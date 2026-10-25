@@ -12,12 +12,13 @@ use crate::block_array::roof::{
     RoofKind, flat_extra_height, gable_extra_height, hip_extra_height, shed_extra_height,
     shed_slope_span,
 };
+use crate::block_array::wall_column::WallColumn;
 
-use super::members::member_will_paint;
+use super::members::{member_will_paint, written_members};
 
-/// Highest wall row across the [`painting_walls`] pairs, `0` with none.
-pub(super) fn max_wall_top(painting: &[(u32, u32)]) -> u32 {
-    painting
+/// Highest wall row across `(y_offset, height)` pairs, `0` with none.
+pub(super) fn max_wall_top(walls: &[(u32, u32)]) -> u32 {
+    walls
         .iter()
         .map(|(y_offset, h)| y_offset.saturating_add(*h))
         .max()
@@ -43,9 +44,47 @@ pub(super) fn painting_walls<'a>(
         .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h)))
 }
 
+/// What a body's walls and roofs ask for as written, whether or not they paint or draw.
+pub(super) struct Written {
+    /// Every row the walls members are written to.
+    pub(super) walls: WallColumn,
+    /// The highest of those rows, `0` with none.
+    wall_top: u32,
+    /// The largest `overhang=` a roof is written with.
+    pub(super) overhang: u32,
+}
+
+impl Written {
+    /// The `y` extent of the body with these walls painted, its roofs rising `roof_extra` above.
+    pub(super) fn height(&self, roof_extra: u32) -> u32 {
+        1u32.saturating_add(self.wall_top)
+            .saturating_add(roof_extra)
+    }
+}
+
+/// The walls and roofs of `members` as written, through their levels.
+pub(super) fn written(members: &[Member]) -> Written {
+    let written = written_members(members);
+    let walls: Vec<(u32, u32)> = written
+        .iter()
+        .filter(|(_, m)| matches!(m.role, MemberRole::Walls))
+        .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h)))
+        .collect();
+    Written {
+        wall_top: max_wall_top(&walls),
+        walls: WallColumn::from_walls(walls),
+        overhang: written
+            .iter()
+            .filter(|(_, m)| matches!(m.role, MemberRole::Roof))
+            .filter_map(|(_, m)| m.nonneg_u32("overhang"))
+            .max()
+            .unwrap_or(0),
+    }
+}
+
 /// Largest `overhang=` across the roofs that draw, reporting an unreadable one on every roof.
 ///
-/// This is the only reader of `overhang=`, so a value not checked here is reported nowhere.
+/// The one reader that reports `overhang=`, so a value not checked here is reported nowhere.
 pub(super) fn max_roof_overhang(
     flattened: &[(u32, &Member)],
     diagnostics: &mut Vec<Diagnostic>,

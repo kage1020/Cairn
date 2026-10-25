@@ -32,6 +32,12 @@ pub(super) struct StructCtx<'a> {
     pub(super) wall_top: u32,
     /// Every row the walls members paint, gaps and all; ports read this same column.
     pub(super) wall_column: WallColumn,
+    /// Every row the walls members are written to, whether or not they paint.
+    pub(super) written_walls: WallColumn,
+    /// The `y` extent [`Self::dims`] would have had every walls member painted.
+    pub(super) written_height: u32,
+    /// The [`Self::overhang`] the struct would have had every roof drawn.
+    pub(super) written_overhang: u32,
 }
 
 /// What the phase model does with a member.
@@ -102,6 +108,30 @@ pub(super) fn flatten_members<'a>(
         } else {
             out.push((0, member));
         }
+    }
+    out
+}
+
+/// Every member a body places, each with its level's `y` offset, the ones [`flatten_members`]
+/// drops for their role at that offset included.
+pub(super) fn written_members(members: &[Member]) -> Vec<(u32, &Member)> {
+    let mut out: Vec<(u32, &Member)> = Vec::new();
+    for member in members {
+        if !matches!(member.role, MemberRole::Level) {
+            out.push((0, member));
+            continue;
+        }
+        let Some(y_offset) = member.nonneg_u32("y") else {
+            continue;
+        };
+        out.extend(
+            member
+                .children
+                .members
+                .iter()
+                .filter(|child| !matches!(child.role, MemberRole::Level))
+                .map(|child| (y_offset, child)),
+        );
     }
     out
 }

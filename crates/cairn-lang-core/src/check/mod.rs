@@ -132,6 +132,7 @@ mod tests {
             | C::UnknownAbstractToken
             | C::UnknownId
             | C::IncompatibleMaterial
+            | C::UnplaceablePlate
             | C::StructNoSize
             | C::DefNoSize
             | C::WalkwayBlocked
@@ -221,6 +222,7 @@ mod tests {
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_UNKNOWN_ABSTRACT_TOKEN",
                 "E_UNKNOWN_ID",
+                "E_UNPLACEABLE_PLATE",
             ],
             "`check` cannot raise these, so a front end reports them only by lowering too",
         );

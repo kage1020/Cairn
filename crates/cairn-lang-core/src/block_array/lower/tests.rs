@@ -684,6 +684,25 @@ fn a_member_default_from_the_pack_is_checked_like_any_other_id() {
 }
 
 #[test]
+fn a_bound_plate_whose_default_the_target_lacks_says_its_signal_still_reaches_the_netlist() {
+    let no_row = PinnedRegistry::new(vec![], &["minecraft:wooden_pressure_plate"]);
+    let plate = "struct s size=3x3\n  pressure_plate id=p at=front.outside\n";
+    let unbound = findings_of(&lowered_with_resolver(plate, &no_row));
+    let bound = findings_of(&lowered_with_resolver(
+        &plate.replace("front.outside", "front.outside -> sig.a"),
+        &no_row,
+    ));
+    assert_eq!(
+        unbound.iter().map(|f| f.0).collect::<Vec<_>>(),
+        [DiagnosticCode::UnknownId],
+    );
+    assert!(!unbound[0].2.iter().any(|n| n == BINDING_STILL_READ));
+    let mut expected = unbound;
+    expected[0].2.push(BINDING_STILL_READ.to_owned());
+    assert_eq!(bound, expected);
+}
+
+#[test]
 fn a_rename_and_a_typo_read_as_different_claims() {
     let renamed = PinnedRegistry::new(vec![], &["minecraft:standing_sign"])
         .aliasing(&["minecraft:oak_sign", "minecraft:standing_sign"]);
@@ -3698,6 +3717,36 @@ fn plate_walled_3x3(member: &str) -> String {
     )
 }
 
+/// A finding as its code, primary and notes.
+type Finding = (DiagnosticCode, String, Vec<String>);
+
+/// Every finding of `out`, in report order.
+fn findings_of(out: &BlockArrayIr) -> Vec<Finding> {
+    out.diagnostics
+        .iter()
+        .map(|d| {
+            (
+                d.code,
+                d.primary.clone(),
+                d.notes.iter().map(|n| n.message.clone()).collect(),
+            )
+        })
+        .collect()
+}
+
+/// The `E_UNPLACEABLE_PLATE` finding with `primary` and `notes`.
+fn unplaceable(primary: &str, notes: &[&str]) -> Finding {
+    (
+        DiagnosticCode::UnplaceablePlate,
+        primary.to_owned(),
+        notes.iter().map(|&n| n.to_owned()).collect(),
+    )
+}
+
+/// The note a refused plate with a `->` binding ends with.
+const BINDING_STILL_READ: &str =
+    "its signal binding still reaches the netlist, with no plate placed to drive it";
+
 #[test]
 fn pressure_plate_outside_with_overhang_paints_in_the_overhang_column() {
     let out = lowered(&plate_walled_3x3(
@@ -3723,20 +3772,36 @@ fn pressure_plate_outside_at_y_zero_without_overhang_falls_back_to_foundation() 
 }
 
 #[test]
-fn pressure_plate_outside_above_ground_without_overhang_defers() {
-    let plate = "pressure_plate at=front.outside offset=0 y=1";
-    let src = plate_walled_3x3(plate);
-    assert_defers_on(&src, &lowered(&src), plate, "has no exterior voxel");
-}
-
-#[test]
-fn pressure_plate_outside_saturating_shift_defers_above_ground() {
+fn pressure_plate_outside_saturating_shift_defers_beside_a_roof_that_draws_nothing() {
     // `shift_outward` saturates back to the wall cell at x=0, which is still in the volume.
-    let plate = "pressure_plate at=left.outside offset=0 y=1";
-    let src = plate_walled_3x3(plate);
-    let out = lowered(&src);
+    let out = lowered(&plate_walled_3x3(
+        "roof mat_slot=p overhang=1\n  pressure_plate at=left.outside offset=0 y=1",
+    ));
     let ba = out.structures.get("struct::s").unwrap();
-    assert_defers_on(&src, &out, plate, "has no exterior voxel");
+    let found = findings_of(&out);
+    assert_eq!(
+        found
+            .iter()
+            .map(|(code, primary, _)| (*code, primary.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                DiagnosticCode::DeferredMember,
+                "missing `kind=` (expected one of gable, shed, hip, flat)",
+            ),
+            (
+                DiagnosticCode::DeferredMember,
+                "pressure_plate `at=left.outside` at y=1 has no exterior voxel to sit on",
+            ),
+        ],
+    );
+    assert_eq!(
+        found[1].2,
+        [
+            "a `roof` written with an `overhang=` draws nothing, so the struct has no overhang to \
+          hold the plate; it fits once that roof draws"
+        ],
+    );
     assert_eq!(block_id(ba, 0, 1, 1), "minecraft:oak_pressure_plate");
 }
 
@@ -3763,22 +3828,19 @@ fn pressure_plate_mat_slot_resolves_into_the_palette() {
     assert_eq!(block_id(ba, 1, 0, 1), "minecraft:spruce_pressure_plate");
 }
 
-/// Lowers `members` and one plate line in a `size=<size>` struct, with its deferral primaries.
-fn lowered_plate(size: &str, members: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
+/// Lowers `members` and one plate line in a `size=<size>` struct, with its findings.
+fn lowered_plate(size: &str, members: &str, plate: &str) -> (BlockArrayIr, Vec<Finding>) {
     let src = format!(
         "theme t:\n  slot wall -> @cobblestone\n\nstruct s size={size}\n{members}  \
          pressure_plate {plate}\n",
     );
     let out = lowered(&src);
-    let reasons = primaries_of(&out, DiagnosticCode::DeferredMember)
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-    (out, reasons)
+    let findings = findings_of(&out);
+    (out, findings)
 }
 
 /// [`lowered_plate`] with `walls height=3` ahead of `extra`.
-fn lowered_inside_plate(size: &str, extra: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
+fn lowered_inside_plate(size: &str, extra: &str, plate: &str) -> (BlockArrayIr, Vec<Finding>) {
     lowered_plate(
         size,
         &format!("  walls mat_slot=wall height=3\n{extra}"),
@@ -3806,36 +3868,36 @@ fn overhang_roof(overhang: u32) -> String {
 }
 
 #[test]
-fn pressure_plate_inside_at_a_corner_defers_and_keeps_the_side_wall() {
-    let (out, reasons) =
+fn pressure_plate_inside_at_a_corner_is_refused_and_keeps_the_side_wall() {
+    let (out, findings) =
         lowered_inside_plate("5x5", "", "id=p at=inside.front offset=0 y=1 -> sig.a");
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
-        reasons,
-        vec![
-            "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
-             the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
-             3 to reach an interior voxel. Its signal binding still reaches the netlist, with \
-             no plate placed to drive it"
-                .to_owned()
-        ],
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so the \
+             voxel inside it belongs to the neighbouring wall",
+            &[
+                "use an `offset=` from 1 to 3 to reach an interior voxel",
+                BINDING_STILL_READ,
+            ],
+        )],
     );
     assert_eq!(block_id(ba, 0, 1, 3), "minecraft:cobblestone");
     assert_eq!(plate_count(ba), 0);
 }
 
 #[test]
-fn pressure_plate_inside_at_a_corner_defers_at_the_floor_row_too() {
-    let (out, reasons) = lowered_inside_plate("5x5", "", "at=inside.front offset=0 y=0");
+fn pressure_plate_inside_at_a_corner_is_refused_at_the_floor_row_too() {
+    let (out, findings) = lowered_inside_plate("5x5", "", "at=inside.front offset=0 y=0");
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
-        reasons,
-        vec![
-            "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
-             the voxel inside it is not an interior cell of this struct; use an `offset=` \
-             from 1 to 3 to reach an interior voxel"
-                .to_owned()
-        ],
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so the \
+             voxel inside it is not an interior cell of this struct",
+            &["use an `offset=` from 1 to 3 to reach an interior voxel"],
+        )],
     );
     assert_eq!(plate_count(ba), 0);
 }
@@ -3851,17 +3913,16 @@ fn pressure_plate_inside_at_a_corner_claims_no_wall_where_none_is_painted() {
         ),
     ];
     for (members, y) in cases {
-        let (out, reasons) =
+        let (out, findings) =
             lowered_plate("5x5", members, &format!("at=inside.front offset=0 y={y}"));
         let ba = out.structures.get("struct::s").unwrap();
         assert_eq!(
-            reasons,
-            vec![
-                "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, \
-                 so the voxel inside it is not an interior cell of this struct; use an \
-                 `offset=` from 1 to 3 to reach an interior voxel"
-                    .to_owned()
-            ],
+            findings,
+            [unplaceable(
+                "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
+                 the voxel inside it is not an interior cell of this struct",
+                &["use an `offset=` from 1 to 3 to reach an interior voxel"],
+            )],
             "{members:?} y={y}",
         );
         assert_eq!(plate_count(ba), 0);
@@ -3870,16 +3931,15 @@ fn pressure_plate_inside_at_a_corner_claims_no_wall_where_none_is_painted() {
 
 #[test]
 fn pressure_plate_inside_at_a_corner_of_a_long_left_wall_names_that_wall() {
-    let (out, reasons) = lowered_inside_plate("4x6", "", "at=inside.left offset=5 y=1");
+    let (out, findings) = lowered_inside_plate("4x6", "", "at=inside.left offset=5 y=1");
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
-        reasons,
-        vec![
-            "pressure_plate `at=inside.left offset=5` is at a corner of the left wall, so \
-             the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
-             4 to reach an interior voxel"
-                .to_owned()
-        ],
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.left offset=5` is at a corner of the left wall, so the \
+             voxel inside it belongs to the neighbouring wall",
+            &["use an `offset=` from 1 to 4 to reach an interior voxel"],
+        )],
     );
     assert_eq!(plate_count(ba), 0);
 }
@@ -3888,11 +3948,11 @@ fn pressure_plate_inside_at_a_corner_of_a_long_left_wall_names_that_wall() {
 const SIDES_4X5: [(&str, u32); 4] = [("front", 4), ("back", 4), ("left", 5), ("right", 5)];
 
 #[test]
-fn pressure_plate_inside_defers_at_both_corners_of_every_side() {
+fn pressure_plate_inside_is_refused_at_both_corners_of_every_side() {
     for overhang in OVERHANGS {
         for (side, length) in SIDES_4X5 {
             for offset in [0, length - 1] {
-                let (out, reasons) = lowered_inside_plate(
+                let (out, findings) = lowered_inside_plate(
                     "4x5",
                     &overhang_roof(overhang),
                     &format!("at=inside.{side} offset={offset} y=1"),
@@ -3900,12 +3960,17 @@ fn pressure_plate_inside_defers_at_both_corners_of_every_side() {
                 let ba = out.structures.get("struct::s").unwrap();
                 let case = format!("overhang={overhang} inside.{side} offset={offset}");
                 assert_eq!(
-                    reasons,
-                    vec![format!(
-                        "pressure_plate `at=inside.{side} offset={offset}` is at a corner of \
-                         the {side} wall, so the voxel inside it belongs to the neighbouring \
-                         wall; use an `offset=` from 1 to {} to reach an interior voxel",
-                        length - 2,
+                    findings,
+                    [unplaceable(
+                        &format!(
+                            "pressure_plate `at=inside.{side} offset={offset}` is at a corner of \
+                             the {side} wall, so the voxel inside it belongs to the neighbouring \
+                             wall",
+                        ),
+                        &[&format!(
+                            "use an `offset=` from 1 to {} to reach an interior voxel",
+                            length - 2,
+                        )],
                     )],
                     "{case}",
                 );
@@ -3931,14 +3996,14 @@ fn pressure_plate_inside_paints_at_every_non_corner_offset_of_every_side() {
                 "{side} has one cell per non-corner offset",
             );
             for (offset, &(x, z)) in (1..length - 1).zip(cells) {
-                let (out, reasons) = lowered_inside_plate(
+                let (out, findings) = lowered_inside_plate(
                     "4x5",
                     &overhang_roof(overhang),
                     &format!("at=inside.{side} offset={offset} y=1"),
                 );
                 let ba = out.structures.get("struct::s").unwrap();
                 let case = format!("overhang={overhang} inside.{side} offset={offset}");
-                assert_eq!(reasons, Vec::<String>::new(), "{case}");
+                assert_eq!(findings, [], "{case}");
                 let (x, z) = (x + overhang, z + overhang);
                 assert_eq!(
                     block_id(ba, x, 1, z),
@@ -3951,60 +4016,104 @@ fn pressure_plate_inside_paints_at_every_non_corner_offset_of_every_side() {
 }
 
 #[test]
-fn pressure_plate_inside_a_two_deep_struct_defers_and_keeps_the_back_wall() {
+fn pressure_plate_inside_a_two_deep_struct_is_refused_and_keeps_the_back_wall() {
     // With no overhang `front.outside` finds no cell above y=0, so the reason does not offer it.
-    let (out, reasons) =
+    let (out, findings) =
         lowered_inside_plate("5x2", "", "id=p at=inside.front offset=2 y=1 -> sig.a");
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
-        reasons,
-        vec![
-            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has \
-             no interior voxel; an interior needs a size of at least 3 on both axes. Grow \
-             `size.h` to at least 3. Its signal binding still reaches the netlist, with no \
-             plate placed to drive it"
-                .to_owned()
-        ],
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has no \
+             interior voxel",
+            &[
+                "an interior needs a size of at least 3 on both axes",
+                "grow `size.h` to at least 3",
+                BINDING_STILL_READ,
+            ],
+        )],
     );
     assert_eq!(block_id(ba, 2, 1, 0), "minecraft:cobblestone");
     assert_eq!(plate_count(ba), 0);
 }
 
 #[test]
-fn pressure_plate_inside_a_one_deep_struct_with_an_overhang_defers() {
-    let roof = overhang_roof(1);
-    let (out, reasons) = lowered_inside_plate("5x1", &roof, "at=inside.front offset=2 y=1");
-    let ba = out.structures.get("struct::s").unwrap();
+fn pressure_plate_inside_a_two_deep_struct_at_the_floor_row_is_offered_the_outside_anchor() {
+    let (out, findings) = lowered_inside_plate("5x2", "", "at=inside.front offset=2 y=0");
     assert_eq!(
-        reasons,
-        vec![
-            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has \
-             no interior voxel; an interior needs a size of at least 3 on both axes. Grow \
-             `size.h` to at least 3, or anchor the plate with `at=front.outside`"
-                .to_owned()
-        ],
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has no \
+             interior voxel",
+            &[
+                "an interior needs a size of at least 3 on both axes",
+                "grow `size.h` to at least 3, or anchor the plate with `at=front.outside`",
+            ],
+        )],
     );
-    assert_eq!(block_id(ba, 3, 1, 0), "minecraft:air");
-    assert_eq!(plate_count(ba), 0);
+    assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
     // The remedy the reason offers works on this very struct.
-    let (out, reasons) = lowered_inside_plate("5x1", &roof, "at=front.outside offset=2 y=1");
-    assert_eq!(reasons, Vec::<String>::new());
+    let (out, findings) = lowered_inside_plate("5x2", "", "at=front.outside offset=2 y=0");
+    assert_eq!(findings, []);
     assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 1);
 }
 
 #[test]
-fn pressure_plate_inside_a_narrow_struct_names_the_narrow_axis() {
-    let (out, reasons) = lowered_inside_plate("2x5", "", "at=inside.front offset=1 y=1");
+fn pressure_plate_inside_a_one_deep_struct_with_an_overhang_is_refused() {
+    let roof = overhang_roof(1);
+    let (out, findings) = lowered_inside_plate("5x1", &roof, "at=inside.front offset=2 y=1");
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
-        reasons,
-        vec![
-            "pressure_plate `at=inside.front offset=1`: the struct's size.w is 2, so it has \
-             no interior voxel, and `offset=1` is at a corner of the front wall besides; an \
-             interior needs a size of at least 3 on both axes. Grow `size.w` to at least 3 \
-             and use an `offset=` away from both ends of the wall"
-                .to_owned()
-        ],
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has no \
+             interior voxel",
+            &[
+                "an interior needs a size of at least 3 on both axes",
+                "grow `size.h` to at least 3, or anchor the plate with `at=front.outside`",
+            ],
+        )],
+    );
+    assert_eq!(block_id(ba, 3, 1, 0), "minecraft:air");
+    assert_eq!(plate_count(ba), 0);
+    // The remedy the reason offers works on this very struct.
+    let (out, findings) = lowered_inside_plate("5x1", &roof, "at=front.outside offset=2 y=1");
+    assert_eq!(findings, []);
+    assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 1);
+}
+
+#[test]
+fn pressure_plate_inside_a_one_deep_struct_is_not_offered_the_outside_anchor_above_its_rows() {
+    let (out, findings) =
+        lowered_inside_plate("5x1", &overhang_roof(1), "at=inside.front offset=2 y=9");
+    assert_eq!(
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has no \
+             interior voxel",
+            &[
+                "an interior needs a size of at least 3 on both axes",
+                "grow `size.h` to at least 3",
+            ],
+        )],
+    );
+    assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
+}
+
+#[test]
+fn pressure_plate_inside_a_narrow_struct_names_the_narrow_axis() {
+    let (out, findings) = lowered_inside_plate("2x5", "", "at=inside.front offset=1 y=1");
+    let ba = out.structures.get("struct::s").unwrap();
+    assert_eq!(
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=1`: the struct's size.w is 2, so it has no \
+             interior voxel, and `offset=1` is at a corner of the front wall besides",
+            &[
+                "an interior needs a size of at least 3 on both axes",
+                "grow `size.w` to at least 3 and use an `offset=` away from both ends of the wall",
+            ],
+        )],
     );
     assert_eq!(plate_count(ba), 0);
 }
@@ -4015,66 +4124,47 @@ fn pressure_plate_inside_reports_a_thin_axis_and_a_corner_in_one_pass() {
         (
             "2x9",
             "at=inside.left offset=0 y=1",
-            "pressure_plate `at=inside.left offset=0`: the struct's size.w is 2, so it has \
-             no interior voxel, and `offset=0` is at a corner of the left wall besides; an \
-             interior needs a size of at least 3 on both axes. Grow `size.w` to at least 3 \
-             and use an `offset=` from 1 to 7",
+            "pressure_plate `at=inside.left offset=0`: the struct's size.w is 2, so it has no \
+             interior voxel, and `offset=0` is at a corner of the left wall besides",
+            "grow `size.w` to at least 3 and use an `offset=` from 1 to 7",
         ),
         (
             "2x2",
             "at=inside.front offset=0 y=1",
-            "pressure_plate `at=inside.front offset=0`: the struct's size.w is 2 and size.h \
-             is 2, so it has no interior voxel, and `offset=0` is at a corner of the front \
-             wall besides; an interior needs a size of at least 3 on both axes. Grow \
-             `size.w` to at least 3 and `size.h` to at least 3 and use an `offset=` away \
+            "pressure_plate `at=inside.front offset=0`: the struct's size.w is 2 and size.h is \
+             2, so it has no interior voxel, and `offset=0` is at a corner of the front wall \
+             besides",
+            "grow `size.w` to at least 3 and `size.h` to at least 3 and use an `offset=` away \
              from both ends of the wall",
         ),
     ];
-    for (size, plate, expected) in cases {
-        let (out, reasons) = lowered_inside_plate(size, "", plate);
-        assert_eq!(reasons, vec![expected.to_owned()], "{size} {plate}");
+    for (size, plate, primary, grow) in cases {
+        let (out, findings) = lowered_inside_plate(size, "", plate);
+        assert_eq!(
+            findings,
+            [unplaceable(
+                primary,
+                &["an interior needs a size of at least 3 on both axes", grow],
+            )],
+            "{size} {plate}",
+        );
         assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
     }
 }
 
 #[test]
-fn pressure_plate_rejects_missing_and_malformed_anchors() {
-    for (plate, needle) in [
-        ("pressure_plate offset=0 y=0", "without `at=`"),
-        (
-            "pressure_plate at=center offset=0 y=0",
-            "must be `<side>.outside`",
-        ),
-        (
-            "pressure_plate at=up.outside offset=0 y=0",
-            "is not one of front, back, left, right",
-        ),
-    ] {
-        let src = plate_walled_3x3(plate);
-        assert_defers_on(&src, &lowered(&src), plate, needle);
-    }
-}
-
-#[test]
-fn pressure_plate_out_of_range_offset_or_y_defers() {
-    for (plate, needle) in [
-        (
-            "pressure_plate at=inside.front offset=99 y=0",
-            "runs past the front wall",
-        ),
-        // The first column past the wall: `INVARIANT(wall-grid-validated)` needs it refused first.
-        (
-            "pressure_plate at=inside.front offset=3 y=0",
-            "`offset=3` runs past the front wall",
-        ),
-        (
-            "pressure_plate at=inside.front offset=0 y=99",
-            "does not fit in the struct",
-        ),
-    ] {
-        let src = plate_walled_3x3(plate);
-        assert_defers_on(&src, &lowered(&src), plate, needle);
-    }
+fn pressure_plate_offset_past_the_wall_is_refused_before_the_wall_grid_is_asked() {
+    // The first column past the wall: `INVARIANT(wall-grid-validated)` needs it refused first.
+    let out = lowered(&plate_walled_3x3(
+        "pressure_plate at=inside.front offset=3 y=0",
+    ));
+    assert_eq!(
+        findings_of(&out),
+        [unplaceable(
+            "pressure_plate `offset=3` runs past the front wall (length 3)",
+            &["an `at=inside.front` plate takes an `offset=` of 1, clear of the wall's corners"],
+        )],
+    );
 }
 
 #[test]
