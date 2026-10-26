@@ -333,13 +333,14 @@ and `@requires` uses it. A floor is placed in the **target edition's** version t
 (`registry-data/{java,bedrock}/data_versions.json`) and weighed against the target's own
 `DataVersion`.
 
-That table names every **release** of its edition, which is a different set from the versions the
-pack can *build* for: three per edition, the ones it ships block and material data for. A row says
-which it is (`targetable`). Keeping the two apart is what lets "inside the table's span, naming no
-row" mean "not a release of this edition": a floor of `1.21.1` is a Java release the pack cannot
-build for and can order perfectly well, while `1.21.4` names no Bedrock release at all, because
-Bedrock numbers its patch releases in tens (`1.21.0`, `1.21.20`, `1.21.40`). The two editions'
-release-label sets are disjoint.
+That table names the **release lines** of its edition that it carries, which is a different set
+from the versions the pack can *build* for: three per edition, the ones it ships block and material
+data for. A row says which it is (`targetable`). Java's rows are its releases from `1.14` on.
+Bedrock's are its release lines, numbered in tens (`1.21.0`, `1.21.20`, `1.21.40`), without the
+hotfixes between them. Keeping the two sets apart is what lets "inside the table's span, naming no
+row" mean "no release this table can order": a floor of `1.21.1` is a Java release the pack cannot
+build for and can order perfectly well, while `1.21.4` names no Bedrock row, and neither does the
+hotfix `1.21.42`.
 
 A floor may still name something no table carries, so placing one is not a bare lookup. Four
 answers, and only the first is exact:
@@ -356,15 +357,15 @@ Java's release names no Bedrock release and sits between `1.21.0` and `1.21.20`.
 labels would read it as satisfied on `40 > 4` and certify a Bedrock build against a version below
 the floor: the same defect enforcing the floor exists to remove, one edition to the left.
 
-Because the label sets are disjoint, the refusal can say more than "no". A label this edition cannot
-place but the *other* edition names (a row of its table, or the pre-release of one) is a floor
-written in the other's numbering, and `E_REQUIRES_UNORDERABLE` names it and offers the scope. A
-label the other edition does not name gets no scope offered, because recommending one would be
-recommending a guess: scoped to an edition that does not name it either, the floor goes inert there
-and the constraint disappears. That covers a label neither edition can place, such as a snapshot,
-and also one the other edition places only below or above every row. Those two placements are
-comparisons rather than releases: they say nothing about which numbering the author meant, and
-scoped there the floor is met by every target of that edition or by none.
+The refusal can say more than "no". A label this edition cannot place but the *other* edition
+names (a row of its table, or the pre-release of one) is a floor written in the other's numbering,
+and `E_REQUIRES_UNORDERABLE` names it and offers the scope. A label the other edition does not name
+gets no scope offered, because recommending one would be recommending a guess: scoped to an edition
+that does not name it either, the floor goes inert there and the constraint disappears. That covers
+a label neither edition can place, such as a snapshot, and also one the other edition places only
+below or above every row. Those two placements are comparisons rather than releases: they say
+nothing about which numbering the author meant, and scoped there the floor is met by every target
+of that edition or by none.
 
 ### A floor may name its edition
 
