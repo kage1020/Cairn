@@ -205,9 +205,10 @@ it is `W_FUTURE_CAIRN_VERSION`: provenance that a later compiler cannot read is 
 the header exists for.
 
 **`@requires`** is a capability floor. Its expression is an optional edition, the subject
-`version`, the operator `>=`, and a version label, with whitespace optional between them, so
-`version>=1.21` and `version >= 1.21` are one requirement. `>=` is the only operator, since a floor
-is the only constraint that composes by folding to the strictest. Every other expression is
+`version`, the operator `>=`, and a version label. Whitespace is optional around the operator, so
+`version>=1.21` and `version >= 1.21` are one requirement, and required after an edition:
+`javaversion>=1.21` is `E_INVALID_REQUIRES`. `>=` is the only operator, since a floor is the only
+constraint that composes by folding to the strictest. Every other expression is
 `E_INVALID_REQUIRES` rather than a line that quietly declares nothing: a floor that evaporates is
 worse than an absent one, because a reader will still believe it.
 
