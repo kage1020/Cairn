@@ -84,8 +84,8 @@ low-`x`, low-`z` corner, and `dims` is its full extent: the `size=WxH` footprint
 | `east_of=ID gap=N` | New origin = `(prior.x + prior.dims.x + N, prior.y, prior.z)`. | `ID` must name a place declared earlier in the same `site`. `gap` is in blocks between the two facing bounding-box faces (each the wall plus its `overhang=` columns; `0` → the boxes touch), defaulting to `0`. |
 | `north_of=ID gap=N` | New origin = `(prior.x, prior.y, prior.z − new.dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. Because an origin is the low-`z` corner, the step back is the new placement's own depth: that is what puts its `+z` face `N` blocks from the prior's `−z` face whichever of the two is deeper. |
 
-Combining selectors, or using `at=` with anything other than `origin`, is
-`E_INVALID_PLACE_ORIGIN`.
+A `place` with no origin selector or more than one, an `at=` other than `origin`, or an `east_of=`
+/ `north_of=` whose value is not a label is `E_INVALID_PLACE_ORIGIN`.
 
 `gap=` belongs to the two relative selectors. An `at=origin` row is anchored absolutely and reads
 no distance, so a `gap=` written beside it is read by nothing and reported as `W_IGNORED_ARGUMENT`

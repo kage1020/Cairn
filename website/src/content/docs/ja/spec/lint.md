@@ -144,7 +144,7 @@ title: "11. Lint と制約検証"
 | `E_INVALID_STRUCT_NAME` | `struct` の名前が、大文字小文字を問わず Windows が予約しているデバイス名 (`CON`、`NUL`、`COM1` など) である。 |
 | `E_DUPLICATE_PLACE_ID` | 同じ site の 2 つの `place` 行が同じ `id=` を持っている。 |
 | `E_OUTPUT_NAME_COLLISION` | ビルドが書き出すはずの 2 つの成果物が、大文字小文字を無視すると同じファイル名になる。同じ名前の `struct` と `place`、2 つの site に置かれた同じ `id=`、平坦化すると同じ名前になる 2 本の通路などで起きる。 |
-| `E_INVALID_PLACE_ORIGIN` | `place` が `origin` 以外の `at=` を持っている。または `at=` と `east_of=` / `north_of=` を併用している ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
+| `E_INVALID_PLACE_ORIGIN` | `place` に原点セレクタがない、または 2 つ以上ある。`origin` 以外の `at=` を持っている。または `east_of=` / `north_of=` の値がラベルではない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
 | `E_UNRESOLVED_PLACE_REF` | `place use=`、`east_of=` / `north_of=`、`connect` の端点が、存在しない place や def を指している。 |
 | `E_UNRESOLVED_THEME_REF` | `place theme=` が、モジュールの宣言していないテーマを指している。 |
 | `W_DEFERRED_PLACE` | `east_of=` / `north_of=` が id を理由に拒否された `place` を指しているので、指している側の行も配置されない。 |

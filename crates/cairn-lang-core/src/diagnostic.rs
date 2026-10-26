@@ -125,7 +125,8 @@ pub enum DiagnosticCode {
     DuplicatePlaceId,
     /// Two scopes a build writes share a file name, ignoring case.
     OutputNameCollision,
-    /// A `place` has an `at=` other than `origin`, or `at=` beside `east_of=` / `north_of=`.
+    /// A `place` with no origin selector or more than one, an `at=` other than `origin`, or an
+    /// `east_of=` / `north_of=` that is not a label.
     InvalidPlaceOrigin,
     /// A `def NAME` that no `place use=NAME` references.
     UnusedDef,

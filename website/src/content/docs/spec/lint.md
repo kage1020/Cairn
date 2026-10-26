@@ -328,7 +328,7 @@ author means, so with both in scope the question has not been asked.
 | `E_INVALID_STRUCT_NAME` | A `struct` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
-| `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_INVALID_PLACE_ORIGIN` | A `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
 | `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
