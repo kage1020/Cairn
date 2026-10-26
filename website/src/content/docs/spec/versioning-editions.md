@@ -590,17 +590,18 @@ brings its own `key` and its own sentence rather than inheriting this one.
 
 Two further failures can reach the state translator: a state value outside the Java domain
 (`facing=up` on a stair), and a state key the translator does not read. Neither is an answer about
-the edition. Both say that a blockstate no validated registry pack can produce reached the
-translator anyway, which is a defect in the pack or in Cairn and not a property of the build being
-reported on.
+the edition. No validated registry pack produces either, so each comes from a state literal in the
+source, which nothing checks against the target yet (`W_STATE_LITERAL_UNCHECKED`,
+[§10.4](#104-fail-loud-and-minimum-version-inference)), or from a defect in the pack or in Cairn.
 
 So they are not a third and fourth reason for `unsupported`. `cairn info` reports **no** portability
 figures for an edition whose palette carries one. The counts would still be computable, and they
-would read as ordinary portability. A leaked `facing=up` counted as `unsupported: 1` is
+would read as ordinary portability. A `facing=up` counted as `unsupported: 1` is
 indistinguishable from a stair whose corner shape Bedrock simply has no state for, which is the one
-conclusion the reader must not draw. The command names every leaked entry on stderr with the
-translator's own message, says the repair belongs to the pack or to Cairn rather than to the source,
-and exits non-zero without a row, the way any other finding that refuses the command does.
+conclusion the reader must not draw. The command names every such entry on stderr with the
+translator's own message, whose fix is to the source blockstate, notes that each is either a state
+literal in the source or a leak in the pack or Cairn, and exits non-zero without a row, the way any
+other finding that refuses the command does.
 
 The state translator is the only place this can be observed, so the rule is stated for the states
 question alone. It is not a licence to answer `unsupported` for a validation gap elsewhere: a figure
