@@ -94,8 +94,22 @@ fn check_label(key: &str, value: &Value, sink: &mut DiagnosticSink) {
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: format!("write a name, such as `{key}=main`, or a quoted string"),
+            message: label_fix(key, value),
         }],
         data: None,
     });
+}
+
+/// How to write `key=` as the label it expects, given the value written instead.
+fn label_fix(key: &str, value: &Value) -> String {
+    match (key, &value.kind) {
+        ("mat_slot", ValueKind::Token(token)) => format!(
+            "`mat_slot=` names a slot of the bound theme, not a block: bind the block there \
+             (`slot NAME -> @{token}`) and write `mat_slot=NAME`"
+        ),
+        ("mat_slot", _) => "write the name of a slot the bound theme declares".to_owned(),
+        ("use", _) => "write the name of a `def` this file declares".to_owned(),
+        ("theme", _) => "write the name of a `theme` this file declares".to_owned(),
+        _ => format!("write a name, such as `{key}=main`, or a quoted string"),
+    }
 }

@@ -113,7 +113,15 @@ fn check_theme_body(body: &[ThemeRule], sink: &mut DiagnosticSink) {
                         code: DiagnosticCode::DuplicateSlot,
                         span: span.clone(),
                         primary: format!("`slot {slot}` is declared more than once"),
-                        notes: vec![first_declaration_note(first_span)],
+                        notes: vec![
+                            first_declaration_note(first_span),
+                            DiagnosticNote {
+                                span: None,
+                                message: format!(
+                                    "keep the `slot {slot}` line you mean and delete the other"
+                                ),
+                            },
+                        ],
                         data: None,
                     });
                 } else {

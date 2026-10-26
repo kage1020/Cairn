@@ -40,6 +40,13 @@ fn duplicate_theme_slot_is_reported() {
         "primary should name the slot, got: {}",
         diags[0].primary,
     );
+    assert_eq!(
+        notes(&diags[0]),
+        [
+            "first declaration here",
+            "keep the `slot wall` line you mean and delete the other"
+        ],
+    );
 }
 
 #[test]
