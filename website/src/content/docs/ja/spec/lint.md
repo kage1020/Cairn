@@ -86,7 +86,7 @@ title: "11. Lint と制約検証"
 | `E_MISSING_MATERIAL` | ブロックを得る手段が `mat_slot=` しかないメンバーが、`mat_slot=` なしで書かれている。 |
 | `E_UNRESOLVED_SLOT` | `mat_slot=` を読む役割のメンバーが、割り当てられたテーマの宣言していないスロットを指している。 |
 | `E_UNKNOWN_SLOT_TARGET` | `slot NAME -> VALUE` の値が、正規トークンでも抽象マテリアルトークンでもない ([マテリアルとテーマ](/ja/spec/materials-themes/))。 |
-| `E_THEME_SELECTOR_UNMATCHED` | `theme` のセレクタ行が、ファイル中のどのメンバーにもマッチしない。 |
+| `E_THEME_SELECTOR_UNMATCHED` | `theme` のセレクタ行が、そのテーマを割り当てたスコープのどのメンバーにもマッチしない。どのスコープにも割り当てられていないテーマは検査しない。 |
 | `E_THEME_VARIANT_MISSING` | 固定したエディションに対して、テーマのエディション別バリアントを 1 つも割り当てられない。 |
 | `E_INCOMPLETE_PLACE` | `place` 行に `id=` / `use=` / `theme=` のいずれかがない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | `mat_slot=` が、渡されたパックのカタログに宣言されていない抽象マテリアルトークンに解決される ([マテリアルとテーマ](/ja/spec/materials-themes/))。 |

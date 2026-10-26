@@ -154,7 +154,7 @@ to compare.
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
 | `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
-| `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member in the file. |
+| `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member of the scopes the theme is bound to. A theme no scope binds is not checked. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
