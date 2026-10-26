@@ -125,7 +125,8 @@ pub enum DiagnosticCode {
     DuplicatePlaceId,
     /// Two scopes a build writes share a file name, ignoring case.
     OutputNameCollision,
-    /// A `place` has an `at=` other than `origin`, or `at=` beside `east_of=` / `north_of=`.
+    /// A `place` with no origin selector or more than one, an `at=` other than `origin`, or an
+    /// `east_of=` / `north_of=` that is not a label.
     InvalidPlaceOrigin,
     /// A `def NAME` that no `place use=NAME` references.
     UnusedDef,
@@ -133,11 +134,13 @@ pub enum DiagnosticCode {
     UnresolvedPort,
     /// A `connect` port id matches more than one member of the referenced def; the first wins.
     AmbiguousPort,
-    /// A `connect` row carries no `path=` argument.
+    /// A `connect` row carries no `path=`, or a `path=` that is not a material token.
     MissingPathMaterial,
-    /// Walkway voxelisation hit a building cell between two ports; the cell is skipped.
+    /// Walkway voxelisation hit a building cell between two ports, which is skipped, or the
+    /// straight L is past the router's search-area cap, so the walkway is not laid.
     WalkwayBlocked,
-    /// A `connect` row repeats a `(from, to)` port pair an earlier row in the site laid.
+    /// A `connect` row joins the same two ports, in either order, as an earlier row in the site
+    /// that laid them.
     DuplicateWalkway,
     /// A `connect` row targets a `place` whose row was refused.
     DeferredConnect,
@@ -149,7 +152,7 @@ pub enum DiagnosticCode {
     ConnectArity,
     /// Two members in one phase wrote one voxel to different blocks; the later line wins.
     PhaseConflict,
-    /// An `assert truth(...)` with no rows.
+    /// An `assert truth(...)` with no rows, or none whose output is `0` or `1`.
     TruthTableEmpty,
     /// An `assert truth(...)` lists one signal as two or more of its inputs.
     TruthTableDuplicateInput,

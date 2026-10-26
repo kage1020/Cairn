@@ -61,13 +61,16 @@ struct BelowFloor<'a> {
 }
 
 /// Weigh each supported version against the gates `run_compile` applies to the source.
+///
+/// `refused_edition_wide` holds what refuses every version the floors let through: scopes that
+/// produced no voxels, and palette entries this edition's writer cannot carry.
 pub(crate) fn weigh_versions<'a>(
     ir: &cairn_lang_core::intent::IntentModule,
     resolution: &cairn_lang_core::Resolution,
     pack: &RegistryPack,
     floors: &'a [VersionFloor],
     considered: &[String],
-    dropped: &[String],
+    refused_edition_wide: bool,
 ) -> VersionVerdicts<'a> {
     let order = pack.version_order();
     let mut verdicts = VersionVerdicts {
@@ -104,8 +107,8 @@ pub(crate) fn weigh_versions<'a>(
             });
             continue;
         }
-        if !dropped.is_empty() {
-            // The caller reports a partial build edition-wide.
+        if refused_edition_wide {
+            // The caller reports the refusal edition-wide.
             continue;
         }
         let pinned = lower_to_block_array(ir, resolution, Some(&pack.view(Some(version))));
@@ -134,6 +137,7 @@ pub(crate) fn buildable_refusal(
     verdicts: &VersionVerdicts<'_>,
     considered: &[String],
     dropped: &[String],
+    states_unmapped: &[String],
 ) -> Option<BuildableRefusal> {
     if !verdicts.buildable.is_empty() {
         return None;
@@ -168,10 +172,12 @@ pub(crate) fn buildable_refusal(
     let refusal = BuildableRefusal {
         unplaceable_floors: declared_floors(source, lines, &verdicts.unplaceable_floors),
         dropped_scopes: dropped.to_vec(),
+        states_unmapped: states_unmapped.to_vec(),
         versions,
     };
     if refusal.unplaceable_floors.is_empty()
         && refusal.dropped_scopes.is_empty()
+        && refusal.states_unmapped.is_empty()
         && refusal.versions.is_empty()
     {
         debug_assert!(

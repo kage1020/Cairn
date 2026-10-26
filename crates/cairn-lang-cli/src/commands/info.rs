@@ -4,14 +4,14 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::block_array::lower_to_block_array;
+use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::resolve::{
     BuildableTargets, DegradedEntry, EditionReport, UnsupportedEntry, UnsupportedReason,
     VersionAxes, compute_axes, declared_version_floors, resolve,
 };
 use cairn_lang_core::suggest::{candidate_list, did_you_mean};
-use cairn_lang_core::{Diagnostic, Edition, Module, Severity, lower};
+use cairn_lang_core::{Diagnostic, Edition, Module, Resolution, Severity, lower};
 use cairn_lang_formats::bedrock_state::degradation_detail;
 use cairn_lang_formats::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
@@ -102,6 +102,52 @@ pub(crate) fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> 
     }
 }
 
+/// The edition-wide causes of an empty `buildable`, each printed as the `note:` naming it: the
+/// scopes that produced no voxels, and the palette entries the edition's writer cannot carry.
+fn edition_wide_refusals(
+    edition: Edition,
+    resolution: &Resolution,
+    block_ir: &BlockArrayIr,
+    portability: Option<&PortabilityReport>,
+) -> (Vec<String>, Vec<String>) {
+    let dropped = dropped_scopes(resolution, block_ir);
+    if !dropped.is_empty() {
+        eprintln!(
+            "note: no {} target can build this source: {} produced no voxels, and a partial \
+             build is not certified",
+            edition.as_str(),
+            backticked(&dropped),
+        );
+    }
+    // A compile refuses these at the writer, after every source gate has passed.
+    let states_unmapped: Vec<String> = portability
+        .into_iter()
+        .flat_map(PortabilityReport::unsupported)
+        .filter_map(|entry| match &entry.reason {
+            UnsupportedReason::StatesUnmapped { states, .. } => {
+                Some(palette_entry_name(&entry.id, states))
+            }
+            UnsupportedReason::AbsentFromEdition { .. } => None,
+        })
+        .collect();
+    if !states_unmapped.is_empty() {
+        eprintln!(
+            "note: no {} target can build this source: its writer cannot carry the states of {}",
+            edition.as_str(),
+            backticked(&states_unmapped),
+        );
+    }
+    (dropped, states_unmapped)
+}
+
+fn backticked(names: &[String]) -> String {
+    names
+        .iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Each requested edition's report row, from a dry-run lower per edition and per version.
 ///
 /// `Err` holds the errors the JSON failure document owes; it is empty under
@@ -172,23 +218,19 @@ fn edition_rows(
                 eprintln!("{note}");
             }
         }
-        let dropped = dropped_scopes(&resolution, &block_ir);
-        if !dropped.is_empty() {
-            eprintln!(
-                "note: no {} target can build this source: {} produced no voxels, and a partial \
-                 build is not certified",
-                edition.as_str(),
-                dropped
-                    .iter()
-                    .map(|scope| format!("`{scope}`"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
-        }
+        let (dropped, states_unmapped) =
+            edition_wide_refusals(edition, &resolution, &block_ir, portability.as_ref());
 
         let floors = declared_version_floors(module, edition);
         let considered = supported_versions(pack);
-        let verdicts = weigh_versions(ir, &resolution, pack, &floors, &considered, &dropped);
+        let verdicts = weigh_versions(
+            ir,
+            &resolution,
+            pack,
+            &floors,
+            &considered,
+            !dropped.is_empty() || !states_unmapped.is_empty(),
+        );
         for (version, refusals) in &verdicts.refused {
             eprintln!("note: {} {version} refuses this source", edition.as_str());
             report_diagnostics(file, source, lines, refusals);
@@ -196,7 +238,14 @@ fn edition_rows(
         report_version_notes(file, source, lines, edition, &verdicts, &considered);
 
         if let Some(portability) = portability {
-            let refusal = buildable_refusal(source, lines, &verdicts, &considered, &dropped);
+            let refusal = buildable_refusal(
+                source,
+                lines,
+                &verdicts,
+                &considered,
+                &dropped,
+                &states_unmapped,
+            );
             let portable = portability.counts().portable;
             let entries = portability.into_entries();
             rows.push(EditionReport {

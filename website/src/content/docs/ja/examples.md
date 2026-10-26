@@ -37,4 +37,4 @@ description: 実際の .crn ファイル集。言語の書き方だけに集中�
 | ファイル | 内容 |
 |---|---|
 | [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | 両エディション共通のプリミティブがないスロットに、エディション別のテーマバリアントで対応する。 |
-| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | 2 つのネットが同じ配線座標を共有する例。交差パスが報告はするが修復はしないケース。 |
+| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | 狭い領域に 4 つのネットを通す例。ルーターは各ネットをほかのネットを避けて敷き、`void=2` の範囲で 1 本をブリッジ層に持ち上げます。`void=1` では `E_ROUTE_CONGESTION` で拒否します。 |

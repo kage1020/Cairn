@@ -2,7 +2,7 @@
 //! It walks the surface AST, where a value lowering hoisted still has its type and span.
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 
 use super::DiagnosticSink;
 
@@ -73,7 +73,10 @@ fn check_size(value: &Value, sink: &mut DiagnosticSink) {
         code: DiagnosticCode::TypeMismatchSize,
         span: value.span.clone(),
         primary: format!("`size=` expects a `WxH` literal, got {}", value.kind_name()),
-        notes: Vec::new(),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "write two whole numbers joined by `x`, such as `size=9x7`".to_owned(),
+        }],
         data: None,
     });
 }
@@ -89,7 +92,24 @@ fn check_label(key: &str, value: &Value, sink: &mut DiagnosticSink) {
             "`{key}=` expects a label (identifier or string), got {}",
             value.kind_name()
         ),
-        notes: Vec::new(),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: label_fix(key, value),
+        }],
         data: None,
     });
+}
+
+/// How to write `key=` as the label it expects, given the value written instead.
+fn label_fix(key: &str, value: &Value) -> String {
+    match (key, &value.kind) {
+        ("mat_slot", ValueKind::Token(token)) => format!(
+            "`mat_slot=` names a slot of the bound theme, not a block: bind the block there \
+             (`slot NAME -> @{token}`) and write `mat_slot=NAME`"
+        ),
+        ("mat_slot", _) => "write the name of a slot the bound theme declares".to_owned(),
+        ("use", _) => "write the name of a `def` this file declares".to_owned(),
+        ("theme", _) => "write the name of a `theme` this file declares".to_owned(),
+        _ => format!("write a name, such as `{key}=main`, or a quoted string"),
+    }
 }

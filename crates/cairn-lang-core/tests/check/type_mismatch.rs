@@ -3,7 +3,7 @@
 
 use cairn_lang_core::DiagnosticCode;
 
-use crate::common::{diagnose, of_code, slice};
+use crate::common::{diagnose, notes, of_code, slice};
 
 #[test]
 fn id_set_to_token_is_flagged_as_label_mismatch() {
@@ -12,11 +12,34 @@ fn id_set_to_token_is_flagged_as_label_mismatch() {
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::TypeMismatchLabel);
     assert_eq!(slice(src, &diags[0]), "@oak");
+    assert_eq!(
+        notes(&diags[0]),
+        ["write a name, such as `id=main`, or a quoted string"]
+    );
     assert!(
         diags[0].primary.contains("token"),
         "primary should name the offending kind, got: {}",
         diags[0].primary,
     );
+}
+
+#[test]
+fn a_mat_slot_given_a_block_says_to_bind_it_in_the_theme() {
+    for (src, note) in [
+        (
+            "struct s size=1x1\n  walls mat_slot=@oak_planks\n",
+            "`mat_slot=` names a slot of the bound theme, not a block: bind the block there \
+             (`slot NAME -> @oak_planks`) and write `mat_slot=NAME`",
+        ),
+        (
+            "struct s size=1x1\n  walls mat_slot=3\n",
+            "write the name of a slot the bound theme declares",
+        ),
+    ] {
+        let found = of_code(src, DiagnosticCode::TypeMismatchLabel);
+        assert_eq!(found.len(), 1, "for {src:?}, got {found:#?}");
+        assert_eq!(notes(&found[0]), [note], "for {src:?}");
+    }
 }
 
 #[test]
@@ -45,6 +68,10 @@ fn struct_size_set_to_integer_is_flagged() {
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::TypeMismatchSize);
     assert_eq!(slice(src, &diags[0]), "5");
+    assert_eq!(
+        notes(&diags[0]),
+        ["write two whole numbers joined by `x`, such as `size=9x7`"]
+    );
     assert!(
         diags[0].primary.contains("integer"),
         "primary should name the offending kind, got: {}",
@@ -86,16 +113,23 @@ floor id=floor mat_slot=floor\n\n";
 /// The resolver drops a placement whose value is not a label without a word.
 #[test]
 fn place_use_and_theme_with_a_non_label_value_are_flagged() {
-    for (row, offending) in [
-        ("place id=a use=3 theme=plain at=origin", "3"),
-        ("place id=a use=hut theme=7 at=origin", "7"),
-        ("place id=a use=@oak theme=plain at=origin", "@oak"),
-        ("place id=a use=hut theme=x.y at=origin", "x.y"),
+    let def_note = "write the name of a `def` this file declares";
+    let theme_note = "write the name of a `theme` this file declares";
+    for (row, offending, note) in [
+        ("place id=a use=3 theme=plain at=origin", "3", def_note),
+        ("place id=a use=hut theme=7 at=origin", "7", theme_note),
+        (
+            "place id=a use=@oak theme=plain at=origin",
+            "@oak",
+            def_note,
+        ),
+        ("place id=a use=hut theme=x.y at=origin", "x.y", theme_note),
     ] {
         let src = format!("{PLACE_PRELUDE}site s:\n  {row}\n");
         let found = of_code(&src, DiagnosticCode::TypeMismatchLabel);
         assert_eq!(found.len(), 1, "for `{row}`, got {found:#?}");
         assert_eq!(slice(&src, &found[0]), offending, "for `{row}`");
+        assert_eq!(notes(&found[0]), [note], "for `{row}`");
     }
 }
 

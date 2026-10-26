@@ -8,7 +8,7 @@ title: "11. Lint と制約検証"
 
 この節は診断コードのカタログです。安定したコマンドが出しうるコードには、必ずここに行があります。行のないコードがあれば、それはカタログ外のコードではなく、この節の不備です。コードの規則が別の章にある場合は、行にコードの意味を書き、規則はその章へリンクします。コードを手にした読者が探すのはこの行で、振る舞いを定義しているのは各章だからです。
 
-レッドストーンのパイプラインが出す `E_LOGIC_*` / `W_LOGIC_*` は、この約束の対象外です。これらに到達できるのは `cairn synth --experimental-logic-synth` だけで、この機能はまるごと Internal ティア ([互換性](/ja/spec/compatibility/)) です。文字列について何も保証していないので、ここに行を置くと、存在しない契約を書くことになります。規則に関わるものは [レッドストーンと論理](/ja/spec/redstone/) で個別に挙げています。
+レッドストーンのパイプラインが出すコードは、すべてこの約束の対象外です。`E_LOGIC_*` / `W_LOGIC_*` のほか、`E_NO_CIRCUIT_REGION`、`E_ROUTE_CONGESTION`、`E_ATTENUATION_LIMIT`、`W_ROUTE_CROSS_LAYER_CLEARANCE` がこれにあたります。これらに到達できるのは `cairn synth --experimental-logic-synth` だけで、この機能はまるごと Internal ティア ([互換性](/ja/spec/compatibility/)) です。文字列について何も保証していないので、ここに行を置くと、存在しない契約を書くことになります。規則に関わるものは [レッドストーンと論理](/ja/spec/redstone/) で個別に挙げています。
 
 ### 重複
 
@@ -86,7 +86,7 @@ title: "11. Lint と制約検証"
 | `E_MISSING_MATERIAL` | ブロックを得る手段が `mat_slot=` しかないメンバーが、`mat_slot=` なしで書かれている。 |
 | `E_UNRESOLVED_SLOT` | `mat_slot=` を読む役割のメンバーが、割り当てられたテーマの宣言していないスロットを指している。 |
 | `E_UNKNOWN_SLOT_TARGET` | `slot NAME -> VALUE` の値が、正規トークンでも抽象マテリアルトークンでもない ([マテリアルとテーマ](/ja/spec/materials-themes/))。 |
-| `E_THEME_SELECTOR_UNMATCHED` | `theme` のセレクタ行が、ファイル中のどのメンバーにもマッチしない。 |
+| `E_THEME_SELECTOR_UNMATCHED` | `theme` のセレクタ行が、そのテーマを割り当てたスコープのどのメンバーにもマッチしない。どのスコープにも割り当てられていないテーマは検査しない。 |
 | `E_THEME_VARIANT_MISSING` | 固定したエディションに対して、テーマのエディション別バリアントを 1 つも割り当てられない。 |
 | `E_INCOMPLETE_PLACE` | `place` 行に `id=` / `use=` / `theme=` のいずれかがない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | `mat_slot=` が、渡されたパックのカタログに宣言されていない抽象マテリアルトークンに解決される ([マテリアルとテーマ](/ja/spec/materials-themes/))。 |
@@ -94,8 +94,13 @@ title: "11. Lint と制約検証"
 | `W_STATE_LITERAL_UNCHECKED` | 正規トークンのステートリテラル (`@oak_log[axis=x]`) を書かれたまま使った。`E_STATE_DOMAIN` が実装されるまで、そのプロパティと値をターゲットと照らし合わせる仕組みがない ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
 | `W_NO_THEME_BOUND` | `mat_slot=` を読むスコープにテーマが割り当てられていないので、そこで読む `mat_slot=` はどれもブロックに解決されない。 |
 | `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定したエディションでは別のバリアントを割り当てた ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
+| `W_INTENT_DEGRADED` | パレットのエントリが、固定したエディションでは表せない意図を失った。Bedrock での階段の `shape` がその例で、エントリごとに 1 行出る ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
+| `W_PREVIOUSLY_VERIFIED_TARGET` | 置き換えるロックが、別の `(edition, version)` を検証していた。行には両方が示される ([バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。 |
+| `W_SEMANTIC_SENSITIVITY` | `W_PREVIOUSLY_VERIFIED_TARGET` に続けて、前のロックの `member_version_sensitivity` が挙げるメンバーを、新しいターゲットでは解決が変わりうるものとして示す ([§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。制約カタログをまだ同梱していないので、コンパイラが書くロックはメンバーを 1 つも挙げておらず、そうしたロックの上でビルドしても、現時点ではこの警告は出ない。 |
 
-`E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は、block-array lowering の段階で発生します。この lowering は `cairn compile`、`cairn lower`、`cairn info`、`cairn check` のどれでも行われ、言語サーバーでも行われます。ただし `E_UNKNOWN_ID` には固定したターゲットが必要なので、実際に出せるのは `cairn compile --target` と `cairn check --edition E --target V` の 2 つです (`info` と `lower` はバージョンを固定せずに lowering します。ファイルの下限がターゲットを拒否する `compile` も同じです。[バージョンとエディション](/ja/spec/versioning-editions/#宣言した下限は強制される) を参照)。`--target` なしの `cairn check` と言語サーバーはターゲットをまったく持たずに lowering するので、`E_INCOMPATIBLE_MATERIAL` はいずれかの出荷済みバージョンが宣言する正規トークンについてだけ出し、`E_UNKNOWN_ID` は出しません ([§11.3](#113-エラーと警告の区分))。
+最後の 3 つは `cairn compile` だけが出します。書き出す成果物とロックについての警告なので、スパンを持たず、ほかのコマンドは出しません。
+
+`E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は、block-array lowering の段階で発生します。この lowering は `cairn compile`、`cairn lower`、`cairn info`、`cairn check` のどれでも行われ、言語サーバーでも行われます。ただし `E_UNKNOWN_ID` には固定したターゲットが必要なので、実際に出せるのは `cairn compile --target`、`cairn check --edition E --target V`、`cairn info` の 3 つです。`cairn info` は `buildable targets` の行のために、サポート対象のバージョンごとに 1 回ずつ lowering し、拒否したバージョンの指摘を `note: <edition> <version> refuses this source` の下に出力します。それでも終了コードは 0 のままです ([バージョンとエディション](/ja/spec/versioning-editions/#buildable-targets-の行))。`lower` はバージョンを固定せずに lowering します。`info` のレポートのほかの部分と、ファイルの下限がターゲットを拒否する `compile` も同じです ([バージョンとエディション](/ja/spec/versioning-editions/#宣言した下限は強制される) を参照)。`--target` なしの `cairn check` と言語サーバーはターゲットをまったく持たずに lowering するので、`E_INCOMPATIBLE_MATERIAL` はいずれかの出荷済みバージョンが宣言する正規トークンについてだけ出し、`E_UNKNOWN_ID` は出しません ([§11.3](#113-エラーと警告の区分))。
 
 `W_STATE_LITERAL_UNCHECKED` も同じ lowering で発生します。テーマのスロットや `connect … path=` から読むステートリテラルのそれぞれに付くので、`cairn compile`、`cairn lower`、`cairn info`、`--target` の有無を問わず `cairn check`、そして言語サーバーが、どちらのエディションでも報告します。これは `E_STATE_DOMAIN` の代わりの警告です。コンパイラが各ブロックのステートの表を持つまでは、ブロックにないプロパティやドメイン外の値がそのまま構造ファイルに書き出されます。それを黙って通さないためにこの警告があります。
 
@@ -139,7 +144,7 @@ title: "11. Lint と制約検証"
 | `E_INVALID_STRUCT_NAME` | `struct` の名前が、大文字小文字を問わず Windows が予約しているデバイス名 (`CON`、`NUL`、`COM1` など) である。 |
 | `E_DUPLICATE_PLACE_ID` | 同じ site の 2 つの `place` 行が同じ `id=` を持っている。 |
 | `E_OUTPUT_NAME_COLLISION` | ビルドが書き出すはずの 2 つの成果物が、大文字小文字を無視すると同じファイル名になる。同じ名前の `struct` と `place`、2 つの site に置かれた同じ `id=`、平坦化すると同じ名前になる 2 本の通路などで起きる。 |
-| `E_INVALID_PLACE_ORIGIN` | `place` が `origin` 以外の `at=` を持っている。または `at=` と `east_of=` / `north_of=` を併用している ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
+| `E_INVALID_PLACE_ORIGIN` | `place` に原点セレクタがない、または 2 つ以上ある。`origin` 以外の `at=` を持っている。または `east_of=` / `north_of=` の値がラベルではない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
 | `E_UNRESOLVED_PLACE_REF` | `place use=`、`east_of=` / `north_of=`、`connect` の端点が、存在しない place や def を指している。 |
 | `E_UNRESOLVED_THEME_REF` | `place theme=` が、モジュールの宣言していないテーマを指している。 |
 | `W_DEFERRED_PLACE` | `east_of=` / `north_of=` が id を理由に拒否された `place` を指しているので、指している側の行も配置されない。 |
@@ -165,15 +170,15 @@ title: "11. Lint と制約検証"
 |---|---|
 | `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def の本体に直接宣言されたどのメンバーも持たないポート id を指している。`level` の下のメンバーはまだポートになれないので、id がそうしたメンバーのものであれば、診断にそのことが示される。 |
 | `E_AMBIGUOUS_PORT` | そのポート id が、参照先の def の複数のメンバーにマッチする。 |
-| `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` がなく、通路を敷くマテリアルがない。 |
-| `W_DUPLICATE_WALKWAY` | 同じ site の先行する行がすでに敷いた `(from, to)` の組を、`connect` が繰り返している。 |
+| `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` がない、または `path=` の値がマテリアルトークンではない (`path=@gravel` のつもりの `path=gravel` など) ので、通路を敷くマテリアルがない。 |
+| `W_DUPLICATE_WALKWAY` | 同じ site の先行する行がすでに通路を敷いた 2 つのポートを、`connect` が向きを問わずもう一度つないでいる。 |
 | `W_INVALID_WALKWAY_IDENT` | `connect` の site / place / port の識別子が `__` を含む。または place / port の識別子が `_` で始まるか終わる。 |
 | `W_DEFERRED_CONNECT` | `connect` の対象の `place` 自体が拒否されており、つなぐものがない。 |
-| `W_WALKWAY_BLOCKED` | フォールバック経路のセルが既存の構造物と重なったので、そのセルを落とした。 |
+| `W_WALKWAY_BLOCKED` | フォールバック経路のセルが既存の構造物と重なったので、そのセルを落とした。または、直線の L 字だけでルーターの探索面積の上限 (4,000,000 セル) を超えたので、通路を敷かなかった。 |
 
 `E_UNRESOLVED_PORT` が指すのは `place.port` のうちポートの側だけです。place の側は `E_UNRESOLVED_PLACE_REF` です。`E_AMBIGUOUS_PORT` の場合、lowering では最初にマッチしたものを採り、衝突を報告します。直し方は、書き手の代わりにどれかを選ぶことではなく、衝突しているメンバーのどちらかを改名することだからです。
 
-`E_MISSING_PATH_MATERIAL` は、ほかの「マテリアルがない」系の指摘が警告なのに対して、エラーです。空気で敷かれた通路は、ソース上はつながって見える 2 棟を、ワールドではつながないまま残します。しかも、レポートにはそのことが何も現れません。
+`E_MISSING_PATH_MATERIAL` は、`E_MISSING_MATERIAL` と同じくエラーです。マテリアルを名指していても解決する相手がない `W_NO_THEME_BOUND` と `W_ABSTRACT_TOKEN_DEFERRED` が警告なのとは異なります。空気で敷かれた通路は、ソース上はつながって見える 2 棟を、ワールドではつながないまま残します。しかも、レポートにはそのことが何も現れません。
 
 `W_INVALID_WALKWAY_IDENT` は、`E_INVALID_PLACE_ID` のうち `.` / `:` に関する読み戻しの規則を、別の区切りに当てはめたものです。`__` は通路のスコープキーで `from` と `to` をつなぐので、片側の `b__c` ともう片側の `c__home2` が同じ文字列に符号化されてしまいます。この区切りに接する `_` も、同じように区切りに溶け込みます。`a.p_ to b.p` と `a.p to _b.p` はどちらも `a.p___b.p` に符号化され、`_` という名前の port は、分け直すと port が空になるキーを残します。区切りに接するのは、`from` 側の port の末尾と、`to` 側の place の先頭だけです。ただし `connect` はどちら向きにも書けるので、どの place の先頭も、どの port の末尾も、区切りに接する可能性があります。残りの 4 つの端、つまり place の末尾と port の先頭は、どちら向きに書いても `.` の隣にあるので溶け込みません。それでも規則を「place と port の識別子は `_` で始まることも終わることもできない」という 1 文に保つため、これらも拒否します。site は両側を `::` で区切られるので、端の規則の対象外です。行は落とし、指摘は改名すべき部分を示します。その行が求めた通路は失われるので、何も敷かなかったほかの行と同じく、`cairn compile` は `E_PARTIAL_BUILD` でビルドを拒否します。
 
@@ -189,14 +194,14 @@ title: "11. Lint と制約検証"
 | `W_DEF_NO_SIZE` | `def` で同じことが起きた。その def を使う `place use=` はすべて飛ばされる。 |
 | `W_STRUCTURE_TOO_LARGE` | スコープから導いた範囲が、block-array パスが確保する体積を超えている。 |
 | `W_PALETTE_TOO_LARGE` | スコープが空気以外に 65,535 を超える種類のブロックステートを塗っており、1 つのパレットで添字を振れる数を超えている。 |
-| `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバーが、1 つのボクセルに異なるブロックを書いた ([§4.4](/ja/spec/compilation/))。 |
+| `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバーが、1 つのボクセルに異なるブロックを書いた ([§4.8](/ja/spec/compilation/#48-同一フェーズ内の衝突とパレット))。 |
 | `E_PARTIAL_BUILD` | 要求されたスコープ、または `connect` 行が求めた通路のうち、少なくとも 1 つが lowering されず、求められたより少ないものしか作られなかった。 |
 
 `W_STRUCT_NO_SIZE` と `W_DEF_NO_SIZE` は、1 つの規則を、それが当てはまる対象によって分けたものです。`code` で絞り込むフィルタが、建たない struct と、インスタンス化されないテンプレートを区別できます。
 
 `W_STRUCTURE_TOO_LARGE` は、組み合わせによって発生します。`size=`、`walls height=`、`roof overhang=`、`level y=` はそれぞれ単独で範囲を検査しており、これはその組み合わせが上限を超えた場合です。上の 2 つと同じく、エラーではなく警告です。そのスコープが飛ばされるだけで、ビルドの残りには影響しません。
 
-`W_PALETTE_TOO_LARGE` は、どこに塗るかではなく何を塗るかについての、同じ種類の上限です。後のメンバーが覆い隠すものも含め、メンバーが書いたすべてのブロックステートを数えるので、上限は完成したスコープに残るものではなく、書かれたものにかかります。バニラのレジストリのブロックステートはこれよりはるかに少ないので、ソースがこの上限に届くのは、固定したターゲットが照合しないブロック ID か、ステートリテラルのプロパティを通じてだけです。ブロック ID は、バージョンを固定せずに lowering するところでは照合しません。`cairn lower` と `cairn info`、言語サーバーと `--target` なしの `cairn check`、エディションが出荷していないバージョンを指定した `cairn compile` と `cairn check --edition E --target V`、そしてファイルの下限が拒否するターゲットを渡した `cairn compile` ([バージョンとエディション](/ja/spec/versioning-editions/#宣言した下限は強制される)) がそうです。ステートリテラルのプロパティは、`W_STATE_LITERAL_UNCHECKED` で説明したとおり ([マテリアルとターゲット](#マテリアルとターゲット)) どのターゲットでも照合しないので、lowering を行うどのコマンドでもこの上限に届く可能性があります。解決できるターゲットを渡した `cairn compile` も例外ではありません。上と同じ理由で警告です。
+`W_PALETTE_TOO_LARGE` は、どこに塗るかではなく何を塗るかについての、同じ種類の上限です。後のメンバーが覆い隠すものも含め、メンバーが書いたすべてのブロックステートを数えるので、上限は完成したスコープに残るものではなく、書かれたものにかかります。バニラのレジストリのブロックステートはこれよりはるかに少ないので、ソースがこの上限に届くのは、固定したターゲットが照合しないブロック ID か、ステートリテラルのプロパティを通じてだけです。ブロック ID は、バージョンを固定せずに lowering するところでは照合しません。`cairn lower` と、`cairn info` のレポートのもとになる範囲全体の lowering、言語サーバーと `--target` なしの `cairn check`、エディションが出荷していないバージョンを指定した `cairn compile` と `cairn check --edition E --target V`、そしてファイルの下限が拒否するターゲットを渡した `cairn compile` ([バージョンとエディション](/ja/spec/versioning-editions/#宣言した下限は強制される)) がそうです。ステートリテラルのプロパティは、`W_STATE_LITERAL_UNCHECKED` で説明したとおり ([マテリアルとターゲット](#マテリアルとターゲット)) どのターゲットでも照合しないので、lowering を行うどのコマンドでもこの上限に届く可能性があります。解決できるターゲットを渡した `cairn compile` も例外ではありません。上と同じ理由で警告です。
 
 `W_DEFERRED_MEMBER` は、モジュールごと失敗させるのではなく、部分的なビルドを確認できる状態に保つための警告です。スコープの残りは lowering し、指摘は何が欠けているかを示します。
 
@@ -242,15 +247,19 @@ title: "11. Lint と制約検証"
 | **redstone** | 宣言した真理値表と時相アサーションに対する、tick 単位のシミュレーション。タイミングの衝突、QC への依存、配線の混雑 ([レッドストーン](/ja/spec/redstone/))。 |
 | **AABB 干渉** | 重なった場合は、優先度に従って統合するか拒否する。境界のブロックステートの再解決は IR 層が担う。 |
 
+このうち attachment、entity_aabb、support、fluid、edit_stability、AABB の干渉は計画中で、現時点ではどのコマンドも検査しません。本体が重なる 2 つの `place` 行も報告しません。幾何は一部だけ守られます。壁の外にはみ出す door、window、軒の stair は描かずに `W_DEFERRED_MEMBER` として報告し、自分の行の指定でどのボクセルにも乗らない pressure_plate は `E_UNPLACEABLE_PLATE` になります。version_caps / parity は、専用のコードを通じて一部だけ実行します。`E_VERSION_CAP` は `--target` を `@requires` の下限と照らし合わせ、`E_UNKNOWN_ID` は固定したターゲットが宣言していないブロック ID を拒否し、`W_INTENT_DEGRADED` はエディションが表せないものを示します。一方、ステートリテラルは照合しないまま使い (`W_STATE_LITERAL_UNCHECKED`)、エンティティのスキーマは検査しません。redstone の行も一部だけです。真理値表のコードが表そのものの整合性を検査するだけで、回路のシミュレーションは行いません。配線の混雑は `E_ROUTE_CONGESTION` ですが、これに到達できるのは Internal ティアの `cairn synth --experimental-logic-synth` だけです。
+
 ### did you mean
 
-閉じた語彙に照らして識別子を拒否する診断には、``did you mean `X`?`` という注記が付きます。未知のキーワード、未知の `mat_slot=` 名、未知の `--target` バージョンが対象です。
+閉じた語彙に照らして名前を拒否する診断は、入力の長さに応じた Damerau-Levenshtein 距離の閾値に収まる候補があれば、最も近いものを示します。閾値は、1〜3 文字なら 1 編集以下、4〜6 文字なら 2、それより長ければ 3 です。対象になる名前は、キーワード、引数のキー、`mat_slot=` の名前、place / def / theme / port の参照、抽象トークン、`pressure_plate` の側面、ブロック ID、`--target` のバージョンです。
 
-候補を出すのは、入力の長さに応じた Damerau-Levenshtein 距離の閾値に収まる場合です。閾値は、1〜3 文字なら 1 編集以下、4〜6 文字なら 2、それより長ければ 3 です。候補の一覧 (`expected one of: ...`) は常に併せて出力します。
+注記は ``did you mean `X`?`` の形で、`X` はその行に書くべき形で示します (ポートなら `home1.entry`、プレートなら `at=front.outside`)。`E_UNKNOWN_ID` だけは、ターゲットで最も近いブロックとして示し、候補を `data.suggestion` にも持たせます ([§11.2](#112-機械可読ペイロード))。
+
+未知のキーワード、引数のキー、`mat_slot=` の名前には、閉じた語彙の一覧 (`expected one of: ...`) も併せて出力します。未知の `--target` には、指定できたバージョンの一覧 (`supported targets: ...`) を出力します。参照、トークン、ブロック ID には、こうした一覧は付きません。
 
 ## 11.2 機械可読ペイロード
 
-`--format json` を受け付けるコマンド (`check`、`info`、`parse`、`lower`) は、**どんな入力に対しても** stdout に JSON 文書をちょうど 1 つ書き出します。`check` の文書は指摘の配列なので、パースできないソースは `E_PARSE` を 1 つ含む配列になります。`info` の文書はレポートです。レポートを出せないとき、つまりパースに失敗したときや、重大度が error の指摘があるときは、代わりに `{"diagnostics": [ ... ]}` を書き出します。レポートとはキーと終了コードで区別できます。どのパスが指摘を出したかによって、この形は変わりません。エディション中立の判定が和集合でまとめてしまうものを、エディションごとの厳密な試行が検出することがあります。そこで出た拒否も、要求されたエディションをすべて調べ終えた後で、同じ文書を書き出します。
+`--format json` を受け付けるコマンド (`check`、`info`、`parse`、`lower`) は、**読み込めるソースであればどれに対しても**、stdout に JSON 文書をちょうど 1 つ書き出します。`check` の文書は指摘の配列なので、パースできないソースは `E_PARSE` を 1 つ含む配列になります。`info` の文書はレポートです。レポートを出せないとき、つまりパースに失敗したときや、重大度が error の指摘があるときは、代わりに `{"diagnostics": [ ... ]}` を書き出します。レポートとはキーと終了コードで区別できます。どのパスが指摘を出したかによって、この形は変わりません。エディション中立の判定が和集合でまとめてしまうものを、エディションごとの厳密な試行が検出することがあります。そこで出た拒否も、要求されたエディションをすべて調べ終えた後で、同じ文書を書き出します。
 
 ただし、どのパスが指摘を出したかによって、文書に **何を載せるか** は変わります。これは偶然ではなく契約です。エディション中立のパスが拒否した場合、そのパスの警告もエラーと並んで文書の要素になります。エディションごとのパスが拒否した場合、文書にはエラーだけを載せます。中立の警告はすでにテキストで報告済みで、エディションごとの警告はこれから捨てる行に属するので、そのエディションを示す注記の下で stderr に出力されます。レポートを出せる実行での警告は、どちらの形式でも stderr にテキストで報告します。
 
@@ -280,7 +289,7 @@ title: "11. Lint と制約検証"
 
 | コード | `data` ペイロード |
 |---|---|
-| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`。フォールバックの L 字経路で既存の構造物と衝突し、飛ばしたセルの数。 |
+| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`。フォールバックの L 字経路で既存の構造物と衝突し、飛ばしたセルの数。セルを飛ばしたときに付き、ルーターの上限を超えて敷かなかった通路では省略する。 |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`。この行が先行する行から奪う、割り当て対象のキー。末尾の `=` は含まない。必ず空でない。 |
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`。後述。 |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`。割り当てられたマテリアル、ジオメトリが必要とするファミリ、割り当ての出どころ。 |
@@ -312,7 +321,7 @@ title: "11. Lint と制約検証"
 - **エラー** は、放置すると意図しない結果になるものです。概念の不在、未知の ID、ドメイン外のステートがこれにあたります。サイレント置換と暗黙の削除は禁止です。
 - **警告** は、バージョンやエディション間の意味のずれ、レッドストーンの挙動が保証されないこと、そして block-array パスが報告する部分的なビルドの劣化です。不完全なのがソースではなくコンパイラの側である場合です。
 
-`E_` / `W_` の接頭辞は重大度を表しません。これは両方向に言えます。多くの `W_` コードは部分的なビルドの劣化を表しますが、`W_UNUSED_DEF` / `W_TRUTH_TABLE_PARTIAL` と `@cairn` の 2 つのコードは、劣化ではないのに警告です。そして接頭辞が `E_` の次の 2 つは、名前ではなく上の規則で重大度を決めています。
+`E_` / `W_` の接頭辞は重大度を表しません。これは両方向に言えます。多くの `W_` コードは部分的なビルドの劣化を表しますが、劣化ではないのに警告のコードもあります。`W_UNUSED_DEF`、真理値表の 2 つの警告、`@cairn` の 2 つのコード、`W_INTENDED_TARGET_CAP`、`W_INTENDED_TARGET_UNSUPPORTED`、`W_THEME_VARIANT_REBOUND`、`W_DUPLICATE_WALKWAY`、そしてリテラルを書かれたまま出力する `W_STATE_LITERAL_UNCHECKED` などです。そして接頭辞が `E_` の次の 2 つは、名前ではなく上の規則で重大度を決めています。
 
 - `E_UNKNOWN_SLOT_TARGET` は **エラー** です。誤りはソースの側にあり、スロットがマテリアルトークンでない値で書かれているからです。参照するメンバーはテーマがないときと同じ形で作られるので、作られるものからは `W_NO_THEME_BOUND` と区別できません。
 - `E_THEME_SELECTOR_UNMATCHED` は **警告** です。何にもマッチしないルールは、何も上書きしません。

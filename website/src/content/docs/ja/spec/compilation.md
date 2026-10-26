@@ -11,11 +11,13 @@ massing     floor / walls / volume
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / センサー / アクチュエーター
-logic_synth レッドストーンの合成: Logic IR → Netlist IR
-logic_place セルの配置
-logic_route 配線 → Placement IR、遅延が確定
+logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
+logic_place セルの配置 → Placement IR
+logic_route Placement IR 上での配線、遅延の挿入、交差の合法化。遅延が確定
 raw         エスケープハッチ
 ```
+
+ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`raw` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures` の 4 つで、`fixtures` に属するのは `pressure_plate` だけです。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
@@ -24,12 +26,18 @@ raw         エスケープハッチ
 後勝ちになるのは **同じフェーズの中での局所的な上書き** だけで、`raw` は常に最後に評価します。同じフェーズの中で別々のメンバーが 1 つのボクセルを取り合う場合も、同じ規則で決着し、そのことを報告します ([§4.8](#48-同一フェーズ内の衝突とパレット))。
 
 ```
+theme stone:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+  slot glass -> @glass_pane
+
 struct keep size=11x9
-floor  id=base   mat_slot=floor
-walls  id=shell  mat_slot=wall height=5
-roof   id=roof   kind=gable mat_slot=roof overhang=1
-window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # それでも開口として切り抜かれる
-door   id=entry  side=front at=center
+  floor  id=base   mat_slot=floor
+  walls  id=shell  mat_slot=wall height=5
+  roof   id=roof   kind=gable mat_slot=roof overhang=1
+  window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # それでも開口として切り抜かれる
+  door   id=entry  side=front at=center
 ```
 
 ## 4.2 ターゲット軸
@@ -99,7 +107,7 @@ cairn compile build.crn --edition bedrock --target 1.21.40
   | 北西 / 北東の角 | `facing=south` で `outer_left` / `outer_right` |
   | 南西 / 南東の角 | `facing=north` で `outer_right` / `outer_left` |
 
-- **頂部。** 頂部は下の枠が立ち上げた部分をふさぐものなので、`extra_height > 1` のときだけ現れます。正方形の敷地では、`half=top` の階段を 1 つ (短いほうのスパンが奇数のとき) か、`2x2` のかたまり (偶数のとき) を置きます。長方形の敷地では、長いほうの軸に沿って内側を渡る `half=top` の階段の 1 行を置きます。頂部の向きは切妻屋根の規則に従い、棟が x 軸に沿う場合は `south`、z 軸に沿う場合は `east` です。
+- **頂部。** 頂部は下の枠が立ち上げた部分をふさぐものなので、`extra_height > 1` のときだけ現れます。いちばん上の段では、内側に寄せた矩形の全体を `half=top` の階段で埋めます。正方形の敷地では、階段を 1 つ (短いほうのスパンが奇数のとき) か、`2x2` のかたまり (偶数のとき) を置きます。長方形の敷地では、長いほうの軸に沿った帯になり、その幅は短いほうのスパンが奇数なら 1 行、偶数なら 2 行です。偶数のときは内側に寄せた矩形が 2 行の幅を持つので、1 行ではもう 1 行が開いたまま残ります。頂部の向きは切妻屋根の規則に従い、棟が x 軸に沿う場合は `south`、z 軸に沿う場合は `east` です。
 - **軒の出。** `gable` と同じです。
 
 ## 4.6 陸屋根のボクセル規則
@@ -129,11 +137,11 @@ Dims.y = 1 + wall_top + roof_extra
 - `roof_extra`: 種類ごとの寄与 ([§4.3](#43-切妻屋根のボクセル規則)–[§4.6](#46-陸屋根のボクセル規則)) のうち、最大のもの。
 - `1`: どの struct にもある基準面。
 
-`level` の中のメンバーも、この 3 つの項すべてに数えます。walls が `level y=5` の下にしかない struct の高さは、その walls を本体に直接書いた struct と同じです。
+`level` の中のメンバーも、この 3 つの項すべてに、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 
 **すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `pressure_plate` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面なので、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
 
-**ブロックを置かないメンバーは、体積も決めません。** level の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。メンバーが脱落するどの場合も同じです。`kind=` のない `roof` や `slope_to=` のない `shed` は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
+**ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof` や `slope_to=` のない `shed` は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
 
 ただし、材質による脱落が起きるのは `walls` だけで、`roof` には起きません。`mat_slot=` が解決できない屋根は、自分の既定の材質を代わりに使って描かれるからです。テーマのない struct を見ると、この違いがよく分かります。壁は作られず、高さも占めませんが、その上の `roof kind=gable` は描かれ、壁がまったくない場合と同じ位置に載ります。
 

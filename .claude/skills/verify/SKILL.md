@@ -23,7 +23,7 @@ python3 -m unittest discover -s .github/scripts
 ```
 
 While iterating on one crate, `-p <crate>` on clippy and test is enough. Run the whole list once
-before pushing: every crate depends on `cairn-lang-core`, so a core change can break any of them.
+before pushing: most crates depend on `cairn-lang-core`, so a core change can break any of them.
 
 Add these when the change reaches them:
 
@@ -33,11 +33,12 @@ Add these when the change reaches them:
 - `website/`: `pnpm install`, `pnpm run check` and `pnpm run build` in `website/`, then
   `cargo xtask lint --site website/dist site-parity` from the root.
 - `editors/vscode/`: `pnpm install`, `pnpm run package` and `pnpm test` in `editors/vscode/`.
-  `pnpm test` opens VS Code and skips on Windows, where CI is the only run; without a display run
-  it as `xvfb-run -a pnpm test`.
+  `pnpm test` opens VS Code and skips on Windows. CI runs it on Linux only, as
+  `xvfb-run -a pnpm test`, which is also how to run it without a display.
 - A new dependency or a recently stabilised API: CI's `MSRV` job runs
-  `cargo +<rust-version> check --workspace --locked --all-features` at the `rust-version` in
-  `Cargo.toml`.
+  `cargo +<floor> check --workspace --locked --all-features`, where the floor is the `rust-version`
+  in `Cargo.toml` with `.0` appended (`1.95` → `1.95.0`), since rustup reads `1.95` as the newest
+  `1.95.x`.
 
 ## When a step fails
 

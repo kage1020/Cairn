@@ -149,6 +149,75 @@ fn unresolved_slot_attaches_did_you_mean_note() {
     );
 }
 
+fn unresolved_slot_notes(src: &str) -> Vec<Vec<String>> {
+    resolve(&ir(src), None)
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::UnresolvedSlot)
+        .map(|d| d.notes.iter().map(|n| n.message.clone()).collect())
+        .collect()
+}
+
+#[test]
+fn unresolved_slot_lists_what_the_theme_declares() {
+    for (theme, slot, expected) in [
+        (
+            "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @spruce_stairs\n",
+            "quartz",
+            vec![
+                "expected one of: wall, roof",
+                "add `slot quartz -> @...` to theme `t` or correct the slot name",
+            ],
+        ),
+        (
+            "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @spruce_stairs\n",
+            "wal",
+            vec![
+                "did you mean `wall`?",
+                "expected one of: wall, roof",
+                "add `slot wal -> @...` to theme `t` or correct the slot name",
+            ],
+        ),
+        (
+            "theme t:\n  walls[class=outer] -> trim=@spruce_log\n",
+            "quartz",
+            vec![
+                "theme `t` declares no slots",
+                "add `slot quartz -> @...` to theme `t`",
+            ],
+        ),
+    ] {
+        let src = format!("{theme}\nstruct s size=4x4\n  walls mat_slot={slot} height=3\n");
+        assert_eq!(unresolved_slot_notes(&src), [expected], "source:\n{src}");
+    }
+}
+
+#[test]
+fn unresolved_slot_lists_and_suggests_a_sibling_variants_slot_when_unpinned() {
+    let src = [
+        "theme t_java:",
+        "  slot floor -> @oak_planks",
+        "",
+        "theme t_bedrock:",
+        "  slot floor -> @oak_planks",
+        "  slot bedrock_only -> @stone",
+        "",
+        "struct s size=4x4",
+        "  floor mat_slot=bedrock_onl",
+        "  walls mat_slot=bedrock_only height=3",
+        "",
+    ]
+    .join("\n");
+    assert_eq!(
+        unresolved_slot_notes(&src),
+        [[
+            "did you mean `bedrock_only`?",
+            "expected one of: floor, bedrock_only",
+            "add `slot bedrock_onl -> @...` to theme `t_java` or correct the slot name",
+        ]],
+    );
+}
+
 #[test]
 fn unresolved_slot_skips_suggestion_when_pool_is_far_away() {
     let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=quartz height=3\n";

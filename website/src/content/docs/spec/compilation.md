@@ -12,11 +12,17 @@ massing     floor / walls / volume
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / sensors / actuators
-logic_synth redstone: Logic IR → Netlist IR
-logic_place cell placement
-logic_route routing → Placement IR, delay determined
+logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
+logic_place cell placement → Placement IR
+logic_route routing, delay insertion and crossing legalization over the Placement IR, delay determined
 raw         escape hatch
 ```
+
+Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `raw` are not keywords
+yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
+`envelope`, `openings` and `fixtures`, whose one member is `pressure_plate`. `cairn compile` does
+not run the three `logic_*` phases, so a `logic` line lays no redstone in the artifact; they are
+reached only through `cairn synth --experimental-logic-synth`.
 
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
 what a member means. Nor does it decide what the artifact is
@@ -32,12 +38,18 @@ different members contesting a voxel inside a phase resolve the same way and are
 [§4.8](#48-within-phase-conflicts-and-the-palette).
 
 ```
+theme stone:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+  slot glass -> @glass_pane
+
 struct keep size=11x9
-floor  id=base   mat_slot=floor
-walls  id=shell  mat_slot=wall height=5
-roof   id=roof   kind=gable mat_slot=roof overhang=1
-window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # still cut as an opening
-door   id=entry  side=front at=center
+  floor  id=base   mat_slot=floor
+  walls  id=shell  mat_slot=wall height=5
+  roof   id=roof   kind=gable mat_slot=roof overhang=1
+  window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # still cut as an opening
+  door   id=entry  side=front at=center
 ```
 
 ## 4.2 Target axes
@@ -151,10 +163,12 @@ slope inward toward a centre ridge.
   | SW / SE corners | `facing=north` with `outer_right` / `outer_left` |
 
 - **Apex.** The apex closes what the frames below it raised, so it applies only when
-  `extra_height > 1`. A square footprint caps with a single `half=top` stair (odd short span) or a
-  `2x2` block of them (even short span). A rectangular footprint caps with a row of `half=top`
-  stairs spanning the inset interior along the long axis. Apex facings follow the gable rule:
-  `south` for an x-ridge, `east` for a z-ridge.
+  `extra_height > 1`. It fills the top layer's whole inset rectangle with `half=top` stairs. A
+  square footprint caps with a single stair (odd short span) or a `2x2` block of them (even short
+  span). A rectangular footprint caps with a band along the long axis, one row deep on an odd short
+  span and two on an even one, since the inset rectangle is two rows deep there and one row would
+  leave the other open. Apex facings follow the gable rule: `south` for an x-ridge, `east` for a
+  z-ridge.
 - **Overhang.** As `gable`.
 
 ## 4.6 Flat roof voxel rules
@@ -194,18 +208,19 @@ Each term counts only the members that will paint:
 - `roof_extra`: the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
 - `1`: the base plane, which every struct has.
 
-Members inside a `level` count in all three: a struct whose only walls sit under `level y=5` is as
-tall as one that writes them directly.
+Members inside a `level` count in all three, at their offset: `walls height=3` written directly
+gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, and
 `pressure_plate` read `N` as the base their geometry is measured from. A `floor` and a `roof` are
 planes a struct has one of, so under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and
 lowers to nothing.
 
-**A member that does not paint does not size the volume.** The `overhang=` of a level-scoped roof
-does not widen the footprint, and its height does not raise `Dims.y`. The same holds for every way
-a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=` does not widen the
-footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
+**A member that does not paint does not size the volume.** The `overhang=` of a roof under
+`level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under
+`level y=0` the roof draws, and widens and raises the volume as one in the body does. The same
+holds for every way a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=`
+does not widen the footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
 
 The material half applies to `walls` and not to `roof`, because a roof whose `mat_slot=` does not
 resolve falls back to a material of its own and still draws. A themeless struct shows the asymmetry:

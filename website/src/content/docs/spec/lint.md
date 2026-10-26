@@ -13,11 +13,12 @@ no row is a bug in this section rather than a code outside it. Where a code's ru
 another chapter, the row states what the code means and links there for the rule. The row is what a
 reader with a code in hand needs to find, and the chapter is where the behaviour is defined.
 
-The redstone pipeline's `E_LOGIC_*` / `W_LOGIC_*` codes are outside that promise. They are reachable
-only through `cairn synth --experimental-logic-synth`, which is Internal tier
-([Compatibility](/spec/compatibility/)). Nothing about those strings is guaranteed, so a row here
-would state a contract that does not exist. [Redstone and Logic](/spec/redstone/) names the ones its
-own rules turn on.
+Every code of the redstone pipeline is outside that promise: the `E_LOGIC_*` / `W_LOGIC_*` codes,
+and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT` and
+`W_ROUTE_CROSS_LAYER_CLEARANCE`. They are reachable only through `cairn synth
+--experimental-logic-synth`, which is Internal tier ([Compatibility](/spec/compatibility/)). Nothing
+about those strings is guaranteed, so a row here would state a contract that does not exist.
+[Redstone and Logic](/spec/redstone/) names the ones its own rules turn on.
 
 ### Duplicates
 
@@ -154,7 +155,7 @@ to compare.
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
 | `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
-| `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member in the file. |
+| `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member of the scopes the theme is bound to. A theme no scope binds is not checked. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
@@ -162,14 +163,23 @@ to compare.
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
+| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned edition has no form for, such as a stair's `shape` on Bedrock; one line per entry ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
+| `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members the previous lock's `member_version_sensitivity` lists, as ones that may resolve differently at the new target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). No lock the compiler writes lists any yet, since no constraint catalog ships, so a build over one does not raise it today. |
+
+The last three are `cairn compile`'s alone: they are about the artifact and the lock it writes, so
+they carry no span and no other command raises them.
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which `cairn
 compile`, `cairn lower`, `cairn info` and `cairn check` all run, as does the language server.
-`E_UNKNOWN_ID` further needs a pinned target, so the two commands that raise it are `cairn compile
---target` and `cairn check --edition E --target V`. `info` and `lower` lower against no version, and
-so does a `compile` whose target the file's floors refuse ([Versioning and
-Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn check` with no
-`--target`, and the language server, lower with no target at all, so they raise
+`E_UNKNOWN_ID` further needs a pinned target, so three commands raise it: `cairn compile --target`,
+`cairn check --edition E --target V`, and `cairn info`, which lowers once per supported version for
+its `buildable targets` row and prints each refusing version's findings under `note: <edition>
+<version> refuses this source`, exiting 0 all the same ([Versioning and
+Editions](/spec/versioning-editions/#the-buildable-targets-row)). `lower` lowers against no version,
+as does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
+check` with no `--target`, and the language server, lower with no target at all, so they raise
 `E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
 `E_UNKNOWN_ID` ([§11.3](#113-error-vs-warning)).
 
@@ -322,7 +332,7 @@ author means, so with both in scope the question has not been asked.
 | `E_INVALID_STRUCT_NAME` | A `struct` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
-| `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_INVALID_PLACE_ORIGIN` | A `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
 | `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
@@ -395,20 +405,21 @@ something for the name would build a site the source did not describe.
 |---|---|
 | `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
-| `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
-| `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
+| `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, or a `path=` that is not a material token (`path=gravel` for `path=@gravel`), so the walkway has no material to lay. |
+| `W_DUPLICATE_WALKWAY` | A `connect` joins the same two ports, in either order, as an earlier row in the same site that already laid them. |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port identifier in a `connect` contains `__`, or a place or port identifier starts or ends with `_`. |
 | `W_DEFERRED_CONNECT` | A `connect` targets a `place` that was itself refused, so there is nothing to connect. |
-| `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped. |
+| `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped, or the straight L alone is past the router's 4,000,000-cell search-area cap and the walkway was not laid. |
 
 `E_UNRESOLVED_PORT` is the port half of the `place.port` shape alone; the place half is
 `E_UNRESOLVED_PLACE_REF`. `E_AMBIGUOUS_PORT` takes the first match for lowering and reports the
 collision, since the repair is to rename one of the colliding members rather than to pick for the
 author.
 
-`E_MISSING_PATH_MATERIAL` is an error where the other absent-material codes are warnings: a walkway
-that degrades to air leaves two buildings looking connected in the source and unconnected in the
-world, with nothing in the report to say so.
+`E_MISSING_PATH_MATERIAL` is an error, as `E_MISSING_MATERIAL` is, where `W_NO_THEME_BOUND` and
+`W_ABSTRACT_TOKEN_DEFERRED`, a material named with nothing to resolve it against, are warnings: a
+walkway that degrades to air leaves two buildings looking connected in the source and unconnected in
+the world, with nothing in the report to say so.
 
 `W_INVALID_WALKWAY_IDENT` is the same round-trip rule as the `.` / `:` half of
 `E_INVALID_PLACE_ID`, on a different separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
@@ -440,7 +451,7 @@ the author to a line that is correct.
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
 | `W_PALETTE_TOO_LARGE` | A scope paints more than 65,535 distinct block states besides air, past what one palette can index. |
-| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](/spec/compilation/)). |
+| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). |
 | `E_PARTIAL_BUILD` | At least one requested scope, or a walkway a `connect` row asked for, did not lower, so the run produced less than was asked for. |
 
 `W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
@@ -451,18 +462,18 @@ on `code` can tell a struct that will not build from a template that will not in
 It is a warning rather than an error, matching the two above: the scope is skipped and the rest of
 the build is unaffected.
 
-`W_PALETTE_TOO_LARGE` is the same kind of limit on what a scope paints rather than where. Every state
-a member writes counts, including one a later member covers, so the limit is on the states written
-rather than the states the finished scope keeps. A vanilla registry has far fewer states, so a source
-reaches it only through block ids or state-literal properties no pinned target checks. Block ids go
-unchecked wherever lowering runs with no version pinned: in `cairn lower`, `cairn info`, the
-language server and a `cairn check` with no `--target`, in a `cairn compile` or `cairn check
---edition E --target V` naming a version the edition does not ship, and in a `cairn compile` whose
-target the file's floors refuse
-([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state
-literal's properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says
-([Materials and targets](#materials-and-targets)), so every command that lowers can reach the limit,
-`cairn compile` with a target that resolves among them. A warning, for the reason above.
+`W_PALETTE_TOO_LARGE` is the same kind of limit on what a scope paints rather than where. Every
+state a member writes counts, including one a later member covers, so the limit is on the states
+written rather than the states the finished scope keeps. A vanilla registry has far fewer states, so
+a source reaches it only through block ids or state-literal properties no pinned target checks.
+Block ids go unchecked wherever lowering runs with no version pinned: in `cairn lower`, the
+range-wide lowering behind `cairn info`'s report, the language server and a `cairn check` with no
+`--target`, in a `cairn compile` or `cairn check --edition E --target V` naming a version the
+edition does not ship, and in a `cairn compile` whose target the file's floors refuse ([Versioning
+and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state literal's
+properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says ([Materials and
+targets](#materials-and-targets)), so every command that lowers can reach the limit, `cairn compile`
+with a target that resolves among them. A warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it.
@@ -554,17 +565,36 @@ Beyond the codes above, lint covers:
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
+Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are
+planned, and no command checks them yet: two `place` rows whose bodies overlap are not reported.
+Geometry holds only in part: a door, window or eave stair that would fall outside its wall is not
+drawn and is reported as `W_DEFERRED_MEMBER`, and a pressure plate its own line puts on no voxel is
+`E_UNPLACEABLE_PLATE`. version_caps / parity runs only in part, through codes of its own:
+`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
+pinned target does not declare, and `W_INTENT_DEGRADED` names what an edition cannot carry, while a
+state literal goes unchecked (`W_STATE_LITERAL_UNCHECKED`) and no entity schema is checked. The
+redstone row runs only in part as well: the truth-table codes check a table against itself, nothing
+simulates the circuit, and routing congestion is `E_ROUTE_CONGESTION`, which only the Internal-tier
+`cairn synth --experimental-logic-synth` reaches.
+
 ### "did you mean"
 
-Three diagnostics reject an identifier against a closed vocabulary: an unknown keyword, an unknown
-`mat_slot=` name, and an unknown `--target` version. Each attaches a ``did you mean `X`?`` note when
-a candidate sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2
-for 4–6, and ≤ 3 beyond. The closed-set listing (`expected one of: ...`) is always printed as well.
+A diagnostic that rejects a name against a closed vocabulary attaches the nearest candidate when one
+sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2 for 4–6, and
+≤ 3 beyond. The names are a keyword, an argument key, a `mat_slot=` name, a place, def, theme or
+port reference, an abstract token, a `pressure_plate` side, a block id, and a `--target` version.
+The note reads ``did you mean `X`?``, with `X` written as the line would be (`home1.entry` for a
+port, `at=front.outside` for a plate); `E_UNKNOWN_ID` instead names the target's nearest block and
+carries it as `data.suggestion` ([§11.2](#112-machine-readable-payload)).
+
+An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
+...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
+reference, a token and a block id print no such list.
 
 ## 11.2 Machine-readable payload
 
 Every command that takes `--format json` (`check`, `info`, `parse` and `lower`) writes exactly one
-JSON document to stdout under it, for every input it is given. `check`'s document is an array of
+JSON document to stdout under it, for every source it can read. `check`'s document is an array of
 findings, so a source that does not parse is that array with one `E_PARSE` element. `info`'s is the
 report; where there is no report, after a parse failure or any error-severity finding, it writes
 `{"diagnostics": [ ... ]}` instead, told apart from a report by its keys and by the exit code. Which
@@ -634,7 +664,7 @@ them. Codes not listed below omit `data` entirely, so the JSON key is absent rat
 
 | Code | `data` payload |
 |---|---|
-| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. |
+| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. Present when cells were dropped; absent when the walkway was past the router's cap and not laid. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`. See below. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
@@ -684,9 +714,11 @@ holds `2^130`.
   rather than the source is the incomplete side.
 
 The `E_` / `W_` prefix is not the severity, in either direction. Most `W_` codes mark a
-partial-build degradation, but `W_UNUSED_DEF`, `W_TRUTH_TABLE_PARTIAL` and the two `@cairn` codes
-are warnings without being one; and two `E_`-prefixed codes are decided by the rule above rather
-than by their name:
+partial-build degradation, but some are warnings without being one, among them `W_UNUSED_DEF`, the
+two truth-table warnings, the two `@cairn` codes, `W_INTENDED_TARGET_CAP`,
+`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`, and
+`W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged; and two `E_`-prefixed codes are
+decided by the rule above rather than by their name:
 
 - `E_UNKNOWN_SLOT_TARGET` is an **error**, because the fault is in the source: the slot is written
   with a value that is not a material token. Its members degrade as they would with no theme bound,

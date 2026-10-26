@@ -4,7 +4,7 @@ title: "12. エコシステム連携と逆変換"
 
 ## 12.1 順方向の変換
 
-block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem` / `.mcstructure` が出力されます ([アーキテクチャ](/ja/spec/architecture/))。各形式はシリアライザで、既存の形式は、ピボットの周りに追加するバックエンドという位置付けです。
+block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem` / `.mcstructure` が出力されます ([アーキテクチャ](/ja/spec/architecture/))。各形式はシリアライザで、既存の形式は、ピボットの周りに追加するバックエンドという位置付けです。現在あるのは `.nbt` と `.mcstructure` のシリアライザだけで、`cairn compile` は Java には `.nbt` を、Bedrock には `.mcstructure` を書き出します。
 
 ## 12.2 逆方向の変換: コンパイラは写し取り、LLM がリフトする
 
@@ -17,6 +17,8 @@ cairn compile house.lifted.crn --edition java --target 1.21.4
 cairn diff-blocks house.litematic house.lifted.crn             # voxel XOR → 自己修正へ
 ```
 
+逆方向の変換はまだ実装していません。 `cairn import` も `cairn diff-blocks` もまだないので、この節とそれに続く 2 つの節の内容は、現在はどれも動きません。
+
 compile → diff → patch のループは、次のように報告します。
 
 ```text
@@ -24,6 +26,8 @@ E_DECOMPILE_DIFF: block IoU = 0.962 < threshold 0.985
   missing bbox=(12,4,3)..(18,6,3) mat=glass_pane → likely window repeat too small
   Suggested patch: edit window[id=front_windows] set repeat=4
 ```
+
+`E_DECOMPILE_DIFF` は未実装です。また、修正案が使っている `edit` 文もまだパースできません ([§9.2](/ja/spec/components-editing-sites/#92-編集モデル))。
 
 収束の閾値は、block IoU ≥ 0.985、`state_accuracy` ≥ 0.995、残った raw ≤ 5% です。完全な一致は求めません。残差は `raw_fill id=residual_* origin=imported` として明示的に残します。
 
@@ -48,7 +52,7 @@ window id=front_windows side=front mat_slot=glass repeat=5 ...
 
 取り込むときは、`(edition, version)` と来歴 (provenance) を block-array IR に記録します (`.litematic` → java、`.mcstructure` → bedrock、`.schem` → java)。これによって、取り込んだものも再現できるようになります ([バージョンとエディション](/ja/spec/versioning-editions/))。
 
-**取り込みを「作者の意図の復元」として見せてはいけません。** これが最大の落とし穴です。復元できるのはボクセルと一部の規則性だけで、そのことは CLI の `W_SEMANTIC_LOSS` に示されます。
+**取り込みを「作者の意図の復元」として見せてはいけません。** これが最大の落とし穴です。復元できるのはボクセルと一部の規則性だけで、そのことは CLI の `W_SEMANTIC_LOSS` に示されます。ただし取り込みはまだないので、何も記録されず、`W_SEMANTIC_LOSS` も未実装です。
 
 ほかの規則:
 

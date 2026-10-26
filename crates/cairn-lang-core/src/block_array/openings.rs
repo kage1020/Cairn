@@ -223,7 +223,8 @@ pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgF
 
 /// Wall-local `u` of a door's `at=` on a wall `len` long, or how an unusable `at=` was written.
 ///
-/// `center` is `len / 2`, rounding half up on an even wall (`spec/syntax` "Selectors").
+/// `center` is `len / 2`, the column right of the midpoint on an even wall (`spec/syntax`
+/// "Selectors").
 pub(super) fn door_anchor_offset(member: &Member, len: u32) -> Result<u32, Written> {
     match member.ident_value("at") {
         Some("center") => Ok(len / 2),

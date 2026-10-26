@@ -10,11 +10,11 @@ use indexmap::IndexMap;
 use crate::ast::{Item, Module, ThemeRule, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{
-    IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS, Unread, ValueWithSpan,
-    role_of,
+    ACTUATOR_BINDINGS, IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS,
+    Unread, ValueWithSpan, known_keywords, role_of,
 };
 use crate::prose::or_list;
-use crate::suggest::{did_you_mean_note, nearest_match};
+use crate::suggest::{did_you_mean_note, nearest_match, one_edit_match};
 
 use super::DiagnosticSink;
 
@@ -134,8 +134,8 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
                 &accepted,
             ));
         } else if coined && !own.contains(&key.as_str()) {
-            // Only the role's own keys: the widened set would suggest the key itself.
-            if let Some(suggested) = nearest_match(key, own.iter().copied()) {
+            // Only the role's own keys: the widened set holds the key itself, so it finds nothing.
+            if let Some(suggested) = one_edit_match(key, own.iter().copied()) {
                 sink.push(coined_near_miss(
                     Field::Argument,
                     keyword,
@@ -180,7 +180,7 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             ));
         } else if widened.is_some_and(|extra| extra.contains(key.as_str()))
             && !own.contains(&key.as_str())
-            && let Some(suggested) = nearest_match(key, own.iter().copied())
+            && let Some(suggested) = one_edit_match(key, own.iter().copied())
         {
             sink.push(coined_near_miss(
                 Field::Selector,
@@ -340,6 +340,7 @@ fn unknown_key(
         span: None,
         message: format!("expected one of: {}", accepted.join(", ")),
     });
+    notes.extend(actuator_host_note(key));
     Diagnostic {
         code: DiagnosticCode::UnknownArgument,
         span: span.clone(),
@@ -347,6 +348,20 @@ fn unknown_key(
         notes,
         data: None,
     }
+}
+
+/// Where an actuator key belongs, when `key` is one (`spec/redstone` "Signal binding").
+fn actuator_host_note(key: &str) -> Option<DiagnosticNote> {
+    let (_, host) = ACTUATOR_BINDINGS.iter().find(|(k, _)| *k == key)?;
+    let message = if known_keywords().contains(host) {
+        format!("`{key}=` binds a signal to a `{host}`, so it belongs on a `{host}` line")
+    } else {
+        format!("`{key}=` binds a signal to a `{host}`, which is not a keyword yet")
+    };
+    Some(DiagnosticNote {
+        span: None,
+        message,
+    })
 }
 
 /// A selector-widened key one edit from the role's own vocabulary, reported as a typo.

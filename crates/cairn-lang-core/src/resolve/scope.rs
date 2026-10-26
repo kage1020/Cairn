@@ -89,8 +89,13 @@ fn resolve_members(
                 None => {
                     let said = (member.span.start, slot_name.to_owned(), tname.to_owned());
                     if ctx.diagnosed.insert(said) {
-                        ctx.diagnostics
-                            .push(unresolved_slot_diag(slot_name, tname, member, slots));
+                        ctx.diagnostics.push(unresolved_slot_diag(
+                            slot_name,
+                            tname,
+                            member,
+                            slots,
+                            sibling_slots,
+                        ));
                     }
                 }
             }

@@ -11,11 +11,13 @@ def cottage class=house size=9x7:
   floor  id=floor  mat_slot=floor
   walls  id=walls  class=outer mat_slot=wall height=4
   roof   id=roof   kind=gable  mat_slot=roof
-  window id=front_windows class=small side=front y=2 repeat=2 mat_slot=glass
+  window id=front_windows class=small side=front y=2 offset=1 size=2x2 repeat=2 step=5 mat_slot=glass
 
 theme medieval:
+  slot floor -> @spruce_planks
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
+  slot glass -> @glass_pane
   walls[class=outer]  -> trim=@spruce_log     # セレクタによる部位の装飾 (予約)
   window[class=small] -> frame=@spruce_wood
 ```
@@ -38,6 +40,8 @@ theme medieval:
 
 テーマが割り当てるのは、生のブロック ID ではなく **正規トークン** です。`(edition, version)` ごとに ID、ステート名、ステートの値、シリアライズの形式を解決するのはバックエンドです ([バージョンとエディション](/ja/spec/versioning-editions/))。LLM は、`pillar_axis` も、リトルエンディアンの NBT も、Bedrock の `weirdo_direction` も知る必要がありません。
 
+現時点のバックエンドが解決する範囲は、これより狭くなっています。正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせるだけなので ([§7.3](#73-バージョンとエディションをまたぐ対応付け))、`@water_cauldron` はどの Bedrock のバージョンでも `E_UNKNOWN_ID` になります。また、Bedrock への書き出しでステートを変換できるのは階段の系統だけで、`@oak_log[axis=x]` は Java 向けにはコンパイルできても、Bedrock 向けには拒否されます。
+
 トークンには 2 つの段階があります。
 
 | 段階 | 例 | 意味 |
@@ -52,6 +56,8 @@ theme exact_oak:
   slot floor -> @oak_planks             # 正規: 1 対 1 に固定する
 ```
 
+抽象トークンは、レジストリパックの `materials` カタログを通じてブロックに解決します。カタログのエントリの `overrides` には、そのブロックを別の綴りで書くバージョンを挙げます ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。カタログにないトークンは、パックを参照する場面、つまりターゲットを指定したときと `cairn lower`、`cairn info` で `E_UNKNOWN_ABSTRACT_TOKEN` になります ([Lint](/ja/spec/lint/))。
+
 ## 7.3 バージョンとエディションをまたぐ対応付け
 
 正規トークンは、次の 5 つのパターンの違いを吸収します。解決に使う表の構造は[バージョンとエディション](/ja/spec/versioning-editions/)で説明します。
@@ -63,5 +69,7 @@ theme exact_oak:
 | N 対 1 の統合 | `@oak_slab` (旧 `wooden_slab{variant}`) | ターゲットごとに解決します。 |
 | 新規追加 | `@cherry_planks` | `requires >=` で下限を指定する必要があります。 |
 | 削除 | ターゲットのバージョンに存在しない | ハードエラーにして、代わりの候補を示します。 |
+
+現時点で書いたとおりに動くのは、最後の行だけです。 正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせます ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。改名は自動では解決されず `E_UNKNOWN_ID` になり、そのターゲットでの綴りをレジストリパックの `aliases` から注記で示します (Bedrock で `@dirt_path` と書くと `minecraft:grass_path` を示します)。改名をまたいで解決できるのは抽象トークンだけで、カタログのエントリの `overrides` を通じて解決します ([§7.2](#72-正規トークン))。分割も区別しません。`@cauldron[fluid=water]` は `minecraft:cauldron[fluid=water]` のまま書き出し、`W_STATE_LITERAL_UNCHECKED` を出します。統合された id も、ほかの id と同じくターゲットごとに照らし合わせるだけです。新しいブロックから下限を推定することもありません。`@requires` のない `@pale_oak_planks` は Java 1.21.4 では問題なく通り、このブロックを持たないターゲットでは `E_UNKNOWN_ID` になります。削除された id は `E_UNKNOWN_ID` になり、近いブロックがそのターゲットにあれば、それを示します。
 
 **吸収できるのは、ID、ステート、シリアライズの違いだけです。** 概念そのものがない場合や、ゲームの挙動の違いは吸収しません。

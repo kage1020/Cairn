@@ -29,7 +29,7 @@ A `cairn check` with no `--target` still lowers, with no target, and reports the
 
 Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 
-- `--edition` is **required** for any subcommand that emits voxels, and `--target` is refused without it. The same `1.21` means different things on Java and Bedrock, and Java's DataVersion is unrelated to Bedrock's `block_version`.
+- `--edition` is **required** by `compile`, and every subcommand that takes `--target` refuses it without `--edition`. The same `1.21` means different things on Java and Bedrock, and Java's DataVersion is unrelated to Bedrock's `block_version`.
 - `--target` is an opaque label resolved through the pinned edition's data table, with DataVersion as the canonical ordering key ([versioning-editions "The target is a compile-time parameter"](https://cairn.kage1020.com/spec/versioning-editions/)). `latest` aliases the row that table names as latest, which is not necessarily the newest row it carries.
 - `compile --target` defaults to `latest`. `check --target` has no default, so `cairn check --edition java` still runs the unpinned gate rather than refusing ids on a version nobody chose.
 
@@ -41,7 +41,7 @@ Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 | `1` | A parse failure, an `Error`-severity diagnostic, an I/O error, or a run-level refusal such as a `--target` the edition does not ship. |
 | `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`), or `cairn docs` was asked for a page or part the binary does not carry, for a title more than one part has, or for a `#fragment` together with a title or `--toc`. |
 
-A reader of stdout that stops early (`cairn lower f.crn | head -1`) does not change the code: output written after stdout has been closed is dropped, and the command exits as it would have with stdout open. This holds for stdout only: diagnostics go to stderr, and a closed stderr still ends the run with a panic.
+A reader of stdout that stops early (`cairn lower f.crn | head -1`) does not change the code: output written after stdout has been closed is dropped, and the command exits as it would have with stdout open. This holds for stdout only: diagnostics go to stderr, and a stderr whose reader has gone still ends the run with a panic.
 
 A run-level refusal is reported on stderr and by the exit code in both output formats, never as an element of the `--format json` array: it is not a finding at a span in the file, and giving it a line number would put a position on a fact that has none. A `check --format json` consumer reads the verdict from the exit code and treats stderr as unstructured prose: an exit of `1` over an array with no `"severity": "error"` element is a run-level refusal, and nothing else reads that way ([lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/)).
 
@@ -58,7 +58,7 @@ cairn docs spec/lint "Error vs warning"        # the section a citation names
 cairn docs ja/spec/syntax                      # the Japanese copy
 ```
 
-The title is quoted the way `--help` and the code cite the spec: a heading without its number, a term the page defines in bold, or the page's own title. A heading or the page's title is also taken with its number. A title that more than one part of the page has is refused with each part listed, and the `#fragment` of the section you mean picks one. `cargo xtask lint spec-citations` holds every citation in the repository to what `cairn docs` can print.
+The title is quoted the way `--help` and the code cite the spec: a heading without its number, a term a list item on the page defines in bold (`- **Term.**`), or the page's own title. A heading or the page's title is also taken with its number. A title that more than one part of the page has is refused with each part listed, and the `#fragment` of the section you mean picks one. `cargo xtask lint spec-citations` holds every citation in the repository to what `cairn docs` can print.
 
 Git Bash on Windows rewrites an argument that starts with `/` into a Windows path before `cairn` sees it, so leave the leading slash off there: `cairn docs spec/#two-version-axes`.
 

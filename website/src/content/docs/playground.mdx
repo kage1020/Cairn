@@ -8,7 +8,8 @@ import { Aside } from '@astrojs/starlight/components';
 <Aside type="caution" title="Not implemented yet">
 This page is a placeholder for the browser-hosted playground that will use the
 [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-lang-wasm) bindings
-once they exist. For now the compiler runs only as the `cairn` CLI, so the editor below is cosmetic.
+once they exist. For now the compiler runs only as the `cairn` CLI, so the sample below is text
+to read.
 </Aside>
 
 ## What this page will eventually be
@@ -35,6 +36,7 @@ plus a voxel diff against the source.
 @requires version>=1.20
 
 theme medieval:
+  slot floor -> @oak_planks
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
 

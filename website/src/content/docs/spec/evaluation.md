@@ -13,6 +13,10 @@ test prompt set (~50)
   → return line-numbered errors and self-correct for up to 3 turns
 ```
 
+This chapter is the methodology the project is to follow, and none of it is automated in the
+repository yet: there is no prompt set, harness, metric or geometry simulator. Of the loop above,
+only the lint step exists, as `cairn check`.
+
 ## 13.1 Primary metrics
 
 | Metric | What it measures |
@@ -54,5 +58,7 @@ corpus → import → normalize(edition/version) → L1 compact → cluster(shap
 ## 13.4 Redstone verification
 
 The headless geometry simulator extends to a per-tick redstone logic simulator. It simulates the
-synthesized circuit per target edition and checks it against the declared truth table and temporal
-assertions, in a synth → sim → diff → patch loop. See [Redstone](/spec/redstone/).
+synthesized circuit per target edition and checks it against the declared truth-table, latency and
+temporal assertions, in a synth → sim → diff → patch loop. Neither simulator exists yet, and of the
+three assertion kinds only truth tables and temporal assertions are parsed today. See
+[Redstone](/spec/redstone/#147-verification).

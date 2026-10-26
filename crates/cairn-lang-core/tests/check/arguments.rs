@@ -6,7 +6,7 @@ use cairn_lang_core::intent::{
 };
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Edition, check, lower, parse};
 
-use crate::common::{codes, diagnose, exactly_one};
+use crate::common::{codes, diagnose, exactly_one, of_code};
 
 /// The one finding `source` raises with `code`, among exactly `total` findings in all.
 fn only_with_code(source: &str, code: &str, total: usize) -> Diagnostic {
@@ -444,6 +444,25 @@ fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
         "got: {}",
         notes(&d),
     );
+}
+
+#[test]
+fn a_selector_coins_a_word_two_edits_from_a_real_one() {
+    let theme =
+        "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hiegt=3] -> frame=@spruce_wood\n\n";
+    // The member's own selector filters on a value it does not carry, so the row matches nothing.
+    for (member, found) in [
+        ("walls hiegt=3 height=3", &["W_IGNORED_ARGUMENT"][..]),
+        (
+            "walls[hiegt=3] height=3",
+            &["E_THEME_SELECTOR_UNMATCHED", "W_IGNORED_ARGUMENT"][..],
+        ),
+    ] {
+        let src =
+            format!("{theme}struct s size=5x5\n  floor mat_slot=wall\n  {member} mat_slot=wall\n");
+        assert_eq!(codes(&src), found, "source:\n{src}");
+        assert_eq!(ignored_at(&src), ["@spruce_wood"], "source:\n{src}");
+    }
 }
 
 #[test]
@@ -1044,4 +1063,25 @@ fn a_slot_nothing_reads_does_not_starve_a_struct_of_a_theme_but_a_place_still_bi
         ["E_THEME_VARIANT_MISSING"],
         "source:\n{without_slot}",
     );
+}
+
+#[test]
+fn an_actuator_key_on_a_member_that_does_not_read_it_names_its_component() {
+    let expected_window = "expected one of: side, y, offset, size, sym, repeat, step, shape, \
+                           anchor, id, class, mat_slot";
+    for (line, host_note) in [
+        (
+            "window side=front y=1 offset=1 size=1x1 opened_by=sig.a",
+            "`opened_by=` binds a signal to a `door`, so it belongs on a `door` line",
+        ),
+        (
+            "window side=front y=1 offset=1 size=1x1 powered_by=sig.a",
+            "`powered_by=` binds a signal to a `piston`, which is not a keyword yet",
+        ),
+    ] {
+        let src = format!("struct s size=5x5\n  {line}\n");
+        let found = exactly_one(of_code(&src, DiagnosticCode::UnknownArgument));
+        let found: Vec<&str> = found.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(found, [expected_window, host_note], "for `{line}`");
+    }
 }

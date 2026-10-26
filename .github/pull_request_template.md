@@ -10,7 +10,7 @@ commit message on `canary` and is parsed by release-plz to decide patch releases
   refactor(nbt): split codec into modules
   ci: add windows-11-arm to publish matrix
 
-Types that trigger a patch release:    feat, fix, perf, refactor, build
+Types that make a patch release due:   feat, fix, perf, refactor, build
 Types that do NOT:                     docs, test, ci, chore, style
 
 See CONTRIBUTING.md for the full convention.

@@ -134,6 +134,9 @@ class CheckTest(Case):
     def test_a_translated_readme_is_not_a_fragment(self) -> None:
         self.assertPasses(self.check_one("README.ja.md", "# 説明\n"))
 
+    def test_a_readme_named_like_a_fragment_is_a_fragment(self) -> None:
+        self.assertRefused(self.check_one("README.fixed.md", "# not an item\n"), NAMING)
+
     def test_bad_names_and_kinds(self) -> None:
         self.assertRefused(self.check_one("Bad.fixed.md", GOOD), "is named `<slug>.<kind>.md`")
         self.fresh()
@@ -142,6 +145,11 @@ class CheckTest(Case):
         self.assertRefused(self.check_one("x.fix.md", GOOD), "unknown kind `fix`")
         self.fresh()
         self.assertRefused(self.check_one(".gitkeep", ""), "is named `<slug>.<kind>.md`")
+
+    def test_a_directory_is_refused(self) -> None:
+        (self.repo.dir / "changelog.d/more").mkdir()
+        self.repo.write("changelog.d/more/x.fixed.md", GOOD)
+        self.assertRefused(self.repo.run("check"), "directly in changelog.d/")
 
     def test_a_leading_blank_line_is_refused(self) -> None:
         self.assertRefused(self.check_one("x.breaking.md", "\n" + GOOD), "on its first line")
@@ -204,6 +212,39 @@ class PrTest(Case):
         self.repo.git("checkout", "-q", "-b", "other")
         self.repo.write("changelog.d/y.fixed.md", GOOD)
         self.assertPasses(self.repo.pr("fix(core): y", head="other"))
+
+    def test_a_file_in_a_directory_under_changelog_d_is_refused(self) -> None:
+        for name in ("x.fixed.md", "README.md"):
+            with self.subTest(name=name):
+                self.fresh()
+                (self.repo.dir / "changelog.d/more").mkdir()
+                self.repo.write(f"changelog.d/more/{name}", GOOD)
+                self.assertRefused(self.repo.pr("fix(core): x"), "directly in changelog.d/")
+
+    def test_a_non_ascii_path_is_checked_as_written(self) -> None:
+        (self.repo.dir / "changelog.d/é").mkdir()
+        self.repo.write("changelog.d/é/x.fixed.md", GOOD)
+        self.assertRefused(self.repo.pr("fix(core): x"), "directly in changelog.d/")
+        self.fresh()
+        self.repo.write("changelog.d/café.fixed.md", GOOD)
+        self.assertRefused(self.repo.pr("fix(core): x"), NAMING)
+
+    def test_a_fragment_whose_type_changed_is_checked(self) -> None:
+        self.repo.git("checkout", "-q", "canary")
+        self.repo.write("changelog.d/x.fixed.md", GOOD)
+        self.repo.commit("a fragment already on canary")
+        self.repo.git("update-ref", "refs/remotes/origin/canary", "HEAD")
+        self.repo.git("checkout", "-q", "-b", "other")
+        # A symlink staged straight into the index, so no host has to be able to create one.
+        target = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=self.repo.dir,
+                                input="elsewhere", capture_output=True, text=True,
+                                check=True).stdout.strip()
+        self.repo.git("update-index", "--cacheinfo", f"120000,{target},changelog.d/x.fixed.md")
+        self.repo.git("commit", "-q", "-m", "now a symlink")
+        self.repo.write("changelog.d/x.fixed.md", "not an item\n")
+        result = self.repo.run("pr", "--base", "canary", "--head-ref", "other", "--author",
+                               "someone", "--title", "fix(core): x")
+        self.assertRefused(result, "starts on its first line with a `- ` list item")
 
     def test_all_problems_are_reported_together(self) -> None:
         self.repo.write("changelog.d/x.breaking.md", "- #12\n")

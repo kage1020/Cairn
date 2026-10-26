@@ -17,9 +17,9 @@ against something more durable than a calendar date.
 
 - **Monthly minor** (`YYYY.M.0`) on the first of the month. The release PR is opened by a cron
   job and merged after human review.
-- **Patches** (`YYYY.M.N`, `N ≥ 1`) are cut on demand from `main` whenever a relevant commit
-  lands. Typical triggers: registry/constraint pack updates, regressions, and security fixes.
-  No upper bound on patches per month.
+- **Patches** (`YYYY.M.N`, `N ≥ 1`) are cut on demand: a maintainer starts the same release job
+  by hand, and it opens a release PR from `canary`. Typical triggers: registry/constraint pack
+  updates, regressions, and security fixes. No upper bound on patches per month.
 - **Channel:** there is only one, `stable`. Cairn does not run a separate nightly or beta train.
   Behaviour that is not yet stable is gated by [compatibility tier](/spec/compatibility/), not by
   release channel.
@@ -51,7 +51,7 @@ a monthly minor can ship without crossing a milestone gate.
 | **2026.7.0** | `cairn-lang-core` lexer/parser, `cairn parse` subcommand (AST display only). Release automation goes live. |
 | **2026.8.0** | Intent IR; syntactic validation; `cairn check`. |
 | **2026.9.0** | Semantic layer; materials and themes basics; `cairn info` reports the three version axes. |
-| **2026.10.0** | Block-array pivot; Java backend (walls and floors only); lockfile (`build.cairn.lock`). |
+| **2026.10.0** | Block-array pivot; Java backend (walls and floors only); lockfile (`<source>.lock`). |
 | **2026.11.0** | `cottage.crn` compiles end-to-end for `--edition java`. |
 | **2026.12.0** | Registry pack ingest; fail-loud errors with nearest-valid suggestions. |
 | **2027.1.0** | All `examples/` work on Java. **M3.** |
@@ -70,18 +70,21 @@ The release strategy itself is automated:
 
 1. **Monthly minor PR** is opened by a GitHub Actions cron at `04:17 UTC` on the first of each
    month. The time is deliberately off the hour, because GitHub Actions crons are most likely to be
-   delayed or skipped on the hour.
+   delayed or skipped on the hour. A patch runs the same job by hand, optionally with the version
+   to use.
 2. **Version is computed** from existing tags: no `vYYYY.M.*` tag yet → next is `YYYY.M.0`,
-   otherwise the next in-month patch.
-3. **release-plz** generates the version bump and changelog, applies the computed version via
-   `--version-overrides`, and opens a PR.
-4. **Human review** is mandatory for the monthly minor. Patches from `main` push events follow
-   the same PR flow; merging triggers the publish pipeline.
-5. **Publish** runs on the resulting `v*` tag: cross-compile binaries for Linux, macOS, and
-   Windows on `x86_64` and `aarch64`; sign with sigstore; attach to a GitHub Release; and
-   `cargo publish` every workspace crate to crates.io.
+   otherwise the next in-month patch. The job writes it into the workspace `Cargo.toml`.
+3. **release-plz** writes the changelog section from the commits and opens the release PR. The job
+   then brings the tree-sitter and VS Code manifests to the same version, regenerates the parser,
+   and folds the `changelog.d/` fragments into `CHANGELOG.md`.
+4. **Human review** merges the release PR into `canary`, for a patch as for a minor.
+5. **Publish** runs on that merge: `cargo publish` every crate except `xtask` to crates.io and tag
+   `vYYYY.M.N`; build binaries for Linux, macOS, and Windows on `x86_64` and `aarch64`, each target
+   on a runner of its own, and attach every archive with its SHA-256 checksum to a GitHub Release,
+   beside a sigstore bundle for each archive except the Windows `aarch64` one; publish the
+   tree-sitter grammar to npm; and open a PR that promotes `canary` to `main`.
 
 Compatibility expectations across this schedule are defined separately by
-[compatibility tier](/spec/compatibility/): `.crn` syntax and the lockfile evolve under **Stable**
-rules, the Rust API stays **Internal** (`#[doc(hidden)]`) until M3, and most other surfaces sit at
+[compatibility tier](/spec/compatibility/): the lockfile format turns **Stable** at M2 and `.crn`
+syntax at M3, the Rust API stays **Internal** throughout, and most other surfaces sit at
 **Evolving** for now.

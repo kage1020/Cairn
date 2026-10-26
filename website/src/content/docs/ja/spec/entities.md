@@ -11,6 +11,8 @@ title: "8. エンティティ"
 - **構造化する (第一級)**: `sign`、`painting`、`item_frame`、`armor_stand`、`villager` (と `trade`)、`display` (text / block / item)、`bed` (ブロックとして扱う)。
 - **汎用の受け皿**: そのほかの mob には `spawn id=.. type=<entity> at=<selector> [nbt={...}]` を使います。
 
+ただし、これらはまだどれもキーワードではなく、`spawn` を含めてすべて `E_UNKNOWN_KEYWORD` になるので、エンティティやブロックエンティティを置くビルドはまだありません。下の例には、パーサがまだ受け付けない構文も含まれています。座標の組 (`at=4,3,2`)、小数 (`scale=1.5`)、`nbt={...}` の値は `E_PARSE` になります ([構文 §5.1.1](/ja/spec/syntax/#511-リテラルと区切り))。
+
 ```
 villager id=trader at=stall[0] profession=librarian level=master
 trade villager=trader buy=emerald count=24 sell=enchanted_book enchant=mending
@@ -29,6 +31,8 @@ spawn id=cat type=cat at=inside.floor nbt={variant:"black"}
 絵画、額縁、アーチ窓、階段室、張り出した屋根は、宣言したサイズと実際に占める AABB が一致しません。ここを曖昧にしたままだと、編集の安定性、テーマの差し替え、実装間の互換性がすべて損なわれます。この章で最も大きな未決事項です。
 
 この曖昧さをなくすため、すべてのプリミティブは IR の中で 4 つの情報を持ちます。`anchor` (基準点)、宣言上の bbox、実際の bbox、取り付ける面です。
+
+現時点では、IR はこの 4 つのどれも持っていません。下の例では、`painting` は `E_UNKNOWN_KEYWORD` になります。window の `anchor=` と `shape=`、roof の `footprint=` と `bounds=` は受け付けますが、どのパスも読まないので、それぞれ `W_IGNORED_ARGUMENT` になります ([Lint](/ja/spec/lint/))。
 
 AABB が重なったときの解決方法は、仕様で 1 つに固定します。優先度による統合か、lint のエラーのどちらかです ([Lint](/ja/spec/lint/))。隣接するブロックに依存するブロックステート (階段、フェンス) は、干渉を検出せずに上書きすると壊れます。たとえば、内角になるはずの階段が外角のまま宙に浮いてしまいます。境界のブロックステートを解決し直すのは、IR の層の責任です。
 

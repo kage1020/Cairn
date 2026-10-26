@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   fragments:
-    # A required status check matches this name literally.
+    # Meant to become a required check, which matches this name literally, so keep it stable.
     name: Changelog
     runs-on: ubuntu-latest
     steps:

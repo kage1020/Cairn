@@ -13,21 +13,43 @@ use crate::suggest::{did_you_mean_note, nearest_match};
 
 use super::binding::{ThemeBinding, TokenKind, classify_token};
 
+/// The `E_UNRESOLVED_SLOT` for `slot`, listing every slot resolution accepts: the bound variant's,
+/// then the sibling variants' that an unpinned build also takes.
 pub(super) fn unresolved_slot_diag(
     slot: &str,
     theme_name: &str,
     member: &Member,
     available_slots: &IndexMap<String, ValueWithSpan>,
+    sibling_slots: &HashSet<String>,
 ) -> Diagnostic {
-    let mut notes = Vec::with_capacity(2);
-    notes.extend(
-        nearest_match(slot, available_slots.keys().map(String::as_str)).map(did_you_mean_note),
-    );
+    let mut from_siblings: Vec<&str> = sibling_slots
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !available_slots.contains_key(*name))
+        .collect();
+    from_siblings.sort_unstable();
+    let declared: Vec<&str> = available_slots
+        .keys()
+        .map(String::as_str)
+        .chain(from_siblings)
+        .collect();
+    let mut notes = Vec::with_capacity(3);
+    notes.extend(nearest_match(slot, declared.iter().copied()).map(did_you_mean_note));
     notes.push(DiagnosticNote {
         span: None,
-        message: format!(
-            "add `slot {slot} -> @...` to theme `{theme_name}` or correct the slot name",
-        ),
+        message: if declared.is_empty() {
+            format!("theme `{theme_name}` declares no slots")
+        } else {
+            format!("expected one of: {}", declared.join(", "))
+        },
+    });
+    notes.push(DiagnosticNote {
+        span: None,
+        message: if declared.is_empty() {
+            format!("add `slot {slot} -> @...` to theme `{theme_name}`")
+        } else {
+            format!("add `slot {slot} -> @...` to theme `{theme_name}` or correct the slot name")
+        },
     });
     Diagnostic {
         code: DiagnosticCode::UnresolvedSlot,

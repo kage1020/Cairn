@@ -29,7 +29,8 @@ def cottage class=house size=9x7:
 
 Important members carry `id=`. Members without one get a **meaning-based stable address** derived
 from parent / role / side / level / offset rather than from generation order, so addresses stay
-stable when you append to a struct.
+stable when you append to a struct. No pass derives that address yet: today a member without `id=`
+has no address.
 
 Edits are a patch DSL against a selector or address:
 
@@ -38,6 +39,10 @@ edit window[class=vent][level=floor2] set shape=arch
 edit window@front[0]                  set mat_slot=accent_glass
 edit door[id=entry]                   set side=front at=center
 ```
+
+`edit` is not accepted yet. A top-level `edit` line is `E_PARSE`, since the only top-level items
+are `theme`, `def`, `site` and `struct`, so no edit is applied today and the edit-diff rule below
+has nothing to compare.
 
 Editing at the level of a concept, such as "make only the second-floor windows arched", must be
 possible without breaking the whole. Edit diffs look only at `intent_state`
@@ -79,8 +84,8 @@ low-`x`, low-`z` corner, and `dims` is its full extent: the `size=WxH` footprint
 | `east_of=ID gap=N` | New origin = `(prior.x + prior.dims.x + N, prior.y, prior.z)`. | `ID` must name a place declared earlier in the same `site`. `gap` is in blocks between the two facing bounding-box faces (each the wall plus its `overhang=` columns; `0` → the boxes touch), defaulting to `0`. |
 | `north_of=ID gap=N` | New origin = `(prior.x, prior.y, prior.z − new.dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. Because an origin is the low-`z` corner, the step back is the new placement's own depth: that is what puts its `+z` face `N` blocks from the prior's `−z` face whichever of the two is deeper. |
 
-Combining selectors, or using `at=` with anything other than `origin`, is
-`E_INVALID_PLACE_ORIGIN`.
+A `place` with no origin selector or more than one, an `at=` other than `origin`, or an `east_of=`
+/ `north_of=` whose value is not a label is `E_INVALID_PLACE_ORIGIN`.
 
 `gap=` belongs to the two relative selectors. An `at=origin` row is anchored absolutely and reads
 no distance, so a `gap=` written beside it is read by nothing and reported as `W_IGNORED_ARGUMENT`
@@ -106,14 +111,14 @@ does one refused because the row it is placed relative to was. An `E_INCOMPATIBL
 ### 9.3.3 Cross-scope references
 
 Every `place` row declares `id=`, `use=`, and `theme=`. A row short of any of them cannot become a
-placement: there is no name for its `.nbt`, no `def` to instantiate, or no theme to resolve its
-`mat_slot=` members against. That is `E_INCOMPLETE_PLACE`. The message names every missing key, and
-the row is dropped. A key that is present but not a label (`use=3`) is `E_TYPE_MISMATCH_LABEL`
+placement: there is no name for its structure file, no `def` to instantiate, or no theme to resolve
+its `mat_slot=` members against. That is `E_INCOMPLETE_PLACE`. The message names every missing key,
+and the row is dropped. A key that is present but not a label (`use=3`) is `E_TYPE_MISMATCH_LABEL`
 instead.
 
 `id=` is required rather than auto-assigned, unlike the geometry members of
 [§9.2](#92-editing-model), because it is the name `east_of=` and `connect` refer to and the name its
-`.nbt` is written under ([§9.3.4](#934-output-naming)).
+structure file is written under ([§9.3.4](#934-output-naming)).
 
 | Code | Cause |
 |---|---|
@@ -124,8 +129,9 @@ instead.
 
 ### 9.3.4 Output naming
 
-The compiler writes one `.nbt` per `place`, named after the `id=` (`home1.nbt`, `home2.nbt`), directly
-into the output directory. These ids are each `E_INVALID_PLACE_ID` ([Lint](/spec/lint/)):
+The compiler writes one structure file (`.nbt` on Java, `.mcstructure` on Bedrock) per `place`,
+named after the `id=` (`home1.nbt`, `home2.nbt`), directly into the output directory. These ids are
+each `E_INVALID_PLACE_ID` ([Lint](/spec/lint/)):
 
 - one carrying `/` or `\`, which would name a path rather than a file;
 - one carrying a character a Windows file name cannot hold, which could not be written there;
@@ -139,8 +145,9 @@ case, are `E_OUTPUT_NAME_COLLISION`: a `place` named after a `struct`, or one `i
 sites, is refused rather than written over the other.
 
 The world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
-`build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout without
-re-running the coordinate solver.
+the lockfile, by default `<source>.lock` beside the source (`village.crn.lock` for `village.crn`),
+under `placements`, so a downstream consumer can rebuild the layout without re-running the
+coordinate solver.
 
 ### 9.3.5 Ports and `connect`
 
@@ -229,20 +236,22 @@ the cap can be reached by a distant pair of ports or by a widely spread floor pl
 That earns one `W_WALKWAY_BLOCKED` naming the concrete cause and its remedy: move the buried door
 or window (or the block on its port cell), widen the gap, bring the two structures closer, or bring
 the placements that stretch the box closer. `--format json` carries `data: { kind:
-"walkway_blocked", skipped: N }`.
+"walkway_blocked", skipped: N }` when cells were skipped. When the straight L itself is past the
+cap, the walkway is not laid at all and the finding carries no `data`.
 
 **Material.** `path=@TOKEN` lifts through the same `mat_slot=` pipeline as member materials.
 Concrete tokens like `@gravel` work without a registry pack; abstract tokens like `@path.gravel`
 need the pack's materials catalog and surface `W_ABSTRACT_TOKEN_DEFERRED` or
 `E_UNKNOWN_ABSTRACT_TOKEN` on a miss.
 
-**Output.** Each `connect` row that lays its walkway writes one `.nbt` named after its site and
-ports (`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the lockfile
-with the world origin, dims, and resolved path material.
+**Output.** Each `connect` row that lays its walkway writes one structure file named after its site
+and ports (`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the
+lockfile with the world origin, dims, and resolved path material.
 
 A row that lays no block has lost a walkway the source asked for. That happens for:
 
-- an endpoint whose `place` was refused upstream (`W_DEFERRED_MEMBER`);
+- an endpoint whose `place` resolved but did not lower (`W_DEFERRED_MEMBER`), as when its `def` has
+  no `size=` or its origin falls past the coordinate range;
 - a port that cannot be placed;
 - an id the walkway's name cannot carry;
 - a path material that does not resolve;
@@ -254,6 +263,11 @@ A row that lays no block has lost a walkway the source asked for. That happens f
 without `--target` reports the findings behind the loss that need no target, but not the loss
 itself ([Lint §11.3](/spec/lint/#113-error-vs-warning)). The loss is named
 `site::SITE::FROM ↔ TO`, with the ports as the row wrote them.
+
+An endpoint whose `place` row did not resolve at all (such as `E_INCOMPLETE_PLACE`,
+`E_INVALID_PLACE_ID`, `E_INVALID_PLACE_ORIGIN` or `W_DEFERRED_PLACE`) is not one of these losses.
+The `connect` row is dropped with `W_DEFERRED_CONNECT` ([Lint](/spec/lint/)), and the error that
+refused the `place` is what refuses the build.
 
 A `W_DUPLICATE_WALKWAY` row loses nothing, since the earlier row laid its pair, and two rows naming
 one pair that neither laid are one loss. One mistake can cost more than one loss: a `place` whose
@@ -267,8 +281,8 @@ adds a note to `E_PARTIAL_BUILD` and one to the count of scopes that did not low
 | `E_CONNECT_ARITY` | The row's shape is not `FROM.PORT to TO.PORT`. Enforced before resolution, since an unreadable endpoint costs the row its walkway. |
 | `E_UNRESOLVED_PORT` | The right-of-dot port id does not name a member of the referenced def's body. Carries a nearest-match note when one fits the spell cap, or, when the id belongs to a member nested under a `level`, says so instead, with a note at that member: a level-scoped member cannot be a port yet. |
 | `E_AMBIGUOUS_PORT` | The def exposes the same `id=` on more than one member. Rename the collision. |
-| `E_MISSING_PATH_MATERIAL` | The row omits `path=`, so walkway lowering has nothing to lay. |
+| `E_MISSING_PATH_MATERIAL` | The row omits `path=`, or gives it a value that is not a `@TOKEN` (`path=gravel`), so walkway lowering has nothing to lay. |
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |
 | `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. When every cell of the straight L overlaps a placement, or the straight L alone is past the router's search-area cap, nothing is laid and the walkway is lost. |
-| `W_DUPLICATE_WALKWAY` | The same `(from, to)` port pair is already laid in this site; the duplicate row is dropped. |
+| `W_DUPLICATE_WALKWAY` | The same two ports, in either order, already have a walkway laid in this site; the duplicate row is dropped. |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port id cannot be carried in the walkway's name ([Lint](/spec/lint/)); the row is dropped. |

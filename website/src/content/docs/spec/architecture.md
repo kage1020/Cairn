@@ -31,17 +31,21 @@ artifact's progress along that path is `semantic_level: raw | grouped | lifted`.
 
 ## 3.3 Redstone sub-layers
 
-When redstone is described logically ([Redstone](/spec/redstone/)), three IR layers with distinct roles sit
-between the Intent IR and the block-array IR, the same separation HDL uses:
+When redstone is described logically ([Redstone](/spec/redstone/)), four IR layers with distinct
+roles sit between the Intent IR and the block-array IR, the same separation HDL uses:
 
 ```
-Logic IR      logical expressions, dependency DAG. Edition-neutral, zero delay
-Netlist IR    cells and nets. Logical cell selection. Still no delay
-Placement IR  cell coordinates + actual wire length. Delay and ticks determined here
+Logic IR            logical expressions, dependency DAG. Edition-neutral, zero delay
+Netlist IR          cells and nets. Logical cell selection. Still no delay
+Edition Netlist IR  the same cells and nets. Edition cell selection. Still no wire
+Placement IR        cell coordinates, then actual wire length. Delay and ticks determined here
 ```
 
-The logic is edition-neutral; the place-and-route result (tiles, timing) is edition-specific.
-**Delay is not carried in the Logic or Netlist IR.** The Placement IR determines it.
+The logic is edition-neutral; the edition cells and the place-and-route result (tiles, timing) are
+edition-specific. **Delay is not carried in the Logic or Netlist IR.** The Placement IR determines
+it: an edition cell fixes the ticks from each of its ports, but there is no wire before routing.
+Nothing lowers the Placement IR to the block-array IR yet
+([Redstone §14.8](/spec/redstone/#148-connection-to-the-ir-and-phases)).
 
 ## 3.4 What the split buys
 

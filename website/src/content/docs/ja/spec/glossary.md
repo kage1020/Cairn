@@ -11,18 +11,18 @@ title: "用語集"
 - **block-array IR**: 3 層の IR の最下層にある、すべての形式に共通のピボットです。ボクセルの格子、パレット、block entities、entities からなり、形式・エディション・バージョンのどれにも依存しません。各形式のフロントエンドとバックエンド、差分、IoU、シリアライズは、すべてこの層でつながります。[アーキテクチャ §3.1](/ja/spec/architecture/#31-block-array-ir-はすべてのフォーマットに共通のピボット) を参照してください。
 - **Intent IR**: 最上層です。`id` / `class` / `role` / `mat_slot` / `intent_state` / `resolved_state` を持つ、名前付きのメンバーからなります。不変条件を持つ独立した型で、schematic の取り込みから直接は作られません。[アーキテクチャ §3.2](/ja/spec/architecture/#32-intent-ir-は情報が豊富で不変条件を持つ) を参照してください。
 - **Semantic / Component-Theme IR**: テーマ、コンポーネント (`def`)、複数建築 (`site`) を解決して Intent IR にする中間層です。[コンポーネント・編集・複数建築](/ja/spec/components-editing-sites/) と [マテリアルとテーマ](/ja/spec/materials-themes/) を参照してください。
-- **Logic IR / Netlist IR / Placement IR**: Intent IR と block-array IR の間に入る、レッドストーン用の 3 つのサブ層です。遅延は Logic IR と Netlist IR には **なく**、Placement IR だけが持ちます。[レッドストーン §14.8](/ja/spec/redstone/#148-ir-とフェーズの関係) と [アーキテクチャ §3.3](/ja/spec/architecture/#33-レッドストーンのサブ層) を参照してください。
+- **Logic IR / Netlist IR / Edition Netlist IR / Placement IR**: Intent IR と block-array IR の間に入る、レッドストーン用の 4 つのサブ層です。遅延は Logic IR と Netlist IR には **なく**、Edition Netlist IR が持つのも各セル自身の tick だけです。遅延が決まるのは Placement IR です。[レッドストーン §14.8](/ja/spec/redstone/#148-ir-とフェーズの関係) と [アーキテクチャ §3.3](/ja/spec/architecture/#33-レッドストーンのサブ層) を参照してください。
 - **`semantic_level`**: 取り込んだ成果物がどこまで進んだかを示すラベルです。`raw` (1 行に 1 ボクセル)、`grouped` (L1 の空間的な圧縮)、`lifted` (L2 の意味の付与) の順に進みます。コンパイラが担うのは L1 までで、L2 は LLM の仕事です。[エコシステム連携 §12.3](/ja/spec/ecosystem-interop/#123-写し取りの-3-段階) を参照してください。
 
 ## メンバーとブロックステート
 
-- **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。
+- **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。現時点では、メンバーが持つのはキーワードから分類した `role` だけで、型は持ちません。ブロックエンティティやエンティティを置くキーワードも、まだありません。
 - **`id` / `class` / `role`**: メンバーに付ける、同一性、グループ、建築上の役割のタグです。セレクタと安定したアドレスに使います。
 - **`mat_slot`**: メンバー上のマテリアルの注入ポイントです。`theme` が値を割り当てます。構造はスロットだけを持ち、どのブロックを使うかはテーマが持ちます。[マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット) を参照してください。
-- **`intent_state`**: 書き手が意図したブロックステートです。編集の差分は **ここだけ** を比べます。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
-- **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。
+- **`intent_state`**: 書き手が意図したブロックステートです。編集の差分は **ここだけ** を比べます。現時点では、メンバーの行に書いた `key=value` のうち、`id`、`class`、`mat_slot` 以外のすべてが入ります。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
+- **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。現時点では何も入らず、lowering が導出したブロックステートは、そのまま block-array に入ります。
 - **上書きによる昇格 (Override-promotion)**: 意図になりうるブロックステートを書くと、そのブロックステートは `resolved_state` から `intent_state` に昇格します。仕様上のルールは「既定では導出し、意図になりうるブロックステートはどれも上書きできる」です。[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) を参照してください。
-- **アンカーと bbox (Anchor / bbox)**: どのプリミティブも、IR の中に `anchor` (基準点)、宣言上の bbox、実際の bbox、取り付ける面の 4 つを持ちます。絵画、額縁、アーチ窓のように、宣言したサイズと実際に占める AABB が食い違うプリミティブを、この 4 つで扱います。[エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約) を参照してください。
+- **アンカーと bbox (Anchor / bbox)**: どのプリミティブも、IR の中に `anchor` (基準点)、宣言上の bbox、実際の bbox、取り付ける面の 4 つを持ちます。絵画、額縁、アーチ窓のように、宣言したサイズと実際に占める AABB が食い違うプリミティブを、この 4 つで扱います。現時点では、IR はこの 4 つのどれも持っていません。[エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約) を参照してください。
 
 ## マテリアルとテーマ
 
@@ -44,17 +44,17 @@ title: "用語集"
 ## ヘッダと来歴
 
 - **`@cairn`**: そのファイルが前提とする **Cairn 言語のバージョン** (CalVer `YYYY.M[.PATCH]`) を宣言するヘッダです。来歴を記録するためだけのもので、省略できます。
-- **`@requires`**: Minecraft のターゲットに求める機能の下限です (例: `version>=1.20`)。推定した値と矛盾すると、ハードエラーになります。
+- **`@requires`**: Minecraft のターゲットに求める機能の下限です (例: `version>=1.20`)。推定した値と矛盾すると、ハードエラーになります。このエラー `E_REQUIRES_CONFLICT` は予約済みで、推定範囲はまだ導出していません。`cairn compile --target` に下限より古いバージョンを指定すると、`E_VERSION_CAP` になります。[バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定) を参照してください。
 - **`@intended_targets`**: どの Minecraft バージョン向けに作ったかを示すヒントです。検証の記録ではありません (記録はロックに残ります)。それでもファイル自身の下限とは突き合わせるので、下限が拒否するバージョンを挙げていれば、コンパイルするまで気づかないままにはならず、その場で報告されます。
-- **ロック (`*.cairn.lock`)**: コンパイラが生成する、再現性のための記録です。`source_hash`、`cairn_version`、`target(mc_version + data_version)`、`registry_pack_hash`、`constraint_catalog_hash`、`resolved_ir_hash`、`verified: true` を持ちます。[バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
+- **ロック (`*.crn.lock`)**: コンパイラが生成する、再現性のための記録です。`--lock` で別のパスを指定しなければ、ソースの隣に `<source>.lock` (`cottage.crn.lock` など) として書き出します。`lock_schema_version`、`source_hash`、`cairn_version`、`target` (`edition`、`mc_version`、`data_version`)、`inputs` (`registry_pack_hash`、`constraint_catalog_hash`)、`resolved_ir_hash`、`verified: true`、`member_version_sensitivity` を持ち、`site` を含むソースではさらに `placements` と `walkways` を持ちます。[バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
 - **来歴の記録 (Provenance stamp)**: 取り込むときに block-array IR に記録する `(edition, version)` です。値はファイル形式から決まります (`.litematic` → java、`.mcstructure` → bedrock、`.schem` → java)。[エコシステム連携 §12.4](/ja/spec/ecosystem-interop/#124-取り込み時の記録と落とし穴) を参照してください。
 
 ## レッドストーン
 
 - **論理セル、エディションセル、物理タイル (Logical cell / edition cell / physical tile)**: 3 段のセルライブラリです。Logic IR が論理セルを選び、エディションごとのセルライブラリがそれを物理タイルに lowering します。Java 版と Bedrock 版の違いは、このライブラリの中に閉じ込めます。[レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い) を参照してください。
-- **組み合わせ回路と順序回路 (Combinational vs sequential)**: v1 が提供するのは、決まった種類の組み合わせゲートと、厳選した順序回路のマクロ (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`) です。任意の FSM や CPU は v1 の範囲外です。
-- **真理値、レイテンシ、時相のアサーション (Truth / latency / temporal assertion)**: 3 種類の検証です。時相のアサーションは、範囲を区切った `eventually within N` だけで、完全な LTL ではありません。[レッドストーン §14.7](/ja/spec/redstone/#147-検証) を参照してください。
-- **QC / BUD**: 疑似接続 (quasi-connectivity) と、ブロック更新検出器 (block-update-detector) の挙動です。セルライブラリはこれらを **吸収しません**。更新順序の意味論に依存する回路は、`E_NO_PORTABLE_IMPL` のコンパイルエラーになります。
+- **組み合わせ回路と順序回路 (Combinational vs sequential)**: v1 が提供するのは、決まった種類の組み合わせゲートと、厳選した順序回路のマクロ (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`) です。任意の FSM や CPU は v1 の範囲外です。現時点では、`logic` の行が受け付けるのは `and`、`or`、`not` だけで、順序回路のマクロはまだパースできません。
+- **真理値、レイテンシ、時相のアサーション (Truth / latency / temporal assertion)**: 3 種類の検証です。時相のアサーションは、範囲を区切った `eventually within N` だけで、完全な LTL ではありません。`assert latency` はまだパースできず (`E_PARSE`)、残りの 2 つを組み上がった回路に照らして検査するシミュレータもまだありません。[レッドストーン §14.7](/ja/spec/redstone/#147-検証) を参照してください。
+- **QC / BUD**: 疑似接続 (quasi-connectivity) と、ブロック更新検出器 (block-update-detector) の挙動です。セルライブラリはこれらを **吸収しません**。更新順序の意味論に依存する回路は、`E_NO_PORTABLE_IMPL` のコンパイルエラーになります。ただし、このコードはまだ実装していません。回路が更新順序に依存するかどうかを検査するものは、まだありません。
 
 ## Lint と評価
 

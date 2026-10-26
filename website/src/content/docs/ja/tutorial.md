@@ -36,15 +36,15 @@ cairn compile examples/cottage.crn --edition java    --target 1.21.4
 cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 ```
 
-**Minecraft のバージョンはソースに書きません。** バージョンは `--target` で指定し、`--edition` も必ず一緒に指定します。ソースに書けるのは、ターゲットが満たすべき下限を示す `@requires` と、このファイルが対象とする言語バージョンを示す `@cairn` だけです。
+**Minecraft のバージョンはソースでは決めません。** バージョンは `--target` で指定し、`--edition` も必ず一緒に指定します。ソースに書けるのは、ターゲットが満たすべき下限を示す `@requires`、作者が想定しているバージョンをヒントとして示す `@intended_targets`、このファイルが対象とする言語バージョンを示す `@cairn` です。
 
 **struct は「どこに」を、theme は「何で」を書きます。** `mat_slot=wall` はブロック名ではなく、素材を差し込む場所を表します。そこにブロックを割り当てるのが theme です。`theme medieval` を別のテーマに差し替えても、形は変わりません。CSS の考え方をブロックに当てはめたものです。
 
 **位置は意味で指定します。** `side=front`、`offset=2`、`y=2`、`at=center` は、どれも壁を基準にした位置です。絶対座標を書く場面はどこにもありません。
 
-**書く順番は問いません。** `window` は `roof` より後に書いてありますが、壁の開口としてきちんと切り抜かれます。コンパイラは評価の前にコマンドを固定のフェーズに振り分けるので、読みやすい順に書いて構いません。
+**書く順番は問いません。** `window` の行を `walls` より前に移しても、壁の開口としてきちんと切り抜かれます。コンパイラは評価の前にコマンドを固定のフェーズに振り分けるので、読みやすい順に書いて構いません。
 
-**ブロックステートは導出されます。** ドアの `facing=south`、壁の `north=tall`、ガラス板の `connected` は、どれも書いていません。コンパイラが位置と隣接するブロックから求めます。
+**ブロックステートは導出されます。** 屋根の階段の `facing`、`half`、`shape` は、どれも書いていません。コンパイラが、それぞれの階段が屋根のどこにあるかから求めます。ドアの向きやガラス板のつながりも同じように導出する予定ですが、今の `door` は開口を切り抜くだけです。
 
 ## 2. 抽象マテリアルと階
 
@@ -67,7 +67,7 @@ struct keep size=11x9
 
   level id=floor2 y=5
     walls  id=upper class=outer mat_slot=wall height=4
-    window class=arrow_slit side=front repeat=3 step=2 y=2 size=1x2 shape=slit
+    window class=arrow_slit side=front repeat=3 step=2 y=2 size=1x2
     stair  id=eave kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left
 ```
 
@@ -105,11 +105,11 @@ struct gatehouse size=7x5
 
 **tick の計算は書きません。** 論理式は時間をいっさい持ちません。数値が tick を表すのは、アサーションの `within 2` だけです。遅延は、回路を配置して配線するまで分からないからです。
 
-**`circuit region=…` は配置配線のための領域を確保します。** 配線が収まらなければ、修正案付きの `E_ROUTE_CONGESTION` が出ます。黙って領域からはみ出すことはありません。
+**`circuit region=…` は配置配線のための領域を確保します。** 配線が収まらなければ、修正案付きの `E_ROUTE_CONGESTION` が出ます。黙って領域からはみ出すことはありません。今のところ配線を行うのは実験的な `cairn synth --experimental-logic-synth` だけなので、`cairn compile` はこのエラーを出しません。
 
-**アサーションは 3 種類です。** 組み合わせ論理を検証する `truth(…)`、遅延の上限を検証する `latency(in → out) <= N`、時間の範囲を区切った時相論理を検証する `always(in -> eventually out within N)` です。完全な LTL は意図的に持たず、tick 単位のシミュレータで安く判定できるものだけに絞っています。
+**アサーションは 3 種類です。** 組み合わせ論理を検証する `truth(…)`、遅延の上限を検証する `latency(in -> out) <= N`、時間の範囲を区切った時相論理を検証する `always(in -> eventually out within N)` です。完全な LTL は意図的に持たず、tick 単位のシミュレータで安く判定できるものだけに絞っています。ただし、このシミュレータはまだなく、`latency` もまだパーサが受け付けません。
 
-**エディションの違いは、言語ではなくセルライブラリが吸収します。** 同じ論理が、Java では `ComparatorAND` セルに、Bedrock では `TorchAND` セルになります。準接続 (quasi-connectivity) やブロック更新の順序に依存する回路は、気付かないうちに壊れる仕掛けを残すのではなく、コンパイルエラーにします。
+**エディションの違いは、言語ではなくセルライブラリが吸収します。** 同じ論理が、Java では `ComparatorAND` セルに、Bedrock では `TorchAND` セルになります。疑似接続 (quasi-connectivity) やブロック更新の順序に依存する回路は、気付かないうちに壊れる仕掛けを残すのではなく、コンパイルエラーにする方針です。ただし、回路がそれに依存しているかを検査するものは、まだありません。
 
 続きは[レッドストーン](/ja/spec/redstone/)で。
 
@@ -148,8 +148,8 @@ site hamlet:
 
 | したいこと | 読む場所 |
 |---|---|
-| 全体を書き直さずに一部だけ変える | [編集モデル §9.2](/ja/spec/components-editing-sites#92-編集モデル)。例: `edit window[class=vent] set shape=arch` |
+| 全体を書き直さずに一部だけ変える (予定) | [編集モデル §9.2](/ja/spec/components-editing-sites#92-編集モデル)。例: `edit window[class=vent] set shape=arch` |
 | ファイルがどの Minecraft バージョンで動くかを知る | [バージョンとエディション §10.5](/ja/spec/versioning-editions#105-どのバージョン向けかの答えは-3-つある)。`cairn info` が報告する内容 |
-| 既存の schematic を Cairn に取り込む | [エコシステム連携](/ja/spec/ecosystem-interop/)。写し取り、引き上げ、voxel-diff |
+| 既存の schematic を Cairn に取り込む (予定) | [エコシステム連携](/ja/spec/ecosystem-interop/)。写し取り、引き上げ、voxel-diff |
 | 他の種類の屋根を試す | [サンプル](/ja/examples/)の `roof-shed` / `roof-hip` / `roof-flat` |
 | 用語を調べる | [用語集](/ja/spec/glossary/) |

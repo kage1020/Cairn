@@ -16,7 +16,8 @@ not carried in the language core ([§14.4](#144-time-model)).
 
 - **Tier 0, physical placement.** You write `repeater facing=north delay=2` and the like, placing
   parts yourself while the compiler derives the blockstate. Behaviour is not modeled
-  ([Blockstate Model](/spec/blockstate/)).
+  ([Blockstate Model](/spec/blockstate/)). None of these parts is a keyword yet, so such a line is
+  `E_UNKNOWN_KEYWORD` today.
 - **Tier 1, logic.** This chapter. You declare a signal graph and the compiler turns it into voxels
   through synthesis → placement → routing.
 
@@ -30,6 +31,11 @@ In Verilog terms, v1 allows the `assign` equivalent and no clocked assignment:
 | **Combinational** | `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux` |
 | **Curated sequential macros** | `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` |
 | **Out of scope** (→ Tier 0 or `raw`) | `always` / `process` / `state` / `case` / FSMs / clocked assignment / CPUs |
+
+Of the primitives and macros above, only `and`, `or` and `not` are accepted today, and the built-in
+`def` library does not exist yet: until it does, the parser reads those three itself, as operators.
+The rest are `E_PARSE` where they are written: `sig.a xor sig.b` stops at `xor`, and a macro call
+such as `pulse(sig.ring, 4)` at its `(`.
 
 ## 14.2 Signal binding
 
@@ -55,12 +61,17 @@ That pairing is normative. A `-> sig.X` tail belongs to a sensor, and each actua
 the one component that reads it. A binding written anywhere else describes no circuit, and
 accepting it would put a port in the netlist with no component behind it.
 
-Two codes say so, and which one applies is decided by what the finding needs in order to be made. A
-`->` tail on a member that is not a sensor is `E_MISPLACED_BINDING`: whether a keyword may emit is a
-fact about the member line, so `check` answers it and every command reports it. An actuator key on a
-component that does not read it is `E_LOGIC_MISPLACED_BINDING`, raised by the synth pipeline.
+Which code says so is decided by what the finding needs in order to be made. A `->` tail on a member
+that is not a sensor is `E_MISPLACED_BINDING`: whether a keyword may emit is a fact about the member
+line, so `check` answers it and every command reports it. An actuator key on a component that does
+not read it is a fact about the member line too, since the key is outside that member's vocabulary:
+`walls opened_by=sig.power` is `E_UNKNOWN_ARGUMENT` ([Lint](/spec/lint/#syntax-and-structure)),
+which `check` reports and every command stops on, with a note naming the component the key belongs
+to. The synth pipeline's `E_LOGIC_MISPLACED_BINDING`, which names that component too, is reached
+only where a `theme` selector has made the key one that member reads
+([Lint](/spec/lint/#113-error-vs-warning)).
 
-**Of the components above, only `door` and `pressure_plate` are accepted today.** `lit_by=`,
+Of the components above, only `door` and `pressure_plate` are accepted today. `lit_by=`,
 `powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
 
 **Where an `at=inside.<side>` plate may sit.** The plate takes the wall cell at `offset=` and sits
@@ -97,9 +108,11 @@ sensor. No way of writing the value makes `walls` a sensor.
 
 **Bindings go after the `[selector]`, never inside it.** `door[id=front] opened_by=sig.power` binds;
 `door[id=front,opened_by=sig.power]` does not. The brackets pick the member the line acts on, so
-nothing written among them is read as a binding. A bracketed pair earns whichever finding still
-applies once it is moved out. `E_LOGIC_MISPLACED_BINDING` names the brackets when that is the only
-problem; otherwise you get the finding for the host or the key.
+nothing written among them is read as a binding. A bracketed pair earns the finding its key would
+earn once moved out: `E_UNKNOWN_ARGUMENT` for a key outside the member's vocabulary, and
+`E_LOGIC_UNKNOWN_BINDING_KEY`, below, for a `sig.` value under a key the member reads that is not
+an actuator key. A component's own actuator key inside its brackets is `E_LOGIC_MISPLACED_BINDING`,
+which names the brackets, whatever the value.
 
 **A selector line binds the member its brackets pick.** `door[id=front] opened_by=sig.power` binds
 the door declared as `door id=front ...` in the same scope, at the top level or directly under a
@@ -115,9 +128,11 @@ the door's own line, through a patch, or on both. A second is `E_LOGIC_DUPLICATE
 bindings would be two wires into one door, a wired OR the logic layer never states. Signals are
 combined there instead: write `logic sig.open = sig.a or sig.x` and bind the door to `sig.open`.
 
-A `sig.` value under a key that is not one of the four actuator keys is
-`E_LOGIC_UNKNOWN_BINDING_KEY`. The value says a signal was meant to be wired and the key says
-nothing reads it. That is the shape a typo takes, as in `oepend_by=sig.power`.
+A `sig.` value under a key the member reads that is not one of the four actuator keys is
+`E_LOGIC_UNKNOWN_BINDING_KEY`, raised by the synth pipeline, as in `walls height=sig.power`. The
+value says a signal was meant to be wired and the key is not one any component reads a signal from.
+A misspelt actuator key such as `oepend_by=sig.power` is outside the member's vocabulary, so it is
+the `E_UNKNOWN_ARGUMENT` that `check` reports first.
 
 ## 14.3 The logic layer is a dependency DAG
 
@@ -133,12 +148,14 @@ logic sig.sel   = mux(sel=sig.s, a=sig.x, b=sig.y)
 ```
 
 The expression contains no time arithmetic. The `4` in `pulse(sig.ring, 4)` is a **stage count**,
-not a tick value.
+not a tick value. Of these lines only the first parses today; the macro calls are `E_PARSE`
+([§14.1](#141-two-tiers-and-the-v1-boundary)).
 
 ## 14.4 Time model
 
-In v1 only the macros carry time: `delay`, `pulse`, `edge`, `latch`, and `counter`. `delay(3)` is a
-cell macro that lowers to three repeaters internally. There is no tick operator to write.
+In v1 only the macros carry time: `delay`, `pulse`, `edge_rising`, `edge_falling`, `latch`, and
+`counter`. `delay(3)` is a cell macro that lowers to three repeaters internally; no macro is parsed
+yet ([§14.1](#141-two-tiers-and-the-v1-boundary)). There is no tick operator to write.
 
 **Delay is carried in neither the Logic IR nor the Netlist IR. It is determined for the first time
 in the Placement IR** ([§14.8](#148-connection-to-the-ir-and-phases)). `and` is logically
@@ -199,7 +216,7 @@ The internal algorithm runs five stages:
 
    Neither spacing is a guarantee of a wiring: a net passing through can still take the last free
    face, and that scope is refused rather than shorted. Three kinds of region are refused here
-   rather than left to fail as an unreachable sink two stages later: one that cannot hold the row
+   rather than left to fail as an unreachable sink at stage 2: one that cannot hold the row
    (`2n + 1` columns for `n` cells, and three rows); one that cannot hold the rows its pads stand in
    (a row per sensor or actuator on the busier edge, and, in a scope with cells, one more for the
    cell row once that edge carries two); and, in a scope with both sensors and actuators, one
@@ -238,14 +255,17 @@ The internal algorithm runs five stages:
    side of its cell are taken, more room only lengthens the run it then makes on the upper layer.
 
    ```text
-   W_ROUTE_CROSS_LAYER_CLEARANCE line 46 circuit=floor:
+   W_ROUTE_CROSS_LAYER_CLEARANCE line 45 circuit=floor:
      routed netlist for struct `crossbar` leaves 12 pairs of dust within one step of each other
-     across layers (2 stacked, 10 staircase).
+     across layers (2 stacked, 10 staircase) — …
      note: (4,1,1) on cell #0 stands directly over (4,0,1) on cell #1
      note: (5,1,1) on cell #0 stands directly over (5,0,1) on cell #1
      note: (1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,0) on sig.a
+     note: (1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,2) on sig.b
+     note: and 8 more of the same two shapes
+     …
      Fix: nothing in the source is wrong — the pairs are what the escape costs, and enlarging
-     the region is not a remedy.
+     the region is not a remedy: …
    ```
 
    The segment cap is tested here too, before any wire is laid. The Manhattan distance between a
@@ -313,7 +333,8 @@ The internal algorithm runs five stages:
    short to lift and no coordinate to contest. It applies the straight-line cap as well, since it
    lays nets of its own and a scope can reach it from a netlist an earlier stage handed over, and
    for the same reason it refuses a stretch of dust with nowhere for a repeater as stage 3 does.
-5. **Edition legalization.** See [§14.6](#146-edition-differences).
+5. **Edition legalization.** See [§14.6](#146-edition-differences). This stage is not implemented
+   yet.
 
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
 whose every way out is walled in, by a component, by an earlier net's dust or the coordinates beside
@@ -369,14 +390,16 @@ The `ComparatorAND` takes port `a` at its rear and inverts `b` onto its side. Co
 ([§14.4](#144-time-model)), a signal entering by `a` passes the comparator alone, 1 tick, and one
 entering by `b` passes the inverter and then the comparator, 2 ticks. Which operand of `and` or `or`
 the netlist puts on `a` is not specified; `assert latency` ([§14.7](#147-verification)), not the
-order written, pins a path's ticks through a `ComparatorAND`.
+order written, pins a path's ticks through a `ComparatorAND`. `assert latency` is not parsed yet,
+so nothing pins them today.
 
 The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as a
 tile that conducts to neither **another net's** coordinate below it nor another net's coordinates
 diagonally below it. Its own net's coordinate below it is the climb that put it there, since there
-is no separate via, and has to conduct. Stage 2 ([§14.5](#145-place-and-route)) keeps two nets one
-step apart in their own plane and climbs to clear what it cannot go round, so every strand a layer
-above another net is the escape's doing and separating the two is the tile's.
+is no separate via, and has to conduct. Stage 2 ([§14.5](#145-place-and-route)) keeps each net's
+dust off another net's dust and off the coordinates beside it in their own plane, and climbs to
+clear what it cannot go round, so every strand a layer above another net is the escape's doing and
+separating the two is the tile's.
 
 It is a requirement on the catalogue rather than on the author, and it is wider than the finding
 that reports it: `W_ROUTE_CROSS_LAYER_CLEARANCE` names the strand-to-strand pairs, which are the
@@ -391,7 +414,8 @@ rather than what is unresolved in it.
   semantics of block-update order, for which no portable implementation exists.
 
 Logic that requires update-order semantics is a compile error rather than a silent footgun,
-consistent with "recompile, don't transcode".
+consistent with "recompile, don't transcode". No pass checks for it yet, so `E_NO_PORTABLE_IMPL`
+below is not raised today.
 
 ```text
 E_NO_PORTABLE_IMPL line 15:
@@ -419,33 +443,52 @@ assert latency(sig.in -> sig.out) <= 4
 assert always(sig.button -> eventually sig.door_open within 8)
 ```
 
+Of the three, only `truth` and `always` are parsed today, and nothing simulates the circuit
+yet. `assert latency(...)` is `E_PARSE` at `latency`. A truth table's rows are checked
+([Lint](/spec/lint/#truth-tables)), and the synth pipeline refuses either kind naming a signal
+nothing in its scope drives (`E_LOGIC_UNBOUND_SIGNAL`), but neither is checked against the circuit:
+a truth table its logic contradicts still synthesizes. The loop below and `E_SIM_ASSERTION_FAILED`
+do not exist yet.
+
 The self-correction loop (P5) is **synth → sim → diff → patch**, and verification runs per target
 edition. The patch targets place-and-route hints, repeaters, and buffers only. **The Logic IR is
 never rewritten**, because self-correction that auto-modifies logic is dangerous.
 
 ```text
 E_SIM_ASSERTION_FAILED edition=bedrock:
-  assert latency(sig.in -> sig.out) <= 4, but measured 6 (extra repeaters from crossing legalization).
+  assert latency(sig.in -> sig.out) <= 4, but measured 6 (2 buffer repeaters on the routed path).
   Patch target: placement hint / route. (logic is never auto-modified)
   Suggested: relax to <=6, enlarge circuit void to shorten routes, or pin cell placement.
 ```
 
 ## 14.8 Connection to the IR and phases
 
-Three IR layers sit between the Intent IR and the block-array IR, separated the way HDL separates
+Four IR layers sit between the Intent IR and the block-array IR, separated the way HDL separates
 them:
 
 ```
-Intent IR        logic declarations / circuit region / signal binding
+Intent IR           logic declarations / circuit region / signal binding
    ↓ logic_synth
-Logic IR         logical expressions, dependency DAG. Edition-neutral, zero delay
+Logic IR            logical expressions, dependency DAG. Edition-neutral, zero delay
    ↓
-Netlist IR       cells and nets. Logical Cell selection. Still no delay
+Netlist IR          cells and nets. Logical Cell selection. Still no delay
+   ↓
+Edition Netlist IR  the same cells and nets. Edition Cell selection. Still no wire
    ↓ logic_place
-Placement IR     cell coordinates + actual wire length. Delay determined here
+Placement IR        cell coordinates
    ↓ logic_route
-block-array IR   the voxel reality of dust, repeater, torch, comparator
+Placement IR        + actual wire length + delay + buffer repeater coordinates. Delay determined
+   ↓
+block-array IR      the voxel reality of dust, repeater, torch, comparator
 ```
+
+The Placement IR is filled pass by pass ([§14.5](#145-place-and-route)): placement gives every cell
+its coordinates, then routing adds the wire length, delay insertion the delay, and crossing
+legalization the buffer repeaters' coordinates. An Edition Cell fixes the ticks from each of its
+ports ([§14.6](#146-edition-differences)), but there is no wire to count before routing, so the
+delay is determined in the Placement IR and no earlier. Nothing lowers the Placement IR to the
+block-array IR yet: edition legalization is not implemented, `cairn compile` runs none of these
+passes, and a circuit goes no further than the IRs `cairn synth --experimental-logic-synth` prints.
 
 The phase model ([Compilation Model](/spec/compilation/)) splits the step right after `fixtures` into
 `logic_synth → logic_place → logic_route`, because the I/O port coordinates are not fixed until

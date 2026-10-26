@@ -14,7 +14,7 @@ window front G 2 2 2x2                                            # forbidden (p
 ```
 
 Positional arguments would mean remembering argument order, which an LLM hallucinates and omits.
-Keys like `mat=` and `side=` act as attention anchors and stabilize generation, which is worth
+Keys like `mat_slot=` and `side=` act as attention anchors and stabilize generation, which is worth
 more than the tokens they cost.
 
 A bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL`. `connect FROM.PORT to TO.PORT`
@@ -25,14 +25,25 @@ The parser puts anything that is not `key=`, `-> binding`, or `[selector]` into 
 so a dropped `=` lands there too. `walls mat_slot=wall height 3` is not a `walls` with a shortened
 height. It is not built at all.
 
+Only a member line (a line of a `struct`, `def` or `site` body) keeps a positional list so far. The
+header line of a `struct`, `def`, `site` or `theme`, a `theme` rule, and a `logic` or `assert` line
+do not yet, so the same slip there is `E_PARSE`, which ends the parse: `struct s size 3x3` is refused
+with "expected `=`".
+
 ### 5.1.1 Literals and separators
 
-A size literal is exactly two extents, `WxH`. A run that continues past the second, such as `2x2x9`
-or `2x2y`, is refused at the literal rather than read as a size followed by something else.
+No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
+parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
+`within` bound of an `assert`. A decimal such as `scale=1.5` ([Entities](/spec/entities/)) is
+therefore `E_PARSE` too until the parser reads one.
 
-Commas are **optional separators**, not structure. `mat=[a, b]` and `mat=[a b]` name the same two
-items, as do `[side=front, y=2]` and `[side=front y=2]`. The two list kinds differ in how much
-punctuation they tolerate:
+A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
+as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
+else.
+
+Commas are **optional separators**, not structure. `@intended_targets ["1.20.4", "1.21.4"]` and
+`@intended_targets ["1.20.4" "1.21.4"]` name the same two versions, as do `[side=front, y=2]` and
+`[side=front y=2]`. The two list kinds differ in how much punctuation they tolerate:
 
 - A `[selector]`'s attribute list skips a comma wherever it finds one, so `[side=front, , y=2]`
   parses.
@@ -48,10 +59,10 @@ and a property named twice are refused. A dotted token such as `@floor.wood` is 
 no literal, because the theme that binds it chooses the block, so a `[` touching it is whatever
 comes next, as one after a space is.
 
-Before the literal, a `[` touching an undotted token was whatever came next too, so `mat=@a[1]` and
-`mat=[@a[b]]` used to parse and are now refused. No source that passed `cairn check` had either
-shape: a bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL`, and a list where a label
-belongs is `E_TYPE_MISMATCH_LABEL`. Only the parse tree of a source that could not build changes.
+Reading a touching `[` as the literal refuses no source that could build otherwise. Read as whatever
+comes next, `mat_slot=@a[1]` would leave a bare value on a member line that reads none, which is
+`E_UNEXPECTED_POSITIONAL`, and `mat_slot=[@a[b]]` would put a list where a label belongs, which is
+`E_TYPE_MISMATCH_LABEL`.
 
 The literal's properties and values are not yet checked against the target: `E_STATE_DOMAIN`
 ([Versioning and Editions](/spec/versioning-editions/)) is not implemented, so a Java build writes
@@ -128,8 +139,12 @@ and Monaco use the same rule, so a diagnostic's line number and the line under t
 same row. A position always points at the text that is wrong, so an error at the end of a line is
 reported there and never at the first column of the next one.
 
-The tree-sitter grammar is a known exception: its runtime advances the row on `\n` alone, so a file
-terminated only by lone `\r` highlights as one long line even though it parses correctly.
+The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
+alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
+correctly. It also accepts six forms the parser refuses, because tree-sitter cannot express their
+rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
+integer past 2^63 − 1, a truth row whose width differs from the input count, and a block-state
+literal naming one property twice.
 
 ## 5.2 Nesting
 
@@ -160,7 +175,10 @@ reservation spans the whole scope: a `circuit` line under a `level` reaches noth
 `E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
-by redstone synthesis from either body, and an `assert` is read by nothing yet.
+by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
+`cairn check` checks a truth table ([Literals and separators](#511-literals-and-separators)), and
+redstone synthesis resolves the signals it names (`E_LOGIC_UNBOUND_SIGNAL`). Nothing verifies it
+against a built circuit yet.
 
 **Top-level names are scoped per kind.** `theme` / `def` / `struct` / `site` are four namespaces, so
 one name may appear once in each. Declaring it twice within one kind is `E_DUPLICATE_ITEM`. For
@@ -188,9 +206,10 @@ it is `W_FUTURE_CAIRN_VERSION`: provenance that a later compiler cannot read is 
 the header exists for.
 
 **`@requires`** is a capability floor. Its expression is an optional edition, the subject
-`version`, the operator `>=`, and a version label, with whitespace optional between them, so
-`version>=1.21` and `version >= 1.21` are one requirement. `>=` is the only operator, since a floor
-is the only constraint that composes by folding to the strictest. Every other expression is
+`version`, the operator `>=`, and a version label. Whitespace is optional around the operator, so
+`version>=1.21` and `version >= 1.21` are one requirement, and required after an edition:
+`javaversion>=1.21` is `E_INVALID_REQUIRES`. `>=` is the only operator, since a floor is the only
+constraint that composes by folding to the strictest. Every other expression is
 `E_INVALID_REQUIRES` rather than a line that quietly declares nothing: a floor that evaporates is
 worse than an absent one, because a reader will still believe it.
 
@@ -256,7 +275,7 @@ greater than 1 is the exception: `sym=true` refuses it, so an unreadable `sym=` 
 
 | Anchor | Column |
 |---|---|
-| `at=center` | `wall_length / 2`, rounded half up. Odd walls have a unique centre; even walls pick the column right of the midpoint. |
+| `at=center` | `u = floor(wall_length / 2)`. Odd walls have a unique centre; even walls pick the column right of the midpoint. |
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
@@ -277,6 +296,8 @@ Important members MAY declare `id=`, and `class=` groups members. Members withou
 stable, meaning-based address assigned by the compiler, derived from parent / role / side / level /
 offset. See
 [Components, Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model).
+The compiler computes no such address yet, so a member without `id=` has none, and the `edit` patch
+DSL that would address it is not parsed: a top-level `edit` is `E_PARSE`.
 
 A `place` row is the exception: its `id=` is required, and omitting it is `E_INCOMPLETE_PLACE`. An
 auto-address names nothing outside the body it sits in. A `place`'s `id=` is what `east_of=` and

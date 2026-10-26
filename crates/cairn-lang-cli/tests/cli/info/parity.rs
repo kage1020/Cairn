@@ -504,6 +504,14 @@ fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
              struct hut size=5x5\n\
              \x20\x20floor mat_slot=floor\n",
         ),
+        // A state Bedrock's writer cannot carry, refused after every source gate has passed.
+        (
+            "states.crn",
+            "theme t:\n\
+             \x20\x20slot floor -> @oak_log[axis=x]\n\n\
+             struct hut size=5x5\n\
+             \x20\x20floor mat_slot=floor\n",
+        ),
         // One that builds everywhere, so "refuse everything" fails.
         (
             "clean.crn",
@@ -792,6 +800,45 @@ fn a_floor_does_not_hide_a_scope_that_produced_no_voxels() {
             ("1.21.60".to_owned(), "below_floor".to_owned()),
         ],
         "both causes, in one run: {row}",
+    );
+}
+
+#[test]
+fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
+    let (tmp, row) = buildable_row(
+        "theme t:\n\
+         \x20\x20slot floor -> @oak_log[axis=x]\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+        "bedrock",
+    );
+    assert!(strings(&row, "buildable").is_empty(), "{row}");
+    assert_eq!(
+        strings(&row["reason"], "states_unmapped"),
+        ["minecraft:oak_log[axis=x]"],
+        "the entry the writer refuses, not the versions: {row}",
+    );
+    assert!(row["reason"].get("versions").is_none(), "{row}");
+
+    let (code, stdout, stderr) = info_raw(&tmp.path().join("s.crn"), "bedrock");
+    assert_eq!(code, Some(0), "info reports; the build refuses: {stderr}");
+    assert!(
+        stdout.contains(
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+        ),
+        "{stdout}",
+    );
+    let notes: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("note: no bedrock target"))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            "note: no bedrock target can build this source: its writer cannot carry the states \
+             of `minecraft:oak_log[axis=x]`"
+        ],
+        "{stderr}",
     );
 }
 

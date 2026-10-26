@@ -15,9 +15,7 @@
 # It sits above the door's opening rather than in it: `door` and
 # `window` are both openings, so a window inside the doorway would be
 # two members of one phase contesting a cell with nothing but the line
-# order to separate them (`W_PHASE_CONFLICT`). The wall is one course
-# taller than the other walkway fixtures for that reason — a window
-# port must still fit inside the wall it is cut into.
+# order to separate them (`W_PHASE_CONFLICT`).
 
 def cottage size=5x5:
   floor  id=floor mat_slot=floor

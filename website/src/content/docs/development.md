@@ -6,8 +6,8 @@ This guide covers the Rust workspace and the day-to-day contributor flow. If you
 language spec rather than the compiler, start at the [Specification](/spec/) and
 [CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md).
 
-> Cairn is at the design stage. The spec is the source of truth and the Rust workspace implements it
-> chapter by chapter. `cairn-lang-wasm` is still a placeholder.
+> The spec is the source of truth, and the Rust workspace implements it chapter by chapter: what it
+> does not cover yet, the spec marks as not implemented. `cairn-lang-wasm` is still a placeholder.
 
 ## Workspace layout
 
@@ -28,11 +28,11 @@ Each crate maps back to the spec chapter it implements:
 | [`cairn-lang-core`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-core/README.md) | Parser, IR, resolver, lint | lib |
 | [`cairn-lang-cli`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-cli/README.md) | The `cairn` binary | bin |
 | [`cairn-lang-nbt`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-nbt/README.md) | Java / Bedrock NBT codec | lib |
-| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.litematic` / `.schem` / `.mcstructure` | lib |
-| [`cairn-lang-redstone`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-redstone/README.md) | Logic synthesis, place-and-route, tick simulation | lib |
+| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.mcstructure` writers, registry packs, portability | lib |
+| [`cairn-lang-redstone`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-redstone/README.md) | Logic synthesis and place-and-route; tick simulation is planned | lib |
 | [`cairn-lang-lsp`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-lsp/README.md) | Language Server Protocol | lib + bin |
-| `cairn-lang-wasm` | WebAssembly bindings | cdylib + rlib |
-| `cairn-lang-tree-sitter` | Grammar for editor highlighting | grammar |
+| [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) | WebAssembly bindings | cdylib + rlib |
+| [`cairn-lang-tree-sitter`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-tree-sitter/README.md) | Grammar for editor highlighting, also published to npm | lib |
 | [`cairn-lang-docs`](https://github.com/kage1020/Cairn/blob/main/website/rust/README.md) | This site's Markdown pages, embedded for `cairn docs` | lib |
 
 ## Dependency rules
@@ -47,7 +47,8 @@ pages it embeds are the site's own sources, with no copy to drift.
   everything beyond it lives in a sibling crate.
 - **`cairn-lang-nbt` is the byte codec and nothing more.** Litematica regions, schematic palettes,
   and Bedrock's `.mcstructure` quirks belong in `cairn-lang-formats`.
-- **`cairn-lang-redstone` reuses core's sensor and actuator placement** but owns its own IR layers
+- **`cairn-lang-redstone` reads sensors, actuators, and `circuit` reservations from core's Intent
+  IR**, then lays its own pads and owns its own IR layers
   ([Redstone §14.8](/spec/redstone#148-connection-to-the-ir-and-phases)).
 
 ## Toolchain
@@ -142,19 +143,18 @@ comparing two profiles with them. To run both:
 cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route
 ```
 
-`cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/), and the website
-expects the resulting `pkg/` at `website/src/wasm/`:
-
-```sh
-wasm-pack build crates/cairn-lang-wasm --target web --release
-```
+`cairn-lang-wasm` has nothing to build for the browser yet: it has no `wasm-bindgen` binding layer,
+so `wasm-pack` refuses it. Its
+[README](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) says what is
+missing and gives the command for when the binding layer lands.
 
 ## Conventions for Rust code
 
 - **The spec is the source of truth.** When spec and implementation disagree, fix the
   implementation. If the spec is wrong, send a spec PR first.
 - **No linter-ignore directives.** `#[allow(clippy::…)]`, `#[allow(dead_code)]`, and friends are not
-  allowed. If a lint fires, the design is the bug.
+  allowed. If a lint fires, the design is the bug. Where a lint is wrong for one item, put
+  `#[expect(lint, reason = "…")]` on that item alone.
 - **Lift the spec's terms verbatim.** `IntentState`, `ResolvedState`, `MatSlot`, `CanonicalToken`,
   `BlockArrayIr`. Do not invent parallel vocabulary.
 - **`missing_docs` is a warning everywhere.** Every public item gets a `///` line, and every crate a
@@ -178,11 +178,11 @@ there is nothing to gain by skipping ahead.
 
 ## Adding a format backend
 
-Format support lives in `cairn-lang-formats`. A new file type needs three things:
+Format support lives in `cairn-lang-formats`. A new file type needs a writer from the block-array IR
+to bytes. Importing it, the reverse direction, needs two more things, and no format has them yet:
 
 1. A reader from bytes to the block-array IR.
-2. A writer from the block-array IR to bytes.
-3. An `(edition, version)` provenance stamp on import
+2. An `(edition, version)` provenance stamp on import
    ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)).
 
 If you find yourself reaching into `cairn-lang-core` to add format-specific fields, format concerns

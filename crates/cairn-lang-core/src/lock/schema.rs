@@ -1,4 +1,4 @@
-//! `build.cairn.lock` YAML schema. Fields are written in declaration order, which matches the
+//! The lockfile's YAML schema. Fields are written in declaration order, which matches the
 //! sample in `spec/versioning-editions` "Provenance and lock".
 
 use serde::{Deserialize, Serialize};
@@ -121,7 +121,7 @@ pub(super) fn refused_identifier(
     }))
 }
 
-/// The whole lockfile, as written to `build.cairn.lock`.
+/// The whole lockfile document.
 ///
 /// It and every type it nests deny unknown fields, so a tampered document cannot read as verified.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -70,7 +70,7 @@ cargo xtask lint --site website/dist site-parity   # after `pnpm run build` in w
 | `crates/cairn-lang-tree-sitter` | tree-sitter grammar, packaged for npm as `tree-sitter-cairn` |
 | `crates/cairn-lang-wasm` | Browser bindings for the future playground — a placeholder so far |
 | `editors/vscode` | VS Code extension — a thin client over `cairn-lsp` |
-| `website` | Astro + Starlight docs site: spec, tutorial, developer guide, in English and 日本語. Also the `cairn-lang-docs` crate, which embeds the site's Markdown pages for `cairn docs` |
+| `website` | Astro + Starlight docs site: spec, tutorial and guides in English and 日本語, and the developer guide in English. Also the `cairn-lang-docs` crate, which embeds the site's Markdown pages for `cairn docs` |
 | `examples` | `.crn` sources (lockfiles are generated output and stay untracked) |
 
 The [Developer Guide](https://cairn.kage1020.com/development/) covers the dependency rules between crates in more detail.
@@ -94,7 +94,7 @@ Rust source, spec prose, examples, and docs must still make sense on their own y
 
 When the deferred thing lands, update the comment in the same PR.
 
-Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md) with its fragments in [changelog.d/](changelog.d/README.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. `cargo xtask lint session-refs` checks every other tracked file, except the pull request template, which asks for the issue a PR closes, and the changelog script's tests.
+Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md) with its fragments in [changelog.d/](changelog.d/README.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the [compatibility](https://cairn.kage1020.com/spec/compatibility/) page with its milestone columns. `cargo xtask lint session-refs` checks every other tracked text file, except this guide, which quotes the coordinates it asks you to leave out; the pull request template, which asks for the issue a PR closes; the changelog script's tests; and lockfiles.
 
 ### Cite the spec by name, not by number
 
@@ -106,31 +106,32 @@ A section number is the same kind of coordinate. `§14.5` is true only while "Pl
 
 Write the chapter as its file stem without the extension (`spec/redstone`, `spec/versioning-editions`) and copy the section title verbatim. Cite the chapter alone when you mean the whole chapter. Once a comment has given the full citation, later sentences in it refer back in prose ("that pipeline", "the phase order") rather than repeat it.
 
-`cargo xtask lint spec-citations` checks `crates/`, `examples/`, `website/rust/`, `xtask/`, `.github/`, `.claude/` and `CLAUDE.md` for three things:
+`cargo xtask lint spec-citations` checks the `.rs`, `.md` and `.crn` files in `crates/`, `examples/`, `website/rust/`, `xtask/`, `.github/`, `.claude/` and `CLAUDE.md` for three things:
 
 - no `§` or "section 11.3" appears in any of them;
 - every `spec/<chapter>` names a chapter that exists;
-- every quoted title is something `cairn docs` prints for that chapter: a heading, a term the chapter defines in bold, or the chapter's own title.
+- every quoted title is something `cairn docs` prints for that chapter: a heading, a term a list item in the chapter defines in bold (`- **Term.**`), or the chapter's own title.
 
 So a citation runs as written, `cairn docs spec/lint "Error vs warning"`. A title that more than one part of the chapter has fails the rule, since it would not say which part it means. Renumbering the spec touches no Rust at all. Retitling a section fails the rule at each citation, by file and line, and that is the point: a title change is a change of meaning, and the comment that leaned on it deserves a re-read.
 
-The rest of the repository is on you. The rule skips the pages under `website/`, because that is where the numbers are defined. The guide pages beside the spec still link to sections by anchors that bake the number into the slug; untangling that belongs with a change to the headings themselves. `editors/`, this file, `CHANGELOG.md` and `changelog.d/` are simply outside the scan.
+The rest of the repository is on you. The rule skips the pages under `website/`, because that is where the numbers are defined. The guide pages beside the spec still link to sections by anchors that bake the number into the slug; untangling that belongs with a change to the headings themselves. `editors/`, this file, `CHANGELOG.md`, `changelog.d/`, and files of other kinds, such as the scripts in `.github/scripts/`, are simply outside the scan.
 
 ### Crate READMEs
 
 Each crate's `README.md` is what crates.io shows, so it is the front page for anyone who has never seen the repository. When a stage lands, update that crate's README in the same PR. A stage has not shipped while its front page still says it is coming.
 
-Four crate READMEs keep an inventory that can be compared against the code, and `cargo xtask lint` checks every one of them, not review:
+Four crate READMEs keep inventories that can be compared against the code, and `cargo xtask lint` checks every one of them, not review:
 
 - `cairn-lang-core`'s module table against the crate's `pub mod` declarations;
 - `cairn-lang-cli`'s subcommand table against what `cairn --help` lists;
+- `cairn-lang-cli`'s `cairn synth` section against the stages `--stage` offers, in their order, and the stage where `--edition` becomes required;
 - the `## Public API` tables in `cairn-lang-nbt` and `cairn-lang-formats` against what each crate root re-exports.
 
-Add a `pub mod`, a subcommand, or a `pub use` without its row and the lint fails, naming what is missing. Every check runs in both directions, so a row for something that no longer ships fails too.
+Add a `pub mod`, a subcommand, a stage, or a `pub use` without its row and the lint fails, naming what is missing. Every check runs in both directions, so a row for something that no longer ships fails too.
 
 `## Public API` means the crate root's `pub use` re-exports, and nothing else. An item that is only `pub` inside a module, such as `registry::AliasCatalog` or anything under `registry::blocks`, is deliberately left off the table; describe it in prose if it needs describing. A row writes one full `module::item` path per code span, and may hold several spans when the items share a sentence. Adding a `## Public API` table to a crate that has none means adding that crate to `PUBLIC_API_CRATES` in `xtask/src/rules/readme.rs`, which the same rule will tell you.
 
-No rule reads the prose. A row's description, a "Status" paragraph, a heading calling a table *planned*, a "Not yet here" list: each stays true only as long as someone remembers to update it. Two published crates went on describing an unimplemented skeleton long after the compiler worked. When you move something out of "not yet", move it out of the README too. Say what ships today, and keep what is still ahead in a section of its own, so a reader can tell the two apart without running the code.
+Beyond those lists, no rule reads the prose. A row's description, a "Status" paragraph, a heading calling a table *planned*, a "Not yet here" list: each stays true only as long as someone remembers to update it. Two published crates went on describing an unimplemented skeleton long after the compiler worked. When you move something out of "not yet", move it out of the README too. Say what ships today, and keep what is still ahead in a section of its own, so a reader can tell the two apart without running the code.
 
 ## Branches and pull requests
 
@@ -141,13 +142,13 @@ No rule reads the prose. A row's description, a "Status" paragraph, a heading ca
 | `canary` | All feature work, fixes, and docs land here. Protected. |
 | `main` | Moved only by the pipeline's promote-to-main PR, which a maintainer approves. No direct pushes; contributors never open a PR against it. |
 | `<type>/<short-kebab>` | One change, targeting `canary`. Deleted after merge. |
-| `release-plz-*` | Opened automatically for monthly minors and patches. |
+| `release-plz-*` | Opened by the release workflow: on a schedule for monthly minors, when a maintainer runs it by hand for patches. |
 
 Name the branch after the Conventional Commits type the work will land under: `feat/parser-lexer`, `fix/wall-corner-shape`, `docs/roadmap-2027`.
 
 **The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Squash merge is the only merge mode, so the title becomes the commit on `canary`, and `release-plz` reads it to decide whether a patch release is due. Commits on your own branch are free-form. The scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
 
-| Type | When | Cuts a patch release? |
+| Type | When | Makes a patch release due? |
 |---|---|---|
 | `feat` | New feature, public API, subcommand | Yes |
 | `fix` | Behaviour brought back in line with the spec | Yes |
@@ -160,19 +161,21 @@ Name the branch after the Conventional Commits type the work will land under: `f
 | `chore` | Anything that doesn't ship to users | No |
 | `style` | Formatting or lint-only changes | No |
 
+A patch release that is due goes out when a maintainer runs the release workflow by hand; only the monthly minor runs on a schedule.
+
 **A breaking change puts `!` before the colon**, after the type or, when one is written, after the scope: `feat(core)!: replace lexer`, `fix!: …`. The `!` and the changelog always go together. A PR that adds a `changelog.d/<slug>.breaking.md` fragment titles itself with `!`, and a PR titled with `!` adds that fragment.
 
 The hand-written entry is what [compatibility "How a break is communicated"](https://cairn.kage1020.com/spec/compatibility/) requires. Once the release folds it in under `### Breaking changes`, it is what a reader of `CHANGELOG.md` sees. The `!` records the same fact in the commit that `release-plz` parses. The `Changelog` check reports a PR that has one without the other. Until that check is required, a reviewer who sees one without the other asks for the missing half before merging.
 
 The `!` does not choose the version. Semver would read it as a major bump, but here the release workflow computes the next `YYYY.M.PATCH` from the date and the existing tags, and writes it into `Cargo.toml` before `release-plz` runs. `release-plz` leaves alone a version that already differs from the published one. Nor does the `!` decide whether a release is due; the type does, per the table above. What it changes is the generated release notes. `release-plz` prefixes the commit's line with `[**breaking**]`, and `protect_breaking_commits` keeps that line even for a type whose lines are otherwise dropped (`docs!:`, `ci!:`).
 
-Every PR you open targets `canary`. The only PR against `main` is the pipeline's own promote-to-main. Merging needs one maintainer approval, and green CI is expected, although the branch rulesets do not require any check yet. The release PR follows the same rules; merging it publishes and fast-forwards `main`.
+Every PR you open targets `canary`. The only PR against `main` is the pipeline's own promote-to-main. Merging needs one maintainer approval, and green CI is expected, although the branch rulesets do not require any check yet. The release PR follows the same rules; merging it publishes and opens the promote-to-main PR.
 
 ## Changelog entries
 
 A PR does not edit [CHANGELOG.md](CHANGELOG.md). Instead it adds a fragment under [changelog.d/](changelog.d/README.md), one file per entry, named `<slug>.<kind>.md`, where the kind picks the heading (`breaking`, `deprecations`, `added`, `changed`, `fixed`, `performance`, `build`).
 
-Fragments avoid conflicts. With twenty PRs open at once, every one that edits the same `[Unreleased]` heading conflicts with the next merge; separate files never do. The monthly release PR folds the fragments into the section `release-plz` writes for the new version, then deletes them.
+Fragments avoid conflicts. With twenty PRs open at once, every one that edits the same `[Unreleased]` heading conflicts with the next merge; separate files never do. The release PR, monthly or patch, folds the fragments into the section `release-plz` writes for the new version, then deletes them.
 
 The `Changelog` workflow checks the name and shape of each fragment a PR adds or edits. It also reports issue or PR numbers, entries scoped to `ci` alone, and any change to `CHANGELOG.md` outside the release PR. [changelog.d/README.md](changelog.d/README.md) has the details and the commands to run the check locally. All of this applies to the root `CHANGELOG.md` only: `editors/vscode/CHANGELOG.md` belongs to the extension and is still edited by hand.
 
@@ -203,7 +206,7 @@ CI's `MSRV` job compiles at the floor and so catches both. It reads `rust-versio
 
 The workspace sets `resolver = "3"`, Cargo's MSRV-aware resolver. `cargo update` and a new dependency therefore pick the newest version whose own `rust-version` is at or below ours, and a dependency past the floor never reaches `Cargo.lock`. The key is written out because a virtual manifest does not take it from its members' edition and would fall back to resolver 1. The resolver only filters candidates that declare a `rust-version`. A dependency that declares none, or a version forced with `cargo update --precise`, still lands in the lockfile, and the `MSRV` job is what catches those.
 
-Raising `rust-version` changes who can build the crates, so it is never a quiet manifest edit. Type the commit `build`, which cuts a patch release so the new floor reaches crates.io, and add a `changelog.d/<slug>.build.md` entry saying which compiler is now required and what needed it. A consumer pinned below the new floor learns about it from cargo either way; the entry tells them why.
+Raising `rust-version` changes who can build the crates, so it is never a quiet manifest edit. Type the commit `build`, which makes a patch release due so the new floor reaches crates.io, and add a `changelog.d/<slug>.build.md` entry saying which compiler is now required and what needed it. A consumer pinned below the new floor learns about it from cargo either way; the entry tells them why.
 
 ## Changing the release profile
 
