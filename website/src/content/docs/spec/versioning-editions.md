@@ -48,11 +48,15 @@ Two sources feed the backend, and they are kept apart.
 **Machine-extracted** from the game's `--reports` / registry dumps. This is the truth about syntax
 and domains: block and entity IDs, blockstate properties and their domains, item and component
 schemas, DataVersion, tags. Taking the game itself as the source of truth, rather than anyone's
-memory, closes the knowledge gap about new versions at its root.
+memory, closes the knowledge gap about new versions at its root. The built-in packs extract nothing
+from `--reports` yet: of that list they carry each version's block IDs and the version table, their
+block tables come from PrismarineJS/minecraft-data, and each pack file names its source.
 
 **Hand-written, version-tagged constraint catalog** for what the data does not carry: attachment (a
 frame cannot go on glass), gravity and support (gravel, hanging lanterns), fluid behaviour, entity
-AABB, redstone. Defined once per new version, and every user benefits.
+AABB, redstone. Defined once per new version, and every user benefits. No constraint catalog ships
+yet, so a lock records its `constraint_catalog_hash` as zeros and no member is reported
+semantic-sensitive ([§10.5](#105-which-version-is-it-for-has-three-answers)).
 
 ```yaml
 constraints:
@@ -74,6 +78,21 @@ The canonical token is the primary key, and each token carries a per-edition map
 state_map). Versions fold with `inherits + diffs`: Java is the base, Bedrock the overriding diffs.
 The hand-written semantic catalog records only the points that differ.
 
+The built-in packs fold only within an edition so far. Each edition has a registry pack of its own,
+whose `pack.json` names its `edition`, and neither inherits from the other yet. Inside one pack the
+`blocks` component holds one version's block IDs, and each later version names the version it
+inherits and the IDs it adds and removes (Java `1.20.4` → `1.21` → `1.21.4`, Bedrock `1.21.0` →
+`1.21.40` → `1.21.60`). A `materials` entry maps a token to one block ID, and its `overrides` name
+the versions that spell it differently, as Bedrock's does for 1.21.0:
+
+```json
+{ "token": "floor.stone.smooth", "block": "stone_bricks",
+  "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }] }
+```
+
+No pack carries a `state_map` or a `sensitivity` yet: the one state translation that exists, the
+stair family's, is written in the Bedrock backend ([§10.7](#107-java--bedrock-portability)).
+
 ```yaml
 "@oak_stairs":
   base: { states: { half: [bottom,top], shape: [straight,inner_left,inner_right,outer_left,outer_right] } }
@@ -94,14 +113,17 @@ rather than to its memory.
 Out-of-domain states are not yet enforced: `E_STATE_DOMAIN` below is not implemented, because the
 compiler holds no table of each block's states. Until it does, a state literal
 ([Syntax](/spec/syntax/)) is written as given, and every one earns `W_STATE_LITERAL_UNCHECKED`
-([Lint](/spec/lint/)) instead.
+([Lint](/spec/lint/)) instead. `E_PARITY_UNSUPPORTED` below is not implemented either
+([§10.7](#writing-an-alternative)). Nor does an error name a minimum version yet: the tables
+record which IDs a version has, not when one first appeared
+([below](#which-registry-an-unknown-id-is-unknown-to)).
 
 ```text
-E_UNKNOWN_ID line 12: "minecraft:pale_oak_planks" not in 1.21.4 registry.
-  Similar valid: minecraft:oak_planks, minecraft:dark_oak_planks, minecraft:cherry_planks
+E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
+  Nearest: minecraft:dark_oak_planks
 
-E_VERSION_CAP line 7: minecraft:cherry_planks introduced in 1.20 (target 1.19.4).
-  Fix: --target >=1.20, or  slot decor -> @oak_planks
+E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
+  Valid java targets: 1.21.4. Fix: --target 1.21.4, or lower the @requires floor
 
 E_STATE_DOMAIN line 18: wall north=true invalid for 1.21.4. Valid: none, low, tall (changed from boolean in 1.16).
   Suggested DSL: wall_segment id=yard_wall connect_north=low
@@ -398,8 +420,12 @@ There is no single "for-version". `cairn info` reports three axes:
    disappear, so deciding Vmax from the registry alone is dangerous. The constraint catalog carries
    a `semantic_sensitivity` (boundary version + reason) separate from `since`/`until`, and a compile
    crossing one warns. Examples: the cauldron split at 1.17, wall connections going bool →
-   `none/low/tall` at 1.16, the item format at 1.20.5.
-3. **The verified lock target** ([§10.6](#106-provenance-and-lock)).
+   `none/low/tall` at 1.16, the item format at 1.20.5. No constraint catalog ships yet
+   ([§10.3](#103-backend--data-tables)), so the `semantic-sensitive` row is always `(none)` and no
+   compile warns.
+3. **The verified lock target** ([§10.6](#106-provenance-and-lock)). `cairn info` does not report
+   it yet, because it reads no lockfile. `cairn compile` does compare a lock's target with the one
+   it builds, and reports a change as `W_PREVIOUSLY_VERIFIED_TARGET`.
 
 ```text
 $ cairn info build.crn --editions java,bedrock
@@ -407,12 +433,13 @@ registry compatibility:  1.21.40 .. latest
 edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
 buildable targets:       Java: none (1.20.4, 1.21, 1.21.4 all refuse)   Bedrock: 1.21.40, 1.21.60 (1.21.0 refuses)
 intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      yard_water(cauldron split@1.17), fence(wall conn@1.16)
+semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16)
 ```
 
 Every version named is one the built-in packs declare. The file behind this output carries
 `@requires version>=1.21.40`, which is what puts every Java target below the floor, and Bedrock
-1.21.0 with them.
+1.21.0 with them. The `semantic-sensitive` row shows what a constraint catalog would add; today it
+reads `(none)`.
 
 `intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
 declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
@@ -669,8 +696,12 @@ verified: true
 member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17" } ]
 ```
 
+No constraint catalog ships yet ([§10.3](#103-backend--data-tables)), so today
+`constraint_catalog_hash` is all zeros and `member_version_sensitivity` is `[]`.
+
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
-filling, and auto-address assignment.
+filling, and auto-address assignment. Auto-address assignment is not implemented yet: a member has
+an address only where it carries `id=` ([§9.2](/spec/components-editing-sites/#92-editing-model)).
 
 `lock_schema_version` leads the document so a reader can decide whether it understands the rest
 before parsing it. Version `1` is the shape above, and a document omitting the key is version `1`.
@@ -684,6 +715,9 @@ $ cairn compile build.crn --target 1.21.4 --lock build.cairn.lock
 W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
 W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 ```
+
+The second warning reads the members the previous lock lists, so no lock a compile writes today
+produces it.
 
 ## 10.7 Java / Bedrock portability
 
@@ -739,13 +773,23 @@ theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
 @edition bedrock { raw_block mat=minecraft:light_block_15 at=4,3,2 }
 ```
 
+The parser accepts only the snippet's `@requires` line today. `hologram` stands at top level,
+where only `theme`, `def`, `site` and `struct` open an item, so it is `E_PARSE`, and the parse ends
+there. Each later line would fail on its own as well. A `theme` takes its rules on indented lines
+under its header, so the one-line form is `E_PARSE` at `slot`, and even indented, a `slot` rule binds
+one token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. `@edition`
+is an unknown directive (`E_PARSE`), and inside a body `hologram` and `raw_block` are
+`E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is not implemented.
+
 ### `@edition` pins an edition, not a version
 
 The guard settles which branch is built and nothing else. The id inside it is still checked against
 the one `(edition, version)` the compile pinned
 ([§10.4](#104-fail-loud-and-minimum-version-inference)), so where an edition respells a block
 inside its own supported range, `@edition bedrock` names the branch and the file's floor names the
-spelling.
+spelling. No guard parses yet ([above](#writing-an-alternative)); the rest of what this section
+leans on is current behaviour: the per-version id check, the `aliases` answer, `E_VERSION_CAP` and
+`E_INTENDED_TARGET_CAP`.
 
 Bedrock's light block is that case, and it is why the snippet above carries a floor. 1.21.0 spells
 the block `light_block` and carries the level beside it as a `block_light_level` state; 1.21.40
@@ -798,6 +842,9 @@ Asymmetric by design:
 - **Upgrade** (old-version NBT → new-version world) is a loud warning plus a DataVersion stamp, and
   depends on DFU. It requires an explicit `--allow-cross-version`.
 
+No command applies a structure file to a world yet, so neither rule is enforced and no command
+takes `--allow-cross-version`.
+
 Not every build needs to be edition-portable. The compiler's job is to state what breaks
 portability.
 
@@ -807,4 +854,5 @@ The `(edition, version)` axis above covers what Cairn *emits*. The orthogonal ax
 promises about its own evolution: `.crn` syntax, the lockfile, the CLI flags, the Rust API. CalVer
 has no "major" axis to read those promises off, so they are spelled out in
 [Compatibility Tiers](/spec/compatibility/). A `Stable` surface gives one release of `W_DEPRECATED` lead
-time; an `Evolving` surface can change in any monthly minor; `Internal` makes no promise.
+time, a code reserved until the first deprecation adds it; an `Evolving` surface can change in any
+monthly minor; `Internal` makes no promise.

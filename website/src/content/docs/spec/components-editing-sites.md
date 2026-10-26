@@ -29,7 +29,8 @@ def cottage class=house size=9x7:
 
 Important members carry `id=`. Members without one get a **meaning-based stable address** derived
 from parent / role / side / level / offset rather than from generation order, so addresses stay
-stable when you append to a struct.
+stable when you append to a struct. No pass derives that address yet: today a member without `id=`
+has no address.
 
 Edits are a patch DSL against a selector or address:
 
@@ -38,6 +39,10 @@ edit window[class=vent][level=floor2] set shape=arch
 edit window@front[0]                  set mat_slot=accent_glass
 edit door[id=entry]                   set side=front at=center
 ```
+
+`edit` is not accepted yet. A top-level `edit` line is `E_PARSE`, since the only top-level items
+are `theme`, `def`, `site` and `struct`, so no edit is applied today and the edit-diff rule below
+has nothing to compare.
 
 Editing at the level of a concept, such as "make only the second-floor windows arched", must be
 possible without breaking the whole. Edit diffs look only at `intent_state`
@@ -106,14 +111,14 @@ does one refused because the row it is placed relative to was. An `E_INCOMPATIBL
 ### 9.3.3 Cross-scope references
 
 Every `place` row declares `id=`, `use=`, and `theme=`. A row short of any of them cannot become a
-placement: there is no name for its `.nbt`, no `def` to instantiate, or no theme to resolve its
-`mat_slot=` members against. That is `E_INCOMPLETE_PLACE`. The message names every missing key, and
-the row is dropped. A key that is present but not a label (`use=3`) is `E_TYPE_MISMATCH_LABEL`
+placement: there is no name for its structure file, no `def` to instantiate, or no theme to resolve
+its `mat_slot=` members against. That is `E_INCOMPLETE_PLACE`. The message names every missing key,
+and the row is dropped. A key that is present but not a label (`use=3`) is `E_TYPE_MISMATCH_LABEL`
 instead.
 
 `id=` is required rather than auto-assigned, unlike the geometry members of
 [§9.2](#92-editing-model), because it is the name `east_of=` and `connect` refer to and the name its
-`.nbt` is written under ([§9.3.4](#934-output-naming)).
+structure file is written under ([§9.3.4](#934-output-naming)).
 
 | Code | Cause |
 |---|---|
@@ -124,8 +129,9 @@ instead.
 
 ### 9.3.4 Output naming
 
-The compiler writes one `.nbt` per `place`, named after the `id=` (`home1.nbt`, `home2.nbt`), directly
-into the output directory. These ids are each `E_INVALID_PLACE_ID` ([Lint](/spec/lint/)):
+The compiler writes one structure file (`.nbt` on Java, `.mcstructure` on Bedrock) per `place`,
+named after the `id=` (`home1.nbt`, `home2.nbt`), directly into the output directory. These ids are
+each `E_INVALID_PLACE_ID` ([Lint](/spec/lint/)):
 
 - one carrying `/` or `\`, which would name a path rather than a file;
 - one carrying a character a Windows file name cannot hold, which could not be written there;
@@ -236,9 +242,9 @@ Concrete tokens like `@gravel` work without a registry pack; abstract tokens lik
 need the pack's materials catalog and surface `W_ABSTRACT_TOKEN_DEFERRED` or
 `E_UNKNOWN_ABSTRACT_TOKEN` on a miss.
 
-**Output.** Each `connect` row that lays its walkway writes one `.nbt` named after its site and
-ports (`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the lockfile
-with the world origin, dims, and resolved path material.
+**Output.** Each `connect` row that lays its walkway writes one structure file named after its site
+and ports (`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the
+lockfile with the world origin, dims, and resolved path material.
 
 A row that lays no block has lost a walkway the source asked for. That happens for:
 

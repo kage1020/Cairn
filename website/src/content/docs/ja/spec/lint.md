@@ -94,6 +94,11 @@ title: "11. Lint と制約検証"
 | `W_STATE_LITERAL_UNCHECKED` | 正規トークンのステートリテラル (`@oak_log[axis=x]`) を書かれたまま使った。`E_STATE_DOMAIN` が実装されるまで、そのプロパティと値をターゲットと照らし合わせる仕組みがない ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
 | `W_NO_THEME_BOUND` | `mat_slot=` を読むスコープにテーマが割り当てられていないので、そこで読む `mat_slot=` はどれもブロックに解決されない。 |
 | `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定したエディションでは別のバリアントを割り当てた ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
+| `W_INTENT_DEGRADED` | パレットのエントリが、固定したエディションでは表せない意図を失った。Bedrock での階段の `shape` がその例で、エントリごとに 1 行出る ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
+| `W_PREVIOUSLY_VERIFIED_TARGET` | 置き換えるロックが、別の `(edition, version)` を検証していた。行には両方が示される ([バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。 |
+| `W_SEMANTIC_SENSITIVITY` | `W_PREVIOUSLY_VERIFIED_TARGET` に続けて、前のロックの `member_version_sensitivity` が挙げるメンバーを、新しいターゲットでは解決が変わりうるものとして示す ([§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。制約カタログをまだ同梱していないので、コンパイラが書くロックはメンバーを 1 つも挙げておらず、そうしたロックの上でビルドしても、現時点ではこの警告は出ない。 |
+
+最後の 3 つは `cairn compile` だけが出します。書き出す成果物とロックについての警告なので、スパンを持たず、ほかのコマンドは出しません。
 
 `E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は、block-array lowering の段階で発生します。この lowering は `cairn compile`、`cairn lower`、`cairn info`、`cairn check` のどれでも行われ、言語サーバーでも行われます。ただし `E_UNKNOWN_ID` には固定したターゲットが必要なので、実際に出せるのは `cairn compile --target` と `cairn check --edition E --target V` の 2 つです (`info` と `lower` はバージョンを固定せずに lowering します。ファイルの下限がターゲットを拒否する `compile` も同じです。[バージョンとエディション](/ja/spec/versioning-editions/#宣言した下限は強制される) を参照)。`--target` なしの `cairn check` と言語サーバーはターゲットをまったく持たずに lowering するので、`E_INCOMPATIBLE_MATERIAL` はいずれかの出荷済みバージョンが宣言する正規トークンについてだけ出し、`E_UNKNOWN_ID` は出しません ([§11.3](#113-エラーと警告の区分))。
 
@@ -189,7 +194,7 @@ title: "11. Lint と制約検証"
 | `W_DEF_NO_SIZE` | `def` で同じことが起きた。その def を使う `place use=` はすべて飛ばされる。 |
 | `W_STRUCTURE_TOO_LARGE` | スコープから導いた範囲が、block-array パスが確保する体積を超えている。 |
 | `W_PALETTE_TOO_LARGE` | スコープが空気以外に 65,535 を超える種類のブロックステートを塗っており、1 つのパレットで添字を振れる数を超えている。 |
-| `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバーが、1 つのボクセルに異なるブロックを書いた ([§4.4](/ja/spec/compilation/))。 |
+| `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバーが、1 つのボクセルに異なるブロックを書いた ([§4.8](/ja/spec/compilation/#48-同一フェーズ内の衝突とパレット))。 |
 | `E_PARTIAL_BUILD` | 要求されたスコープ、または `connect` 行が求めた通路のうち、少なくとも 1 つが lowering されず、求められたより少ないものしか作られなかった。 |
 
 `W_STRUCT_NO_SIZE` と `W_DEF_NO_SIZE` は、1 つの規則を、それが当てはまる対象によって分けたものです。`code` で絞り込むフィルタが、建たない struct と、インスタンス化されないテンプレートを区別できます。
@@ -241,6 +246,8 @@ title: "11. Lint と制約検証"
 | **edit_stability** | `intent_state` の変更が、無関係なメンバーの `resolved_state` に波及しないか。 |
 | **redstone** | 宣言した真理値表と時相アサーションに対する、tick 単位のシミュレーション。タイミングの衝突、QC への依存、配線の混雑 ([レッドストーン](/ja/spec/redstone/))。 |
 | **AABB 干渉** | 重なった場合は、優先度に従って統合するか拒否する。境界のブロックステートの再解決は IR 層が担う。 |
+
+このうち attachment、entity_aabb、support、fluid、edit_stability、AABB の干渉は計画中で、現時点ではどのコマンドも検査しません。本体が重なる 2 つの `place` 行も報告しません。幾何は一部だけ守られます。壁の外にはみ出す door、window、軒の stair は描かずに `W_DEFERRED_MEMBER` として報告し、自分の行の指定でどのボクセルにも乗らない pressure_plate は `E_UNPLACEABLE_PLATE` になります。version_caps / parity は、専用のコードを通じて一部だけ実行します。`E_VERSION_CAP` は `--target` を `@requires` の下限と照らし合わせ、`E_UNKNOWN_ID` は固定したターゲットが宣言していないブロック ID を拒否し、`W_INTENT_DEGRADED` はエディションが表せないものを示します。一方、ステートリテラルは照合しないまま使い (`W_STATE_LITERAL_UNCHECKED`)、エンティティのスキーマは検査しません。redstone の行も一部だけです。真理値表のコードが表そのものの整合性を検査するだけで、回路のシミュレーションは行いません。配線の混雑は `E_ROUTE_CONGESTION` ですが、これに到達できるのは Internal ティアの `cairn synth --experimental-logic-synth` だけです。
 
 ### did you mean
 
@@ -312,7 +319,7 @@ title: "11. Lint と制約検証"
 - **エラー** は、放置すると意図しない結果になるものです。概念の不在、未知の ID、ドメイン外のステートがこれにあたります。サイレント置換と暗黙の削除は禁止です。
 - **警告** は、バージョンやエディション間の意味のずれ、レッドストーンの挙動が保証されないこと、そして block-array パスが報告する部分的なビルドの劣化です。不完全なのがソースではなくコンパイラの側である場合です。
 
-`E_` / `W_` の接頭辞は重大度を表しません。これは両方向に言えます。多くの `W_` コードは部分的なビルドの劣化を表しますが、`W_UNUSED_DEF` / `W_TRUTH_TABLE_PARTIAL` と `@cairn` の 2 つのコードは、劣化ではないのに警告です。そして接頭辞が `E_` の次の 2 つは、名前ではなく上の規則で重大度を決めています。
+`E_` / `W_` の接頭辞は重大度を表しません。これは両方向に言えます。多くの `W_` コードは部分的なビルドの劣化を表しますが、劣化ではないのに警告のコードもあります。`W_UNUSED_DEF`、真理値表の 2 つの警告、`@cairn` の 2 つのコード、`W_INTENDED_TARGET_CAP`、`W_INTENDED_TARGET_UNSUPPORTED`、`W_THEME_VARIANT_REBOUND`、`W_DUPLICATE_WALKWAY`、そしてリテラルを書かれたまま出力する `W_STATE_LITERAL_UNCHECKED` などです。そして接頭辞が `E_` の次の 2 つは、名前ではなく上の規則で重大度を決めています。
 
 - `E_UNKNOWN_SLOT_TARGET` は **エラー** です。誤りはソースの側にあり、スロットがマテリアルトークンでない値で書かれているからです。参照するメンバーはテーマがないときと同じ形で作られるので、作られるものからは `W_NO_THEME_BOUND` と区別できません。
 - `E_THEME_SELECTOR_UNMATCHED` は **警告** です。何にもマッチしないルールは、何も上書きしません。

@@ -17,6 +17,8 @@ logic_route 配線 → Placement IR、遅延が確定
 raw         エスケープハッチ
 ```
 
+ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`raw` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures` の 4 つで、`fixtures` に属するのは `pressure_plate` だけです。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
+
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
 `circuit` は配線のための領域を確保するだけで、ボクセルを書かないので、どのフェーズにも属しません。3 つの `logic_*` フェーズが `fixtures` の後にあるのは、センサーとアクチュエーターを 3D 空間に配置するまで、ポートの座標が決まらないからです ([レッドストーン](/ja/spec/redstone/))。
@@ -24,12 +26,18 @@ raw         エスケープハッチ
 後勝ちになるのは **同じフェーズの中での局所的な上書き** だけで、`raw` は常に最後に評価します。同じフェーズの中で別々のメンバーが 1 つのボクセルを取り合う場合も、同じ規則で決着し、そのことを報告します ([§4.8](#48-同一フェーズ内の衝突とパレット))。
 
 ```
+theme stone:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+  slot glass -> @glass_pane
+
 struct keep size=11x9
-floor  id=base   mat_slot=floor
-walls  id=shell  mat_slot=wall height=5
-roof   id=roof   kind=gable mat_slot=roof overhang=1
-window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # それでも開口として切り抜かれる
-door   id=entry  side=front at=center
+  floor  id=base   mat_slot=floor
+  walls  id=shell  mat_slot=wall height=5
+  roof   id=roof   kind=gable mat_slot=roof overhang=1
+  window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # それでも開口として切り抜かれる
+  door   id=entry  side=front at=center
 ```
 
 ## 4.2 ターゲット軸

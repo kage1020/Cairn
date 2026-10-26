@@ -162,6 +162,12 @@ to compare.
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
+| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned edition has no form for, such as a stair's `shape` on Bedrock; one line per entry ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
+| `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members the previous lock's `member_version_sensitivity` lists, as ones that may resolve differently at the new target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). No lock the compiler writes lists any yet, since no constraint catalog ships, so a build over one does not raise it today. |
+
+The last three are `cairn compile`'s alone: they are about the artifact and the lock it writes, so
+they carry no span and no other command raises them.
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which `cairn
 compile`, `cairn lower`, `cairn info` and `cairn check` all run, as does the language server.
@@ -440,7 +446,7 @@ the author to a line that is correct.
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
 | `W_PALETTE_TOO_LARGE` | A scope paints more than 65,535 distinct block states besides air, past what one palette can index. |
-| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](/spec/compilation/)). |
+| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). |
 | `E_PARTIAL_BUILD` | At least one requested scope, or a walkway a `connect` row asked for, did not lower, so the run produced less than was asked for. |
 
 `W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
@@ -553,6 +559,18 @@ Beyond the codes above, lint covers:
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
+
+Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are
+planned, and no command checks them yet: two `place` rows whose bodies overlap are not reported.
+Geometry holds only in part: a door, window or eave stair that would fall outside its wall is not
+drawn and is reported as `W_DEFERRED_MEMBER`, and a pressure plate its own line puts on no voxel is
+`E_UNPLACEABLE_PLATE`. version_caps / parity runs only in part, through codes of its own:
+`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
+pinned target does not declare, and `W_INTENT_DEGRADED` names what an edition cannot carry, while a
+state literal goes unchecked (`W_STATE_LITERAL_UNCHECKED`) and no entity schema is checked. The
+redstone row runs only in part as well: the truth-table codes check a table against itself, nothing
+simulates the circuit, and routing congestion is `E_ROUTE_CONGESTION`, which only the Internal-tier
+`cairn synth --experimental-logic-synth` reaches.
 
 ### "did you mean"
 
@@ -684,9 +702,11 @@ holds `2^130`.
   rather than the source is the incomplete side.
 
 The `E_` / `W_` prefix is not the severity, in either direction. Most `W_` codes mark a
-partial-build degradation, but `W_UNUSED_DEF`, `W_TRUTH_TABLE_PARTIAL` and the two `@cairn` codes
-are warnings without being one; and two `E_`-prefixed codes are decided by the rule above rather
-than by their name:
+partial-build degradation, but some are warnings without being one, among them `W_UNUSED_DEF`, the
+two truth-table warnings, the two `@cairn` codes, `W_INTENDED_TARGET_CAP`,
+`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`, and
+`W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged; and two `E_`-prefixed codes are
+decided by the rule above rather than by their name:
 
 - `E_UNKNOWN_SLOT_TARGET` is an **error**, because the fault is in the source: the slot is written
   with a value that is not a material token. Its members degrade as they would with no theme bound,

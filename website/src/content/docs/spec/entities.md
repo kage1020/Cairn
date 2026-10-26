@@ -14,6 +14,11 @@ version differences, is structured. Only one-off special NBT escapes through `nb
   `trade`), `display` (text / block / item), and `bed` (treated as a block).
 - **Generic fallback**: `spawn id=.. type=<entity> at=<selector> [nbt={...}]` for other mobs.
 
+None of these is a keyword yet, `spawn` included: each is `E_UNKNOWN_KEYWORD`, so no build places
+an entity or a block entity. The example below also uses syntax the parser does not accept yet: a
+coordinate triple (`at=4,3,2`), a decimal (`scale=1.5`) and an `nbt={...}` value are `E_PARSE`
+([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)).
+
 ```
 villager id=trader at=stall[0] profession=librarian level=master
 trade villager=trader buy=emerald count=24 sell=enchanted_book enchant=mending
@@ -37,6 +42,10 @@ cross-implementation compatibility all break. This is the top open issue in this
 
 Every primitive therefore carries four things in the IR: an `anchor` (reference point), a declared
 bbox, an actual bbox, and a host face.
+
+The IR carries none of the four yet. In the example below, `painting` is `E_UNKNOWN_KEYWORD`, and
+the window's `anchor=` and `shape=` and the roof's `footprint=` and `bounds=` are accepted but read
+by no pass, so each is `W_IGNORED_ARGUMENT` ([Lint](/spec/lint/)).
 
 Overlapping AABBs resolve by a rule the spec fixes, either priority merge or a lint error
 ([Lint](/spec/lint/)). Neighbour-dependent blockstate (stairs, fences) breaks when overwritten without

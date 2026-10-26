@@ -18,6 +18,12 @@ logic_route routing → Placement IR, delay determined
 raw         escape hatch
 ```
 
+Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `raw` are not keywords
+yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
+`envelope`, `openings` and `fixtures`, whose one member is `pressure_plate`. `cairn compile` does
+not run the three `logic_*` phases, so a `logic` line lays no redstone in the artifact; they are
+reached only through `cairn synth --experimental-logic-synth`.
+
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
 what a member means. Nor does it decide what the artifact is
 ([§4.8](#48-within-phase-conflicts-and-the-palette)): permuting two members that share no voxel
@@ -32,12 +38,18 @@ different members contesting a voxel inside a phase resolve the same way and are
 [§4.8](#48-within-phase-conflicts-and-the-palette).
 
 ```
+theme stone:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+  slot glass -> @glass_pane
+
 struct keep size=11x9
-floor  id=base   mat_slot=floor
-walls  id=shell  mat_slot=wall height=5
-roof   id=roof   kind=gable mat_slot=roof overhang=1
-window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # still cut as an opening
-door   id=entry  side=front at=center
+  floor  id=base   mat_slot=floor
+  walls  id=shell  mat_slot=wall height=5
+  roof   id=roof   kind=gable mat_slot=roof overhang=1
+  window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # still cut as an opening
+  door   id=entry  side=front at=center
 ```
 
 ## 4.2 Target axes

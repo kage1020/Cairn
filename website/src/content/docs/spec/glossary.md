@@ -36,24 +36,26 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 
 - **Member.** A named element of the Intent IR. Types: `block`, `block_entity`, `entity`. The
   IR carries the type, but the author writes one selector grammar across all of them
-  ([principles P4](/spec/principles/)).
+  ([principles P4](/spec/principles/)). Today a member carries the `role` its keyword classifies to
+  and no type, and no keyword places a block entity or an entity yet.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
-- **`intent_state`.** The author's blockstate intent. Edit diffs look **only** here. See
+- **`intent_state`.** The author's blockstate intent. Edit diffs look **only** here. Today it
+  holds every `key=value` a member line writes except `id`, `class` and `mat_slot`. See
   [blockstate §6.2](/spec/blockstate/#62-intent_state-and-resolved_state).
 - **`resolved_state`.** Compiler-derived blockstate (orientation, connections, waterlogged). Never
-  hand-written.
+  hand-written. Not populated yet: what lowering derives goes straight into the block array.
 - **Override-promotion.** Writing a blockstate that *could* be intent promotes it from
   `resolved_state` to `intent_state`. The spec rule is "derive by default; any blockstate that can
   be intent is overridable." See
   [blockstate §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
 - **Anchor / bbox.** Every primitive carries an `anchor` (reference point), a declared bbox, an
   actual bbox, and a host face in the IR. Primitives like paintings, item frames, and arch windows
-  have a declared size that differs from the occupied AABB, and these four resolve it. See
-  [entities §8.2](/spec/entities/#82-anchor-conventions).
+  have a declared size that differs from the occupied AABB, and these four resolve it. The IR
+  carries none of them yet. See [entities §8.2](/spec/entities/#82-anchor-conventions).
 
 ## Materials and themes
 
@@ -100,7 +102,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@cairn`.** Header declaring the **Cairn language version** the file was written against
   (CalVer `YYYY.M[.PATCH]`). Provenance only; optional.
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
-  on conflict with the inferred value.
+  on conflict with the inferred value. That error, `E_REQUIRES_CONFLICT`, is reserved: no inferred
+  range is derived yet. A `cairn compile --target` below the floor is `E_VERSION_CAP`. See
+  [versioning-editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
   verification record, since the record lives in the lock. Still weighed against the file's own
   floor: an intent the floor refuses is reported rather than left to be discovered at compile time.
@@ -119,13 +123,15 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   Java/Bedrock difference to the library. See [redstone §14.6](/spec/redstone/#146-edition-differences).
 - **Combinational vs sequential.** v1 ships closed-set combinational gates and curated sequential
   macros (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`). Arbitrary
-  FSMs / CPUs are out of scope for v1.
+  FSMs / CPUs are out of scope for v1. Today a `logic` line accepts only `and`, `or` and `not`; no
+  sequential macro is parsed yet.
 - **Truth / latency / temporal assertion.** The three verification kinds. See
   [redstone §14.7](/spec/redstone/#147-verification). Temporal is bounded `eventually within N` only, not
-  full LTL.
+  full LTL. `assert latency` is not parsed yet (`E_PARSE`), and no simulator checks the other two
+  against a built circuit.
 - **QC / BUD.** Quasi-connectivity / block-update-detector behaviors. **Not absorbed** by the cell
   library; a circuit that depends on update-order semantics is an `E_NO_PORTABLE_IMPL` compile
-  error.
+  error. That code is not implemented yet: nothing checks a circuit for update-order dependence.
 
 ## Lint and evaluation
 

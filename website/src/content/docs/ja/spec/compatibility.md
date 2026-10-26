@@ -10,7 +10,7 @@ Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions
 
 ### Stable
 
-契約: **破壊的変更は 1 リリース前に `W_DEPRECATED` で予告し、早くても次の月次マイナーリリースまでは削除しない。**
+契約: **破壊的変更は 1 リリース前に `W_DEPRECATED` で予告し、早くても次の月次マイナーリリースまでは削除しない。** `W_DEPRECATED` は予約済みのコードで、最初の非推奨化とともに追加します。今はまだ出力するものがありません。
 
 - Stable な面に入った破壊的変更は、翌月の CHANGELOG から参照しなければなりません (MUST)。
 - 名前を変更する場合、非推奨期間中は旧名も動作し続けなければなりません (MUST)。
@@ -19,10 +19,10 @@ Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions
 
 Stable な面:
 
-- 仕様が規範として定める `.crn` の構文 (キーワード、ヘッダ、ブロックの種類、ブロックステートのプリミティブ、テーマとマテリアルのプリミティブ、エディションガード)。
+- 仕様が規範として定める `.crn` の構文 (キーワード、ヘッダ、ブロックの種類、ブロックステートのプリミティブ、テーマとマテリアルのプリミティブ、エディションガード)。ただしエディションガードはまだ構文に含まれておらず、`@edition` はパースできません ([§10.7](/ja/spec/versioning-editions/#代替を書くとき))。
 - `build.cairn.lock` のファイル形式 (フィールド、ハッシュの入力、[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) が定める `verified` の意味)。
 - `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力のスキーマ、終了コード。
-- tier-1 のマテリアルトークン (ユーザーがソースに書く名前)。
+- tier-1 のマテリアルトークン (ユーザーがソースに書く名前)。ただし [§7.2](/ja/spec/materials-themes/#72-正規トークン) の正規トークンには、どれが tier-1 かの区別がまだありません。
 - 仕様に記載されたエラーと警告のコード (`E_*`、`W_*`)。
 
 ### Evolving
@@ -37,7 +37,7 @@ Evolving な面:
 
 - ドラフトと明記された仕様の章や節 ([未決事項](/ja/spec/open-issues/) と、本文中で変更の余地があると注記された節)。
 - 新しく追加された `cairn` サブコマンドの、最初の 3 か月分の月次マイナーリリース。
-- レジストリパックと制約カタログのファイル構成 (それらの *ハッシュ* は Stable なロックの意味に含まれますが、*内部構造* は Evolving です)。
+- レジストリパックと制約カタログのファイル構成 (それらの *ハッシュ* は Stable なロックの意味に含まれますが、*内部構造* は Evolving です)。制約カタログはまだ同梱しておらず、ロックにはそのハッシュとしてゼロを記録します。
 - tier-2 のトークン (tier-1 の解決先となる実装レベルの名前)。
 - CLI の人間向け診断の書式と文言 (*コード* は Stable ですが、*文言* は違います)。
 - `cairn-lang-cli` の `--features` の組 (cargo features) と、ワークスペースの各クレートの `[features]`。
@@ -48,7 +48,7 @@ Evolving な面:
 
 Internal な面:
 
-- ワークスペースの全クレートの Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、`cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-docs`)。これらは、含まれる最初の月次マイナーリリースから crates.io に公開しますが、CLI の推移的な公開依存でない項目にはすべて `#[doc(hidden)]` を付けます。
+- ワークスペースの全クレートの Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、`cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-tree-sitter`、`cairn-lang-docs`)。これらは、含まれる最初の月次マイナーリリースから crates.io に公開しますが、CLI の推移的な公開依存でない項目にはすべて `#[doc(hidden)]` を付けます。まだ付けた項目はありません。
 - コンパイラの中間表現 (Intent IR、Semantic IR、block-array ピボットのレイアウト)。
 - 増分ビルドキャッシュのディスク上の形式 (プロジェクト内の `target/` に相当するもの)。
 - 言語サーバーの内部プロトコル (VS Code などとの間の LSP の通信仕様は Stable ですが、`cairn-lang-lsp` の内部の分け方は Stable ではありません)。
@@ -57,7 +57,7 @@ Internal な面:
 
 ある面のティアは固定ではなく、プロジェクトが [ロードマップ](/ja/roadmap/) を進むにつれて Stable に昇格していきます。この表が基準です。
 
-| 面 | 現在 (M1 前) | M2 (minimal build) | M3 (examples work) | M5 (DX) | M6 (redstone) |
+| 面 | M1 まで | M2 (minimal build) | M3 (examples work) | M5 (DX) | M6 (redstone) |
 |---|---|---|---|---|---|
 | `.crn` の構文 (5〜9 章) | Evolving | Evolving | **Stable** | Stable | Stable |
 | `build.cairn.lock` の形式 | Evolving | **Stable** | Stable | Stable | Stable |
@@ -89,11 +89,11 @@ Rust API の行は、計画中のロードマップの範囲では昇格しま�
   早くても 2026.12.0 までは削除しません。
 ```
 
-`W_DEPRECATED` と `E_BREAKING` というコード自体は Stable です。新しいコードの追加は破壊的変更ではありませんが、既存のコードの意味を変えることは破壊的変更です。
+`W_DEPRECATED` と `E_BREAKING` というコード自体は Stable です。どちらもまだ存在せず、それを必要とする最初の非推奨化や破壊的変更とともに追加します。新しいコードの追加は破壊的変更ではありませんが、既存のコードの意味を変えることは破壊的変更です。
 
 ## C.4 ティアの対象外
 
 次の 2 つは、この表の対象外です。
 
 - **仕様に挙動を合わせるバグ修正** は、利用者がバグのある挙動に依存していたとしても、破壊的変更ではありません。契約を定めるのは実装ではなく仕様です。
-- **出力する `.nbt` / `.litematic` / `.schem` / `.mcstructure` のビット単位の一致** は、どのティアでも約束しません。2 つのリリースが同じソースから構造の異なるファイルを生成してもかまいません。重要なのは、結果がターゲットの `(edition, version)` に対して有効であることと、ロックファイルの `resolved_ir_hash` と一致することです。[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
+- **出力する `.nbt` / `.litematic` / `.schem` / `.mcstructure` のビット単位の一致** は、どのティアでも約束しません。現在あるのは `.nbt` と `.mcstructure` の出力だけです ([§12.1](/ja/spec/ecosystem-interop/#121-順方向の変換))。2 つのリリースが同じソースから構造の異なるファイルを生成してもかまいません。重要なのは、結果がターゲットの `(edition, version)` に対して有効であることと、ロックファイルの `resolved_ir_hash` と一致することです。[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。

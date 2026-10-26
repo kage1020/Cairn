@@ -6,7 +6,8 @@ title: "12. Ecosystem Interop and Reverse Conversion"
 
 Serializing the block-array IR emits `.nbt`, `.litematic`, `.schem`, and `.mcstructure`
 ([Architecture](/spec/architecture/)). Each format is a serializer, and an existing format is one
-more backend around the pivot.
+more backend around the pivot. Only the `.nbt` and `.mcstructure` serializers exist today:
+`cairn compile` writes `.nbt` for Java and `.mcstructure` for Bedrock.
 
 ## 12.2 Reverse direction: the compiler transliterates, an LLM lifts
 
@@ -22,6 +23,9 @@ cairn compile house.lifted.crn --edition java --target 1.21.4
 cairn diff-blocks house.litematic house.lifted.crn             # voxel XOR → into self-correction
 ```
 
+The reverse direction is not implemented yet. Neither `cairn import` nor `cairn diff-blocks`
+exists, so nothing in this section or the two after it runs today.
+
 The compile → diff → patch loop reports like this:
 
 ```text
@@ -29,6 +33,9 @@ E_DECOMPILE_DIFF: block IoU = 0.962 < threshold 0.985
   missing bbox=(12,4,3)..(18,6,3) mat=glass_pane → likely window repeat too small
   Suggested patch: edit window[id=front_windows] set repeat=4
 ```
+
+`E_DECOMPILE_DIFF` is not implemented, and the `edit` statement its patch suggests does not parse
+yet ([§9.2](/spec/components-editing-sites/#92-editing-model)).
 
 Convergence thresholds are block IoU ≥ 0.985, `state_accuracy` ≥ 0.995, and residual raw ≤ 5%. An
 exact match is not required, and the residue stays explicit as `raw_fill id=residual_*
@@ -58,7 +65,8 @@ On import, the `(edition, version)` pair and provenance are stamped onto the blo
 reproducible ([Versioning and Editions](/spec/versioning-editions/)).
 
 **Never present import as "recovering author intent."** That is the biggest pitfall. Only voxels
-and some regularity can be recovered, and the CLI says so with `W_SEMANTIC_LOSS`.
+and some regularity can be recovered, and the CLI says so with `W_SEMANTIC_LOSS`. With no import
+yet, nothing is stamped and `W_SEMANTIC_LOSS` is not implemented.
 
 Other rules:
 
