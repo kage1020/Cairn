@@ -29,7 +29,7 @@ Stable surfaces:
 - `.crn` syntax that is normative in the spec (keywords, headers, block kinds, blockstate
   primitives, theme/material primitives, edition guards). Edition guards are not part of the syntax
   yet: `@edition` does not parse ([§10.7](/spec/versioning-editions/#writing-an-alternative)).
-- `build.cairn.lock` file format (fields, hash inputs, the `verified` semantics defined in
+- The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
   output schemas, and process exit codes.
@@ -89,7 +89,7 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 | Surface | Through M1 | At M2 (minimal build) | At M3 (examples work) | At M5 (DX) | At M6 (redstone) |
 |---|---|---|---|---|---|
 | `.crn` syntax (chapters 5-9) | Evolving | Evolving | **Stable** | Stable | Stable |
-| `build.cairn.lock` format | Evolving | **Stable** | Stable | Stable | Stable |
+| Lockfile format | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` flags | Evolving | Evolving | **Stable** | Stable | Stable |
 | Diagnostic codes (`E_*`, `W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Tier-1 material vocabulary | Evolving | Evolving | **Stable** | Stable | Stable |

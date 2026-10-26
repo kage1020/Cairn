@@ -46,7 +46,7 @@ title: "用語集"
 - **`@cairn`**: そのファイルが前提とする **Cairn 言語のバージョン** (CalVer `YYYY.M[.PATCH]`) を宣言するヘッダです。来歴を記録するためだけのもので、省略できます。
 - **`@requires`**: Minecraft のターゲットに求める機能の下限です (例: `version>=1.20`)。推定した値と矛盾すると、ハードエラーになります。このエラー `E_REQUIRES_CONFLICT` は予約済みで、推定範囲はまだ導出していません。`cairn compile --target` に下限より古いバージョンを指定すると、`E_VERSION_CAP` になります。[バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定) を参照してください。
 - **`@intended_targets`**: どの Minecraft バージョン向けに作ったかを示すヒントです。検証の記録ではありません (記録はロックに残ります)。それでもファイル自身の下限とは突き合わせるので、下限が拒否するバージョンを挙げていれば、コンパイルするまで気づかないままにはならず、その場で報告されます。
-- **ロック (`*.cairn.lock`)**: コンパイラが生成する、再現性のための記録です。`source_hash`、`cairn_version`、`target(mc_version + data_version)`、`registry_pack_hash`、`constraint_catalog_hash`、`resolved_ir_hash`、`verified: true` を持ちます。[バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
+- **ロック (`*.crn.lock`)**: コンパイラが生成する、再現性のための記録です。`--lock` で別のパスを指定しなければ、ソースの隣に `<source>.lock` (`cottage.crn.lock` など) として書き出します。`lock_schema_version`、`source_hash`、`cairn_version`、`target` (`edition`、`mc_version`、`data_version`)、`inputs` (`registry_pack_hash`、`constraint_catalog_hash`)、`resolved_ir_hash`、`verified: true`、`member_version_sensitivity` を持ち、`site` を含むソースではさらに `placements` と `walkways` を持ちます。[バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
 - **来歴の記録 (Provenance stamp)**: 取り込むときに block-array IR に記録する `(edition, version)` です。値はファイル形式から決まります (`.litematic` → java、`.mcstructure` → bedrock、`.schem` → java)。[エコシステム連携 §12.4](/ja/spec/ecosystem-interop/#124-取り込み時の記録と落とし穴) を参照してください。
 
 ## レッドストーン

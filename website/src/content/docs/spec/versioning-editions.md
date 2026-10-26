@@ -685,7 +685,7 @@ hashes exist only in the lock, written by the compiler on a successful build. Th
 hand-written.
 
 ```yaml
-# build.cairn.lock (compiler-generated)
+# build.crn.lock (compiler-generated)
 lock_schema_version: 1        # revision of this document's own schema
 source_hash: sha256:...
 cairn_version: 2026.06        # the Cairn release's date version (CalVer)
@@ -696,7 +696,8 @@ verified: true
 member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17" } ]
 ```
 
-No constraint catalog ships yet ([§10.3](#103-backend--data-tables)), so today
+A compile writes the lock next to its source as `<source>.lock` unless `--lock` names another
+path. No constraint catalog ships yet ([§10.3](#103-backend--data-tables)), so today
 `constraint_catalog_hash` is all zeros and `member_version_sensitivity` is `[]`.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
@@ -704,14 +705,17 @@ filling, and auto-address assignment. Auto-address assignment is not implemented
 an address only where it carries `id=` ([§9.2](/spec/components-editing-sites/#92-editing-model)).
 
 `lock_schema_version` leads the document so a reader can decide whether it understands the rest
-before parsing it. Version `1` is the shape above, and a document omitting the key is version `1`.
-A document declaring a higher version is refused rather than read as if the field names still meant
-the same thing. Keys the schema does not declare are refused wherever they appear.
+before parsing it. Version `1` is the shape above plus two keys written only when they are
+non-empty: `placements`, each `place` row's resolved origin and extent, and `walkways`, each
+`connect` row's resolved strip and path material. A document omitting `lock_schema_version` is
+version `1`. A document declaring a higher version is refused rather than read as if the field
+names still meant the same thing. Keys the schema does not declare are refused wherever they
+appear.
 
 Recompiling for a different target shows the difference from the verified one loudly:
 
 ```text
-$ cairn compile build.crn --target 1.21.4 --lock build.cairn.lock
+$ cairn compile build.crn --edition java --target 1.21.4 --lock build.crn.lock
 W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
 W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 ```

@@ -355,7 +355,7 @@ semantic-sensitive:      (none)
 `.crn` が持つのは、ヒントである `@intended_targets` だけです。`verified: true`、DataVersion、各種ハッシュはロックにだけ存在し、ビルドが成功したときにコンパイラが書き込みます。手で書くことはありません。
 
 ```yaml
-# build.cairn.lock (コンパイラが生成)
+# build.crn.lock (コンパイラが生成)
 lock_schema_version: 1        # この文書自身のスキーマの改訂番号
 source_hash: sha256:...
 cairn_version: 2026.06        # Cairn リリースの日付バージョン (CalVer)
@@ -366,16 +366,16 @@ verified: true
 member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17" } ]
 ```
 
-制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、現在の `constraint_catalog_hash` はゼロで、`member_version_sensitivity` は `[]` です。
+コンパイルは、`--lock` で別のパスを指定しないかぎり、ロックをソースの隣に `<source>.lock` として書き出します。制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、現在の `constraint_catalog_hash` はゼロで、`member_version_sensitivity` は `[]` です。
 
 `resolved_ir_hash` が再現性の中心です。マクロ展開、デフォルト値の補完、アドレスの自動割り当てを終えた後の IR を固定します。ただしアドレスの自動割り当ては未実装で、アドレスを持つのは `id=` を書いたメンバーだけです ([§9.2](/ja/spec/components-editing-sites/#92-編集モデル))。
 
-`lock_schema_version` を先頭に置くのは、読み手が残りをパースする前に、内容を理解できるかどうか判断できるようにするためです。バージョン `1` は上の形で、このキーを省いた文書もバージョン `1` とみなします。より高いバージョンを宣言する文書は、フィールド名の意味が変わっていないと仮定して読むのではなく、拒否します。スキーマが宣言していないキーは、どこにあっても拒否します。
+`lock_schema_version` を先頭に置くのは、読み手が残りをパースする前に、内容を理解できるかどうか判断できるようにするためです。バージョン `1` は、上の形に、空でないときにだけ書き出す 2 つのキーを加えたものです。`placements` は各 `place` 行の解決済みの原点と大きさ、`walkways` は各 `connect` 行の解決済みの通路と経路のマテリアルです。`lock_schema_version` を省いた文書もバージョン `1` とみなします。より高いバージョンを宣言する文書は、フィールド名の意味が変わっていないと仮定して読むのではなく、拒否します。スキーマが宣言していないキーは、どこにあっても拒否します。
 
 別のターゲットで再コンパイルすると、検証済みのターゲットとの違いをはっきり報告します。
 
 ```text
-$ cairn compile build.crn --target 1.21.4 --lock build.cairn.lock
+$ cairn compile build.crn --edition java --target 1.21.4 --lock build.crn.lock
 W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
 W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 ```

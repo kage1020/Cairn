@@ -20,7 +20,7 @@ Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions
 Stable な面:
 
 - 仕様が規範として定める `.crn` の構文 (キーワード、ヘッダ、ブロックの種類、ブロックステートのプリミティブ、テーマとマテリアルのプリミティブ、エディションガード)。ただしエディションガードはまだ構文に含まれておらず、`@edition` はパースできません ([§10.7](/ja/spec/versioning-editions/#代替を書くとき))。
-- `build.cairn.lock` のファイル形式 (フィールド、ハッシュの入力、[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) が定める `verified` の意味)。
+- ロックファイル (`<source>.lock`) の形式 (フィールド、ハッシュの入力、[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) が定める `verified` の意味)。
 - `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力のスキーマ、終了コード。
 - tier-1 のマテリアルトークン (ユーザーがソースに書く名前)。ただし [§7.2](/ja/spec/materials-themes/#72-正規トークン) の正規トークンには、どれが tier-1 かの区別がまだありません。
 - 仕様に記載されたエラーと警告のコード (`E_*`、`W_*`)。
@@ -60,7 +60,7 @@ Internal な面:
 | 面 | M1 まで | M2 (minimal build) | M3 (examples work) | M5 (DX) | M6 (redstone) |
 |---|---|---|---|---|---|
 | `.crn` の構文 (5〜9 章) | Evolving | Evolving | **Stable** | Stable | Stable |
-| `build.cairn.lock` の形式 | Evolving | **Stable** | Stable | Stable | Stable |
+| ロックファイルの形式 | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` のフラグ | Evolving | Evolving | **Stable** | Stable | Stable |
 | 診断コード (`E_*`、`W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | tier-1 のマテリアルトークン | Evolving | Evolving | **Stable** | Stable | Stable |

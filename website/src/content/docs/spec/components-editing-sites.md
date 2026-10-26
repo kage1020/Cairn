@@ -145,8 +145,9 @@ case, are `E_OUTPUT_NAME_COLLISION`: a `place` named after a `struct`, or one `i
 sites, is refused rather than written over the other.
 
 The world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
-`build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout without
-re-running the coordinate solver.
+the lockfile, by default `<source>.lock` beside the source (`village.crn.lock` for `village.crn`),
+under `placements`, so a downstream consumer can rebuild the layout without re-running the
+coordinate solver.
 
 ### 9.3.5 Ports and `connect`
 
