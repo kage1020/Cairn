@@ -4,7 +4,7 @@ Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside 
 
 ## Install
 
-1. Install the extension (`.vsix`): download from the release page or run `code --install-extension cairn-lang-<version>.vsix`.
+1. Build the extension (`.vsix`) with `pnpm package` (see [Development](#development)) and install it with `code --install-extension ./cairn-lang-<version>.vsix`. Releases do not attach a `.vsix`, and the extension is not on the Marketplace yet.
 2. Install the `cairn-lsp` binary:
    - Download the archive matching your platform from the [Cairn releases](https://github.com/kage1020/Cairn/releases) (each archive contains both `cairn` and `cairn-lsp`).
    - Extract and put the binary on your `PATH`, **or** set `cairn.serverPath` to its absolute path in your VS Code settings.
@@ -35,4 +35,4 @@ Sideload for local testing with `code --install-extension ./cairn-lang-<version>
 
 ## Version compatibility
 
-The extension is released in lock-step with the Cairn CLI: the `cairn-lsp` binary and the extension version share the same CalVer tag (`YYYY.M.PATCH`). Mixing versions across a major release boundary is not supported — the extension logs the server version at activation so mismatches show up in the Output panel.
+The extension's version follows the Cairn CLI: the release pipeline sets it to the same CalVer tag (`YYYY.M.PATCH`) as the `cairn-lsp` binary. Use the extension with the `cairn-lsp` of the same release. The extension logs the server version at activation, so a mismatch shows up in the Output panel.

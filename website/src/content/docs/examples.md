@@ -40,4 +40,4 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 | File | Shows |
 |---|---|
 | [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | Per-edition theme variants for a slot with no cross-edition primitive. |
-| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | Two nets sharing a wire coordinate: what the crossing pass reports and does not repair. |
+| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | Four nets in a tight region: the router lays each one around the others and lifts one onto a bridge layer inside `void=2`; at `void=1` it refuses with `E_ROUTE_CONGESTION`. |

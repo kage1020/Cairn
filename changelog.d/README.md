@@ -82,7 +82,7 @@ python3 .github/scripts/changelog.py pr --base canary \
 
 ## At release
 
-The monthly release PR runs `changelog.py assemble --version <version> --delete` after
+The release PR, monthly or patch, runs `changelog.py assemble --version <version> --delete` after
 release-plz has written the new version's section, and refuses if the section under
 `[Unreleased]` is any other version's. Each fragment goes under its heading in that section,
 after the title lines release-plz wrote, in file-name order, and the fragment files are deleted in

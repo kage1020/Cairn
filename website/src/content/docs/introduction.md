@@ -40,7 +40,7 @@ See [Purpose and Scope](/spec/overview/) for the normative wording.
 | | |
 |---|---|
 | [Tutorial](/tutorial/) | A walk from one cottage to a village, through the worked [examples](/examples/). |
-| [Specification](/spec/) | Fifteen chapters plus a cross-cutting glossary. |
+| [Specification](/spec/) | Fifteen chapters, plus the compatibility tiers and a cross-cutting glossary. |
 | [Developer Guide](/development/) | The Rust workspace, how the crates split, and how to land changes. |
 | [Playground](/playground/) | A placeholder for the browser-hosted compiler. Tracks `cairn-lang-wasm`. |
 

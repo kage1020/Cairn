@@ -12,7 +12,10 @@ a reader with the code in hand looks it up. Both land in the same pull request a
    `website/src/content/docs/spec/lint.md` and `website/src/content/docs/ja/spec/lint.md`. When the
    rule belongs to another chapter, the row says what the code means and links there. When the
    code's severity does not follow from its `E_` / `W_` prefix, say why under "Error vs warning".
-   The redstone pipeline's `E_LOGIC_*` / `W_LOGIC_*` codes are Internal tier and get no row.
+   The redstone pipeline's codes (`crates/cairn-lang-redstone/src/diagnostic.rs`: `E_LOGIC_*` /
+   `W_LOGIC_*`, `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT`,
+   `W_ROUTE_CROSS_LAYER_CLEARANCE`) are Internal tier and get no row. A code the CLI prints itself,
+   as `error[E_…]`, `warning[W_…]` or `W_…:`, gets a row like core's, and skips step 2.
 2. **Enum.** In `crates/cairn-lang-core/src/diagnostic.rs`:
    - add the variant to `DiagnosticCode` with a one-line doc of what it reports;
    - add its string to `as_str` and its severity to `severity`. The severity follows `spec/lint`
