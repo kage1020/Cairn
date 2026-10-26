@@ -50,7 +50,7 @@ jobs:
           cargo test -p cairn-lang-redstone --bench place_and_route
 
   lint:
-    # A required status check matches this name literally.
+    # Meant to become a required check, which matches this name literally, so keep it stable.
     name: Lint
     runs-on: ubuntu-latest
 
@@ -70,7 +70,7 @@ jobs:
         run: cargo xtask lint
 
   docs:
-    # A required status check matches this name literally.
+    # Meant to become a required check, which matches this name literally, so keep it stable.
     name: Docs
     runs-on: ubuntu-latest
     env:
@@ -96,7 +96,7 @@ jobs:
         run: cargo doc --workspace --no-deps --locked --all-features --document-private-items
 
   msrv:
-    # A required status check matches this name literally.
+    # Meant to become a required check, which matches this name literally, so keep it stable.
     name: MSRV
     runs-on: ubuntu-latest
     # CONTRIBUTING.md "Bumping the toolchain" says what this job catches.

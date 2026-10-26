@@ -31,7 +31,8 @@ KINDS = {
 }
 
 FRAGMENT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*\.(?P<kind>[a-z]+)\.md$")
-README_NAME = re.compile(r"^README(\.[a-z]+)?\.md$")
+# A language subtag, so `README.fixed.md` is a misnamed fragment rather than a README.
+README_NAME = re.compile(r"^README(\.[a-z]{2,3})?\.md$")
 BREAKING_TITLE = re.compile(r"^[a-z]+(\([^)]*\))?!:")
 # The `&` keeps a numeric HTML entity such as `&#8217;` from reading as one.
 BARE_NUMBER = re.compile(r"(?<![\w&])#\d+\b")
@@ -147,8 +148,9 @@ def pr(args: argparse.Namespace) -> int:
         return 0
 
     base = f"origin/{args.base}"
-    changed = git("diff", "--name-status", "--no-renames", f"{base}...HEAD").stdout.splitlines()
-    status = {name: code for code, name in (line.split("\t", 1) for line in changed)}
+    # `-z` keeps a non-ASCII path unquoted, so it is compared as written.
+    fields = git("diff", "--name-status", "--no-renames", "-z", f"{base}...HEAD").stdout.split("\0")
+    status = dict(zip(fields[1::2], fields[0::2]))
     release_pr = args.author == RELEASE_BOT and args.head_ref.startswith(RELEASE_BRANCH_PREFIX)
     # A base from before changelog.d/ existed has nothing to compare against.
     bootstrap = git("cat-file", "-e", f"{base}:changelog.d/README.md",
@@ -162,7 +164,7 @@ def pr(args: argparse.Namespace) -> int:
 
     touched = [
         ROOT / name for name, code in status.items()
-        if code in "AM" and name.startswith("changelog.d/")
+        if code != "D" and name.startswith("changelog.d/")
         and not (name.count("/") == 1 and README_NAME.match(Path(name).name))
     ]
     ok = all([check_fragment(path) for path in touched])
