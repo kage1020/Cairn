@@ -37,8 +37,9 @@ parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, 
 `within` bound of an `assert`. A decimal such as `scale=1.5` ([Entities](/spec/entities/)) is
 therefore `E_PARSE` too until the parser reads one.
 
-A size literal is exactly two extents, `WxH`. A run that continues past the second, such as `2x2x9`
-or `2x2y`, is refused at the literal rather than read as a size followed by something else.
+A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
+as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
+else.
 
 Commas are **optional separators**, not structure. `@intended_targets ["1.20.4", "1.21.4"]` and
 `@intended_targets ["1.20.4" "1.21.4"]` name the same two versions, as do `[side=front, y=2]` and
