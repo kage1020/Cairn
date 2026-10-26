@@ -11,9 +11,9 @@ massing     floor / walls / volume
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / センサー / アクチュエーター
-logic_synth レッドストーンの合成: Logic IR → Netlist IR
-logic_place セルの配置
-logic_route 配線 → Placement IR、遅延が確定
+logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
+logic_place セルの配置 → Placement IR
+logic_route Placement IR 上での配線、遅延の挿入、交差の合法化。遅延が確定
 raw         エスケープハッチ
 ```
 

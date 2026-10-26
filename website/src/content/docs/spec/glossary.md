@@ -23,8 +23,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   and multi-building (`site`) into the Intent IR. See
   [components-editing-sites](/spec/components-editing-sites/),
   [materials-themes](/spec/materials-themes/).
-- **Logic IR / Netlist IR / Placement IR.** The three redstone sub-layers between Intent IR and
-  block-array IR. Delay is **not** carried in Logic/Netlist; only the Placement IR has it. See
+- **Logic IR / Netlist IR / Edition Netlist IR / Placement IR.** The four redstone sub-layers
+  between Intent IR and block-array IR. Delay is **not** carried in Logic/Netlist, and the Edition
+  Netlist IR has only each cell's own ticks; the Placement IR determines the delay. See
   [redstone §14.8](/spec/redstone/#148-connection-to-the-ir-and-phases),
   [architecture §3.3](/spec/architecture/#33-redstone-sub-layers).
 - **`semantic_level`.** An imported artifact's progress label: `raw` (one voxel per line) →

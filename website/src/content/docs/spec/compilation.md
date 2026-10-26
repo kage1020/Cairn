@@ -12,9 +12,9 @@ massing     floor / walls / volume
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / sensors / actuators
-logic_synth redstone: Logic IR → Netlist IR
-logic_place cell placement
-logic_route routing → Placement IR, delay determined
+logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
+logic_place cell placement → Placement IR
+logic_route routing, delay insertion and crossing legalization over the Placement IR, delay determined
 raw         escape hatch
 ```
 

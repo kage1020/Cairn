@@ -11,7 +11,7 @@ title: "用語集"
 - **block-array IR**: 3 層の IR の最下層にある、すべての形式に共通のピボットです。ボクセルの格子、パレット、block entities、entities からなり、形式・エディション・バージョンのどれにも依存しません。各形式のフロントエンドとバックエンド、差分、IoU、シリアライズは、すべてこの層でつながります。[アーキテクチャ §3.1](/ja/spec/architecture/#31-block-array-ir-はすべてのフォーマットに共通のピボット) を参照してください。
 - **Intent IR**: 最上層です。`id` / `class` / `role` / `mat_slot` / `intent_state` / `resolved_state` を持つ、名前付きのメンバーからなります。不変条件を持つ独立した型で、schematic の取り込みから直接は作られません。[アーキテクチャ §3.2](/ja/spec/architecture/#32-intent-ir-は情報が豊富で不変条件を持つ) を参照してください。
 - **Semantic / Component-Theme IR**: テーマ、コンポーネント (`def`)、複数建築 (`site`) を解決して Intent IR にする中間層です。[コンポーネント・編集・複数建築](/ja/spec/components-editing-sites/) と [マテリアルとテーマ](/ja/spec/materials-themes/) を参照してください。
-- **Logic IR / Netlist IR / Placement IR**: Intent IR と block-array IR の間に入る、レッドストーン用の 3 つのサブ層です。遅延は Logic IR と Netlist IR には **なく**、Placement IR だけが持ちます。[レッドストーン §14.8](/ja/spec/redstone/#148-ir-とフェーズの関係) と [アーキテクチャ §3.3](/ja/spec/architecture/#33-レッドストーンのサブ層) を参照してください。
+- **Logic IR / Netlist IR / Edition Netlist IR / Placement IR**: Intent IR と block-array IR の間に入る、レッドストーン用の 4 つのサブ層です。遅延は Logic IR と Netlist IR には **なく**、Edition Netlist IR が持つのも各セル自身の tick だけです。遅延が決まるのは Placement IR です。[レッドストーン §14.8](/ja/spec/redstone/#148-ir-とフェーズの関係) と [アーキテクチャ §3.3](/ja/spec/architecture/#33-レッドストーンのサブ層) を参照してください。
 - **`semantic_level`**: 取り込んだ成果物がどこまで進んだかを示すラベルです。`raw` (1 行に 1 ボクセル)、`grouped` (L1 の空間的な圧縮)、`lifted` (L2 の意味の付与) の順に進みます。コンパイラが担うのは L1 までで、L2 は LLM の仕事です。[エコシステム連携 §12.3](/ja/spec/ecosystem-interop/#123-写し取りの-3-段階) を参照してください。
 
 ## メンバーとブロックステート

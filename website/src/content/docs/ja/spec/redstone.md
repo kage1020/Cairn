@@ -223,19 +223,25 @@ E_SIM_ASSERTION_FAILED edition=bedrock:
 
 ## 14.8 IR とフェーズの関係
 
-Intent IR と block-array IR の間に、HDL と同じ分け方で 3 つの IR 層が入ります。
+Intent IR と block-array IR の間に、HDL と同じ分け方で 4 つの IR 層が入ります。
 
 ```
-Intent IR        logic 宣言 / circuit 領域 / 信号バインディング
+Intent IR           logic 宣言 / circuit 領域 / 信号バインディング
    ↓ logic_synth
-Logic IR         論理式と依存 DAG。エディション中立、遅延ゼロ
+Logic IR            論理式と依存 DAG。エディション中立、遅延ゼロ
    ↓
-Netlist IR       セルとネット。Logical Cell の選択。まだ遅延なし
+Netlist IR          セルとネット。Logical Cell の選択。まだ遅延なし
+   ↓
+Edition Netlist IR  同じセルとネット。Edition Cell の選択。まだ配線なし
    ↓ logic_place
-Placement IR     セル座標 + 実際の配線長。ここで遅延が確定する
+Placement IR        セル座標
    ↓ logic_route
-block-array IR   ダスト・リピーター・トーチ・コンパレーターのボクセル実体
+Placement IR        + 実際の配線長 + 遅延 + バッファのリピーターの座標。ここで遅延が確定する
+   ↓
+block-array IR      ダスト・リピーター・トーチ・コンパレーターのボクセル実体
 ```
+
+Placement IR は、パスごとに順に埋まっていきます ([§14.5](#145-配置配線-place-and-route))。配置が各セルに座標を与え、続いて配線が配線長を、遅延の挿入が遅延を、交差の合法化がバッファのリピーターの座標を加えます。Edition Cell の時点で、各ポートからの tick 数は決まります ([§14.6](#146-エディションの違い))。しかし配線する前には数えるべき配線がないので、遅延が確定するのは Placement IR で、それより前ではありません。Placement IR を block-array IR に落とすパスは、まだありません。エディションの合法化は未実装で、`cairn compile` はこれらのパスを 1 つも実行しないので、回路は `cairn synth --experimental-logic-synth` が出力する IR より先には進みません。
 
 フェーズモデル ([コンパイルモデル](/ja/spec/compilation/)) では、`fixtures` の直後を `logic_synth → logic_place → logic_route` に分けます。センサーとアクチュエーターが 3D 空間に配置されるまで、I/O ポートの座標が決まらないからです。
 

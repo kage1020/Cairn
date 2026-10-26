@@ -463,20 +463,32 @@ E_SIM_ASSERTION_FAILED edition=bedrock:
 
 ## 14.8 Connection to the IR and phases
 
-Three IR layers sit between the Intent IR and the block-array IR, separated the way HDL separates
+Four IR layers sit between the Intent IR and the block-array IR, separated the way HDL separates
 them:
 
 ```
-Intent IR        logic declarations / circuit region / signal binding
+Intent IR           logic declarations / circuit region / signal binding
    ↓ logic_synth
-Logic IR         logical expressions, dependency DAG. Edition-neutral, zero delay
+Logic IR            logical expressions, dependency DAG. Edition-neutral, zero delay
    ↓
-Netlist IR       cells and nets. Logical Cell selection. Still no delay
+Netlist IR          cells and nets. Logical Cell selection. Still no delay
+   ↓
+Edition Netlist IR  the same cells and nets. Edition Cell selection. Still no wire
    ↓ logic_place
-Placement IR     cell coordinates + actual wire length. Delay determined here
+Placement IR        cell coordinates
    ↓ logic_route
-block-array IR   the voxel reality of dust, repeater, torch, comparator
+Placement IR        + actual wire length + delay + buffer repeater coordinates. Delay determined
+   ↓
+block-array IR      the voxel reality of dust, repeater, torch, comparator
 ```
+
+The Placement IR is filled pass by pass ([§14.5](#145-place-and-route)): placement gives every cell
+its coordinates, then routing adds the wire length, delay insertion the delay, and crossing
+legalization the buffer repeaters' coordinates. An Edition Cell fixes the ticks from each of its
+ports ([§14.6](#146-edition-differences)), but there is no wire to count before routing, so the
+delay is determined in the Placement IR and no earlier. Nothing lowers the Placement IR to the
+block-array IR yet: edition legalization is not implemented, `cairn compile` runs none of these
+passes, and a circuit goes no further than the IRs `cairn synth --experimental-logic-synth` prints.
 
 The phase model ([Compilation Model](/spec/compilation/)) splits the step right after `fixtures` into
 `logic_synth → logic_place → logic_route`, because the I/O port coordinates are not fixed until
