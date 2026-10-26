@@ -72,6 +72,9 @@ pub struct BuildableRefusal {
     /// Scopes and walkways that produced no voxels, as keys opaque to this crate.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dropped_scopes: Vec<String>,
+    /// Palette entries, as `id[states]`, whose states this edition's writer cannot carry.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub states_unmapped: Vec<String>,
     /// Versions refused for a reason of their own, a subsequence of `considered`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub versions: Vec<RefusedTarget>,
