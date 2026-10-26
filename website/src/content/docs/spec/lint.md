@@ -574,10 +574,17 @@ simulates the circuit, and routing congestion is `E_ROUTE_CONGESTION`, which onl
 
 ### "did you mean"
 
-Three diagnostics reject an identifier against a closed vocabulary: an unknown keyword, an unknown
-`mat_slot=` name, and an unknown `--target` version. Each attaches a ``did you mean `X`?`` note when
-a candidate sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2
-for 4–6, and ≤ 3 beyond. The closed-set listing (`expected one of: ...`) is always printed as well.
+A diagnostic that rejects a name against a closed vocabulary attaches the nearest candidate when one
+sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2 for 4–6, and
+≤ 3 beyond. The names are a keyword, an argument key, a `mat_slot=` name, a place, def, theme or
+port reference, an abstract token, a `pressure_plate` side, a block id, and a `--target` version.
+The note reads ``did you mean `X`?``, with `X` written as the line would be (`home1.entry` for a
+port, `at=front.outside` for a plate); `E_UNKNOWN_ID` instead names the target's nearest block and
+carries it as `data.suggestion` ([§11.2](#112-machine-readable-payload)).
+
+An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
+...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
+reference, a token and a block id print no such list.
 
 ## 11.2 Machine-readable payload
 
