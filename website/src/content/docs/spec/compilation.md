@@ -163,10 +163,12 @@ slope inward toward a centre ridge.
   | SW / SE corners | `facing=north` with `outer_right` / `outer_left` |
 
 - **Apex.** The apex closes what the frames below it raised, so it applies only when
-  `extra_height > 1`. A square footprint caps with a single `half=top` stair (odd short span) or a
-  `2x2` block of them (even short span). A rectangular footprint caps with a row of `half=top`
-  stairs spanning the inset interior along the long axis. Apex facings follow the gable rule:
-  `south` for an x-ridge, `east` for a z-ridge.
+  `extra_height > 1`. It fills the top layer's whole inset rectangle with `half=top` stairs. A
+  square footprint caps with a single stair (odd short span) or a `2x2` block of them (even short
+  span). A rectangular footprint caps with a band along the long axis, one row deep on an odd short
+  span and two on an even one, since the inset rectangle is two rows deep there and one row would
+  leave the other open. Apex facings follow the gable rule: `south` for an x-ridge, `east` for a
+  z-ridge.
 - **Overhang.** As `gable`.
 
 ## 4.6 Flat roof voxel rules
