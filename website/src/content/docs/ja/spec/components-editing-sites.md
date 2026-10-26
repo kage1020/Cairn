@@ -140,7 +140,7 @@ y … y + size.h - 1 のすべての段が 1 つの層の中にある  # window�
 
 ルーターは、2 つのポートと、歩く高さにあるすべての配置の床を含む箱の中を探索するので、ポート同士が離れている場合も、床が広い範囲に散らばっている場合も、上限に達することがあります。
 
-このとき `W_WALKWAY_BLOCKED` が 1 件出て、具体的な原因と直し方が示されます。直し方は、埋まっているドアや窓 (またはポートのセルにあるブロック) を動かす、gap を広げる、2 つの構造を近づける、箱を広げている配置を近づける、のいずれかです。`--format json` では `data: { kind: "walkway_blocked", skipped: N }` が付きます。
+このとき `W_WALKWAY_BLOCKED` が 1 件出て、具体的な原因と直し方が示されます。直し方は、埋まっているドアや窓 (またはポートのセルにあるブロック) を動かす、gap を広げる、2 つの構造を近づける、箱を広げている配置を近づける、のいずれかです。`--format json` では、セルを飛ばしたときに `data: { kind: "walkway_blocked", skipped: N }` が付きます。直線の L 字そのものが上限を超えるときは通路をまったく敷かず、`data` も付きません。
 
 **マテリアル。** `path=@TOKEN` は、メンバーのマテリアルと同じ `mat_slot=` の処理を通ります。`@gravel` のような具体的なトークンは、レジストリパックがなくても使えます。`@path.gravel` のような抽象トークンにはパックのマテリアルカタログが必要で、見つからなければ `W_ABSTRACT_TOKEN_DEFERRED` か `E_UNKNOWN_ABSTRACT_TOKEN` を出します。
 
@@ -148,7 +148,7 @@ y … y + size.h - 1 のすべての段が 1 つの層の中にある  # window�
 
 ブロックを 1 つも敷かなかった行は、ソースが求めた通路を失っています。原因は次のいずれかです。
 
-- 端点の `place` が上流で拒否された (`W_DEFERRED_MEMBER`)。
+- 端点の `place` は解決できたが、lowering できなかった (`W_DEFERRED_MEMBER`)。その `def` に `size=` がない場合や、原点が座標の範囲を超える場合です。
 - ポートを置けない。
 - 通路の名前に使えない id がある。
 - 経路のマテリアルが解決できない。
@@ -156,6 +156,8 @@ y … y + size.h - 1 のすべての段が 1 つの層の中にある  # window�
 - 直線の L 字のすべてのセルが配置と重なり、帯が空気だけになる。
 
 このとき `cairn compile` は、スコープを失ったときと同じく `E_PARTIAL_BUILD` でビルドを拒否し、`cairn check --edition E --target V` も同じく拒否します ([Lint](/ja/spec/lint/))。`--target` を付けない `cairn check` は、失った原因となる指摘のうちターゲットを必要としないものは報告しますが、失ったこと自体は報告しません ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。失った通路は、`site::SITE::FROM ↔ TO` という名前と、行に書いたとおりのポートで示します。
+
+端点の `place` の行がそもそも解決できなかった場合 (`E_INCOMPLETE_PLACE`、`E_INVALID_PLACE_ID`、`E_INVALID_PLACE_ORIGIN`、`W_DEFERRED_PLACE` など) は、ここでいう損失には数えません。`connect` の行は `W_DEFERRED_CONNECT` とともに捨て ([Lint](/ja/spec/lint/))、ビルドは `place` を拒否したエラーによって拒否されます。
 
 `W_DUPLICATE_WALKWAY` の行は何も失いません。そのポートの組は、前の行がすでに敷いているからです。どちらも敷かなかった同じ組を指す 2 つの行は、1 件の損失として数えます。逆に、1 つの誤りで複数の損失が出ることもあります。`size=` のない def を使う `place` は失われたスコープで、そこに端点を持つ通路もすべて失われます。通路ごとに `E_PARTIAL_BUILD` に note が 1 つ加わり、lowering できなかったスコープの数も 1 つずつ増えます。
 
@@ -166,8 +168,8 @@ y … y + size.h - 1 のすべての段が 1 つの層の中にある  # window�
 | `E_CONNECT_ARITY` | 行の形が `FROM.PORT to TO.PORT` ではない。端点を読み取れないとその行の通路が失われるので、解決の前に検査します。 |
 | `E_UNRESOLVED_PORT` | ドットの右のポート id が、参照先の def の本体のメンバーを指していない。綴りの差の上限に収まる候補があれば、最も近い候補の note を付けます。その id が `level` の下にあるメンバーのものなら、代わりにそのことを示し、そのメンバーを指す note を付けます。level の中のメンバーは、まだポートになれません。 |
 | `E_AMBIGUOUS_PORT` | def が同じ `id=` を複数のメンバーで公開している。重複している名前を変えてください。 |
-| `E_MISSING_PATH_MATERIAL` | 行に `path=` がなく、通路の lowering で敷くものがない。 |
+| `E_MISSING_PATH_MATERIAL` | 行に `path=` がないか、その値が `@TOKEN` ではない (`path=gravel`) ため、通路の lowering で敷くものがない。 |
 | `E_UNRESOLVED_PLACE_REF` | 先頭の place の id が、この site で先に宣言した place を指していない ([§9.3.3](#933-スコープをまたぐ参照) と共通)。 |
 | `W_WALKWAY_BLOCKED` | 障害物のない経路がない。直線の L 字に戻し、残りの帯は敷きます。直線の L 字のすべてのセルが配置と重なる場合や、直線の L 字だけでルーターの探索面積の上限を超える場合は、何も敷かず、通路は失われます。 |
-| `W_DUPLICATE_WALKWAY` | 同じ `(from, to)` のポートの組が、この site ですでに敷かれている。重複した行は捨てます。 |
+| `W_DUPLICATE_WALKWAY` | 同じ 2 つのポートの間に、書いた順番にかかわらず、この site ですでに通路が敷かれている。重複した行は捨てます。 |
 | `W_INVALID_WALKWAY_IDENT` | site / place / port の id を通路の名前に使えない ([Lint](/ja/spec/lint/))。その行は捨てます。 |

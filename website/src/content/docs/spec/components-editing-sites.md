@@ -236,7 +236,8 @@ the cap can be reached by a distant pair of ports or by a widely spread floor pl
 That earns one `W_WALKWAY_BLOCKED` naming the concrete cause and its remedy: move the buried door
 or window (or the block on its port cell), widen the gap, bring the two structures closer, or bring
 the placements that stretch the box closer. `--format json` carries `data: { kind:
-"walkway_blocked", skipped: N }`.
+"walkway_blocked", skipped: N }` when cells were skipped. When the straight L itself is past the
+cap, the walkway is not laid at all and the finding carries no `data`.
 
 **Material.** `path=@TOKEN` lifts through the same `mat_slot=` pipeline as member materials.
 Concrete tokens like `@gravel` work without a registry pack; abstract tokens like `@path.gravel`
@@ -249,7 +250,8 @@ lockfile with the world origin, dims, and resolved path material.
 
 A row that lays no block has lost a walkway the source asked for. That happens for:
 
-- an endpoint whose `place` was refused upstream (`W_DEFERRED_MEMBER`);
+- an endpoint whose `place` resolved but did not lower (`W_DEFERRED_MEMBER`), as when its `def` has
+  no `size=` or its origin falls past the coordinate range;
 - a port that cannot be placed;
 - an id the walkway's name cannot carry;
 - a path material that does not resolve;
@@ -261,6 +263,11 @@ A row that lays no block has lost a walkway the source asked for. That happens f
 without `--target` reports the findings behind the loss that need no target, but not the loss
 itself ([Lint §11.3](/spec/lint/#113-error-vs-warning)). The loss is named
 `site::SITE::FROM ↔ TO`, with the ports as the row wrote them.
+
+An endpoint whose `place` row did not resolve at all (such as `E_INCOMPLETE_PLACE`,
+`E_INVALID_PLACE_ID`, `E_INVALID_PLACE_ORIGIN` or `W_DEFERRED_PLACE`) is not one of these losses.
+The `connect` row is dropped with `W_DEFERRED_CONNECT` ([Lint](/spec/lint/)), and the error that
+refused the `place` is what refuses the build.
 
 A `W_DUPLICATE_WALKWAY` row loses nothing, since the earlier row laid its pair, and two rows naming
 one pair that neither laid are one loss. One mistake can cost more than one loss: a `place` whose
@@ -274,8 +281,8 @@ adds a note to `E_PARTIAL_BUILD` and one to the count of scopes that did not low
 | `E_CONNECT_ARITY` | The row's shape is not `FROM.PORT to TO.PORT`. Enforced before resolution, since an unreadable endpoint costs the row its walkway. |
 | `E_UNRESOLVED_PORT` | The right-of-dot port id does not name a member of the referenced def's body. Carries a nearest-match note when one fits the spell cap, or, when the id belongs to a member nested under a `level`, says so instead, with a note at that member: a level-scoped member cannot be a port yet. |
 | `E_AMBIGUOUS_PORT` | The def exposes the same `id=` on more than one member. Rename the collision. |
-| `E_MISSING_PATH_MATERIAL` | The row omits `path=`, so walkway lowering has nothing to lay. |
+| `E_MISSING_PATH_MATERIAL` | The row omits `path=`, or gives it a value that is not a `@TOKEN` (`path=gravel`), so walkway lowering has nothing to lay. |
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |
 | `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. When every cell of the straight L overlaps a placement, or the straight L alone is past the router's search-area cap, nothing is laid and the walkway is lost. |
-| `W_DUPLICATE_WALKWAY` | The same `(from, to)` port pair is already laid in this site; the duplicate row is dropped. |
+| `W_DUPLICATE_WALKWAY` | The same two ports, in either order, already have a walkway laid in this site; the duplicate row is dropped. |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port id cannot be carried in the walkway's name ([Lint](/spec/lint/)); the row is dropped. |

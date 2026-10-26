@@ -401,11 +401,11 @@ something for the name would build a site the source did not describe.
 |---|---|
 | `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
-| `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
-| `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
+| `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, or a `path=` that is not a material token (`path=gravel` for `path=@gravel`), so the walkway has no material to lay. |
+| `W_DUPLICATE_WALKWAY` | A `connect` joins the same two ports, in either order, as an earlier row in the same site that already laid them. |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port identifier in a `connect` contains `__`, or a place or port identifier starts or ends with `_`. |
 | `W_DEFERRED_CONNECT` | A `connect` targets a `place` that was itself refused, so there is nothing to connect. |
-| `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped. |
+| `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped, or the straight L alone is past the router's 4,000,000-cell search-area cap and the walkway was not laid. |
 
 `E_UNRESOLVED_PORT` is the port half of the `place.port` shape alone; the place half is
 `E_UNRESOLVED_PLACE_REF`. `E_AMBIGUOUS_PORT` takes the first match for lowering and reports the
@@ -652,7 +652,7 @@ them. Codes not listed below omit `data` entirely, so the JSON key is absent rat
 
 | Code | `data` payload |
 |---|---|
-| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. |
+| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. Present when cells were dropped; absent when the walkway was past the router's cap and not laid. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`. See below. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |

@@ -170,11 +170,11 @@ title: "11. Lint と制約検証"
 |---|---|
 | `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def の本体に直接宣言されたどのメンバーも持たないポート id を指している。`level` の下のメンバーはまだポートになれないので、id がそうしたメンバーのものであれば、診断にそのことが示される。 |
 | `E_AMBIGUOUS_PORT` | そのポート id が、参照先の def の複数のメンバーにマッチする。 |
-| `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` がなく、通路を敷くマテリアルがない。 |
-| `W_DUPLICATE_WALKWAY` | 同じ site の先行する行がすでに敷いた `(from, to)` の組を、`connect` が繰り返している。 |
+| `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` がない、または `path=` の値がマテリアルトークンではない (`path=@gravel` のつもりの `path=gravel` など) ので、通路を敷くマテリアルがない。 |
+| `W_DUPLICATE_WALKWAY` | 同じ site の先行する行がすでに通路を敷いた 2 つのポートを、`connect` が向きを問わずもう一度つないでいる。 |
 | `W_INVALID_WALKWAY_IDENT` | `connect` の site / place / port の識別子が `__` を含む。または place / port の識別子が `_` で始まるか終わる。 |
 | `W_DEFERRED_CONNECT` | `connect` の対象の `place` 自体が拒否されており、つなぐものがない。 |
-| `W_WALKWAY_BLOCKED` | フォールバック経路のセルが既存の構造物と重なったので、そのセルを落とした。 |
+| `W_WALKWAY_BLOCKED` | フォールバック経路のセルが既存の構造物と重なったので、そのセルを落とした。または、直線の L 字だけでルーターの探索面積の上限 (4,000,000 セル) を超えたので、通路を敷かなかった。 |
 
 `E_UNRESOLVED_PORT` が指すのは `place.port` のうちポートの側だけです。place の側は `E_UNRESOLVED_PLACE_REF` です。`E_AMBIGUOUS_PORT` の場合、lowering では最初にマッチしたものを採り、衝突を報告します。直し方は、書き手の代わりにどれかを選ぶことではなく、衝突しているメンバーのどちらかを改名することだからです。
 
@@ -287,7 +287,7 @@ title: "11. Lint と制約検証"
 
 | コード | `data` ペイロード |
 |---|---|
-| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`。フォールバックの L 字経路で既存の構造物と衝突し、飛ばしたセルの数。 |
+| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`。フォールバックの L 字経路で既存の構造物と衝突し、飛ばしたセルの数。セルを飛ばしたときに付き、ルーターの上限を超えて敷かなかった通路では省略する。 |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`。この行が先行する行から奪う、割り当て対象のキー。末尾の `=` は含まない。必ず空でない。 |
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`。後述。 |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`。割り当てられたマテリアル、ジオメトリが必要とするファミリ、割り当ての出どころ。 |

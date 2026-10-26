@@ -134,11 +134,13 @@ pub enum DiagnosticCode {
     UnresolvedPort,
     /// A `connect` port id matches more than one member of the referenced def; the first wins.
     AmbiguousPort,
-    /// A `connect` row carries no `path=` argument.
+    /// A `connect` row carries no `path=`, or a `path=` that is not a material token.
     MissingPathMaterial,
-    /// Walkway voxelisation hit a building cell between two ports; the cell is skipped.
+    /// Walkway voxelisation hit a building cell between two ports, which is skipped, or the
+    /// straight L is past the router's search-area cap, so the walkway is not laid.
     WalkwayBlocked,
-    /// A `connect` row repeats a `(from, to)` port pair an earlier row in the site laid.
+    /// A `connect` row joins the same two ports, in either order, as an earlier row in the site
+    /// that laid them.
     DuplicateWalkway,
     /// A `connect` row targets a `place` whose row was refused.
     DeferredConnect,
