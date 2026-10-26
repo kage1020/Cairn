@@ -23,6 +23,15 @@ pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 /// Keywords that may carry a `-> value` sensor tail (`spec/redstone` "Signal binding").
 pub const SENSOR_HOSTS: &[&str] = &["pressure_plate"];
 
+/// Each actuator argument key of `spec/redstone` "Signal binding", paired with the component
+/// keyword that carries it.
+pub const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
+    ("opened_by", "door"),
+    ("powered_by", "piston"),
+    ("lit_by", "lamp"),
+    ("fired_by", "dispenser"),
+];
+
 /// Coarse classification of a member, derived from its source keyword.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]

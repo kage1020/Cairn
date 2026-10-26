@@ -19,14 +19,8 @@ use cairn_lang_core::intent::{
 };
 use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
-/// Each actuator argument key of `spec/redstone` "Signal binding", paired with the component
-/// keyword that carries it.
-pub const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
-    ("opened_by", "door"),
-    ("powered_by", "piston"),
-    ("lit_by", "lamp"),
-    ("fired_by", "dispenser"),
-];
+/// Each actuator argument key, paired with the component keyword that carries it.
+pub use cairn_lang_core::intent::ACTUATOR_BINDINGS;
 
 /// The component keywords that may carry a `->` sensor tail.
 pub use cairn_lang_core::intent::SENSOR_HOSTS;
