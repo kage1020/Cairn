@@ -1,4 +1,4 @@
-//! The version axes `cairn info` reports (`spec/versioning-editions`): the declared registry range,
+//! What `cairn info` reports (`spec/versioning-editions`): the declared registry range,
 //! per-edition portability, semantic-sensitive members, and the buildable targets.
 
 use std::collections::HashSet;
@@ -13,15 +13,16 @@ use crate::version::{FloorVerdict, VersionOrder, compare_versions, parse_min_ver
 
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
 
-/// The three-axis answer to "which version is this `.crn` for?".
+/// What `cairn info` answers to "which version is this `.crn` for?", short of the third axis, the
+/// verified lock target, which no lockfile is read for yet.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct VersionAxes {
     /// Axis 1: the version range the file declares.
     pub registry_compat: RegistryRange,
-    /// Axis 2: per-edition portability counts, in the caller's order (the CLI's `--editions`).
+    /// Per-edition portability counts, in the caller's order (the CLI's `--editions`).
     pub edition_portability: Vec<EditionPortability>,
-    /// Axis 3: members whose meaning shifts at a boundary version. Always empty: no catalog exists.
+    /// Axis 2: members whose meaning shifts at a boundary version. Always empty: no catalog exists.
     pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
     /// Per edition, in `edition_portability` order, the supported versions that build the source.
     pub buildable_targets: Vec<BuildableTargets>,

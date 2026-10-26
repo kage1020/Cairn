@@ -152,7 +152,7 @@ pub enum DiagnosticCode {
     ConnectArity,
     /// Two members in one phase wrote one voxel to different blocks; the later line wins.
     PhaseConflict,
-    /// An `assert truth(...)` with no rows.
+    /// An `assert truth(...)` with no rows, or none whose output is `0` or `1`.
     TruthTableEmpty,
     /// An `assert truth(...)` lists one signal as two or more of its inputs.
     TruthTableDuplicateInput,
