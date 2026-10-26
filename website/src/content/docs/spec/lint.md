@@ -13,11 +13,12 @@ no row is a bug in this section rather than a code outside it. Where a code's ru
 another chapter, the row states what the code means and links there for the rule. The row is what a
 reader with a code in hand needs to find, and the chapter is where the behaviour is defined.
 
-The redstone pipeline's `E_LOGIC_*` / `W_LOGIC_*` codes are outside that promise. They are reachable
-only through `cairn synth --experimental-logic-synth`, which is Internal tier
-([Compatibility](/spec/compatibility/)). Nothing about those strings is guaranteed, so a row here
-would state a contract that does not exist. [Redstone and Logic](/spec/redstone/) names the ones its
-own rules turn on.
+Every code of the redstone pipeline is outside that promise: the `E_LOGIC_*` / `W_LOGIC_*` codes,
+and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT` and
+`W_ROUTE_CROSS_LAYER_CLEARANCE`. They are reachable only through `cairn synth
+--experimental-logic-synth`, which is Internal tier ([Compatibility](/spec/compatibility/)). Nothing
+about those strings is guaranteed, so a row here would state a contract that does not exist.
+[Redstone and Logic](/spec/redstone/) names the ones its own rules turn on.
 
 ### Duplicates
 

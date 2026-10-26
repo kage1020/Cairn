@@ -49,6 +49,7 @@ Evolving な面:
 Internal な面:
 
 - ワークスペースの全クレートの Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、`cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-tree-sitter`、`cairn-lang-docs`)。これらは、含まれる最初の月次マイナーリリースから crates.io に公開しますが、CLI の推移的な公開依存でない項目にはすべて `#[doc(hidden)]` を付けます。まだ付けた項目はありません。
+- `cairn synth` と、それが出力する JSON。このコマンドは `--experimental-logic-synth` を付けたときにしか動きません。
 - コンパイラの中間表現 (Intent IR、Semantic IR、block-array ピボットのレイアウト)。
 - 増分ビルドキャッシュのディスク上の形式 (プロジェクト内の `target/` に相当するもの)。
 - 言語サーバーの内部プロトコル (VS Code などとの間の LSP の通信仕様は Stable ですが、`cairn-lang-lsp` の内部の分け方は Stable ではありません)。

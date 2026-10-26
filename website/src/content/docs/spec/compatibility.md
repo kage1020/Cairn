@@ -73,6 +73,7 @@ Internal surfaces:
   `cairn-lang-docs`). These crates are published to crates.io from the first monthly minor that
   contains them, but every item that is not the CLI's transitive public dependency is marked
   `#[doc(hidden)]`. No item is marked yet.
+- `cairn synth`, which runs only behind `--experimental-logic-synth`, and the JSON it prints.
 - The compiler's intermediate representation (Intent IR, Semantic IR, block-array pivot
   layouts).
 - The on-disk shape of incremental build caches (`target/`-equivalents inside the project
