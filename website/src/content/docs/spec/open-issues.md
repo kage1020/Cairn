@@ -17,8 +17,9 @@ considered later as an option.
 
 ## 15.2 Untouched topics
 
-**Coordinate system.** Keep the corner origin and `front = +z` fixed, or introduce a centre origin,
-an entrance-relative orientation, or a per-floor local `y=0` such as `level id=floor2 y=4`.
+**Coordinate system.** Keep the corner origin and `front = +z` fixed, or introduce a centre origin
+or an entrance-relative orientation. A per-floor local `y=0` is settled: `level y=N` provides it
+([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)).
 
 **Primitive promotion.** Whether hip, flat, and pyramid roofs, columns, arches, and `repeat` should
 become semantic primitives. The decision rests on experimental data from the

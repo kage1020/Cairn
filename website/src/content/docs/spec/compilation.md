@@ -208,18 +208,19 @@ Each term counts only the members that will paint:
 - `roof_extra`: the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
 - `1`: the base plane, which every struct has.
 
-Members inside a `level` count in all three: a struct whose only walls sit under `level y=5` is as
-tall as one that writes them directly.
+Members inside a `level` count in all three, at their offset: `walls height=3` written directly
+gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, and
 `pressure_plate` read `N` as the base their geometry is measured from. A `floor` and a `roof` are
 planes a struct has one of, so under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and
 lowers to nothing.
 
-**A member that does not paint does not size the volume.** The `overhang=` of a level-scoped roof
-does not widen the footprint, and its height does not raise `Dims.y`. The same holds for every way
-a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=` does not widen the
-footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
+**A member that does not paint does not size the volume.** The `overhang=` of a roof under
+`level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under
+`level y=0` the roof draws, and widens and raises the volume as one in the body does. The same
+holds for every way a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=`
+does not widen the footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
 
 The material half applies to `walls` and not to `roof`, because a roof whose `mat_slot=` does not
 resolve falls back to a material of its own and still draws. A themeless struct shows the asymmetry:
