@@ -1,5 +1,7 @@
-//! Every diagnostic code has a row of its own in the spec's catalog, in each language: a code is
-//! what `--format json` consumers branch on.
+//! Every code core's `DiagnosticCode` spells, and every code a CLI string literal prints itself,
+//! has a row of its own in the spec's catalog, in each language: a code is what a reader of the
+//! output, or a consumer of `--format json`, branches on. A code no literal spells out, such as
+//! one interpolated from a `const`, is not seen.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -14,8 +16,8 @@ use crate::repo::Repo;
 
 pub const RULE: Rule = Rule {
     name: "diagnostic-catalog",
-    summary: "every code core's DiagnosticCode or the CLI prints has a row in spec/lint's catalog, \
-              in each language",
+    summary: "every code core's DiagnosticCode spells, or a CLI string literal prints itself, has a \
+              row in spec/lint's catalog, in each language",
     check,
 };
 
@@ -24,9 +26,9 @@ const CORE_SRC: &str = "crates/cairn-lang-core/src";
 /// The CLI prints the codes of the checks it runs itself, outside core's enum.
 const CLI_SRC: &str = "crates/cairn-lang-cli/src";
 
-/// A code as the CLI prints one: `error[E_X]`, `warning[W_X]`, or `W_X:` opening the line.
+/// A code as the CLI prints one: `error[E_X]`, `warning[W_X]`, or `W_X:` opening a line.
 static PRINTED_CODE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:^|error\[|warning\[)([EW]_[A-Z0-9_]+)(?:\]|:)").expect("a valid pattern")
+    Regex::new(r"(?m)(?:^\s*|error\[|warning\[)([EW]_[A-Z0-9_]+)(?:\]|:)").expect("a valid pattern")
 });
 
 /// The spec directory in each language, with its catalog section's title. The chapter file is
@@ -99,14 +101,32 @@ impl<'ast> Visit<'ast> for Printed {
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        let literals = mac
-            .parse_body_with(
-                syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
-            )
-            .into_iter()
-            .flatten();
-        for expr in literals {
-            self.visit_expr(&expr);
+        match mac.parse_body_with(
+            syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
+        ) {
+            Ok(exprs) => {
+                for expr in exprs {
+                    self.visit_expr(&expr);
+                }
+            }
+            Err(_) => self.visit_tokens(mac.tokens.clone()),
+        }
+    }
+}
+
+impl Printed {
+    /// Reads every string literal in a macro body that is not a list of expressions.
+    fn visit_tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        for tree in tokens {
+            match tree {
+                proc_macro2::TokenTree::Group(group) => self.visit_tokens(group.stream()),
+                proc_macro2::TokenTree::Literal(literal) => {
+                    if let Ok(literal) = syn::parse_str::<syn::LitStr>(&literal.to_string()) {
+                        self.visit_lit_str(&literal);
+                    }
+                }
+                proc_macro2::TokenTree::Ident(_) | proc_macro2::TokenTree::Punct(_) => {}
+            }
         }
     }
 }
@@ -249,6 +269,10 @@ fn warn() { eprintln!("W_SEEN: {} now", x); }
 fn fail() -> String { format!("error[E_SEEN]: {}", y) }
 const NOTE: &str = "warning[W_ALSO]: z";
 const HELP: &str = "fires `E_ONLY_NAMED` when";
+const LATER: &str = "first line\nW_ON_A_LATER_LINE: z";
+const INDENTED: &str = "  W_INDENTED: z";
+macro_rules! warn { ($x:expr) => { eprintln!("W_IN_MACRO_RULES: {}", $x) }; }
+fn repeated() -> Vec<&'static str> { vec!["error[E_REPEATED]: z"; 2] }
 #[cfg(test)]
 mod tests { fn t() { assert!(s.contains("error[E_IN_TEST]")); } }
 "#;
@@ -256,7 +280,15 @@ mod tests { fn t() { assert!(s.contains("error[E_IN_TEST]")); } }
         printed.visit_file(&syn::parse_file(source).unwrap());
         assert_eq!(
             printed.found.into_iter().collect::<Vec<_>>(),
-            ["E_SEEN", "W_ALSO", "W_SEEN"]
+            [
+                "E_REPEATED",
+                "E_SEEN",
+                "W_ALSO",
+                "W_INDENTED",
+                "W_IN_MACRO_RULES",
+                "W_ON_A_LATER_LINE",
+                "W_SEEN"
+            ]
         );
     }
 
