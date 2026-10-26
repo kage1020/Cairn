@@ -61,10 +61,15 @@ That pairing is normative. A `-> sig.X` tail belongs to a sensor, and each actua
 the one component that reads it. A binding written anywhere else describes no circuit, and
 accepting it would put a port in the netlist with no component behind it.
 
-Two codes say so, and which one applies is decided by what the finding needs in order to be made. A
-`->` tail on a member that is not a sensor is `E_MISPLACED_BINDING`: whether a keyword may emit is a
-fact about the member line, so `check` answers it and every command reports it. An actuator key on a
-component that does not read it is `E_LOGIC_MISPLACED_BINDING`, raised by the synth pipeline.
+Which code says so is decided by what the finding needs in order to be made. A `->` tail on a member
+that is not a sensor is `E_MISPLACED_BINDING`: whether a keyword may emit is a fact about the member
+line, so `check` answers it and every command reports it. An actuator key on a component that does
+not read it is a fact about the member line too, since the key is outside that member's vocabulary:
+`walls opened_by=sig.power` is `E_UNKNOWN_ARGUMENT` ([Lint](/spec/lint/#syntax-and-structure)),
+which `check` reports and every command stops on, with a note naming the component the key belongs
+to. The synth pipeline's `E_LOGIC_MISPLACED_BINDING`, which names that component too, is reached
+only where a `theme` selector has made the key one that member reads
+([Lint](/spec/lint/#113-error-vs-warning)).
 
 Of the components above, only `door` and `pressure_plate` are accepted today. `lit_by=`,
 `powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
@@ -103,9 +108,11 @@ sensor. No way of writing the value makes `walls` a sensor.
 
 **Bindings go after the `[selector]`, never inside it.** `door[id=front] opened_by=sig.power` binds;
 `door[id=front,opened_by=sig.power]` does not. The brackets pick the member the line acts on, so
-nothing written among them is read as a binding. A bracketed pair earns whichever finding still
-applies once it is moved out. `E_LOGIC_MISPLACED_BINDING` names the brackets when that is the only
-problem; otherwise you get the finding for the host or the key.
+nothing written among them is read as a binding. A bracketed pair earns the finding its key would
+earn once moved out: `E_UNKNOWN_ARGUMENT` for a key outside the member's vocabulary, and
+`E_LOGIC_UNKNOWN_BINDING_KEY`, below, for a `sig.` value under a key the member reads that is not
+an actuator key. A component's own actuator key inside its brackets is `E_LOGIC_MISPLACED_BINDING`,
+which names the brackets, whatever the value.
 
 **A selector line binds the member its brackets pick.** `door[id=front] opened_by=sig.power` binds
 the door declared as `door id=front ...` in the same scope, at the top level or directly under a
@@ -121,9 +128,11 @@ the door's own line, through a patch, or on both. A second is `E_LOGIC_DUPLICATE
 bindings would be two wires into one door, a wired OR the logic layer never states. Signals are
 combined there instead: write `logic sig.open = sig.a or sig.x` and bind the door to `sig.open`.
 
-A `sig.` value under a key that is not one of the four actuator keys is
-`E_LOGIC_UNKNOWN_BINDING_KEY`. The value says a signal was meant to be wired and the key says
-nothing reads it. That is the shape a typo takes, as in `oepend_by=sig.power`.
+A `sig.` value under a key the member reads that is not one of the four actuator keys is
+`E_LOGIC_UNKNOWN_BINDING_KEY`, raised by the synth pipeline, as in `walls height=sig.power`. The
+value says a signal was meant to be wired and the key is not one any component reads a signal from.
+A misspelt actuator key such as `oepend_by=sig.power` is outside the member's vocabulary, so it is
+the `E_UNKNOWN_ARGUMENT` that `check` reports first.
 
 ## 14.3 The logic layer is a dependency DAG
 
