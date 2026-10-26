@@ -42,10 +42,12 @@ and aligns architectural knowledge (walls, roofs, symmetry) with the voxel world
 
 ## Two version axes
 
-Cairn's own releases use date-based versioning (CalVer) `YYYY.M[.PATCH]`: `2026.7` for a monthly
-release, `2026.7.1` for an in-month patch. They sort chronologically as strings. A release bundles
-the language spec, the reference compiler, the standard library, and the `(edition, version)`
-registry and constraint catalogs.
+Cairn's own releases use date-based versioning (CalVer) `YYYY.M.PATCH`: `2026.7.0` for a monthly
+release, `2026.7.1` for an in-month patch. A version written without its patch, as `@cairn` allows,
+has patch `0`, so `2026.7` and `2026.7.0` name the same version. Versions compare component by
+component, as numbers: `2026.10.0` is later than `2026.8.2`, though it sorts before it as a string.
+A release bundles the language spec, the reference compiler, the standard library, and the
+`(edition, version)` registry and constraint catalogs.
 
 **Minecraft also moved to date-based versions**, so the two cannot be told apart by format. They are
 distinguished by field, flag, or keyword, never by shape:

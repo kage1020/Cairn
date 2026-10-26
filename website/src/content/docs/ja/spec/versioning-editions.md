@@ -358,7 +358,7 @@ semantic-sensitive:      (none)
 # build.crn.lock (コンパイラが生成)
 lock_schema_version: 1        # この文書自身のスキーマの改訂番号
 source_hash: sha256:...
-cairn_version: 2026.06        # Cairn リリースの日付バージョン (CalVer)
+cairn_version: 2026.10.0      # 書き出した Cairn のリリース。`cairn --version` の表示と同じ
 target: { edition: java, mc_version: 1.20.4, data_version: 3700 }
 inputs: { registry_pack_hash: sha256:..., constraint_catalog_hash: sha256:... }
 resolved_ir_hash: sha256:...

@@ -2,10 +2,9 @@
 title: "Compatibility Tiers"
 ---
 
-Cairn ships a single release train under
-[date-based versioning](/spec/versioning-editions/#101-the-target-is-a-compile-time-parameter) (`YYYY.M[.PATCH]`).
-Because CalVer has no semver-style "major" axis, the **scope of what is and is not safe to break in
-a release** is set by this document rather than by version numbers.
+Cairn ships a single release train under [date-based versioning](/spec/#two-version-axes)
+(`YYYY.M.PATCH`). Because CalVer has no semver-style "major" axis, the **scope of what is and is
+not safe to break in a release** is set by this document rather than by version numbers.
 
 Every public surface of the project sits in exactly one of three tiers: **Stable**, **Evolving**, or
 **Internal**. The tier sets the rules; the version number only records when something happened.

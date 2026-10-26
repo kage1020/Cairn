@@ -688,7 +688,7 @@ hand-written.
 # build.crn.lock (compiler-generated)
 lock_schema_version: 1        # revision of this document's own schema
 source_hash: sha256:...
-cairn_version: 2026.06        # the Cairn release's date version (CalVer)
+cairn_version: 2026.10.0      # the Cairn release that wrote it, as `cairn --version` prints it
 target: { edition: java, mc_version: 1.20.4, data_version: 3700 }
 inputs: { registry_pack_hash: sha256:..., constraint_catalog_hash: sha256:... }
 resolved_ir_hash: sha256:...
