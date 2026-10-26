@@ -171,11 +171,14 @@ they carry no span and no other command raises them.
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which `cairn
 compile`, `cairn lower`, `cairn info` and `cairn check` all run, as does the language server.
-`E_UNKNOWN_ID` further needs a pinned target, so the two commands that raise it are `cairn compile
---target` and `cairn check --edition E --target V`. `info` and `lower` lower against no version, and
-so does a `compile` whose target the file's floors refuse ([Versioning and
-Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn check` with no
-`--target`, and the language server, lower with no target at all, so they raise
+`E_UNKNOWN_ID` further needs a pinned target, so three commands raise it: `cairn compile --target`,
+`cairn check --edition E --target V`, and `cairn info`, which lowers once per supported version for
+its `buildable targets` row and prints each refusing version's findings under `note: <edition>
+<version> refuses this source`, exiting 0 all the same ([Versioning and
+Editions](/spec/versioning-editions/#the-buildable-targets-row)). `lower` lowers against no version,
+as does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
+check` with no `--target`, and the language server, lower with no target at all, so they raise
 `E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
 `E_UNKNOWN_ID` ([§11.3](#113-error-vs-warning)).
 
@@ -457,18 +460,18 @@ on `code` can tell a struct that will not build from a template that will not in
 It is a warning rather than an error, matching the two above: the scope is skipped and the rest of
 the build is unaffected.
 
-`W_PALETTE_TOO_LARGE` is the same kind of limit on what a scope paints rather than where. Every state
-a member writes counts, including one a later member covers, so the limit is on the states written
-rather than the states the finished scope keeps. A vanilla registry has far fewer states, so a source
-reaches it only through block ids or state-literal properties no pinned target checks. Block ids go
-unchecked wherever lowering runs with no version pinned: in `cairn lower`, `cairn info`, the
-language server and a `cairn check` with no `--target`, in a `cairn compile` or `cairn check
---edition E --target V` naming a version the edition does not ship, and in a `cairn compile` whose
-target the file's floors refuse
-([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state
-literal's properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says
-([Materials and targets](#materials-and-targets)), so every command that lowers can reach the limit,
-`cairn compile` with a target that resolves among them. A warning, for the reason above.
+`W_PALETTE_TOO_LARGE` is the same kind of limit on what a scope paints rather than where. Every
+state a member writes counts, including one a later member covers, so the limit is on the states
+written rather than the states the finished scope keeps. A vanilla registry has far fewer states, so
+a source reaches it only through block ids or state-literal properties no pinned target checks.
+Block ids go unchecked wherever lowering runs with no version pinned: in `cairn lower`, the
+range-wide lowering behind `cairn info`'s report, the language server and a `cairn check` with no
+`--target`, in a `cairn compile` or `cairn check --edition E --target V` naming a version the
+edition does not ship, and in a `cairn compile` whose target the file's floors refuse ([Versioning
+and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state literal's
+properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says ([Materials and
+targets](#materials-and-targets)), so every command that lowers can reach the limit, `cairn compile`
+with a target that resolves among them. A warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it.

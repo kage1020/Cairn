@@ -141,15 +141,18 @@ The tables ship in the registry pack's `blocks` component, folded with the `inhe
 of [§10.3](#103-backend--data-tables).
 
 The check therefore runs where a version is pinned and nowhere else: on `cairn compile --target`,
-and on `cairn check --edition E --target V`, which pins the same pair to run the same pass without
-writing anything. A `compile` whose target the file's floors refuse pins none: it checks no id and
+on `cairn check --edition E --target V`, which pins the same pair to run the same pass without
+writing anything, and in the `buildable targets` row of `cairn info`, which pins each supported
+version in turn. A `compile` whose target the file's floors refuse pins none: it checks no id and
 is refused on the floor instead ([§10.4](#the-declared-floor-is-enforced)), while `check --target`
-is not held to the floors and pins the target regardless. `cairn info` and `cairn lower` do lower,
-but pin no version, since `info` reports across the whole range by design. They skip the comparison
-rather than pick a version on the author's behalf. A `cairn check` with no `--target` lowers with
-no target at all, which pins no version and leaves each abstract token to the pack of the target
-that builds it, so neither this check, `E_UNKNOWN_ABSTRACT_TOKEN` nor `W_ABSTRACT_TOKEN_DEFERRED`
-reaches it ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+is not held to the floors and pins the target regardless. The `buildable targets` row reports each
+version's `E_UNKNOWN_ID` under that version and leaves the exit code alone
+([§10.5](#the-buildable-targets-row)). The other rows of `info` report across the whole range by
+design, and `cairn lower` lowers with no target, so neither pins a version: they skip the
+comparison rather than pick one on the author's behalf. A `cairn check` with no `--target` lowers
+with no target at all, which pins no version and leaves each abstract token to the pack of the
+target that builds it, so neither this check, `E_UNKNOWN_ABSTRACT_TOKEN` nor
+`W_ABSTRACT_TOKEN_DEFERRED` reaches it ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 Checking against *every* version the edition ships and refusing only the ids valid in none of them
 would need no flag, and would answer a different question: `stone_bricks` is valid somewhere on
