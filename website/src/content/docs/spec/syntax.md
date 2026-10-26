@@ -274,7 +274,7 @@ greater than 1 is the exception: `sym=true` refuses it, so an unreadable `sym=` 
 
 | Anchor | Column |
 |---|---|
-| `at=center` | `wall_length / 2`, rounded half up. Odd walls have a unique centre; even walls pick the column right of the midpoint. |
+| `at=center` | `u = floor(wall_length / 2)`. Odd walls have a unique centre; even walls pick the column right of the midpoint. |
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
