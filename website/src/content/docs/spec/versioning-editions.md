@@ -620,9 +620,11 @@ set rather than a `[Vmin, Vmax]` range, because two IDs whose version sets inter
 range would claim.
 
 It is derived by lowering once per supported version, the same check `cairn compile --target` runs.
-It is **not** derived by intersecting the range-wide palette's ID sets, which is unsound: with no
-target pinned every material takes its *default* mapping, so a token the target respells is compared
-as the wrong ID.
+An entry the `edition portability` row counts `unsupported` for its states is one the edition's
+writer cannot carry, so it refuses every version of that edition here as it refuses the compile. It
+is **not** derived by intersecting the range-wide palette's ID sets, which is unsound: with no
+target pinned every material takes its *default* mapping, so a token the target respells is
+compared as the wrong ID.
 
 Like the counters, this row reports and does not refuse. `cairn info` exits 0 even for a source no
 supported version can build, because the build is the command that refuses it. Each refusing
@@ -631,21 +633,22 @@ target that raised it.
 
 #### Why the list is empty
 
-An empty `buildable` has four causes, and they are not all repaired by the same edit: the
-`@requires` line answers two of them, the member that produced no voxels a third, and whatever the
-pinned lowering named the fourth. The list alone cannot tell them apart, so under `--format json` a
-`reason` accompanies it. The key is **absent** whenever a version builds, so an ordinary report is
-unchanged.
+An empty `buildable` has five causes, and they are not all repaired by the same edit: the
+`@requires` line answers two of them, the member that produced no voxels a third, the material the
+writer cannot carry a fourth, and whatever the pinned lowering named the fifth. The list alone
+cannot tell them apart, so under `--format json` a `reason` accompanies it. The key is **absent**
+whenever a version builds, so an ordinary report is unchanged.
 
-`reason` is an object, and every cause that holds is reported. Two of the four are facts about the
-**edition**, identical under every release and settled before any release is weighed, so they are
-its own fields. The other two differ between releases and sit in a per-version list beside them.
+`reason` is an object, and every cause that holds is reported. Three of the five are facts about
+the **edition**, identical under every release and settled before any release is weighed, so they
+are its own fields. The other two differ between releases and sit in a per-version list beside them.
 Each field is omitted when it carries nothing.
 
 | Field | Carries | What the author edits |
 |---|---|---|
 | `unplaceable_floors` | Floors | The `@requires` line. The floor names no release of this edition, so no version can be weighed against it and none is certified. |
 | `dropped_scopes` | Scope keys, and `site::SITE::FROM ↔ TO` for a walkway | The member or `connect` row that produced no voxels. It refuses every version before its ID table is consulted, since a partial build is not certified. |
+| `states_unmapped` | Palette entries, as `id[states]` | The theme slot bound to that material. The edition's writer cannot carry those states, so it refuses the build at every version. |
 | `versions` | Refused targets | One entry per version that refused for a reason of its own. |
 
 Beside rather than instead: a file can declare a floor this edition cannot place *and* use an ID
@@ -675,11 +678,11 @@ unchanged by this row: these ride inside the report rather than in the `{"diagno
 document, and a report is not a refusal.
 
 The text rows say none of this. `buildable targets: Bedrock: none (1.21.0, 1.21.40, 1.21.60 all
-refuse)` is true for every one of the four causes. Each cause is reported on stderr as well, though
+refuse)` is true for every one of the five causes. Each cause is reported on stderr as well, though
 not in the same shape: the two floor causes print a `note:` carrying the position of the line, a
-dropped scope prints a `note:` naming the scope and no position, and a refused lowering prints the
-findings themselves under the version, each with its own position. Only the JSON lacks them, and
-`reason` fills that gap.
+dropped scope prints a `note:` naming the scope and no position, an entry the writer cannot carry
+prints a `note:` naming the entry, and a refused lowering prints the findings themselves under the
+version, each with its own position. Only the JSON lacks them, and `reason` fills that gap.
 
 A fifth line, `recommended test targets`, belongs to this axis and answers a different question
 again: which versions are worth testing against. No code path emits it yet.
