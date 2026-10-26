@@ -409,7 +409,8 @@ same. `1.a` and `x` name no version in any scheme and are `E_INVALID_REQUIRES`.
 Accepting a label is not claiming it can be ordered. Whether a given label has a `DataVersion` is
 the table's answer, and it is asked per edition: `cairn compile --target` refuses the build, and
 `cairn info --editions` reports the edition as having no buildable target and says why. `cairn
-check` pins no edition and does not ask.
+check` does not ask: it never weighs a floor against its target, even with `--edition` and
+`--target` pinned ([§10.4](#the-declared-floor-is-enforced)).
 
 ## 10.5 "Which version is it for?" has three answers
 
@@ -685,9 +686,9 @@ again: which versions are worth testing against. No code path emits it yet.
 
 ## 10.6 Provenance and lock
 
-The `.crn` carries only `@intended_targets`, a hint. `verified: true`, the DataVersion, and the
-hashes exist only in the lock, written by the compiler on a successful build. They are never
-hand-written.
+The `.crn` carries the language version it is written against (`@cairn`) and, about targets, only
+`@intended_targets`, a hint. `verified: true`, the DataVersion, and the hashes exist only in the
+lock, written by the compiler on a successful build. They are never hand-written.
 
 ```yaml
 # build.crn.lock (compiler-generated)

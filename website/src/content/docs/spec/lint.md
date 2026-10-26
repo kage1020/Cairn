@@ -415,9 +415,10 @@ something for the name would build a site the source did not describe.
 collision, since the repair is to rename one of the colliding members rather than to pick for the
 author.
 
-`E_MISSING_PATH_MATERIAL` is an error where the other absent-material codes are warnings: a walkway
-that degrades to air leaves two buildings looking connected in the source and unconnected in the
-world, with nothing in the report to say so.
+`E_MISSING_PATH_MATERIAL` is an error, as `E_MISSING_MATERIAL` is, where `W_NO_THEME_BOUND` and
+`W_ABSTRACT_TOKEN_DEFERRED`, a material named with nothing to resolve it against, are warnings: a
+walkway that degrades to air leaves two buildings looking connected in the source and unconnected in
+the world, with nothing in the report to say so.
 
 `W_INVALID_WALKWAY_IDENT` is the same round-trip rule as the `.` / `:` half of
 `E_INVALID_PLACE_ID`, on a different separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
@@ -592,7 +593,7 @@ reference, a token and a block id print no such list.
 ## 11.2 Machine-readable payload
 
 Every command that takes `--format json` (`check`, `info`, `parse` and `lower`) writes exactly one
-JSON document to stdout under it, for every input it is given. `check`'s document is an array of
+JSON document to stdout under it, for every source it can read. `check`'s document is an array of
 findings, so a source that does not parse is that array with one `E_PARSE` element. `info`'s is the
 report; where there is no report, after a parse failure or any error-severity finding, it writes
 `{"diagnostics": [ ... ]}` instead, told apart from a report by its keys and by the exit code. Which
