@@ -50,7 +50,8 @@ fn eave_source(body: &str) -> String {
 
 #[test]
 fn a_plate_and_an_eave_stair_on_one_cell_lower_the_same_whichever_line_comes_first() {
-    // They contest `(1, 0, 4)`: the eave's one ring voxel and the plate's `at=front.outside` anchor.
+    // They contest `(1, 0, 4)`: the eave's one ring voxel and the plate's `at=front.outside`
+    // anchor.
     let plate_first = lowered(&eave_source(&format!("{PLATE}{EAVE}")));
     let eave_first = lowered(&eave_source(&format!("{EAVE}{PLATE}")));
 

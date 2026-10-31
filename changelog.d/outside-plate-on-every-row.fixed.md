@@ -6,6 +6,6 @@
   nothing, such as one with no `kind=` or one under a raised `level`, it is left unplaced with
   `W_DEFERRED_MEMBER`, whose note says the roof has the repair. The refusal offers a `roof` in the
   struct's body with an `overhang=` of at least 1, or `at=inside.<side>` at an interior `offset=`,
-  at `y=1` where a `floor` takes row 0. A refusal of an outside plate's `offset=` or row adds the roof it
-  needs too. The `redstone-door` and `crossbar` examples give their structs a flat roof with
+  at `y=1` where a `floor` takes row 0. A refusal of an outside plate's `offset=` or row adds the
+  roof it needs too. The `redstone-door` and `crossbar` examples give their structs a flat roof with
   `overhang=1`, and `redstone-door` puts one plate on each side of its door.
