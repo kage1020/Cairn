@@ -110,6 +110,7 @@ Stable なコードは、[Lint §11.1](/ja/spec/lint/#111-診断コード) が�
 - `E_UNKNOWN_ARGUMENT`。仕様がそのキーワードに定めていて、まだ受け付けないキーに出ます。たとえば `stair` の `waterlogged=` です。
 - `W_IGNORED_ARGUMENT`。まだ届いていないキー ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分)) に出ます。theme のセレクタのバインディング、`window shape=` / `anchor=`、`roof footprint=` / `bounds=`、ヘッダの `class=`、`door` の `mat_slot=` です。
 - `W_STATE_LITERAL_UNCHECKED`。`E_STATE_DOMAIN` がステートのリテラルをターゲットに照らして検査するようになるまで出ます。
+- `W_DEFERRED_MEMBER`。block-array パスがまだ lowering しないものを行が書いたメンバー ([Lint](/ja/spec/lint/#lowering)) に出ます。たとえば、持ち上げた `level` の下の `floor` や `roof`、入れ子の `level`、`repeat=` が 1 より大きく `sym=true` も持つ `window` です。
 
 仮置きのコードが覆うのは、仕様が「コンパイラがまだ組み上げない」と言っているものだけです。仕様そのものが拒否するソースは、同じコードを受け続けます。
 

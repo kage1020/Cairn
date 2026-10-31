@@ -173,7 +173,10 @@ means what it meant. The placeholders are:
 - `W_IGNORED_ARGUMENT`, on an unreached key ([Lint §11.3](/spec/lint/#113-error-vs-warning)): a
   theme selector's bindings, `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a header's
   `class=` and a `door`'s `mat_slot=`;
-- `W_STATE_LITERAL_UNCHECKED`, until `E_STATE_DOMAIN` checks a state literal against the target.
+- `W_STATE_LITERAL_UNCHECKED`, until `E_STATE_DOMAIN` checks a state literal against the target;
+- `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet
+  ([Lint](/spec/lint/#lowering)), such as a `floor` or `roof` under a raised `level`, a nested
+  `level` and a `window` with both `repeat=` above 1 and `sym=true`.
 
 A placeholder covers only what the spec says the compiler does not build yet. Source the spec
 itself refuses keeps its code.
