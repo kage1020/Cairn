@@ -35,12 +35,6 @@ const WALLS_PAINT_NOTHING: &str = "a `walls` member that would reach this row pa
 
 const INTERIOR_NEEDS: &str = "an interior needs a size of at least 3 on both axes";
 
-const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls, door, window, \
-     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
-     (at=<side>.outside|inside.<side>), and level y=N grouping, and recognises circuit \
-     region=<label> void=<N> (u32, N>=1) plus door[id=<name>] opened_by=sig.<name> actuator \
-     patches; other roles will be added as their lowering rules are spec'd";
-
 /// A finding as its code, the text it points at, its primary and its notes.
 type Finding<'a> = (DiagnosticCode, &'a str, &'a str, Vec<&'a str>);
 
@@ -92,7 +86,7 @@ fn plate_cells(ba: &BlockArray) -> Vec<(u32, u32, u32)> {
     cells
 }
 
-/// `line` in [`walled`] raises exactly one `E_UNPLACEABLE_PLATE` with `primary` and `notes`
+/// `line` in [`walled`] raises exactly one `E_INVALID_MEMBER` with `primary` and `notes`
 /// over the line, and paints no plate.
 fn assert_refused(line: &str, primary: &str, expected_notes: &[&str]) {
     assert_refused_at("5x5", line, primary, expected_notes);
@@ -105,7 +99,7 @@ fn assert_refused_at(size: &str, line: &str, primary: &str, expected_notes: &[&s
     assert_eq!(
         findings(&src, &out),
         [(
-            DiagnosticCode::UnplaceablePlate,
+            DiagnosticCode::InvalidMember,
             line,
             primary,
             expected_notes.to_vec(),
@@ -290,7 +284,7 @@ fn a_plate_past_its_wall_or_above_the_struct_is_refused_with_the_range_it_takes(
     assert_eq!(
         findings(&src, &out),
         [(
-            DiagnosticCode::UnplaceablePlate,
+            DiagnosticCode::InvalidMember,
             line,
             "pressure_plate `offset=7` runs past the front wall (length 5)",
             vec!["an `at=front.outside` plate takes an `offset=` from 0 to 4"],
@@ -387,13 +381,13 @@ fn a_plate_outside_a_wall_no_roof_overhangs_is_refused_on_every_row() {
         located(&found),
         [
             (DiagnosticCode::IgnoredArgument, "big"),
-            (DiagnosticCode::UnplaceablePlate, line),
+            (DiagnosticCode::InvalidMember, line),
         ],
     );
     assert_eq!(
         found[1],
         (
-            DiagnosticCode::UnplaceablePlate,
+            DiagnosticCode::InvalidMember,
             line,
             "pressure_plate `at=front.outside` at y=2 has no exterior voxel to sit on",
             vec![NO_ROOF_OVERHANG, OUTSIDE_FIX],
@@ -441,7 +435,7 @@ fn an_outside_plate_on_a_floored_struct_is_offered_the_row_on_top_of_the_floor()
     assert_eq!(
         findings(&src, &out),
         [(
-            DiagnosticCode::UnplaceablePlate,
+            DiagnosticCode::InvalidMember,
             line,
             "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
             vec![
@@ -469,13 +463,13 @@ fn an_inside_plate_on_a_thin_struct_is_not_offered_an_overhang_its_roof_does_not
         findings(&src, &out),
         [
             (
-                DiagnosticCode::DeferredMember,
+                DiagnosticCode::InvalidMember,
                 roof,
                 "missing `kind=` (expected one of gable, shed, hip, flat)",
-                vec![DRAWN_ROLES],
+                vec![],
             ),
             (
-                DiagnosticCode::UnplaceablePlate,
+                DiagnosticCode::InvalidMember,
                 line,
                 "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has no \
                  interior voxel",
@@ -528,7 +522,7 @@ fn a_plate_under_a_level_is_refused_naming_the_level_and_the_row_it_reaches() {
         assert_eq!(
             findings(&src, &out),
             [(
-                DiagnosticCode::UnplaceablePlate,
+                DiagnosticCode::InvalidMember,
                 line,
                 primary,
                 expected_notes.to_vec(),
@@ -597,13 +591,13 @@ fn a_plate_above_where_walls_that_paint_nothing_would_reach_is_refused_with_thei
         located(&found),
         [
             (DiagnosticCode::NoThemeBound, src.trim_end()),
-            (DiagnosticCode::UnplaceablePlate, line),
+            (DiagnosticCode::InvalidMember, line),
         ],
     );
     assert_eq!(
         found[1],
         (
-            DiagnosticCode::UnplaceablePlate,
+            DiagnosticCode::InvalidMember,
             line,
             "pressure_plate y=4 does not fit in the struct (dims.y=1)",
             vec![
@@ -649,18 +643,13 @@ fn a_plate_its_own_line_puts_nowhere_is_refused_though_the_walls_paint_nothing()
             located(&found),
             [
                 (DiagnosticCode::NoThemeBound, src.trim_end()),
-                (DiagnosticCode::UnplaceablePlate, line),
+                (DiagnosticCode::InvalidMember, line),
             ],
             "{line}",
         );
         assert_eq!(
             found[1],
-            (
-                DiagnosticCode::UnplaceablePlate,
-                line,
-                primary,
-                expected_notes
-            ),
+            (DiagnosticCode::InvalidMember, line, primary, expected_notes),
             "{line}",
         );
         assert_eq!(plate_cells(only_structure(&out)), [(1, 0, 1)], "{line}");
@@ -707,14 +696,14 @@ fn a_roof_under_a_level_with_no_offset_gives_a_plate_no_overhang_to_wait_on() {
     assert_eq!(
         located(&found),
         [
-            (DiagnosticCode::DeferredMember, level),
-            (DiagnosticCode::UnplaceablePlate, line),
+            (DiagnosticCode::InvalidMember, level),
+            (DiagnosticCode::InvalidMember, line),
         ],
     );
     assert_eq!(
         found[1],
         (
-            DiagnosticCode::UnplaceablePlate,
+            DiagnosticCode::InvalidMember,
             line,
             "pressure_plate `at=front.outside` at y=1 has no exterior voxel to sit on",
             vec![NO_ROOF_OVERHANG, OUTSIDE_FIX],
@@ -739,13 +728,13 @@ fn every_plate_left_unplaced_says_its_signal_still_reaches_the_netlist() {
             walled("PLATE"),
             "pressure_plate at=front.outside offset=5",
             vec![],
-            DiagnosticCode::UnplaceablePlate,
+            DiagnosticCode::InvalidMember,
         ),
         (
             walled("PLATE"),
             "pressure_plate at=sideways",
             vec![],
-            DiagnosticCode::UnplaceablePlate,
+            DiagnosticCode::InvalidMember,
         ),
         (
             unresolved,

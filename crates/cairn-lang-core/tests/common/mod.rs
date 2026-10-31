@@ -194,6 +194,15 @@ pub fn defers(ir: &BlockArrayIr) -> Vec<&str> {
         .collect()
 }
 
+/// The primaries of the `E_INVALID_MEMBER` findings `ir` carries.
+pub fn refusals(ir: &BlockArrayIr) -> Vec<&str> {
+    ir.diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::InvalidMember)
+        .map(|d| d.primary.as_str())
+        .collect()
+}
+
 /// Whether `source` lays its walkway rather than skipping it for an unplaceable port.
 ///
 /// # Panics

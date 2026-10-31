@@ -6,7 +6,9 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNo
 use crate::intent::{Member, ValueWithSpan};
 use crate::resolve::ScopeResolution;
 
-use crate::block_array::args::{diag_deferred_member_reason, member_or_slot_span};
+use crate::block_array::args::{
+    diag_deferred_member_reason, diag_invalid_member, member_or_slot_span,
+};
 use crate::block_array::material::is_stand_in;
 use crate::block_array::openings::WallSide;
 use crate::block_array::roof::{
@@ -231,7 +233,7 @@ fn diag_incompatible_material(
     }
 }
 
-/// Resolve a `roof` member's `kind=`, or `None` after a `W_DEFERRED_MEMBER`.
+/// Resolve a `roof` member's `kind=`, or `None` after an `E_INVALID_MEMBER`.
 fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<RoofKind> {
     let Some(raw) = member.ident_value("kind") else {
         // A wrongly shaped value is named by its shape: `kind="shed"` spells a kind in the set.
@@ -243,23 +245,24 @@ fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option
             ),
             None => format!("missing `kind=` (expected one of {})", RoofKind::names()),
         };
-        diagnostics.push(diag_deferred_member_reason(member, &reason));
+        diagnostics.push(diag_invalid_member(member, reason, Vec::new()));
         return None;
     };
     if let Some(k) = RoofKind::from_ident(raw) {
         return Some(k);
     }
-    diagnostics.push(diag_deferred_member_reason(
+    diagnostics.push(diag_invalid_member(
         member,
-        &format!(
+        format!(
             "unknown roof `kind={raw}` (expected one of {})",
             RoofKind::names(),
         ),
+        Vec::new(),
     ));
     None
 }
 
-/// Resolve a shed roof's required `slope_to=`, or `None` after a `W_DEFERRED_MEMBER`.
+/// Resolve a shed roof's required `slope_to=`, or `None` after an `E_INVALID_MEMBER`.
 pub(super) fn shed_slope_to(
     member: &Member,
     diagnostics: &mut Vec<Diagnostic>,
@@ -272,15 +275,16 @@ pub(super) fn shed_slope_to(
             ),
             None => "shed roof requires `slope_to=` (one of front, back, left, right)".to_owned(),
         };
-        diagnostics.push(diag_deferred_member_reason(member, &reason));
+        diagnostics.push(diag_invalid_member(member, reason, Vec::new()));
         return None;
     };
     if let Some(side) = WallSide::from_ident(raw) {
         return Some(side);
     }
-    diagnostics.push(diag_deferred_member_reason(
+    diagnostics.push(diag_invalid_member(
         member,
-        &format!("unknown shed `slope_to={raw}` (expected one of front, back, left, right)"),
+        format!("unknown shed `slope_to={raw}` (expected one of front, back, left, right)"),
+        Vec::new(),
     ));
     None
 }

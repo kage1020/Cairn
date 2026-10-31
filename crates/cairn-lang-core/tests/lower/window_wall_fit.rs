@@ -2,8 +2,9 @@
 //! walkway port draws the same line as the openings pass.
 
 use cairn_lang_core::block_array::BlockArray;
+use cairn_lang_core::check::DiagnosticCode;
 
-use crate::common::{defers, lowered, only_structure, state_at, walkway_was_laid};
+use crate::common::{lowered, only_structure, refusals, state_at, walkway_was_laid};
 
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
@@ -31,7 +32,7 @@ fn a_window_on_the_floor_plane_is_refused_instead_of_carving_the_slab() {
     );
     let out = lowered(&src);
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         [
             "window rows y=0..=1 are not all inside one wall course (size=1x2; the walls occupy y=1..=3)"
         ],
@@ -58,7 +59,7 @@ fn a_window_in_the_air_between_two_courses_is_refused_instead_of_hanging_glass()
     );
     let out = lowered(&src);
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         [
             "window rows y=3..=5 are not all inside one wall course (size=1x3; the walls occupy y=1..=2, y=7..=8)"
         ],
@@ -78,7 +79,7 @@ fn a_window_that_fills_the_wall_end_to_end_is_carved() {
          window side=front y=1 offset=3 size=1x3 mat_slot=glass\n",
     );
     let out = lowered(&src);
-    assert_eq!(defers(&out), [] as [&str; 0]);
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     let ba = only_structure(&out);
     for y in 1..=3 {
         assert_eq!(state_at(ba, 3, y, 4).id, "minecraft:glass_pane");
@@ -93,7 +94,7 @@ fn a_window_flush_with_the_top_course_is_carved() {
          window side=front y=3 offset=3 size=1x1 mat_slot=glass\n",
     );
     let out = lowered(&src);
-    assert_eq!(defers(&out), [] as [&str; 0]);
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     assert_eq!(
         state_at(only_structure(&out), 3, 3, 4).id,
         "minecraft:glass_pane",
@@ -109,7 +110,7 @@ fn a_window_one_row_past_the_top_course_is_refused() {
     );
     let out = lowered(&src);
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         [
             "window rows y=3..=4 are not all inside one wall course (size=1x2; the walls occupy y=1..=3)"
         ],
@@ -128,7 +129,7 @@ fn a_window_across_the_seam_between_two_stacked_courses_is_carved() {
          window side=front y=4 offset=3 size=1x3 mat_slot=glass\n",
     );
     let out = lowered(&src);
-    assert_eq!(defers(&out), [] as [&str; 0]);
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     let ba = only_structure(&out);
     for y in 4..=6 {
         assert_eq!(
@@ -148,9 +149,9 @@ fn a_window_on_a_struct_with_no_walls_says_there_is_no_wall() {
     );
     let out = lowered(&src);
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         [
-            "window at y=0 size=1x1 has no wall to cut into (this struct declares no `walls` that paints — one with a positive `height=` and a `mat_slot=` that resolves)"
+            "window at y=0 size=1x1 has no wall to cut into: this struct declares no `walls` with a positive `height=`"
         ],
     );
     assert!(!contains_id(only_structure(&out), "minecraft:glass_pane"));
@@ -166,7 +167,7 @@ fn a_window_inside_a_level_is_checked_against_the_rows_it_lands_on() {
          window side=front y=0 offset=3 size=1x1 mat_slot=glass\n",
     );
     let out = lowered(&inside);
-    assert_eq!(defers(&out), [] as [&str; 0]);
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     assert_eq!(
         state_at(only_structure(&out), 3, 5, 4).id,
         "minecraft:glass_pane",
@@ -178,7 +179,7 @@ fn a_window_inside_a_level_is_checked_against_the_rows_it_lands_on() {
     );
     let out = lowered(&above);
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         [
             "window rows y=5..=5 are not all inside one wall course (size=1x1; the walls occupy y=1..=4)"
         ],
@@ -195,12 +196,53 @@ fn a_height_on_a_member_that_is_not_a_wall_builds_no_wall() {
     );
     let out = lowered(&src);
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         [
-            "window at y=1 size=1x2 has no wall to cut into (this struct declares no `walls` that paints — one with a positive `height=` and a `mat_slot=` that resolves)"
+            "window at y=1 size=1x2 has no wall to cut into: this struct declares no `walls` with a positive `height=`"
         ],
     );
     assert!(!contains_id(only_structure(&out), "minecraft:glass_pane"));
+}
+
+#[test]
+fn a_window_in_a_course_that_paints_nothing_defers_to_its_walls() {
+    // The upper walls' material is an abstract token no registry pack lifts, so only 1..=3 paints.
+    let src = "theme t:\n  \
+               slot wall  -> @cobblestone\n  \
+               slot upper -> @wall.stone.cobble\n  \
+               slot glass -> @glass_pane\n\n\
+               struct t size=7x5\n  \
+               walls mat_slot=wall height=3\n  \
+               level id=up y=3\n    \
+               walls mat_slot=upper height=3\n  \
+               window side=front y=5 offset=3 size=1x1 mat_slot=glass\n";
+    let out = lowered(src);
+    assert_eq!(refusals(&out), Vec::<&str>::new());
+    let deferred: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DeferredMember)
+        .map(|d| {
+            (
+                d.primary.as_str(),
+                d.notes
+                    .iter()
+                    .map(|n| n.message.as_str())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        deferred,
+        [(
+            "window rows y=5..=5 lie in a course the walls are written to (y=1..=6) but not in one \
+             they paint (y=1..=3)",
+            vec![
+                "a `walls` member written to hold these rows paints nothing, and its own finding \
+                 says why; the opening is cut once that member paints"
+            ],
+        )],
+    );
 }
 
 // --------------------------------------------- the walkway port agrees
@@ -250,7 +292,7 @@ fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
                  walls mat_slot=wall height={WALL_HEIGHT}\n  \
                  window side=front offset=1 y={y} size=1x{height} mat_slot=glass\n",
             );
-            defers(&lowered(&src)).is_empty()
+            lowered(&src).diagnostics.is_empty()
         };
         let anchored = walkway_was_laid(&site_with_window_port(y, height, WALL_HEIGHT));
         assert_eq!(
@@ -285,7 +327,7 @@ fn walls_under_a_level_are_carved_into_and_anchor_a_port() {
             .iter()
             .any(|d| d.primary.contains("was skipped because port")),
         "the port resolves against the same masonry: {:?}",
-        defers(&out),
+        out.diagnostics,
     );
     assert_eq!(out.walkways.len(), 1, "the strip is laid");
 }
@@ -348,7 +390,7 @@ fn walls_that_paint_nothing_are_masonry_to_neither_pass() {
             .iter()
             .any(|d| d.primary.contains("was skipped because port")),
         "the port refuses it too: {:?}",
-        defers(&out),
+        out.diagnostics,
     );
     assert!(out.walkways.is_empty(), "and no strip is laid");
 }

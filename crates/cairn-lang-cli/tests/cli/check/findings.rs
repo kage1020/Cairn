@@ -13,8 +13,8 @@ const DUPLICATE_FINDINGS: &[(u64, u64, &str, &str)] = &[
     (2, 3, "error", "E_MISSING_MATERIAL"),
     (2, 18, "error", "E_DUPLICATE_ARG"),
     (4, 8, "error", "E_DUPLICATE_ID"),
-    (3, 3, "warning", "W_DEFERRED_MEMBER"),
-    (4, 3, "warning", "W_DEFERRED_MEMBER"),
+    (3, 3, "error", "E_INVALID_MEMBER"),
+    (4, 3, "error", "E_INVALID_MEMBER"),
 ];
 
 const CAIRN_VERSION: &str = "@cairn banana\n\ntheme t:\n  slot floor -> @oak_planks\n\nstruct s size=2x2\n  floor mat_slot=floor\n";

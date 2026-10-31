@@ -104,7 +104,7 @@ from the footprint whether or not a `walls` member paints it, and the rule holds
 including the floor row `y = 0`. A plate outside it is not placed.
 
 **A plate that cannot be placed.** A plate whose own line puts it on no voxel is
-`E_UNPLACEABLE_PLATE`, and the build stops. Its line does that with no `at=` or one other than
+`E_INVALID_MEMBER`, and the build stops. Its line does that with no `at=` or one other than
 `<side>.outside` or `inside.<side>`, an `offset=` or `y=` that is not a non-negative integer, an
 `offset=` at or past its wall's length, a row at or above the struct's height
 ([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), an

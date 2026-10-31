@@ -1,12 +1,14 @@
 //! Placing a `pressure_plate` member.
 
 use crate::ast::ValueKind;
-use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticNote};
 use crate::intent::Member;
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::BlockState;
-use crate::block_array::args::{diag_deferred_member_noted, diag_deferred_member_reason};
+use crate::block_array::args::{
+    diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member,
+};
 use crate::block_array::material::{IdOrigin, MaterialDeferred, TargetRegistry, validated_id};
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 
@@ -71,23 +73,6 @@ impl PlateAnchor {
     }
 }
 
-/// The `E_UNPLACEABLE_PLATE` for a plate its own line puts on no voxel.
-fn unplaceable(member: &Member, primary: String, notes: Vec<String>) -> Diagnostic {
-    Diagnostic {
-        code: DiagnosticCode::UnplaceablePlate,
-        span: member.span.clone(),
-        primary,
-        notes: notes
-            .into_iter()
-            .map(|message| DiagnosticNote {
-                span: None,
-                message,
-            })
-            .collect(),
-        data: None,
-    }
-}
-
 /// `refusal`, with [`BINDING_STILL_READ`] after its notes when the plate has a `->` binding.
 fn with_binding_note(member: &Member, refusal: Refusal) -> Diagnostic {
     let mut refusal = *refusal;
@@ -103,8 +88,13 @@ fn with_binding_note(member: &Member, refusal: Refusal) -> Diagnostic {
 
 /// Parse a `pressure_plate at=` value, or the refusal of any other shape.
 fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, Refusal> {
-    let refuse =
-        |primary: String| Box::new(unplaceable(member, primary, vec![ANCHOR_FORMS.to_owned()]));
+    let refuse = |primary: String| {
+        Box::new(diag_invalid_member(
+            member,
+            primary,
+            vec![ANCHOR_FORMS.to_owned()],
+        ))
+    };
     let Some(raw) = member.intent_state.get("at") else {
         return Err(refuse(
             "pressure_plate has no `at=`, so nothing says which wall it sits by".to_owned(),
@@ -136,7 +126,7 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, Refusal> {
     let refuse_with_suggestion = |primary: String, note: String| {
         let mut notes = vec![note];
         notes.extend(intended_anchor(head, tail).map(|anchor| did_you_mean(&anchor)));
-        Box::new(unplaceable(member, primary, notes))
+        Box::new(diag_invalid_member(member, primary, notes))
     };
     let not_a_side = |name: &str, example: &str| {
         refuse_with_suggestion(
@@ -234,7 +224,7 @@ fn plate_coordinate(member: &Member, key: &str, counts: &str) -> Result<u32, Ref
         return Ok(0);
     };
     member.nonneg_u32(key).ok_or_else(|| {
-        Box::new(unplaceable(
+        Box::new(diag_invalid_member(
             member,
             format!(
                 "pressure_plate `{key}=` must be a non-negative integer that fits in u32, not {}",
@@ -279,7 +269,7 @@ fn plate_voxel_position(
     if let PlateAnchor::Inside(_) = anchor
         && let Some((primary, notes)) = inside_plate_refusal(side, offset, length, y_world, ctx)
     {
-        return Err(Box::new(unplaceable(member, primary, notes)));
+        return Err(Box::new(diag_invalid_member(member, primary, notes)));
     }
     if y_world >= ctx.written_height {
         return Err(Box::new(above_the_struct(member, anchor, row, ctx)));
@@ -416,7 +406,7 @@ fn above_the_struct(
         "lower the plate, or raise the `walls` to reach its row".to_owned()
     });
     notes.extend(outside_needs_a_roof(anchor, ctx));
-    unplaceable(member, row_past_the_struct(row, ctx), notes)
+    diag_invalid_member(member, row_past_the_struct(row, ctx), notes)
 }
 
 /// The fix in a struct's body an `at=<side>.outside` plate needs too, when no roof on it is
@@ -465,7 +455,7 @@ fn past_the_wall(
             ),
         ],
     };
-    unplaceable(
+    diag_invalid_member(
         member,
         format!("pressure_plate `offset={offset}` runs past the {name} wall (length {length})"),
         notes,
@@ -540,7 +530,7 @@ fn no_exterior_voxel(
     } else {
         roof.to_owned()
     };
-    unplaceable(
+    diag_invalid_member(
         member,
         no_exterior_primary(side, row),
         vec![

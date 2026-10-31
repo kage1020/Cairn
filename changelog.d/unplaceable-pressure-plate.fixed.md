@@ -1,5 +1,5 @@
 - *(core)* A `pressure_plate` its own line puts on no voxel is refused with the new error
-  `E_UNPLACEABLE_PLATE` rather than built around with `W_DEFERRED_MEMBER`, so a structure no
+  `E_INVALID_MEMBER` rather than built around with `W_DEFERRED_MEMBER`, so a structure no
   longer builds at exit 0 without it, as `spec/lint` "Error vs warning" requires of a dropped
   member. The lines it covers are no `at=` or one naming no anchor, an `offset=` or `y=` that is not
   a non-negative integer, an `offset=` past the wall, a row at or above the struct's height, an

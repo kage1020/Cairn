@@ -123,30 +123,30 @@ fn redstone_door_actuator_patch_bad_id_emits_actuator_shaped_primary() {
     source.push_str("  door[id=nonexistent] opened_by=sig.open\n");
     let out = lower_source(&source, Edition::Java, Some(latest(Edition::Java)));
 
-    let actuator_defers: Vec<&cairn_lang_core::check::Diagnostic> = out
+    let actuator_refusals: Vec<&cairn_lang_core::check::Diagnostic> = out
         .diagnostics
         .iter()
-        .filter(|d| matches!(d.code, DiagnosticCode::DeferredMember))
+        .filter(|d| matches!(d.code, DiagnosticCode::InvalidMember))
         .filter(|d| d.primary.contains("actuator patch"))
         .collect();
     assert_eq!(
-        actuator_defers.len(),
+        actuator_refusals.len(),
         1,
-        "canary expected exactly one actuator-shaped deferred entry, got {} — primaries: {:?}",
-        actuator_defers.len(),
-        actuator_defers
+        "canary expected exactly one actuator-shaped refusal, got {} — primaries: {:?}",
+        actuator_refusals.len(),
+        actuator_refusals
             .iter()
             .map(|d| d.primary.as_str())
             .collect::<Vec<_>>(),
     );
     assert!(
-        actuator_defers[0].primary.contains("id=nonexistent"),
+        actuator_refusals[0].primary.contains("id=nonexistent"),
         "canary primary must render the offending id verbatim, got {}",
-        actuator_defers[0].primary,
+        actuator_refusals[0].primary,
     );
     assert!(
-        actuator_defers[0].primary.contains("front"),
+        actuator_refusals[0].primary.contains("front"),
         "canary primary must list `front` as a known door id (the fixture's only physical door), got {}",
-        actuator_defers[0].primary,
+        actuator_refusals[0].primary,
     );
 }

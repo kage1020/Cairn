@@ -61,7 +61,7 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 
 階段の系統でも、独自のブロックステートを持つ割り当ての場合は、id はそのまま使い、ステートは屋根の形状が決めた値で置き換えて、`W_DEFERRED_MEMBER` を出します。軒に置く `stair kind=stairs` も同じ材質の規則に従いますが、ステートは自分の引数から取ります。
 
-その引数は `facing=out | in`、`half=top | bottom`、`shape=straight | outer_left | outer_right` で、どれも裸の識別子です。既定値はそれぞれ `out`、`top`、`straight` です。一覧にない識別子はまだサポートしていないので、その階段は `W_DEFERRED_MEMBER` で保留になります。識別子ではない形の値 (`half="bottom"`、`facing=1`) は読み取れない値として扱います。階段はそのキーの既定値で作られ、その値は `W_IGNORED_ARGUMENT` として報告されます。階段が別の理由で拒否された場合も、この値は報告されます。その際は、どちらにしても階段は作られないという注記が付きます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
+その引数は `facing=out | in`、`half=top | bottom`、`shape=straight | outer_left | outer_right` で、どれも裸の識別子です。既定値はそれぞれ `out`、`top`、`straight` です。一覧にない識別子は `E_INVALID_MEMBER` になり、その階段は作られません。識別子ではない形の値 (`half="bottom"`、`facing=1`) は読み取れない値として扱います。階段はそのキーの既定値で作られ、その値は `W_IGNORED_ARGUMENT` として報告されます。階段が別の理由で拒否された場合も、この値は報告されます。その際は、どちらにしても階段は作られないという注記が付きます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
 
 **棟の向き。** 棟は、敷地 (footprint) の長いほうの水平軸に沿って走ります。正方形の敷地 (`size=WxW`) では `x` 軸を選び、東西方向の棟になります。
 
@@ -89,7 +89,7 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 - **傾斜の向き。** `slope_to=front|back` は `z` 方向に、`slope_to=left|right` は `x` 方向に高くなります。高い側の辺が指定した壁に、低い側の辺が反対側の壁に載ります。
 - **高さ。** 片流れ屋根は、壁の上端から `slope_span` ボクセル立ち上がります。`slope_span` は、`front|back` なら `dims.z`、`left|right` なら `dims.x` で、どちらも軒の出で広げた後の値です。`y` が 1 上がるごとに、低い側の辺から 1 ずつ内側に寄ります。
 - **階段の向き。** 斜面の階段はすべて高い側の辺を向きます。`front` なら `facing=south`、`back` なら `north`、`left` なら `west`、`right` なら `east` です。いちばん上の段は、同じ向きの `half=top` の 1 行でふさぎます。
-- **`slope_to=` は必須です。** 既定値はありません。指定がない場合や未知の値の場合は、向きを推測せず `W_DEFERRED_MEMBER` にします。
+- **`slope_to=` は必須です。** 既定値はありません。指定がない場合や未知の値の場合は、向きを推測せず `E_INVALID_MEMBER` にします。
 
 ## 4.5 寄棟屋根のボクセル規則
 

@@ -50,10 +50,10 @@ fn skip_notes<'a>(src: &str, out: &'a BlockArrayIr) -> Vec<&'a DiagnosticNote> {
     skip(src, out).notes.iter().collect()
 }
 
-/// The suffix a note carries when the member's own line defers too.
+/// The suffix a note carries when the member's own line is reported too.
 const OWN_LINE: &str = "; the member says so on its own line too";
 
-/// Asserts the member's own line really carries the deferral `note` claims it does.
+/// Asserts the member's own line really carries the finding `note` claims it does.
 fn assert_own_line_holds(out: &BlockArrayIr, note: &DiagnosticNote) {
     if !note.message.ends_with(OWN_LINE) {
         return;
@@ -63,12 +63,12 @@ fn assert_own_line_holds(out: &BlockArrayIr, note: &DiagnosticNote) {
         .clone()
         .expect("a note naming a line points at it");
     assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::DeferredMember
-                && d.span == span
-                && !d.primary.starts_with("walkway `")),
-        "the note says the member's line defers too, and nothing is there: {:#?}",
+        out.diagnostics.iter().any(|d| matches!(
+            d.code,
+            DiagnosticCode::DeferredMember | DiagnosticCode::InvalidMember
+        ) && d.span == span
+            && !d.primary.starts_with("walkway `")),
+        "the note says the member's line is reported too, and nothing is there: {:#?}",
         out.diagnostics,
     );
 }
@@ -341,8 +341,8 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
 }
 
 #[test]
-fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
-    // The port reads `offset=`, `y=`, `size=`; the cut also defers on `repeat=` or `step=`,
+fn a_window_the_cut_refuses_for_its_repeat_anchors_no_walkway() {
+    // The port reads `offset=`, `y=`, `size=`; the cut also refuses on `repeat=` or `step=`,
     // including a `repeat=` above 1 beside `sym=`.
     for (args, own_line) in [
         (
@@ -351,7 +351,8 @@ fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
         ),
         (
             "offset=0 y=1 size=1x1 repeat=abc mat_slot=glass",
-            "`repeat=` must be a non-negative integer that fits in u32",
+            "window `repeat=` must be a non-negative integer that fits in u32, not identifier \
+             `abc`",
         ),
         (
             "offset=0 y=1 size=1x1 repeat=3 step=3 mat_slot=glass",
@@ -373,7 +374,7 @@ fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
         ),
         (
             "offset=0 y=1 size=1x1 step=abc mat_slot=glass",
-            "`step=` must be a non-negative integer that fits in u32",
+            "window `step=` must be a non-negative integer that fits in u32, not identifier `abc`",
         ),
     ] {
         let src = site(&format!("{WALLS}  window id=p side=front {args}\n"), 6);

@@ -5,52 +5,57 @@ use crate::ast::{SIGNAL_HEAD, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticNote};
 use crate::intent::{Member, MemberRole, PatchTargetError, actuator_patch_target};
 
-use crate::block_array::args::{NonNegRead, diag_deferred_member_reason, nonneg_int_or_defer};
+use crate::block_array::args::{NonNegRead, diag_invalid_member, nonneg_int_or_refuse};
 
 /// Check a `circuit region=<label> void=<N>` line's shape without emitting voxels
 /// (`spec/redstone` "Place-and-route").
 ///
-/// `void=0` defers too: an author who wants no headroom drops the line.
+/// `void=0` is refused too: an author who wants no headroom drops the line.
 pub(super) fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Diagnostic>) {
     let Some(raw_region) = member.intent_state.get("region") else {
-        diagnostics.push(diag_deferred_member_reason(
+        diagnostics.push(diag_invalid_member(
             member,
-            "circuit requires `region=<label>` (e.g. `region=floor`, `region=basement`)",
+            "circuit requires `region=<label>` (e.g. `region=floor`, `region=basement`)".to_owned(),
+            Vec::new(),
         ));
         return;
     };
     let Some(region) = raw_region.value.as_label_str() else {
-        diagnostics.push(diag_deferred_member_reason(
+        diagnostics.push(diag_invalid_member(
             member,
-            &format!(
+            format!(
                 "circuit `region=` must be an identifier or string label, got {}",
                 raw_region.value.kind_name(),
             ),
+            Vec::new(),
         ));
         return;
     };
     if region.is_empty() {
-        diagnostics.push(diag_deferred_member_reason(
+        diagnostics.push(diag_invalid_member(
             member,
-            "circuit `region=` must be a non-empty label",
+            "circuit `region=` must be a non-empty label".to_owned(),
+            Vec::new(),
         ));
         return;
     }
-    // `nonneg_int_or_defer` has already reported a `Deferred` value.
-    match nonneg_int_or_defer(member, "void", diagnostics) {
+    // `nonneg_int_or_refuse` has already reported a `Refused` value.
+    match nonneg_int_or_refuse(member, "void", diagnostics) {
         NonNegRead::Valid(0) => {
-            diagnostics.push(diag_deferred_member_reason(
+            diagnostics.push(diag_invalid_member(
                 member,
-                "circuit `void=0` reserves no service layer; use a `u32` value >= 1",
+                "circuit `void=0` reserves no service layer; use a `u32` value >= 1".to_owned(),
+                Vec::new(),
             ));
         }
         NonNegRead::Absent => {
-            diagnostics.push(diag_deferred_member_reason(
+            diagnostics.push(diag_invalid_member(
                 member,
-                "circuit requires `void=<N>` (a `u32` service-layer height >= 1)",
+                "circuit requires `void=<N>` (a `u32` service-layer height >= 1)".to_owned(),
+                Vec::new(),
             ));
         }
-        NonNegRead::Valid(_) | NonNegRead::Deferred => {}
+        NonNegRead::Valid(_) | NonNegRead::Refused => {}
     }
 }
 
@@ -90,18 +95,19 @@ pub(super) fn recognize_actuator_patch(
         .filter(|k| !ACTUATOR_PATCH_SELECTOR_KEYS.contains(k) && vocabulary.contains(k))
         .collect();
     if !unknown_selector_keys.is_empty() {
-        diagnostics.push(diag_deferred_member_reason(
+        diagnostics.push(diag_invalid_member(
             member,
-            &format!(
+            format!(
                 "door actuator patch `[selector]` accepts only `id=<label>`; unknown attribute(s): {}",
                 unknown_selector_keys.join(", "),
             ),
+            Vec::new(),
         ));
         return;
     }
     // The redstone front end picks the door through this too, so the two agree.
     if let Err(reason) = actuator_patch_target(member, siblings.iter().map(|&(_, m)| m)) {
-        let mut diagnostic = diag_deferred_member_reason(member, &reason.to_string());
+        let mut diagnostic = diag_invalid_member(member, reason.to_string(), Vec::new());
         if let Some(fix) = patch_target_fix(&reason) {
             diagnostic.notes.push(DiagnosticNote {
                 span: None,
@@ -118,49 +124,54 @@ pub(super) fn recognize_actuator_patch(
         .filter(|k| !ACTUATOR_PATCH_INTENT_KEYS.contains(k))
         .collect();
     if !unknown_intent_keys.is_empty() {
-        diagnostics.push(diag_deferred_member_reason(
+        diagnostics.push(diag_invalid_member(
             member,
-            &format!(
+            format!(
                 "door actuator patch accepts only `opened_by=sig.<name>` today; unknown \
                  attribute(s): {} (spec/redstone \"Signal binding\" reserves `lit_by=` / \
                  `powered_by=` / `fired_by=` for future keywords)",
                 unknown_intent_keys.join(", "),
             ),
+            Vec::new(),
         ));
         return;
     }
     let Some(opened_by) = member.intent_state.get("opened_by") else {
-        diagnostics.push(diag_deferred_member_reason(
+        diagnostics.push(diag_invalid_member(
             member,
-            "door actuator patch requires an `opened_by=sig.<name>` binding (only `opened_by=` is recognised on doors today)",
+            "door actuator patch requires an `opened_by=sig.<name>` binding (only `opened_by=` is recognised on doors today)".to_owned(),
+            Vec::new(),
         ));
         return;
     };
     match &opened_by.value.kind {
         ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD && dotref.tail().len() == 1 => {}
         ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD => {
-            diagnostics.push(diag_deferred_member_reason(
+            diagnostics.push(diag_invalid_member(
                 member,
-                &format!(
+                format!(
                     "door actuator patch `opened_by=` must be a two-segment signal reference `sig.<name>`, got `{dotref}`",
                 ),
+                Vec::new(),
             ));
         }
         ValueKind::DotRef(dotref) => {
-            diagnostics.push(diag_deferred_member_reason(
+            diagnostics.push(diag_invalid_member(
                 member,
-                &format!(
+                format!(
                     "door actuator patch `opened_by=` must be a signal reference `sig.<name>` (head must be `sig`), got `{dotref}`",
                 ),
+                Vec::new(),
             ));
         }
         _ => {
-            diagnostics.push(diag_deferred_member_reason(
+            diagnostics.push(diag_invalid_member(
                 member,
-                &format!(
+                format!(
                     "door actuator patch `opened_by=` must be a signal reference `sig.<name>`, got {}",
                     opened_by.value.kind_name(),
                 ),
+                Vec::new(),
             ));
         }
     }

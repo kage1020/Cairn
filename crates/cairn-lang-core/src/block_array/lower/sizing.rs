@@ -5,7 +5,7 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 use crate::resolve::ScopeResolution;
 
-use crate::block_array::args::{diag_deferred_member_reason, nonneg_int_or_ignore};
+use crate::block_array::args::{diag_invalid_member, nonneg_int_or_ignore};
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::openings::WallSide;
 use crate::block_array::roof::{
@@ -174,16 +174,28 @@ fn roof_kind_of(member: &Member) -> Option<RoofKind> {
 }
 
 pub(super) fn wall_height(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<u32> {
-    match height_value(member) {
-        Some(h) if h >= 1 => Some(h),
-        _ => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                "walls without a positive `height=` cannot voxelise",
-            ));
-            None
-        }
+    if let Some(h) = height_value(member) {
+        return Some(h);
     }
+    let (primary, notes) = match member.intent_state.get("height") {
+        Some(raw) => (
+            format!(
+                "walls `height=` must be a positive integer that fits in u32, not {}",
+                raw.value.describe(),
+            ),
+            Vec::new(),
+        ),
+        None => (
+            "walls has no `height=`, so nothing says how many rows it rises".to_owned(),
+            vec![
+                "write `height=N`, where `N` is a positive integer: the walls fill the `N` rows \
+                 above the base row"
+                    .to_owned(),
+            ],
+        ),
+    };
+    diagnostics.push(diag_invalid_member(member, primary, notes));
+    None
 }
 
 /// A positive `height=` that fits `u32`, else `None` rather than a saturated height.

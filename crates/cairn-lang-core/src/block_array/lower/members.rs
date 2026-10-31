@@ -5,7 +5,8 @@ use crate::intent::{Member, MemberRole, ValueWithSpan};
 use crate::resolve::ScopeResolution;
 
 use crate::block_array::args::{
-    NonNegRead, diag_deferred_member_reason, member_or_slot_span, nonneg_int_or_defer,
+    NonNegRead, diag_deferred_member_reason, diag_invalid_member, member_or_slot_span,
+    nonneg_int_or_refuse,
 };
 use crate::block_array::material::{MaterialDeferred, TargetRegistry, resolve_block_state};
 use crate::block_array::openings::WallSide;
@@ -72,6 +73,17 @@ pub(super) fn member_disposition(role: &MemberRole) -> MemberDisposition {
     }
 }
 
+/// The note on an opening deferred because the `walls` member written to hold its rows paints
+/// nothing.
+pub(super) const UNPAINTED_COURSE: &str = "a `walls` member written to hold these rows paints \
+                                           nothing, and its own finding says why; the opening is \
+                                           cut once that member paints";
+
+/// The note on a `level` with no `y=`, saying what one is.
+const LEVEL_Y_FORM: &str = "write `level y=N`, where `N` is a non-negative integer: the members \
+                            under it are measured from row `N`, as the members of the body are \
+                            from row 0";
+
 /// Flatten `level` blocks into the body's paint set, each member with its level's `y` offset.
 ///
 /// Sizing reads the same list, so the volume and the paint agree on which members count.
@@ -82,16 +94,18 @@ pub(super) fn flatten_members<'a>(
     let mut out: Vec<(u32, &'a Member)> = Vec::new();
     for member in members {
         if matches!(member.role, MemberRole::Level) {
-            let y_offset = match nonneg_int_or_defer(member, "y", diagnostics) {
+            let y_offset = match nonneg_int_or_refuse(member, "y", diagnostics) {
                 NonNegRead::Valid(v) => v,
                 NonNegRead::Absent => {
-                    diagnostics.push(diag_deferred_member_reason(
+                    diagnostics.push(diag_invalid_member(
                         member,
-                        "level requires `y=N` (non-negative integer) to place its children",
+                        "level has no `y=`, so nothing says which row its members stand on"
+                            .to_owned(),
+                        vec![LEVEL_Y_FORM.to_owned()],
                     ));
                     continue;
                 }
-                NonNegRead::Deferred => continue,
+                NonNegRead::Refused => continue,
             };
             for child in &member.children.members {
                 if matches!(child.role, MemberRole::Level) {
@@ -255,15 +269,16 @@ pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Opt
             ),
             None => "missing `side=` (expected one of front, back, left, right)".to_owned(),
         };
-        diagnostics.push(diag_deferred_member_reason(member, &reason));
+        diagnostics.push(diag_invalid_member(member, reason, Vec::new()));
         return None;
     };
     if let Some(side) = WallSide::from_ident(raw) {
         return Some(side);
     }
-    diagnostics.push(diag_deferred_member_reason(
+    diagnostics.push(diag_invalid_member(
         member,
-        &format!("unknown `side={raw}` (expected one of front, back, left, right)"),
+        format!("unknown `side={raw}` (expected one of front, back, left, right)"),
+        Vec::new(),
     ));
     None
 }

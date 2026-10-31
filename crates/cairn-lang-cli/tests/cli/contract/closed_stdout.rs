@@ -116,8 +116,8 @@ fn a_run_that_warns_says_so_with_stdout_closed() {
          \x20\x20slot floor -> @spruce_planks\n\n\
          struct s size=2x2\n\
          \x20\x20floor mat_slot=floor\n\
-         \x20\x20roof kind=flat overhang=1\n\
-         \x20\x20stair kind=stairs side=front shape=inner_left\n",
+         \x20\x20level y=1\n\
+         \x20\x20\x20\x20roof kind=flat\n",
     );
     let source = source.to_str().unwrap();
     for argv in [
@@ -125,7 +125,7 @@ fn a_run_that_warns_says_so_with_stdout_closed() {
         ["info", source, "--format", "text"],
     ] {
         let open = same_argv(&argv, 0);
-        assert_stream(&stderr_of(&open), &[(7, 3, "warning", "W_DEFERRED_MEMBER")]);
+        assert_stream(&stderr_of(&open), &[(7, 5, "warning", "W_DEFERRED_MEMBER")]);
     }
 }
 

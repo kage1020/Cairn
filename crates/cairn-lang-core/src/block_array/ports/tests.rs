@@ -1,5 +1,5 @@
 use super::*;
-use crate::block_array::openings::door_at_deferral;
+use crate::block_array::openings::door_at_refusal;
 
 fn pid(name: &str) -> PortId {
     PortId::new(name).expect("valid port id")
@@ -964,7 +964,7 @@ fn every_rejection_note_renders_in_full() {
 #[test]
 fn the_member_line_and_the_note_word_a_door_at_fault_alike() {
     for written in written_samples("middle") {
-        let deferral = door_at_deferral(&written);
+        let refusal = door_at_refusal(&written);
         let note = PortRejection::DoorAt {
             written: written.clone(),
             member: 0..0,
@@ -972,10 +972,7 @@ fn the_member_line_and_the_note_word_a_door_at_fault_alike() {
         .note("a.p")
         .message;
         let clause = door_at_clause(&written);
-        assert!(
-            deferral.starts_with(&format!("door {clause}")),
-            "{deferral}"
-        );
+        assert!(refusal.starts_with(&format!("door {clause}")), "{refusal}");
         assert!(note.contains(&clause), "{note}");
     }
 }

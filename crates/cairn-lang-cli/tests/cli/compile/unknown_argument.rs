@@ -1,5 +1,5 @@
 //! `E_UNKNOWN_ARGUMENT` end to end: a misspelled `key=` refuses `check` and `compile`, and
-//! `compile` prints it ahead of the warning it causes.
+//! `compile` prints it ahead of the refusal it causes.
 
 use crate::common::{assert_stream, cairn, compile, write_source};
 
@@ -22,7 +22,7 @@ fn check_refuses_a_source_carrying_a_key_nothing_reads() {
         &[
             (4, 42, "error", "E_UNKNOWN_ARGUMENT"),
             (3, 1, "warning", "W_NO_THEME_BOUND"),
-            (4, 3, "warning", "W_DEFERRED_MEMBER"),
+            (4, 3, "error", "E_INVALID_MEMBER"),
         ],
     );
     assert!(stderr.contains("did you mean `height`?"), "got: {stderr}");
@@ -41,7 +41,7 @@ fn compile_reports_the_misspelling_before_the_absence_it_causes() {
         &[
             (4, 42, "error", "E_UNKNOWN_ARGUMENT"),
             (3, 1, "warning", "W_NO_THEME_BOUND"),
-            (4, 3, "warning", "W_DEFERRED_MEMBER"),
+            (4, 3, "error", "E_INVALID_MEMBER"),
         ],
     );
     assert!(

@@ -353,7 +353,7 @@ fn the_member_that_does_not_lower_is_billed_once() {
         let out = lowered(&source);
         assert_eq!(
             codes(&out.diagnostics),
-            ["W_DEFERRED_MEMBER"],
+            ["E_INVALID_MEMBER"],
             "source:\n{source}",
         );
         let module = parse(&source).expect("fixture parses");
@@ -361,7 +361,7 @@ fn the_member_that_does_not_lower_is_billed_once() {
         assert_eq!(
             codes(&check(&module, &ir, None)),
             Vec::<&str>::new(),
-            "the deferral carries the repair, so the check pass says nothing:\n{source}",
+            "the refusal carries the repair, so the check pass says nothing:\n{source}",
         );
     }
 }

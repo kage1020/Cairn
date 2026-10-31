@@ -138,8 +138,8 @@ fn a_wall_one_long_offers_only_dropping_sym() {
 }
 
 #[test]
-fn a_window_refused_outright_carries_the_generic_deferral_note() {
-    let window = "window side=front offset=0 y=1 size=1x1 repeat=0 mat_slot=glass";
+fn a_window_deferred_outright_carries_the_generic_deferral_note() {
+    let window = "window side=front offset=0 y=1 size=1x1 repeat=2 step=2 sym=true mat_slot=glass";
     let src = struct_with_window(6, 5, window);
     let out = lowered(&src);
     let all: Vec<_> = out.diagnostics.iter().flat_map(notes).collect();

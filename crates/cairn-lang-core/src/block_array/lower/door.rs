@@ -4,13 +4,13 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::PaletteIndex;
-use crate::block_array::args::diag_deferred_member_reason;
+use crate::block_array::args::{diag_deferred_member_noted, diag_invalid_member};
 use crate::block_array::openings::{
-    door_anchor_offset, door_at_deferral, wall_length, wall_local_to_grid,
+    door_anchor_offset, door_at_refusal, wall_length, wall_local_to_grid,
 };
 
 use super::canvas::MemberCanvas;
-use super::members::{StructCtx, side_name, side_of};
+use super::members::{StructCtx, UNPAINTED_COURSE, side_name, side_of};
 
 /// Most rows a doorway opens, counted from the row it opens at; a shorter course cuts fewer.
 const DOOR_HEIGHT: u32 = 2;
@@ -30,9 +30,10 @@ pub(super) fn carve_door(
     let at = match door_anchor_offset(member, len) {
         Ok(at) => at,
         Err(written) => {
-            diagnostics.push(diag_deferred_member_reason(
+            diagnostics.push(diag_invalid_member(
                 member,
-                &door_at_deferral(&written),
+                door_at_refusal(&written),
+                Vec::new(),
             ));
             return;
         }
@@ -40,16 +41,7 @@ pub(super) fn carve_door(
     // Judged against the course holding the door's row, never the tallest wall row.
     let base_row = y_offset.saturating_add(1);
     let Some(course_top) = ctx.wall_column.course_top_at(base_row) else {
-        // An unresolved `mat_slot=` empties the column too, so "no walls" names both causes.
-        let reason = if ctx.wall_column.is_empty() {
-            "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into".to_owned()
-        } else {
-            format!(
-                "door opens at y={base_row}, which is not inside any wall course (the walls occupy {})",
-                ctx.wall_column,
-            )
-        };
-        diagnostics.push(diag_deferred_member_reason(member, &reason));
+        diagnostics.push(door_course_refusal(member, base_row, ctx));
         return;
     };
     // Only the opening is cut; no door block is placed.
@@ -80,4 +72,38 @@ pub(super) fn carve_door(
         };
         canvas.paint((x, y, z), || PaletteIndex::AIR);
     }
+}
+
+/// The finding that refuses a door opening at `base_row`, which no wall course holds.
+///
+/// A row a `walls` member is written to hold and does not paint is that member's to repair.
+fn door_course_refusal(member: &Member, base_row: u32, ctx: &StructCtx<'_>) -> Diagnostic {
+    if ctx.written_walls.course_top_at(base_row).is_some() {
+        let primary = if ctx.wall_column.is_empty() {
+            "door has no wall to cut into: no `walls` member on this struct paints".to_owned()
+        } else {
+            format!(
+                "door opens at y={base_row}, in a course the walls are written to ({}) but not in one they paint ({})",
+                ctx.written_walls, ctx.wall_column,
+            )
+        };
+        return diag_deferred_member_noted(member, &primary, UNPAINTED_COURSE);
+    }
+    let (primary, fix) = if ctx.written_walls.is_empty() {
+        (
+            "door has no wall to cut into: this struct declares no `walls` with a positive `height=`"
+                .to_owned(),
+            "add a `walls` member whose course holds the row the door opens at",
+        )
+    } else {
+        (
+            format!(
+                "door opens at y={base_row}, which is not inside any wall course (the walls occupy {})",
+                ctx.written_walls,
+            ),
+            "a door opens one row above the base of its `level`, or of the body outside one; \
+             move it under a `level` whose walls hold that row, or add walls there",
+        )
+    };
+    diag_invalid_member(member, primary, vec![fix.to_owned()])
 }

@@ -128,8 +128,8 @@ pub(super) fn door_at_clause(written: &Written) -> String {
     }
 }
 
-/// The reason a door is deferred when [`door_anchor_offset`] refused its `at=`.
-pub(super) fn door_at_deferral(written: &Written) -> String {
+/// The primary of the `E_INVALID_MEMBER` for a door whose `at=` [`door_anchor_offset`] refused.
+pub(super) fn door_at_refusal(written: &Written) -> String {
     format!(
         "door {} — use `at=center | left | right`",
         door_at_clause(written)
@@ -165,8 +165,8 @@ impl WindowArgFault {
         }
     }
 
-    /// The reason `super::lower::window::cut_window` defers the window.
-    pub(super) fn deferral(self) -> String {
+    /// The primary of the `E_INVALID_MEMBER` that refuses the window.
+    pub(super) fn refusal(self) -> String {
         format!("window {}", self.clause())
     }
 }

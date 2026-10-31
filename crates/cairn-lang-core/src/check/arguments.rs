@@ -217,7 +217,7 @@ fn unlowered_binding(keyword: &str, key: &str, span: &crate::error::Span) -> Dia
 
 /// The finding for a key this member's selector argument (`kind=` on a `roof`) routed past.
 ///
-/// `None` also when the selector names no rule, which lowering's `W_DEFERRED_MEMBER` reports.
+/// `None` also when the selector names no rule, which lowering's `E_INVALID_MEMBER` reports.
 fn routed_past(member: &Member, key: &str, span: &crate::error::Span) -> Option<Diagnostic> {
     for axis in member.role.conditional_arguments() {
         if !axis.is_conditional(key) {

@@ -13,7 +13,7 @@ const PRELUDE: &str = concat!(
     "  floor mat_slot=wall\n",
     "  walls mat_slot=wall height=3\n",
     "  door id=front side=front at=center\n",
-    "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+    "  pressure_plate id=p at=inside.front offset=1 y=0 -> sig.a\n",
 );
 
 fn source(body: &str) -> String {
@@ -65,8 +65,8 @@ fn a_patch_on_an_id_no_door_carries_is_refused_and_gets_no_port() {
     );
 }
 
-/// Block-array lowering's `W_DEFERRED_MEMBER` primaries for `src`.
-fn lowering_deferrals(src: &str) -> Vec<String> {
+/// Block-array lowering's `E_INVALID_MEMBER` primaries for `src`.
+fn lowering_refusals(src: &str) -> Vec<String> {
     let module = cairn_lang_core::parse(src).expect("parse");
     let ir = cairn_lang_core::lower(&module);
     let resolution = cairn_lang_core::resolve(&ir, None);
@@ -74,7 +74,7 @@ fn lowering_deferrals(src: &str) -> Vec<String> {
     lowered
         .diagnostics
         .iter()
-        .filter(|d| d.code.as_str() == "W_DEFERRED_MEMBER")
+        .filter(|d| d.code.as_str() == "E_INVALID_MEMBER")
         .map(|d| d.primary.clone())
         .collect()
 }
@@ -110,12 +110,12 @@ fn every_reason_is_the_one_lowering_gives() {
     ];
     for (name, body, reason) in cases {
         let src = source(body);
-        let deferred = lowering_deferrals(&src);
-        assert_eq!(deferred.len(), 1, "{name}: lowering gave {deferred:#?}");
+        let refused = lowering_refusals(&src);
+        assert_eq!(refused.len(), 1, "{name}: lowering gave {refused:#?}");
         assert!(
-            deferred[0].contains(reason),
+            refused[0].contains(reason),
             "{name}: lowering: {}",
-            deferred[0]
+            refused[0]
         );
         let out = synth_source(&src);
         assert_eq!(codes(&out), ["E_LOGIC_UNRESOLVED_PATCH"], "{name}");
@@ -124,7 +124,7 @@ fn every_reason_is_the_one_lowering_gives() {
             synth,
             &format!(
                 "struct=s: {}, so its `opened_by=` binding drives nothing",
-                deferred[0]
+                refused[0]
             ),
             "{name}",
         );
@@ -135,9 +135,9 @@ fn every_reason_is_the_one_lowering_gives() {
 #[test]
 fn a_selector_key_other_than_id_is_where_the_passes_diverge() {
     let src = source("  door[side=front] opened_by=sig.a\n");
-    let deferred = lowering_deferrals(&src);
+    let refused = lowering_refusals(&src);
     assert_eq!(
-        deferred,
+        refused,
         ["door actuator patch `[selector]` accepts only `id=<label>`; unknown attribute(s): side"],
     );
     let out = synth_source(&src);
@@ -150,7 +150,7 @@ fn a_selector_key_other_than_id_is_where_the_passes_diverge() {
         "got: {}",
         d.primary,
     );
-    assert!(!d.primary.contains(&deferred[0]), "got: {}", d.primary);
+    assert!(!d.primary.contains(&refused[0]), "got: {}", d.primary);
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn a_patch_beside_an_unlabelled_door_is_told_to_add_the_id() {
         "  floor mat_slot=wall\n",
         "  walls mat_slot=wall height=3\n",
         "  door side=front at=center\n",
-        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  pressure_plate id=p at=inside.front offset=1 y=0 -> sig.a\n",
         "  door[id=front] opened_by=sig.a\n",
         "  circuit region=floor void=2\n",
     );
@@ -288,7 +288,7 @@ fn a_patch_on_a_door_bound_on_its_own_line_is_refused() {
         "  floor mat_slot=wall\n",
         "  walls mat_slot=wall height=3\n",
         "  door id=front side=front at=center opened_by=sig.a\n",
-        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  pressure_plate id=p at=inside.front offset=1 y=0 -> sig.a\n",
         "  pressure_plate id=q at=inside.front offset=1 y=0 -> sig.b\n",
         "  door[id=front] opened_by=sig.b\n",
         "  circuit region=floor void=2\n",
@@ -310,7 +310,7 @@ fn a_patch_above_a_bound_door_is_the_binding_refused() {
         "struct s size=7x5\n",
         "  floor mat_slot=wall\n",
         "  walls mat_slot=wall height=3\n",
-        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  pressure_plate id=p at=inside.front offset=1 y=0 -> sig.a\n",
         "  pressure_plate id=q at=inside.front offset=1 y=0 -> sig.b\n",
         "  door[id=front] opened_by=sig.b\n",
         "  door id=front side=front at=center opened_by=sig.a\n",

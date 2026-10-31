@@ -1,11 +1,13 @@
 //! Painting an eave `stair` member.
 
+use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::PaletteIndex;
 use crate::block_array::args::{
-    NonNegRead, diag_deferred_member_reason, ident_or_ignore, nonneg_int_or_defer,
+    NonNegRead, diag_deferred_member_noted, diag_invalid_member, ident_or_ignore,
+    nonneg_int_or_refuse,
 };
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 use crate::block_array::roof::{Cardinal, STAIR_BASE_ID, StairShape, shed_high_side, stair_state};
@@ -13,6 +15,10 @@ use crate::block_array::roof::{Cardinal, STAIR_BASE_ID, StairShape, shed_high_si
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::members::{StructCtx, resolve_member_state, side_name, side_of};
 use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
+
+/// The note on a stair refused for its `kind=`, naming the one kind there is.
+const STAIR_KINDS: &str = "write `kind=stairs`, the one stair kind: a band of stairs in the \
+                           overhang outside a wall";
 
 /// Paint a `stair kind=stairs` member as a band of stairs in the overhang outside a wall.
 pub(super) fn fill_stair(
@@ -109,25 +115,25 @@ fn draw_eave_band(
     true
 }
 
-/// Whether the stair's `kind=` is `stairs`, refusing any other with a `W_DEFERRED_MEMBER`.
+/// Whether the stair's `kind=` is `stairs`, refusing any other with an `E_INVALID_MEMBER`.
 fn eave_kind_is_stairs(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
-    let Some(raw_kind) = member.ident_value("kind") else {
-        let reason = if member.intent_state.contains_key("kind") {
-            "stair `kind=` must be `stairs`"
-        } else {
-            "stair without `kind=` is not yet supported (currently only `kind=stairs`)"
-        };
-        diagnostics.push(diag_deferred_member_reason(member, reason));
-        return false;
+    let primary = match member.intent_state.get("kind") {
+        None => "stair has no `kind=`, so nothing says what it builds".to_owned(),
+        Some(raw) => match &raw.value.kind {
+            ValueKind::Ident(kind) if kind == "stairs" => return true,
+            ValueKind::Ident(kind) => format!("unknown stair `kind={kind}`"),
+            _ => format!(
+                "stair `kind=` must be an identifier, not {}",
+                raw.value.describe(),
+            ),
+        },
     };
-    if raw_kind != "stairs" {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!("stair `kind={raw_kind}` is not yet supported (currently only `kind=stairs`)"),
-        ));
-        return false;
-    }
-    true
+    diagnostics.push(diag_invalid_member(
+        member,
+        primary,
+        vec![STAIR_KINDS.to_owned()],
+    ));
+    false
 }
 
 impl EaveStates<'_> {
@@ -138,14 +144,18 @@ impl EaveStates<'_> {
         side: WallSide,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Option<(Cardinal, &'static str, StairShape)> {
+        let mut refuse = |key: &str, other: &str, values: &[&str]| {
+            diagnostics.push(diag_invalid_member(
+                member,
+                format!("unknown stair `{key}={other}`"),
+                vec![format!("`{key}=` takes one of {}", values.join(", "))],
+            ));
+        };
         let half = match self.half {
             Some("top") | None => "top",
             Some("bottom") => "bottom",
             Some(other) => {
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    &format!("stair `half={other}` is not yet supported (use `top` or `bottom`)"),
-                ));
+                refuse("half", other, &["top", "bottom"]);
                 return None;
             }
         };
@@ -153,10 +163,7 @@ impl EaveStates<'_> {
             Some("out") | None => shed_high_side(side),
             Some("in") => inward_cardinal(side),
             Some(other) => {
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    &format!("stair `facing={other}` is not yet supported (use `out` or `in`)"),
-                ));
+                refuse("facing", other, &["out", "in"]);
                 return None;
             }
         };
@@ -165,12 +172,7 @@ impl EaveStates<'_> {
             Some("outer_left") => StairShape::OuterLeft,
             Some("outer_right") => StairShape::OuterRight,
             Some(other) => {
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    &format!(
-                        "stair `shape={other}` is not yet supported (use `straight`, `outer_left`, or `outer_right`)",
-                    ),
-                ));
+                refuse("shape", other, &["straight", "outer_left", "outer_right"]);
                 return None;
             }
         };
@@ -178,34 +180,67 @@ impl EaveStates<'_> {
     }
 }
 
-/// The row an eave band lands on, or `None` after a `W_DEFERRED_MEMBER`.
+/// The row an eave band lands on, or `None` after the finding that refuses the stair.
+///
+/// The stair's own line is asked against the struct as written first, so its fault is an error
+/// even when a `roof` or `walls` member that would have held it paints nothing too.
 fn eave_row(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
-    // The overhang a roof draws, not the `overhang=` written: a roof that draws nothing gives none.
-    if ctx.overhang == 0 {
-        diagnostics.push(diag_deferred_member_reason(
+    let y_local = match nonneg_int_or_refuse(member, "y", diagnostics) {
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Refused => return None,
+    };
+    let y_world = y_local.saturating_add(y_offset);
+    if ctx.written_overhang == 0 {
+        diagnostics.push(diag_invalid_member(
             member,
-            "eave `stair` needs a roof that draws an overhang of at least 1 so the band can sit outside the wall — no roof on this struct contributes one",
+            "eave `stair` has no overhang to sit in: no roof on this struct is written with an `overhang=` of at least 1".to_owned(),
+            vec![
+                "an eave band sits one voxel outside the wall, in the ring a roof's `overhang=` \
+                 adds; give the struct's `roof` an `overhang=` of at least 1"
+                    .to_owned(),
+            ],
         ));
         return None;
     }
-    let y_local = match nonneg_int_or_defer(member, "y", diagnostics) {
-        NonNegRead::Valid(v) => v,
-        NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return None,
+    let past_the_struct = || {
+        format!(
+            "stair y={y_world} does not fit in the struct (dims.y={})",
+            ctx.dims.y
+        )
     };
-    let y_world = y_local.saturating_add(y_offset);
-    if y_world >= ctx.dims.y {
-        diagnostics.push(diag_deferred_member_reason(
+    if y_world >= ctx.written_height {
+        diagnostics.push(diag_invalid_member(
             member,
-            &format!(
-                "stair y={y_world} does not fit in the struct (dims.y={})",
-                ctx.dims.y,
-            ),
+            past_the_struct(),
+            vec![format!(
+                "the struct's top row is {}; lower the stair or its `level`, or raise the `walls` \
+                 to reach its row",
+                ctx.written_height.saturating_sub(1),
+            )],
+        ));
+        return None;
+    }
+    // The overhang a roof draws, not the `overhang=` written: a roof that draws nothing gives none.
+    if ctx.overhang == 0 {
+        diagnostics.push(diag_deferred_member_noted(
+            member,
+            "eave `stair` has no overhang to sit in: the roof written with an `overhang=` draws nothing",
+            "the stair is built once that roof draws, and the roof's own finding says why it does not",
+        ));
+        return None;
+    }
+    if y_world >= ctx.dims.y {
+        diagnostics.push(diag_deferred_member_noted(
+            member,
+            &past_the_struct(),
+            "a `walls` member that would reach this row paints nothing; the stair is built once \
+             that member paints, and its own finding says why it does not",
         ));
         return None;
     }

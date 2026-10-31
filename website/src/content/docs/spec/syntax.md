@@ -285,15 +285,18 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
 The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
-Numeric offsets (`at=N`) are reserved for a future extension.
+Numeric offsets (`at=N`) are reserved for a future extension. A door with no `at=`, or one that
+names no anchor, is `E_INVALID_MEMBER` and cuts nothing.
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
 level's base plane. It takes the two rows a doorway wants, or, if fewer remain, as much of that
 row's wall course as is left counting the row it opens at. A door under a one-row course therefore
 opens that one row rather than cutting into the roof. The row it opens at MUST be inside a course
-of the masonry. A door written against walls that do not reach it is `W_DEFERRED_MEMBER` and cuts
-nothing, the same finding the `window` on that body earns ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the
-courses a `walls` paints).
+of the masonry. A door whose row no `walls` member is written to hold is `E_INVALID_MEMBER` and cuts
+nothing, the same finding the `window` on that body earns. A door in a course whose `walls` paint
+nothing is `W_DEFERRED_MEMBER` instead, since those walls' own finding has the repair
+([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the courses a `walls`
+paints).
 
 ## 5.5 IDs, classes, addresses
 
