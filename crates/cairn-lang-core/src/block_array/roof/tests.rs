@@ -217,57 +217,90 @@ fn hip_extra_height_matches_gable_short_span_formula() {
     assert_eq!(hip_extra_height(5, 5), 3);
 }
 
+/// The apex layer's `(x, z)` cells and faces, in emission order.
+fn hip_apex(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<((u32, u32), HipFace)> {
+    let apex_y = wall_top + hip_extra_height(roof_w, roof_h);
+    hip_voxels(roof_w, roof_h, wall_top)
+        .into_iter()
+        .filter(|v| v.pos.1 == apex_y)
+        .map(|v| ((v.pos.0, v.pos.2), v.face))
+        .collect()
+}
+
+fn facing_and_half(ridge_axis: Axis, face: HipFace) -> (String, String) {
+    let state = hip_stair_state(ridge_axis, face);
+    (
+        state.properties["facing"].clone(),
+        state.properties["half"].clone(),
+    )
+}
+
 #[test]
 fn hip_square_5x5_caps_with_single_apex_cell() {
-    let voxels = hip_voxels(5, 5, 4);
-    let apex_y = 4 + hip_extra_height(5, 5);
-    let apex: Vec<&HipVoxel> = voxels.iter().filter(|v| v.pos.1 == apex_y).collect();
-    assert_eq!(apex.len(), 1, "odd-span square hip apex is one cell");
-    assert_eq!(apex[0].pos, (2, apex_y, 2));
-    assert_eq!(apex[0].face, HipFace::ApexCap);
+    assert_eq!(hip_apex(5, 5, 4), [((2, 2), HipFace::Apex)]);
+    assert_eq!(
+        facing_and_half(Axis::X, HipFace::Apex),
+        ("south".to_owned(), "top".to_owned()),
+    );
 }
 
 #[test]
-fn hip_square_4x4_caps_with_two_by_two_apex() {
-    let voxels = hip_voxels(4, 4, 3);
-    let apex_y = 3 + hip_extra_height(4, 4);
-    let apex: Vec<&HipVoxel> = voxels.iter().filter(|v| v.pos.1 == apex_y).collect();
-    assert_eq!(apex.len(), 4, "even-span square hip apex is 2x2");
-    for v in apex {
-        assert_eq!(v.face, HipFace::ApexCap);
-    }
+fn hip_square_4x4_caps_with_the_x_ridge_pair() {
+    assert_eq!(
+        hip_apex(4, 4, 3),
+        [
+            ((1, 1), HipFace::ApexLow),
+            ((1, 2), HipFace::ApexHigh),
+            ((2, 1), HipFace::ApexLow),
+            ((2, 2), HipFace::ApexHigh),
+        ],
+    );
 }
 
 #[test]
-fn hip_rectangular_even_short_span_emits_two_row_ridge_band_single_facing() {
-    // The whole band takes one facing (`spec/compilation` "Hip roof voxel rules"), unlike a
-    // gable's even-span pair.
-    let voxels = hip_voxels(8, 4, 4);
-    let apex_y = 4 + hip_extra_height(8, 4);
-    assert_eq!(apex_y, 6);
-    let apex: Vec<&HipVoxel> = voxels.iter().filter(|v| v.pos.1 == apex_y).collect();
-    assert_eq!(apex.len(), 6 * 2);
-    let z_vals: std::collections::BTreeSet<u32> = apex.iter().map(|v| v.pos.2).collect();
-    assert_eq!(z_vals, std::collections::BTreeSet::from([1, 2]));
-    for v in &apex {
-        assert_eq!(v.face, HipFace::ApexRidge);
-    }
-    let state = hip_stair_state(Axis::X, HipFace::ApexRidge);
-    assert_eq!(state.properties.get("facing").unwrap(), "south");
-    assert_eq!(state.properties.get("half").unwrap(), "top");
+fn hip_even_short_span_band_rows_face_away_from_an_x_ridge() {
+    let apex = hip_apex(8, 4, 4);
+    let expected: Vec<((u32, u32), HipFace)> = (1..=6)
+        .flat_map(|x| [((x, 1), HipFace::ApexLow), ((x, 2), HipFace::ApexHigh)])
+        .collect();
+    assert_eq!(apex, expected);
+    assert_eq!(
+        facing_and_half(Axis::X, HipFace::ApexLow),
+        ("north".to_owned(), "top".to_owned()),
+    );
+    assert_eq!(
+        facing_and_half(Axis::X, HipFace::ApexHigh),
+        ("south".to_owned(), "top".to_owned()),
+    );
 }
 
 #[test]
-fn hip_rectangular_emits_ridge_row_on_long_axis() {
-    let voxels = hip_voxels(9, 5, 4);
-    let apex_y = 4 + 3;
-    let apex: Vec<&HipVoxel> = voxels.iter().filter(|v| v.pos.1 == apex_y).collect();
-    assert_eq!(apex.len(), 5);
-    let z_vals: std::collections::BTreeSet<u32> = apex.iter().map(|v| v.pos.2).collect();
-    assert_eq!(z_vals, std::collections::BTreeSet::from([2]));
-    for v in apex {
-        assert_eq!(v.face, HipFace::ApexRidge);
-    }
+fn hip_even_short_span_band_rows_face_away_from_a_z_ridge() {
+    let apex = hip_apex(4, 8, 4);
+    let expected: Vec<((u32, u32), HipFace)> = (1..=6)
+        .flat_map(|z| [((1, z), HipFace::ApexLow), ((2, z), HipFace::ApexHigh)])
+        .collect();
+    assert_eq!(apex, expected);
+    assert_eq!(
+        facing_and_half(Axis::Z, HipFace::ApexLow),
+        ("west".to_owned(), "top".to_owned()),
+    );
+    assert_eq!(
+        facing_and_half(Axis::Z, HipFace::ApexHigh),
+        ("east".to_owned(), "top".to_owned()),
+    );
+}
+
+#[test]
+fn hip_odd_short_span_band_is_one_row_with_the_low_slope_facing() {
+    let expected: Vec<((u32, u32), HipFace)> = (2..=6).map(|x| ((x, 2), HipFace::Apex)).collect();
+    assert_eq!(hip_apex(9, 5, 4), expected);
+    let expected: Vec<((u32, u32), HipFace)> = (2..=6).map(|z| ((2, z), HipFace::Apex)).collect();
+    assert_eq!(hip_apex(5, 9, 4), expected);
+    assert_eq!(
+        facing_and_half(Axis::Z, HipFace::Apex),
+        ("east".to_owned(), "top".to_owned()),
+    );
 }
 
 #[test]
