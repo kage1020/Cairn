@@ -26,8 +26,9 @@ it is added with the first deprecation, and nothing emits it yet.
 Stable surfaces:
 
 - `.crn` syntax that is normative in the spec (keywords, headers, block kinds, blockstate
-  primitives, theme/material primitives, edition guards). Edition guards are not part of the syntax
-  yet: `@edition` does not parse ([§10.7](/spec/versioning-editions/#writing-an-alternative)).
+  primitives, theme/material primitives), except what a section flags
+  [subject to change](#subject-to-change). Edition guards join it when `@edition` parses
+  ([§10.7](/spec/versioning-editions/#writing-an-alternative)).
 - The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
@@ -49,8 +50,8 @@ No deprecation window is promised.
 
 Evolving surfaces:
 
-- Spec chapters or sections explicitly marked as draft (the
-  [Open Issues](/spec/open-issues/) list and any section flagged "subject to change" in its prose).
+- Spec chapters or sections explicitly marked as draft (the [Open Issues](/spec/open-issues/)
+  list), and the syntax a section flags [subject to change](#subject-to-change).
 - New `cairn` subcommands during their first three monthly minors after introduction.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
@@ -60,6 +61,15 @@ Evolving surfaces:
 - The CLI's human-readable diagnostic format and prose (the *codes* are Stable; the *prose*
   is not).
 - The `--features` set on `cairn-lang-cli` (cargo features) and `[features]` on workspace crates.
+
+### Subject to change
+
+A section that specifies syntax the compiler does not build yet opens with a **Subject to change.**
+paragraph naming that syntax. What the flag names stays Evolving whatever tier
+[§C.2](#c2-tier-of-each-surface-by-milestone) gives its chapter, and the rest of the section takes
+the chapter's tier. The change that builds the syntax takes the flag off, and its CHANGELOG entry
+says the syntax graduates to Stable. No flag is added to syntax that is already Stable, since that
+would be a demotion.
 
 ### Internal
 

@@ -27,6 +27,9 @@ def cottage class=house size=9x7:
 
 ## 9.2 Editing model
 
+**Subject to change.** Nothing in this section is built yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 Important members carry `id=`. Members without one get a **meaning-based stable address** derived
 from parent / role / side / level / offset rather than from generation order, so addresses stay
 stable when you append to a struct. No pass derives that address yet: today a member without `id=`

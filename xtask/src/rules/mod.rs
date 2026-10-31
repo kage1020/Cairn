@@ -11,6 +11,7 @@ mod readme;
 mod session_refs;
 mod site_parity;
 mod spec_citations;
+mod subject_to_change;
 mod unsafe_code;
 mod versions;
 
@@ -29,6 +30,7 @@ pub const RULES: &[Rule] = &[
     unsafe_code::RULE,
     versions::RULE,
     spec_citations::RULE,
+    subject_to_change::RULE,
     site_parity::RULE,
     session_refs::RULE,
     readme::MODULES,

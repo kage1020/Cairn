@@ -4,6 +4,8 @@ title: "6. ブロックステート"
 
 ## 6.1 既定では導出し、上書きで昇格する
 
+**変更の余地あり。** 下に挙げる上書きのうち、組み上げられるのは `stair` の `facing`、`half`、`shape` だけです。そのほかの上書き、`beam`・`chest`・`note_block` のキーワード、座標の組はまだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
+
 既定では、コンパイラが位置と隣接するブロックからブロックステートを導出します。階段の向き、ドアの向き、ガラス板・フェンス・壁のつながり、チェストの左右などです。
 
 現時点で導出するのは、このうち階段の向きと形だけです。`roof` は、置かれた位置から階段の `facing`、`half`、`shape` を得ます。軒の `stair` が位置から得るのは、置かれた面に応じた東西南北の `facing` だけで、`half` と `shape` は行に書いた値か、既定の `top` と `straight` です。`door` は開口を切り抜くだけで、ドアのブロックは置きません。ガラス板・フェンス・壁のつながり、チェストの組み合わせ、下で述べる松明と看板の入れ替えもまだ導出しないので、`cairn lower examples/cottage.crn` はつながりの状態を持たない `minecraft:glass_pane` を出力します。
@@ -50,9 +52,9 @@ IR はまだこの形を持っていません。`resolved_state` には何も入
 
 ## 6.3 `waterlogged`
 
-既定では、塗りから決まります。`fill fluid=water` が水浸しにできるブロックと重なると、コンパイラが `waterlogged` を立てます。
+**変更の余地あり。** この節の内容は、まだどれも組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。`waterlogged` を設定するパスも読むパスもなく、`stair` に `waterlogged=false` を書くと `E_UNKNOWN_ARGUMENT` になります。下の例では、`fill`、`trapdoor`、`water` は `E_UNKNOWN_KEYWORD` に、`from=1,1,1` のような座標の組は `E_PARSE` になります。
 
-この節の内容は、まだどれも実装していません。`waterlogged` を設定するパスも読むパスもなく、`stair` に `waterlogged=false` を書くと `E_UNKNOWN_ARGUMENT` になります。下の例では、`fill`、`trapdoor`、`water` は `E_UNKNOWN_KEYWORD` に、`from=1,1,1` のような座標の組は `E_PARSE` になります。
+既定では、塗りから決まります。`fill fluid=water` が水浸しにできるブロックと重なると、コンパイラが `waterlogged` を立てます。
 
 `waterlogged=auto|true|false` の 3 値で指定することもできます。水槽の中に空気の空間を残す (明示的な `false`)、水源と流水を区別する、水浸しにできるブロックの一覧がバージョンによって違うことに対応する、といった用途のためです。流水は `flow=` と `level=` で明示します。
 

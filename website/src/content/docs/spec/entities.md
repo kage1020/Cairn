@@ -4,6 +4,9 @@ title: "8. Entities"
 
 ## 8.1 Two tiers
 
+**Subject to change.** Nothing in this section is built yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 Opening up `nbt={}` for everything would destroy theming, editing, linting, and version tolerance.
 So important entities are **structured**, which lets them ride the named-member editing model.
 
@@ -35,6 +38,9 @@ Block entities (signs) and true entities (paintings) are different things in NBT
 selector grammar in the DSL. Telling them apart is the compiler's job.
 
 ## 8.2 Anchor conventions
+
+**Subject to change.** `painting` and the anchor keys below (`anchor=`, `shape=`, `footprint=`,
+`bounds=`) are not built yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 Paintings, item frames, arch windows, stairwells, and overhanging roofs have a declared size that
 differs from the AABB they occupy. Left ambiguous, edit stability, theme swapping, and
