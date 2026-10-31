@@ -88,6 +88,13 @@ only where a `theme` selector has made the key one that member reads
 Of the components above, only `door` and `pressure_plate` are accepted today. `lit_by=`,
 `powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
 
+**Where an `at=<side>.outside` plate may sit.** The plate takes the wall cell at `offset=` and sits
+one voxel outward from it, in the ring a roof's `overhang=` adds around the walls
+([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)). That ring is the only
+exterior a struct has, so on a struct no roof gives an overhang the plate has no cell at any row,
+the floor row `y = 0` included. It is not placed on the wall's own column instead, where the wall
+above would bury it and its signal could never fire.
+
 **Where an `at=inside.<side>` plate may sit.** The plate takes the wall cell at `offset=` and sits
 one voxel inward from it, and that voxel must be strictly inside the wall ring: the footprint's
 outermost row and column, where `walls` paint their courses. So `offset` runs from 1 to the wall's
@@ -101,8 +108,8 @@ including the floor row `y = 0`. A plate outside it is not placed.
 `<side>.outside` or `inside.<side>`, an `offset=` or `y=` that is not a non-negative integer, an
 `offset=` at or past its wall's length, a row at or above the struct's height
 ([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), an
-`at=<side>.outside` above `y = 0` with no exterior voxel beside it, which is every one on a struct
-no roof gives an overhang, or an `at=inside.<side>` outside the interior. A plate the struct would
+`at=<side>.outside` on a struct no roof is written with an `overhang=` of at least 1, or an
+`at=inside.<side>` outside the interior. A plate the struct would
 have held had another member built is `W_DEFERRED_MEMBER` instead, because that member's finding
 has the repair: a row that `walls` painting nothing would have reached, or an `at=<side>.outside`
 beside a `roof` written with an `overhang=` that draws nothing ([Lint](/spec/lint/#lowering)).

@@ -108,10 +108,11 @@ Instead of placing dust and repeaters, you declare what depends on what.
 struct gatehouse size=7x5
   floor mat_slot=wall
   walls class=outer mat_slot=wall height=3
+  roof  kind=flat mat_slot=wall overhang=1
   door  id=front side=front at=center
 
-  pressure_plate id=plate at=front.outside offset=0 y=0 -> sig.step
-  pressure_plate id=inner at=inside.front  offset=1 y=0 -> sig.exit
+  pressure_plate id=plate at=front.outside offset=3 y=0 -> sig.step
+  pressure_plate id=inner at=inside.front  offset=3 y=1 -> sig.exit
 
   logic sig.open = sig.step or sig.exit
   door[id=front] opened_by=sig.open
@@ -121,6 +122,11 @@ struct gatehouse size=7x5
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
   assert always(sig.step -> eventually sig.open within 2)
 ```
+
+**A plate outside a wall stands under the roof's overhang.** `at=front.outside` takes the cell in
+front of the wall at `offset=3`, right outside the door, in the ring the roof's `overhang=1` adds.
+Without an overhang the struct ends at its walls, so the plate has nowhere to go and is refused with
+`E_UNPLACEABLE_PLATE`. `at=inside.front` takes the cell just inside, on the floor at `y=1`.
 
 **Sensors emit, actuators consume.** `-> sig.step` is a sensor's output; `opened_by=sig.open` is an
 actuator's input. `logic` writes the dependency between them.

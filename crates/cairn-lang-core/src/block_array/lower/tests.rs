@@ -646,7 +646,7 @@ fn the_payload_names_the_token_only_when_the_catalog_chose_the_id() {
 
 #[test]
 fn a_member_default_from_the_pack_is_checked_like_any_other_id() {
-    let plate = "struct s size=3x3\n  pressure_plate id=p at=front.outside\n";
+    let plate = "struct s size=3x3\n  pressure_plate id=p at=inside.front offset=1\n";
 
     let mapped_wrong = PinnedRegistry::new(
         vec![(PRESSURE_PLATE_TOKEN, "oak_pressure_plate")],
@@ -686,10 +686,10 @@ fn a_member_default_from_the_pack_is_checked_like_any_other_id() {
 #[test]
 fn a_bound_plate_whose_default_the_target_lacks_says_its_signal_still_reaches_the_netlist() {
     let no_row = PinnedRegistry::new(vec![], &["minecraft:wooden_pressure_plate"]);
-    let plate = "struct s size=3x3\n  pressure_plate id=p at=front.outside\n";
+    let plate = "struct s size=3x3\n  pressure_plate id=p at=inside.front offset=1\n";
     let unbound = findings_of(&lowered_with_resolver(plate, &no_row));
     let bound = findings_of(&lowered_with_resolver(
-        &plate.replace("front.outside", "front.outside -> sig.a"),
+        &plate.replace("offset=1", "offset=1 -> sig.a"),
         &no_row,
     ));
     assert_eq!(
@@ -1457,7 +1457,7 @@ fn abstract_token_deferral_says_what_each_member_does_instead() {
         },
         DeferralArm {
             members: "walls mat_slot=wall height=3\n  \
-                      pressure_plate at=front.outside offset=2 y=0 mat_slot=trim",
+                      pressure_plate at=inside.front offset=2 y=0 mat_slot=trim",
             consequence: default_block,
             voxels: |out| assert!(has_id(out, PRESSURE_PLATE_BASE_ID)),
         },
@@ -3760,49 +3760,67 @@ fn pressure_plate_outside_with_overhang_paints_in_the_overhang_column() {
 }
 
 #[test]
-fn pressure_plate_outside_at_y_zero_without_overhang_falls_back_to_foundation() {
+fn pressure_plate_outside_on_the_floor_row_without_an_overhang_is_refused() {
     let out = lowered(&plate_walled_3x3(
-        "pressure_plate at=front.outside offset=0 y=0",
+        "pressure_plate at=front.outside offset=1 y=0",
     ));
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(ba.dims.x, 3);
-    assert_eq!(ba.dims.z, 3);
-    assert_eq!(block_id(ba, 0, 0, 2), "minecraft:oak_pressure_plate");
-    assert_eq!(deferred_count(&out), 0);
+    assert_eq!(
+        findings_of(&out),
+        [unplaceable(
+            "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
+            &[
+                "no roof on this struct has an `overhang=` of at least 1, so it has no voxel \
+                 outside its walls",
+                "give a `roof` an `overhang=` of at least 1, or use `at=inside.front` with an \
+                 `offset=` of 1",
+            ],
+        )],
+    );
+    assert_eq!((ba.dims.x, ba.dims.z), (3, 3));
+    for (x, z) in [(0, 2), (1, 2), (2, 2), (1, 1)] {
+        assert_eq!(block_id(ba, x, 0, z), BlockState::AIR_ID, "({x}, 0, {z})");
+    }
 }
 
 #[test]
 fn pressure_plate_outside_saturating_shift_defers_beside_a_roof_that_draws_nothing() {
-    // `shift_outward` saturates back to the wall cell at x=0, which is still in the volume.
-    let out = lowered(&plate_walled_3x3(
-        "roof mat_slot=p overhang=1\n  pressure_plate at=left.outside offset=0 y=1",
-    ));
-    let ba = out.structures.get("struct::s").unwrap();
-    let found = findings_of(&out);
-    assert_eq!(
-        found
-            .iter()
-            .map(|(code, primary, _)| (*code, primary.as_str()))
-            .collect::<Vec<_>>(),
-        [
-            (
-                DiagnosticCode::DeferredMember,
-                "missing `kind=` (expected one of gable, shed, hip, flat)",
-            ),
-            (
-                DiagnosticCode::DeferredMember,
-                "pressure_plate `at=left.outside` at y=1 has no exterior voxel to sit on",
-            ),
-        ],
-    );
-    assert_eq!(
-        found[1].2,
-        [
-            "a `roof` written with an `overhang=` draws nothing, so the struct has no overhang to \
-          hold the plate; it fits once that roof draws"
-        ],
-    );
-    assert_eq!(block_id(ba, 0, 1, 1), "minecraft:oak_pressure_plate");
+    // `shift_outward` saturates back to the wall cell at x=0, which is still in the volume. The
+    // cell under the wall column at y=0 is no fallback either, so the floor row defers too.
+    for (y, wall_cell) in [(0, BlockState::AIR_ID), (1, "minecraft:oak_pressure_plate")] {
+        let out = lowered(&plate_walled_3x3(&format!(
+            "roof mat_slot=p overhang=1\n  pressure_plate at=left.outside offset=0 y={y}"
+        )));
+        let ba = out.structures.get("struct::s").unwrap();
+        let found = findings_of(&out);
+        assert_eq!(
+            found
+                .iter()
+                .map(|(code, primary, _)| (*code, primary.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    DiagnosticCode::DeferredMember,
+                    "missing `kind=` (expected one of gable, shed, hip, flat)",
+                ),
+                (
+                    DiagnosticCode::DeferredMember,
+                    format!(
+                        "pressure_plate `at=left.outside` at y={y} has no exterior voxel to sit on"
+                    )
+                    .as_str(),
+                ),
+            ],
+        );
+        assert_eq!(
+            found[1].2,
+            [
+                "a `roof` written with an `overhang=` draws nothing, so the struct has no overhang \
+                 to hold the plate; it fits once that roof draws"
+            ],
+        );
+        assert_eq!(block_id(ba, 0, y, 1), wall_cell, "y={y}");
+    }
 }
 
 #[test]
@@ -4017,7 +4035,7 @@ fn pressure_plate_inside_paints_at_every_non_corner_offset_of_every_side() {
 
 #[test]
 fn pressure_plate_inside_a_two_deep_struct_is_refused_and_keeps_the_back_wall() {
-    // With no overhang `front.outside` finds no cell above y=0, so the reason does not offer it.
+    // With no overhang `front.outside` finds no cell, so the reason does not offer it.
     let (out, findings) =
         lowered_inside_plate("5x2", "", "id=p at=inside.front offset=2 y=1 -> sig.a");
     let ba = out.structures.get("struct::s").unwrap();
@@ -4038,13 +4056,28 @@ fn pressure_plate_inside_a_two_deep_struct_is_refused_and_keeps_the_back_wall() 
 }
 
 #[test]
-fn pressure_plate_inside_a_two_deep_struct_at_the_floor_row_is_offered_the_outside_anchor() {
+fn pressure_plate_inside_a_two_deep_struct_at_the_floor_row_is_offered_the_outside_anchor_beside_an_overhang()
+ {
+    let primary = "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has \
+                   no interior voxel";
     let (out, findings) = lowered_inside_plate("5x2", "", "at=inside.front offset=2 y=0");
     assert_eq!(
         findings,
         [unplaceable(
-            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has no \
-             interior voxel",
+            primary,
+            &[
+                "an interior needs a size of at least 3 on both axes",
+                "grow `size.h` to at least 3",
+            ],
+        )],
+    );
+    assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
+    let roof = overhang_roof(1);
+    let (out, findings) = lowered_inside_plate("5x2", &roof, "at=inside.front offset=2 y=0");
+    assert_eq!(
+        findings,
+        [unplaceable(
+            primary,
             &[
                 "an interior needs a size of at least 3 on both axes",
                 "grow `size.h` to at least 3, or anchor the plate with `at=front.outside`",
@@ -4053,7 +4086,7 @@ fn pressure_plate_inside_a_two_deep_struct_at_the_floor_row_is_offered_the_outsi
     );
     assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
     // The remedy the reason offers works on this very struct.
-    let (out, findings) = lowered_inside_plate("5x2", "", "at=front.outside offset=2 y=0");
+    let (out, findings) = lowered_inside_plate("5x2", &roof, "at=front.outside offset=2 y=0");
     assert_eq!(findings, []);
     assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 1);
 }

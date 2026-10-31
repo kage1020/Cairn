@@ -15,8 +15,13 @@ const ANCHOR_FORMS: &str = "write `at=<side>.outside` to sit outside a wall or `
 const BINDING_STILL_READ: &str =
     "its signal binding still reaches the netlist, with no plate placed to drive it";
 
-const NO_ROOF_OVERHANG: &str = "no roof on this struct draws an overhang, and only at y=0 does \
-                                the plate fall back to the wall's foundation";
+const NO_ROOF_OVERHANG: &str = "no roof on this struct has an `overhang=` of at least 1, so it \
+                                has no voxel outside its walls";
+
+const OUTSIDE_FIX: &str = "give a `roof` an `overhang=` of at least 1, or use `at=inside.front` \
+                           with an `offset=` from 1 to 3";
+
+const ROOF_OVERHANG: &str = "roof kind=flat mat_slot=wall overhang=1";
 
 const LOWER_OR_RAISE: &str = "lower the plate, or raise the `walls` to reach its row";
 
@@ -309,12 +314,25 @@ fn a_plate_past_its_wall_on_a_struct_with_no_interior_names_every_axis_to_grow()
 }
 
 #[test]
-fn a_plate_outside_a_wall_no_roof_overhangs_is_refused_above_the_floor_row() {
-    let line = "pressure_plate at=front.outside y=2";
-    let primary = "pressure_plate `at=front.outside` at y=2 has no exterior voxel to sit on";
-    let fix = "set `y=0`, or give a `roof` an `overhang=` of at least 1";
-    assert_refused(line, primary, &[NO_ROOF_OVERHANG, fix]);
+fn a_plate_outside_a_wall_no_roof_overhangs_is_refused_on_every_row() {
+    for y in [0, 2] {
+        let line = format!("pressure_plate at=front.outside y={y}");
+        let primary =
+            format!("pressure_plate `at=front.outside` at y={y} has no exterior voxel to sit on");
+        assert_refused(&line, &primary, &[NO_ROOF_OVERHANG, OUTSIDE_FIX]);
+    }
+    // A struct with no interior is offered the roof alone.
+    assert_refused_at(
+        "5x2",
+        "pressure_plate at=front.outside",
+        "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
+        &[
+            NO_ROOF_OVERHANG,
+            "give a `roof` an `overhang=` of at least 1",
+        ],
+    );
     // A roof whose `overhang=` is unreadable draws none, and the same fix applies to it.
+    let line = "pressure_plate at=front.outside y=2";
     let roof = "roof kind=flat mat_slot=wall overhang=big";
     let src = walled(&format!("{roof}\n  {line}"));
     let out = lowered(&src);
@@ -331,10 +349,29 @@ fn a_plate_outside_a_wall_no_roof_overhangs_is_refused_above_the_floor_row() {
         (
             DiagnosticCode::UnplaceablePlate,
             line,
-            primary,
-            vec![NO_ROOF_OVERHANG, fix],
+            "pressure_plate `at=front.outside` at y=2 has no exterior voxel to sit on",
+            vec![NO_ROOF_OVERHANG, OUTSIDE_FIX],
         ),
     );
+}
+
+#[test]
+fn either_fix_an_outside_plate_with_no_overhang_is_offered_places_it() {
+    for (lines, cell) in [
+        (
+            format!("{ROOF_OVERHANG}\n  pressure_plate at=front.outside y=0"),
+            (1, 0, 6),
+        ),
+        (
+            "pressure_plate at=inside.front offset=1 y=0".to_owned(),
+            (1, 0, 3),
+        ),
+    ] {
+        let src = walled(&lines);
+        let out = lowered(&src);
+        assert_eq!(findings(&src, &out), [], "{lines}");
+        assert_eq!(plate_cells(only_structure(&out)), [cell], "{lines}");
+    }
 }
 
 #[test]
@@ -372,10 +409,7 @@ fn a_plate_under_a_level_is_refused_naming_the_level_and_the_row_it_reaches() {
             "pressure_plate at=front.outside",
             "pressure_plate `at=front.outside` at y=0 under `level y=1` (row 1) has no exterior \
              voxel to sit on",
-            [
-                NO_ROOF_OVERHANG,
-                "give a `roof` an `overhang=` of at least 1",
-            ],
+            [NO_ROOF_OVERHANG, OUTSIDE_FIX],
         ),
     ] {
         let src = walled(lines);
@@ -395,15 +429,24 @@ fn a_plate_under_a_level_is_refused_naming_the_level_and_the_row_it_reaches() {
 
 #[test]
 fn a_plate_on_the_last_row_or_cell_its_wall_offers_is_placed_silently() {
-    for (line, cell) in [
-        ("pressure_plate at=inside.front offset=3 y=3", (3, 3, 3)),
-        ("pressure_plate at=front.outside offset=4 y=0", (4, 0, 4)),
-        ("pressure_plate at=inside.left offset=3 y=1", (1, 1, 3)),
+    for (lines, cell) in [
+        (
+            "pressure_plate at=inside.front offset=3 y=3".to_owned(),
+            (3, 3, 3),
+        ),
+        (
+            format!("{ROOF_OVERHANG}\n  pressure_plate at=front.outside offset=4 y=3"),
+            (5, 3, 6),
+        ),
+        (
+            "pressure_plate at=inside.left offset=3 y=1".to_owned(),
+            (1, 1, 3),
+        ),
     ] {
-        let src = walled(line);
+        let src = walled(&lines);
         let out = lowered(&src);
-        assert_eq!(findings(&src, &out), [], "{line}");
-        assert_eq!(plate_cells(only_structure(&out)), [cell], "{line}");
+        assert_eq!(findings(&src, &out), [], "{lines}");
+        assert_eq!(plate_cells(only_structure(&out)), [cell], "{lines}");
     }
 }
 
@@ -477,10 +520,7 @@ fn a_plate_its_own_line_puts_nowhere_is_refused_though_the_walls_paint_nothing()
         (
             "pressure_plate at=front.outside y=2",
             "pressure_plate `at=front.outside` at y=2 has no exterior voxel to sit on",
-            vec![
-                NO_ROOF_OVERHANG,
-                "set `y=0`, or give a `roof` an `overhang=` of at least 1",
-            ],
+            vec![NO_ROOF_OVERHANG, OUTSIDE_FIX],
         ),
         (
             "pressure_plate at=inside.front offset=9 y=2",
@@ -566,10 +606,7 @@ fn a_roof_under_a_level_with_no_offset_gives_a_plate_no_overhang_to_wait_on() {
             DiagnosticCode::UnplaceablePlate,
             line,
             "pressure_plate `at=front.outside` at y=1 has no exterior voxel to sit on",
-            vec![
-                NO_ROOF_OVERHANG,
-                "set `y=0`, or give a `roof` an `overhang=` of at least 1",
-            ],
+            vec![NO_ROOF_OVERHANG, OUTSIDE_FIX,],
         ),
     );
 }
@@ -607,7 +644,7 @@ fn every_plate_left_unplaced_says_its_signal_still_reaches_the_netlist() {
         ),
         (
             state_literal,
-            "pressure_plate at=front.outside mat_slot=p",
+            "pressure_plate at=inside.front offset=2 mat_slot=p",
             vec![(DiagnosticCode::StateLiteralUnchecked, literal)],
             DiagnosticCode::DeferredMember,
         ),

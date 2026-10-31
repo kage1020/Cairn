@@ -36,6 +36,16 @@ structs:
           height:
             kind: Int
             value: 3
+      - role:
+          kind: Roof
+        mat_slot: wall
+        intent_state:
+          kind:
+            kind: Ident
+            value: flat
+          overhang:
+            kind: Int
+            value: 1
       - id: front
         role:
           kind: Door
@@ -62,7 +72,7 @@ structs:
               - outside
           offset:
             kind: Int
-            value: 0
+            value: 3
           y:
             kind: Int
             value: 0
@@ -82,10 +92,10 @@ structs:
               - front
           offset:
             kind: Int
-            value: 1
+            value: 3
           y:
             kind: Int
-            value: 0
+            value: 1
       - role:
           kind: Door
         selector:
