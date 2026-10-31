@@ -135,13 +135,16 @@ items:
           - sig
           - f1
         rhs:
-          kind: And
+          kind: Infix
           value:
-            - kind: Ref
+            primitive: and
+            lhs:
+              kind: Ref
               value:
                 - sig
                 - a
-            - kind: Ref
+            rhs:
+              kind: Ref
               value:
                 - sig
                 - b
@@ -150,13 +153,16 @@ items:
           - sig
           - f2
         rhs:
-          kind: Or
+          kind: Infix
           value:
-            - kind: Ref
+            primitive: or
+            lhs:
+              kind: Ref
               value:
                 - sig
                 - a
-            - kind: Ref
+            rhs:
+              kind: Ref
               value:
                 - sig
                 - b

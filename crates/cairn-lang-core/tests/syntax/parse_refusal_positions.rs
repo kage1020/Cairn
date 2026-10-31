@@ -353,31 +353,31 @@ fn an_x_key_apart_from_a_size_is_an_ordinary_key() {
 // -- logic expressions ------------------------------------------------------
 
 #[test]
-fn an_operator_is_not_read_as_a_signal() {
+fn an_infix_primitive_is_not_read_as_a_signal() {
     for (expression, expected) in [
         (
             "sig.a and or",
-            "2:27: expected a signal after `and`, got the operator `or`",
+            "2:27: expected a signal after `and`, got the infix primitive `or`",
         ),
         (
             "and",
-            "2:17: expected a signal after `=`, got the operator `and`",
+            "2:17: expected a signal after `=`, got the infix primitive `and`",
         ),
         (
             "sig.a or and and sig.b",
-            "2:26: expected a signal after `or`, got the operator `and`",
+            "2:26: expected a signal after `or`, got the infix primitive `and`",
         ),
         (
             "not or",
-            "2:21: expected a signal after `not`, got the operator `or`",
+            "2:21: expected a signal after `not`, got the infix primitive `or`",
         ),
         (
             "(or)",
-            "2:18: expected a signal after `(`, got the operator `or`",
+            "2:18: expected a signal after `(`, got the infix primitive `or`",
         ),
         (
             "sig.a and or.x",
-            "2:27: expected a signal after `and`, got the operator `or`",
+            "2:27: expected a signal after `and`, got the infix primitive `or`",
         ),
     ] {
         let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");
@@ -386,6 +386,83 @@ fn an_operator_is_not_read_as_a_signal() {
 }
 
 #[test]
-fn an_operator_word_may_end_a_dotted_name() {
+fn an_infix_primitive_word_may_end_a_dotted_name() {
     parse("struct s size=3x3\n  logic sig.x = sig.a and c.or\n").expect("a dotted name");
+}
+
+#[test]
+fn what_follows_an_operand_is_refused_with_the_primitives_that_could_stand_there() {
+    let end_of_line = "expected `and`, `or`, or end of line";
+    let between = "two operands need an infix primitive between them";
+    for (expression, expected) in [
+        (
+            "sig.a xor sig.b",
+            format!(
+                "2:23: {end_of_line}, got identifier `xor`: the built-in logic library has no \
+                 primitive `xor`"
+            ),
+        ),
+        (
+            "(sig.a xor sig.b)",
+            "2:24: expected `and`, `or`, or `)`, got identifier `xor`: the built-in logic \
+             library has no primitive `xor`"
+                .to_owned(),
+        ),
+        (
+            "xor sig.a",
+            format!(
+                "2:21: {end_of_line}, got identifier `sig`: the built-in logic library has no \
+                 primitive `xor`"
+            ),
+        ),
+        (
+            "sig.a b",
+            format!(
+                "2:23: {end_of_line}, got identifier `b`: the built-in logic library has no \
+                 primitive `b`"
+            ),
+        ),
+        (
+            "pulse(sig.ring, 4)",
+            format!(
+                "2:22: {end_of_line}, got `(`: the built-in logic library has no primitive \
+                 `pulse` to call"
+            ),
+        ),
+        (
+            "sig.a not",
+            format!("2:23: {end_of_line}, got identifier `not`: `not` goes before its operand"),
+        ),
+        (
+            "sig.a not sig.b",
+            format!("2:23: {end_of_line}, got identifier `not`: {between}"),
+        ),
+        (
+            "sig.a sig.b",
+            format!("2:23: {end_of_line}, got identifier `sig`: {between}"),
+        ),
+        (
+            "c.or (sig.a)",
+            format!("2:22: {end_of_line}, got `(`: {between}"),
+        ),
+        (
+            "sig.a (sig.b)",
+            format!("2:23: {end_of_line}, got `(`: {between}"),
+        ),
+        (
+            "sig.pulse(sig.a)",
+            format!("2:26: {end_of_line}, got `(`: {between}"),
+        ),
+        (
+            "(sig.a) (sig.b)",
+            format!("2:25: {end_of_line}, got `(`: {between}"),
+        ),
+        (
+            "(sig.a",
+            "2:23: expected `and`, `or`, or `)`, got end of line".to_owned(),
+        ),
+    ] {
+        let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");
+        assert_eq!(refusal(&source), expected, "{expression:?}");
+    }
 }

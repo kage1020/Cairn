@@ -120,13 +120,16 @@ items:
           - sig
           - open
         rhs:
-          kind: Or
+          kind: Infix
           value:
-            - kind: Ref
+            primitive: or
+            lhs:
+              kind: Ref
               value:
                 - sig
                 - step
-            - kind: Ref
+            rhs:
+              kind: Ref
               value:
                 - sig
                 - exit

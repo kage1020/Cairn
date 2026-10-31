@@ -358,7 +358,7 @@ pub fn shed_voxels(roof_w: u32, roof_h: u32, wall_top: u32, slope_to: WallSide) 
     out
 }
 
-/// Which side or corner of a hip roof's inset frame a voxel belongs to.
+/// Which part of a hip roof a voxel belongs to: a side or corner of an inset frame, or the apex.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HipFace {
     /// North-side slope row (`z = layer`), `facing=south`, `half=bottom`.
@@ -377,10 +377,12 @@ pub enum HipFace {
     CornerSouthWest,
     /// South-east corner — `facing=north`, `shape=outer_left`.
     CornerSouthEast,
-    /// `half=top` ridge cell along the long axis of a rectangular hip, faced like a gable's.
-    ApexRidge,
-    /// `half=top` cap of a square hip, one cell or a 2x2 block.
-    ApexCap,
+    /// `half=top` cap of an odd short span, with the low slope's facing.
+    Apex,
+    /// `half=top` low-side row of an even short span's cap, facing away from the ridge.
+    ApexLow,
+    /// `half=top` high-side row of an even short span's cap, facing away from the ridge.
+    ApexHigh,
 }
 
 /// One stair voxel produced by [`hip_voxels`].
@@ -404,26 +406,19 @@ pub fn hip_stair_state(ridge_axis: Axis, face: HipFace) -> BlockState {
         HipFace::CornerNorthEast => (Cardinal::South, StairShape::OuterRight),
         HipFace::CornerSouthWest => (Cardinal::North, StairShape::OuterRight),
         HipFace::CornerSouthEast => (Cardinal::North, StairShape::OuterLeft),
-        HipFace::ApexRidge | HipFace::ApexCap => {
-            let facing = match ridge_axis {
-                Axis::X => Cardinal::South,
-                Axis::Z => Cardinal::East,
-            };
-            (facing, StairShape::Straight)
-        }
+        HipFace::Apex => return gable_stair_state(ridge_axis, StairFace::Apex),
+        HipFace::ApexLow => return gable_stair_state(ridge_axis, StairFace::ApexLow),
+        HipFace::ApexHigh => return gable_stair_state(ridge_axis, StairFace::ApexHigh),
     };
-    let half = match face {
-        HipFace::ApexRidge | HipFace::ApexCap => "top",
-        _ => "bottom",
-    };
-    stair_state(STAIR_BASE_ID, facing, half, shape)
+    stair_state(STAIR_BASE_ID, facing, "bottom", shape)
 }
 
-/// Every stair voxel of a hip roof: an inset frame per layer, capped by [`HipFace::ApexCap`] on
-/// a square footprint or [`HipFace::ApexRidge`] on a rectangular one.
+/// Every stair voxel of a hip roof: an inset frame per layer, except that the top layer of a roof
+/// more than one course high is its inset rectangle faced as a gable's apex.
 #[must_use]
 pub fn hip_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<HipVoxel> {
     let layers = hip_extra_height(roof_w, roof_h);
+    let ridge_axis = gable_ridge_axis(roof_w, roof_h);
     let mut out: Vec<HipVoxel> = Vec::new();
     for layer in 0..layers {
         let y = wall_top.saturating_add(1).saturating_add(layer);
@@ -444,39 +439,24 @@ pub fn hip_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<HipVoxel> {
             continue;
         }
 
-        let span_x = hi_x - lo_x + 1;
-        let span_z = hi_z - lo_z + 1;
-        if span_x == 1 && span_z == 1 {
-            out.push(HipVoxel {
-                pos: (lo_x, y, lo_z),
-                face: HipFace::ApexCap,
-            });
-        } else if roof_w == roof_h {
-            for x in lo_x..=hi_x {
-                for z in lo_z..=hi_z {
-                    out.push(HipVoxel {
-                        pos: (x, y, z),
-                        face: HipFace::ApexCap,
-                    });
-                }
-            }
-        } else if span_x >= span_z {
-            for x in lo_x..=hi_x {
-                for z in lo_z..=hi_z {
-                    out.push(HipVoxel {
-                        pos: (x, y, z),
-                        face: HipFace::ApexRidge,
-                    });
-                }
-            }
-        } else {
-            for z in lo_z..=hi_z {
-                for x in lo_x..=hi_x {
-                    out.push(HipVoxel {
-                        pos: (x, y, z),
-                        face: HipFace::ApexRidge,
-                    });
-                }
+        let ((along_lo, along_hi), (across_lo, across_hi)) = match ridge_axis {
+            Axis::X => ((lo_x, hi_x), (lo_z, hi_z)),
+            Axis::Z => ((lo_z, hi_z), (lo_x, hi_x)),
+        };
+        for along in along_lo..=along_hi {
+            for across in across_lo..=across_hi {
+                let face = if across_lo == across_hi {
+                    HipFace::Apex
+                } else if across == across_lo {
+                    HipFace::ApexLow
+                } else {
+                    HipFace::ApexHigh
+                };
+                let pos = match ridge_axis {
+                    Axis::X => (along, y, across),
+                    Axis::Z => (across, y, along),
+                };
+                out.push(HipVoxel { pos, face });
             }
         }
     }

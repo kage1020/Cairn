@@ -1,5 +1,5 @@
 //! The parser's two depth bounds hold at their exact boundaries: `MAX_NESTING_DEPTH` on descent,
-//! and `MAX_EXPR_DEPTH` on the boolean tree, which a flat `or` chain deepens without descent.
+//! and `MAX_EXPR_DEPTH` on the boolean tree, which an infix chain deepens without descent.
 
 use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, ParseError, parse};
 
@@ -49,12 +49,53 @@ fn descent_shapes(depth: usize) -> Vec<(&'static str, String)> {
     ]
 }
 
-/// `sig.a or sig.a or …`, which the parser walks iteratively.
-fn flat_or_chain(terms: usize) -> String {
-    let chain = std::iter::repeat_n("sig.a", terms)
+/// `terms` distinct signals joined by `primitive`, which the parser walks iteratively.
+fn chain(primitive: &str, terms: usize) -> String {
+    (0..terms)
+        .map(|i| format!("sig.a{i}"))
         .collect::<Vec<_>>()
-        .join(" or ");
-    format!("struct a size=1x1\n  logic sig.out = {chain}\n")
+        .join(&format!(" {primitive} "))
+}
+
+/// `logic sig.out = {expression}`.
+fn logic(expression: &str) -> String {
+    format!("struct a size=1x1\n  logic sig.out = {expression}\n")
+}
+
+/// `sig.a0 or sig.a1 or …`, `terms` deep.
+fn flat_or_chain(terms: usize) -> String {
+    logic(&chain("or", terms))
+}
+
+/// The `not`s around the chain in [`expression_shapes`], short of the descent bound.
+const NOTS: usize = 60;
+
+/// Shapes bounded by how deep a tree the parser hands back, each exactly `depth` deep.
+fn expression_shapes(depth: usize) -> Vec<(&'static str, String)> {
+    vec![
+        ("or chain", flat_or_chain(depth)),
+        ("and chain", logic(&chain("and", depth))),
+        (
+            "nots around an or chain",
+            logic(&format!(
+                "{}({})",
+                "not ".repeat(NOTS),
+                chain("or", depth - NOTS)
+            )),
+        ),
+        (
+            "and chain right of an or",
+            logic(&format!("sig.z or {}", chain("and", depth - 1))),
+        ),
+        (
+            "parenthesised or chain right of an or",
+            logic(&format!("sig.z or ({})", chain("or", depth - 1))),
+        ),
+        (
+            "parenthesised or chain",
+            logic(&format!("({})", chain("or", depth))),
+        ),
+    ]
 }
 
 #[test]
@@ -81,28 +122,32 @@ fn one_level_past_the_descent_limit_is_refused() {
 }
 
 #[test]
-fn a_flat_chain_at_the_expression_limit_parses() {
-    assert!(
-        parse(&flat_or_chain(MAX_EXPR_DEPTH)).is_ok(),
-        "a chain of {MAX_EXPR_DEPTH} terms builds a tree exactly at the bound",
-    );
-}
-
-#[test]
-fn one_term_past_the_expression_limit_is_refused() {
-    // The bound is on the tree handed back, which `Serialize`, the check passes and `Drop` walk.
-    match parse(&flat_or_chain(MAX_EXPR_DEPTH + 1)) {
-        Err(ParseError::NestingTooDeep { limit, .. }) => assert_eq!(
-            limit, MAX_EXPR_DEPTH,
-            "the expression bound, not the descent one",
-        ),
-        other => panic!("expected NestingTooDeep, got {other:?}"),
+fn a_tree_at_the_expression_limit_parses() {
+    for (shape, source) in expression_shapes(MAX_EXPR_DEPTH) {
+        assert!(
+            parse(&source).is_ok(),
+            "{shape}: a tree {MAX_EXPR_DEPTH} deep is the deepest legal one",
+        );
     }
 }
 
-/// Terms at which a debug build of `cairn parse` overflows serialising an
-/// unbounded tree, as measured.
-const MEASURED_CONSUMER_OVERFLOW: usize = 570;
+#[test]
+fn a_tree_one_past_the_expression_limit_is_refused() {
+    // The bound is on the tree handed back, which `Serialize`, the check passes and `Drop` walk.
+    for (shape, source) in expression_shapes(MAX_EXPR_DEPTH + 1) {
+        match parse(&source) {
+            Err(ParseError::NestingTooDeep { limit, .. }) => assert_eq!(
+                limit, MAX_EXPR_DEPTH,
+                "{shape}: the expression bound, not the descent one",
+            ),
+            other => panic!("{shape}: expected NestingTooDeep, got {other:?}"),
+        }
+    }
+}
+
+/// Terms at which a debug build of `cairn parse` overflows serialising an unbounded tree, as
+/// measured on Linux with a 1 MiB stack, the size Windows gives the main thread.
+const MEASURED_CONSUMER_OVERFLOW: usize = 751;
 
 // A `MAX_EXPR_DEPTH` near the measured overflow would fail downstream, far from this guard.
 const _: () = assert!(

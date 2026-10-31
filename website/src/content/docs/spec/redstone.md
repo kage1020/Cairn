@@ -21,8 +21,8 @@ not carried in the language core ([§14.4](#144-time-model)).
 - **Tier 1, logic.** This chapter. You declare a signal graph and the compiler turns it into voxels
   through synthesis → placement → routing.
 
-The only new keywords are `logic`, `circuit`, and `assert`. Logic primitives ship as a built-in
-`def` library, which keeps the vocabulary small and closed (P3).
+The only new keywords are `logic`, `circuit`, and `assert`. Logic primitives are not keywords: they
+ship as a built-in library, which keeps the vocabulary small and closed (P3).
 
 In Verilog terms, v1 allows the `assign` equivalent and no clocked assignment:
 
@@ -32,10 +32,24 @@ In Verilog terms, v1 allows the `assign` equivalent and no clocked assignment:
 | **Curated sequential macros** | `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` |
 | **Out of scope** (→ Tier 0 or `raw`) | `always` / `process` / `state` / `case` / FSMs / clocked assignment / CPUs |
 
-Of the primitives and macros above, only `and`, `or` and `not` are accepted today, and the built-in
-`def` library does not exist yet: until it does, the parser reads those three itself, as operators.
-The rest are `E_PARSE` where they are written: `sig.a xor sig.b` stops at `xor`, and a macro call
-such as `pulse(sig.ring, 4)` at its `(`.
+**The built-in logic library.** Each entry is a primitive's name and its notation. A prefix
+primitive stands before its one operand. An infix primitive stands between its two, and its rank
+says how tightly it binds: a higher rank groups first, and one rank groups left to right. The parser
+takes an expression's shape from the library, so a prefix or infix primitive the library gains needs
+no new syntax. The library holds three primitives today:
+
+| Primitive | Notation |
+|---|---|
+| `or` | infix, rank 0 |
+| `and` | infix, rank 1 |
+| `not` | prefix |
+
+A prefix primitive binds tighter than any infix one, so `sig.a or sig.b and not sig.c` reads as
+`sig.a or (sig.b and (not sig.c))`. Parentheses group as written.
+
+The other primitives and macros above are not in the library yet. Written before an operand or
+between two, or called, each is `E_PARSE`, and the message names the primitives that could stand
+there: `sig.a xor sig.b` stops at `xor`, and a macro call such as `pulse(sig.ring, 4)` at its `(`.
 
 ## 14.2 Signal binding
 

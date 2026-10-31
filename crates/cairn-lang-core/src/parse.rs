@@ -11,6 +11,8 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
+use crate::logic_library::{LogicPrimitive, Notation, infix_rank_above};
+use crate::prose::or_list;
 use crate::version::parse_requirement;
 use indexmap::IndexSet;
 
@@ -114,8 +116,8 @@ pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError
 /// debug build's recursive descent overflows the stack.
 pub const MAX_NESTING_DEPTH: usize = 64;
 
-/// Deepest boolean-expression tree the parser hands back: `and` / `or` chains parse iteratively,
-/// but every consumer walks the tree recursively.
+/// Deepest boolean-expression tree the parser hands back: infix chains parse iteratively, but
+/// every consumer walks the tree recursively.
 pub const MAX_EXPR_DEPTH: usize = 128;
 
 /// A truth row's input pattern, and whether an adjacent `->` may have eaten its final `-`.
@@ -153,7 +155,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Run `descend` one level deeper, refusing past [`MAX_NESTING_DEPTH`]. Every recursive step
-    /// in a value, expression or body must go through here.
+    /// the source can repeat, in a value, expression or body, must go through here.
     fn nested<T>(
         &mut self,
         descend: impl FnOnce(&mut Self) -> Result<T, ParseError>,
@@ -583,7 +585,7 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::Eq)?;
         let rhs = self.parse_expr()?;
         let span = start_byte..self.last_byte();
-        self.expect_newline()?;
+        self.expect_operand_end(&TokenKind::Newline)?;
         Ok(Statement::Logic { lhs, rhs, span })
     }
 
@@ -739,7 +741,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        Ok(self.parse_expr_or()?.0)
+        Ok(self.parse_expr_at(infix_rank_above(None))?.0)
     }
 
     /// Refuse a boolean tree deeper than [`MAX_EXPR_DEPTH`].
@@ -753,64 +755,157 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// The expression and its tree depth, so an iteratively parsed chain pays for its shape.
-    fn parse_expr_or(&mut self) -> Result<(Expr, usize), ParseError> {
-        let (mut lhs, mut depth) = self.parse_expr_and()?;
-        while self.match_keyword("or") {
-            let (rhs, rhs_depth) = self.parse_expr_and()?;
+    /// The expression whose infix primitives rank `rank` or higher, `None` being the prefix level
+    /// above them all, and its tree depth, so an iteratively parsed chain pays for its shape.
+    fn parse_expr_at(&mut self, rank: Option<u8>) -> Result<(Expr, usize), ParseError> {
+        let Some(rank) = rank else {
+            return self.parse_expr_prefix();
+        };
+        let tighter = infix_rank_above(Some(rank));
+        let (mut lhs, mut depth) = self.parse_expr_at(tighter)?;
+        while let Some(primitive) = self.match_infix(rank) {
+            let (rhs, rhs_depth) = self.parse_expr_at(tighter)?;
             depth = depth.max(rhs_depth) + 1;
             self.charge_expr_depth(depth)?;
-            lhs = Expr::Or(Box::new(lhs), Box::new(rhs));
+            lhs = Expr::Infix {
+                primitive,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
         }
         Ok((lhs, depth))
     }
 
-    fn parse_expr_and(&mut self) -> Result<(Expr, usize), ParseError> {
-        let (mut lhs, mut depth) = self.parse_expr_not()?;
-        while self.match_keyword("and") {
-            let (rhs, rhs_depth) = self.parse_expr_not()?;
-            depth = depth.max(rhs_depth) + 1;
+    /// A prefix primitive costs descent and tree depth; parentheses cost descent alone.
+    fn parse_expr_prefix(&mut self) -> Result<(Expr, usize), ParseError> {
+        if let Some(primitive) = self
+            .peek_primitive()
+            .filter(|primitive| primitive.notation() == Notation::Prefix)
+        {
+            self.advance();
+            let (operand, operand_depth) = self.nested(Self::parse_expr_prefix)?;
+            let depth = operand_depth + 1;
             self.charge_expr_depth(depth)?;
-            lhs = Expr::And(Box::new(lhs), Box::new(rhs));
-        }
-        Ok((lhs, depth))
-    }
-
-    /// `not` costs descent and tree depth; parentheses cost descent alone.
-    fn parse_expr_not(&mut self) -> Result<(Expr, usize), ParseError> {
-        if self.match_keyword("not") {
-            let (inner, inner_depth) = self.nested(Self::parse_expr_not)?;
-            let depth = inner_depth + 1;
-            self.charge_expr_depth(depth)?;
-            return Ok((Expr::Not(Box::new(inner)), depth));
+            let operand = Box::new(operand);
+            return Ok((Expr::Prefix { primitive, operand }, depth));
         }
         if self.peek_is(&TokenKind::LParen) {
             self.advance();
-            let inner = self.nested(Self::parse_expr_or)?;
-            self.expect(&TokenKind::RParen)?;
+            let inner = self.nested(|p| p.parse_expr_at(infix_rank_above(None)))?;
+            self.expect_operand_end(&TokenKind::RParen)?;
             return Ok(inner);
         }
-        // `and` and `or` are never signal names, so a missing operand is reported here.
-        if let Some(Token {
-            kind: TokenKind::Ident(word),
-            position,
-            ..
-        }) = self.peek()
-            && matches!(word.as_str(), "and" | "or")
+        // An infix primitive is never a signal name, so a missing operand is reported here.
+        if let Some(primitive) = self.peek_primitive()
+            && primitive.infix_rank().is_some()
         {
-            // The token before is an operator word, `=` or `(`.
+            // The token before is a primitive, `=` or `(`.
             let after = match self.pos.checked_sub(1).map(|i| &self.tokens[i].kind) {
                 Some(TokenKind::Ident(previous)) => format!("`{previous}`"),
                 Some(previous) => previous.to_string(),
                 None => "the start of the line".to_owned(),
             };
             return Err(ParseError::Syntax {
-                position: *position,
-                message: format!("expected a signal after {after}, got the operator `{word}`"),
+                position: self.position(),
+                message: format!(
+                    "expected a signal after {after}, got the infix primitive `{}`",
+                    primitive.name(),
+                ),
             });
         }
         let dotted = self.parse_dotted_ref()?;
         Ok((Expr::Ref(dotted), 1))
+    }
+
+    /// The primitive of the built-in logic library the next token names, consuming nothing.
+    fn peek_primitive(&self) -> Option<LogicPrimitive> {
+        match &self.peek()?.kind {
+            TokenKind::Ident(word) => LogicPrimitive::from_name(word),
+            _ => None,
+        }
+    }
+
+    /// Take the next token when it names an infix primitive of `rank`.
+    fn match_infix(&mut self, rank: u8) -> Option<LogicPrimitive> {
+        let primitive = self.peek_primitive()?;
+        if primitive.infix_rank() != Some(rank) {
+            return None;
+        }
+        self.advance();
+        Some(primitive)
+    }
+
+    /// Take `closer` after a complete operand, or refuse what stands there with the infix
+    /// primitives that could have stood there instead.
+    fn expect_operand_end(&mut self, closer: &TokenKind) -> Result<(), ParseError> {
+        if *closer == TokenKind::Newline && self.at_eof() {
+            return Ok(());
+        }
+        if self.peek_is(closer) {
+            self.advance();
+            return Ok(());
+        }
+        let mut expected: Vec<String> = LogicPrimitive::ALL
+            .into_iter()
+            .filter(|primitive| primitive.infix_rank().is_some())
+            .map(|primitive| format!("`{}`", primitive.name()))
+            .collect();
+        expected.push(closer.to_string());
+        let expected = or_list(&expected).unwrap_or_default();
+        let found = self.peek().map(|token| token.kind.clone());
+        let why = self.why_not_after_operand(found.as_ref());
+        let found = found.map_or_else(|| "end of input".to_owned(), |kind| kind.to_string());
+        Err(ParseError::Syntax {
+            position: self.position(),
+            message: format!("expected {expected}, got {found}{why}"),
+        })
+    }
+
+    /// Why `found`, standing after a complete operand, cannot stand there, or nothing when the
+    /// token says no more than itself.
+    fn why_not_after_operand(&self, found: Option<&TokenKind>) -> String {
+        let kind_at = |offset: isize| {
+            self.pos
+                .checked_add_signed(offset)
+                .and_then(|i| self.tokens.get(i))
+                .map(|token| &token.kind)
+        };
+        // The operand before is one bare word only when no `.` joins it to a word before it.
+        let bare_word_before = match (kind_at(-1), kind_at(-2)) {
+            (Some(TokenKind::Ident(word)), before) if before != Some(&TokenKind::Dot) => {
+                Some(word.as_str()).filter(|word| LogicPrimitive::from_name(word).is_none())
+            }
+            _ => None,
+        };
+        let operand_follows = |offset: isize| {
+            matches!(
+                kind_at(offset),
+                Some(TokenKind::Ident(_) | TokenKind::LParen)
+            )
+        };
+        let is_prefix = |word: &str| {
+            LogicPrimitive::from_name(word)
+                .is_some_and(|primitive| primitive.notation() == Notation::Prefix)
+        };
+        let between = ": two operands need an infix primitive between them".to_owned();
+        match (found, bare_word_before) {
+            (Some(TokenKind::LParen), Some(callee)) => {
+                format!(": the built-in logic library has no primitive `{callee}` to call")
+            }
+            (Some(TokenKind::LParen), None) => between,
+            (Some(TokenKind::Ident(word)), _) if is_prefix(word) && !operand_follows(1) => {
+                format!(": `{word}` goes before its operand")
+            }
+            (Some(TokenKind::Ident(word)), _) if is_prefix(word) => between,
+            (Some(TokenKind::Ident(_)), Some(unknown)) => {
+                format!(": the built-in logic library has no primitive `{unknown}`")
+            }
+            (Some(TokenKind::Ident(_)), None) if kind_at(1) == Some(&TokenKind::Dot) => between,
+            (Some(TokenKind::Ident(word)), None) => {
+                format!(": the built-in logic library has no primitive `{word}`")
+            }
+            _ => String::new(),
+        }
     }
 
     /// Whether the next token is the bare identifier `name`, consuming nothing.
