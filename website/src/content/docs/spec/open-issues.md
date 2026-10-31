@@ -9,6 +9,17 @@ title: "15. Open Issues"
 compiler writes records such as `verified` into the lock
 ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 
+**Coordinate system:** keep the corner origin and `front = +z`, or move to a centre origin or an
+entrance-relative orientation. Decided: a build's origin is the low corner of its extent, `y` rises
+from the floor, and `front` / `back` / `left` / `right` face `+z` / `-z` / `-x` / `+x`
+([Syntax §5.4](/spec/syntax/#54-selectors),
+[Components, Editing, and Multi-building §9.3.1](/spec/components-editing-sites/#931-coordinate-convention)).
+A structure file is placed from its low corner, so the origin is the file's own. An even side has no
+centre voxel to hold one. A building is turned when it is placed in the world, and `front` already
+names its entrance, so a frame relative to the entrance would add nothing. A per-floor local `y=0`
+comes from `level y=N` ([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)).
+Coordinate triples (`from=1,1,1`, `at=4,3,2`) are read in this frame when they are specified.
+
 **The type of the reverse-direction IR:** one IR that can degenerate, or separate Intent IR and
 Raw Geometry IR types. The tentative policy is to share the block-array layer and split types at the
 member layer above it ([Architecture](/spec/architecture/)).
@@ -17,10 +28,6 @@ member layer above it ([Architecture](/spec/architecture/)).
 considered later as an option.
 
 ## 15.2 Untouched topics
-
-**Coordinate system.** Keep the corner origin and `front = +z` fixed, or introduce a centre origin
-or an entrance-relative orientation. A per-floor local `y=0` is settled: `level y=N` provides it
-([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)).
 
 **Primitive promotion.** Whether columns and arches should become semantic primitives. The
 decision rests on experimental data from the [Evaluation Framework](/spec/evaluation/).
