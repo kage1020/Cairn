@@ -103,11 +103,6 @@ then on the specification carries the version of the release that ships it, star
 
 What stands between today and that point:
 
-- **The language-evolution policy is closed.**
-  [Open issues "Language-evolution policy"](/spec/open-issues/#153-language-evolution-policy) still
-  weighs an opt-in, year-based mechanism against announcing changes per release. The label above
-  takes the second answer, CalVer with the CHANGELOG and the compatibility tiers, so M3 records it
-  as decided.
 - **The tier-1 tokens are marked.** The
   [canonical vocabulary](/spec/materials-themes/#72-canonical-vocabulary) does not say yet which of
   its tokens are tier-1, and the tier-1 row is one of those turning Stable.
