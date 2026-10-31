@@ -7,6 +7,7 @@ use std::num::NonZeroU32;
 use serde::Serialize;
 
 use crate::error::Span;
+use crate::logic_library::LogicPrimitive;
 
 /// A language version string captured verbatim from `@cairn`, its shape unchecked.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -528,12 +529,22 @@ pub struct TruthRow {
 pub enum Expr {
     /// Signal reference.
     Ref(DottedRef),
-    /// `a and b`.
-    And(Box<Expr>, Box<Expr>),
-    /// `a or b`.
-    Or(Box<Expr>, Box<Expr>),
-    /// `not a`.
-    Not(Box<Expr>),
+    /// A prefix primitive of the built-in logic library and its operand: `not a`.
+    Prefix {
+        /// The primitive applied.
+        primitive: LogicPrimitive,
+        /// Its operand.
+        operand: Box<Expr>,
+    },
+    /// An infix primitive of the built-in logic library between its operands: `a and b`.
+    Infix {
+        /// The primitive applied.
+        primitive: LogicPrimitive,
+        /// The operand before it.
+        lhs: Box<Expr>,
+        /// The operand after it.
+        rhs: Box<Expr>,
+    },
 }
 
 /// Head segment marking a [`DottedRef`] as a redstone signal name.

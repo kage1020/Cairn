@@ -13,6 +13,7 @@ pub mod intent;
 pub mod lex;
 pub mod lines;
 pub mod lock;
+pub mod logic_library;
 pub mod parse;
 pub(crate) mod prose;
 pub mod resolve;

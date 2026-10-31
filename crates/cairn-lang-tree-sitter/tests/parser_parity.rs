@@ -4,6 +4,7 @@
 
 use std::fmt::Write as _;
 
+use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
 use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH};
 use tree_sitter::Parser;
 
@@ -420,34 +421,34 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  logic true = a.b\n",
         Reject,
     ),
-    // `and` and `or` are operators where a signal may start, though a dotted name may end in one.
+    // An infix primitive is refused where a signal may start, though a dotted name may end in one.
     (
-        "logic_operator_as_operand",
+        "logic_infix_as_operand",
         "struct s size=3x3\n  logic s.out = a.b and or\n",
         Reject,
     ),
     (
-        "logic_operator_as_whole_value",
+        "logic_infix_as_whole_value",
         "struct s size=3x3\n  logic s.out = and\n",
         Reject,
     ),
     (
-        "logic_operator_after_operator",
+        "logic_infix_after_infix",
         "struct s size=3x3\n  logic s.out = a.b or and and c\n",
         Reject,
     ),
     (
-        "logic_operator_after_not",
+        "logic_infix_after_not",
         "struct s size=3x3\n  logic s.out = not or\n",
         Reject,
     ),
     (
-        "logic_operator_heads_a_dotted_name",
+        "logic_infix_heads_a_dotted_name",
         "struct s size=3x3\n  logic s.out = a.b and or.x\n",
         Reject,
     ),
     (
-        "logic_operator_ends_a_dotted_name",
+        "logic_infix_ends_a_dotted_name",
         "struct s size=3x3\n  logic s.out = a.b and c.or\n",
         Accept,
     ),
@@ -461,6 +462,27 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "logic_not_ends_a_dotted_name",
         "struct s size=3x3\n  logic s.out = a.b and c.not\n",
         Accept,
+    ),
+    // What the library does not hold, and two operands with no infix primitive between them.
+    (
+        "logic_word_the_library_lacks",
+        "struct s size=3x3\n  logic s.out = sig.a xor sig.b\n",
+        Reject,
+    ),
+    (
+        "logic_call",
+        "struct s size=3x3\n  logic s.out = pulse(sig.ring, 4)\n",
+        Reject,
+    ),
+    (
+        "logic_prefix_between_operands",
+        "struct s size=3x3\n  logic s.out = sig.a not sig.b\n",
+        Reject,
+    ),
+    (
+        "logic_operands_side_by_side",
+        "struct s size=3x3\n  logic s.out = sig.a sig.b\n",
+        Reject,
     ),
     // -- assertions ---------------------------------------------------
     (
@@ -1364,6 +1386,34 @@ fn generated_at_the_bounds() -> impl Iterator<Item = (String, String)> {
         .map(|&(name, shape, depth)| (format!("{name}, one step shallower"), shape(depth - 1)))
 }
 
+/// Each primitive of core's built-in logic library in its notation, and each infix one where an
+/// operand belongs, so a primitive the library gains fails here until the grammar has it.
+fn library_primitives() -> impl Iterator<Item = (String, String, Verdict)> {
+    LogicPrimitive::ALL.into_iter().flat_map(|primitive| {
+        let word = primitive.name();
+        let logic = |value: String| format!("struct s size=3x3\n  logic s.out = {value}\n");
+        match primitive.notation() {
+            Notation::Prefix => vec![(
+                format!("library prefix `{word}`"),
+                logic(format!("{word} a.b")),
+                Accept,
+            )],
+            Notation::Infix { .. } => vec![
+                (
+                    format!("library infix `{word}`"),
+                    logic(format!("a.b {word} c.d")),
+                    Accept,
+                ),
+                (
+                    format!("library infix `{word}` as an operand"),
+                    logic(word.to_owned()),
+                    Reject,
+                ),
+            ],
+        }
+    })
+}
+
 #[test]
 fn both_parsers_reach_the_expected_verdict() {
     let mut parser = new_parser();
@@ -1372,7 +1422,7 @@ fn both_parsers_reach_the_expected_verdict() {
         .iter()
         .map(|&(name, source, verdict)| (name.to_owned(), source.to_owned(), verdict));
     let generated = generated_at_the_bounds().map(|(name, source)| (name, source, Accept));
-    for (name, source, expected) in written.chain(generated) {
+    for (name, source, expected) in written.chain(generated).chain(library_primitives()) {
         let source = source.as_str();
         let core = if cairn_lang_core::parse::parse(source).is_ok() {
             Accept
@@ -1391,6 +1441,129 @@ fn both_parsers_reach_the_expected_verdict() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Two infix primitives in each order, each prefix one beside each infix one, and parentheses
+/// against each rank, so the grammar's precedences are held to the library's ranks.
+fn library_groupings() -> Vec<String> {
+    let infix: Vec<&str> = LogicPrimitive::ALL
+        .into_iter()
+        .filter(|primitive| primitive.infix_rank().is_some())
+        .map(LogicPrimitive::name)
+        .collect();
+    let prefix = LogicPrimitive::ALL
+        .into_iter()
+        .filter(|primitive| primitive.notation() == Notation::Prefix)
+        .map(LogicPrimitive::name);
+    let mut out = Vec::new();
+    for p in &infix {
+        for q in &infix {
+            out.push(format!("a.b {p} c.d {q} e.f"));
+            out.push(format!("a.b {p} (c.d {q} e.f)"));
+        }
+    }
+    for r in prefix {
+        for p in &infix {
+            out.push(format!("{r} a.b {p} c.d"));
+            out.push(format!("a.b {p} {r} c.d"));
+        }
+    }
+    out
+}
+
+#[test]
+fn both_parsers_group_an_expression_alike() {
+    use cairn_lang_core::ast::{Item, Statement};
+    let mut parser = new_parser();
+    let mut wrong = Vec::new();
+    for expression in library_groupings() {
+        let source = format!("struct s size=3x3\n  logic s.out = {expression}\n");
+        let module = cairn_lang_core::parse::parse(&source).expect("core parses the grouping");
+        let Item::Struct { body, .. } = &module.items[0] else {
+            panic!("one struct");
+        };
+        let Statement::Logic { rhs, .. } = &body[0] else {
+            panic!("one logic line");
+        };
+        let tree = parser.parse(&source, None).expect("parse produced no tree");
+        let value = find_kind(tree.root_node(), "logic_decl")
+            .and_then(|decl| decl.child_by_field_name("value"))
+            .expect("the grammar reads a logic value");
+        let (core, grammar) = (core_grouping(rhs), grammar_grouping(value, &source));
+        if core != grammar {
+            wrong.push(format!(
+                "{expression:?}: the reference parser groups {core}, the grammar {grammar}"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The expression with every primitive's operands in parentheses.
+fn core_grouping(expr: &cairn_lang_core::ast::Expr) -> String {
+    use cairn_lang_core::ast::Expr;
+    match expr {
+        Expr::Ref(name) => name.to_string(),
+        Expr::Infix {
+            primitive,
+            lhs,
+            rhs,
+        } => format!(
+            "({} {} {})",
+            core_grouping(lhs),
+            primitive.name(),
+            core_grouping(rhs),
+        ),
+        Expr::Prefix { primitive, operand } => {
+            format!("({} {})", primitive.name(), core_grouping(operand))
+        }
+        other => panic!("no grouping for {other:?}"),
+    }
+}
+
+/// The same string read off the tree-sitter tree.
+fn grammar_grouping(node: tree_sitter::Node<'_>, source: &str) -> String {
+    let field = |name: &str| {
+        node.child_by_field_name(name)
+            .unwrap_or_else(|| panic!("a `{}` has a `{name}` field", node.kind()))
+    };
+    let word = |at: u32| {
+        node.child(at)
+            .expect("a primitive's word")
+            .kind()
+            .to_owned()
+    };
+    match node.kind() {
+        "binary_expression" => format!(
+            "({} {} {})",
+            grammar_grouping(field("lhs"), source),
+            word(1),
+            grammar_grouping(field("rhs"), source),
+        ),
+        "unary_expression" => format!(
+            "({} {})",
+            word(0),
+            grammar_grouping(field("operand"), source)
+        ),
+        "parenthesized_expression" => grammar_grouping(
+            node.named_child(0).expect("a parenthesised operand"),
+            source,
+        ),
+        _ => node.utf8_text(source.as_bytes()).expect("utf-8").to_owned(),
+    }
+}
+
+/// The first node of `kind` in the tree, depth first.
+fn find_kind<'tree>(
+    node: tree_sitter::Node<'tree>,
+    kind: &str,
+) -> Option<tree_sitter::Node<'tree>> {
+    if node.kind() == kind {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find_map(|child| find_kind(child, kind))
 }
 
 /// 131072 spaces is level 65536, which 16 bits would wrap to level 0; 131074, to level 1.

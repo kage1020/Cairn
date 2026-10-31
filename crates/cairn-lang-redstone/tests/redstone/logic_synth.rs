@@ -3,10 +3,13 @@
 
 use std::fmt::Write as _;
 
+use cairn_lang_core::ast::Expr;
 use cairn_lang_core::check::Severity;
-use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef};
+use cairn_lang_core::logic_library::LogicPrimitive;
+use cairn_lang_core::{lower, parse};
+use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef, synthesize};
 
-use crate::common::{line_of, load_example, synth_source};
+use crate::common::{codes, line_of, load_example, only, synth_source};
 
 fn count_code(out: &cairn_lang_redstone::SynthOutput, code: DiagnosticCode) -> usize {
     out.diagnostics.iter().filter(|d| d.code == code).count()
@@ -517,6 +520,46 @@ struct s size=1x1
     let primaries: String = unbound.iter().map(|d| d.primary.as_str()).collect();
     assert!(primaries.contains("sig.undef1"), "sig.undef1 must be named");
     assert!(primaries.contains("sig.undef2"), "sig.undef2 must be named");
+}
+
+#[test]
+fn a_primitive_in_a_notation_it_has_no_gate_in_still_reports_its_operands() {
+    let unbound = "E_LOGIC_UNBOUND_SIGNAL";
+    let unsupported = "E_LOGIC_UNSUPPORTED_PRIMITIVE";
+    for (expression, primitive, expected_codes, primary, footer) in [
+        (
+            "sig.nope1 and sig.nope2",
+            LogicPrimitive::Not,
+            &[unbound, unbound, unsupported][..],
+            "struct=s: logic expression applies `not` between two operands, which the \
+             combinational lowering has no gate for",
+            "Fix: write `not` before its one operand",
+        ),
+        (
+            "not sig.nope1",
+            LogicPrimitive::And,
+            &[unbound, unsupported][..],
+            "struct=s: logic expression applies `and` before one operand, which the \
+             combinational lowering has no gate for",
+            "Fix: write `and` between its two operands",
+        ),
+    ] {
+        let source = format!(
+            "struct s size=1x1\n  logic sig.out = {expression}\n  \
+             door id=front side=front at=center\n  door[id=front] opened_by=sig.out\n"
+        );
+        let mut intent = lower(&parse(&source).expect("parse"));
+        match &mut intent.structs[0].logic[0].rhs {
+            Expr::Infix { primitive: p, .. } | Expr::Prefix { primitive: p, .. } => *p = primitive,
+            other => panic!("{expression:?}: expected a primitive, got {other:?}"),
+        }
+        let out = synthesize(&intent);
+        assert_eq!(codes(&out), expected_codes, "{expression:?}");
+        let finding = only(&out, DiagnosticCode::LogicUnsupportedPrimitive);
+        assert_eq!(finding.primary, primary, "{expression:?}");
+        let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(notes, [footer], "{expression:?}");
+    }
 }
 
 /// The walk reaches the `level`-nested `assert` first, though it is written below.

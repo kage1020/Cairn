@@ -4,9 +4,11 @@
 use std::num::{IntErrorKind, NonZeroU32};
 
 use cairn_lang_core::ast::{
-    DottedRef, Header, Item, RawRequirement, RawVersion, Statement, ThemeRule, Value, ValueKind,
+    DottedRef, Expr, Header, Item, RawRequirement, RawVersion, Statement, ThemeRule, Value,
+    ValueKind,
 };
 use cairn_lang_core::error::IntContext;
+use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
 use cairn_lang_core::{ParseError, parse};
 
 use crate::pos;
@@ -176,9 +178,39 @@ fn parses_sensor_binding() {
     );
 }
 
+/// The right-hand side of `logic sig.x = {expression}`.
+fn logic_rhs(expression: &str) -> Expr {
+    let module = parse(&format!("struct s\n  logic sig.x = {expression}\n")).expect("parse");
+    let Item::Struct { body, .. } = &module.items[0] else {
+        panic!("not a struct");
+    };
+    let Statement::Logic { rhs, .. } = &body[0] else {
+        panic!("expected Logic, got {:?}", body[0]);
+    };
+    rhs.clone()
+}
+
+fn name(segments: &[&str]) -> Expr {
+    Expr::Ref(dr(segments))
+}
+
+fn infix(primitive: LogicPrimitive, lhs: Expr, rhs: Expr) -> Expr {
+    Expr::Infix {
+        primitive,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+    }
+}
+
+fn not(operand: Expr) -> Expr {
+    Expr::Prefix {
+        primitive: LogicPrimitive::Not,
+        operand: Box::new(operand),
+    }
+}
+
 #[test]
 fn parses_logic_expression() {
-    use cairn_lang_core::ast::Expr;
     let module = parse("struct s\n  logic sig.open = sig.step or sig.exit\n").expect("parse");
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
@@ -187,7 +219,14 @@ fn parses_logic_expression() {
         panic!("expected Logic, got {:?}", body[0]);
     };
     assert_eq!(lhs, &dr(&["sig", "open"]));
-    assert!(matches!(rhs, Expr::Or(_, _)));
+    assert_eq!(
+        rhs,
+        &infix(
+            LogicPrimitive::Or,
+            name(&["sig", "step"]),
+            name(&["sig", "exit"]),
+        ),
+    );
 }
 
 #[test]
@@ -298,41 +337,101 @@ struct keep size=11x9
 
 #[test]
 fn logic_precedence_and_binds_tighter_than_or() {
-    use cairn_lang_core::ast::Expr;
-    // `a and b or c` must parse as `Or(And(a, b), c)`, not `And(a, Or(b, c))`.
-    let module = parse("struct s\n  logic sig.x = a and b or c\n").expect("parse");
-    let Item::Struct { body, .. } = &module.items[0] else {
-        panic!("not a struct");
-    };
-    let Statement::Logic { rhs, .. } = &body[0] else {
-        panic!("expected Logic, got {:?}", body[0]);
-    };
-    match rhs {
-        Expr::Or(lhs, rhs_c) => {
-            assert!(
-                matches!(**lhs, Expr::And(_, _)),
-                "lhs should be And, got {lhs:?}",
-            );
-            assert!(matches!(**rhs_c, Expr::Ref(_)), "rhs should be Ref(c)");
-        }
-        other => panic!("expected Or at the root, got {other:?}"),
-    }
+    let (a, b, c) = (name(&["a"]), name(&["b"]), name(&["c"]));
+    assert_eq!(
+        logic_rhs("a and b or c"),
+        infix(
+            LogicPrimitive::Or,
+            infix(LogicPrimitive::And, a.clone(), b.clone()),
+            c.clone(),
+        ),
+    );
+    assert_eq!(
+        logic_rhs("a or b and c"),
+        infix(LogicPrimitive::Or, a, infix(LogicPrimitive::And, b, c)),
+    );
 }
 
 #[test]
 fn logic_not_higher_than_and() {
-    use cairn_lang_core::ast::Expr;
-    // `not a and b` must parse as `And(Not(a), b)`.
-    let module = parse("struct s\n  logic sig.x = not a and b\n").expect("parse");
-    let Item::Struct { body, .. } = &module.items[0] else {
-        panic!("not a struct");
-    };
-    let Statement::Logic { rhs, .. } = &body[0] else {
-        panic!("expected Logic, got {:?}", body[0]);
-    };
-    match rhs {
-        Expr::And(lhs, _) => assert!(matches!(**lhs, Expr::Not(_))),
-        other => panic!("expected And, got {other:?}"),
+    assert_eq!(
+        logic_rhs("not a and b"),
+        infix(LogicPrimitive::And, not(name(&["a"])), name(&["b"])),
+    );
+}
+
+#[test]
+fn one_rank_groups_left_to_right() {
+    let (a, b, c) = (name(&["a"]), name(&["b"]), name(&["c"]));
+    for primitive in [LogicPrimitive::And, LogicPrimitive::Or] {
+        let word = primitive.name();
+        assert_eq!(
+            logic_rhs(&format!("a {word} b {word} c")),
+            infix(primitive, infix(primitive, a.clone(), b.clone()), c.clone()),
+        );
+    }
+}
+
+#[test]
+fn ranks_group_first_and_parentheses_group_as_written() {
+    let (a, b, c) = (
+        name(&["sig", "a"]),
+        name(&["sig", "b"]),
+        name(&["sig", "c"]),
+    );
+    assert_eq!(
+        logic_rhs("sig.a or sig.b and not sig.c"),
+        infix(
+            LogicPrimitive::Or,
+            a.clone(),
+            infix(LogicPrimitive::And, b.clone(), not(c.clone())),
+        ),
+    );
+    assert_eq!(
+        logic_rhs("(sig.a or sig.b) and not (sig.c)"),
+        infix(LogicPrimitive::And, infix(LogicPrimitive::Or, a, b), not(c)),
+    );
+}
+
+#[test]
+fn every_library_primitive_parses_in_its_notation() {
+    let (a, b) = (name(&["sig", "a"]), name(&["sig", "b"]));
+    for primitive in LogicPrimitive::ALL {
+        let word = primitive.name();
+        let (expression, expected) = match primitive.notation() {
+            Notation::Prefix => (
+                format!("{word} sig.a"),
+                Expr::Prefix {
+                    primitive,
+                    operand: Box::new(a.clone()),
+                },
+            ),
+            Notation::Infix { .. } => (
+                format!("sig.a {word} sig.b"),
+                infix(primitive, a.clone(), b.clone()),
+            ),
+        };
+        assert_eq!(logic_rhs(&expression), expected, "{expression:?}");
+    }
+}
+
+#[test]
+fn an_expression_serialises_with_its_primitive_by_name() {
+    for (expression, expected) in [
+        (
+            "not sig.a",
+            r#"{"kind":"Prefix","value":{"primitive":"not","operand":{"kind":"Ref","value":["sig","a"]}}}"#,
+        ),
+        (
+            "sig.a and sig.b",
+            r#"{"kind":"Infix","value":{"primitive":"and","lhs":{"kind":"Ref","value":["sig","a"]},"rhs":{"kind":"Ref","value":["sig","b"]}}}"#,
+        ),
+    ] {
+        assert_eq!(
+            serde_json::to_string(&logic_rhs(expression)).expect("serialise"),
+            expected,
+            "{expression:?}",
+        );
     }
 }
 
