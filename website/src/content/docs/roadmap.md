@@ -69,7 +69,7 @@ files the first release under `2026.7.0`; its tag and GitHub release are `v2026.
 | **2026.8.0** | Bedrock `.mcstructure` output, with the parity table and per-edition theme fallbacks. `themed-tower`, `village` and `redstone-door` compile clean, through `level` grouping and eave stairs, walkways routed around structures, and pressure plates, circuit region markers and door actuator patches. `cairn-lsp` with diagnostics and completion, and a VS Code extension; the tree-sitter grammar, on npm as `tree-sitter-cairn`; redstone synthesis, placement, routing, delay insertion and crossing legalization behind `cairn synth --experimental-logic-synth`. **M4**, **M5**. |
 | **2026.9.0** | Hardening. A source that does not parse gets a diagnostic like any other; the lockfile is read back, so a rebuild for another target says so; the floor `@requires` declares is enforced; nesting and extents are bounded, so hostile input is refused instead of exhausting the compiler. |
 | **2026.10.0** | Version floors in full: `@cairn` is read, `@requires` floors order by DataVersion and may name an edition, a `def` or a `theme` declares its own floor, and `@intended_targets` is weighed against them. A renamed block id is answered from the pack's alias table, and an `assert truth` row may use `-` as a don't-care. |
-| **2026.11.0** | `cairn docs` prints the documentation built into the binary, offline, and the site serves each page as Markdown with an `/llms.txt` index. `cairn check` with no target reports the lowering findings that need none, a truth table may be written one row per line, and an even-span hip roof's apex faces away from its ridge. A pressure plate its line cannot place is the error `E_UNPLACEABLE_PLATE`, a name Windows reserves is refused on every host (`E_INVALID_PLACE_ID`, `E_INVALID_STRUCT_NAME`), and `and` / `or` / `not` come from a built-in logic library, which changes the expression shape `cairn parse --format json` prints. The lockfile format turns Stable. **M2**. |
+| **2026.11.0** | `cairn docs` prints the documentation built into the binary, offline, and the site serves each page as Markdown with an `/llms.txt` index. `cairn check` with no target reports the lowering findings that need none, a truth table may be written one row per line, and an even-span hip roof's apex faces away from its ridge. A pressure plate its line cannot place is the error `E_UNPLACEABLE_PLATE`, and `redstone-door`'s plates sit where a player can step on them, a name Windows reserves is refused on every host (`E_INVALID_PLACE_ID`, `E_INVALID_STRUCT_NAME`), and `and` / `or` / `not` come from a built-in logic library, which changes the expression shape `cairn parse --format json` prints. The lockfile format turns Stable. **M2**. |
 
 ## Monthly scope
 
@@ -78,7 +78,7 @@ than the milestone table because a monthly minor can ship without crossing a mil
 
 | Release | Scope added |
 |---|---|
-| **2026.12.0** | What M3 waits on ([Leaving draft](#leaving-draft)): `redstone-door`'s plate where a player can step on it, unimplemented syntax flagged, the coordinate system settled, the language-evolution policy closed, tier-1 tokens marked, and the compatibility chapter's rule for retiring a placeholder code. Each release attaches the VS Code extension as a `.vsix`, and the extension is on the Marketplace. |
+| **2026.12.0** | What M3 waits on ([Leaving draft](#leaving-draft)): unimplemented syntax flagged, the coordinate system settled, the language-evolution policy closed, tier-1 tokens marked, and the compatibility chapter's rule for retiring a placeholder code. Each release attaches the VS Code extension as a `.vsix`, and the extension is on the Marketplace. |
 | **2027.1.0** | Every example compiles clean on Java and loads in Minecraft. The specification leaves draft as `2027.1`, and `.crn` syntax, the `compile` / `check` / `info` interface, the diagnostic codes and the tier-1 vocabulary turn Stable. **M3.** |
 | **2027.2.0** | Blockstate derived beyond stairs: a `door` places its door block, panes, fences and walls connect, chests pair, and `fill`, with the coordinate triples it takes (`from=1,1,1`), sets `waterlogged`. The built-in packs are extracted from each edition's `--reports` / registry dumps, for the targets they carry today and each edition's current releases, so `E_STATE_DOMAIN` checks a state literal against the target and an error names the version an id first appears in. |
 | **2027.3.0** | Redstone reaches the structure file: edition legalization and lowering from the Placement IR to the block array, so `cairn compile` runs the `logic_*` phases. The rest of the combinational primitives (`xor`, `nand`, `nor`, `mux`), the remaining sensors and actuators (`lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`), Tier 0 parts such as `repeater` placed by hand, the `raw` escape hatch, and `@edition` alternatives with `E_PARITY_UNSUPPORTED`. |
@@ -103,10 +103,6 @@ then on the specification carries the version of the release that ships it, star
 
 What stands between today and that point:
 
-- **No example relies on a buried plate.** With no roof overhang, `at=front.outside y=0` has no
-  exterior cell to take, so it falls back to the floor cell under the wall column, where the plate
-  is buried and its signal can never fire. `redstone-door` relies on that fallback. The fallback is
-  refused, and the example moves its plate where a player can reach it.
 - **Stable covers syntax the compiler builds.** Chapters 5 to 9 still describe syntax the compiler
   does not build yet: coordinate triples, decimals and `nbt={...}` values, blockstate overrides
   beyond a stair's, `fill`, entities and block entities, `edit`, and theme selector bindings, which

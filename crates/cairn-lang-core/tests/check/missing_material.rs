@@ -237,7 +237,6 @@ const PAINTERS: &[(&str, &str, &str)] = &[
     ),
     (
         "pressure_plate",
-        // `at=front.outside` needs a roof drawing an overhang to sit in.
         "pressure_plate id=p at=inside.front offset=1 y=0",
         "",
     ),

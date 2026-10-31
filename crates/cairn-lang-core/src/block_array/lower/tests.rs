@@ -3770,10 +3770,9 @@ fn pressure_plate_outside_on_the_floor_row_without_an_overhang_is_refused() {
         [unplaceable(
             "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
             &[
-                "no roof on this struct has an `overhang=` of at least 1, so it has no voxel \
-                 outside its walls",
-                "give a `roof` an `overhang=` of at least 1, or use `at=inside.front` with an \
-                 `offset=` of 1",
+                "no roof on this struct draws an overhang, so it has no voxel outside its walls",
+                "give a `roof` in the struct's body an `overhang=` of at least 1, or use \
+                 `at=inside.front` with an `offset=` of 1",
             ],
         )],
     );
@@ -3784,42 +3783,46 @@ fn pressure_plate_outside_on_the_floor_row_without_an_overhang_is_refused() {
 }
 
 #[test]
-fn pressure_plate_outside_saturating_shift_defers_beside_a_roof_that_draws_nothing() {
-    // `shift_outward` saturates back to the wall cell at x=0, which is still in the volume. The
-    // cell under the wall column at y=0 is no fallback either, so the floor row defers too.
-    for (y, wall_cell) in [(0, BlockState::AIR_ID), (1, "minecraft:oak_pressure_plate")] {
-        let out = lowered(&plate_walled_3x3(&format!(
-            "roof mat_slot=p overhang=1\n  pressure_plate at=left.outside offset=0 y={y}"
-        )));
-        let ba = out.structures.get("struct::s").unwrap();
-        let found = findings_of(&out);
-        assert_eq!(
-            found
-                .iter()
-                .map(|(code, primary, _)| (*code, primary.as_str()))
-                .collect::<Vec<_>>(),
-            [
-                (
-                    DiagnosticCode::DeferredMember,
-                    "missing `kind=` (expected one of gable, shed, hip, flat)",
-                ),
-                (
-                    DiagnosticCode::DeferredMember,
-                    format!(
-                        "pressure_plate `at=left.outside` at y={y} has no exterior voxel to sit on"
-                    )
-                    .as_str(),
-                ),
-            ],
-        );
-        assert_eq!(
-            found[1].2,
-            [
-                "a `roof` written with an `overhang=` draws nothing, so the struct has no overhang \
-                 to hold the plate; it fits once that roof draws"
-            ],
-        );
-        assert_eq!(block_id(ba, 0, y, 1), wall_cell, "y={y}");
+fn pressure_plate_outside_defers_beside_a_roof_that_draws_nothing() {
+    // `left` and `back` shift back onto their wall cell, `front` and `right` out of the volume.
+    for (side, offset, (x, z)) in [("left", 0, (0, 1)), ("front", 1, (1, 2))] {
+        for (y, wall_cell) in [(0, BlockState::AIR_ID), (1, "minecraft:oak_pressure_plate")] {
+            let out = lowered(&plate_walled_3x3(&format!(
+                "roof mat_slot=p overhang=1\n  pressure_plate at={side}.outside offset={offset} \
+                 y={y}"
+            )));
+            let ba = out.structures.get("struct::s").unwrap();
+            let found = findings_of(&out);
+            assert_eq!(
+                found
+                    .iter()
+                    .map(|(code, primary, _)| (*code, primary.as_str()))
+                    .collect::<Vec<_>>(),
+                [
+                    (
+                        DiagnosticCode::DeferredMember,
+                        "missing `kind=` (expected one of gable, shed, hip, flat)",
+                    ),
+                    (
+                        DiagnosticCode::DeferredMember,
+                        format!(
+                            "pressure_plate `at={side}.outside` at y={y} has no exterior voxel \
+                             to sit on"
+                        )
+                        .as_str(),
+                    ),
+                ],
+            );
+            assert_eq!(
+                found[1].2,
+                [
+                    "a `roof` written with an `overhang=` draws nothing, so the struct has no \
+                     overhang to hold the plate; it fits once that roof draws"
+                ],
+            );
+            assert_eq!((ba.dims.x, ba.dims.z), (3, 3), "{side} y={y}");
+            assert_eq!(block_id(ba, x, y, z), wall_cell, "{side} y={y}");
+        }
     }
 }
 

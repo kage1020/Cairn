@@ -1,9 +1,11 @@
-- *(core)* An `at=<side>.outside` pressure plate at `y=0` on a struct with no roof overhang was
-  placed in the floor cell under the wall column, where the wall above buried it and its signal
-  could never fire, and nothing was reported. It is now refused with `E_UNPLACEABLE_PLATE` on every
-  row, since the ring a roof's `overhang=` adds is the only exterior a struct has. The fix it offers
-  is a `roof` with an `overhang=` of at least 1, or `at=inside.<side>` at an interior `offset=`;
-  it no longer offers `y=0`. An `at=inside.<side>` plate on a struct with no interior is offered
-  `at=<side>.outside` only where a roof draws an overhang. The `redstone-door` and `crossbar`
-  examples give their structs a flat roof with `overhang=1`, and `redstone-door` puts one plate on
-  each side of its door.
+- *(core)* An `at=<side>.outside` pressure plate at `y=0` on a struct whose roofs draw no overhang
+  was placed in the floor cell under the wall column, where the wall above buried it and its signal
+  could never fire, and nothing was reported. On a struct with no roof written with an `overhang=`
+  of at least 1 it is now refused with `E_UNPLACEABLE_PLATE`, since the ring a roof's `overhang=`
+  adds is the only exterior a struct has. Beside a roof written with an `overhang=` that draws
+  nothing, such as one with no `kind=` or one under a raised `level`, it is left unplaced with
+  `W_DEFERRED_MEMBER`, whose note says the roof has the repair. The refusal offers a `roof` in the
+  struct's body with an `overhang=` of at least 1, or `at=inside.<side>` at an interior `offset=`,
+  at `y=1` where a `floor` takes row 0. A refusal of an outside plate's `offset=` or row adds the roof it
+  needs too. The `redstone-door` and `crossbar` examples give their structs a flat roof with
+  `overhang=1`, and `redstone-door` puts one plate on each side of its door.

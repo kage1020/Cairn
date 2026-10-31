@@ -38,6 +38,8 @@ pub(super) struct StructCtx<'a> {
     pub(super) written_height: u32,
     /// The [`Self::overhang`] the struct would have had every roof drawn.
     pub(super) written_overhang: u32,
+    /// Whether a `floor` is written on row 0, whether or not it paints.
+    pub(super) written_floor: bool,
 }
 
 /// What the phase model does with a member.

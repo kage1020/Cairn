@@ -15,11 +15,16 @@ const ANCHOR_FORMS: &str = "write `at=<side>.outside` to sit outside a wall or `
 const BINDING_STILL_READ: &str =
     "its signal binding still reaches the netlist, with no plate placed to drive it";
 
-const NO_ROOF_OVERHANG: &str = "no roof on this struct has an `overhang=` of at least 1, so it \
-                                has no voxel outside its walls";
+const NO_ROOF_OVERHANG: &str =
+    "no roof on this struct draws an overhang, so it has no voxel outside its walls";
 
-const OUTSIDE_FIX: &str = "give a `roof` an `overhang=` of at least 1, or use `at=inside.front` \
-                           with an `offset=` from 1 to 3";
+const ROOF_FIX: &str = "give a `roof` in the struct's body an `overhang=` of at least 1";
+
+const OUTSIDE_FIX: &str = "give a `roof` in the struct's body an `overhang=` of at least 1, or \
+                           use `at=inside.front` with an `offset=` from 1 to 3";
+
+const OUTSIDE_NEEDS_A_ROOF: &str = "an `at=front.outside` plate also needs a `roof` in the \
+                                    struct's body with an `overhang=` of at least 1";
 
 const ROOF_OVERHANG: &str = "roof kind=flat mat_slot=wall overhang=1";
 
@@ -29,6 +34,12 @@ const WALLS_PAINT_NOTHING: &str = "a `walls` member that would reach this row pa
                                    plate fits once that member's material resolves to a block";
 
 const INTERIOR_NEEDS: &str = "an interior needs a size of at least 3 on both axes";
+
+const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls, door, window, \
+     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
+     (at=<side>.outside|inside.<side>), and level y=N grouping, and recognises circuit \
+     region=<label> void=<N> (u32, N>=1) plus door[id=<name>] opened_by=sig.<name> actuator \
+     patches; other roles will be added as their lowering rules are spec'd";
 
 /// A finding as its code, the text it points at, its primary and its notes.
 type Finding<'a> = (DiagnosticCode, &'a str, &'a str, Vec<&'a str>);
@@ -245,7 +256,10 @@ fn a_plate_past_its_wall_or_above_the_struct_is_refused_with_the_range_it_takes(
     assert_refused(
         "pressure_plate at=front.outside offset=5",
         "pressure_plate `offset=5` runs past the front wall (length 5)",
-        &["an `at=front.outside` plate takes an `offset=` from 0 to 4"],
+        &[
+            "an `at=front.outside` plate takes an `offset=` from 0 to 4",
+            OUTSIDE_NEEDS_A_ROOF,
+        ],
     );
     assert_refused(
         "pressure_plate at=inside.left offset=5",
@@ -259,6 +273,28 @@ fn a_plate_past_its_wall_or_above_the_struct_is_refused_with_the_range_it_takes(
             "`y=` runs from 0 to 3, the struct's top row",
             LOWER_OR_RAISE,
         ],
+    );
+    assert_refused(
+        "pressure_plate at=front.outside offset=2 y=4",
+        "pressure_plate y=4 does not fit in the struct (dims.y=4)",
+        &[
+            "`y=` runs from 0 to 3, the struct's top row",
+            LOWER_OR_RAISE,
+            OUTSIDE_NEEDS_A_ROOF,
+        ],
+    );
+    // With a roof written with an overhang, the range is the whole of what the plate needs.
+    let line = "pressure_plate at=front.outside offset=7";
+    let src = walled(&format!("{ROOF_OVERHANG}\n  {line}"));
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::UnplaceablePlate,
+            line,
+            "pressure_plate `offset=7` runs past the front wall (length 5)",
+            vec!["an `at=front.outside` plate takes an `offset=` from 0 to 4"],
+        )],
     );
 }
 
@@ -322,13 +358,23 @@ fn a_plate_outside_a_wall_no_roof_overhangs_is_refused_on_every_row() {
         assert_refused(&line, &primary, &[NO_ROOF_OVERHANG, OUTSIDE_FIX]);
     }
     // A struct with no interior is offered the roof alone.
+    for size in ["5x2", "2x5"] {
+        assert_refused_at(
+            size,
+            "pressure_plate at=front.outside",
+            "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
+            &[NO_ROOF_OVERHANG, ROOF_FIX],
+        );
+    }
+    // The inside offsets are the plate's own wall's, not the front's.
     assert_refused_at(
-        "5x2",
-        "pressure_plate at=front.outside",
-        "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
+        "5x4",
+        "pressure_plate at=left.outside",
+        "pressure_plate `at=left.outside` at y=0 has no exterior voxel to sit on",
         &[
             NO_ROOF_OVERHANG,
-            "give a `roof` an `overhang=` of at least 1",
+            "give a `roof` in the struct's body an `overhang=` of at least 1, or use \
+             `at=inside.left` with an `offset=` from 1 to 2",
         ],
     );
     // A roof whose `overhang=` is unreadable draws none, and the same fix applies to it.
@@ -357,21 +403,86 @@ fn a_plate_outside_a_wall_no_roof_overhangs_is_refused_on_every_row() {
 
 #[test]
 fn either_fix_an_outside_plate_with_no_overhang_is_offered_places_it() {
-    for (lines, cell) in [
+    for (size, lines, cell) in [
         (
+            "5x5",
             format!("{ROOF_OVERHANG}\n  pressure_plate at=front.outside y=0"),
             (1, 0, 6),
         ),
         (
+            "5x5",
             "pressure_plate at=inside.front offset=1 y=0".to_owned(),
             (1, 0, 3),
         ),
+        (
+            "5x4",
+            "pressure_plate at=inside.left offset=2 y=0".to_owned(),
+            (1, 0, 2),
+        ),
     ] {
-        let src = walled(&lines);
+        let src = walled_at(size, &lines);
         let out = lowered(&src);
         assert_eq!(findings(&src, &out), [], "{lines}");
         assert_eq!(plate_cells(only_structure(&out)), [cell], "{lines}");
     }
+}
+
+#[test]
+fn an_outside_plate_on_a_floored_struct_is_offered_the_row_on_top_of_the_floor() {
+    let floored = |lines: &str| {
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+             {lines}\n"
+        )
+    };
+    let line = "pressure_plate at=front.outside offset=2";
+    let src = floored(line);
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::UnplaceablePlate,
+            line,
+            "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
+            vec![
+                NO_ROOF_OVERHANG,
+                "give a `roof` in the struct's body an `overhang=` of at least 1, or use \
+                 `at=inside.front y=1` with an `offset=` from 1 to 3, on top of the floor",
+            ],
+        )],
+    );
+    let src = floored("pressure_plate at=inside.front offset=2 y=1");
+    let out = lowered(&src);
+    assert_eq!(findings(&src, &out), []);
+    let ba = only_structure(&out);
+    assert_eq!(plate_cells(ba), [(2, 1, 3)]);
+    assert_eq!(state_at(ba, 2, 0, 3).id, "minecraft:cobblestone");
+}
+
+#[test]
+fn an_inside_plate_on_a_thin_struct_is_not_offered_an_overhang_its_roof_does_not_draw() {
+    let roof = "roof mat_slot=wall overhang=1";
+    let line = "pressure_plate at=inside.front offset=2 y=0";
+    let src = walled_at("5x2", &format!("{roof}\n  {line}"));
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [
+            (
+                DiagnosticCode::DeferredMember,
+                roof,
+                "missing `kind=` (expected one of gable, shed, hip, flat)",
+                vec![DRAWN_ROLES],
+            ),
+            (
+                DiagnosticCode::UnplaceablePlate,
+                line,
+                "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has no \
+                 interior voxel",
+                vec![INTERIOR_NEEDS, "grow `size.h` to at least 3"],
+            ),
+        ],
+    );
 }
 
 #[test]
@@ -435,8 +546,8 @@ fn a_plate_on_the_last_row_or_cell_its_wall_offers_is_placed_silently() {
             (3, 3, 3),
         ),
         (
-            format!("{ROOF_OVERHANG}\n  pressure_plate at=front.outside offset=4 y=3"),
-            (5, 3, 6),
+            format!("{ROOF_OVERHANG}\n  pressure_plate at=front.outside offset=4 y=0"),
+            (5, 0, 6),
         ),
         (
             "pressure_plate at=inside.left offset=3 y=1".to_owned(),
@@ -606,7 +717,7 @@ fn a_roof_under_a_level_with_no_offset_gives_a_plate_no_overhang_to_wait_on() {
             DiagnosticCode::UnplaceablePlate,
             line,
             "pressure_plate `at=front.outside` at y=1 has no exterior voxel to sit on",
-            vec![NO_ROOF_OVERHANG, OUTSIDE_FIX,],
+            vec![NO_ROOF_OVERHANG, OUTSIDE_FIX],
         ),
     );
 }

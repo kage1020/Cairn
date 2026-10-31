@@ -126,7 +126,8 @@ struct gatehouse size=7x5
 **A plate outside a wall stands under the roof's overhang.** `at=front.outside` takes the cell in
 front of the wall at `offset=3`, right outside the door, in the ring the roof's `overhang=1` adds.
 Without an overhang the struct ends at its walls, so the plate has nowhere to go and is refused with
-`E_UNPLACEABLE_PLATE`. `at=inside.front` takes the cell just inside, on the floor at `y=1`.
+`E_UNPLACEABLE_PLATE`. `at=inside.front` takes the cell just inside, at `y=1`, on top of the floor:
+inside the walls row `y=0` is the floor itself, while outside it is the ground.
 
 **Sensors emit, actuators consume.** `-> sig.step` is a sensor's output; `opened_by=sig.open` is an
 actuator's input. `logic` writes the dependency between them.

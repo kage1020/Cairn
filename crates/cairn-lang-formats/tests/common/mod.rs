@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::ParityNote;
@@ -95,6 +95,12 @@ pub fn lower_source(source: &str, edition: Edition, mc_version: Option<&str>) ->
 /// [`lower_source`] over the shipped example `name`.
 pub fn lower_example(name: &str, edition: Edition, mc_version: Option<&str>) -> BlockArrayIr {
     lower_source(&example_source(name), edition, mc_version)
+}
+
+/// The id at `(x, y, z)` of `ba`, or `None` past the array.
+pub fn id_at(ba: &BlockArray, x: u32, y: u32, z: u32) -> Option<&str> {
+    let i = ba.dims.index(x, y, z)?;
+    Some(&ba.palette.entries[usize::from(ba.voxels[i].0)].id)
 }
 
 /// Every version the pack can build for.

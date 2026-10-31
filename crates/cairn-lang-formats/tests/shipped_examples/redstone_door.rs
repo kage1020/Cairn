@@ -1,11 +1,13 @@
 //! `redstone-door.crn` lowered: its gatehouse, pressure plates, circuit marker and door actuator.
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
+use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_formats::registry::builtin_pack;
 
-use crate::common::{example_source, latest, lower_example, lower_source, supported_versions};
+use crate::common::{
+    example_source, id_at, latest, lower_example, lower_source, supported_versions,
+};
 
 fn lower_redstone_door() -> BlockArrayIr {
     lower_example(
@@ -54,12 +56,6 @@ fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
     }
 }
 
-/// The id at `(x, y, z)` of the gatehouse.
-fn gatehouse_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {
-    let i = ba.dims.index(x, y, z).expect("cell within the gatehouse");
-    &ba.palette.entries[usize::from(ba.voxels[i].0)].id
-}
-
 #[test]
 fn redstone_door_plates_sit_on_either_side_of_the_door() {
     let out = lower_redstone_door();
@@ -72,7 +68,7 @@ fn redstone_door_plates_sit_on_either_side_of_the_door() {
         ((4, 0, 4), "minecraft:oak_planks"),
     ] {
         let (x, y, z) = cell;
-        assert_eq!(gatehouse_id(ba, x, y, z), id, "{cell:?}");
+        assert_eq!(id_at(ba, x, y, z), Some(id), "{cell:?}");
     }
     let plates = ba
         .voxels

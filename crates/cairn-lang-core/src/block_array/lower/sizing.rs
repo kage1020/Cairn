@@ -52,6 +52,8 @@ pub(super) struct Written {
     wall_top: u32,
     /// The largest `overhang=` a roof is written with.
     pub(super) overhang: u32,
+    /// Whether a `floor` is written on row 0.
+    pub(super) floor: bool,
 }
 
 impl Written {
@@ -79,6 +81,9 @@ pub(super) fn written(members: &[Member]) -> Written {
             .filter_map(|(_, m)| m.nonneg_u32("overhang"))
             .max()
             .unwrap_or(0),
+        floor: written
+            .iter()
+            .any(|(y_offset, m)| *y_offset == 0 && matches!(m.role, MemberRole::Floor)),
     }
 }
 

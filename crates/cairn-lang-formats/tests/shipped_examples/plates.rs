@@ -1,18 +1,12 @@
 //! Every pressure plate a shipped example places is one a player can step on.
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArray, BlockState};
+use cairn_lang_core::block_array::BlockState;
 
-use crate::common::{examples, latest, lower_source};
-
-/// The id at `(x, y, z)`, or `None` past the array, where the world around the build is.
-fn id_at(ba: &BlockArray, x: u32, y: u32, z: u32) -> Option<&str> {
-    let i = ba.dims.index(x, y, z)?;
-    Some(&ba.palette.entries[usize::from(ba.voxels[i].0)].id)
-}
+use crate::common::{examples, id_at, latest, lower_source};
 
 #[test]
-fn every_plate_a_shipped_example_places_has_room_above_it_for_a_player() {
+fn every_plate_a_shipped_example_places_stands_on_something_with_room_above_it() {
     let mut plates = 0;
     for (name, source) in examples() {
         for edition in [Edition::Java, Edition::Bedrock] {
@@ -27,15 +21,24 @@ fn every_plate_a_shipped_example_places_has_room_above_it_for_a_player() {
                                 continue;
                             }
                             plates += 1;
-                            for above in [y + 1, y + 2] {
-                                let id = id_at(ba, x, above, z).unwrap_or(BlockState::AIR_ID);
-                                assert_eq!(
-                                    id,
-                                    BlockState::AIR_ID,
-                                    "{name} ({edition:?}) {scope}: the plate at ({x}, {y}, {z}) \
-                                     has `{id}` at y={above}, so no player reaches it",
-                                );
-                            }
+                            // A plate has no collision box, so a player stands in its cell.
+                            let above = id_at(ba, x, y + 1, z).unwrap_or(BlockState::AIR_ID);
+                            assert_eq!(
+                                above,
+                                BlockState::AIR_ID,
+                                "{name} ({edition:?}) {scope}: the plate at ({x}, {y}, {z}) has \
+                                 `{above}` above it, so no player reaches it",
+                            );
+                            // Row 0 stands on the ground the build is placed on.
+                            let below = y.checked_sub(1).map(|b| {
+                                id_at(ba, x, b, z).expect("the row below is in the array")
+                            });
+                            assert_ne!(
+                                below,
+                                Some(BlockState::AIR_ID),
+                                "{name} ({edition:?}) {scope}: the plate at ({x}, {y}, {z}) has \
+                                 air under it, so nothing holds it up",
+                            );
                         }
                     }
                 }
