@@ -167,8 +167,11 @@ slope inward toward a centre ridge.
   square footprint caps with a single stair (odd short span) or a `2x2` block of them (even short
   span). A rectangular footprint caps with a band along the long axis, one row deep on an odd short
   span and two on an even one, since the inset rectangle is two rows deep there and one row would
-  leave the other open. Apex facings follow the gable rule: `south` for an x-ridge, `east` for a
-  z-ridge.
+  leave the other open. Apex facings follow the gable rule. On an odd short span the apex takes the
+  low slope's facing, `south` for an x-ridge and `east` for a z-ridge. On an even one each of its
+  two rows faces away from the ridge: `north` on the `-z` row and `south` on the `+z` row for an
+  x-ridge, `west` on the `-x` row and `east` on the `+x` row for a z-ridge. A square ties to `x`,
+  so its `2x2` cap is the x-ridge pair (`north` / `south`).
 - **Overhang.** As `gable`.
 
 ## 4.6 Flat roof voxel rules
