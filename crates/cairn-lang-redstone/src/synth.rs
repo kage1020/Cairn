@@ -17,6 +17,7 @@ use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
     SiteIr, StructIr, ValueWithSpan, actuator_patch_target, known_keywords,
 };
+use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
 use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
 /// Each actuator argument key, paired with the component keyword that carries it.
@@ -1260,34 +1261,49 @@ fn lower_expr_inner<'a>(
 ) -> Result<SignalRef, LoweringFailed> {
     match expr {
         Expr::Ref(dr) => resolve_ref(dr, binding_span, ir, ctx, diagnostics),
-        Expr::And(a, b) => {
-            let (ai, bi) = lower_binary(a, b, binding_span, ir, ctx, diagnostics)?;
-            let (ai, bi) = canonicalize_pair(ai, bi);
-            Ok(intern_gate(
-                ir,
-                ctx,
-                GateKind::And2 { a: ai, b: bi },
-                binding_span.clone(),
-            ))
+        Expr::Infix {
+            primitive,
+            lhs,
+            rhs,
+        } => {
+            let operands = lower_binary(lhs, rhs, binding_span, ir, ctx, diagnostics);
+            let gate: fn(SignalRef, SignalRef) -> GateKind = match primitive {
+                LogicPrimitive::And => |a, b| GateKind::And2 { a, b },
+                LogicPrimitive::Or => |a, b| GateKind::Or2 { a, b },
+                LogicPrimitive::Not => {
+                    return Err(no_gate(
+                        *primitive,
+                        "between two operands",
+                        binding_span,
+                        ctx,
+                        diagnostics,
+                    ));
+                }
+            };
+            let (a, b) = operands?;
+            let (a, b) = canonicalize_pair(a, b);
+            Ok(intern_gate(ir, ctx, gate(a, b), binding_span.clone()))
         }
-        Expr::Or(a, b) => {
-            let (ai, bi) = lower_binary(a, b, binding_span, ir, ctx, diagnostics)?;
-            let (ai, bi) = canonicalize_pair(ai, bi);
-            Ok(intern_gate(
-                ir,
-                ctx,
-                GateKind::Or2 { a: ai, b: bi },
-                binding_span.clone(),
-            ))
-        }
-        Expr::Not(a) => {
-            let ai = lower_expr(a, binding_span, ir, ctx, diagnostics)?;
-            Ok(intern_gate(
-                ir,
-                ctx,
-                GateKind::Not { a: ai },
-                binding_span.clone(),
-            ))
+        Expr::Prefix { primitive, operand } => {
+            let operand = lower_expr(operand, binding_span, ir, ctx, diagnostics);
+            match primitive {
+                LogicPrimitive::Not => {
+                    let a = operand?;
+                    Ok(intern_gate(
+                        ir,
+                        ctx,
+                        GateKind::Not { a },
+                        binding_span.clone(),
+                    ))
+                }
+                LogicPrimitive::And | LogicPrimitive::Or => Err(no_gate(
+                    *primitive,
+                    "before one operand",
+                    binding_span,
+                    ctx,
+                    diagnostics,
+                )),
+            }
         }
         _ => {
             let label = ctx.scope.label();
@@ -1299,12 +1315,54 @@ fn lower_expr_inner<'a>(
                         "{label} logic expression uses a boolean primitive the combinational lowering has no gate for",
                     ),
                 )
-                .with_footer(
-                    "Fix: rewrite the expression with `and`, `or` and `not`",
-                ),
+                .with_footer(format!(
+                    "Fix: rewrite the expression with {}",
+                    library_words(),
+                )),
             );
             Err(LoweringFailed)
         }
+    }
+}
+
+/// Reports `primitive` written `as_written`, a notation it has no gate in, once its operands are
+/// lowered.
+fn no_gate(
+    primitive: LogicPrimitive,
+    as_written: &str,
+    binding_span: &Span,
+    ctx: &LoweringCtx<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> LoweringFailed {
+    let label = ctx.scope.label();
+    let name = primitive.name();
+    let written = match primitive.notation() {
+        Notation::Prefix => "before its one operand",
+        Notation::Infix { .. } => "between its two operands",
+    };
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::LogicUnsupportedPrimitive,
+            binding_span.clone(),
+            format!(
+                "{label} logic expression applies `{name}` {as_written}, which the combinational lowering has no gate for",
+            ),
+        )
+        .with_footer(format!("Fix: write `{name}` {written}")),
+    );
+    LoweringFailed
+}
+
+/// Every primitive of the built-in logic library, as a prose list of its words.
+fn library_words() -> String {
+    let words: Vec<String> = LogicPrimitive::ALL
+        .iter()
+        .map(|primitive| format!("`{}`", primitive.name()))
+        .collect();
+    match words.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, head)) => format!("{} and {last}", head.join(", ")),
+        None => String::new(),
     }
 }
 
@@ -1472,11 +1530,11 @@ fn collect_refs(expr: &Expr, out: &mut HashSet<DottedRef>) {
         Expr::Ref(dr) => {
             out.insert(dr.clone());
         }
-        Expr::And(a, b) | Expr::Or(a, b) => {
-            collect_refs(a, out);
-            collect_refs(b, out);
+        Expr::Infix { lhs, rhs, .. } => {
+            collect_refs(lhs, out);
+            collect_refs(rhs, out);
         }
-        Expr::Not(a) => collect_refs(a, out),
+        Expr::Prefix { operand, .. } => collect_refs(operand, out),
         _ => {}
     }
 }

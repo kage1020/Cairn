@@ -19,7 +19,7 @@
     `9x` is unchanged.
   - `and` and `or` are no longer read as a signal's name where a `logic` expression expects a
     signal, so `logic sig.x = sig.a and or` is refused at the parse with
-    ``expected a signal after `and`, got the operator `or` ``. Such an operand could never be read:
+    ``expected a signal after `and`, got the infix primitive `or` ``. Such an operand could never be read:
     `spec/redstone` "Signal names" puts every readable signal in the `sig.` namespace, and a signal
     named `or` (`-> sig.or`, read as `sig.or`) is untouched. But nothing before synthesis said so:
     `cairn check`, `cairn info` and `cairn compile` exited 0 on such a file, and `compile` wrote its

@@ -1,6 +1,6 @@
 //! A roof's first course sits on the wall top even when it is the only course, and an even-span
-//! gable's cap pair faces outward: `spec/compilation` "Hip roof voxel rules" and "Gable roof voxel
-//! rules".
+//! gable's or hip's cap pair faces outward: `spec/compilation` "Hip roof voxel rules" and "Gable
+//! roof voxel rules".
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::{lower, parse, resolve};
@@ -192,10 +192,8 @@ fn an_odd_span_gable_keeps_the_low_slope_facing_on_its_single_cap() {
     );
 }
 
-// ------------------------------------------- the footprints that do not move
-
 #[test]
-fn a_hip_taller_than_one_course_frames_below_and_caps_above() {
+fn a_hip_taller_than_one_course_frames_below_and_caps_with_an_outward_pair() {
     // The frame at y=4 and the `half=top` ridge band at y=5.
     let out = roof("8x4", "hip");
     let ba = structure(&out);
@@ -203,14 +201,35 @@ fn a_hip_taller_than_one_course_frames_below_and_caps_above() {
     assert_eq!(stair_at(ba, 0, 4, 1), ("east", "bottom", "straight"));
     assert_eq!(stair_at(ba, 7, 4, 3), ("north", "bottom", "outer_left"));
     for x in 1..7 {
-        for z in 1..3 {
-            assert_eq!(stair_at(ba, x, 5, z), ("south", "top", "straight"));
-        }
+        assert_eq!(stair_at(ba, x, 5, 1), ("north", "top", "straight"));
+        assert_eq!(stair_at(ba, x, 5, 2), ("south", "top", "straight"));
     }
 }
 
 #[test]
-fn a_square_hip_still_caps_with_a_single_apex_cell() {
+fn an_even_span_hip_on_a_z_ridge_mirrors_the_outward_pair() {
+    let out = roof("4x8", "hip");
+    let ba = structure(&out);
+    for z in 1..7 {
+        assert_eq!(stair_at(ba, 1, 5, z), ("west", "top", "straight"));
+        assert_eq!(stair_at(ba, 2, 5, z), ("east", "top", "straight"));
+    }
+}
+
+#[test]
+fn a_square_even_span_hip_caps_with_the_x_ridge_pair() {
+    let out = roof("4x4", "hip");
+    let ba = structure(&out);
+    for x in 1..3 {
+        assert_eq!(stair_at(ba, x, 5, 1), ("north", "top", "straight"));
+        assert_eq!(stair_at(ba, x, 5, 2), ("south", "top", "straight"));
+    }
+}
+
+// ----------------------------------------- an odd-span hip caps with one row
+
+#[test]
+fn an_odd_square_hip_caps_with_a_single_apex_cell() {
     // Three layers on a 5x5: frames at y=4 and y=5, one apex cell at y=6.
     let out = roof("5x5", "hip");
     let ba = structure(&out);
@@ -221,7 +240,7 @@ fn a_square_hip_still_caps_with_a_single_apex_cell() {
 }
 
 #[test]
-fn a_rectangular_hip_still_caps_with_a_ridge_row() {
+fn an_odd_span_rectangular_hip_caps_with_a_ridge_row() {
     // 9x5: frames at y=4 and y=5, and a five-cell ridge along x at y=6.
     let out = roof("9x5", "hip");
     let ba = structure(&out);
