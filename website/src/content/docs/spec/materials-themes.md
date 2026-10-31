@@ -79,9 +79,9 @@ checked against the pinned target ([§7.3](#73-mappings-across-version-and-editi
 `@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version, and the Bedrock writer maps the states
 of the stair family alone: `@oak_log[axis=x]` compiles for Java and is refused for Bedrock.
 
-Tokens come in two tiers:
+Tokens come in two kinds:
 
-| Tier | Example | What it means |
+| Kind | Example | What it means |
 |---|---|---|
 | **Canonical block token** | `@oak_planks`, `@water_cauldron`, `@oak_log[axis=x]` | A specific meaning in Minecraft. Silent meaning-breaking downgrades are **forbidden**, so `@water_cauldron` may never become `cauldron`. |
 | **Abstract material token** | `@floor.wood.broadleaf`, `@roof.dark_wood` | An aesthetic choice. Theme policy MAY downgrade these (oak ↔ birch). |
@@ -98,6 +98,28 @@ block, and an entry's `overrides` name the versions that spell that block differ
 ([Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)).
 A token the catalog does not declare is `E_UNKNOWN_ABSTRACT_TOKEN` ([Lint](/spec/lint/)) wherever a
 pack is offered: at a pinned target, and in `cairn lower` and `cairn info`.
+
+### Tier-1 tokens
+
+The abstract tokens the built-in `materials` catalogs declare are the **tier-1** vocabulary, which
+[Compatibility Tiers](/spec/compatibility/#c1-tier-definitions) holds Stable. Both editions'
+catalogs declare the same tokens, so a theme that binds only these resolves on either:
+
+| Tokens | For |
+|---|---|
+| `@floor.wood.broadleaf`, `@floor.wood.conifer`, `@floor.stone.cobble`, `@floor.stone.smooth` | Floors |
+| `@wall.wood.broadleaf`, `@wall.wood.conifer`, `@wall.stone.cobble`, `@wall.stone.smooth` | Walls |
+| `@wood.dark`, `@wood.light`, `@wood.warm`, `@wood.cool` | Planks, by tone |
+| `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
+| `@sign.oak`, `@sign.oak_wall` | A standing sign and a wall sign |
+| `@pressure_plate.default` | The default block a `pressure_plate` is built from |
+
+The block a tier-1 token resolves to is **tier-2**, which is Evolving: it is the catalog's answer
+for the target, and a release may change it. Adding a token to the catalogs breaks nothing.
+Renaming or retiring one is a break to a Stable surface, so the old token keeps resolving, with
+`W_DEPRECATED`, for the deprecation window. A canonical block token is Minecraft's own name rather
+than Cairn's and has no tier: whether `@oak_planks` exists at a target is the registry pack's answer
+([§7.3](#73-mappings-across-version-and-edition)).
 
 ## 7.3 Mappings across version and edition
 
