@@ -1,7 +1,5 @@
 name: Minecraft
 
-# Loads every example's `.nbt` with Minecraft Java's own structure loader at each shipped target.
-# It downloads Mojang's server jars, so it stays out of `cargo test` and the default CI run.
 on:
   push:
     branches: [canary]
@@ -16,6 +14,7 @@ on:
       - ".github/scripts/minecraft_load.py"
       - ".github/workflows/minecraft.yml"
   pull_request:
+    # Keep in step with the `push` filter.
     paths:
       - "examples/**"
       - "crates/cairn-lang-core/src/**"
@@ -27,7 +26,8 @@ on:
       - ".github/scripts/minecraft_load.py"
       - ".github/workflows/minecraft.yml"
   schedule:
-    # Weekly, off the hour, so a release that changes nothing above is still checked.
+    # Weekly, off the hour, for a change to the runner's Java or to Mojang's endpoints, which no
+    # path above sees.
     - cron: "37 5 * * 1"
   workflow_dispatch:
 
@@ -54,11 +54,14 @@ jobs:
           shared-key: minecraft
           save-if: ${{ github.ref == 'refs/heads/canary' }}
 
-      - name: Cache the server jars
-        uses: actions/cache@v6
+      - name: Restore the server jars
+        id: jars
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/cairn-minecraft
           key: minecraft-${{ hashFiles('crates/cairn-lang-formats/registry-data/java/data_versions.json') }}
+          # The script checks each jar against Mojang's SHA-1, so an older set is a safe start.
+          restore-keys: minecraft-
 
       - name: Build cairn
         run: cargo build -p cairn-lang-cli --locked
@@ -67,6 +70,13 @@ jobs:
         # The runner image ships Java 21, which every shipped target runs on.
         run: >-
           python3 .github/scripts/minecraft_load.py
-          --cairn target/debug/cairn
+          --cairn ./target/debug/cairn
           --java "$JAVA_HOME_21_X64/bin/java"
           --cache ~/.cache/cairn-minecraft
+
+      - name: Save the server jars
+        if: github.ref == 'refs/heads/canary' && steps.jars.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/cairn-minecraft
+          key: ${{ steps.jars.outputs.cache-primary-key }}

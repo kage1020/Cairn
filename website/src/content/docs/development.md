@@ -151,25 +151,42 @@ missing and gives the command for when the binding layer lands.
 ### The examples in Minecraft
 
 `cargo test` holds what Cairn writes to Cairn's own reading of each format. Whether the game reads
-a file the same way is the `Minecraft` workflow's job. It runs on a pull request that touches the
-examples, lowering, the writers or the registry packs, on `canary`, and weekly. For each targetable
-row of the built-in Java pack, it compiles every example and has that version's server jar load
-each `.nbt` through its data generator. `--dev` turns the files into SNBT, and `--server` turns
-them back into structures through the DataFixer and the template loader `/place template` uses. A
-block, property, `DataVersion` or size the game reads differently from what was written fails the
-job, which names the file and the cell.
+a file the same way is the job of the `Minecraft` workflow, whose check is
+`Examples load in Minecraft Java`. It runs weekly, and on a pull request or a push to `canary` that
+touches the examples, `cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats` and its registry
+packs, `cairn-lang-cli` or `Cargo.lock`.
+
+For each targetable row of the built-in Java pack, the job compiles every example and has that
+version's server jar load each `.nbt` through its data generator. `--dev` turns the files into
+SNBT, and `--server` turns them back into structures through the DataFixer and the template loader.
+Unlike a running world, that loader does not filter blocks by enabled features, so a block behind an
+experiment passes here and still loads as air in a world without the experiment. Block-entity NBT
+is kept as written until a structure is placed, so the job does not check it.
+
+The job fails when:
+
+- An example does not compile clean, meaning exit 0 with nothing on stderr, at every shipped
+  target. An example with `@requires version>=1.21` fails at 1.20.4 with `E_VERSION_CAP`, and so
+  does one that raises any warning.
+- A written file uses a key the game does not read, gives `pos` or `size` as anything but three
+  `Int`s, or puts two blocks at one position.
+- The game reads a block, a property, the `DataVersion`, the `size`, the block count or the entity
+  count differently from what was written, or writes no copy of a file. A block's line names the
+  file and the cell.
+- The data generator logs an exception. It still exits 0 then, so the job reads its log.
 
 To run it locally, with Java 21 and network access to Mojang:
 
 ```sh
 cargo build -p cairn-lang-cli
-python3 .github/scripts/minecraft_load.py --cairn target/debug/cairn --target 1.21.4
+python3 .github/scripts/minecraft_load.py --cairn ./target/debug/cairn --target 1.21.4
 ```
 
-Leave out `--target` to check every shipped version. The script downloads each server jar from
-Mojang, checks it against the SHA-1 Mojang publishes, and keeps it under `~/.cache/cairn-minecraft`.
-The jars are used under the Minecraft EULA and are never committed. The data generator writes no
-world, so it needs no `eula.txt`.
+Leave out `--target` to check every shipped version. 1.21 and later need Java 21, so when the
+`java` on the `PATH` is older, pass a newer one with `--java <path>`. The script downloads each
+server jar from Mojang, checks it against the SHA-1 Mojang publishes, and keeps it under
+`~/.cache/cairn-minecraft`. The jars are used under the Minecraft EULA and are never committed. The
+data generator writes no world, so it needs no `eula.txt`.
 
 ## Conventions for Rust code
 

@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 """Load every example's `.nbt` with Minecraft Java's own structure loader, at each shipped target.
 
-For each targetable row of the built-in Java pack, every `examples/*.crn` is compiled with
-`cairn compile --edition java --target <version>`, and the vanilla server jar of that version
-reads each `.nbt` back through its data generator: `--dev` turns the files into SNBT, and
-`--server` turns the SNBT back into structures through `StructureUpdater`, which runs the
-DataFixer from the file's `DataVersion`, loads the template against the block registry and saves
-it again. That is the load `/place template` and a structure block perform. A block the game does
-not know comes back as air, a property it does not know is dropped, a value outside its domain
-reverts to the default, and an older `DataVersion` is upgraded, so any difference between a
-written file and its reloaded copy is a file the game reads differently from what was written.
-
-The server jar is downloaded from Mojang at run time, checked against the SHA-1 Mojang publishes,
-and kept in the cache directory; it is never committed or redistributed, and its use is under the
-Minecraft EULA. The data generator writes no world and needs no `eula.txt`.
+Each `examples/*.crn` is compiled for every targetable row of the built-in Java pack, and that
+version's server jar reads each `.nbt` back through its data generator: `--dev` writes SNBT, and
+`--server` runs the DataFixer from the file's `DataVersion` and loads the template against the
+block registry. An unknown block loads as air, an unknown property is dropped and a value outside
+its domain reverts to the default. Unlike a running world, the loader does not filter blocks by
+enabled features, so a block behind an experiment loads here and not in the game.
 
 Standard library only: it runs on a bare `ubuntu-latest` runner.
 """
@@ -23,8 +16,10 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import http.client
 import io
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -39,8 +34,10 @@ EXAMPLES = ROOT / "examples"
 DATA_VERSIONS = ROOT / "crates/cairn-lang-formats/registry-data/java/data_versions.json"
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 
-# How many differences to print for one structure before summarising the rest.
 SHOWN_PER_FILE = 5
+
+# The data generator exits 0 even when a conversion throws, so its log is the only sign.
+GENERATOR_FAILURES = ('Exception in thread "ServerMain"', "/ERROR]:")
 
 TAG_END, TAG_BYTE, TAG_SHORT, TAG_INT, TAG_LONG = 0, 1, 2, 3, 4
 TAG_FLOAT, TAG_DOUBLE, TAG_BYTE_ARRAY, TAG_STRING = 5, 6, 7, 8
@@ -51,11 +48,44 @@ class Refused(Exception):
     """A step the check depends on did not complete."""
 
 
+class Malformed(ValueError):
+    """A written structure laid out other than the way the game reads one."""
+
+
+def shown(path: Path) -> str:
+    """`path` relative to the repository when it is inside it."""
+    return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+
+
 # --- NBT ------------------------------------------------------------------------------------
 
 
+class Byte(int):
+    """An NBT `Byte`."""
+
+
+class Short(int):
+    """An NBT `Short`."""
+
+
+class Int(int):
+    """An NBT `Int`."""
+
+
+class Long(int):
+    """An NBT `Long`."""
+
+
+INTEGERS = {
+    TAG_BYTE: (Byte, ">b"),
+    TAG_SHORT: (Short, ">h"),
+    TAG_INT: (Int, ">i"),
+    TAG_LONG: (Long, ">q"),
+}
+
+
 def read_nbt(raw: bytes) -> dict:
-    """The root compound of a gzip-compressed, big-endian NBT file."""
+    """The root compound of a gzip-compressed, big-endian NBT file, integers typed by their tag."""
     data = gzip.decompress(raw)
     pos = 0
 
@@ -74,8 +104,11 @@ def read_nbt(raw: bytes) -> dict:
         return take(int(unpack(">H"))).decode("utf-8")
 
     def payload(tag: int):
-        if tag in (TAG_BYTE, TAG_SHORT, TAG_INT, TAG_LONG, TAG_FLOAT, TAG_DOUBLE):
-            return unpack({1: ">b", 2: ">h", 3: ">i", 4: ">q", 5: ">f", 6: ">d"}[tag])
+        if tag in INTEGERS:
+            kind, fmt = INTEGERS[tag]
+            return kind(unpack(fmt))
+        if tag in (TAG_FLOAT, TAG_DOUBLE):
+            return unpack(">f" if tag == TAG_FLOAT else ">d")
         if tag == TAG_BYTE_ARRAY:
             return list(take(int(unpack(">i"))))
         if tag == TAG_STRING:
@@ -102,10 +135,16 @@ def read_nbt(raw: bytes) -> dict:
 
 
 def write_nbt(root: dict) -> bytes:
-    """`root` as a gzip-compressed NBT file: ints as `Int`, strings, lists and compounds only."""
+    """`root` as a gzip-compressed NBT file: integers, strings, lists and compounds only.
+
+    A plain `int` is written as an `Int`, and `Byte`, `Short` and `Long` as their own tags.
+    """
     out = io.BytesIO()
 
     def tag_of(value) -> int:
+        for tag, (kind, _) in INTEGERS.items():
+            if type(value) is kind:
+                return tag
         if isinstance(value, bool) or not isinstance(value, (int, str, list, dict)):
             raise TypeError(f"no NBT tag for {value!r}")
         return {int: TAG_INT, str: TAG_STRING, list: TAG_LIST, dict: TAG_COMPOUND}[type(value)]
@@ -116,8 +155,8 @@ def write_nbt(root: dict) -> bytes:
 
     def payload(value) -> None:
         tag = tag_of(value)
-        if tag == TAG_INT:
-            out.write(struct.pack(">i", value))
+        if tag in INTEGERS:
+            out.write(struct.pack(INTEGERS[tag][1], value))
         elif tag == TAG_STRING:
             string(value)
         elif tag == TAG_LIST:
@@ -140,18 +179,76 @@ def write_nbt(root: dict) -> bytes:
 
 # --- comparing a written structure with the game's copy ------------------------------------
 
+ROOT_KEYS = {"DataVersion", "size", "palette", "palettes", "blocks", "entities"}
+PALETTE_KEYS = {"Name", "Properties"}
+BLOCK_KEYS = {"pos", "state", "nbt"}
+ENTITY_KEYS = {"pos", "blockPos", "nbt"}
 
-def block_states(structure: dict) -> dict[tuple[int, int, int], tuple[str, dict, object]]:
-    """Each block of a structure by position, as its id, properties and block-entity NBT."""
+
+def strict_layout(structure: dict) -> None:
+    """Raise `Malformed` unless `structure` uses only the keys and tags the game reads.
+
+    The game skips a key it does not read and reads a mistyped `pos` or `size` as zeros, so a
+    lenient comparison would agree with a file the game reads as empty.
+    """
+
+    def require(ok: bool, problem: str) -> None:
+        if not ok:
+            raise Malformed(problem)
+
+    def compound(value, allowed: set[str], what: str) -> dict:
+        require(isinstance(value, dict), f"{what} is not a compound")
+        extra = sorted(value.keys() - allowed)
+        named = ", ".join(f"`{key}`" for key in extra)
+        require(not extra, f"{what} has {named}, which the game does not read")
+        return value
+
+    def ints(value, what: str) -> tuple[int, int, int]:
+        three = isinstance(value, list) and len(value) == 3
+        require(three and all(type(v) is Int for v in value), f"{what} is not three `Int`s")
+        return tuple(value)
+
+    compound(structure, ROOT_KEYS, "the root")
+    missing = sorted({"DataVersion", "size", "blocks", "entities"} - structure.keys())
+    require(not missing, f"the root has no {', '.join(f'`{key}`' for key in missing)}")
+    one = ("palette" in structure) != ("palettes" in structure)
+    require(one, "the root needs exactly one of `palette` and `palettes`")
+    require(type(structure["DataVersion"]) is Int, "`DataVersion` is not an `Int`")
+    ints(structure["size"], "`size`")
+    palettes = [structure["palette"]] if "palette" in structure else structure["palettes"]
+    require(isinstance(palettes, list) and bool(palettes), "`palettes` holds no palette")
+    for palette in palettes:
+        require(isinstance(palette, list), "a palette is not a list")
+        for entry in palette:
+            compound(entry, PALETTE_KEYS, "a palette entry")
+            require(isinstance(entry.get("Name"), str), "a palette entry has no `Name`")
+            properties = entry.get("Properties", {})
+            textual = isinstance(properties, dict) and all(
+                isinstance(v, str) for v in properties.values()
+            )
+            require(textual, f"{entry['Name']}'s `Properties` are not all strings")
+    require(isinstance(structure["blocks"], list), "`blocks` is not a list")
+    seen = set()
+    for block in structure["blocks"]:
+        compound(block, BLOCK_KEYS, "a block")
+        pos = ints(block.get("pos"), "a block's `pos`")
+        state = block.get("state")
+        in_palette = type(state) is Int and all(0 <= state < len(p) for p in palettes)
+        require(in_palette, f"the block at {pos} has no `Int` `state` inside its palette")
+        require(pos not in seen, f"two blocks are at {pos}")
+        seen.add(pos)
+    require(isinstance(structure["entities"], list), "`entities` is not a list")
+    for entity in structure["entities"]:
+        compound(entity, ENTITY_KEYS, "an entity")
+
+
+def block_states(structure: dict) -> dict[tuple[int, int, int], tuple[str, dict]]:
+    """Each block of a structure by position, as its id and properties."""
     palette = structure["palette"] if "palette" in structure else structure["palettes"][0]
     states = {}
     for block in structure.get("blocks", []):
         entry = palette[block["state"]]
-        states[tuple(block["pos"])] = (
-            entry["Name"],
-            entry.get("Properties", {}),
-            block.get("nbt"),
-        )
+        states[tuple(block["pos"])] = (entry["Name"], entry.get("Properties", {}))
     return states
 
 
@@ -165,11 +262,10 @@ def differences(written: dict, loaded: dict) -> list[str]:
     for key in ("DataVersion", "size"):
         if written.get(key) != loaded.get(key):
             found.append(f"{key} {written.get(key)} was read as {loaded.get(key)}")
-    if len(written.get("entities", [])) != len(loaded.get("entities", [])):
-        found.append(
-            f"{len(written.get('entities', []))} entities were read as "
-            f"{len(loaded.get('entities', []))}"
-        )
+    for key in ("entities", "blocks"):
+        ours, theirs = len(written.get(key, [])), len(loaded.get(key, []))
+        if ours != theirs:
+            found.append(f"{ours} {key} were read as {theirs}")
     ours, theirs = block_states(written), block_states(loaded)
     for pos in sorted(ours.keys() | theirs.keys()):
         if pos not in theirs:
@@ -178,19 +274,34 @@ def differences(written: dict, loaded: dict) -> list[str]:
         if pos not in ours:
             found.append(f"{pos}: {theirs[pos][0]} appeared")
             continue
-        name, properties, entity = ours[pos]
-        read_name, read_properties, read_entity = theirs[pos]
+        (name, properties), (read_name, read_properties) = ours[pos], theirs[pos]
         if name != read_name:
             found.append(f"{pos}: {name} was read as {read_name}")
             continue
         for key, value in properties.items():
             if read_properties.get(key) != value:
                 read = read_properties.get(key)
-                shown = "dropped" if read is None else f"read as {key}={read}"
-                found.append(f"{pos}: {name}[{key}={value}] {shown}")
-        if entity is not None and read_entity is None:
-            found.append(f"{pos}: {name}'s block entity was dropped")
+                change = "dropped" if read is None else f"read as {key}={read}"
+                found.append(f"{pos}: {name}[{key}={value}] {change}")
     return found
+
+
+def compare(path: Path, copy: Path) -> list[str]:
+    """What the game read differently from the structure at `path`, given its copy at `copy`."""
+    if not copy.exists():
+        return ["the game wrote no copy of it"]
+    try:
+        written = read_nbt(path.read_bytes())
+        strict_layout(written)
+    except Malformed as problem:
+        return [f"the written file is malformed: {problem}"]
+    except (OSError, EOFError, ValueError) as problem:
+        return [f"the written file does not read as NBT: {problem}"]
+    try:
+        loaded = read_nbt(copy.read_bytes())
+    except (OSError, EOFError, ValueError) as problem:
+        return [f"the game's copy does not read as NBT: {problem}"]
+    return differences(written, loaded)
 
 
 # --- targets and server jars -----------------------------------------------------------------
@@ -222,39 +333,67 @@ def shipped_targets(table: dict) -> list[Target]:
     ]
 
 
+def fetch(url: str, timeout: int) -> bytes:
+    """The body at `url`."""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.read()
+    except (OSError, http.client.HTTPException) as problem:
+        raise Refused(f"cannot download {url}: {problem}") from None
+
+
 def fetch_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=60) as response:
-        return json.load(response)
+    """The JSON document at `url`."""
+    try:
+        return json.loads(fetch(url, 60))
+    except ValueError as problem:
+        raise Refused(f"{url} is not JSON: {problem}") from None
+
+
+def write_atomically(path: Path, data: bytes) -> None:
+    """`data` at `path`, which an interrupted run never leaves half written."""
+    partial = path.with_name(f"{path.name}.partial")
+    partial.write_bytes(data)
+    os.replace(partial, path)
 
 
 def server_jar(version: str, cache: Path) -> tuple[Path, int]:
     """The vanilla server jar for `version` in `cache`, and the Java major version it needs."""
     cache.mkdir(parents=True, exist_ok=True)
     meta_path = cache / f"{version}.json"
-    if not meta_path.exists():
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         manifest = fetch_json(MANIFEST_URL)
         urls = [v["url"] for v in manifest["versions"] if v["id"] == version]
         if not urls:
-            raise Refused(f"Mojang's version manifest has no {version}")
-        meta_path.write_text(json.dumps(fetch_json(urls[0])))
-    meta = json.loads(meta_path.read_text())
+            raise Refused(f"Mojang's version manifest has no {version}") from None
+        meta = fetch_json(urls[0])
+        write_atomically(meta_path, json.dumps(meta).encode("utf-8"))
     download = meta["downloads"]["server"]
     jar = cache / f"server-{version}.jar"
     if not jar.exists() or hashlib.sha1(jar.read_bytes()).hexdigest() != download["sha1"]:
-        with urllib.request.urlopen(download["url"], timeout=300) as response:
-            body = response.read()
+        body = fetch(download["url"], 300)
         if hashlib.sha1(body).hexdigest() != download["sha1"]:
             raise Refused(f"the {version} server jar does not match the SHA-1 Mojang publishes")
-        jar.write_bytes(body)
+        write_atomically(jar, body)
     return jar, int(meta["javaVersion"]["majorVersion"])
+
+
+def run_tool(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
+    """`command` run to completion, with its output captured as UTF-8."""
+    try:
+        return subprocess.run(
+            command, cwd=cwd, capture_output=True, encoding="utf-8", errors="replace"
+        )
+    except OSError as problem:
+        raise Refused(f"cannot run `{command[0]}`: {problem}") from None
 
 
 def java_major(java: str) -> int:
     """The major version of the `java` executable."""
-    shown = subprocess.run(
-        [java, "-XshowSettings:properties", "-version"], capture_output=True, text=True
-    ).stderr
-    for line in shown.splitlines():
+    shown_settings = run_tool([java, "-XshowSettings:properties", "-version"]).stderr
+    for line in shown_settings.splitlines():
         if line.strip().startswith("java.specification.version"):
             return int(line.split("=")[1].strip().split(".")[-1])
     raise Refused(f"cannot tell which Java `{java}` is")
@@ -264,43 +403,46 @@ def java_major(java: str) -> int:
 
 
 def compile_examples(cairn: str, target: Target, into: Path, locks: Path) -> list[Path]:
-    """Every example compiled for `target` under `into`, one folder per example."""
+    """The `.nbt` files of each example compiled for `target`, in a folder per example in `into`."""
+    sources = sorted(EXAMPLES.glob("*.crn"))
+    if not sources:
+        raise Refused(f"{shown(EXAMPLES)} holds no `.crn` example")
     locks.mkdir(parents=True, exist_ok=True)
     written = []
-    for source in sorted(EXAMPLES.glob("*.crn")):
+    for source in sources:
         out = into / source.stem
-        run = subprocess.run(
+        run = run_tool(
             [
                 cairn, "compile", "--edition", "java", "--target", target.mc_version,
                 "--out", str(out), "--lock", str(locks / f"{source.stem}.lock"), str(source),
-            ],
-            capture_output=True,
-            text=True,
+            ]
         )
         if run.returncode != 0 or run.stderr.strip():
             raise Refused(
-                f"{source.relative_to(ROOT)} does not compile clean for Java "
-                f"{target.mc_version} (exit {run.returncode}):\n{run.stderr.strip()}"
+                f"{shown(source)} does not compile clean for Java {target.mc_version} "
+                f"(exit {run.returncode}):\n{run.stderr.strip()}"
             )
         files = sorted(out.glob("*.nbt"))
         if not files:
-            raise Refused(f"{source.relative_to(ROOT)} wrote no .nbt for Java {target.mc_version}")
+            raise Refused(f"{shown(source)} wrote no .nbt for Java {target.mc_version}")
         written.extend(files)
     return written
 
 
-def data_generator(java: str, jar: Path, cwd: Path, *args: str) -> None:
+def data_generator(java: str, jar: Path, cwd: Path, log: Path, mode: str, *args: str) -> None:
+    """Run `jar`'s data generator in `mode` from `cwd`, keeping everything it prints in `log`."""
     cwd.mkdir(parents=True, exist_ok=True)
-    run = subprocess.run(
-        [java, "-DbundlerMainClass=net.minecraft.data.Main", "-jar", str(jar), *args],
+    run = run_tool(
+        [java, "-DbundlerMainClass=net.minecraft.data.Main", "-jar", str(jar), mode, *args],
         cwd=cwd,
-        capture_output=True,
-        text=True,
     )
-    if run.returncode != 0:
-        log = (run.stdout + run.stderr).strip().splitlines()
-        tail = "\n".join(log[-30:])
-        raise Refused(f"the data generator failed (exit {run.returncode}):\n{tail}")
+    output = run.stdout + run.stderr
+    log.write_text(output, encoding="utf-8")
+    if run.returncode != 0 or any(mark in output for mark in GENERATOR_FAILURES):
+        tail = "\n".join(output.strip().splitlines()[-30:])
+        raise Refused(
+            f"the data generator's {mode} run failed (exit {run.returncode}, log in {log}):\n{tail}"
+        )
 
 
 # A state the game always saves with properties, so a reload that adds none never loaded it.
@@ -313,7 +455,10 @@ SENTINEL = {
 
 
 def check_target(cairn: str, java: str, target: Target, cache: Path, work: Path) -> list[str]:
-    """Every difference between what `cairn` writes for `target` and what the game loads."""
+    """Report lines for what the game reads differently from what `cairn` writes for `target`.
+
+    At most `SHOWN_PER_FILE` lines are kept per structure, and how many differ is printed first.
+    """
     jar, needs_java = server_jar(target.mc_version, cache)
     has_java = java_major(java)
     if has_java < needs_java:
@@ -321,24 +466,34 @@ def check_target(cairn: str, java: str, target: Target, cache: Path, work: Path)
             f"Java {target.mc_version} needs Java {needs_java}, and `{java}` is {has_java}"
         )
     root = work / target.mc_version
-    shutil.rmtree(root, ignore_errors=True)
+    try:
+        if root.exists():
+            shutil.rmtree(root)
+    except OSError as problem:
+        raise Refused(f"cannot clear the last run's {root}: {problem}") from None
     structures = root / "in" / "data" / "minecraft" / target.structure_folder()
     files = compile_examples(cairn, target, structures, root / "locks")
     sentinel = structures / "sentinel.nbt"
     sentinel.write_bytes(write_nbt({**SENTINEL, "DataVersion": target.data_version}))
-    # The bundler unpacks its libraries into the working directory, so that stays in the cache.
-    runtime = cache / target.mc_version
     for mode, source, output in (("--dev", "in", "snbt"), ("--server", "snbt", "out")):
         data_generator(
-            java, jar, runtime, mode, "--input", str(root / source), "--output", str(root / output)
+            java, jar, root / "runtime", root / f"{mode[2:]}.log", mode,
+            "--input", str(root / source), "--output", str(root / output),
         )
 
-    def loaded(path: Path) -> dict | None:
-        copy = root / "out" / path.relative_to(root / "in")
-        return read_nbt(copy.read_bytes()) if copy.exists() else None
+    def copy_of(path: Path) -> Path:
+        return root / "out" / path.relative_to(root / "in")
 
-    reloaded_sentinel = loaded(sentinel)
-    if reloaded_sentinel is None or not block_states(reloaded_sentinel)[(0, 0, 0)][1]:
+    if not copy_of(sentinel).exists():
+        raise Refused(
+            f"the {target.mc_version} data generator wrote no copy of the sentinel structure "
+            f"(logs in {root})"
+        )
+    try:
+        reloaded = block_states(read_nbt(copy_of(sentinel).read_bytes()))
+    except (OSError, EOFError, ValueError, LookupError) as problem:
+        raise Refused(f"the game's copy of the sentinel does not read: {problem}") from None
+    if not reloaded.get((0, 0, 0), ("", {}))[1]:
         raise Refused(
             f"the {target.mc_version} data generator converted the structures without loading "
             f"them; it reads structures from a folder other than `{target.structure_folder()}`"
@@ -347,21 +502,20 @@ def check_target(cairn: str, java: str, target: Target, cache: Path, work: Path)
     differing = 0
     for path in files:
         where = f"Java {target.mc_version} {path.parent.name}/{path.name}"
-        copy = loaded(path)
-        lines = (
-            ["the game wrote no copy of it"]
-            if copy is None
-            else differences(read_nbt(path.read_bytes()), copy)
-        )
+        lines = compare(path, copy_of(path))
         differing += bool(lines)
         found.extend(f"{where}: {line}" for line in lines[:SHOWN_PER_FILE])
         if len(lines) > SHOWN_PER_FILE:
             found.append(f"{where}: and {len(lines) - SHOWN_PER_FILE} more")
-    print(f"Java {target.mc_version}: {len(files)} structures, {differing} read differently")
+    print(
+        f"Java {target.mc_version}: {len(files)} structures, {differing} read differently",
+        flush=True,
+    )
     return found
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """0 when the game reads every structure as written, 1 when not or refused, 2 on misuse."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--cairn", required=True, help="the `cairn` binary to compile with")
     parser.add_argument("--java", default="java", help="a Java new enough for every target")
@@ -369,39 +523,42 @@ def main() -> int:
         "--cache",
         type=Path,
         default=Path.home() / ".cache" / "cairn-minecraft",
-        help="where the server jars and their unpacked libraries are kept",
+        help="where the server jars are kept",
     )
     parser.add_argument(
-        "--work",
-        type=Path,
-        default=Path(tempfile.gettempdir()) / "cairn-minecraft-load",
-        help="where to compile and convert",
+        "--work", type=Path, help="where to compile and convert; a new temporary folder by default"
     )
     parser.add_argument(
         "--target",
         action="append",
         help="check only this version (repeatable); every shipped one by default",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    targets = shipped_targets(json.loads(DATA_VERSIONS.read_text()))
+    targets = shipped_targets(json.loads(DATA_VERSIONS.read_text(encoding="utf-8")))
     if args.target:
         unknown = sorted(set(args.target) - {t.mc_version for t in targets})
         if unknown:
             print(f"not a shipped Java target: {', '.join(unknown)}", file=sys.stderr)
             return 2
         targets = [t for t in targets if t.mc_version in args.target]
-    cache, work = args.cache.resolve(), args.work.resolve()
-    found = []
+    # Windows starts no relative path with `/` and no `./`; a bare name stays a PATH lookup.
+    cairn, java = os.path.normpath(args.cairn), os.path.normpath(args.java)
+    cache = args.cache.resolve()
+    work = (args.work or Path(tempfile.mkdtemp(prefix="cairn-minecraft-load-"))).resolve()
+    differ = False
     try:
+        if not targets:
+            raise Refused(f"{shown(DATA_VERSIONS)} has no targetable Java version")
         for target in targets:
-            found.extend(check_target(args.cairn, args.java, target, cache, work))
+            lines = check_target(cairn, java, target, cache, work)
+            for line in lines:
+                print(line, file=sys.stderr, flush=True)
+            differ = differ or bool(lines)
     except Refused as refusal:
-        print(f"error: {refusal}", file=sys.stderr)
+        print(f"error: {refusal}", file=sys.stderr, flush=True)
         return 1
-    for line in found:
-        print(line, file=sys.stderr)
-    return 1 if found else 0
+    return 1 if differ else 0
 
 
 if __name__ == "__main__":

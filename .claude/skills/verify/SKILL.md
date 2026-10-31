@@ -35,10 +35,11 @@ Add these when the change reaches them:
 - `editors/vscode/`: `pnpm install`, `pnpm run package` and `pnpm test` in `editors/vscode/`.
   `pnpm test` opens VS Code and skips on Windows. CI runs it on Linux only, as
   `xvfb-run -a pnpm test`, which is also how to run it without a display.
-- `examples/`, lowering, the writers or the registry packs: CI's `Minecraft` workflow loads every
-  example's `.nbt` in the game at each shipped Java target. To run it, with Java 21 and network
-  access to Mojang: `cargo build -p cairn-lang-cli`, then
-  `python3 .github/scripts/minecraft_load.py --cairn target/debug/cairn`.
+- `examples/`, `cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats` and its registry packs,
+  `cairn-lang-cli` or `Cargo.lock`: the `Minecraft` workflow's `Examples load in Minecraft Java`
+  check loads every example's `.nbt` in the game at each shipped Java target. To run it, with Java
+  21 (or `--java <path>`) and network access to Mojang: `cargo build -p cairn-lang-cli`, then
+  `python3 .github/scripts/minecraft_load.py --cairn ./target/debug/cairn`.
 - A new dependency or a recently stabilised API: CI's `MSRV` job runs
   `cargo +<floor> check --workspace --locked --all-features`, where the floor is the `rust-version`
   in `Cargo.toml` with `.0` appended (`1.95` → `1.95.0`), since rustup reads `1.95` as the newest
