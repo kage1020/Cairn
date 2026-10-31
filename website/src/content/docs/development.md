@@ -148,6 +148,29 @@ so `wasm-pack` refuses it. Its
 [README](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) says what is
 missing and gives the command for when the binding layer lands.
 
+### The examples in Minecraft
+
+`cargo test` holds what Cairn writes to Cairn's own reading of each format. Whether the game reads
+a file the same way is the `Minecraft` workflow's job. It runs on a pull request that touches the
+examples, lowering, the writers or the registry packs, on `canary`, and weekly. For each targetable
+row of the built-in Java pack, it compiles every example and has that version's server jar load
+each `.nbt` through its data generator. `--dev` turns the files into SNBT, and `--server` turns
+them back into structures through the DataFixer and the template loader `/place template` uses. A
+block, property, `DataVersion` or size the game reads differently from what was written fails the
+job, which names the file and the cell.
+
+To run it locally, with Java 21 and network access to Mojang:
+
+```sh
+cargo build -p cairn-lang-cli
+python3 .github/scripts/minecraft_load.py --cairn target/debug/cairn --target 1.21.4
+```
+
+Leave out `--target` to check every shipped version. The script downloads each server jar from
+Mojang, checks it against the SHA-1 Mojang publishes, and keeps it under `~/.cache/cairn-minecraft`.
+The jars are used under the Minecraft EULA and are never committed. The data generator writes no
+world, so it needs no `eula.txt`.
+
 ## Conventions for Rust code
 
 - **The spec is the source of truth.** When spec and implementation disagree, fix the

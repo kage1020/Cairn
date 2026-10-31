@@ -1,0 +1,72 @@
+name: Minecraft
+
+# Loads every example's `.nbt` with Minecraft Java's own structure loader at each shipped target.
+# It downloads Mojang's server jars, so it stays out of `cargo test` and the default CI run.
+on:
+  push:
+    branches: [canary]
+    paths:
+      - "examples/**"
+      - "crates/cairn-lang-core/src/**"
+      - "crates/cairn-lang-nbt/src/**"
+      - "crates/cairn-lang-formats/src/**"
+      - "crates/cairn-lang-formats/registry-data/**"
+      - "crates/cairn-lang-cli/src/**"
+      - "Cargo.lock"
+      - ".github/scripts/minecraft_load.py"
+      - ".github/workflows/minecraft.yml"
+  pull_request:
+    paths:
+      - "examples/**"
+      - "crates/cairn-lang-core/src/**"
+      - "crates/cairn-lang-nbt/src/**"
+      - "crates/cairn-lang-formats/src/**"
+      - "crates/cairn-lang-formats/registry-data/**"
+      - "crates/cairn-lang-cli/src/**"
+      - "Cargo.lock"
+      - ".github/scripts/minecraft_load.py"
+      - ".github/workflows/minecraft.yml"
+  schedule:
+    # Weekly, off the hour, so a release that changes nothing above is still checked.
+    - cron: "37 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  load:
+    name: Examples load in Minecraft Java
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: minecraft
+          save-if: ${{ github.ref == 'refs/heads/canary' }}
+
+      - name: Cache the server jars
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/cairn-minecraft
+          key: minecraft-${{ hashFiles('crates/cairn-lang-formats/registry-data/java/data_versions.json') }}
+
+      - name: Build cairn
+        run: cargo build -p cairn-lang-cli --locked
+
+      - name: Load the examples
+        # The runner image ships Java 21, which every shipped target runs on.
+        run: >-
+          python3 .github/scripts/minecraft_load.py
+          --cairn target/debug/cairn
+          --java "$JAVA_HOME_21_X64/bin/java"
+          --cache ~/.cache/cairn-minecraft
