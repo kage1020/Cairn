@@ -9,9 +9,12 @@ shape is what feeds the loop in [Evaluation Framework](/spec/evaluation/).
 ## 11.1 Diagnostic codes
 
 This section is the catalog: every code a stable command can raise has a row here, and a code with
-no row is a bug in this section rather than a code outside it. Where a code's rule belongs to
-another chapter, the row states what the code means and links there for the rule. The row is what a
-reader with a code in hand needs to find, and the chapter is where the behaviour is defined.
+no row is a bug in this section rather than a code outside it. A code another chapter names with no
+row here, such as `E_STATE_DOMAIN`, is reserved: no command raises it yet
+([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Where a code's
+rule belongs to another chapter, the row states what the code means and links there for the rule.
+The row is what a reader with a code in hand needs to find, and the chapter is where the behaviour
+is defined.
 
 Every code of the redstone pipeline is outside that promise: the `E_LOGIC_*` / `W_LOGIC_*` codes,
 and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT` and
@@ -660,7 +663,9 @@ dumping. Under every other `--format` the findings read as prose on stderr.
 
 `data` is an open object tagged with `kind`. Match on `(code, data.kind)` rather than parsing
 `primary`. Additions are strictly additive, so ignore unknown `kind` values rather than failing on
-them. Codes not listed below omit `data` entirely, so the JSON key is absent rather than `null`.
+them. Removing or retyping a field, or renaming a `kind`, changes what the code means and is a break
+([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Codes not listed
+below omit `data` entirely, so the JSON key is absent rather than `null`.
 
 | Code | `data` payload |
 |---|---|

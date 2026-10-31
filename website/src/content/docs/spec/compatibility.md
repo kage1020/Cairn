@@ -132,7 +132,7 @@ preceding release's `Deprecations` section.
   `--edition java`.
 
 ### Deprecations
-- `slot` keyword without an arrow form is now deprecated; emits `W_DEPRECATED_SLOT_ARROW`.
+- `slot` keyword without an arrow form is now deprecated; emits `W_DEPRECATED`.
   Will be removed no earlier than 2026.12.0.
 ```
 
@@ -146,6 +146,37 @@ release to move.
 `W_DEPRECATED` and `E_BREAKING` codes are themselves Stable. Neither exists yet: each is added with
 the first deprecation or break that needs it. Adding a new code is not a breaking change; changing
 the meaning of an existing code is.
+
+Their meanings are fixed now. `W_DEPRECATED` warns on a source that uses a Stable form inside its
+deprecation window, and names the replacement and the earliest release that removes the form.
+`E_BREAKING` refuses a source that uses a form a release has removed, in place of the error the form
+would otherwise earn, and names that release and the replacement. Every deprecation raises the one
+code, and its message says which form it is about.
+
+The Stable codes are the ones [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists. A code the spec
+names without a row there, such as `E_STATE_DOMAIN` or `E_REQUIRES_CONFLICT`, is reserved: no
+command raises it, and its row landing is adding a code. A code's severity, and the payload
+[Lint §11.2](/spec/lint/#112-machine-readable-payload) gives it, are part of what it means. Adding
+a field to a payload, or a payload to a code that had none, is still adding.
+
+Some findings are **placeholders**: they cover syntax or a check the spec defines and the compiler
+does not build yet, and stop covering it when it lands. That is adding the spec's own behaviour,
+which [§C.4](#c4-what-is-not-covered-by-tier) never counts as a break, and the placeholder still
+means what it meant. The placeholders are:
+
+- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as coordinate triples,
+  decimals, `nbt={...}` values, `edit`, `@edition` and `assert latency`;
+- `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
+  `spawn`, `chest`, `lever` and `raw_block`;
+- `E_UNKNOWN_ARGUMENT`, on a key the spec specifies for a keyword that does not take it yet, such as
+  `waterlogged=` on a `stair`;
+- `W_IGNORED_ARGUMENT`, on an unreached key ([Lint §11.3](/spec/lint/#113-error-vs-warning)): a
+  theme selector's bindings, `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a header's
+  `class=` and a `door`'s `mat_slot=`;
+- `W_STATE_LITERAL_UNCHECKED`, until `E_STATE_DOMAIN` checks a state literal against the target.
+
+A placeholder covers only what the spec says the compiler does not build yet. Source the spec
+itself refuses keeps its code.
 
 ## C.4 What is not covered by tier
 
