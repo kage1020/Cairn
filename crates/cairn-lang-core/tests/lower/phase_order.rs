@@ -30,18 +30,32 @@ fn source(body: &str) -> String {
     format!("{PRELUDE}{body}")
 }
 
-const PLATE: &str = "  pressure_plate id=p at=front.outside offset=3 y=0 -> sig.step\n";
-const PANE: &str = "  window side=front y=0 offset=3 size=1x1 mat_slot=glass\n";
+/// A one-wide struct under a roof overhang, whose front eave is a single ring voxel.
+const EAVE_PRELUDE: &str = "theme t:\n  \
+                            slot wall -> @cobblestone\n  \
+                            slot deck -> @oak_planks\n  \
+                            slot eave -> @dark_oak_stairs\n\n\
+                            struct t size=1x3\n  \
+                            walls mat_slot=wall height=3\n  \
+                            roof kind=flat mat_slot=deck overhang=1\n";
+
+const EAVE: &str = "  stair kind=stairs side=front mat_slot=eave\n";
+const PLATE: &str = "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step\n";
+
+fn eave_source(body: &str) -> String {
+    format!("{EAVE_PRELUDE}{body}")
+}
 
 // --- the phase a member lands in ----------------------------------------
 
 #[test]
-fn a_plate_and_a_window_on_one_cell_lower_the_same_whichever_line_comes_first() {
-    // They contest `(3, 0, 4)`: the window's cell and the plate's `at=front.outside` anchor.
-    let plate_first = lowered(&source(&format!("{PLATE}{PANE}")));
-    let pane_first = lowered(&source(&format!("{PANE}{PLATE}")));
+fn a_plate_and_an_eave_stair_on_one_cell_lower_the_same_whichever_line_comes_first() {
+    // They contest `(1, 0, 4)`: the eave's one ring voxel and the plate's `at=front.outside`
+    // anchor.
+    let plate_first = lowered(&eave_source(&format!("{PLATE}{EAVE}")));
+    let eave_first = lowered(&eave_source(&format!("{EAVE}{PLATE}")));
 
-    assert_eq!(only_structure(&plate_first), only_structure(&pane_first));
+    assert_eq!(only_structure(&plate_first), only_structure(&eave_first));
     // Guard: the comparison is vacuous if neither side painted a plate.
     assert!(
         ids(only_structure(&plate_first)).contains(&"minecraft:oak_pressure_plate"),
@@ -49,19 +63,19 @@ fn a_plate_and_a_window_on_one_cell_lower_the_same_whichever_line_comes_first() 
         ids(only_structure(&plate_first)),
     );
     assert_eq!(conflicts(&plate_first).len(), 0);
-    assert_eq!(conflicts(&pane_first).len(), 0);
+    assert_eq!(conflicts(&eave_first).len(), 0);
 }
 
 #[test]
-fn a_plate_reaches_the_grid_after_the_window_that_would_have_covered_it() {
-    // The test above would also pass if both orders agreed on the window, so name the winner.
-    let out = lowered(&source(&format!("{PANE}{PLATE}")));
+fn a_plate_reaches_the_grid_after_the_eave_stair_that_would_have_covered_it() {
+    // The test above would also pass if both orders agreed on the stair, so name the winner.
+    let out = lowered(&eave_source(&format!("{PLATE}{EAVE}")));
     let ba = only_structure(&out);
-    let cell = ba.dims.index(3, 0, 4).expect("the contested cell exists");
+    let cell = ba.dims.index(1, 0, 4).expect("the contested cell exists");
     assert_eq!(
         ba.palette.entries[usize::from(ba.voxels[cell].0)].id,
         "minecraft:oak_pressure_plate",
-        "a sensor is a fixture, and fixtures are evaluated after openings",
+        "a sensor is a fixture, and fixtures are evaluated after the envelope",
     );
 }
 
@@ -69,25 +83,33 @@ fn a_plate_reaches_the_grid_after_the_window_that_would_have_covered_it() {
 
 #[test]
 fn a_material_covered_by_a_later_phase_leaves_no_palette_entry() {
-    let out = lowered(&source(&format!("{PANE}{PLATE}")));
+    // Guard: the eave paints its one voxel when nothing covers it.
+    let uncovered = lowered(&eave_source(EAVE));
     assert!(
-        !ids(only_structure(&out)).contains(&"minecraft:glass_pane"),
-        "the window's only voxel went to the plate, so the structure holds \
-         no glass — palette = {:?}",
+        ids(only_structure(&uncovered)).contains(&"minecraft:dark_oak_stairs"),
+        "palette = {:?}",
+        ids(only_structure(&uncovered)),
+    );
+    let out = lowered(&eave_source(&format!("{EAVE}{PLATE}")));
+    assert!(
+        !ids(only_structure(&out)).contains(&"minecraft:dark_oak_stairs"),
+        "the eave's only voxel went to the plate, so the structure holds no stair — palette = \
+         {:?}",
         ids(only_structure(&out)),
     );
 }
 
 #[test]
 fn pruning_keeps_air_at_slot_zero_and_leaves_the_survivors_in_order() {
-    // The plate covers the window's only cell, so glass drops out of the palette's middle. The
+    // The plate covers the eave's only cell, so the stair drops out of the palette's middle. The
     // survivors are already sorted: this pins the prune, not the sort.
-    let out = lowered(&source(&format!("{PANE}{PLATE}")));
+    let out = lowered(&eave_source(&format!("{EAVE}{PLATE}")));
     assert_eq!(
         ids(only_structure(&out)),
         [
             "minecraft:air",
             "minecraft:cobblestone",
+            "minecraft:oak_planks",
             "minecraft:oak_pressure_plate",
         ],
     );
@@ -280,7 +302,8 @@ fn the_conflict_warning_does_not_change_which_block_wins() {
 fn a_conflict_between_two_fixtures_is_reported_like_any_other() {
     // The other conflicts here are in Openings; one contested voxel pins the singular wording.
     let out = lowered(&source(
-        "  pressure_plate id=a at=front.outside offset=3 y=0 mat_slot=stone_plate -> sig.x\n  \
+        "  roof kind=flat mat_slot=deck overhang=1\n  \
+         pressure_plate id=a at=front.outside offset=3 y=0 mat_slot=stone_plate -> sig.x\n  \
          pressure_plate id=b at=front.outside offset=3 y=0 mat_slot=wood_plate -> sig.y\n",
     ));
     let found = conflicts(&out);

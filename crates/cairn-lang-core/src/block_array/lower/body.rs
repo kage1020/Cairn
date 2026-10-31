@@ -63,8 +63,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         registry,
         palette_capacity,
     } = bodies;
-    let interior_w = body.size.w.get();
-    let interior_h = body.size.h.get();
+    let (interior_w, interior_h) = (body.size.w.get(), body.size.h.get());
 
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
 
@@ -113,6 +112,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         written_height: written.height(roof_extra),
         written_walls: written.walls,
         written_overhang: written.overhang,
+        written_floor: written.floor,
     };
 
     let buckets = bucket_members(&flattened, diagnostics);

@@ -30,6 +30,7 @@ theme cross:
 struct crossbar size=6x4
   floor mat_slot=wall
   walls class=outer mat_slot=wall height=3
+  roof  kind=flat mat_slot=wall overhang=1
   door  id=front side=front at=center
   door  id=back  side=back  at=center
 

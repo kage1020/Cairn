@@ -247,8 +247,8 @@ fn plate_coordinate(member: &Member, key: &str, counts: &str) -> Result<u32, Ref
 
 /// The world voxel a plate paints onto, or the finding that leaves it unplaced.
 ///
-/// With no exterior cell, `<side>.outside` falls back to the wall's foundation, at `y = 0` only.
-/// `inside.<side>` must land strictly inside the wall ring.
+/// `<side>.outside` lands only in the overhang ring, and `inside.<side>` only strictly inside the
+/// wall ring.
 fn plate_voxel_position(
     member: &Member,
     y_offset: u32,
@@ -277,18 +277,17 @@ fn plate_voxel_position(
         return Err(Box::new(past_the_wall(member, anchor, offset, length, ctx)));
     }
     if let PlateAnchor::Inside(_) = anchor
-        && let Some((primary, notes)) = inside_plate_refusal(side, offset, y_world, ctx)
+        && let Some((primary, notes)) = inside_plate_refusal(side, offset, length, y_world, ctx)
     {
         return Err(Box::new(unplaceable(member, primary, notes)));
     }
     if y_world >= ctx.written_height {
-        return Err(Box::new(above_the_struct(member, row, ctx)));
+        return Err(Box::new(above_the_struct(member, anchor, row, ctx)));
     }
     if let PlateAnchor::Outside(_) = anchor
-        && y_world > 0
         && ctx.written_overhang == 0
     {
-        return Err(Box::new(no_exterior_voxel(member, side, row)));
+        return Err(Box::new(no_exterior_voxel(member, side, length, row, ctx)));
     }
     // A struct shorter than its walls ask for is theirs to repair, so the plate only defers.
     if y_world >= ctx.dims.y {
@@ -296,6 +295,16 @@ fn plate_voxel_position(
             member,
             &row_past_the_struct(row, ctx),
             WALLS_PAINT_NOTHING,
+        )));
+    }
+    // An overhang a roof is written with and does not draw is the roof's to repair.
+    if let PlateAnchor::Outside(_) = anchor
+        && ctx.overhang == 0
+    {
+        return Err(Box::new(diag_deferred_member_noted(
+            member,
+            &no_exterior_primary(side, row),
+            ROOF_DRAWS_NOTHING,
         )));
     }
     let Some((wx, _wy, wz)) = wall_local_to_grid(
@@ -321,31 +330,11 @@ fn plate_voxel_position(
             "pressure_plate resolved to a voxel outside the struct's block array",
         )));
     };
-    match anchor {
-        PlateAnchor::Outside(_) => {
-            let (sx, sz) = shift_outward(side, wx, wz);
-            // A saturating shift that stays on the wall column reaches no exterior cell either.
-            let shift_reached_exterior =
-                (sx, sz) != (wx, wz) && ctx.dims.index(sx, y_world, sz).is_some();
-            if shift_reached_exterior {
-                Ok((sx, y_world, sz))
-            } else if y_world == 0 {
-                // The wall column's y=0 cell is floor (walls start at y=1).
-                Ok((wx, y_world, wz))
-            } else {
-                // An overhang a roof is written with and does not draw is the roof's to repair.
-                Err(Box::new(diag_deferred_member_noted(
-                    member,
-                    &no_exterior_primary(side, row),
-                    ROOF_DRAWS_NOTHING,
-                )))
-            }
-        }
-        PlateAnchor::Inside(_) => {
-            let (sx, sz) = shift_inward(side, wx, wz);
-            Ok((sx, y_world, sz))
-        }
-    }
+    let (sx, sz) = match anchor {
+        PlateAnchor::Outside(_) => shift_outward(side, wx, wz),
+        PlateAnchor::Inside(_) => shift_inward(side, wx, wz),
+    };
+    Ok((sx, y_world, sz))
 }
 
 /// A plate's `y=` and the `level y=` it is written under.
@@ -387,7 +376,12 @@ fn row_past_the_struct(row: PlateRow, ctx: &StructCtx<'_>) -> String {
 
 /// The refusal of a plate whose row is at or above the struct's height with every walls member
 /// painted.
-fn above_the_struct(member: &Member, row: PlateRow, ctx: &StructCtx<'_>) -> Diagnostic {
+fn above_the_struct(
+    member: &Member,
+    anchor: PlateAnchor,
+    row: PlateRow,
+    ctx: &StructCtx<'_>,
+) -> Diagnostic {
     let top = ctx.written_height - 1;
     let level = row.level;
     let runs_to = |highest: u32| {
@@ -421,7 +415,21 @@ fn above_the_struct(member: &Member, row: PlateRow, ctx: &StructCtx<'_>) -> Diag
     } else {
         "lower the plate, or raise the `walls` to reach its row".to_owned()
     });
+    notes.extend(outside_needs_a_roof(anchor, ctx));
     unplaceable(member, row_past_the_struct(row, ctx), notes)
+}
+
+/// The fix in a struct's body an `at=<side>.outside` plate needs too, when no roof on it is
+/// written with an overhang.
+fn outside_needs_a_roof(anchor: PlateAnchor, ctx: &StructCtx<'_>) -> Option<String> {
+    match anchor {
+        PlateAnchor::Outside(side) if ctx.written_overhang == 0 => Some(format!(
+            "an `at={}.outside` plate also needs a `roof` in the struct's body with an \
+             `overhang=` of at least 1",
+            side_name(side),
+        )),
+        _ => None,
+    }
 }
 
 /// The refusal of a plate whose `offset=` is at or past its wall's length.
@@ -435,10 +443,12 @@ fn past_the_wall(
     let name = side_name(anchor.side());
     let thin = thin_axes(ctx);
     let notes = match anchor {
-        PlateAnchor::Outside(_) => vec![format!(
+        PlateAnchor::Outside(_) => std::iter::once(format!(
             "an `at={name}.outside` plate takes an `offset=` from 0 to {}",
             length - 1,
-        )],
+        ))
+        .chain(outside_needs_a_roof(anchor, ctx))
+        .collect(),
         PlateAnchor::Inside(_) if thin.is_empty() => vec![format!(
             "an `at=inside.{name}` plate takes an `offset=` {}, clear of the wall's corners",
             inside_offsets(length),
@@ -505,38 +515,54 @@ fn no_exterior_primary(side: WallSide, row: PlateRow) -> String {
     )
 }
 
-/// The refusal of an `at=<side>.outside` plate above `y = 0` beside no roof written with an
-/// overhang.
-fn no_exterior_voxel(member: &Member, side: WallSide, row: PlateRow) -> Diagnostic {
-    let fix = if row.level == 0 {
-        "set `y=0`, or give a `roof` an `overhang=` of at least 1"
+/// The refusal of an `at=<side>.outside` plate beside no roof written with an overhang, on a wall
+/// `length` long.
+fn no_exterior_voxel(
+    member: &Member,
+    side: WallSide,
+    length: u32,
+    row: PlateRow,
+    ctx: &StructCtx<'_>,
+) -> Diagnostic {
+    let roof = "give a `roof` in the struct's body an `overhang=` of at least 1";
+    let fix = if thin_axes(ctx).is_empty() {
+        // On row 0 an inside plate would replace a floor block, one below the floor's top.
+        let (raised, on_the_floor) = if row.world() == 0 && ctx.written_floor {
+            (" y=1", ", on top of the floor")
+        } else {
+            ("", "")
+        };
+        format!(
+            "{roof}, or use `at=inside.{}{raised}` with an `offset=` {}{on_the_floor}",
+            side_name(side),
+            inside_offsets(length),
+        )
     } else {
-        "give a `roof` an `overhang=` of at least 1"
+        roof.to_owned()
     };
     unplaceable(
         member,
         no_exterior_primary(side, row),
         vec![
-            "no roof on this struct draws an overhang, and only at y=0 does the plate fall back to \
-             the wall's foundation"
+            "no roof on this struct draws an overhang, so it has no voxel outside its walls"
                 .to_owned(),
-            fix.to_owned(),
+            fix,
         ],
     )
 }
 
-/// Why an `at=inside.<side>` plate at an `offset=` within its wall's length has no interior cell,
-/// as a primary and its notes, or `None`.
+/// Why an `at=inside.<side>` plate at an `offset=` within its wall's `length` has no interior
+/// cell, as a primary and its notes, or `None`.
 ///
 /// The interior is strictly inside the footprint's wall ring, whether or not walls paint it.
 fn inside_plate_refusal(
     side: WallSide,
     offset: u32,
+    length: u32,
     y: u32,
     ctx: &StructCtx<'_>,
 ) -> Option<(String, Vec<String>)> {
     let name = side_name(side);
-    let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     let thin = thin_axes(ctx);
     let corner = offset == 0 || offset == length - 1;
     if thin.is_empty() && !corner {
@@ -569,8 +595,8 @@ fn inside_plate_refusal(
     } else {
         String::new()
     };
-    // `<side>.outside` finds a cell in a drawn overhang, or on the foundation at y=0.
-    let outside = if y == 0 || (ctx.overhang > 0 && y < ctx.dims.y) {
+    // `<side>.outside` finds a cell only in a drawn overhang.
+    let outside = if ctx.overhang > 0 && y < ctx.dims.y {
         format!(", or anchor the plate with `at={name}.outside`")
     } else {
         String::new()

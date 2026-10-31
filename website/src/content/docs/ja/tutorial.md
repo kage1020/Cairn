@@ -87,10 +87,11 @@ struct keep size=11x9
 struct gatehouse size=7x5
   floor mat_slot=wall
   walls class=outer mat_slot=wall height=3
+  roof  kind=flat mat_slot=wall overhang=1
   door  id=front side=front at=center
 
-  pressure_plate id=plate at=front.outside offset=0 y=0 -> sig.step
-  pressure_plate id=inner at=inside.front  offset=1 y=0 -> sig.exit
+  pressure_plate id=plate at=front.outside offset=3 y=0 -> sig.step
+  pressure_plate id=inner at=inside.front  offset=3 y=1 -> sig.exit
 
   logic sig.open = sig.step or sig.exit
   door[id=front] opened_by=sig.open
@@ -100,6 +101,8 @@ struct gatehouse size=7x5
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
   assert always(sig.step -> eventually sig.open within 2)
 ```
+
+**壁の外のプレートは、屋根の軒の出の下に置かれます。** `at=front.outside` は、`offset=3` で壁の前にあるセル、つまりドアのすぐ外側を取ります。このセルは、屋根の `overhang=1` の分だけ壁の周りに広がるリングの中にあります。軒の出がなければ struct は壁で終わるので、プレートの置き場がなく、`E_UNPLACEABLE_PLATE` で拒否されます。`at=inside.front` はすぐ内側の、床の上に載る `y=1` のセルを取ります。壁の内側では段 `y=0` が床そのもので、外側では地面だからです。
 
 **センサーが信号を出し、アクチュエーターが受け取ります。** `-> sig.step` はセンサーの出力、`opened_by=sig.open` はアクチュエーターの入力です。その間の依存関係を書くのが `logic` です。
 

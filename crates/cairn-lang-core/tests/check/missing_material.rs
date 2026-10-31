@@ -237,8 +237,7 @@ const PAINTERS: &[(&str, &str, &str)] = &[
     ),
     (
         "pressure_plate",
-        // `front.inside` is not a recognised anchor and would be deferred.
-        "pressure_plate id=p at=front.outside offset=0 y=0",
+        "pressure_plate id=p at=inside.front offset=1 y=0",
         "",
     ),
 ];

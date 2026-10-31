@@ -5,7 +5,9 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_formats::registry::builtin_pack;
 
-use crate::common::{example_source, latest, lower_example, lower_source, supported_versions};
+use crate::common::{
+    example_source, id_at, latest, lower_example, lower_source, supported_versions,
+};
 
 fn lower_redstone_door() -> BlockArrayIr {
     lower_example(
@@ -16,15 +18,13 @@ fn lower_redstone_door() -> BlockArrayIr {
 }
 
 #[test]
-fn redstone_door_lowers_to_a_flat_gatehouse_volume() {
+fn redstone_door_lowers_to_a_gatehouse_under_an_overhanging_roof() {
     let out = lower_redstone_door();
     let ba = out
         .structures
         .get("struct::gatehouse")
         .expect("gatehouse struct present");
-    assert_eq!(ba.dims.x, 7);
-    assert_eq!(ba.dims.y, 4);
-    assert_eq!(ba.dims.z, 5);
+    assert_eq!((ba.dims.x, ba.dims.y, ba.dims.z), (9, 5, 7));
 }
 
 #[test]
@@ -57,39 +57,25 @@ fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
 }
 
 #[test]
-fn redstone_door_outside_plate_falls_back_to_wall_column_without_overhang() {
-    // With no overhang, the outward shift leaves the volume and falls back to the wall's column.
+fn redstone_door_plates_sit_on_either_side_of_the_door() {
     let out = lower_redstone_door();
     let ba = out.structures.get("struct::gatehouse").unwrap();
-    let plate_idx = u16::try_from(
-        ba.palette
-            .entries
-            .iter()
-            .position(|s| s.id == "minecraft:oak_pressure_plate")
-            .expect("oak_pressure_plate palette entry present"),
-    )
-    .expect("palette index fits in u16");
-    let i = ba
-        .dims
-        .index(0, 0, 4)
-        .expect("front-wall corner within bounds");
-    assert_eq!(ba.voxels[i].0, plate_idx);
-}
-
-#[test]
-fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
-    let out = lower_redstone_door();
-    let ba = out.structures.get("struct::gatehouse").unwrap();
-    let plate_idx = u16::try_from(
-        ba.palette
-            .entries
-            .iter()
-            .position(|s| s.id == "minecraft:oak_pressure_plate")
-            .expect("oak_pressure_plate palette entry present"),
-    )
-    .expect("palette index fits in u16");
-    let i = ba.dims.index(1, 0, 3).expect("interior row within bounds");
-    assert_eq!(ba.voxels[i].0, plate_idx);
+    // The door's opening is (4, 1..=2, 5), in the front wall at z=5.
+    for (cell, id) in [
+        ((4, 0, 6), "minecraft:oak_pressure_plate"),
+        ((4, 1, 5), "minecraft:air"),
+        ((4, 1, 4), "minecraft:oak_pressure_plate"),
+        ((4, 0, 4), "minecraft:oak_planks"),
+    ] {
+        let (x, y, z) = cell;
+        assert_eq!(id_at(ba, x, y, z), Some(id), "{cell:?}");
+    }
+    let plates = ba
+        .voxels
+        .iter()
+        .filter(|v| ba.palette.entries[usize::from(v.0)].id == "minecraft:oak_pressure_plate")
+        .count();
+    assert_eq!(plates, 2);
 }
 
 #[test]

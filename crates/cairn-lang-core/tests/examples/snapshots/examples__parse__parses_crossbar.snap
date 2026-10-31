@@ -49,6 +49,21 @@ items:
               kind: Int
               value: 3
       - kind: Generic
+        keyword: roof
+        args:
+          - key: kind
+            value:
+              kind: Ident
+              value: flat
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: overhang
+            value:
+              kind: Int
+              value: 1
+      - kind: Generic
         keyword: door
         args:
           - key: id

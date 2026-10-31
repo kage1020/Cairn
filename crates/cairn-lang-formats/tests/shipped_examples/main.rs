@@ -4,5 +4,6 @@
 pub mod common;
 
 mod bedrock_mcstructure;
+mod plates;
 mod redstone_door;
 mod themed_tower;
