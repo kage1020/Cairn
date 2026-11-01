@@ -22,7 +22,7 @@ Stable な面:
 - 仕様が規範として定める `.crn` の構文 (キーワード、ヘッダ、ブロックの種類、ブロックステートのプリミティブ、テーマとマテリアルのプリミティブ、エディションガード)。ただし、節が[変更の余地あり](#変更の余地あり)と示したものは除きます。
 - ロックファイル (`<source>.lock`) の形式 (フィールド、ハッシュの入力、[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) が定める `verified` の意味)。
 - `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力のスキーマ、終了コード。
-- tier-1 のマテリアルトークン (ユーザーがソースに書く名前)。ただし [§7.2](/ja/spec/materials-themes/#72-正規トークン) の正規トークンには、どれが tier-1 かの区別がまだありません。
+- tier-1 のトークン。組み込みの `materials` カタログが宣言する抽象トークンで、[§7.2](/ja/spec/materials-themes/#tier-1-のトークン) に挙げています。トークンを足すことは破壊的変更ではありません。
 - 仕様に記載されたエラーと警告のコード (`E_*`、`W_*`)。
 
 ### Evolving
@@ -38,7 +38,8 @@ Evolving な面:
 - ドラフトと明記された仕様の章や節 ([未決事項](/ja/spec/open-issues/))。また、節が[変更の余地あり](#変更の余地あり)と示した構文。
 - 新しく追加された `cairn` サブコマンドの、最初の 3 か月分の月次マイナーリリース。
 - レジストリパックと制約カタログのファイル構成 (それらの *ハッシュ* は Stable なロックの意味に含まれますが、*内部構造* は Evolving です)。制約カタログはまだ同梱しておらず、ロックにはそのハッシュとしてゼロを記録します。
-- tier-2 のトークン (tier-1 の解決先となる実装レベルの名前)。
+- tier-2 のブロック。各 tier-1 のトークンが、ターゲットごとに解決するブロックです ([§7.2](/ja/spec/materials-themes/#tier-1-のトークン))。
+- 正規ブロックトークン。ターゲットが受け付ける名前 (そのレジストリパックに従います) と、それぞれがそのターゲットで指すブロックです ([§7.3](/ja/spec/materials-themes/#73-バージョンとエディションをまたぐ対応付け))。
 - CLI の人間向け診断の書式と文言 (*コード* は Stable ですが、*文言* は違います)。
 - `cairn-lang-cli` の `--features` の組 (cargo features) と、ワークスペースの各クレートの `[features]`。
 
@@ -68,10 +69,10 @@ Internal な面:
 | ロックファイルの形式 | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` のフラグ | Evolving | Evolving | **Stable** | Stable | Stable |
 | 診断コード (`E_*`、`W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
-| tier-1 のマテリアルトークン | Evolving | Evolving | **Stable** | Stable | Stable |
+| tier-1 のトークン | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP の通信プロトコル (LSP 標準) | — | — | — | **Stable** | Stable |
 | レッドストーン DSL (14 章) | Evolving | Evolving | Evolving | Evolving | **Stable** |
-| tier-2 のトークン、レジストリパックの構成 | Evolving | Evolving | Evolving | Evolving | Evolving |
+| tier-2 のブロック、正規ブロックトークン、レジストリパックの構成 | Evolving | Evolving | Evolving | Evolving | Evolving |
 | Rust API (全クレート) | Internal | Internal | Internal | Internal | Internal |
 
 表の読み方: **ある行が初めて Stable になる列が、緩やかな約束です。** その列のマイルストーンに到達するまで、プロジェクトは非推奨期間を設けずにその面を変更できます。

@@ -44,9 +44,9 @@ theme medieval:
 
 現時点のバックエンドが解決する範囲は、これより狭くなっています。正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせるだけなので ([§7.3](#73-バージョンとエディションをまたぐ対応付け))、`@water_cauldron` はどの Bedrock のバージョンでも `E_UNKNOWN_ID` になります。また、Bedrock への書き出しでステートを変換できるのは階段の系統だけで、`@oak_log[axis=x]` は Java 向けにはコンパイルできても、Bedrock 向けには拒否されます。
 
-トークンには 2 つの段階があります。
+トークンには 2 つの種類があります。
 
-| 段階 | 例 | 意味 |
+| 種類 | 例 | 意味 |
 |---|---|---|
 | **正規ブロックトークン** | `@oak_planks` / `@water_cauldron` / `@oak_log[axis=x]` | Minecraft の特定のブロックを意味します。意味が変わってしまうようなダウングレードを黙って行うことは **禁止** で、`@water_cauldron` が `cauldron` になることはありません。 |
 | **抽象マテリアルトークン** | `@floor.wood.broadleaf` / `@roof.dark_wood` | 見た目の好みを表します。テーマのポリシーによってダウングレードしてもかまいません (MAY) (オーク ↔ シラカバ)。 |
@@ -59,6 +59,21 @@ theme exact_oak:
 ```
 
 抽象トークンは、レジストリパックの `materials` カタログを通じてブロックに解決します。カタログのエントリの `overrides` には、そのブロックを別の綴りで書くバージョンを挙げます ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。カタログにないトークンは、パックを参照する場面、つまりターゲットを指定したときと `cairn lower`、`cairn info` で `E_UNKNOWN_ABSTRACT_TOKEN` になります ([Lint](/ja/spec/lint/))。
+
+### tier-1 のトークン
+
+組み込みの `materials` カタログが宣言する抽象トークンが **tier-1** の語彙で、[互換性ティア](/ja/spec/compatibility/#c1-ティアの定義)で Stable と定めています。両エディションのカタログは同じトークンを宣言するので、これらだけを割り当てるテーマは、どちらのエディションでも解決します。
+
+| トークン | 用途 |
+|---|---|
+| `@floor.wood.broadleaf`、`@floor.wood.conifer`、`@floor.stone.cobble`、`@floor.stone.smooth` | 床 |
+| `@wall.wood.broadleaf`、`@wall.wood.conifer`、`@wall.stone.cobble`、`@wall.stone.smooth` | 壁 |
+| `@wood.dark`、`@wood.light`、`@wood.warm`、`@wood.cool` | 色味で選ぶ板材 |
+| `@roof.dark_wood`、`@roof.light_wood`、`@roof.warm_wood`、`@roof.cool_wood` | 色味で選ぶ屋根の階段 |
+| `@sign.oak`、`@sign.oak_wall` | 立てた看板と壁の看板 |
+| `@pressure_plate.default` | `mat_slot=` で割り当てていない `pressure_plate` が置くブロック |
+
+tier-1 のトークンが解決するブロックは **tier-2** で、Evolving です。ターゲットごとにカタログで決まり、リリースによって変わることがあります。カタログにトークンを足しても何も壊れません。トークンの名前を変えたり廃止したりするのは Stable な面の破壊的変更なので、非推奨期間のあいだは古いトークンも `W_DEPRECATED` 付きで解決し続けます。正規ブロックトークンは tier-1 でも tier-2 でもありません。[§7.3](#73-バージョンとエディションをまたぐ対応付け) の対応付けを通じてブロックを指す名前で、ターゲットが受け付ける名前はそのレジストリパックで決まり、[互換性ティア](/ja/spec/compatibility/#evolving)で Evolving と定めています。
 
 ## 7.3 バージョンとエディションをまたぐ対応付け
 
