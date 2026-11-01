@@ -765,6 +765,10 @@ and game-behaviour differences are not absorbed.** The cases that cannot be:
 
 ### Writing an alternative
 
+**Subject to change.** `@edition` guards, `hologram`, `raw_block`, `slot` rules that take
+arguments, and coordinate triples are not built yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 `@edition` conditionals in the semantic layer are forbidden. When an alternative is needed, work
 down this hierarchy:
 
@@ -796,13 +800,16 @@ is an unknown directive (`E_PARSE`), and inside a body `hologram` and `raw_block
 
 ### `@edition` pins an edition, not a version
 
+**Subject to change.** No `@edition` guard parses yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)). The rest of what this section
+leans on is current behaviour: the per-version id check, the `aliases` answer, `E_VERSION_CAP` and
+`E_INTENDED_TARGET_CAP`.
+
 The guard settles which branch is built and nothing else. The id inside it is still checked against
 the one `(edition, version)` the compile pinned
 ([§10.4](#104-fail-loud-and-minimum-version-inference)), so where an edition respells a block
 inside its own supported range, `@edition bedrock` names the branch and the file's floor names the
-spelling. No guard parses yet ([above](#writing-an-alternative)); the rest of what this section
-leans on is current behaviour: the per-version id check, the `aliases` answer, `E_VERSION_CAP` and
-`E_INTENDED_TARGET_CAP`.
+spelling.
 
 Bedrock's light block is that case, and it is why the snippet above carries a floor. 1.21.0 spells
 the block `light_block` and carries the level beside it as a `block_light_level` state; 1.21.40

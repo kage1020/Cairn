@@ -4,6 +4,9 @@ title: "7. Materials and Themes"
 
 ## 7.1 Slots as dependency injection
 
+**Subject to change.** Selector bindings, the `key=value` pairs right of a selector row's arrow, are
+reserved and not built ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 The structure never writes a concrete block name. It carries `mat_slot` injection points, and a
 `theme` binds values to slots and selectors, the way CSS or dependency injection does. That
 separates structure (where the walls are) from style (which blocks, what detailing).

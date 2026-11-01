@@ -32,6 +32,10 @@ with "expected `=`".
 
 ### 5.1.1 Literals and separators
 
+**Subject to change.** Decimals (`scale=1.5`), coordinate triples (`at=4,3,2`) and `nbt={...}`
+values, which other chapters write, do not parse yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
 parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
 `within` bound of an `assert`. A decimal such as `scale=1.5` ([Entities](/spec/entities/)) is
@@ -292,12 +296,15 @@ courses a `walls` paints).
 
 ## 5.5 IDs, classes, addresses
 
+**Subject to change.** The address the compiler gives a member without `id=`, and the `edit` patch
+DSL that would use it, are not built yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)). Today such a member has no address,
+and a top-level `edit` is `E_PARSE`.
+
 Important members MAY declare `id=`, and `class=` groups members. Members without an `id=` get a
 stable, meaning-based address assigned by the compiler, derived from parent / role / side / level /
 offset. See
 [Components, Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model).
-The compiler computes no such address yet, so a member without `id=` has none, and the `edit` patch
-DSL that would address it is not parsed: a top-level `edit` is `E_PARSE`.
 
 A `place` row is the exception: its `id=` is required, and omitting it is `E_INCOMPLETE_PLACE`. An
 auto-address names nothing outside the body it sits in. A `place`'s `id=` is what `east_of=` and

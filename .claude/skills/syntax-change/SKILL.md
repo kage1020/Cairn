@@ -9,7 +9,12 @@ The language has two parsers: core's, which is the reference, and the tree-sitte
 use. A syntax change lands in both, in one pull request, after the spec says what the syntax is.
 
 1. **Spec.** Write the syntax in `spec/syntax`, and any new refusal in `spec/lint` (see the
-   `diagnostic-code` skill).
+   `diagnostic-code` skill). Syntax a section already specifies may sit under a
+   **Subject to change.** paragraph (`spec/compatibility` "Subject to change"): take it off what
+   the change builds, in both languages, and, if the `.crn` syntax row is already Stable
+   (`spec/compatibility` "Tier of each surface, by milestone"), say in the `added` changelog
+   fragment that this syntax now is too. `cargo xtask lint subject-to-change` holds the two
+   languages to the same flags.
 2. **Core.** The lexer, parser and AST are `crates/cairn-lang-core/src/{lex,parse,ast}.rs`.
    Member keywords and their roles are `KNOWN_KEYWORDS` and `role_of` in
    `crates/cairn-lang-core/src/intent/keyword_table.rs`. Add parser tests for both the accepted

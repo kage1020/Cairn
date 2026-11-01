@@ -4,6 +4,10 @@ title: "6. Blockstate Model"
 
 ## 6.1 Derive by default, promote on override
 
+**Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape` are
+built. The others, the `beam`, `chest` and `note_block` keywords, and coordinate triples are not
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
@@ -66,12 +70,14 @@ fields of their own. In place of `type`, a member carries the `role` its keyword
 
 ## 6.3 `waterlogged`
 
+**Subject to change.** Nothing in this section is built yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)). No pass sets or reads
+`waterlogged`: on a `stair`, `waterlogged=false` is `E_UNKNOWN_ARGUMENT`. In the example below,
+`fill`, `trapdoor` and `water` are `E_UNKNOWN_KEYWORD`, and a coordinate triple such as
+`from=1,1,1` is `E_PARSE`.
+
 The default is paint-derived: when `fill fluid=water` overlaps a waterloggable block, the compiler
 sets `waterlogged`.
-
-None of this section is implemented yet. No pass sets or reads `waterlogged`: on a `stair`,
-`waterlogged=false` is `E_UNKNOWN_ARGUMENT`. In the example below, `fill`, `trapdoor` and `water`
-are `E_UNKNOWN_KEYWORD`, and a coordinate triple such as `from=1,1,1` is `E_PARSE`.
 
 A three-valued `waterlogged=auto|true|false` is allowed, for leaving an air pocket inside a tank
 (explicit `false`), distinguishing source from flowing, and version differences in the waterloggable
