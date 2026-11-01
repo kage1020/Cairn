@@ -10,8 +10,9 @@ is the sequence.
 
 1. Branch from `canary` as `<type>/<short-kebab>`, and target `canary`. Only a hotfix a
    maintainer asked for branches from `main` as `hotfix/<short-kebab>` and targets `main`.
-2. Title the PR with a Conventional Commits line. The squash merge makes it the commit on the
-   branch the PR targets, and release-plz reads it.
+2. Title the PR with a Conventional Commits line. The squash merge makes it the commit on
+   `canary`, and release-plz reads it. `main` takes merge commits only, so a hotfix writes each of
+   its own commits as a Conventional Commits line too.
    - Scope is the crate without its prefix or the spec area: `core`, `nbt`, `formats`,
      `redstone`, `cli`, `lsp`, `wasm`, `tree-sitter`, `xtask`, `spec`, `deps`.
    - `feat`, `fix`, `perf`, `refactor` and `build` make a patch release due, which goes out at the

@@ -81,5 +81,7 @@ commit_parsers = [
   { message = "^chore(\\(release\\))?: release", skip = true },
   { message = "^chore\\(release\\)", skip = true },
   { message = "^chore", group = "chore", skip = true },
+  # A merge commit brings in commits that are listed on their own.
+  { message = "^Merge ", skip = true },
   { message = "^.*", group = "other" },
 ]

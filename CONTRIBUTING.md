@@ -140,14 +140,14 @@ Beyond those lists, no rule reads the prose. A row's description, a "Status" par
 | Branch | Purpose |
 |---|---|
 | `canary` | All feature work, fixes, and docs land here. Protected. |
-| `main` | Moved by the promote-to-main PR, the release PR, and hotfix PRs, each approved by a maintainer. No direct pushes. |
+| `main` | Moved by the promote-to-main PR, the release PR, and hotfix PRs, each approved by a maintainer and merged with a merge commit. No direct pushes. |
 | `<type>/<short-kebab>` | One change, targeting `canary`. Deleted after merge. |
 | `hotfix/<short-kebab>` | A fix that cannot wait for the next promote, such as a security fix. Branched from `main`, targeting `main`, and opened only when a maintainer asks for it. Deleted after merge. |
 | `release-plz-*` | Opened by the release workflow against `main`, each time `main` gains a promote or a hotfix that makes a release due. |
 
 Name the branch after the Conventional Commits type the work will land under: `feat/parser-lexer`, `fix/wall-corner-shape`, `docs/roadmap-2027`.
 
-**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Every PR is squash-merged, except the two the release workflow opens between `canary` and `main`, so the title becomes the commit on the branch the PR targets, and `release-plz` reads it to decide whether a patch release is due. Commits on your own branch are free-form. The scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
+**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** A PR into `canary` is squash-merged, except the one that merges `main` back, so the title becomes the commit on `canary`, and `release-plz` reads it to decide whether a patch release is due. Commits on your own branch are free-form. The scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
 
 | Type | When | Makes a patch release due? |
 |---|---|---|
@@ -172,9 +172,9 @@ The `!` does not choose the version. Semver would read it as a major bump, but h
 
 Every PR you open targets `canary`, unless a maintainer asks for a hotfix. Merging needs one maintainer approval, and green CI is expected, although the branch rulesets do not require any check yet. The release PR follows the same rules.
 
-A hotfix branches from `main` as `hotfix/<short-kebab>` and is titled and given a fragment like any other PR. Its merge into `main` opens the release PR for the next patch, which holds only what `main` has, and merging that publishes the fix. The PR back into `canary` then brings the fix to `canary`.
+A hotfix branches from `main` as `hotfix/<short-kebab>` and is titled and given a fragment like any other PR. `main` takes merge commits only, so `release-plz` reads the hotfix's own commits rather than its title: write each of them as a Conventional Commits line too. Its merge into `main` opens the release PR for the next patch, which holds only what `main` has, and merging that publishes the fix. The PR back into `canary` then brings the fix to `canary`.
 
-A maintainer merges the promote-to-main PR and the PR back into `canary` by hand, with a merge commit. A squash would leave `main`'s commits out of `canary`'s history, and the next promote refuses while `main` has a commit `canary` lacks. Neither PR turns on auto-merge, because a merge GitHub performs for the workflow's token starts no workflow, and the promote's merge has to start the release PR.
+Both PRs between the branches land as merge commits, since a squash would leave one branch's commits out of the other's history, and the next promote refuses while `main` has a commit `canary` lacks. `main`'s ruleset allows merge commits only. The PR back into `canary` has auto-merge on with a merge commit, so approving it is enough; the merge it performs starts no workflow, so `canary`'s CI next runs on the PR after it. The promote-to-main PR is merged by hand, because its merge has to start the release PR.
 
 ## Changelog entries
 
