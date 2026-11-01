@@ -2,6 +2,940 @@
 
 ## [Unreleased]
 
+## 2026.11.0 — 2026-11-01
+
+### Breaking changes
+
+- *(cli,lsp)* A source whose block-array lowering raises an error every target that reads its line
+  raises, such as a `shed` roof bound to `@cobblestone`, now fails a `cairn check` with no
+  `--target` with exit 1, as it fails `cairn compile`, instead of passing it silently; the language
+  server marks it too. A check with no target also prints the lowering warnings that need no target.
+  `spec/lint` "Error vs warning" states which findings a check with no target reports.
+
+  Listed here rather than as a fix under `spec/compatibility` C.4: the spec said a `cairn check`
+  with no `--target` runs no block-array lowering, so the build did what the spec said, and the spec
+  changed.
+
+- *(formats)* `bedrock_structure::ParityNote` is retyped from `{ id, message }` to
+  `{ id, states, dropped }`, so a consumer learns which entry degraded and what it lost without
+  parsing English, as it already does from `cairn info`'s `degraded_entries`. `states` is the
+  entry's `key=value` pairs, comma-joined, spelled as core's `resolve::DegradedEntry::states`
+  spells them, and `dropped` is the `DroppedIntent`; there is still one note per intent dropped.
+  Code that printed `message` names the entry from `id` and `states` and words the loss with
+  `bedrock_state::degradation_detail(&note.dropped)`. `ParityNote` is now `#[non_exhaustive]`, so
+  outside the crate it can be read but neither built with a struct literal nor destructured
+  without `..`.
+- *(formats)* `bedrock_state::degradation_message` is removed: name the entry from `ParityNote`'s
+  `id` and `states`, then append `degradation_detail`'s sentence.
+- *(formats)* `bedrock_state::degradation_detail` no longer names the dropped value. Its sentence
+  is worded per `key` (``Bedrock has no `shape` state; …``), and the value is the `DroppedIntent`'s
+  to read.
+
+- *(core)* An identifier carrying `*`, `|`, `?`, `<`, `>`, `"` or a control character is now
+  refused on every host, as `.`, `:`, `/`, `\` and whitespace (a tab among them) already were. A
+  `place id=` carrying one of the newly refused characters other than `"` passed `check` and built
+  on Linux, and failed on Windows with a bare OS error when the artifact was written; it is now
+  `E_INVALID_PLACE_ID`. `"` never passed `check`, since a source string literal cannot carry one;
+  it reaches the rule through a lockfile. The rule is the one
+  `PlaceId`, `PortId` and `SiteName` share, so it covers port ids and site names too: a lockfile
+  recording one of them is reported as such, and `PortId::new` / `SiteName::new` refuse them. From
+  source only a `place id=` can carry these characters, since a port and a site are named by
+  identifier tokens. `*`, `|`, `?`, `<`, `>`, `"` and U+0000 to U+001F are what a Windows file name
+  cannot carry; U+007F to U+009F are refused because they print as nothing or move the cursor. A
+  control character, or whitespace other than a plain space, is quoted as its escape in the
+  message.
+
+  Listed here rather than as a fix under `spec/compatibility` C.4: the spec gained these characters,
+  rather than the build being brought in line with what it already said.
+
+- *(core)* A source with a member its own line keeps from being built now fails `cairn check`,
+  `cairn compile`, `cairn lower` and `cairn info` with exit 1, where it passed with a
+  `W_DEFERRED_MEMBER` warning, and the language server marks the line as an error. The finding is
+  the new `E_INVALID_MEMBER`, `DiagnosticCode::InvalidMember` in `cairn-lang-core`. It covers a
+  `side=` naming no wall, a `level` with no member under it and no `y=` it can read, `walls` with
+  no positive `height=`, a `roof` whose `kind=` or shed `slope_to=` names nothing, a `window` with
+  no `y=` or `size=`, with an `offset=`, `y=`, `size=`, `repeat=` or `step=` it cannot read, with
+  `repeat=0` or with `repeat=` above 1 and no positive `step=`, or running past its wall, a `door`
+  whose `at=` names no anchor, a `door` or `window` whose rows no written wall course holds, an
+  eave `stair` with no `kind=`, with a `kind=`, `facing=`, `half=` or `shape=` outside its list or
+  a `y=` it cannot read, or that sits above the struct as written or on one where no roof has an
+  `overhang=` of at least 1, a `circuit` line that reserves no region, and an actuator patch that
+  binds no door. An `overhang=` that is not a non-negative integer counts as none, the default its
+  `W_IGNORED_ARGUMENT` puts in its place. `cairn synth` reads no block array and is unchanged.
+
+  Listed here rather than as a fix under `spec/compatibility` C.4: `spec/lint` "Lowering" gave
+  these lines `W_DEFERRED_MEMBER`, so the build did what the spec said, and the spec changed.
+
+- *(core)* `and`, `or` and `not` are primitives of a built-in logic library,
+  `logic_library::LogicPrimitive`, each with a name and a notation: prefix, or infix with a rank.
+  `ast::Expr::And`, `Expr::Or` and `Expr::Not` are gone, replaced by
+  `Expr::Infix { primitive, lhs, rhs }` and `Expr::Prefix { primitive, operand }`, so both shapes
+  `cairn parse --format json` prints for an expression change:
+  - `{"kind": "And", "value": [<lhs>, <rhs>]}` becomes
+    `{"kind": "Infix", "value": {"primitive": "and", "lhs": <lhs>, "rhs": <rhs>}}`, and `Or` the
+    same way.
+  - `{"kind": "Not", "value": <operand>}` becomes
+    `{"kind": "Prefix", "value": {"primitive": "not", "operand": <operand>}}`.
+
+  Every `logic` line that parsed before groups the same way, and one that was refused is still
+  refused at the same position.
+
+- *(lsp)* `DocumentStore::change` is removed. It stored a `didChange` revision's text as the whole
+  document, and the server no longer calls it. `DocumentStore::apply` replaces it: it applies each
+  event of the notification's `contentChanges` and returns `Result<&str, store::ChangeRefused>`,
+  with `ChangeRefused::DocumentNotOpen` where `change` returned `None`.
+
+- *(core)* `intent::Member::mat_slot` is retyped from `Option<String>` to `Option<Label>`. The new
+  `intent::Label` carries the slot name (`name`) and where its value was written (`span`), so a pass
+  can report on a hoisted `mat_slot=` at its value. It still serialises as the bare name. Code that
+  read the field as a string reads `.name`, and code that builds a `Member` with a struct literal
+  wraps the name in a `Label`.
+- *(core)* `MemberRole::unread_arguments` is retyped from `&'static [&'static str]` to
+  `&'static [UnreadArgument]`. Each entry carries its `key` and why nothing on the role reads it, as
+  the new `intent::Unread`: `Unreached`, a key the specification defines and no pass reads yet, or
+  `Inapplicable`, a universal key on a role that puts down nothing it would be read for. The new
+  `MemberRole::unread_argument` answers for one key.
+
+- *(core)* A source with a `pressure_plate at=<side>.outside` at `y=0` on a struct with no roof
+  written with an `overhang=` of at least 1 now fails `cairn check`, `cairn compile`, `cairn lower`
+  and `cairn info` with `E_INVALID_MEMBER` and exit 1, where it passed and placed the plate under
+  the wall column. The language server marks the line as an error. `cairn synth` reads no block
+  array and is unchanged.
+
+  Listed here rather than as a fix under `spec/compatibility` C.4: `spec/redstone` "Signal binding"
+  refused such a plate only above `y = 0`, so the build did what the spec said, and the spec
+  changed.
+
+- *(redstone)* `EditionCell::base_delay_ticks()` is replaced by
+  `EditionCell::port_delay_ticks(PortName)`, the ticks from one input port to the cell's output.
+  Every cell but the Java comparator AND returns from each port what `base_delay_ticks` returned;
+  that one returns 1 from `PortName::A` and 2 from `PortName::B`. Delay insertion charges a cell the
+  largest of these over the ports its drivers feed.
+
+- *(formats)* `RegistryPack`'s fields `manifest`, `data_versions`, `materials`, `blocks`,
+  `aliases`, `bytes_hash` and `source` are private. Each is read through the method of the same
+  name, which borrows it: `RegistryPack::manifest()`, `data_versions()`, `materials()`,
+  `blocks()`, `aliases()`, `bytes_hash()` and `source()`. Nothing replaces writing to a field.
+
+- *(core)* `lock::LockEdition` is gone: `LockTarget::edition` is `Edition`, which now derives
+  `Deserialize`. The lockfile's YAML is unchanged.
+- *(core)* `block_array` no longer exports the walkway router (`BlockedIndex`, `RoutePathError`,
+  `WalkwayLayout`, `build_walkway_array`, `l_path`, `route_path`). Lowering is its only caller;
+  the walkways it lays are still in `BlockArrayIr::walkways`.
+- *(core)* `compute_axes` takes the module and the edition reports only. It never read the Intent IR
+  or the resolution it was also given.
+- *(formats)* `registry::PackEdition` is gone: `PackManifest::edition`,
+  `RegistryError::EditionMismatch` and `UnsupportedTarget::edition` carry core's `Edition`.
+- *(formats)* `builtin_java` / `builtin_bedrock` become `builtin_pack(edition)`, and
+  `load_builtin_java` / `load_builtin_bedrock` become `load_builtin_pack(edition)`, under
+  `registry` and at the crate root.
+- *(formats)* `data_version::supported_list` is gone; `RegistryPack::supported_list` is the list
+  the CLI prints.
+- *(formats)* `bedrock_state::translate_states` takes the `BlockState` rather than its id and
+  properties.
+- *(lsp)* `LineIndex::line_end` is gone; `cairn_lang_core::lines::LineStarts::line_end` answers the
+  same question.
+
+- *(core)* A source with a `pressure_plate` whose own `at=`, `offset=` or `y=` puts it on no voxel
+  now fails `cairn check`, `cairn compile`, `cairn lower` and `cairn info` with `E_INVALID_MEMBER`
+  and exit 1, where it passed with a `W_DEFERRED_MEMBER` warning, and the language server marks
+  the line as an error. `W_DEFERRED_MEMBER` no longer covers those lines. `cairn synth` reads no
+  block array and is unchanged.
+
+  Listed here rather than as a fix under `spec/compatibility` C.4: `spec/redstone` "Signal binding"
+  said a plate outside the interior earns `W_DEFERRED_MEMBER`, so the build did what the spec said,
+  and the spec changed.
+
+- *(core)* A `place id=` or a `struct` named after a device Windows reserves passed `check` and
+  was written under that name, which Microsoft's naming rules reserve whatever extension follows
+  and which a Windows release applying them opens as the device. The names are `CON`, `PRN`,
+  `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, and `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²` and
+  `LPT³`, each in any letter case. They are now refused on every host: a place id as
+  `E_INVALID_PLACE_ID`, and a struct name as the new `E_INVALID_STRUCT_NAME`. A site name or a
+  port id may still spell one, since it is only ever part of a walkway's file name.
+  - `PlaceId::new` refuses these names with the new variant `IdError::ReservedDeviceName`. An
+    external exhaustive `match` on `IdError` no longer compiles; `IdError` is now
+    `#[non_exhaustive]`, so the next variant costs no second break.
+  - New variant `DiagnosticCode::InvalidStructName`.
+  - A lockfile recording such a place id is reported as one recording an identifier this build
+    refuses, and the target it records is still compared.
+  - A `connect` endpoint naming such a `place` row is `W_DEFERRED_CONNECT`, whose note points at
+    that row.
+
+  Listed here rather than as a fix under `spec/compatibility` C.4: the spec gained these names,
+  rather than the build being brought in line with what it already said.
+
+### Added
+
+- *(core,tree-sitter)* read a truth table written one row per line ([#506](https://github.com/kage1020/Cairn/pull/506))
+
+- *(cli)* `cairn docs` prints a page of the documentation site as Markdown from a copy compiled into
+  the binary, so the specification a person or an agent reads is the one the installed compiler
+  implements, offline. `cairn docs` lists the pages, `cairn docs spec/syntax` prints one, `--toc`
+  lists its headings, and a part of a page is named the way the spec is cited
+  (`cairn docs spec/lint "Error vs warning"`) or by the `#fragment` of a link to it. A link or URL
+  of the site works as written, the `index.md` form `llms.txt` links included, and Japanese pages
+  sit under `ja/`.
+- *(website)* The site serves every Markdown page as Markdown at its URL followed by `index.md`,
+  indexes the English ones for language models in `/llms.txt`, and puts them all in
+  `/llms-full.txt`. The same pages are the new `cairn-lang-docs` crate, which embeds them for
+  `cairn docs`, and CI checks after each build of the site that the two serve the same pages.
+
+- *(redstone)* A whole `cairn synth --stage <s>` dump from `placement` on reads back:
+  `serde_json::from_str::<ScopedPlacementIr>(&dump)` returns the Placement IR the dump was written
+  from, equal to it except that every span is empty. Only the cells had a reader before, so a tool
+  reached into each scope's `cells` array itself and could not read the outputs, the region, the
+  inputs or the signal definitions back. `PlacedOutputNode`, `PlacementIr`,
+  `CircuitRegionReservation`, `NetlistInput`, `ScopeKind` and `Scoped<T>` / `ScopedEntry<T>` now
+  have a `Deserialize`.
+
+  An output is read as a cell is: its `stage` tag picks its phase and a payload key the tag
+  disagrees with is refused. Its buffers stand on the `out` segment, so one on a driver port is
+  refused too:
+
+  ```text
+  an output tagged `stage: "route"` has been through the route stage and must carry `wire_length`
+  `buffer_coords[1]` stands on `a`, a cell's driver port, and an output's buffers stand on the `out` segment
+  ```
+
+  A key the dump leaves out because it is empty (`region`, `inputs`, `outputs`, `cells`,
+  `signal_defs`) reads back empty. These are refused as deserialisation errors: an unknown key at
+  any depth, an unknown scope kind, a key a node gives twice, a signal that `signal_defs` names
+  twice, and a dotted name with no segment, an empty segment (`"sig."` as a `signal_defs` key,
+  `["sig", ""]` as a name) or a segment holding a `.` (`["sig.a"]`). The reader checks each node,
+  not the IR as a whole: a `NetRef` out of range, nodes at another stage than the pass expects or
+  two cells on one `coord` read back, and `compile_routing`, `compile_delay` and
+  `compile_crossing` panic on them, as their `# Panics` sections now say. Reading back is for
+  self-describing formats such as JSON.
+
+- *(core)* `circuit_lines` reads each `circuit` line at the top level of a `struct` or `def`, or
+  under a `level` in one, into the `CircuitRegion` it reserves or a `RejectedCircuitRegion` whose
+  `CircuitRegionDefect` says why it reserves nothing; the defect's `Display` is that reason as a
+  clause. `circuit_regions` returns the same reservations as before, out of the same walk.
+
+- *(core)* `suggest::did_you_mean`, the one phrasing every "did you mean" note, message and error
+  uses.
+- *(core)* `BlockState::properties_text`, the `key=value,...` spelling of a state's properties.
+- *(core)* `lines::LineStarts::line_of`, the 0-based line an offset is on.
+- *(core)* `ast::ItemKind::ALL`, every top-level item kind.
+- *(formats)* `RegistryPack::targetable`, the rows `--target` may name, and
+  `RegistryPack::version_order`, the order `@requires` floors are placed in.
+- *(redstone)* `Scoped<T>` / `ScopedEntry<T>`, of which the four `Scoped*` IR lists are now
+  aliases, with the same fields and JSON.
+
+- *(core,tree-sitter)* An `assert truth(...)` table may give each row a line of its own. Only a
+  table on its `assert` line parsed before: core refused a line break inside the braces with
+  `expected a truth-table input pattern, got end of line`, and the tree-sitter grammar gave an
+  ERROR node. A line break may now come before or after any row, after a row's `;`, and before the
+  `}`, and the lines inside the braces carry no indentation, so the rows and the `}` may sit at any
+  depth with blank and comment lines among them. The table reads exactly as it would on one line:
+
+  ```
+  assert truth(sig.a, sig.b -> sig.out) {
+    00 -> 0
+    01 -> 1
+  }
+  ```
+
+  A row is still one line, and the `{` stays on the `assert` line. A table whose `}` is missing is
+  refused at whatever follows its last row, or at the end of that row's line when the file ends
+  there, with ``expected a truth-table row or the `}` that closes the table``. An output that is not
+  an integer, such as the `}` of `{ 0 -> }` or an output moved to the line below its arrow, is now
+  ``truth-table output must be `0`, `1`, or `-`, got …`` where it was `expected integer literal`.
+
+### Changed
+
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+- *(formats)* A loaded `RegistryPack` can no longer be changed, so a caller cannot reorder
+  `data_versions` or replace its `latest` after the loader validated them.
+
+- *(redstone)* `E_LOGIC_UNSUPPORTED_PRIMITIVE` says the combinational lowering has no gate for the
+  primitive, and its Fix line asks only for the expression to be rewritten with `and`, `or` and
+  `not`, without pointing at a later release.
+- *(cli)* `-h` prints one line for each subcommand and flag, and `cairn --help` lists the
+  subcommands by that line. `cairn <subcommand> --help` prints the whole text as before, exit codes
+  included.
+
+- *(spec)* Where the specification and the compiler disagreed and the compiler was right, the
+  specification now says what the compiler does, and each such change gives its reason:
+  - `@requires` needs whitespace after an edition, so `javaversion>=1.21` is `E_INVALID_REQUIRES`.
+  - The lockfile is `<source>.lock` beside its source (`village.crn.lock`) unless `--lock` names
+    another path, and lock schema version 1 includes the `placements` and `walkways` keys.
+  - A rectangular hip roof's apex fills the top layer's inset rectangle, two rows deep on an even
+    short span, where one row would leave a hole along the ridge.
+  - An actuator key on a member that does not read it, misspelt or not, is `E_UNKNOWN_ARGUMENT`,
+    which `cairn check` reports, rather than a finding only `cairn synth` reaches.
+  - `E_THEME_SELECTOR_UNMATCHED` weighs a selector row against the scopes its theme is bound to,
+    and a theme no scope binds is not checked.
+  - The redstone layers are four: the Edition Netlist IR sits between the Netlist IR and the
+    Placement IR.
+  - `E_INVALID_PLACE_ORIGIN` covers a `place` with no single label origin; `E_MISSING_PATH_MATERIAL`
+    covers `path=gravel`; `W_DUPLICATE_WALKWAY` holds in either order; `W_WALKWAY_BLOCKED` covers a
+    walkway past the router's search area; and the did-you-mean note covers every closed
+    vocabulary.
+  - Cairn versions are `YYYY.M.PATCH` and compare as numbers; `at=center` on an even wall is
+    `floor(len / 2)`; a `level`'s offset counts toward `Dims.y`; `cairn info`'s `buildable targets`
+    row pins each version and can raise `E_UNKNOWN_ID`; each edition's version table holds its
+    release lines; and a state the translator cannot read may come from a state literal.
+  - `cairn synth`, its JSON and every code of the redstone pipeline are Internal tier.
+  - A size literal's two extents are non-zero.
+  - An empty `buildable` has a fifth cause, `states_unmapped`, a palette entry the edition's writer
+    cannot carry.
+- *(spec)* Where the compiler does not carry out a rule yet, the rule stays and a note says what
+  happens today, such as `E_PARSE` for an `edit` statement or `E_UNKNOWN_KEYWORD` for an entity.
+
+### Fixed
+
+- *(core,redstone)* [**breaking**] face an even-span hip apex away from its ridge, and read logic primitives from a built-in library ([#552](https://github.com/kage1020/Cairn/pull/552))
+- *(tree-sitter)* end a truth output at its digits, and refuse an indent past 16 bits of levels ([#459](https://github.com/kage1020/Cairn/pull/459))
+- *(core,tree-sitter)* point six parser refusals at the text that is wrong ([#457](https://github.com/kage1020/Cairn/pull/457))
+
+- *(core)* With no registry pack, `W_ABSTRACT_TOKEN_DEFERRED` told every member whose slot binds an
+  abstract token that "the cell falls back to air". It now says what the member does instead: a
+  `floor` falls back to air; a `walls` is not built and takes up no rows; a `window` is not cut, so
+  its wall stays and a port on it is refused; a `roof`, an eave `stair` or a `pressure_plate` is
+  built from its default block.
+- *(core)* A `roof kind=shed` with no usable `slope_to=` draws nothing, yet still resolved its
+  `mat_slot=`. An unresolved binding drew a `W_DEFERRED_MEMBER` saying it falls back to
+  `minecraft:spruce_stairs`, and with a pack a bad one raised an error such as
+  `E_UNKNOWN_ABSTRACT_TOKEN` or `E_INCOMPATIBLE_MATERIAL`. It now resolves its material only once
+  it will draw, as a `window` and an eave `stair` already did, so the `W_DEFERRED_MEMBER` saying
+  why it is not drawn is the one finding lowering gives it.
+
+- *(cli)* `cairn compile --target` below a declared `@requires` floor was reported as `E_UNKNOWN_ID`
+  instead of `E_VERSION_CAP` when the target also lacked one of the file's blocks, which is the usual
+  reason to declare the floor. The author was told to replace the block and never that the target was
+  below the floor. The same `E_UNKNOWN_ID` stood in for `E_REQUIRES_UNORDERABLE` when a floor named a
+  version the edition's table cannot place, which refuses every target. A target the floors refuse
+  now lowers with no version pinned, so no id is checked at all until the target clears every floor,
+  a typo no version declares included, and the build is refused with `E_VERSION_CAP` or
+  `E_REQUIRES_UNORDERABLE`. Findings that need no version, such as `E_INVALID_REQUIRES` and
+  `E_UNKNOWN_ABSTRACT_TOKEN`, are still reported ahead of the refusal.
+
+- *(redstone)* Delay insertion counted the sink at the end of a segment as a block of dust, so a
+  segment from a fresh source carried one block less than a source at strength 15 does. A 16-step
+  route, whose 15 blocks of dust reach the sink at strength 1, got a repeater it does not need,
+  and a straight run took one every 15 steps. A sink, or a repeater, now reads the dust before it
+  and may be reached over all 15 blocks; a cell that passes on the strength it reads is still held
+  to its budget through a port whose strength it passes on. A 16-step segment takes no repeater, a
+  32-step one takes one rather than two, and on a straight run the repeater stands in place of every
+  16th block. This changes the repeaters `--experimental-logic-synth` places and the delay it
+  reports. The `E_ATTENUATION_LIMIT` refusals now count lengths, and the cap of 256, in steps rather
+  than blocks, and the fix line for a stretch with nowhere for a repeater asks for a straight coord
+  in every 16 blocks rather than every 15.
+
+- *(cli,lsp)* A `cairn check` with no `--target`, and the language server, run block-array lowering
+  with no target and report every finding each target that reads its line raises, weighed as if
+  every block id some shipped version declares were declared, with the code, span and text a pinned
+  check gives it: a sloped roof bound to a canonical block outside the stair family
+  (`E_INCOMPATIBLE_MATERIAL`), a value lowering cannot read (`W_IGNORED_ARGUMENT`), a member it
+  cannot lower (`W_DEFERRED_MEMBER`), a blocked walkway (`W_WALKWAY_BLOCKED`), and the rest.
+  `--edition` alone reports what that edition's theme variants raise. With neither flag, a finding
+  on a line only one edition's variant reads is reported as that edition's, and any other when both
+  editions raise it at the same place. What only a target's registry pack can say is left to
+  `cairn check --edition E --target V`: `E_UNKNOWN_ID`, `E_UNKNOWN_ABSTRACT_TOKEN`, and any verdict
+  on the block an abstract token, an id no shipped version declares, or the pack's default pressure
+  plate stands for, which a walkway note calls "a block". So is `E_PARTIAL_BUILD`, which counts what
+  a build at a target loses. The shared logic is `block_array::findings_without_target` in
+  `cairn-lang-core`.
+- *(lsp)* Diagnostics are computed on a second thread, which skips a revision of a document that a
+  newer one has replaced, so a completion request is answered without waiting for them.
+- *(core)* An unreadable `place gap=` asks for a non-negative integer, as
+  `spec/components-editing-sites` "Origin selectors" now says: `gap=` counts the cells between the
+  two bodies, and a negative value is `E_PARSE`. An unreadable `gap=` on a row refused for its
+  origin is noted as not placed either way, as on any other refused row, since no gap of zero or
+  more brings the row back in range.
+
+- *(core)* A `circuit` line under a `level` in a `struct` or `def`, directly or through `level`s
+  nested in it, reserves nothing, since place-and-route reads a reservation only from a line among
+  the scope's own members, yet `cairn check` and the language server said nothing about it. Beside
+  a line at the scope's top level it was dropped without a word, and in a scope with logic and no
+  line of its own, `cairn synth` refused the scope at the placement stage. `check` now refuses the
+  line as `E_MISPLACED_MEMBER`, saying it reserves nothing and belongs among the scope's own
+  members, so a source that built before now exits 1 from `cairn check`, `cairn compile` and
+  `cairn synth`. A note points at the line the scope keeps, its own or, when it has none, the first
+  line under a `level`, which is the one asked to move out. `E_DUPLICATE_CIRCUIT` still counts only
+  the body's own members, so the line is not reported twice.
+
+- *(core)* A `connect` naming a door or window declared under a `level` was refused as a port the
+  def does not declare, with a note to add the `id=` the member already had. A port is still looked
+  up among the def body's own members only, but this `E_UNRESOLVED_PORT` now says the member is
+  declared under a `level` (the one it sits directly under, by its `id=` when it has one) and that
+  a member there cannot be a port yet. Its note points at the member and says to use a door or
+  window declared in the def's body as the endpoint.
+
+- *(core)* A `place` row refused with `E_INVALID_PLACE_ID` drew a second error on every later row
+  whose `east_of=` / `north_of=` named it: `E_UNRESOLVED_PLACE_REF`, with a note telling the author
+  to declare the target above that line, which it already was. That row is now `W_DEFERRED_PLACE`,
+  a warning whose note points at the refused row, where the repair is, and a `connect` naming it
+  still gets `W_DEFERRED_CONNECT`. A reference above the refused row names no prior place and is
+  still `E_UNRESOLVED_PLACE_REF`.
+
+- *(cli)* A `W_INTENT_DEGRADED` line named its palette entry's id twice, bare after the
+  structure's scope and again inside the sentence. It now names the entry once, as `id[states]`,
+  the spelling `cairn info`'s note uses, then says what Bedrock lacks for the dropped `key` without
+  repeating the value the entry's states already show. `cairn info`'s degraded notes drop the
+  repeated value the same way. The diagnostic code is unchanged:
+
+  ```text
+  warning[W_INTENT_DEGRADED]: struct::roof_hip: minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]: Bedrock has no `shape` state; its stairs render straight, so corners show visual gaps
+  ```
+
+- *(core)* A key a `theme` selector coins was refused as `E_UNKNOWN_ARGUMENT` whenever it was near a
+  key the role already has, up to the "did you mean" cap, though `spec/lint` refuses only a word
+  one edit away. A coined key two or more edits from every real one is now its own key, as the
+  spec says; one edit away is still refused.
+- *(cli)* `cairn info` listed an edition's versions as buildable when the edition's writer could
+  not carry a palette entry's states, though `cairn compile` refuses every one of them. The
+  `buildable targets` row now refuses them too, prints a `note:` naming each entry, and under
+  `--format json` names the entries in `reason.states_unmapped`.
+- *(core)* `E_UNRESOLVED_SLOT` now lists the slots the theme declares, or says it declares none, as
+  `spec/lint` asks of every diagnostic. Where an unpinned build also takes a sibling theme
+  variant's slots, it lists and suggests those as well, and it offers to correct the slot name only
+  when there is a slot to correct it to.
+- *(core)* `E_DUPLICATE_ARG`, `E_DUPLICATE_SIZE`, `E_DUPLICATE_ID`, `E_DUPLICATE_SLOT`,
+  `E_TYPE_MISMATCH_SIZE` and `E_TYPE_MISMATCH_LABEL` gain a note saying how to fix them.
+  `E_TYPE_MISMATCH_LABEL`'s note fits its key: under `mat_slot=` it says how to bind a block to a
+  slot, and under `use=` and `theme=` it asks for a `def` or `theme` the file declares.
+- *(core)* An actuator key on a member that does not read it, such as `walls opened_by=sig.power`,
+  is `E_UNKNOWN_ARGUMENT` with a note naming the component the key belongs to.
+- *(cli)* `cairn --help` said the compiler turns `.crn` into NBT "and back", and `--out` and
+  `cairn lower` named only Java's `.nbt`. They now say it writes structure files, `.nbt` for Java
+  and `.mcstructure` for Bedrock. `--edition`'s values no longer say what each one emits, since
+  `check` and `synth` take the same flag and write no file.
+
+- *(core)* The "did you mean" search computed the full Damerau-Levenshtein distance between an
+  unknown id and every candidate, though no candidate more than three characters longer or shorter
+  can pass the cap. One unknown `@token` of 20,000 characters cost `compile --target` about 2 s and
+  `info` about 20 s in a release build, for an answer that was always "no suggestion". A candidate
+  outside the cap's length band is now skipped before its distance is computed, which changes no
+  suggestion.
+
+- *(core,redstone)* Of two `circuit` lines in the same `struct` or `def` body, place-and-route read
+  one and dropped the other without a word, and its Fix lines suggested writing more than one.
+  `check` now refuses each line after the first as `E_DUPLICATE_CIRCUIT`, with a note on the first
+  line and a note on the repair. It counts the body's own members, so a `circuit` line under a
+  `level` is not counted. Those Fix lines now suggest splitting the logic across several scopes,
+  each with its own `circuit` line.
+
+- *(core)* Two `place` rows of one `site` body sharing an `id=` were reported twice, as
+  `E_DUPLICATE_PLACE_ID` and as `E_DUPLICATE_ID`, so an editor showed two squiggles on one line
+  and a consumer counting errors counted two. `E_DUPLICATE_PLACE_ID`, the code that names the site
+  and that the first-row-wins rule is documented for, now reports the pair alone, so the finding
+  spans the second row and its note the first, where `E_DUPLICATE_ID` spanned their `id=`. That
+  includes two rows sharing an id refused as `E_INVALID_PLACE_ID`, which the resolver did not
+  compare: the second row now gets `E_DUPLICATE_PLACE_ID` in place of `E_DUPLICATE_ID`.
+  `E_DUPLICATE_ID` still reports a `place` row sharing its `id=` with any other row of the body,
+  such as a `connect`, and two `place` rows indented under one row.
+
+- *(core)* A hip roof whose short span is even capped its two-row apex with stairs that all took the
+  low slope's facing, which left a 0.5 × 0.5 undercut along one outer face for the band's whole
+  length. Each row now faces away from the ridge, as an even-span gable's apex pair does:
+  `north` and `south` across an x-ridge, `west` and `east` across a z-ridge. An odd span's apex is
+  unchanged.
+- *(core)* What follows a complete operand of a `logic` expression, where an infix primitive, `)`
+  or the end of the line belongs, is still `E_PARSE` at the same position, and the message now
+  names the infix primitives that could stand there and, where it can, why the text cannot:
+
+  ```text
+  s.crn:2:23: error[E_PARSE]: expected `and`, `or`, or end of line, got identifier `xor`: the built-in logic library has no primitive `xor`
+  ```
+
+- *(cli)* `cairn info --editions java,java` reported Java twice: a second entry in
+  `edition portability` and `buildable targets`, in text and in the JSON document, and every
+  per-edition note on stderr printed a second time, since the per-edition dry-run ran once per
+  name. That run now walks the deduplicated list the `@intended_targets` findings are weighed in,
+  so a repeated edition is reported once.
+
+- *(core)* When a floor named a version the edition's table cannot place, the note under
+  `E_INTENDED_TARGET_CAP` and `W_INTENDED_TARGET_CAP` that lists the valid targets said no target
+  satisfies the floors, though the floors the table can place left some. A floor it cannot place
+  is its own `E_REQUIRES_UNORDERABLE`, repaired on its own line, so it now takes no version off
+  that list: the note names the targets the other floors allow, such as
+  `valid bedrock targets: 1.21.60`.
+
+- *(core)* A member dropped for a fault in its own line was only warned about, so a structure built
+  at exit 0 without the window, door, roof or stair its author wrote, which `spec/lint` "Error vs
+  warning" forbids for a dropped member. Such a member is now `E_INVALID_MEMBER`, as a pressure
+  plate its line puts nowhere is. Its line is judged against the struct as written, every member at
+  the size its line asks for whether or not it builds, so a roof that draws nothing still counts for
+  the rows it rises and the overhang it adds. `W_DEFERRED_MEMBER` keeps three cases: a member
+  another member keeps out, such as a `door` or `window` in a course whose `walls` paint nothing or
+  beside walls under a `level` that is not placed, or an eave `stair` beside a `roof` that draws
+  nothing, with a note saying which member has the repair; a line the pass does not lower yet, such
+  as a `floor` or `roof` under a raised `level`; and part of a built member, such as an overlapping
+  `sym=true` mirror. A line wrong in itself is the error even when such a member is missing too or
+  its line is one the pass does not lower yet, so a `roof` under a raised `level` is refused for its
+  `kind=` before it is deferred, and a `window` series for running past its wall before its
+  `sym=true` mirror is. A `walls` refused for its `height=`, a `level` for its `y=`, a `stair` with
+  no `kind=` and a `window` refused for its own arguments now say what to write, a `door` or
+  `window` outside every course names the courses the walls are written to, and a `level` with
+  members under it and no `y=`, or a `level` inside another, is reported once, as
+  `E_UNSUPPORTED_NESTING`.
+
+- *(redstone)* Delay insertion held the wire into the Java comparator AND's side, port `b`, to what
+  the cell can spare of the limit, since its wire out needs the rest, and counted the dust spent on
+  it toward that wire out, though the operand there ends at the inverter, which restores strength.
+  `spec/redstone` "Place-and-route" now says only the comparator's rear runs on through the cell:
+  the side's wire may carry all 15 blocks of dust, as the wire into any sink that restores strength
+  may, and the wire out starts from what the rear has spent. A Java AND fed over a long or winding
+  wire on its side takes fewer buffer repeaters and is refused with `E_ATTENUATION_LIMIT` less
+  often, so `cairn synth --stage delay` can report a lower `local_delay_ticks` for that cell and the
+  ones it feeds, and `--stage crossing` fewer `buffer_coords`, or ones further along the wire. An
+  `E_ATTENUATION_LIMIT` refusal of a wire held to a cell's budget now names the port it feeds, such
+  as port `a`, and no longer says a cell passes on the strength of an operand it restores.
+- *(redstone)* `EditionCell::port_regenerates(PortName)` says whether a cell restores the strength
+  of a signal entering by one port: every port of a cell that `regenerates()`, and port `b` of the
+  Java comparator AND.
+
+- *(core,cli)* A lockfile recording an identifier this build refuses, such as one an earlier Cairn
+  wrote before the identifier rule tightened, was reported as one that "could not be read", and the
+  target it recorded was not compared, so a target change went without
+  `W_PREVIOUSLY_VERIFIED_TARGET` or `W_SEMANTIC_SENSITIVITY`. When the document is valid in every
+  other respect, `compile` now says it records an identifier this build refuses, and still compares
+  the target; one broken in any other way is still reported as unreadable, with that cause.
+  `Lockfile::refused_identifier` makes the same reading.
+
+- *(redstone)* An unbound signal used by a scope's own `assert` and by one nested under a `level`
+  further down was reported at the nested one. It is now reported at the first in the file.
+
+- *(redstone)* `E_LOGIC_NESTING_TOO_DEEP` claimed "about 128 chained bindings" whatever the chain,
+  and stood on the binding the lowering was deepest in, the furthest from where the misordering
+  starts. It now counts the bindings the lowering was inside, stands on the outermost, notes the
+  next three, and counts any past those. Two chains that start from one binding still get a finding
+  each.
+
+- *(core)* An `assert truth(...)` listing one signal twice was asked for rows that give the two
+  positions different values, which no circuit sees, and
+  `assert truth(sig.a, sig.a -> sig.o) { -0 -> 0; -1 -> 1 }`, whose meaning depends on which of the
+  two columns is read as `sig.a`, passed `check` with no finding. Such a table is now refused as
+  `E_TRUTH_TABLE_DUPLICATE_INPUT`, once per repeated signal, with no other truth-table finding
+  beside it.
+
+- *(lsp)* A `didChange` event carrying a `range` was stored as the whole document, so `# note\n`
+  inserted at `0:0` replaced the file and the server diagnosed and completed text nobody had. The
+  server advertises full sync and a conforming client sends no range, but one that does now has
+  each event applied in order, ranged or not (`DocumentStore::apply`). A range on a line the
+  document does not have, or a range whose end resolves before its start, drops the revision with
+  a line on stderr and keeps the last text. A column past its line's end resolves to the line end
+  before the two ends are compared.
+
+- *(lsp)* An unreadable frame was logged as "client closed stdin without `shutdown`" before the
+  frame's own error, so the first line said the opposite of what happened. The session now says the
+  client closed stdin only once the reader has returned without an error. When the reader or the
+  writer failed before `shutdown`, that failure is the one line, and it ends "the session ended
+  without `shutdown`".
+
+- *(core)* A `mat_slot=` on a `door`, `level`, `circuit`, `place` or `connect` changes nothing in
+  the build, since none of them reads a material from a slot, yet a slot name the bound theme lacked
+  refused the build with `E_UNRESOLVED_SLOT` (on a `place` or a `connect` it went unreported). The
+  key is now `W_IGNORED_ARGUMENT` on its value, as any other key no pass reads is, and is not looked
+  up in the theme, so a misspelt name is not caught there either; removing it leaves the build as
+  it was. The note says why nothing reads it: on a `door` the key waits on the door block, which is
+  not placed yet; on the other four it has nothing to be read for, so the note asks for its removal.
+  Nor does such a `mat_slot=` count as reading a slot: a module whose `struct` and `def` members
+  read no other is not refused with `E_THEME_VARIANT_MISSING` when the pinned `--edition` can bind
+  none of its theme's variants. A `place` naming such a theme is still refused, whatever its `def`
+  reads, since its own `theme=` binds the theme.
+- *(lsp)* Completion no longer offers the theme's slot names after `mat_slot=` on those five
+  keywords.
+
+- *(formats)* A Bedrock build printed identical `W_INTENT_DEGRADED` lines, and its `.mcstructure`
+  palette held one block several times. `roof-hip`'s four degraded stairs are four states of one
+  id, and the warning named the id alone, so it printed two pairs of identical lines: the two
+  stairs of a pair differ only in `facing`, which the warning left out. Each warning now names the
+  Java state it came from, as `cairn info`'s note does:
+  `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]`. And once `shape` is
+  dropped, several Java states translate to one Bedrock state: those entries now share the first
+  one's `block_palette` slot, with `block_indices` written through the merge and air kept at `0`,
+  so the written palette is a set like the one it is built from. The Java palette and `info`'s
+  per-entry counts are unchanged.
+
+- *(formats)* `prepare_mcstructure` and `build_mcstructure_tag` panicked on a hand-built
+  `BlockArray` whose palette translates to more than 65,536 distinct Bedrock blocks. They now write
+  it, as the Java writer writes a long palette. Translating the palette also no longer compares
+  each entry with every block before it, so preparing a palette that large takes a moment rather
+  than minutes. The CLI never builds such a palette.
+
+- *(core)* `W_NO_THEME_BOUND`, "every `mat_slot=` will lower to air", was reported on every scope
+  with no theme bound, including an empty struct and one whose only member is a `roof kind=flat`
+  built from its default block, neither of which reads a `mat_slot=`. It is now reported only on a
+  scope with a member that reads a `mat_slot=`, one under a `level` included. A `mat_slot=` on a
+  keyword that reads none (`door`, `level`, `circuit`, `place` or `connect`) does not count, and is
+  reported as `W_IGNORED_ARGUMENT` instead. Nor does a member a `level` drops, such as a `floor`
+  above `y=0`, which paints nothing whatever the theme.
+
+- *(core)* `W_NO_THEME_BOUND` said "every `mat_slot=` will lower to air", which is true of a `floor`
+  only. It now reads "has no theme bound, so no `mat_slot=` in it resolves to a block", and a new
+  first note says what each role does instead: a `floor` is left air; no `walls` is built or takes
+  up rows, so no `door` or `window` is cut; a `roof` is built from its default block, and so is an
+  eave `stair` or `pressure_plate` that still fits the shorter structure. The code and severity are
+  unchanged.
+- *(spec)* `spec/lint` said the same in `W_NO_THEME_BOUND`'s catalog row and in the two passages
+  that explain why `E_UNKNOWN_SLOT_TARGET` is an error, and `spec/compilation` said a themeless
+  struct's walls lower to air. The catalog row now stops at what resolves, the passages say what
+  each role does without its material, an eave `stair` or `pressure_plate` higher than the shorter
+  structure reaches is refused, and `E_UNKNOWN_SLOT_TARGET` is an error because the slot's value is
+  wrong in the source.
+
+- *(redstone)* An identity wire in a region one column wide (`size=1xN`) passed `--stage placement`
+  at exit 0, with a Placement IR whose output pad stood on `(0,0,0)`, the same voxel as its first
+  input pad. Placement now refuses it with an `E_ROUTE_CONGESTION` that asks for a second column.
+  Its `Fix:` line asks for that alone, where the refusal `--stage route` gave before went on to the
+  depth rule and to splitting into multiple `circuit` blocks.
+
+- *(core,redstone)* A scope whose `circuit` line reserved nothing got an `E_NO_CIRCUIT_REGION` on
+  its first `logic` line (or its first actuator binding, with no `logic` line) that listed every
+  possible cause. It now stands on that `circuit` line, names the one cause, and gives a fix for
+  it; with several such lines, the first. For a library caller of `compile_placement` that skips
+  `check`, a `circuit` line under a `level`, which reserves nothing, is named as such on the line.
+  A scope with no `circuit` line keeps the old anchor, and its message now asks only for the line.
+
+- *(cli)* `cairn compile` took two file names that differ only in letter case for one file on macOS
+  and Windows and for two everywhere else, whatever `--out` itself did. In a case-insensitive
+  directory under Linux (casefold ext4, exFAT, CIFS), a `--lock out/HOME1.NBT` beside an artifact
+  `out/home1.nbt` passed the lock collision guard, and the build staged both into one file, then
+  failed, losing the artifact. In a case-sensitive directory under macOS or Windows the same lock
+  was refused, although there it is a file of its own. `cairn compile` now asks `--out` itself: it
+  writes a uniquely named scratch file there, reads it back under its upper-case spelling, and
+  removes it. Both the lock guard and the guard against two artifacts sharing one file use that
+  answer. Where the probe fails, the two spellings are taken for one file. On Linux and macOS the
+  lock guard also tells the lock's directory and `--out` apart by device and inode, so a
+  `--lock OUT/home1.nbt` beside `--out out` is refused too when `OUT` is the same directory spelled
+  another way.
+
+- *(core)* An `at=<side>.outside` pressure plate at `y=0` on a struct whose roofs draw no overhang
+  was placed in the floor cell under the wall column, where the wall above buried it and its signal
+  could never fire, and nothing was reported. On a struct with no roof written with an `overhang=`
+  of at least 1 it is now refused with `E_INVALID_MEMBER`, since the ring a roof's `overhang=` adds
+  is the only exterior a struct has. Beside a roof written with an `overhang=` that draws nothing,
+  such as one with no `kind=` or one under a raised `level`, it is left unplaced with
+  `W_DEFERRED_MEMBER`, whose note says the roof has the repair. The refusal offers a `roof` in the
+  struct's body with an `overhang=` of at least 1, or `at=inside.<side>` at an interior `offset=`,
+  at `y=1` where a `floor` takes row 0. A refusal of an outside plate's `offset=` or row adds the
+  roof it needs too. The `redstone-door` and `crossbar` examples give their structs a flat roof with
+  `overhang=1`, and `redstone-door` puts one plate on each side of its door.
+
+- *(core)* Every command that lowers a source panicked on a scope that painted more than 65,535
+  distinct block states besides air: `cairn compile`, `cairn lower`, `cairn info`, and `cairn check
+  --edition E --target V`. A source gets there through block ids or state-literal properties no
+  pinned target checks. An id goes unchecked wherever no version is pinned, and a state literal's
+  properties under every target, so `cairn compile` with a target that resolves panicked too. Every
+  paint counts, including one a later member covers. The scope is now skipped with a new warning,
+  `W_PALETTE_TOO_LARGE`, and the other scopes still lower; `cairn compile` and `cairn check
+  --edition E --target V` then refuse the partial build with `E_PARTIAL_BUILD`, as they do for
+  `W_STRUCTURE_TOO_LARGE`. `Palette::try_intern` is the fallible form of `Palette::intern`, its
+  `PaletteFull` error carries the capacity it refused at, and `PALETTE_CAPACITY` is the cap.
+
+- *(core,tree-sitter)* Six parser refusals pointed past the text that was wrong or named the wrong
+  problem. Each now points at the text and names the mistake:
+  - A bad truth-table output (`{ 0 -> 7 }`) is reported at the output, not at the `}` or the row
+    after it, and a misspelled `assert` form (`assert truht(…)`) at the form rather than at
+    `assert`.
+  - An unknown directive with no value (`@crain`) is ``unknown directive `@crain` `` rather than
+    "requires a value", which is now said only of the three directives that exist.
+  - `@intended_targets` quotes the offending value as written and points at it, rather than
+    printing Rust `Debug` output at the start of the value:
+    ``@intended_targets expects a string such as `"1.21.4"`, got `oak` ``.
+  - A `requires version>=X` under a member of a `struct` or `site` gets the `@requires` repair; the
+    "goes at the body's own level" repair is for a member of a `def`, where it applies. A floor
+    with an indented line under it is refused as a floor rather than read as a member whose `>=` is
+    then unexpected.
+  - `size=9x` in an item header, a `[…]` list or a `theme` binding, the forms where every argument
+    needs its `=`, is ``size literal `9x` has no height; a size is two extents, as in `9x7` ``
+    rather than ``expected `=` ``. A member command's own arguments read a key with no `=` as a
+    positional value, so `window size=9x` reaches the checks it always did. The lexer's split of
+    `9x` is unchanged.
+  - `and` and `or` are no longer read as a signal's name where a `logic` expression expects a
+    signal, so `logic sig.x = sig.a and or` is refused at the parse with
+    ``expected a signal after `and`, got the infix primitive `or` ``. Such an operand could never be read:
+    `spec/redstone` "Signal names" puts every readable signal in the `sig.` namespace, and a signal
+    named `or` (`-> sig.or`, read as `sig.or`) is untouched. But nothing before synthesis said so:
+    `cairn check`, `cairn info` and `cairn compile` exited 0 on such a file, and `compile` wrote its
+    artifacts and lockfile. That file now exits 1. The tree-sitter grammar refuses it too. A dotted
+    name may still end in one (`c.or`).
+
+- *(redstone)* Delay insertion charged the Java comparator AND 1 tick from either operand, though
+  the operand inverted onto the comparator's side passes the inverter as well as the comparator.
+  `spec/redstone` "Time model" now says a cell's delay is counted per input port, and "Edition
+  differences" that the AND takes its `a` port at the rear and inverts its `b` port onto the side,
+  so that cell counts 1 tick from `a` and 2 from `b`. Each cell's `local_delay_ticks` is the delay
+  of its slowest driven port plus the buffer repeaters on the nets feeding it, so
+  `cairn synth --stage delay` and `--stage crossing` now report a Java AND 1 tick higher. The
+  Placement IR keeps one `local_delay_ticks` per cell.
+
+- *(core)* A `def` whose only `place use=` row was refused for its id or its origin was also
+  reported as `W_UNUSED_DEF`, with advice to remove the def. Every such refusal did this: a missing
+  `id=` (`E_INCOMPLETE_PLACE`), one that is not an identifier or string (`id=3`,
+  `E_TYPE_MISMATCH_LABEL`), `E_INVALID_PLACE_ID`, `E_DUPLICATE_PLACE_ID`, `E_INVALID_PLACE_ORIGIN`
+  (no origin selector, more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=`
+  that is not an identifier or string), an `east_of=` / `north_of=` naming no prior place
+  (`E_UNRESOLVED_PLACE_REF`), and one naming a row refused for its id (`W_DEFERRED_PLACE`).
+  Following the advice brought the def back as `E_UNRESOLVED_PLACE_REF` once the row was fixed. A
+  row whose `use=` names a declared def now references it, whatever refuses the row.
+
+- *(redstone)* A stretch with no coord for a buffer repeater, refused only because a coord touches
+  another block of its own net, was reported as though every coord turned. The refusal now says
+  which of the two applied, and names the coord nearest the dark end that touches its net and the
+  block it touches.
+
+- *(core)* A key written twice on the right of one `theme` selector row, as in
+  `window[class=small] -> frame=@no_such_block frame=@spruce_wood`, got `E_DUPLICATE_ARG` and a
+  `W_IGNORED_ARGUMENT` on its last value only, so the first value went without the finding it gets
+  when written alone. Each value now gets its own `W_IGNORED_ARGUMENT`, beside the
+  `E_DUPLICATE_ARG`.
+- *(core)* `E_DUPLICATE_SELECTOR`'s note now calls the earlier value dead text whatever a binding
+  comes to mean, rather than lost. The note on the fix said to merge the rows, which writes the key
+  twice in one row and so raises `E_DUPLICATE_ARG`; it now says to delete the value you do not mean
+  from one of the rows, or to narrow one selector so they pick different members.
+- *(spec)* `spec/materials-themes` "Slots as dependency injection" said no selector binding makes
+  a build refuse, though a key bound twice for the same members is refused: `E_DUPLICATE_ARG`
+  within one row, `E_DUPLICATE_SELECTOR` across two. It now says so, and `spec/lint` "Error vs
+  warning" says why `E_DUPLICATE_SELECTOR` is an error while bindings are reserved.
+
+- *(core)* `waterlogged=` on a `stair` refused the build with `E_UNKNOWN_ARGUMENT`, which
+  `spec/lint` "Error vs warning" keeps for a key outside the keyword's vocabulary, though
+  `spec/blockstate` "`waterlogged`" defines the key and what is missing is a pass that reads it.
+  The key is now `W_IGNORED_ARGUMENT` on its value, as any other key no pass reads yet is, and the
+  stair is built as if the key were not written.
+- *(spec)* `spec/blockstate` "`waterlogged`" now gives `W_IGNORED_ARGUMENT` for that key, and
+  says that a `roof` or a `window` takes no state override, so `waterlogged=` there is still
+  `E_UNKNOWN_ARGUMENT`. `spec/lint` "Error vs warning" lists the key among those no pass reads yet.
+
+- *(core)* A `sym=true` window centred on its wall (`2 * offset + size_w = wall_length`) has a
+  mirror that is the same rectangle as the window. Lowering painted the window once and reported
+  nothing, though `spec/syntax` "Selectors" rejects every mirror that overlaps its window with
+  `W_DEFERRED_MEMBER`: the author asked for two windows and got one without being told. The
+  centred window now gets that warning too, saying it "coincides with its mirror" where an
+  off-centre one "would overlap" it. The window is still painted and its mirror is not, so the
+  blocks written do not change.
+
+- *(core)* The `W_DEFERRED_MEMBER` on a `sym=true` window whose mirror overlaps or coincides with
+  it carried the generic deferral note, "block-array lowering currently voxelises floor, walls,
+  door, window, …", though a `window` is lowered and this one was cut. The note now says when a
+  window and its mirror make a pair, with the bounds for that wall, and how to fix it: move or
+  narrow the window, or drop `sym=true` to keep the one opening that was cut. On a wall 1 long,
+  which holds no pair, it offers only the last.
+- *(spec)* `spec/syntax` "Selectors" now says that a mirror which only touches its window is not
+  rejected: both are cut, and read as one opening twice the window's width.
+  `spec/components-editing-sites` "Ports and `connect`" now says that a `sym=true` window whose
+  mirror is skipped keeps its own cut and its port, as lowering already did.
+
+- *(cli)* `cairn synth` checked for a missing `--edition` only after the source had been parsed,
+  checked and synthesised, so a source with an error reported that error with exit 1 and never
+  reached the usage error, and one with only warnings printed them ahead of it. The check now runs
+  before the file is read, as the refusal of a stray `--edition` on `logic` / `netlist` already
+  did: `--stage placement` without `--edition` exits 2 with the flag message alone, whatever the
+  source holds. A path that names nothing is reported only once the flag is right, so a caller who
+  got both wrong hears about the flag first and about the path on the next run.
+
+- *(formats)* `--target` matched a version label exactly, so `--target 1.21.0` on Java was refused
+  with "did you mean `1.21.4`?", a different release, while
+  `@intended_targets ["1.21.0"]` was read as Java 1.21. `--target` now counts two spellings of one
+  version as one, as `@requires` and `@intended_targets` already did, and `--help` on `compile` and
+  `check` says so. The target and the lockfile carry the row's own label (`1.21` on Java, `1.21.0`
+  on Bedrock).
+
+- *(tree-sitter)* The grammar accepted two shapes `cairn-lang-core` refuses, and built a tree for a
+  file nobody wrote:
+  - A truth-row output run into the next row, as in `{ 00->101->0 }`, read as the two rows `00->1`
+    and `01->0`. The output was `/[01]/`, one character, and the next pattern started on the
+    character after it; the reference lexer reads `101` as one integer and refuses it as an output.
+    The output is now scanned by the external scanner, which takes one `0` or `1`, and only when no
+    digit follows it.
+  - A line indented by 131072 spaces read as level 0, a second top-level declaration, and one of
+    131074 spaces as an ordinary body line. The scanner narrowed the level to 16 bits before
+    comparing it with the indent stack; it now compares first, so the line is refused as an indent
+    that opens more than one level.
+
+- *(core)* A partial truth table whose first unassigned combination sat behind more combinations
+  than the search for a sample would step through lost its `W_TRUTH_TABLE_PARTIAL` although the
+  count was exact. A row fixing the lowest of fifteen inputs beside a row fixing the lowest and
+  the highest is one: its first gap comes after 16 385 assigned combinations, past that search's
+  cap of 10 000 steps. The sample is now found by descending through prefixes, so the finding no
+  longer depends on how many combinations sit in front of the first gap, and it names the lowest
+  missing combinations, up to four. It is still withheld when the rows stand for `2^64`
+  combinations or more between them and leave some out, which takes 65 inputs or more, because
+  the payload carries the covered count as a 64-bit integer.
+
+- *(core)* A `pressure_plate` its own line puts on no voxel is refused with `E_INVALID_MEMBER`
+  rather than built around with `W_DEFERRED_MEMBER`, so a structure no longer builds at exit 0
+  without it, as `spec/lint` "Error vs warning" requires of a dropped member. The lines it covers
+  are no `at=` or one naming no anchor, an `offset=` or `y=` that is not a non-negative integer, an
+  `offset=` past the wall, a row above every row the struct as written reaches, an
+  `at=<side>.outside` on a struct where no roof has an `overhang=` of at least 1, and an
+  `at=inside.<side>` at a corner or on a struct under 3 on an axis. Each names the values that
+  would be valid and the change that fixes it. An `at=` one typo or a swap away from an anchor,
+  such as `at=front.inside`, is offered that anchor, and a bare side such as `at=front` is offered
+  both anchors on it. A plate that only a `walls` member painting nothing, a `roof` that draws
+  nothing or a `level` that is not placed keeps off its voxel stays `W_DEFERRED_MEMBER`, with a
+  note saying which of them has the repair. Every plate left unplaced that carries a `->` binding,
+  the state-literal `mat_slot=` and pack-default `E_UNKNOWN_ID` refusals included, now notes that
+  its signal still reaches the netlist with no plate to drive it.
+
+### Build
+
+- *(deps)* Bump tree-sitter-cli from 0.26.11 to 0.27.1 in /crates/cairn-lang-tree-sitter ([#516](https://github.com/kage1020/Cairn/pull/516))
+
+- The workspace resolves dependencies with Cargo's MSRV-aware resolver (`resolver = "3"`), so
+  `cargo update` no longer picks a dependency whose own `rust-version` is above Cairn's 1.95. The
+  committed `Cargo.lock` is unchanged.
+
+- *(tree-sitter)* The grammar is generated by tree-sitter-cli 0.27.1. A comment or string holding
+  `ſ` (U+017F) or the Kelvin sign (U+212A) no longer ends at that character: the older generator
+  case-folded those two out of the characters a comment or string may hold.
+
+## 2026.11.0 — 2026-11-01
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(core,tree-sitter)* read a truth table written one row per line ([#506](https://github.com/kage1020/Cairn/pull/506))
+
+### Build
+- *(deps)* Bump lsp-server from 0.8.0 to 0.10.0 ([#523](https://github.com/kage1020/Cairn/pull/523))
+
+### Changed
+- *(formats)* [**breaking**] make RegistryPack read-only behind accessors ([#530](https://github.com/kage1020/Cairn/pull/530))
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core,cli,lsp)* [**breaking**] report target-independent lowering findings in a check with no target ([#509](https://github.com/kage1020/Cairn/pull/509))
+- *(core)* [**breaking**] report mat_slot= on a role that reads no material as ignored, and stop resolving it ([#478](https://github.com/kage1020/Cairn/pull/478))
+- *(lsp)* [**breaking**] report an unreadable frame as itself, and apply a ranged didChange as an edit ([#461](https://github.com/kage1020/Cairn/pull/461))
+
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(cli)* print the documentation the binary was built with, and serve the site as Markdown ([#511](https://github.com/kage1020/Cairn/pull/511))
+
+### Changed
+- *(formats)* [**breaking**] make RegistryPack read-only behind accessors ([#530](https://github.com/kage1020/Cairn/pull/530))
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core,cli)* hold cairn info's buildable targets to what compile builds, and say how to fix more codes ([#547](https://github.com/kage1020/Cairn/pull/547))
+- *(redstone)* [**breaking**] count a cell's delay per input port, 2 ticks on the Java AND's inverted side ([#544](https://github.com/kage1020/Cairn/pull/544))
+- *(core,cli,lsp)* [**breaking**] report target-independent lowering findings in a check with no target ([#509](https://github.com/kage1020/Cairn/pull/509))
+- *(cli)* ask --out whether it folds case, not the platform ([#508](https://github.com/kage1020/Cairn/pull/508))
+- *(core)* [**breaking**] refuse a Windows device name as a place id or struct name ([#503](https://github.com/kage1020/Cairn/pull/503))
+- *(formats,cli)* [**breaking**] name the degraded entry once in W_INTENT_DEGRADED, and carry it as fields on ParityNote ([#499](https://github.com/kage1020/Cairn/pull/499))
+- *(core,redstone)* point three logic findings at the right line and refuse a repeated truth input ([#479](https://github.com/kage1020/Cairn/pull/479))
+- *(core,redstone)* refuse a second circuit line in a scope as E_DUPLICATE_CIRCUIT ([#476](https://github.com/kage1020/Cairn/pull/476))
+- *(cli)* cap a target below the floor before checking its block ids ([#472](https://github.com/kage1020/Cairn/pull/472))
+- *(formats)* name each degraded Bedrock entry by its Java state, and merge translated duplicates ([#471](https://github.com/kage1020/Cairn/pull/471))
+- *(formats)* accept either spelling of a version as --target ([#470](https://github.com/kage1020/Cairn/pull/470))
+- *(redstone)* count a buffer repeater's 15 blocks of dust without the sink ([#468](https://github.com/kage1020/Cairn/pull/468))
+- *(core)* report a repeated place id once, as E_DUPLICATE_PLACE_ID ([#467](https://github.com/kage1020/Cairn/pull/467))
+- *(cli)* report an edition named twice in `cairn info --editions` once ([#466](https://github.com/kage1020/Cairn/pull/466))
+- *(cli)* refuse a missing `cairn synth --edition` before the source is read ([#464](https://github.com/kage1020/Cairn/pull/464))
+- *(core)* count a refused place row's def as referenced ([#463](https://github.com/kage1020/Cairn/pull/463))
+- *(core)* close four site-lowering gaps left by the unreadable-value review ([#462](https://github.com/kage1020/Cairn/pull/462))
+- *(core)* [**breaking**] name what buries a walkway port and what stretched the router's search box ([#455](https://github.com/kage1020/Cairn/pull/455))
+- *(core,cli)* [**breaking**] refuse Windows-reserved and control characters in an identifier ([#456](https://github.com/kage1020/Cairn/pull/456))
+
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(redstone)* read a whole Placement IR dump back ([#536](https://github.com/kage1020/Cairn/pull/536))
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core,redstone)* [**breaking**] face an even-span hip apex away from its ridge, and read logic primitives from a built-in library ([#552](https://github.com/kage1020/Cairn/pull/552))
+- *(core,cli)* hold cairn info's buildable targets to what compile builds, and say how to fix more codes ([#547](https://github.com/kage1020/Cairn/pull/547))
+- *(redstone)* hold the Java AND's inverted side to the limit rather than the cell's budget ([#546](https://github.com/kage1020/Cairn/pull/546))
+- *(redstone)* [**breaking**] count a cell's delay per input port, 2 ticks on the Java AND's inverted side ([#544](https://github.com/kage1020/Cairn/pull/544))
+- *(core,redstone)* point three logic findings at the right line and refuse a repeated truth input ([#479](https://github.com/kage1020/Cairn/pull/479))
+- *(core,redstone)* refuse a second circuit line in a scope as E_DUPLICATE_CIRCUIT ([#476](https://github.com/kage1020/Cairn/pull/476))
+- *(core,redstone)* refuse a one-column pad region by width and anchor a rejected circuit line ([#474](https://github.com/kage1020/Cairn/pull/474))
+- *(redstone)* count a buffer repeater's 15 blocks of dust without the sink ([#468](https://github.com/kage1020/Cairn/pull/468))
+- *(redstone)* say a coord was refused a buffer repeater for touching its own net ([#454](https://github.com/kage1020/Cairn/pull/454))
+
+## 2026.11.0 — 2026-11-01
+
+### Changed
+- *(formats)* [**breaking**] make RegistryPack read-only behind accessors ([#530](https://github.com/kage1020/Cairn/pull/530))
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core)* [**breaking**] refuse an outside pressure plate on the floor row with no roof overhang ([#620](https://github.com/kage1020/Cairn/pull/620))
+- *(formats)* write a Bedrock palette past 65,536 distinct blocks instead of panicking ([#533](https://github.com/kage1020/Cairn/pull/533))
+- *(core,cli,lsp)* [**breaking**] report target-independent lowering findings in a check with no target ([#509](https://github.com/kage1020/Cairn/pull/509))
+- *(formats,cli)* [**breaking**] name the degraded entry once in W_INTENT_DEGRADED, and carry it as fields on ParityNote ([#499](https://github.com/kage1020/Cairn/pull/499))
+- *(core)* refuse a scope whose palette overflows instead of panicking ([#475](https://github.com/kage1020/Cairn/pull/475))
+- *(cli)* cap a target below the floor before checking its block ids ([#472](https://github.com/kage1020/Cairn/pull/472))
+- *(formats)* name each degraded Bedrock entry by its Java state, and merge translated duplicates ([#471](https://github.com/kage1020/Cairn/pull/471))
+- *(formats)* accept either spelling of a version as --target ([#470](https://github.com/kage1020/Cairn/pull/470))
+
+## 2026.11.0 — 2026-11-01
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+## 2026.11.0 — 2026-11-01
+
+### Fixed
+- *(core)* report `waterlogged=` on a `stair` as an unreached key ([#629](https://github.com/kage1020/Cairn/pull/629))
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core)* [**breaking**] refuse an outside pressure plate on the floor row with no roof overhang ([#620](https://github.com/kage1020/Cairn/pull/620))
+- *(core,redstone)* [**breaking**] face an even-span hip apex away from its ridge, and read logic primitives from a built-in library ([#552](https://github.com/kage1020/Cairn/pull/552))
+- *(core,cli)* hold cairn info's buildable targets to what compile builds, and say how to fix more codes ([#547](https://github.com/kage1020/Cairn/pull/547))
+- *(redstone)* hold the Java AND's inverted side to the limit rather than the cell's budget ([#546](https://github.com/kage1020/Cairn/pull/546))
+- *(redstone)* [**breaking**] count a cell's delay per input port, 2 ticks on the Java AND's inverted side ([#544](https://github.com/kage1020/Cairn/pull/544))
+- *(core)* [**breaking**] refuse a pressure_plate its own line cannot place as E_UNPLACEABLE_PLATE ([#541](https://github.com/kage1020/Cairn/pull/541))
+- *(core)* report each value of a key repeated in one theme selector row ([#535](https://github.com/kage1020/Cairn/pull/535))
+
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(cli)* print the documentation the binary was built with, and serve the site as Markdown ([#511](https://github.com/kage1020/Cairn/pull/511))
+- *(core,tree-sitter)* read a truth table written one row per line ([#506](https://github.com/kage1020/Cairn/pull/506))
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* report `waterlogged=` on a `stair` as an unreached key ([#629](https://github.com/kage1020/Cairn/pull/629))
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core)* [**breaking**] refuse an outside pressure plate on the floor row with no roof overhang ([#620](https://github.com/kage1020/Cairn/pull/620))
+- *(core,redstone)* [**breaking**] face an even-span hip apex away from its ridge, and read logic primitives from a built-in library ([#552](https://github.com/kage1020/Cairn/pull/552))
+- *(core,cli)* hold cairn info's buildable targets to what compile builds, and say how to fix more codes ([#547](https://github.com/kage1020/Cairn/pull/547))
+- *(core)* [**breaking**] refuse a pressure_plate its own line cannot place as E_UNPLACEABLE_PLATE ([#541](https://github.com/kage1020/Cairn/pull/541))
+- *(core)* report each value of a key repeated in one theme selector row ([#535](https://github.com/kage1020/Cairn/pull/535))
+- *(core,cli,lsp)* [**breaking**] report target-independent lowering findings in a check with no target ([#509](https://github.com/kage1020/Cairn/pull/509))
+- *(core)* say what each role builds under W_NO_THEME_BOUND instead of "lower to air" ([#507](https://github.com/kage1020/Cairn/pull/507))
+- *(core)* keep an unplaceable floor from emptying the offered target list ([#505](https://github.com/kage1020/Cairn/pull/505))
+- *(core)* [**breaking**] refuse a Windows device name as a place id or struct name ([#503](https://github.com/kage1020/Cairn/pull/503))
+- *(core)* report a circuit line under a level as E_MISPLACED_MEMBER ([#501](https://github.com/kage1020/Cairn/pull/501))
+- *(core)* give a skipped sym=true mirror a note that applies, and pin which mirrors are skipped ([#500](https://github.com/kage1020/Cairn/pull/500))
+- *(core)* report W_NO_THEME_BOUND only on a scope that reads a mat_slot= ([#480](https://github.com/kage1020/Cairn/pull/480))
+- *(core,redstone)* point three logic findings at the right line and refuse a repeated truth input ([#479](https://github.com/kage1020/Cairn/pull/479))
+- *(core)* [**breaking**] report mat_slot= on a role that reads no material as ignored, and stop resolving it ([#478](https://github.com/kage1020/Cairn/pull/478))
+- *(core)* find a partial truth table's sample by prefix, not by a step-capped walk ([#477](https://github.com/kage1020/Cairn/pull/477))
+- *(core,redstone)* refuse a second circuit line in a scope as E_DUPLICATE_CIRCUIT ([#476](https://github.com/kage1020/Cairn/pull/476))
+- *(core)* refuse a scope whose palette overflows instead of panicking ([#475](https://github.com/kage1020/Cairn/pull/475))
+- *(core,redstone)* refuse a one-column pad region by width and anchor a rejected circuit line ([#474](https://github.com/kage1020/Cairn/pull/474))
+- *(core)* refuse a connect port nested under a level as level-scoped, not as undeclared ([#473](https://github.com/kage1020/Cairn/pull/473))
+- *(core)* say what a member builds in place of an abstract token no pack lowers ([#469](https://github.com/kage1020/Cairn/pull/469))
+- *(core)* report a repeated place id once, as E_DUPLICATE_PLACE_ID ([#467](https://github.com/kage1020/Cairn/pull/467))
+- *(core)* report a sym=true window whose mirror coincides with it ([#465](https://github.com/kage1020/Cairn/pull/465))
+- *(core)* count a refused place row's def as referenced ([#463](https://github.com/kage1020/Cairn/pull/463))
+- *(core)* close four site-lowering gaps left by the unreadable-value review ([#462](https://github.com/kage1020/Cairn/pull/462))
+- *(core)* skip a "did you mean" candidate the cap rules out by length ([#460](https://github.com/kage1020/Cairn/pull/460))
+- *(core,tree-sitter)* point six parser refusals at the text that is wrong ([#457](https://github.com/kage1020/Cairn/pull/457))
+- *(core)* [**breaking**] name what buries a walkway port and what stretched the router's search box ([#455](https://github.com/kage1020/Cairn/pull/455))
+- *(core,cli)* [**breaking**] refuse Windows-reserved and control characters in an identifier ([#456](https://github.com/kage1020/Cairn/pull/456))
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added
