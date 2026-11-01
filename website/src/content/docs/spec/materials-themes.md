@@ -112,14 +112,15 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@wood.dark`, `@wood.light`, `@wood.warm`, `@wood.cool` | Planks, by tone |
 | `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
 | `@sign.oak`, `@sign.oak_wall` | A standing sign and a wall sign |
-| `@pressure_plate.default` | The default block a `pressure_plate` is built from |
+| `@pressure_plate.default` | The block a `pressure_plate` places when no `mat_slot=` binds one |
 
 The block a tier-1 token resolves to is **tier-2**, which is Evolving: it is the catalog's answer
 for the target, and a release may change it. Adding a token to the catalogs breaks nothing.
 Renaming or retiring one is a break to a Stable surface, so the old token keeps resolving, with
-`W_DEPRECATED`, for the deprecation window. A canonical block token is Minecraft's own name rather
-than Cairn's and has no tier: whether `@oak_planks` exists at a target is the registry pack's answer
-([§7.3](#73-mappings-across-version-and-edition)).
+`W_DEPRECATED`, for the deprecation window. A canonical block token is neither tier-1 nor tier-2.
+It names a block through the mappings of [§7.3](#73-mappings-across-version-and-edition), and the
+names a target accepts follow its registry pack.
+[Compatibility Tiers](/spec/compatibility/#evolving) holds them Evolving.
 
 ## 7.3 Mappings across version and edition
 

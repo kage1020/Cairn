@@ -56,6 +56,8 @@ Evolving surfaces:
   its hash as zeros.
 - The tier-2 material vocabulary: the block each tier-1 token resolves to at a target
   ([§7.2](/spec/materials-themes/#tier-1-tokens)).
+- Canonical block tokens: the names a target accepts, which follow its registry pack, and the
+  block each names there ([§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)).
 - The CLI's human-readable diagnostic format and prose (the *codes* are Stable; the *prose*
   is not).
 - The `--features` set on `cairn-lang-cli` (cargo features) and `[features]` on workspace crates.
@@ -106,7 +108,7 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 | Tier-1 material vocabulary | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP wire protocol (LSP std) | — | — | — | **Stable** | Stable |
 | Redstone DSL (chapter 14) | Evolving | Evolving | Evolving | Evolving | **Stable** |
-| Tier-2 vocabulary, registry pack layout | Evolving | Evolving | Evolving | Evolving | Evolving |
+| Tier-2 material vocabulary, canonical block tokens, registry pack layout | Evolving | Evolving | Evolving | Evolving | Evolving |
 | Rust API (every crate) | Internal | Internal | Internal | Internal | Internal |
 
 Reading the table: **the column where a row first turns Stable is the soft commitment.** Until that

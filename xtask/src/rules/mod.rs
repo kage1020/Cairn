@@ -12,7 +12,7 @@ mod session_refs;
 mod site_parity;
 mod spec_citations;
 mod subject_to_change;
-mod tier_one_tokens;
+mod tier_1_tokens;
 mod unsafe_code;
 mod versions;
 
@@ -39,7 +39,7 @@ pub const RULES: &[Rule] = &[
     readme::SUBCOMMANDS,
     readme::SYNTH_STAGES,
     diagnostic_catalog::RULE,
-    tier_one_tokens::RULE,
+    tier_1_tokens::RULE,
     grammar_fields::RULE,
     editor_keywords::RULE,
     comment_length::RULE,

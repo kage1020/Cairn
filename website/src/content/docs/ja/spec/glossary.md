@@ -29,7 +29,7 @@ title: "用語集"
 - **正規トークン (Canonical token)**: スロットやテーマのセレクタに割り当てる値です。生のブロック ID ではなく、**意味** を表すトークンです。`(edition, version)` ごとの ID や状態名は、バックエンドが解決します。[マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン) を参照してください。
 - **正規ブロックトークン (Canonical block token)**: 特定のブロックの意味を表すトークンです (`@oak_planks`、`@water_cauldron`、`@oak_log[axis=x]`)。意味を壊すダウングレード (`@water_cauldron` を `cauldron` にするなど) を黙って行うことは禁止です。
 - **抽象マテリアルトークン (Abstract material token)**: 見た目の好みを表すトークンです (`@floor.wood.broadleaf`、`@roof.dark_wood`)。テーマのポリシーでダウングレードしてかまいません (MAY) (オークをシラカバにするなど)。
-- **tier-1 のトークン (Tier-1 token)**: 組み込みの `materials` カタログが宣言する抽象マテリアルトークンで、Stable です。それが解決するブロックは tier-2 で、Evolving です。[マテリアルとテーマ §7.2](/ja/spec/materials-themes/#tier-1-のトークン) を参照してください。
+- **tier-1 のトークン (Tier-1 token)**: 組み込みの `materials` カタログが宣言する抽象マテリアルトークンで、仕様がドラフトを外れると Stable になります。それが解決するブロックは tier-2 で、Evolving です。[マテリアルとテーマ §7.2](/ja/spec/materials-themes/#tier-1-のトークン) を参照してください。
 - **`theme`**: スロットやセレクタの値を正規トークンに割り当てる、CSS のような仕組みです。**構造** (どこに壁があるか) と **スタイル** (どのブロックを使うか) を分けます。
 - **`def`**: スロットを持つコンポーネントの定義 (再利用できる struct) です。再帰は禁止で、パラメータ化は許されます。ただし、その仕組みが決まるまで、ヘッダに書けるのは `size=` と `class=` だけです。組み合わせたものの最小バージョンは、構成要素の最小バージョンのうち最も新しいものになります。[コンポーネント・編集・複数建築 §9.1](/ja/spec/components-editing-sites/#91-コンポーネントを定義する-def) を参照してください。
 - **`site`**: 複数の建物をまとめるコンテナです。`def` から作った構造物を、絶対座標ではなく位置関係 (`east_of`、`gap=`、`connect`) で配置します。[コンポーネント・編集・複数建築 §9.3](/ja/spec/components-editing-sites/#93-site-による複数建築) を参照してください。

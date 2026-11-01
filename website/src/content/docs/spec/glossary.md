@@ -68,8 +68,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   forbidden.
 - **Abstract material token.** An aesthetic choice: `@floor.wood.broadleaf`, `@roof.dark_wood`.
   Theme policy MAY downgrade these (e.g. oak↔birch).
-- **Tier-1 token.** An abstract material token the built-in `materials` catalogs declare, held
-  Stable. The block it resolves to is tier-2, and Evolving. See
+- **Tier-1 token.** An abstract material token the built-in `materials` catalogs declare, Stable
+  once the specification leaves draft. The block it resolves to is tier-2, and Evolving. See
   [materials-themes §7.2](/spec/materials-themes/#tier-1-tokens).
 - **`theme`.** A CSS-like binding of slot/selector values to canonical tokens. Separates
   *structure* (where the walls are) from *style* (which blocks).
