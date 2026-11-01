@@ -849,8 +849,9 @@ the key itself decides whether the member is built at all, the member is left ou
 An **unread key**: a `key=` the keyword accepts and nothing reads where it is written, carried into
 the IR and never consulted. It comes in two kinds. An *unreached* key is one this specification
 defines that no pass reads yet. `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a
-header's `class=`, and a `door`'s `mat_slot=`, which waits on the door block itself, are those keys
-today. Every `key=value` on the right of a `theme` selector row whose keyword the compiler knows is
+header's `class=`, a `door`'s `mat_slot=`, which waits on the door block itself, and a `stair`'s
+`waterlogged=` are those keys today. Every `key=value` on the right of a `theme` selector row whose
+keyword the compiler knows is
 one too, reported on the binding whatever its key or value, since no pass lowers a selector's
 bindings yet ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every
 member accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,

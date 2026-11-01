@@ -491,7 +491,8 @@ fn a_stair_reads_the_height_it_is_written_at() {
 
 #[test]
 fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // The worked example in `spec/entities` "Anchor conventions" writes these on known keywords.
+    // The worked example in `spec/entities` "Anchor conventions" writes these on known keywords,
+    // and `spec/blockstate` "`waterlogged`" the last one.
     for (line, key) in [
         (
             "  window side=front y=2 offset=4 size=3x3 shape=arch\n",
@@ -503,6 +504,10 @@ fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() 
         ),
         ("  roof kind=gable footprint=struct\n", "footprint"),
         ("  roof kind=gable bounds=expand\n", "bounds"),
+        (
+            "  stair kind=stairs side=front waterlogged=false\n",
+            "waterlogged",
+        ),
     ] {
         let src = format!("struct s size=9x9\n{line}");
         let d = exactly_one(diagnose(&src));

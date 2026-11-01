@@ -72,9 +72,10 @@ fields of their own. In place of `type`, a member carries the `role` its keyword
 
 **Subject to change.** Nothing in this section is built yet
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)). No pass sets or reads
-`waterlogged`: on a `stair`, `waterlogged=false` is `E_UNKNOWN_ARGUMENT`. In the example below,
-`fill`, `trapdoor` and `water` are `E_UNKNOWN_KEYWORD`, and a coordinate triple such as
-`from=1,1,1` is `E_PARSE`.
+`waterlogged`: on a `stair`, `waterlogged=false` is an unreached key, reported as
+`W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), and the stair is built as if
+it were not written. In the example below, `fill`, `trapdoor` and `water` are `E_UNKNOWN_KEYWORD`,
+and a coordinate triple such as `from=1,1,1` is `E_PARSE`.
 
 The default is paint-derived: when `fill fluid=water` overlaps a waterloggable block, the compiler
 sets `waterlogged`.
