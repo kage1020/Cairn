@@ -39,8 +39,9 @@ considered later as an option.
 Decided: per release, as
 [Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated) records. The tiers
 already bound what a release may break, and a Stable surface's `W_DEPRECATED` window already gives a
-file a release to move, so an opt-in would add a second bound and keep every past revision's rules
-alive in the compiler. "Edition" already names Java or Bedrock, and `@cairn` stays provenance.
+file at least one release to move, so an opt-in would add a second bound and keep every past
+revision's rules alive in the compiler. "Edition" already names Java or Bedrock, and `@cairn` stays
+provenance.
 
 ## 15.2 Untouched topics
 

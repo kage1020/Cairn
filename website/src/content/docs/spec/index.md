@@ -66,8 +66,9 @@ future compiler can parse the file and warn correctly. No pass branches on it, b
 still checked to be a `CalVer`. See [Syntax §5.3](/spec/syntax/#53-headers).
 
 The draft label comes off with the `2027.1.0` release. From then on the specification carries the
-version of the release that ships it, `2027.1` first, so a release's specification and compiler
-share one version. A file written against it declares `@cairn 2027.1`, and a file written against a
-later release declares that release. A value before `2027.1`, such as `@cairn 2026.06`, names a
-release that shipped this draft. It stays valid provenance, and a later compiler reads the file as
-it reads any other.
+version of the monthly minor that ships it, `2027.1` first, so a minor's specification and compiler
+share one version, and a patch release such as `2027.1.1` ships its minor's specification. A file
+written against `2027.1` MAY declare `@cairn 2027.1`, and a file written against a later release
+MAY declare that release. A value before `2027.1`, such as `@cairn 2026.06`, names the `2026.6`
+draft or a release that shipped it. It stays valid provenance, and a later compiler reads the file
+as it reads any other.
