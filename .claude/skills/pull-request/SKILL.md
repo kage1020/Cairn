@@ -1,6 +1,6 @@
 ---
 name: pull-request
-description: Title a Cairn pull request and write its changelog fragment, when opening or retitling a PR against canary.
+description: Title a Cairn pull request and write its changelog fragment, when opening or retitling a PR against canary, or a hotfix against main.
 ---
 
 # Open a pull request
@@ -8,14 +8,15 @@ description: Title a Cairn pull request and write its changelog fragment, when o
 CONTRIBUTING.md "Branches and pull requests" and `changelog.d/README.md` are the full rules; this
 is the sequence.
 
-1. Branch from `canary` as `<type>/<short-kebab>`, and target `canary`. Never open a PR against
-   `main`.
-2. Title the PR with a Conventional Commits line. The squash merge makes it the commit on
-   `canary`, and release-plz reads it.
+1. Branch from `canary` as `<type>/<short-kebab>`, and target `canary`. Only a hotfix a
+   maintainer asked for branches from `main` as `hotfix/<short-kebab>` and targets `main`.
+2. Title the PR with a Conventional Commits line. The squash merge makes it the commit on the
+   branch the PR targets, and release-plz reads it.
    - Scope is the crate without its prefix or the spec area: `core`, `nbt`, `formats`,
      `redstone`, `cli`, `lsp`, `wasm`, `tree-sitter`, `xtask`, `spec`, `deps`.
-   - `feat`, `fix`, `perf`, `refactor` and `build` make a patch release due, which goes out when a
-     maintainer runs the release workflow; `docs`, `test`, `ci`, `chore` and `style` do not.
+   - `feat`, `fix`, `perf`, `refactor` and `build` make a patch release due, which goes out at the
+     next promote to `main`, or at once for a hotfix; `docs`, `test`, `ci`, `chore` and `style`
+     do not.
    - A breaking change puts `!` before the colon and adds a `breaking` fragment. The two always
      come together.
 3. Add one fragment per kind as `changelog.d/<slug>.<kind>.md`. The kind follows the type:
@@ -33,7 +34,8 @@ is the sequence.
    `- *(scope)* ...` lines that say what changed for a user and why, without issue or PR numbers.
    Never edit `CHANGELOG.md`.
 4. Fill in the sections of `.github/pull_request_template.md` for the body.
-5. Check the fragments and the title together before pushing:
+5. Check the fragments and the title together before pushing, with `main` for `canary` in a
+   hotfix:
 
    ```sh
    git fetch origin canary

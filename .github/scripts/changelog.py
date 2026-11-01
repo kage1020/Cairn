@@ -42,6 +42,11 @@ SCOPE = re.compile(r"^\*\([^)]*\)\*")
 
 RELEASE_BOT = "github-actions[bot]"
 RELEASE_BRANCH_PREFIX = "release-plz-"
+# The PRs the release workflow opens between the two long-lived branches, by (base, head).
+BRANCH_MERGES = {
+    ("main", "canary"): "promote-to-main PR: everything in it was checked on its way into canary",
+    ("canary", "main"): "main-to-canary PR: everything in it was checked on its way into main",
+}
 
 
 class Refused(Exception):
@@ -143,8 +148,9 @@ def release_problems() -> list[str]:
 
 
 def pr(args: argparse.Namespace) -> int:
-    if args.base == "main" and args.head_ref == "canary" and args.author == RELEASE_BOT:
-        print("promote-to-main PR: nothing here was not already checked on canary")
+    branch_merge = BRANCH_MERGES.get((args.base, args.head_ref))
+    if branch_merge and args.author == RELEASE_BOT:
+        print(branch_merge)
         return 0
 
     base = f"origin/{args.base}"
