@@ -1,90 +1,30 @@
-//! `truth` pass — flags an `assert truth(...)` table that verifies less
-//! than it looks like it does.
-//!
-//! The parser already refuses a row it cannot read: a digit that is not
-//! `0`/`1`, and a pattern whose width is not the number of signals left of
-//! the arrow. Both are properties of one row against the header, which is
-//! why they live where the header is in hand. What no row can see is the
-//! table around it, and three shapes of table verify nothing while reading
-//! — in a diff, in a review — exactly like one that passes:
-//!
-//! * no rows at all;
-//! * a pattern assigned twice, the two rows disagreeing;
-//! * combinations left unassigned, which are the ones a bug hides in.
-//!
-//! Severity follows what is provable, the split [`super::diagnostic`]
-//! records per code. A table with no rows can never assert anything — no
-//! context around it and no pass written later changes that — so it is an
-//! error, the same argument `E_INVALID_REQUIRES` makes for a `@requires`
-//! the compiler cannot read. Two rows that assign one input combination
-//! different outputs describe a circuit that cannot exist, so that is an
-//! error too. A table merely short of rows still asserts everything its
-//! rows say, and a four-input table is sixteen rows an author part way
-//! through should not be blocked on, so that is a warning — as is a row
-//! that repeats one already written and agrees with it, where the repair
-//! is to delete a line and nothing else moves.
-//!
-//! Nothing evaluates a truth table yet — the tick simulator is unbuilt
-//! — and none of this waits on it. Which of
-//! two disagreeing rows an evaluator would read is the one thing these
-//! messages will not say: there is no evaluator to describe, and the
-//! author's next action is to decide which row is wrong either way.
-//!
-//! Scope of the walk: the `asserts` of every `def`, `struct`, and `site`,
-//! and those of every member body under them. A shape fault belongs to the
-//! statement wherever it is written, and redstone synthesis already reads a
-//! nested `assert` — its `collect_member` extends the scope's list with
-//! `children.asserts` — so a table under a `level` is checked against its
-//! signal names today and would be the one place a shape went unreported.
+//! The `truth` pass: an `assert truth(...)` table that verifies less than it looks like it does —
+//! a signal listed twice, no rows, two rows assigning one combination, or combinations left
+//! unassigned.
 
-use crate::ast::TruthRow;
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap};
+
+use crate::ast::{DottedRef, TruthRow};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{AssertIr, IntentModule, Member, MemberBody};
 use crate::prose::and_list;
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
-/// How many unassigned combinations a finding names, in the sentence and
-/// in the payload alike.
-///
-/// A sample rather than the set. Four shows the shape of what is missing
-/// for the table sizes anyone writes by hand, and the cap is what keeps a
-/// twenty-input table from building a million strings to describe a
-/// one-row mistake.
+/// How many unassigned combinations a finding names, in the sentence and the payload.
 const MISSING_SAMPLE: usize = 4;
 
-/// How many steps the walk for a missing combination may take before it
-/// gives the finding up.
-///
-/// Generous on purpose: it is a backstop against a table no one writes,
-/// not a budget any real table comes near.
-///
-/// A step leaves a row behind only when [`fill_free_tail`] can jump to
-/// the row's last combination, and it fills only the positions *below*
-/// the row's lowest fixed one. Don't-cares above that are re-entered one
-/// combination at a time, so the cost is nearer
-/// `rows × 2^(don't-cares above the lowest fixed position) ×
-/// MISSING_SAMPLE`. `{ --00; --01; --10 }` is three rows and sixteen
-/// steps for its four missing combinations, not three.
-const MISSING_WALK_STEPS: usize = 10_000;
+/// How many of a repeated signal's positions a finding names before it counts the rest.
+const POSITION_SAMPLE: usize = 4;
 
 /// Past this many inputs the number of combinations is written `2^n`.
-///
-/// `2^32` is ten digits and already far past any table written by hand; a
-/// longer decimal is not a number a reader compares a row count against.
-/// Beyond 127 inputs there is no integer to render at all, which is the
-/// same branch.
 const DECIMAL_TOTAL_MAX_INPUTS: u32 = 32;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    for def in &ir.defs {
-        walk(&def.members, &def.asserts, sink);
-    }
-    for item in &ir.structs {
-        walk(&item.members, &item.asserts, sink);
-    }
-    for site in &ir.sites {
-        walk(&site.placements, &site.asserts, sink);
+    for body in ir.bodies() {
+        walk(body.members, body.asserts, sink);
     }
 }
 
@@ -109,60 +49,29 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     else {
         return;
     };
+    let repeated = repeated_inputs(inputs, span);
+    if !repeated.is_empty() {
+        for finding in repeated {
+            sink.push(finding);
+        }
+        return;
+    }
     let arity = u32::try_from(inputs.len()).expect("an input list is bounded by the source length");
+    // The parser refuses any other width; the zips and the sample search rely on it.
+    debug_assert!(
+        rows.iter().all(|row| row.inputs.len() == inputs.len()),
+        "a truth-table row is as wide as its input list",
+    );
     if rows.is_empty() {
-        // And nothing else. An empty table is trivially missing every
-        // combination, and a coverage finding beside this one would bill
-        // one repair twice.
         sink.push(empty_table(span, arity));
         return;
     }
 
-    // Rows do not overlap. A `-` is shorthand for the rows it stands
-    // for, so two rows that share a combination write that combination
-    // twice — the same thing writing one pattern twice has always been,
-    // now read through the don't-cares. Nothing orders the rows, so
-    // there is no reading under which the second one wins.
-    //
-    // A row is compared with every earlier row for a contradiction,
-    // dropped or not. A row with a `-` can overlap several earlier rows
-    // at once, and those rows can disagree with each other: `0- -> 1`
-    // after `00 -> 1; 01 -> 0` agrees with the first and contradicts the
-    // second. Asking only one of them would make whether the table is
-    // refused depend on the order its rows are written in, and the error
-    // is defined by the combination, not by the order. A dropped row is
-    // still a row the author wrote, so `10 -> 0` after `0- -> 1; -0 -> 1`
-    // contradicts the `-0` it never meets in the accepted set.
-    //
-    // A conflict is noted at the first earlier row that contradicts this
-    // one. Any other finding is noted at the first earlier row this one
-    // overlaps, dropped or not. No row before that one shares a
-    // combination with this one, so it is the first row assigning the
-    // combination the finding names, and every finding naming that
-    // combination sends the author to the same row.
-    //
-    // A row that overlaps an accepted one is not accepted, so what
-    // survives is a set of patterns no two of which share a combination.
-    // Coverage is then the sum of their sizes and needs no union.
+    // Each row meets every earlier row, dropped or not, so the verdict ignores row order.
+    // Accepted rows are pairwise disjoint, so coverage is the sum of their sizes.
     let mut accepted: Vec<&TruthRow> = Vec::with_capacity(rows.len());
-    // Whether what was dropped is still accounted for. A row inside the
-    // row it answers to — `01` under `0-`, and the exact repeat that has
-    // always been this — assigns nothing the accepted set does not, so
-    // dropping it leaves the count right. A row that merely crosses one
-    // does assign something new, and counting without it would name a
-    // combination as missing that the source assigns on the line above.
-    // A wrong coverage finding is worse than none, and the author's next
-    // edit is the overlap either way — the argument the empty table
-    // already makes against billing one repair twice.
-    //
-    // A row can be accepted and still carry a finding, when every row it
-    // overlaps was dropped. That leaves the count sound: a dropped row D
-    // overlapped an accepted row A, and were D inside A, any row
-    // overlapping D would overlap A too and not be accepted. So D crossed
-    // A, which already cleared this flag.
+    // Cleared once a dropped row crosses an accepted one, since the sum then misses what it adds.
     let mut coverage_is_countable = true;
-    // Whether each row carries an overlap finding of its own, which
-    // changes the advice a later row noted against it can be given.
     let mut reported = vec![false; rows.len()];
     for (index, row) in rows.iter().enumerate() {
         let mut first_overlap = None;
@@ -190,19 +99,7 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
         }
     }
 
-    // A table every row of which declines to assert an output is the
-    // empty table written at length, so it earns the empty table's
-    // finding — and not the coverage one beside it, which would bill the
-    // same repair twice.
-    //
-    // Asked of `rows` rather than of `accepted`, because acceptance is
-    // first-come: a row is dropped for overlapping an *earlier* one, so
-    // a broad `-` row written first survives and the concrete row after
-    // it is the one that goes. Reading the survivors calls the table
-    // empty while the author is looking at a `0` in it, and `-` first
-    // with the exceptions after is the ordinary way to write one. What
-    // the author wrote is what this sentence is about; that the two rows
-    // overlap is a separate finding, already raised above.
+    // Asked of `rows`: a broad first row with a `-` output can leave only `-` outputs accepted.
     if rows.iter().all(|row| row.output.is_none()) {
         sink.push(asserts_nothing(span, arity));
     } else if coverage_is_countable
@@ -212,31 +109,65 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     }
 }
 
-/// Whether two patterns assign a combination in common.
-///
-/// Position by position: they share one unless both are concrete and
-/// differ. A `-` agrees with anything, which is what makes `0-` and `-1`
-/// overlap at `01` while `00` and `01` overlap nowhere.
+fn repeated_inputs(inputs: &[DottedRef], span: &Span) -> Vec<Diagnostic> {
+    let mut positions: Vec<(&DottedRef, Vec<usize>)> = Vec::new();
+    let mut slots: HashMap<&DottedRef, usize> = HashMap::with_capacity(inputs.len());
+    for (index, input) in inputs.iter().enumerate() {
+        match slots.entry(input) {
+            Entry::Occupied(slot) => positions[*slot.get()].1.push(index + 1),
+            Entry::Vacant(slot) => {
+                slot.insert(positions.len());
+                positions.push((input, vec![index + 1]));
+            }
+        }
+    }
+    positions
+        .into_iter()
+        .filter(|(_, at)| at.len() > 1)
+        .map(|(name, at)| {
+            let shown: Vec<String> = at
+                .iter()
+                .take(POSITION_SAMPLE)
+                .map(ToString::to_string)
+                .collect();
+            let listed = match at.len().checked_sub(POSITION_SAMPLE) {
+                Some(more) if more > 0 => format!("{}, and {more} more", shown.join(", ")),
+                _ => and_list(&shown).expect("a repeated input holds two positions or more"),
+            };
+            Diagnostic {
+                code: DiagnosticCode::TruthTableDuplicateInput,
+                span: span.clone(),
+                primary: format!(
+                    "this `assert truth` lists `{name}` as inputs {listed}, and one signal is \
+                     one input, so the table has {columns} columns for it and its rows \
+                     describe combinations the circuit does not have",
+                    columns = at.len(),
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message: format!(
+                        "Fix: list `{name}` once and drop its other columns from every row, or \
+                         name the signal you meant in its place"
+                    ),
+                }],
+                data: None,
+            }
+        })
+        .collect()
+}
+
+/// Whether two patterns share a combination, as `0-` and `-1` share `01`.
 fn overlap(a: &str, b: &str) -> bool {
     a.bytes()
         .zip(b.bytes())
         .all(|(x, y)| x == b'-' || y == b'-' || x == y)
 }
 
-/// Whether two rows' outputs contradict each other, read only once
-/// [`overlap`] says the rows share a combination.
-///
-/// Only two concrete outputs can: a `-` output asserts nothing for the
-/// other row to contradict.
 fn contradicts(a: &TruthRow, b: &TruthRow) -> bool {
     matches!((a.output, b.output), (Some(x), Some(y)) if x != y)
 }
 
 /// Whether every combination `inner` assigns, `outer` assigns too.
-///
-/// Read only after [`overlap`] says yes, to pick which sentence the
-/// finding gets: a row inside an earlier one is deleted, a row merely
-/// crossing it is narrowed.
 fn subsumes(outer: &str, inner: &str) -> bool {
     outer
         .bytes()
@@ -244,11 +175,7 @@ fn subsumes(outer: &str, inner: &str) -> bool {
         .all(|(o, i)| o == b'-' || o == i)
 }
 
-/// One combination both patterns assign, for a message to name.
-///
-/// Where both are don't-cares any value would do and `0` is chosen, so
-/// the witness is the lowest combination the two share. The caller has
-/// checked they overlap, so no position disagrees.
+/// The lowest combination both patterns assign; they must overlap.
 fn shared_combination(a: &str, b: &str) -> String {
     a.bytes()
         .zip(b.bytes())
@@ -281,25 +208,11 @@ fn empty_table(span: &Span, arity: u32) -> Diagnostic {
     }
 }
 
-/// What to do about a row that constrains a combination an overlapping row
-/// declines to, or the other way round.
-///
-/// Not a conflict: no circuit is being asked for two outputs, so the code
-/// stays in the duplicate-row family. But the repair is not the
-/// duplicate-row family's either — "delete either row" is what a pair
-/// saying the same thing earns, and these two do not say the same thing,
-/// so which one goes changes the table.
 const UNCONSTRAINED_FIX: &str = "Fix: delete whichever of the two you did not mean — a `-` output says the combination is \
      deliberately unconstrained, and the other row constrains it, so the table reads differently \
      depending on which one stays";
 
 /// A table with rows, none of which asserts an output.
-///
-/// The same code as [`empty_table`], because it is the same table: a row
-/// whose output is `-` marks its combinations as deliberately
-/// unconstrained, and a table of nothing but those constrains nothing.
-/// The sentence differs because the repair does — there are rows to
-/// change here, not rows to add.
 fn asserts_nothing(span: &Span, arity: u32) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::TruthTableEmpty,
@@ -320,52 +233,14 @@ fn asserts_nothing(span: &Span, arity: u32) -> Diagnostic {
     }
 }
 
-/// A row assigning a combination an earlier row already assigned.
+/// The finding for `row`, which assigns a combination the earlier `noted` row already assigns.
 ///
-/// One code when the two outputs contradict each other and another when
-/// they do not: the repairs are different work, and severity is a property
-/// of the code. Only two concrete outputs can contradict — a `-` asserts
-/// nothing to be contradicted, so a `-` meeting a `0` is the second code,
-/// a row written twice rather than a circuit asked for two things.
-///
-/// The agreeing case carries three sentences rather than one, because the
-/// repair is three different edits. A row repeating an earlier pattern
-/// exactly is a line to delete. A row inside an earlier one — `01` under
-/// `0-` — is also a line to delete, but the reader has to be told which
-/// row already covers it, since the two do not read alike. A row merely
-/// crossing an earlier one — `-1` against `0-` — asserts something the
-/// earlier row does not, so deleting it would lose coverage, and the edit
-/// is to narrow one of the two.
-///
-/// A `-` output beside a concrete one is a fourth sentence and neither
-/// code's usual repair: the rows do not contradict, since a `-` asserts
-/// nothing to contradict, but they do not agree either, and deleting the
-/// wrong one changes what the table says. Splitting it off is also what
-/// lets the three sentences below name one output for both rows, which
-/// they have to, since each is about what the table already says.
-///
-/// For a conflict, `noted` is the first earlier row contradicting this
-/// one, so the note names the output it assigns: no row before it assigns
-/// the shared combination that output, since such a row would contradict
-/// this one too and would have been chosen instead. The row the table
-/// opened the combination with may well agree with this one, which is
-/// why the note cannot just say "first row assigning" as the other
-/// findings' notes do.
-///
-/// Every other sentence's repair assumes `noted` stays as written. When
-/// `noted` carries an overlap finding of its own (`noted_is_reported`),
-/// it is being asked to change too, and "delete this row, the earlier
-/// one stands for it" can cancel against that: `10 -> 1` under the `-0`
-/// of `0- -> 1; -0 -> 1` is inside `-0`, while `-0` is told to narrow
-/// away from `0-`, and following both leaves `10` unassigned. So the
-/// repair there is to settle the earlier row first, and this row's fate
-/// follows from how that one changes.
+/// `noted` is the first earlier row that contradicts `row`, else the first it overlaps.
 fn overlapping_row(row: &TruthRow, noted: &TruthRow, noted_is_reported: bool) -> Diagnostic {
     let pattern = &row.inputs;
     let earlier = &noted.inputs;
     let shared = shared_combination(earlier, pattern);
-    // Everything below the match reads one output for both rows, which is
-    // only sound once the cases where they say different things are gone.
+    // Past this match the two rows agree on the output.
     let disagreement = match (row.output, noted.output) {
         (Some(later), Some(earlier_output)) if later != earlier_output => Some((
             DiagnosticCode::TruthTableConflict,
@@ -448,8 +323,8 @@ fn overlapping_row(row: &TruthRow, noted: &TruthRow, noted_is_reported: bool) ->
     )
 }
 
-/// `fix`, unless the noted row is itself being asked to change — see
-/// [`overlapping_row`] for why the repair then waits on that row.
+/// `fix`, unless the noted row is told to change too, when following both repairs could leave a
+/// combination unassigned.
 fn settled_first(fix: String, earlier: &str, noted_is_reported: bool) -> String {
     if !noted_is_reported {
         return fix;
@@ -465,8 +340,6 @@ fn first_assigning(shared: &str) -> String {
     format!("first row assigning `{shared}` here")
 }
 
-/// The shape every overlap finding shares: reported on the later row,
-/// with the earlier one noted and the fix last.
 fn finding(
     code: DiagnosticCode,
     row: &TruthRow,
@@ -493,20 +366,7 @@ fn finding(
     }
 }
 
-/// The combinations no accepted row assigns, or `None` when there is
-/// nothing to report.
-///
-/// `None` covers three cases, and only the first is "the table is
-/// complete". The other two are counts the compiler cannot state: a
-/// covered total past `u64`, which the payload carries, and a walk that
-/// ran out of steps before it found a missing combination. Both need an
-/// input list far past anything written by hand, and a finding whose
-/// numbers are guesses is worse than one that is missing — so the finding
-/// is withheld rather than approximated.
-///
-/// `accepted` is pairwise non-overlapping, which is what `check_table`
-/// drops a row to keep, so the covered total is the sum of the rows'
-/// sizes and no union is computed.
+/// The combinations no accepted row assigns, or `None` when complete or past a `u64` count.
 fn unassigned_combinations(span: &Span, arity: u32, accepted: &[&TruthRow]) -> Option<Diagnostic> {
     let total = combination_count(arity);
     let covered = assigned_count(accepted)?;
@@ -514,17 +374,16 @@ fn unassigned_combinations(span: &Span, arity: u32, accepted: &[&TruthRow]) -> O
         return None;
     }
     let covered_count = u64::try_from(covered).ok()?;
-    let sample = missing_sample(arity, accepted)?;
+    let sample = missing_sample(arity, accepted);
+    debug_assert!(
+        !sample.is_empty(),
+        "an incomplete table has a missing combination for the descent to find",
+    );
     if sample.is_empty() {
         return None;
     }
     let quoted: Vec<String> = sample.iter().map(|p| format!("`{p}`")).collect();
     let missing_total = total.map(|total| total - covered);
-    // The sample stops at the cap, so the sentence has to say it is a
-    // sample — a list of four that reads as the whole set is the opposite
-    // of what a coverage finding is for. The count is arithmetic and needs
-    // no walk; past 127 inputs there is no integer for it, and the shorter
-    // sentence is the honest one.
     let listed = u128::try_from(sample.len()).expect("the sample is capped at a small constant");
     let rows_to_write = match missing_total {
         Some(total) if total == listed => {
@@ -554,114 +413,150 @@ fn unassigned_combinations(span: &Span, arity: u32, accepted: &[&TruthRow]) -> O
     })
 }
 
-/// How many combinations the accepted rows assign between them, or `None`
-/// past `u128`.
-///
-/// A plain sum, because no two accepted rows share a combination. A row
-/// with `d` don't-cares stands for `2^d` of them.
+/// A plain sum, since no two accepted rows share a combination; `None` past `u128`.
 fn assigned_count(accepted: &[&TruthRow]) -> Option<u128> {
     accepted.iter().try_fold(0u128, |sum, row| {
         sum.checked_add(pattern_size(&row.inputs)?)
     })
 }
 
-/// `2^d` for a pattern with `d` don't-cares, or `None` when that is past
-/// `u128` — 128 or more of them, which needs an input list to match.
+/// `2^d` for a pattern with `d` don't-cares, or `None` past `u128`.
 fn pattern_size(pattern: &str) -> Option<u128> {
     let dashes = u32::try_from(pattern.bytes().filter(|b| *b == b'-').count())
         .expect("a pattern is bounded by the source length");
     1u128.checked_shl(dashes)
 }
 
-/// The lowest few combinations no accepted row assigns, in ascending
-/// order, or `None` when the walk ran out of steps.
+/// Up to [`MISSING_SAMPLE`] of the lowest combinations no accepted row assigns, ascending.
 ///
-/// Counting up and skipping what is covered, rather than building the
-/// space and subtracting. The skip is what keeps that affordable: landing
-/// inside a row, the walk does not step through the row one combination
-/// at a time but jumps to the last one it assigns without leaving it, so
-/// a row standing for a million combinations costs one step rather than a
-/// million.
-///
-/// [`MISSING_WALK_STEPS`] is the backstop. A step either yields a missing
-/// combination or advances past one the rows cover, and only the second
-/// of those leaves a row behind for good — see the constant for what
-/// that costs a row whose don't-cares sit above its fixed positions. A
-/// table that runs the budget out is one whose sample would not help
-/// anyone read it.
-fn missing_sample(arity: u32, accepted: &[&TruthRow]) -> Option<Vec<String>> {
-    let width = usize::try_from(arity).expect("an input list is bounded by the source length");
-    let mut combination = vec![b'0'; width];
+/// Iterative, not recursive: a frame per input could overflow the stack on a wide table.
+fn missing_sample(arity: u32, accepted: &[&TruthRow]) -> Vec<String> {
+    let width = usize::try_from(arity)
+        .expect("`arity` was converted from a `usize` length, so it fits one");
+    let mut descent = Descent::new(accepted);
     let mut sample = Vec::new();
-    let mut steps = 0usize;
-    while sample.len() < MISSING_SAMPLE {
-        steps += 1;
-        if steps > MISSING_WALK_STEPS {
-            return None;
-        }
-        match accepted
-            .iter()
-            .find(|row| assigns(&row.inputs, &combination))
-        {
-            None => sample.push(
-                String::from_utf8(combination.clone()).expect("the walk writes `0` and `1` only"),
-            ),
-            Some(row) => fill_free_tail(&row.inputs, &mut combination),
-        }
-        if !increment(&mut combination) {
-            break;
-        }
-    }
-    Some(sample)
-}
-
-/// Whether `pattern` assigns this combination: every position it fixes
-/// agrees, and the rest are its don't-cares.
-fn assigns(pattern: &str, combination: &[u8]) -> bool {
-    pattern
-        .bytes()
-        .zip(combination)
-        .all(|(p, c)| p == b'-' || p == *c)
-}
-
-/// Raise a combination the row assigns to the last one it assigns before
-/// the row's lowest fixed position has to change.
-///
-/// Every position below that one is a don't-care, so setting them all to
-/// `1` skips only combinations this row already assigns, and the
-/// increment that follows carries into the fixed position and leaves the
-/// row. A row that fixes nothing assigns everything, so the walk is never
-/// called on one — it would mean a complete table, which returns earlier.
-fn fill_free_tail(pattern: &str, combination: &mut [u8]) {
-    let Some(lowest_fixed) = pattern.bytes().rposition(|b| b != b'-') else {
-        return;
-    };
-    for (slot, _) in combination
-        .iter_mut()
-        .zip(pattern.bytes())
-        .skip(lowest_fixed + 1)
+    // Untried branch points: the prefix length to retract to, and the digit to append.
+    let mut pending: Vec<(usize, u8)> = Vec::new();
+    branch(&mut pending, 0);
+    while sample.len() < MISSING_SAMPLE
+        && let Some((len, digit)) = pending.pop()
     {
-        *slot = b'1';
-    }
-}
-
-/// Step to the next combination, or report there is none left.
-fn increment(combination: &mut [u8]) -> bool {
-    for slot in combination.iter_mut().rev() {
-        if *slot == b'0' {
-            *slot = b'1';
-            return true;
+        descent.retract_to(len);
+        descent.extend(digit);
+        if descent.fills(width) {
+            continue;
         }
-        *slot = b'0';
+        if len + 1 == width {
+            sample.push(descent.combination());
+        } else {
+            branch(&mut pending, len + 1);
+        }
     }
-    false
+    sample
 }
 
-/// `2^arity`, or `None` when no integer the compiler carries holds it.
-///
-/// The grammar puts no ceiling on the input list — a twenty-input table is
-/// already in the tree-sitter corpus — so this is a real branch and not a
-/// defensive one.
+/// Stacks both digits for position `len`, `0` on top so the sample comes out ascending.
+fn branch(pending: &mut Vec<(usize, u8)>, len: usize) {
+    pending.extend(b"01".iter().rev().map(|&digit| (len, digit)));
+}
+
+/// A prefix, and what each accepted row says under it.
+struct Descent<'a> {
+    rows: &'a [&'a TruthRow],
+    /// The digits chosen so far, as ASCII `0` and `1`.
+    prefix: Vec<u8>,
+    /// Per row, the first position where it disagrees with the prefix.
+    parted_at: Vec<Option<usize>>,
+    /// Per row, its don't-cares past the prefix.
+    free: Vec<usize>,
+}
+
+impl<'a> Descent<'a> {
+    fn new(rows: &'a [&'a TruthRow]) -> Self {
+        Self {
+            rows,
+            prefix: Vec::new(),
+            parted_at: vec![None; rows.len()],
+            free: rows
+                .iter()
+                .map(|row| row.inputs.bytes().filter(|b| *b == b'-').count())
+                .collect(),
+        }
+    }
+
+    fn extend(&mut self, digit: u8) {
+        let at = self.prefix.len();
+        self.prefix.push(digit);
+        for ((row, parted), free) in self
+            .rows
+            .iter()
+            .zip(&mut self.parted_at)
+            .zip(&mut self.free)
+        {
+            match row.inputs.as_bytes()[at] {
+                b'-' => *free -= 1,
+                fixed => {
+                    if parted.is_none() && fixed != digit {
+                        *parted = Some(at);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Undoes [`Descent::extend`] exactly, back to a `len`-digit prefix.
+    fn retract_to(&mut self, len: usize) {
+        while self.prefix.len() > len {
+            self.prefix.pop();
+            let at = self.prefix.len();
+            for ((row, parted), free) in self
+                .rows
+                .iter()
+                .zip(&mut self.parted_at)
+                .zip(&mut self.free)
+            {
+                if row.inputs.as_bytes()[at] == b'-' {
+                    *free += 1;
+                }
+                if *parted == Some(at) {
+                    *parted = None;
+                }
+            }
+        }
+    }
+
+    /// Whether the rows that have not parted assign every combination starting with the prefix.
+    ///
+    /// Sums their `2^free` in binary, a carry at a time, so no width overflows an integer.
+    fn fills(&self, width: usize) -> bool {
+        let len = self.prefix.len();
+        let mut bits: BTreeMap<usize, usize> = BTreeMap::new();
+        for (free, parted) in self.free.iter().zip(&self.parted_at) {
+            if parted.is_none() {
+                *bits.entry(*free).or_default() += 1;
+            }
+        }
+        let mut carry = 0;
+        let mut position = 0;
+        let mut sum = Vec::new();
+        while carry > 0 || bits.range(position..).next().is_some() {
+            let here = carry + bits.get(&position).copied().unwrap_or(0);
+            if here % 2 == 1 {
+                sum.push(position);
+            }
+            carry = here / 2;
+            position += 1;
+        }
+        sum == [width - len]
+    }
+
+    /// The prefix, once it is a whole combination.
+    fn combination(&self) -> String {
+        String::from_utf8(self.prefix.clone()).expect("the descent writes `0` and `1` only")
+    }
+}
+
+/// `2^arity`, or `None` past `u128`, since the grammar puts no ceiling on the input list.
 fn combination_count(arity: u32) -> Option<u128> {
     1u128.checked_shl(arity)
 }
@@ -678,10 +573,6 @@ fn bit(output: bool) -> char {
     if output { '1' } else { '0' }
 }
 
-/// How a row's output reads inside a sentence about what it assigns.
-///
-/// A `-` output is not a third value the circuit can produce, so it is
-/// named as the absence it is rather than rendered as a bit.
 fn outcome(output: Option<bool>) -> String {
     match output {
         Some(value) => format!("the output `{}`", bit(value)),

@@ -1,25 +1,42 @@
 ---
 title: Roadmap
-description: Date-driven, small-and-frequent releases. Monthly minor with patches as needed, six named milestones from "source parses" to "redstone simulates".
+description: Date-driven, small-and-frequent releases. Monthly minor with patches as needed, and six named milestones from "source parses" to "redstone simulates", four of them reached.
 ---
 
 Cairn ships **monthly minor releases** under
 [date-based versioning](/spec/versioning-editions/#101-the-target-is-a-compile-time-parameter)
 `YYYY.M[.PATCH]`. Each month delivers what is ready; nothing is held back for an arbitrary "1.0".
-Six named milestones cross-cut the monthly schedule so contributors and consumers can plan against
-something more durable than a calendar tick.
+Six named milestones sit across the monthly schedule, so contributors and consumers can plan
+against something more durable than a calendar date.
 
-> Schedule is a plan, not a promise. The compiler is implemented in the open and slips happen.
+> The schedule is a plan, not a promise. The compiler is implemented in the open, and slips happen.
 > The [CHANGELOG](https://github.com/kage1020/Cairn/blob/main/CHANGELOG.md) is the source of truth
 > for what shipped.
 
+## Where things stand
+
+The compiler ran well ahead of the first plan. What M1, M2, M4 and M5 ask the compiler to do had
+all landed by 2026.8.0, three of them months before their dates, and the releases since have
+hardened it against the spec. M2 also makes the lockfile format Stable, and the lockfile kept
+changing after M2's build landed: 2026.9.0 added `lock_schema_version` and reframed the registry
+pack hash, and 2026.10.0 canonicalised the palette, which moved every `resolved_ir_hash`. So M2
+counts as reached with 2026.11.0, the release its Stable contract starts from. Two milestones
+remain.
+
+- **M3** is where the language leaves draft. Every example already compiles clean for Java and
+  builds for Bedrock. What M3 still needs is listed under [Leaving draft](#leaving-draft).
+- **M6** is where redstone reaches the structure file. Synthesis and place-and-route run behind
+  `cairn synth --experimental-logic-synth`, but no routed circuit is written into an artifact, and
+  nothing simulates one.
+
 ## Release cadence
 
-- **Monthly minor** (`YYYY.M.0`) on the first of the month. The release PR is opened by a cron
-  job and merged after human review.
-- **Patches** (`YYYY.M.N`, `N ≥ 1`) are cut on demand from `main` whenever a relevant commit
-  lands. Typical triggers: registry/constraint pack updates, regressions, and security fixes.
-  No upper bound on patches per month.
+- **Monthly minor** (`YYYY.M.0`) on the first of the month. A cron job opens the PR that promotes
+  `canary` to `main`; its merge opens the release PR on `main`, which is merged after human review.
+- **Patches** (`YYYY.M.N`, `N ≥ 1`) are cut on demand: a maintainer starts the same promote by hand,
+  or merges a hotfix into `main`, and either opens a release PR on `main`. Typical triggers:
+  registry/constraint pack updates, regressions, and security fixes. No upper bound on patches per
+  month.
 - **Channel:** there is only one, `stable`. Cairn does not run a separate nightly or beta train.
   Behaviour that is not yet stable is gated by [compatibility tier](/spec/compatibility/), not by
   release channel.
@@ -28,60 +45,96 @@ something more durable than a calendar tick.
 
 ## Milestones
 
-Each milestone is a "the project can credibly do X" gate, hit when the corresponding month ships.
+Each milestone is a "the project can credibly do X" gate, hit when the release that does X ships.
+A milestone that turns a surface Stable is reached when that surface's Stable contract starts.
 Naming the gates separately from version numbers gives the roadmap a stable vocabulary even when
 the monthly schedule shifts.
 
-| Milestone | Lands by | The thing it earns |
+| Milestone | Status | The thing it earns |
 |---|---|---|
-| **M1, source parses** | 2026.7.0 | `cairn parse` produces an AST for every example in `examples/` |
-| **M2, minimal build** | 2026.10.0 | `cairn compile` writes a Java `.nbt` for a single-room structure with floor and walls, plus a lockfile |
-| **M3, examples work** | 2027.1.0 | `cottage`, `themed-tower`, `village` all round-trip through `cairn compile --edition java` and load in Minecraft |
-| **M4, Java/Bedrock parity** | 2027.2.0 | Same DSL source emits valid output for both editions; parity table populated; per-edition theme fallbacks work |
-| **M5, developer experience** | 2027.3.0 | `cairn-lang-lsp` provides diagnostics and completion in at least one editor (VS Code) |
-| **M6, redstone simulates** | 2027.5.0 | Logical redstone synthesis, place-and-route, and tick simulator land together; `redstone-door` example verifies |
+| **M1, source parses** | Reached in 2026.7.1 | `cairn parse` produces an AST for every example in `examples/` |
+| **M2, minimal build** | Reached in 2026.11.0; the build landed in 2026.7.1 | `cairn compile` writes a Java `.nbt` for a single-room structure with floor and walls, plus a lockfile, and the lockfile format turns Stable |
+| **M3, examples work** | Planned for 2027.1.0 | Every example in `examples/` compiles clean with `--edition java` and loads in Minecraft; the specification leaves draft, and the surfaces the [compatibility tiers](/spec/compatibility/#c2-tier-of-each-surface-by-milestone) list for M3 turn Stable |
+| **M4, Java/Bedrock parity** | Reached in 2026.8.0 | Same DSL source emits valid output for both editions; parity table populated; per-edition theme fallbacks work |
+| **M5, developer experience** | Reached in 2026.8.0 | `cairn-lsp` provides diagnostics and completion in at least one editor (VS Code) |
+| **M6, redstone simulates** | Planned for 2027.4.0 | `cairn compile` lays a `logic` graph into the structure file, and a tick simulator verifies `redstone-door`'s assertions against the circuit it built |
+
+## Shipped so far
+
+Each minor release by its headline. The patches and the full lists are in the CHANGELOG, which
+files the first release under `2026.7.0`; its tag and GitHub release are `v2026.7.1`.
+
+| Release | What it brought |
+|---|---|
+| **2026.7.1** | The first release. `cairn parse`, `check`, `info`, `lower` and `compile`; the Intent IR, the semantic layer and the block-array pivot; Java `.nbt` output with a lockfile; registry pack ingest and nearest-valid suggestions; `gable`, `shed`, `hip` and `flat` roofs; `site` placements joined by walkways. **M1**. |
+| **2026.8.0** | Bedrock `.mcstructure` output, with the parity table and per-edition theme fallbacks. `themed-tower`, `village` and `redstone-door` compile clean, through `level` grouping and eave stairs, walkways routed around structures, and pressure plates, circuit region markers and door actuator patches. `cairn-lsp` with diagnostics and completion, and a VS Code extension; the tree-sitter grammar, on npm as `tree-sitter-cairn`; redstone synthesis, placement, routing, delay insertion and crossing legalization behind `cairn synth --experimental-logic-synth`. **M4**, **M5**. |
+| **2026.9.0** | Hardening. A source that does not parse gets a diagnostic like any other; the lockfile is read back, so a rebuild for another target says so; the floor `@requires` declares is enforced; nesting and extents are bounded, so hostile input is refused instead of exhausting the compiler. |
+| **2026.10.0** | Version floors in full: `@cairn` is read, `@requires` floors order by DataVersion and may name an edition, a `def` or a `theme` declares its own floor, and `@intended_targets` is weighed against them. A renamed block id is answered from the pack's alias table, and an `assert truth` row may use `-` as a don't-care. |
+| **2026.11.0** | `cairn docs` prints the documentation built into the binary, offline, and the site serves each page as Markdown with an `/llms.txt` index. `cairn check` with no target reports the lowering findings that need none, a truth table may be written one row per line, and an even-span hip roof's apex faces away from its ridge. A member its own line cannot place, a pressure plate among them, is the error `E_INVALID_MEMBER`, `redstone-door`'s plates sit where a player can step on them, a name Windows reserves is refused on every host (`E_INVALID_PLACE_ID`, `E_INVALID_STRUCT_NAME`), and `and` / `or` / `not` come from a built-in logic library, which changes the expression shape `cairn parse --format json` prints. The coordinate system is settled on a corner origin and `front = +z`, and the language-evolution policy on announcing changes per release, with no year-based opt-in. Syntax the specification describes but the compiler does not build yet is flagged subject to change, so it stays Evolving when `.crn` syntax turns Stable. The specification lists the tier-1 tokens, the abstract tokens the built-in catalogs declare. The compatibility chapter fixes what `W_DEPRECATED` and `E_BREAKING` mean, which codes are reserved, and which findings are placeholders, raised only until what they stand in for is built. The lockfile format turns Stable. **M2**. |
 
 ## Monthly scope
 
-The month → release contents table below is the working plan. It is denser than the milestone
-table because monthly minors can ship without crossing a milestone gate.
+The table below is the working plan, month by month, for the releases still ahead. It is denser
+than the milestone table because a monthly minor can ship without crossing a milestone gate.
 
 | Release | Scope added |
 |---|---|
-| **2026.7.0** | `cairn-lang-core` lexer/parser, `cairn parse` subcommand (AST display only). Release automation goes live. |
-| **2026.8.0** | Intent IR; syntactic validation; `cairn check`. |
-| **2026.9.0** | Semantic layer; materials and themes basics; `cairn info` reports the three version axes. |
-| **2026.10.0** | Block-array pivot; Java backend (walls and floors only); lockfile (`build.cairn.lock`). |
-| **2026.11.0** | `cottage.crn` compiles end-to-end for `--edition java`. |
-| **2026.12.0** | Registry pack ingest; fail-loud errors with nearest-valid suggestions. |
-| **2027.1.0** | All `examples/` work on Java. **M3.** |
-| **2027.2.0** | Bedrock backend with parity table and per-edition theme fallbacks. **M4.** |
-| **2027.3.0** | `cairn-lang-lsp` minimal (diagnostics + completion); VS Code extension. **M5.** |
-| **2027.4.0** | Redstone logical layer; combinational synthesis and place-and-route. |
-| **2027.5.0** | Redstone tick simulator; sequential macros; `redstone-door` verifies. **M6.** |
-| **2027.6.0** | `cairn-lang-wasm` + browser playground (live compile in the docs site). |
+| **2026.12.0** | What M3 waits on ([Leaving draft](#leaving-draft)): the diagnostic codes settled. Each release attaches the VS Code extension as a `.vsix`, and the extension is on the Marketplace. |
+| **2027.1.0** | Every example compiles clean on Java and loads in Minecraft. The specification leaves draft as `2027.1`, and `.crn` syntax, the `compile` / `check` / `info` interface, the diagnostic codes and the tier-1 vocabulary turn Stable. **M3.** |
+| **2027.2.0** | Blockstate derived beyond stairs: a `door` places its door block, panes, fences and walls connect, chests pair, and `fill`, with the coordinate triples it takes (`from=1,1,1`), sets `waterlogged`. The built-in packs are extracted from each edition's `--reports` / registry dumps, for the targets they carry today and each edition's current releases, so `E_STATE_DOMAIN` checks a state literal against the target and an error names the version an id first appears in. |
+| **2027.3.0** | Redstone reaches the structure file: edition legalization and lowering from the Placement IR to the block array, so `cairn compile` runs the `logic_*` phases. The rest of the combinational primitives (`xor`, `nand`, `nor`, `mux`), the remaining sensors and actuators (`lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`), Tier 0 parts such as `repeater` placed by hand, the `raw` escape hatch, and `@edition` alternatives with `E_PARITY_UNSUPPORTED`. |
+| **2027.4.0** | A tick simulator checks `assert truth` and `assert always` against the built circuit; `assert latency`; the sequential macros (`latch`, `pulse`, `delay`, `edge_rising`, `edge_falling`, `counter`); `E_NO_PORTABLE_IMPL` for logic that depends on update order, whose fix, Tier 0 under an `@edition` guard, exists by then. `redstone-door` verifies, and the redstone DSL turns Stable. **M6.** |
+| **2027.5.0** | Entities and block entities (`spawn`, `painting`, `sign`, `bed`, …) with their anchors, and the decimal (`scale=1.5`) and `nbt={...}` values they take; theme selector bindings, specified and lowered; the first constraint catalog (attachment, support, fluids, entity AABB), so `cairn info` reports semantic-sensitive members and a lock records the catalog's hash. |
+| **2027.6.0** | `edit` patches, and the stable addresses the compiler gives members written without an `id=`; `.litematic` and `.schem` writers; `cairn-lang-wasm` and the browser playground (live compile in the docs site). |
 
-Beyond `2027.6.0` the schedule is intentionally not drawn. Once M6 lands the spec-driven part of
-the project is largely complete and the roadmap will be redrawn around real usage feedback.
+Beyond `2027.6.0` the schedule is not drawn yet. The spec describes more than this plan reaches:
+the reverse direction (`cairn import`, `cairn diff-blocks`), the harness the
+[evaluation framework](/spec/evaluation/) calls for, and the open questions that wait on its data,
+columns and arches as primitives and interiors. The roadmap will be redrawn around those, and
+around feedback from real use, as 2027.6.0 approaches.
+
+## Leaving draft
+
+The specification is titled `2026.06 (draft)`. The label comes off at M3, when the surfaces the
+[compatibility tiers](/spec/compatibility/#c2-tier-of-each-surface-by-milestone) list for M3 turn
+Stable: `.crn` syntax (chapters 5 to 9 and §10.7), the flags, JSON schemas and exit codes of
+`cairn compile`, `check` and `info`, the diagnostic codes, and the tier-1 material vocabulary. From
+then on the specification carries the version of the release that ships it, starting with
+`2027.1`, and a break to any of those surfaces waits out a `W_DEPRECATED` window.
+
+What stands between today and that point:
+
+- **The diagnostic codes settle.** After M3, adding a code breaks nothing and changing what an
+  existing code means does, so changes of the second kind land before 2027.1.0.
+  [Compatibility "How a break is communicated"](/spec/compatibility/#c3-how-a-break-is-communicated)
+  says which kind a change is, including a placeholder replaced by the behaviour the spec already
+  defines.
 
 ## How the schedule is enforced
 
 The release strategy itself is automated:
 
-1. **Monthly minor PR** is opened by a GitHub Actions cron at `17:04 UTC` on the first of each
-   month, offset from the hour boundary on purpose because GHA crons are most likely to be delayed
-   or skipped there.
-2. **Version is computed** from existing tags: no `vYYYY.M.*` tag yet → next is `YYYY.M.0`,
-   otherwise the next in-month patch.
-3. **release-plz** generates the version bump and changelog, applies the computed version via
-   `--version-overrides`, and opens a PR.
-4. **Human review** is mandatory for the monthly minor. Patches from `main` push events follow
-   the same PR flow; merging triggers the publish pipeline.
-5. **Publish** runs on the resulting `v*` tag: cross-compile binaries for Linux, macOS, and
-   Windows on `x86_64` and `aarch64`; sign with sigstore; attach to a GitHub Release; and
-   `cargo publish` every workspace crate to crates.io.
+1. **Monthly promote PR** from `canary` to `main` is opened by a GitHub Actions cron at `04:17 UTC`
+   on the first of each month. The time is deliberately off the hour, because GitHub Actions crons
+   are most likely to be delayed or skipped on the hour. A patch runs the same job by hand, or lands
+   a hotfix on `main`. Only `main` is published, so nothing on `canary` reaches users before it is
+   promoted.
+2. **Version is computed** when the promote or the hotfix lands on `main`, from existing tags: no
+   `vYYYY.M.*` tag yet → next is `YYYY.M.0`, otherwise the next in-month patch. The job writes it
+   into the workspace `Cargo.toml`, unless a maintainer running it by hand gives the version.
+3. **release-plz** writes the changelog section from the commits and opens the release PR against
+   `main`. The job then brings the tree-sitter and VS Code manifests to the same version,
+   regenerates the parser, and folds the `changelog.d/` fragments into `CHANGELOG.md`.
+4. **Human review** merges the release PR into `main`, for a patch as for a minor.
+5. **Publish** runs on that merge: `cargo publish` every crate except `xtask` to crates.io and tag
+   `vYYYY.M.N`; build binaries for Linux, macOS, and Windows on `x86_64` and `aarch64`, each target
+   on a runner of its own, and attach every archive with its SHA-256 checksum to a GitHub Release,
+   beside a sigstore bundle for each archive except the Windows `aarch64` one, and a signed
+   CycloneDX SBOM; publish the tree-sitter grammar to npm; and open a PR that merges `main` back
+   into `canary`.
 
 Compatibility expectations across this schedule are defined separately by
-[compatibility tier](/spec/compatibility/): `.crn` syntax and the lockfile evolve under **Stable**
-rules, the Rust API stays **Internal** (`#[doc(hidden)]`) until M3, and most other surfaces sit at
-**Evolving** for now.
+[compatibility tier](/spec/compatibility/): the lockfile format is **Stable** from 2026.11.0, where
+M2 is reached, and the LSP wire protocol from M5; `.crn` syntax follows at M3 and the redstone DSL
+at M6; the Rust API stays **Internal** throughout, and most other surfaces sit at **Evolving** for
+now.

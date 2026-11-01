@@ -12,16 +12,22 @@ massing     floor / walls / volume
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / sensors / actuators
-logic_synth redstone: Logic IR → Netlist IR
-logic_place cell placement
-logic_route routing → Placement IR, delay determined
+logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
+logic_place cell placement → Placement IR
+logic_route routing, delay insertion and crossing legalization over the Placement IR, delay determined
 raw         escape hatch
 ```
 
+Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `raw` are not keywords
+yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
+`envelope`, `openings` and `fixtures`, whose one member is `pressure_plate`. `cairn compile` does
+not run the three `logic_*` phases, so a `logic` line lays no redstone in the artifact; they are
+reached only through `cairn synth --experimental-logic-synth`.
+
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
-what a member means — nor, per [§4.8](#48-within-phase-conflicts-and-the-palette), what the artifact
-is: permuting two members that share no voxel leaves the whole `BlockArray` equal, palette
-numbering included, and not only the voxels.
+what a member means. Nor does it decide what the artifact is
+([§4.8](#48-within-phase-conflicts-and-the-palette)): permuting two members that share no voxel
+leaves the whole `BlockArray` equal, palette numbering included, not only the voxels.
 
 `circuit` marks a routing region and writes no voxel, so it belongs to no phase. The three
 `logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
@@ -32,12 +38,18 @@ different members contesting a voxel inside a phase resolve the same way and are
 [§4.8](#48-within-phase-conflicts-and-the-palette).
 
 ```
+theme stone:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+  slot glass -> @glass_pane
+
 struct keep size=11x9
-floor  id=base   mat_slot=floor
-walls  id=shell  mat_slot=wall height=5
-roof   id=roof   kind=gable mat_slot=roof overhang=1
-window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # still cut as an opening
-door   id=entry  side=front at=center
+  floor  id=base   mat_slot=floor
+  walls  id=shell  mat_slot=wall height=5
+  roof   id=roof   kind=gable mat_slot=roof overhang=1
+  window id=front_windows side=front y=2 offset=2 size=2x2 mat_slot=glass   # still cut as an opening
+  door   id=entry  side=front at=center
 ```
 
 ## 4.2 Target axes
@@ -62,8 +74,8 @@ below. Their layouts are this section and the three that follow. `overhang=` is 
 kind; `slope_to=` belongs to `shed` alone, and written on any other kind it is read by nothing and
 reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
-**Material.** A sloped roof takes its material from `mat_slot=` and it MUST be in the stair family
-— an id whose path ends in `_stairs`. The geometry attaches `facing`, `half`, and `shape` to
+**Material.** A sloped roof takes its material from `mat_slot=`, and it MUST be in the stair family
+(an id whose path ends in `_stairs`). The geometry attaches `facing`, `half`, and `shape` to
 whatever it paints, and a whole block cannot carry them. A binding outside the family is
 `E_INCOMPATIBLE_MATERIAL` and stops the build. With no `mat_slot=` at all the roof falls back to
 `minecraft:spruce_stairs`. The registry pack's four roof species (`roof.dark_wood`,
@@ -75,11 +87,11 @@ rule, but takes its states from its own arguments.
 
 Those arguments are `facing=out | in`, `half=top | bottom` and
 `shape=straight | outer_left | outer_right`, each a bare identifier, defaulting to `out`, `top` and
-`straight`. An identifier outside the list is not yet supported, and the stair is deferred with
-`W_DEFERRED_MEMBER`. A value of another shape (`half="bottom"`, `facing=1`) is an unreadable value:
-the stair is built with that key's default, and the value is reported as `W_IGNORED_ARGUMENT` —
-also when the stair is refused for another reason, with a note saying it is not built either way
-([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+`straight`. An identifier outside the list is `E_INVALID_MEMBER`, and the stair is not built. A
+value of another shape (`half="bottom"`, `facing=1`) is an unreadable value: the stair is built
+with that key's default, and the value is reported as `W_IGNORED_ARGUMENT`.
+The value is reported even when the stair is refused for another reason, with a note saying the
+stair is not built either way ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **Ridge axis.** The ridge runs along the long horizontal axis of the footprint. A square footprint
 (`size=WxW`) ties to `x`, giving an east-west ridge.
@@ -128,7 +140,7 @@ authored height.
   `back` → `north`, `left` → `west`, `right` → `east`. The top layer is capped with one row at
   `half=top` and the same facing.
 - **`slope_to=` is required.** It has no default. A missing or unknown value is
-  `W_DEFERRED_MEMBER` rather than a guessed direction.
+  `E_INVALID_MEMBER` rather than a guessed direction.
 
 ## 4.5 Hip roof voxel rules
 
@@ -151,10 +163,15 @@ slope inward toward a centre ridge.
   | SW / SE corners | `facing=north` with `outer_right` / `outer_left` |
 
 - **Apex.** The apex closes what the frames below it raised, so it applies only when
-  `extra_height > 1`. A square footprint caps with a single `half=top` stair (odd short span) or a
-  `2x2` block of them (even short span). A rectangular footprint caps with a row of `half=top`
-  stairs spanning the inset interior along the long axis. Apex facings follow the gable rule:
-  `south` for an x-ridge, `east` for a z-ridge.
+  `extra_height > 1`. It fills the top layer's whole inset rectangle with `half=top` stairs. A
+  square footprint caps with a single stair (odd short span) or a `2x2` block of them (even short
+  span). A rectangular footprint caps with a band along the long axis, one row deep on an odd short
+  span and two on an even one, since the inset rectangle is two rows deep there and one row would
+  leave the other open. Apex facings follow the gable rule. On an odd short span the apex takes the
+  low slope's facing, `south` for an x-ridge and `east` for a z-ridge. On an even one each of its
+  two rows faces away from the ridge: `north` on the `-z` row and `south` on the `+z` row for an
+  x-ridge, `west` on the `-x` row and `east` on the `+x` row for a z-ridge. A square ties to `x`,
+  so its `2x2` cap is the x-ridge pair (`north` / `south`).
 - **Overhang.** As `gable`.
 
 ## 4.6 Flat roof voxel rules
@@ -173,7 +190,9 @@ slope inward toward a centre ridge.
 
 `level y=N` groups members and places each of them `N` voxels above the struct's base plane. The
 `level` line itself lowers to no blocks; every member under it lowers as if written in the body with
-`N` added to its vertical coordinate.
+`N` added to its vertical coordinate. A `level` does not group a `circuit` line, whose reservation
+spans the whole scope: one under a `level` is `E_MISPLACED_MEMBER`
+([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 The volume a struct lowers into is derived, never written:
 
@@ -192,23 +211,24 @@ Each term counts only the members that will paint:
 - `roof_extra`: the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
 - `1`: the base plane, which every struct has.
 
-Members inside a `level` count in all three: a struct whose only walls sit under `level y=5` is as
-tall as one that writes them directly.
+Members inside a `level` count in all three, at their offset: `walls height=3` written directly
+gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, and
 `pressure_plate` read `N` as the base their geometry is measured from. A `floor` and a `roof` are
-planes a struct has one of, so under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and
-lowers to nothing.
+planes a struct has one of, and what one under a raised `level` builds is reserved for a later
+extension: under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to nothing.
 
-**A member that does not paint does not size the volume.** The `overhang=` of a level-scoped roof
-does not widen the footprint, and its height does not raise `Dims.y`. The same holds for every way
-a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=` does not widen the
-footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
+**A member that does not paint does not size the volume.** The `overhang=` of a roof under
+`level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under
+`level y=0` the roof draws, and widens and raises the volume as one in the body does. The same
+holds for every way a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=`
+does not widen the footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
 
 The material half applies to `walls` and not to `roof`, because a roof whose `mat_slot=` does not
-resolve falls back to a material of its own and still draws. A themeless struct shows the
-asymmetry: its walls lower to air and reserve nothing, while a `roof kind=gable` over them still
-draws and still seats its ridge above them.
+resolve falls back to a material of its own and still draws. A themeless struct shows the asymmetry:
+its walls are not built and take up no rows, while a `roof kind=gable` over them still draws, seated
+where it would sit with no walls at all.
 
 "Does the material resolve" is asked against the pinned target, so a block only some versions
 declare can change `Dims.y` between two `--target` values. An id the pinned target does not declare
@@ -243,10 +263,10 @@ makes the order independent of how a state literal happens to spell its properti
 `@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north,half=top]` name one block, and
 which of them a theme wrote first must not move a slot.
 
-Slot `0` is the one exception to "the blocks that body contains": air holds it whatever happens, so a
-fully paved volume still carries the entry. A slot that was never painted at all is the other, and it
-is kept on purpose — dropping it would delete the only evidence a released build carries that a
-generator interned a material for geometry it does not emit.
+"The blocks that body contains" has two exceptions. Slot `0` is one: air holds it whatever happens,
+so a fully paved volume still carries the entry. A slot that was never painted at all is the other,
+and it is kept on purpose. Dropping it would delete the only evidence a released build carries that
+a generator interned a material for geometry it does not emit.
 
 Two rules follow, and both exist because the numbering reaches the `.nbt`, `cairn info`'s per-entry
 rows, and `resolved_ir_hash`:
@@ -255,13 +275,17 @@ rows, and `resolved_ir_hash`:
   onto the gap. Otherwise two sources differing only in which member lost would produce different
   artifacts for the same build.
 - Two members that share no voxel do not order each other. Nothing about the finished grid depends
-  on which of their lines came first, so nothing about the artifact may either — which is what §4.1
-  opens by promising, and it is a claim about the bytes and not only about the voxels. Sorting is
-  what makes it true: the palette is derived from the finished grid alone, so any permutation of the
+  on which of their lines came first, so nothing about the artifact may either. That is the promise
+  §4.1 opens with, and it is a claim about the bytes, not only about the voxels. Sorting is what
+  makes it true: the palette is derived from the finished grid alone, so any permutation of the
   source that leaves the grid alone leaves the whole `BlockArray` alone.
 
 The sort is over the resolved state, so it is stable across editions and versions in the sense that
 matters: it does not consult source spans, member ids, phases, or paint order. It is not a claim
 that two targets agree on the palette, because two targets need not agree on the ids in it.
+
+The `.mcstructure` palette is written from this one and stays a set. Translating to Bedrock can map
+several entries to one Bedrock block (stairs that differ only in `shape`, once `shape` is dropped).
+Those entries share the first one's slot, so air stays at `0` and no Bedrock block is listed twice.
 
 A walkway's array is laid by the `connect` pass rather than by the phases, and is not covered here.

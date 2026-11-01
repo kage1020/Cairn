@@ -1,0 +1,164 @@
+---
+source: crates/cairn-lang-core/tests/lower/intent.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: entry
+    slots:
+      wall:
+        kind: Token
+        value: oak_planks
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: gatehouse
+    size:
+      w: 7
+      h: 5
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: wall
+        intent_state: {}
+      - class: outer
+        role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 3
+      - role:
+          kind: Roof
+        mat_slot: wall
+        intent_state:
+          kind:
+            kind: Ident
+            value: flat
+          overhang:
+            kind: Int
+            value: 1
+      - id: front
+        role:
+          kind: Door
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+      - id: plate
+        role:
+          kind: PressurePlate
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - step
+        intent_state:
+          at:
+            kind: DotRef
+            value:
+              - front
+              - outside
+          offset:
+            kind: Int
+            value: 3
+          y:
+            kind: Int
+            value: 0
+      - id: inner
+        role:
+          kind: PressurePlate
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - exit
+        intent_state:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - front
+          offset:
+            kind: Int
+            value: 3
+          y:
+            kind: Int
+            value: 1
+      - role:
+          kind: Door
+        selector:
+          id:
+            kind: Ident
+            value: front
+        intent_state:
+          opened_by:
+            kind: DotRef
+            value:
+              - sig
+              - open
+      - role:
+          kind: Circuit
+        intent_state:
+          region:
+            kind: Ident
+            value: floor
+          void:
+            kind: Int
+            value: 2
+    logic:
+      - lhs:
+          - sig
+          - open
+        rhs:
+          kind: Infix
+          value:
+            primitive: or
+            lhs:
+              kind: Ref
+              value:
+                - sig
+                - step
+            rhs:
+              kind: Ref
+              value:
+                - sig
+                - exit
+    asserts:
+      - kind: Truth
+        inputs:
+          - - sig
+            - step
+          - - sig
+            - exit
+        output:
+          - sig
+          - open
+        rows:
+          - inputs: "00"
+            output: false
+          - inputs: "01"
+            output: true
+          - inputs: "10"
+            output: true
+          - inputs: "11"
+            output: true
+      - kind: Always
+        antecedent:
+          - sig
+          - step
+        consequent:
+          - sig
+          - open
+        within: 2

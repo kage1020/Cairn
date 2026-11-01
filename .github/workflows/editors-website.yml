@@ -5,12 +5,14 @@ on:
     paths:
       - "editors/vscode/**"
       - "website/**"
+      - "xtask/**"
       - "Cargo.toml"
       - ".github/workflows/editors-website.yml"
   pull_request:
     paths:
       - "editors/vscode/**"
       - "website/**"
+      - "xtask/**"
       - "Cargo.toml"
       - ".github/workflows/editors-website.yml"
   workflow_dispatch:
@@ -22,38 +24,19 @@ jobs:
   vscode:
     name: VS Code extension
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: editors/vscode
     steps:
       - uses: actions/checkout@v7
 
-      - name: Compare the extension version with the workspace version
-        shell: bash
-        run: |
-          set -euo pipefail
-          workspace=$(awk '
-            /^\[workspace\.package\]/   { in_section = 1; next }
-            /^\[/                       { in_section = 0 }
-            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
-          ' ../../Cargo.toml)
-          if [[ ! "$workspace" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
-            echo "Read '$workspace' from [workspace.package]; that is not a CalVer number" >&2
-            exit 1
-          fi
-          extension=$(jq -er '.version' package.json)
-          echo "Cargo [workspace.package]: $workspace"
-          echo "editors/vscode:            $extension"
-          if [ "$workspace" != "$extension" ]; then
-            exit 1
-          fi
-
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: editors/vscode/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
 
@@ -61,6 +44,21 @@ jobs:
 
       - name: Type-check, bundle, and package
         run: pnpm run package
+
+      - name: Read the VS Code version the tests pin
+        id: vscode
+        run: |
+          version=$(grep -oP '^const VSCODE_VERSION = "\K[^"]+(?=";$)' src/test/extension.test.ts)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache VS Code
+        uses: actions/cache@v6
+        with:
+          path: editors/vscode/.vscode-test
+          key: vscode-test-${{ runner.os }}-${{ steps.vscode.outputs.version }}
+
+      - name: Start a stand-in cairn-lsp through the extension
+        run: xvfb-run -a pnpm test
 
   website:
     name: Documentation site
@@ -75,18 +73,23 @@ jobs:
           package_json_file: website/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: website/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
 
-      # Three checks, none of which subsumes another. `astro check` type-checks
-      # `astro.config.mjs` and everything under `src`, which the build does not
-      # do at all. The build renders every page, so a content-collection
-      # frontmatter violation and a sidebar `slug:` pointing at a missing page
-      # fail there. Link validation runs as a build hook, after the pages
-      # exist, and resolves every internal link and `#anchor` fragment in both
-      # the `en` and `ja` trees — a relative link is refused outright, because
-      # on this site a relative link is a broken link (see `astro.config.mjs`).
+      # The build does not type-check, and `astro check` neither renders pages nor validates links.
       - run: pnpm run check
       - run: pnpm run build
+
+      - name: Install Rust toolchain
+        run: rustup show
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: website
+          save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
+      # `cairn docs` prints the pages cairn-lang-docs embeds, so they must be the ones just built.
+      - name: Embedded pages match the build
+        working-directory: .
+        run: cargo xtask lint --site website/dist site-parity

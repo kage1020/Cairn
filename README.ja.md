@@ -2,9 +2,9 @@
 
 > 言語: **日本語** ([English](README.md))
 
-Cairn は Minecraft の建築物を記述するための言語です。作りたいものを書けば — 丸石の壁、切妻屋根、正面に並んだ窓を持つ 9×7 のコテージ — コンパイラがブロックを組み立てます。屋根の階段が向く方向、開口部の位置、座標計算、そしてエディションとバージョンごとに異なるブロック ID まで。
+Cairn は Minecraft の建築物を記述するための言語です。「丸石の壁と切妻屋根を持ち、正面に窓が並ぶ 9×7 のコテージ」のように作りたいものを書くと、必要なブロックはコンパイラが割り出します。屋根の階段の向き、開口部の位置、座標の計算、エディションやバージョンごとに異なるブロック ID まで、手で書く必要はありません。
 
-ケルン (cairn) とは、場所を示すために積み上げられた石のことです。Minecraft の建築物も同じです。
+ケルン (cairn) は、場所の目印として石を積み上げたものです。Minecraft の建築物も、積み上げたブロックで場所に印を付けるという点で同じです。
 
 ## インストール
 
@@ -12,7 +12,11 @@ Cairn は Minecraft の建築物を記述するための言語です。作りた
 cargo install cairn-lang-cli
 ```
 
-これで `cairn` コマンドが入ります。Linux・macOS・Windows (`x86_64` と `aarch64`) 向けのビルド済みアーカイブは各[リリース](https://github.com/kage1020/Cairn/releases)に添付されており、`cairn` と言語サーバー `cairn-lsp` の両方が含まれています。sigstore 署名は、cosign がバイナリを提供していない Windows `aarch64` を除くすべてに付きます。チェックアウトから直接ビルドする場合は `cargo build --release` で両方が `target/release/` に出力されます。
+これで `cairn` コマンドが使えるようになります。
+
+Linux・macOS・Windows (`x86_64` と `aarch64`) 向けのビルド済みアーカイブも、各[リリース](https://github.com/kage1020/Cairn/releases)に添付しています。アーカイブには `cairn` と言語サーバー `cairn-lsp` の両方が入っています。Windows `aarch64` 版を除くすべてのアーカイブに sigstore の署名が付きます (Windows `aarch64` 向けには cosign のバイナリがないためです)。
+
+リポジトリから直接ビルドする場合は `cargo build --release` を実行してください。両方のバイナリが `target/release/` に出力されます。
 
 ## はじめかた
 
@@ -42,19 +46,22 @@ struct cottage size=9x7
 cairn compile cottage.crn --edition java --target 1.21.4
 ```
 
-ストラクチャーブロックで読み込めるバニラの構造ファイル `cottage.nbt` と、ソースのハッシュ・解決されたターゲット・使用したレジストリパックを記録した `cottage.crn.lock` が出力されます。
+次の 2 つのファイルができます。
 
-同じファイルが Bedrock でもビルドできます。
+- `cottage.nbt`: ストラクチャーブロックで読み込めるバニラの構造ファイル
+- `cottage.crn.lock`: ソースのハッシュ、解決したターゲット、ビルドに使ったレジストリパックの記録
+
+同じファイルを Bedrock 向けにもビルドできます。
 
 ```sh
 cairn compile cottage.crn --edition bedrock --target 1.21.60
 ```
 
-今度は `cottage.mcstructure` が出力されます。ソースは 1 文字も変えていません。エディションはフラグであって方言ではないからです。Bedrock が本当に表現できないもの (たとえば階段の角の形状) については、黙って落とすのではなくその旨を報告します。
+今度は `cottage.mcstructure` ができます。ソースは 1 文字も変えていません。エディションはコンパイル時に指定するもので、エディションごとに書き方が変わるわけではないからです。階段の角の形のように Bedrock では表現できないものがあれば、黙って捨てずにそのことを報告します。
 
 ## ビルドする前に
 
-`cairn check` は何も書き出さずに同じ解析だけを実行します。エディションとターゲットを指定すればブロック ID まで検査し、意図していたであろうブロックを名指しします。
+`cairn check` は、何も書き出さずに同じ解析だけを行います。エディションとターゲットを指定すると、ブロック ID まで検査し、書き間違いには正しいブロック名を示します。
 
 ```
 $ cairn check cottage.crn --edition java --target 1.21.4
@@ -63,9 +70,9 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 …
 ```
 
-診断は「何が誤りか」と「妥当な値は何か」の両方を示すので、ビルドが失敗したときに次に何を打てばよいかがそのまま分かります。`--format json` を付ければ同じ内容が機械可読な形で出てくるので、「書く → チェックする → 直す」のループが実用的に回せます。手作業でも、ツール経由でも同じです。
+診断は、何が誤りかと、どんな値なら有効かを示します。ビルドが失敗しても、次に何を書けばよいかがその場で分かります。`--format json` を付けると同じ内容を機械可読な形式で出力するので、書いて、チェックして、直すというループを人の手でもツールからでも回せます。
 
-`cairn info` は、ターゲットを決める前にバージョンの問いに答えます。
+`cairn info` を使うと、ターゲットを決める前にどのバージョンでビルドできるかを確かめられます。
 
 ```
 $ cairn info cottage.crn
@@ -76,49 +83,61 @@ intended targets:        (none declared)
 semantic-sensitive:      (none)
 ```
 
-## 現在動くもの
+## いま使える機能
 
 - `cairn parse` / `check` / `info` / `lower` / `compile`
-- 単一のソースから Java `.nbt` と Bedrock `.mcstructure` を出力
-- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、感圧板、`level` による階層のグルーピング
-- スロットを持つテーマ、およびそのエディション別バリアント
-- ソースごとのロックファイルと、バージョン別ブロック ID・リネームエイリアスを収めたレジストリパック
-- 診断と補完を提供する `cairn-lsp`、および [VS Code 拡張](editors/vscode/)
-- tree-sitter 文法 (言語サーバーなしでハイライトだけ欲しいエディタ向け)
+- 1 つのソースから Java の `.nbt` と Bedrock の `.mcstructure` を出力
+- メンバー: 床、壁、ドアの開口、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、感圧板、`level` による階ごとのまとまり
+- スロットを持つテーマと、そのエディション別バリアント
+- ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
+- 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
+- tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)
 
-**実験的機能。** `cairn synth --experimental-logic-synth` は `logic` グラフを合成・ネットリスト構築・エディション選択・配置・配線・遅延挿入・交差の合法化まで通し、各ステージを JSON で出力します。レッドストーンはまだコンパイル成果物には届いておらず、出力の形も変わりうるものです。
+**実験的な機能。** `cairn synth --experimental-logic-synth` は、`logic` グラフに合成、ネットリスト構築、エディション選択、配置、配線、遅延挿入、交差の合法化を順に施し、各ステージの結果を JSON で出力します。ただし、レッドストーンはまだコンパイル成果物に出力されず、出力の形式も今後変わる可能性があります。
 
-**まだないもの。** テーマのセレクタ束縛 (`window[class=small] -> frame=@spruce_wood` は窓にマッチしても何も塗らず、`cairn check` がそう報告します)、`.litematic` と `.schem` の書き出し、既存 schematic の読み込み、コンパイル成果物へのレッドストーン出力とそれを検証するティックシミュレータ、そしてブラウザ上のプレイグラウンド (`cairn-lang-wasm` クレートは export を持たないプレースホルダのままです)。
+**未実装の機能。**
 
-## 核となる考え方
+- テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
+- 屋根と階段以外のブロックステートの導出。`door` は開口を切り抜くだけでドアのブロックは置かず、板ガラスやフェンスの接続や水没状態も導出しません。
+- `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
+- `.litematic` と `.schem` の書き出し、既存の schematic の読み込み
+- コンパイル成果物へのレッドストーン出力、`and` / `or` / `not` 以外のゲートと順序マクロ、`assert latency`、回路を検証するティックシミュレータ
+- ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
-- **ブロックステートではなく意図を書く。** 切妻屋根は、自分の階段がどちらを向き、それぞれが上下どちらの半分に座るかを知っています。`facing=` を書く必要はありません。ブロックステートは導出されるもので、上書きするのは、その値自体が意図であるときだけです。
-- **順序は問わない。** メンバーはどの順に書いても構いません。コンパイラが固定のフェーズ (massing → envelope → openings → fixtures → redstone → raw) に並べ替えます。
-- **テーマが「どこ」と「なに」を分ける。** 構造は `mat_slot` を持ち、テーマがそのスロットを素材に束ねます。スタイルシートがクラスに束ねるのと同じ関係です。
-- **変換ではなく再コンパイル。** 可搬な成果物は `.crn` ソースです。構造ファイルは特定のエディションとバージョンに固定されたビルド出力で、バイナリと同じ位置づけです。
-- **黙って代替しない。** 未知のブロック、解決できないスロット、意図を表現できないターゲットはエラーか、名前の付いた劣化 (degradation) として報告されます。
+## 基本の考え方
+
+- **ブロックステートではなく意図を書く。** 切妻屋根は、自分の階段がどちらを向き、それぞれがブロックの上半分と下半分のどちらに置かれるかを知っているので、`facing=` を書く必要はありません。ブロックステートはコンパイラが導出します。自分で指定するのは、その値自体が意図であるときだけです。
+- **書く順番は問わない。** メンバーはどの順に書いても構いません。コンパイラが固定のフェーズ (massing → envelope → openings → fixtures → redstone → raw) に並べ替えます。
+- **テーマで「どこに」と「何で」を分ける。** 構造は `mat_slot` を持ち、テーマがそのスロットに素材を割り当てます。スタイルシートがクラスにスタイルを割り当てるのと同じ関係です。
+- **変換せず、再コンパイルする。** 持ち運べる成果物は `.crn` ソースです。構造ファイルは特定のエディションとバージョン向けのビルド出力で、プログラムでいえば実行バイナリにあたります。
+- **黙って置き換えない。** 未知のブロック、解決できないスロット、意図を表現できないターゲットは、エラーか名前の付いた劣化 (degradation) として報告します。
 
 ## ドキュメント
 
-プロジェクトの文章の正典は英語版 <https://cairn.kage1020.com/> で、日本語版 <https://cairn.kage1020.com/ja/> はそのミラーです。英語版は `/<path>/`、日本語版は `/ja/<path>/` に対応しています。
+ドキュメントは英語版の <https://cairn.kage1020.com/> を基準とします。日本語訳は `/ja/<path>/` の下にあります (<https://cairn.kage1020.com/ja/>)。
 
-- [チュートリアル](https://cairn.kage1020.com/ja/tutorial/) — インストールからワールドに構造ファイルを置くまでの最短経路。
-- [サンプル](examples/) — `cottage` / `themed-tower` / `village` / `redstone-door` と、メンバーをひとつずつ扱う小さなファイル群。
-- [仕様](https://cairn.kage1020.com/ja/spec/) — 規範的なリファレンス。全体を横断する [用語集](https://cairn.kage1020.com/ja/spec/glossary/)付き。
-- [開発者ガイド](https://cairn.kage1020.com/development/) — ワークスペース構成、依存関係のルール、ビルド・テスト・lint コマンド (英語のみ)。
-- [ロードマップ](https://cairn.kage1020.com/ja/roadmap/) — 各月が目指しているもの。
+- [チュートリアル](https://cairn.kage1020.com/ja/tutorial/): インストールから、ワールドに構造ファイルを置くまでの最短ルート。
+- [サンプル](examples/): `cottage` / `themed-tower` / `village` / `redstone-door` と、メンバーを 1 つずつ扱う小さなファイル。
+- [仕様](https://cairn.kage1020.com/ja/spec/): 規範となるリファレンス。全章に共通の[用語集](https://cairn.kage1020.com/ja/spec/glossary/)もあります。
+- [開発者ガイド](https://cairn.kage1020.com/development/): ワークスペースの構成、依存関係のルール、ビルド・テスト・lint のコマンド (英語のみ)。
+- [ロードマップ](https://cairn.kage1020.com/ja/roadmap/): 各月の目標。
 
-サイトのソースは [`website/src/content/docs/`](website/README.md) にあり、コードと同じレビューを通ります。
+サイトのソースは [`website/src/content/docs/`](website/README.md) にあり、コードと同じようにレビューを受けます。
+
+同じページはコンパイラにも同梱されていて、言語モデル向けの形式でも配信しています。
+
+- `cairn docs` は、トップページとプレイグラウンドを除くサイトのページを一覧します。表示されるのは、インストールした `cairn` がビルドされた時点の内容です。`cairn docs ja/spec/syntax` で 1 ページを Markdown で表示でき、`cairn docs spec/lint "Error vs warning"` で引用が指す節だけを表示できます。ネットワークは不要で、表示される内容は常にそのリリースが実装している仕様と一致します。
+- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) は言語モデル向けのサイト索引です。同じページは、URL の末尾に `index.md` を付けると Markdown で取得できます ([`/ja/spec/syntax/index.md`](https://cairn.kage1020.com/ja/spec/syntax/index.md))。[`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) は英語版の全ページを 1 つにまとめたものです。
 
 ## バージョニング
 
-リリースは日付ベースのバージョニング `YYYY.M[.PATCH]` を使い、言語・コンパイラ・レジストリパックをひとつの束として扱います。これは `--target` に渡す Minecraft のバージョンとは別の軸で、両者はフラグやキーワードで区別され、書式で区別されることはありません。
+リリースには日付ベースのバージョン `YYYY.M[.PATCH]` を使い、言語・コンパイラ・レジストリパックを 1 つの単位としてリリースします。このバージョンは `--target` に渡す Minecraft のバージョンとは別物です。両者は書式ではなく、フラグやキーワードで区別します。
 
-バージョンを上げるときに何を壊してよいかは [互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)が定めます。すべての表面が **Stable** / **Evolving** / **Internal** のいずれかに属し、`Evolving` を壊せるのは月次マイナーだけ、`Stable` を壊す前には 1 リリース分の `W_DEPRECATED` 警告を挟みます。
+バージョンを上げるときに何を壊してよいかは、[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)で決めています。すべての公開面は **Stable**・**Evolving**・**Internal** のいずれかに属します。`Evolving` を壊せるのは月次のマイナーリリースだけです。`Stable` を壊すときは、その前に 1 リリースの間 `W_DEPRECATED` 警告を出します。
 
 ## コントリビュート
 
-バグ報告、隙を突くサンプル、仕様への批判、そしてコード。どれも歓迎します。[CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) と[行動規範](CODE_OF_CONDUCT.md)をご覧ください。
+バグ報告、言語の穴を突くサンプル、仕様への批判、コードのどれも歓迎します。[CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) と[行動規範](CODE_OF_CONDUCT.md)をご覧ください。
 
 ## ライセンス
 

@@ -8,16 +8,20 @@ shape is what feeds the loop in [Evaluation Framework](/spec/evaluation/).
 
 ## 11.1 Diagnostic codes
 
-This section is the catalog: every code a stable command can raise has a row here, and a code with
-no row is a bug in this section rather than a code outside it. Where a code's rule belongs to
-another chapter, the row states what the code means and links there for the rule — the row is what a
-reader with a code in hand needs to find, and the chapter is where the behaviour is defined.
+This section is the catalog: every code a stable command can raise has a row here, and a code a
+stable command raises with no row is a bug in this section rather than a code outside it. A code
+another chapter names that no command raises yet, such as `E_STATE_DOMAIN`, is a reserved code
+([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Where a code's
+rule belongs to another chapter, the row states what the code means and links there for the rule.
+The row is what a reader with a code in hand needs to find, and the chapter is where the behaviour
+is defined.
 
-The redstone pipeline's `E_LOGIC_*` / `W_LOGIC_*` codes are outside that promise. They are reachable
-only through `cairn synth --experimental-logic-synth`, which is Internal tier
-([Compatibility](/spec/compatibility/)) — nothing about those strings is guaranteed, so a row here would
-state a contract that does not exist. [Redstone and Logic](/spec/redstone/) names the ones its own rules
-turn on.
+Every code of the redstone pipeline is outside that promise: the `E_LOGIC_*` / `W_LOGIC_*` codes,
+and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT` and
+`W_ROUTE_CROSS_LAYER_CLEARANCE`. They are reachable only through `cairn synth
+--experimental-logic-synth`, which is Internal tier ([Compatibility](/spec/compatibility/)). Nothing
+about those strings is guaranteed, so a row here would state a contract that does not exist.
+[Redstone and Logic](/spec/redstone/) names the ones its own rules turn on.
 
 ### Duplicates
 
@@ -30,11 +34,21 @@ turn on.
 | `E_DUPLICATE_SELECTOR` | Two selector rows in one `theme` select the same members and bind the same key. |
 | `E_DUPLICATE_ITEM` | Two top-level items of the same kind share a name. |
 | `E_DUPLICATE_HEADER` | A single-valued `@directive` is declared more than once. |
+| `E_DUPLICATE_CIRCUIT` | A `struct` or `def` body has more than one `circuit` line. |
+
+`E_DUPLICATE_ID` leaves two `place` rows of one `site` body to `E_DUPLICATE_PLACE_ID`
+([Sites and placements](#sites-and-placements)), which names the site. That holds for an id
+refused as `E_INVALID_PLACE_ID` too: the second row sharing it gets `E_DUPLICATE_PLACE_ID` beside
+its own `E_INVALID_PLACE_ID`, so renaming both rows to one usable id raises nothing new. A `place`
+row sharing its `id=` with any other row of that body, such as a `connect`, is still
+`E_DUPLICATE_ID`. So are two `place` rows indented under one row, which are not in that body.
 
 `E_DUPLICATE_SELECTOR` compares selectors by meaning, not by text: attribute order does not count,
 and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
 Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
 partly overlap (see [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)).
+`E_DUPLICATE_SELECTOR` is an error even while selector bindings are reserved
+([§11.3](#113-error-vs-warning)).
 
 `E_DUPLICATE_ITEM` treats `theme` / `def` / `struct` / `site` as four separate namespaces, so one
 name may appear once in each. For the first three the first declaration resolves and the rest bind
@@ -54,7 +68,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes. |
 | `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
-| `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
+| `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
@@ -67,6 +81,14 @@ compose to the strictest across every line, so a second one adds a constraint ([
 `E_MISPLACED_MEMBER` fires on a `place` / `connect` inside a `struct` or `def`, or a geometry
 keyword among a `site`'s rows. It is reported once at the offending row, and anything indented
 under it goes with it.
+
+It also fires on a `circuit` line under a `level`, directly or through `level`s nested in it. A
+reservation spans the whole scope, so place-and-route reads a `circuit` line only among the
+`struct`'s or `def`'s own members ([§14.5](/spec/redstone/#145-place-and-route)), and one under a
+`level` reserves nothing. `E_DUPLICATE_CIRCUIT` counts only the body's own members, so it does not
+report that line as well. A `level` that groups nothing, such as one inside another, is
+`E_UNSUPPORTED_NESTING` as well: that finding is about the blocks its members lose, and a `circuit`
+line writes none.
 
 `E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, and a `site`
 body is a flat list. Reported once per dropped subtree, at its root.
@@ -81,46 +103,46 @@ endpoint that is not a one-dot `PLACE.PORT` reference. The two endpoints are rep
 since they are independent fix sites.
 
 `E_INVALID_REQUIRES`: the accepted shape is an optional edition, `version`, `>=`, and a version
-label, with whitespace optional. The code covers a word before `version` that is not an edition,
-any other operator, a missing version, a component that does not begin with a digit or does not fit
-in a `u32`, a `-` with no readable pre-release tag after it, and text after the version. It does
-*not* cover a well-formed label the target edition has no `DataVersion` for — that is
+label, with whitespace optional. The code covers a word before `version` that is not an edition, any
+other operator, a missing version, a component that does not begin with a digit or does not fit in a
+`u32`, a `-` with no readable pre-release tag after it, and text after the version. It does *not*
+cover a well-formed label the target edition has no `DataVersion` for; that is
 `E_REQUIRES_UNORDERABLE`, and it is not a syntax fact. Both spellings of the floor are checked, and
 by the same rule: the `@requires` header, and the member-level `requires` line a `def` or a `theme`
 may carry ([§10.4](/spec/versioning-editions/#a-part-may-declare-its-own-floor)). A part no build
-instantiates is checked too — the mistake is in the line, not in whether anything reads it.
+instantiates is checked too, because the mistake is in the line, not in whether anything reads it.
 
-`W_INVALID_CAIRN_VERSION`: the accepted shape is `YYYY.M` or `YYYY.M.PATCH` — a four-digit year, a
+`W_INVALID_CAIRN_VERSION`: the accepted shape is `YYYY.M` or `YYYY.M.PATCH`: a four-digit year, a
 month `1 … 12`, and an optional patch, every component decimal digits. A leading zero on the month
 is accepted and does not change it: `2026.06` and `2026.6` are one version, the first being
 calver.org's `YYYY.0M` and the second the `YYYY.M` a Cargo `version` field can carry. The code
-covers a value that is not two or three components, a component that is empty or not digits, a
-year that is not four digits, a month outside the calendar, a patch past `u32`, and a second word
-after the version — the header value is a whole line, so `@cairn 2026.6 draft` names a version and
-then something else.
+covers a value that is not two or three components, a component that is empty or not digits, a year
+that is not four digits, a month outside the calendar, a patch past `u32`, and a second word after
+the version. The header value is a whole line, so `@cairn 2026.6 draft` names a version and then
+something else.
 
 This is deliberately stricter than `@requires`, which reads a Minecraft label out of Mojang's
 namespace and only has to order it, so a component there need only *begin* with a digit and a
 pre-release tag is a label too. `@cairn` names Cairn's own version, so every component is digits,
 `2026.13` is a month that does not exist and `1.2` is a semver rather than a year.
 
-`W_FUTURE_CAIRN_VERSION` is the one thing a compiler can usefully say about a file written against
-a language newer than itself: a keyword or argument added after this build is reported as
+`W_FUTURE_CAIRN_VERSION` is the one thing a compiler can usefully say about a file written against a
+language newer than itself: a keyword or argument added after this build is reported as
 `E_UNKNOWN_KEYWORD` or `E_UNKNOWN_ARGUMENT`, and only the header knows those findings may be about
 the version gap rather than about the lines they name. That reaches what a later language adds
-*within* the shapes this one has. A whole new syntactic form — a directive, a top-level item — is
-`E_PARSE`, and parsing precedes every check pass ([§11.3](#113-error-vs-warning)), so this finding
-cannot appear in the case the version gap explains best.
+*within* the shapes this one has. A whole new syntactic form, such as a directive or a top-level
+item, is `E_PARSE`, and parsing precedes every check pass ([§11.3](#113-error-vs-warning)), so this
+finding cannot appear in the case the version gap explains best.
 
-There the header is read out of the text — one line, matched by a leading `@cairn` and read to end
-of line — and `E_PARSE` carries a note saying the file declares a later language than the build
+There the header is read out of the text as one line, matched by a leading `@cairn` and read to end
+of line, and `E_PARSE` carries a note saying the file declares a later language than the build
 reading it. A note rather than a second finding, because a source that does not parse reports
 `E_PARSE` alone and that stays true. Only a value that reads as a version earns it: a malformed one
 is `W_INVALID_CAIRN_VERSION`'s business, and repeating that on an unrelated parse failure would be
 noise.
 
-The two codes never both fire on one directive — a value that is not read as a version has no
-version to compare.
+The two codes never both fire on one directive: a value that is not read as a version has no version
+to compare.
 
 ### Materials and targets
 
@@ -134,73 +156,104 @@ version to compare.
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
-| `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
+| `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
 | `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
-| `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member in the file. |
+| `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member of the scopes the theme is bound to. A theme no scope binds is not checked. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
-| `W_NO_THEME_BOUND` | A scope has no theme bound to it, so every `mat_slot=` member in it lowers to air. |
+| `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
+| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned edition has no form for, such as a stair's `shape` on Bedrock; one line per entry ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
+| `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members the previous lock's `member_version_sensitivity` lists, as ones that may resolve differently at the new target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). No lock the compiler writes lists any yet, since no constraint catalog ships, so a build over one does not raise it today. |
 
-`E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only the
-commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, and `cairn check
---edition E --target V`. `E_UNKNOWN_ID` further needs a pinned target, so the two commands that
-raise it are `cairn compile --target` and `cairn check --edition E --target V` — `info` and
-`lower` lower against no version. A `cairn check` with no `--target` runs no lowering at all and
-reaches neither code.
+The last three are `cairn compile`'s alone: they are about the artifact and the lock it writes, so
+they carry no span and no other command raises them.
+
+`E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which `cairn
+compile`, `cairn lower`, `cairn info` and `cairn check` all run, as does the language server.
+`E_UNKNOWN_ID` further needs a pinned target, so three commands raise it: `cairn compile --target`,
+`cairn check --edition E --target V`, and `cairn info`, which lowers once per supported version for
+its `buildable targets` row and prints each refusing version's findings under `note: <edition>
+<version> refuses this source`, exiting 0 all the same ([Versioning and
+Editions](/spec/versioning-editions/#the-buildable-targets-row)). `lower` lowers against no version,
+as does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
+check` with no `--target`, and the language server, lower with no target at all, so they raise
+`E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
+`E_UNKNOWN_ID` ([§11.3](#113-error-vs-warning)).
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering, on every state literal it reads from a
-theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info` and `cairn check
---edition E --target V` report it under either edition. It stands in for `E_STATE_DOMAIN`: until
-the compiler holds a table of each block's states, a property the block lacks or a value outside
-its domain is written into the structure file unchanged, and the warning is what keeps that from
-being silent.
+theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info`, `cairn check`
+with or without `--target`, and the language server report it under either edition. It stands in
+for `E_STATE_DOMAIN`: until the compiler holds a table of each block's states, a property the block
+lacks or a value outside its domain is written into the structure file unchanged, and the warning
+is what keeps that from being silent.
 
 `cairn check --target` exists so a CI job can gate on the check command and still see the
-lowering-stage findings a compile would refuse on: an id the target does not declare passed
-`check` at exit 0 and stopped `cairn compile` at exit 1, and the information that decides it — the
-one `(edition, version)` pair — was not on `check`'s command line. It requires `--edition` for the
-reason [Compilation Model §4.2](/spec/compilation/#42-target-axes) refuses `--target` alone, and runs the
-same lowering pass against the same table `compile` does, so a lost scope earns the same
-`E_PARTIAL_BUILD`. What it does not do is anything `compile` writes: no artifact, no lockfile, and
-no `@requires` floor enforcement — a lock certifies a build, and only the command that produces
-one holds `--target` to the floors (`E_VERSION_CAP`). Leaving the flag off is unchanged behaviour,
-so no source that passes today starts failing. See
-[Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
+lowering-stage findings a compile would refuse on. Without it, an id the target does not declare
+passes `check` at exit 0 and stops `cairn compile` at exit 1, because the information that decides
+it, the one `(edition, version)` pair, is not on `check`'s command line. It requires `--edition` for
+the reason [Compilation Model §4.2](/spec/compilation/#42-target-axes) refuses `--target` alone, and
+runs the same lowering pass against the same table `compile` does at any target the file's floors
+let through, so a lost scope earns the same `E_PARTIAL_BUILD`. What it does not do is anything
+`compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement. A lock certifies a
+build, and only the command that produces one holds `--target` to the floors (`E_VERSION_CAP`). So
+at a target the floors refuse, the two commands name different causes: `check` pins the target and
+reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty, while
+`compile` checks no id and reports the floor ([Versioning and
+Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Leaving the flag off still
+lowers, with no target, and reports only the findings every target that reads their line raises
+([§11.3](#113-error-vs-warning)). See [Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
 family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
-placement naming it is still refused. A module that declares such a theme but never reads a
-`mat_slot=` from it is not reported: the build is byte-identical with or without the pin.
+placement naming it is still refused, whatever its `def` reads: a `place`'s `theme=` binds the
+theme, the lockfile records the bound theme for the placement, and the theme's floor applies once it
+is bound ([Versioning and Editions](/spec/versioning-editions/#a-part-may-declare-its-own-floor)).
+A module that names such a theme in no `place`, and whose `struct` and `def` members read no
+`mat_slot=` from it, is not reported: the build is byte-identical with or without the pin. A
+`mat_slot=` on a keyword that reads none, such as a `door`'s, is not such a read
+([§11.3](#113-error-vs-warning)).
 
 `E_THEME_SELECTOR_UNMATCHED` is a warning despite its prefix. A rule that matches nothing overrides
 nothing, so every member keeps the material it would have had with the rule deleted; the finding is
 about the author's intent rather than about what was built. The prefix is part of the code string,
-which is Stable ([Compatibility Tiers](/spec/compatibility/)), so it stays as written — read severity from
-the `severity` field rather than from the first letter.
+which is Stable ([Compatibility Tiers](/spec/compatibility/)), so it stays as written. Read severity
+from the `severity` field rather than from the first letter.
 
-`E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: a slot bound to nothing lowers every
-`mat_slot=` pointing at it to air, so a theme whose slots are all mistyped builds a hollow shell of
-the requested extent at exit 0.
+`E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: no `mat_slot=` pointing at a slot bound to
+something other than a material token resolves. A `floor` that names it is left air; a `walls` that
+names it is not built and takes up no rows, so a `door` or `window` cut into it is deferred; a
+`window` that names it is not cut, so its wall stays; and a `roof`, eave `stair` or `pressure_plate`
+that names it is built from its default block. Were it a warning, a theme whose slots are all
+mistyped would still build at exit 0 every scope that keeps something to draw, such as a `roof`:
+shorter than asked, with no floor and no walls, and only default blocks, less any eave `stair` or
+`pressure_plate` set higher than the shorter structure reaches.
 
-`E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member
-earns both: the key is absent for the first and present-but-unusable for the second. They have
-different repairs, which is why they are different codes — the same division `E_INCOMPLETE_PLACE`
-and `E_TYPE_MISMATCH_LABEL` draw on a `place` row.
+`E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member earns
+both: the key is absent for the first and present-but-unusable for the second. They have different
+repairs, which is why they are different codes: the same division `E_INCOMPLETE_PLACE` and
+`E_TYPE_MISMATCH_LABEL` draw on a `place` row. The split is drawn on the keywords that read a
+`mat_slot=`. On one that reads none, neither half applies: nothing would read the key, so its
+absence is not reported, and its name is not looked up, so a label written there is
+`W_IGNORED_ARGUMENT` whatever slot it names ([§11.3](#113-error-vs-warning)).
 
-`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and
-`walls` reach the palette through the applied theme's slot map and have no default block, so a
-bare one contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air,
-and is not reported — that is how a narrow slit is punched through a wall without choosing a
-species for it; a `door` is always a carve and reads no material at all. A `roof`, `stair` or
-`pressure_plate` paints a default block and is not reported either. `cairn check` raises it, before any lowering, and it needs no theme: a module
-that declares none is still told which of its members name no material.
+`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and `walls`
+reach the palette through the applied theme's slot map and have no default block, so a bare one
+contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
+reported; that is how a narrow slit is punched through a wall without choosing a species for it. A
+`door` carves its opening and reads no material, since its own block is not placed yet. A `roof`,
+`stair` or `pressure_plate` paints a default block and is not reported either. `cairn check` raises
+it, before any lowering, and it needs no theme: a module that declares none is still told which of
+its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
 resolved once as its own scope and once again for every `place` that instantiates it, and each of
@@ -211,46 +264,62 @@ two of them can bind the same theme and still judge the slot differently.
 
 The difference is edition-variant softening. Without an `--edition` pin, a slot that any sibling
 variant of the picked theme declares counts as known and is not reported: the concrete binding is
-edition-specific and comes into scope only once a pin narrows the theme to one variant
-([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). A
-`place ... theme=NAME` is softened the same way only when `NAME` names the logical theme — naming
-a variant asks about that variant's slots alone. Two placements can therefore bind one theme and
+edition-specific and comes into scope only once a pin narrows the theme to one variant ([Versioning
+and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). A `place ...
+theme=NAME` is softened the same way only when `NAME` names the logical theme, because naming a
+variant asks about that variant's slots alone. Two placements can therefore bind one theme and
 disagree about one slot.
 
-A `def` nothing places is still resolved, against the theme the module picks, so a file of defs
-and no `site` is checked as long as the module has a single logical theme to pick. Where it
-declares more than one — or none at all — no theme binds to the def's own scope and its
-`mat_slot=` names are not judged until a `place` chooses one.
+A `def` nothing places is still resolved, against the theme the module picks, so a file of defs and
+no `site` is checked as long as the module has a single logical theme to pick. Where it declares
+more than one, or none at all, no theme binds to the def's own scope and its `mat_slot=` names are
+not judged until a `place` chooses one.
 
 `E_INCOMPLETE_PLACE` names every key the row is short of, and the row is dropped from the build.
 
 `E_UNKNOWN_ABSTRACT_TOKEN` and `W_ABSTRACT_TOKEN_DEFERRED` differ on whether anything could have
 answered. A pack was offered and does not declare the token, so the build stops with a suggestion
-towards the closest one it does declare; no pack was offered, so nothing was asked and the cell
-degrades to air with a warning. The second is the path a library caller reaches — LSP highlighting,
-or a `cairn check` with no pack — and it is a warning for that reason: refusing there would refuse
-every source read without a pack.
+towards the closest one it does declare; no pack was offered, so nothing was asked and the member
+degrades with a warning. The second is the path only a library caller reaches, by lowering with no
+pack at all, and it is a warning for that reason: refusing there would refuse every source read
+without a pack. A front end with no target (the language server, or a `cairn check` with no
+`--target`) raises neither, and leaves the token to the pack of the target that builds it
+([§11.3](#113-error-vs-warning)).
+
+The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
+or `pressure_plate` is built from its default block. A `walls` is not built and takes up no rows, so
+a `door` or `window` cut into it is deferred. A `window` is not cut, so its wall stays, and a port on
+it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
-all has no slot map to read, so the member contributes no voxel. A module that binds no theme and
-reads no `mat_slot=` is not reported.
+all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
+or takes up rows, so no `door` or `window` is cut and the structure is shorter than asked. A `floor`
+leaves its cells air, and a `roof` is still built from its default block, as is an eave `stair` or
+`pressure_plate` that still fits the shorter structure; one set higher than it reaches is deferred.
+It is judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported,
+whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a
+`door`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
+([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
+nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
+is `E_UNSUPPORTED_NESTING`.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
-([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version
-the edition cannot build is `W_INTENDED_TARGET_UNSUPPORTED` and is not also weighed against a floor:
-"this target does not exist here" is what the author acts on, and a cap beside it would send them to
-edit a line that is not what stops the build. The rest — the versions the edition *can* build — are
-counted among themselves: *every* one of them below a floor is `E_INTENDED_TARGET_CAP`, since the
-file can then be built for nothing it says it is for and the first `cairn compile --target` naming
-any of them is `E_VERSION_CAP`, while *some* of them is `W_INTENDED_TARGET_CAP`, because the header
-is a hint ([§5.3](/spec/syntax/#53-headers)) and the versions above the floor still build. A version that
-was never buildable is not in that count either way: it answers for none of the list, and letting it
-would report a file nothing can build as half a problem. One header can earn a cap code and the
-unsupported code at once; the versions it names are not all wrong in the same way.
+([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A
+version the edition cannot build is `W_INTENDED_TARGET_UNSUPPORTED` and is not also weighed against
+a floor: "this target does not exist here" is what the author acts on, and a cap beside it would
+send them to edit a line that is not what stops the build. The rest, the versions the edition *can*
+build, are counted among themselves. *Every* one of them below a floor is `E_INTENDED_TARGET_CAP`,
+since the file can then be built for nothing it says it is for and the first `cairn compile
+--target` naming any of them is `E_VERSION_CAP`. *Some* of them is `W_INTENDED_TARGET_CAP`, because
+the header is a hint ([§5.3](/spec/syntax/#53-headers)) and the versions above the floor still
+build. A version that was never buildable is not in that count either way: it answers for none of
+the list, and letting it would report a file nothing can build as half a problem. One header can
+earn a cap code and the unsupported code at once; the versions it names are not all wrong in the
+same way.
 
 All three are per-edition answers, since a floor and a target label are ordered in one edition's
-`DataVersion` table. Every command that gates on `cairn check` reports the two cap codes — `check`,
-`info`, `lower`, `compile`, `synth` — each weighing the header in the tables of the editions it is
+`DataVersion` table. Every command that gates on `cairn check` (`check`, `info`, `lower`, `compile`,
+`synth`) reports the two cap codes, each weighing the header in the tables of the editions it is
 about: the one `--edition` names, the ones `cairn info --editions` lists, or both where the command
 names none. A finding either edition reaches is reported, because the contradiction is between two
 lines of the file however it is later built; one span carries one cap finding, and two editions
@@ -262,12 +331,14 @@ author means, so with both in scope the question has not been asked.
 
 | Code | Meaning |
 |---|---|
-| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\` or whitespace. |
+| `E_INVALID_PLACE_ID` | A `place id=` is empty, carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character, or is a device name Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
+| `E_INVALID_STRUCT_NAME` | A `struct` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
-| `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_INVALID_PLACE_ORIGIN` | A `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
+| `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
 | `W_UNUSED_DEF` | A `def` no `place use=` references. |
 
 `E_INVALID_PLACE_ID` is about round-tripping rather than taste. The scope key
@@ -275,12 +346,42 @@ author means, so with both in scope the question has not been asked.
 separators, so an id carrying one cannot be read back. The id is also the name of the file the
 placement is written to in the output directory, and a `/` or `\` would make that name a path: a
 relative id with one lands in a subdirectory, and an absolute id replaces the output directory
-altogether. Both separators are refused on every platform, so whether an id is accepted does not
-depend on the host that checks it. `id=` accepts a string literal, which is what let the value
-through.
+altogether. `*`, `|`, `?`, `<`, `>`, `"` and the control characters U+0000 to U+001F cannot appear
+in a Windows file name, so an id carrying one would build on Linux and fail to be written on
+Windows. Microsoft's naming rules also reserve a set of device names, whatever extension follows:
+`CON`, `PRN`, `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, and `COM¹`, `COM²`, `COM³`, `LPT¹`,
+`LPT²` and `LPT³`, whose superscripts count as digits, each in any letter case. A Windows release
+that applies those rules opens `CON.nbt` as the console rather than as a file. Both are refused on
+every platform, so whether an id is accepted does not depend on the host that checks it. The other
+control characters, U+007F to U+009F, are legal in a Windows file name and are refused on their own
+ground: they print as nothing or move the terminal cursor, so a finding that quotes the id could
+not show it. `id=` accepts a string literal, which is what let the value through.
+
+A `struct` is written under its own name ([§9.3.4](/spec/components-editing-sites/#934-output-naming)),
+so one named after a device is `E_INVALID_STRUCT_NAME`, for the same reason and in any letter
+case. A struct name is a bare identifier, so none of the characters above can reach it. Neither a
+site name nor a port id is refused for spelling a device name: each is only ever one part of a
+walkway's file name, such as `hamlet_walkway_home1_entry__home2_entry`, and Windows reads a file as
+a device only when the part of its name before the extension is the device's whole name.
+
+A later `east_of=` / `north_of=` naming the id of a row refused with `E_INVALID_PLACE_ID` still
+means that row, so it is not `E_UNRESOLVED_PLACE_REF`, which would send the author looking for a
+typo. It is `W_DEFERRED_PLACE`: the row naming the refused one is not placed either, since what it
+is placed against has no position, and the note points at the refused row, where the repair is.
+Renaming that row's id means renaming the reference with it. It is a warning for the reason
+`W_DEFERRED_CONNECT` is: the build already fails on the refused row, and a second error would send
+the author to a line that names the row it means. A `connect` endpoint naming the refused row is
+`W_DEFERRED_CONNECT`, whose note likewise points at the refused row. A reference above the refused
+row names no prior place, as it would for any other id, and is `E_UNRESOLVED_PLACE_REF`.
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
+
+`W_UNUSED_DEF` counts every `place` row in a `site` body whose `use=` names the def, including a row
+refused for its id or its origin. That row does reference the def, and the finding with the repair
+is the one on the row: removing the def, as the warning would advise, only brings it back as
+`E_UNRESOLVED_PLACE_REF` once the row is fixed. A `use=` that is not an identifier or string
+(`use=3`) names no def, so it is not counted.
 
 `E_OUTPUT_NAME_COLLISION` follows from how artifacts are named
 ([§9.3.4](/spec/components-editing-sites/#934-output-naming)): a `struct` by its name, a `place` by
@@ -305,22 +406,23 @@ something for the name would build a site the source did not describe.
 
 | Code | Meaning |
 |---|---|
-| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port the referenced def does not expose. |
+| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
-| `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
-| `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
+| `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, or a `path=` that is not a material token (`path=gravel` for `path=@gravel`), so the walkway has no material to lay. |
+| `W_DUPLICATE_WALKWAY` | A `connect` joins the same two ports, in either order, as an earlier row in the same site that already laid them. |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port identifier in a `connect` contains `__`, or a place or port identifier starts or ends with `_`. |
 | `W_DEFERRED_CONNECT` | A `connect` targets a `place` that was itself refused, so there is nothing to connect. |
-| `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped. |
+| `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped, or the straight L alone is past the router's 4,000,000-cell search-area cap and the walkway was not laid. |
 
 `E_UNRESOLVED_PORT` is the port half of the `place.port` shape alone; the place half is
 `E_UNRESOLVED_PLACE_REF`. `E_AMBIGUOUS_PORT` takes the first match for lowering and reports the
 collision, since the repair is to rename one of the colliding members rather than to pick for the
 author.
 
-`E_MISSING_PATH_MATERIAL` is an error where the other absent-material codes are warnings: a walkway
-that degrades to air leaves two buildings looking connected in the source and unconnected in the
-world, with nothing in the report to say so.
+`E_MISSING_PATH_MATERIAL` is an error, as `E_MISSING_MATERIAL` is, where `W_NO_THEME_BOUND` and
+`W_ABSTRACT_TOKEN_DEFERRED`, a material named with nothing to resolve it against, are warnings: a
+walkway that degrades to air leaves two buildings looking connected in the source and unconnected in
+the world, with nothing in the report to say so.
 
 `W_INVALID_WALKWAY_IDENT` is the same round-trip rule as the `.` / `:` half of
 `E_INVALID_PLACE_ID`, on a different separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
@@ -335,20 +437,24 @@ from the edge rule, since `::` separates it from both neighbours. The row is dro
 names the segment to rename. The walkway it asked for is lost, so `cairn compile` refuses the build
 with `E_PARTIAL_BUILD`, as it does for every row that lays nothing.
 
-`W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
-failed origin selector, an unresolved `use=` or `theme=`. It is a warning because the finding that
-has the repair is the one on the `place`, and reporting the `connect` as a second error would send
+`W_DEFERRED_CONNECT` follows whatever refused the `place`: an incomplete row, a mistyped key, an id
+refused with `E_INVALID_PLACE_ID` (the note then points at that row), a failed origin selector, an
+origin naming a row refused for its id (`W_DEFERRED_PLACE`, whose note leads on to that row), an
+unresolved `use=` or `theme=`. It is a warning because the finding that has the repair is the one on
+the `place`, or the one its note points at, and reporting the `connect` as a second error would send
 the author to a line that is correct.
 
 ### Lowering
 
 | Code | Meaning |
 |---|---|
-| `W_DEFERRED_MEMBER` | A member the block-array pass does not lower, so the scope builds without it. |
+| `W_DEFERRED_MEMBER` | A member, or part of one, the block-array pass leaves out because another member did not build or because the pass does not lower what its line writes yet. |
+| `E_INVALID_MEMBER` | A member its own line keeps the block-array pass from building, whatever the rest of its struct builds. |
 | `W_STRUCT_NO_SIZE` | A `struct` declares no `size=WxH`, so lowering can derive no extent and skips it. |
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
-| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](/spec/compilation/)). |
+| `W_PALETTE_TOO_LARGE` | A scope paints more than 65,535 distinct block states besides air, past what one palette can index. |
+| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). |
 | `E_PARTIAL_BUILD` | At least one requested scope, or a walkway a `connect` row asked for, did not lower, so the run produced less than was asked for. |
 
 `W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
@@ -356,63 +462,119 @@ on `code` can tell a struct that will not build from a template that will not in
 
 `W_STRUCTURE_TOO_LARGE` fires on a *combination*: `size=`, `walls height=`, `roof overhang=` and
 `level y=` are each range-checked on their own, and this is the product of them being out of reach.
-A warning rather than an error, matching the two above — the scope is skipped and the rest of the
-build is unaffected.
+It is a warning rather than an error, matching the two above: the scope is skipped and the rest of
+the build is unaffected.
+
+`W_PALETTE_TOO_LARGE` is the same kind of limit on what a scope paints rather than where. Every
+state a member writes counts, including one a later member covers, so the limit is on the states
+written rather than the states the finished scope keeps. A vanilla registry has far fewer states, so
+a source reaches it only through block ids or state-literal properties no pinned target checks.
+Block ids go unchecked wherever lowering runs with no version pinned: in `cairn lower`, the
+range-wide lowering behind `cairn info`'s report, the language server and a `cairn check` with no
+`--target`, in a `cairn compile` or `cairn check --edition E --target V` naming a version the
+edition does not ship, and in a `cairn compile` whose target the file's floors refuse ([Versioning
+and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state literal's
+properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says ([Materials and
+targets](#materials-and-targets)), so every command that lowers can reach the limit, `cairn compile`
+with a target that resolves among them. A warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
-the scope lowers, and the finding names what is missing from it.
+the scope lowers, and the finding names what is missing from it. In a struct body it covers three
+things, and in none of them does the member's own line keep it from being built. A member another
+member keeps out: a `door` or `window` in a course whose `walls` paint nothing or beside `walls`
+under a `level` that is not placed, or an eave `stair` beside a `roof` that draws nothing. A member
+whose line writes what the pass does not lower yet: a `floor` or `roof` under a raised `level`, a
+`window` with `repeat=` above 1 and a `sym=` that is `true` or unreadable, or a `pressure_plate`
+whose slot binds a state literal. And part of a member that is built: the mirror of a `sym=true`
+window that would overlap it, or the states a `mat_slot=` binding carries onto a roof that takes its
+own. The `place` and `connect` rows of a site it covers are in [Components, Editing, and
+Multi-building](/spec/components-editing-sites/).
 
-`E_PARTIAL_BUILD` is the run-level counterpart, and the one error among these: a warning above says
-a scope builds without something, and this says a scope the command was asked for did not build at
-all. A scope that lowers to air alone did not build either, whatever left it empty: every member
-deferred, no theme gave its `mat_slot=` members a block, or it declares no member. It is reported
+`E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
+([§11.3](#113-error-vs-warning)): the member is dropped with nothing in its place, and the
+incomplete side is its own line rather than the compiler. A line does that with an argument the
+member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose `y=`
+is not a non-negative integer, `walls` with no positive `height=`), a value outside the ones its key
+takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair` whose `half=` is an
+identifier other than `top` or `bottom`), or arguments that put it outside its struct as written: a
+`window` past the end of its wall, a `door` or `window` whose rows no course of the walls holds, an
+eave `stair` above the struct or on one where no `roof` has an `overhang=` of at least 1. The struct
+as written is every member at the size its line asks for, whether or not it builds: a `roof` that
+draws nothing still rises and overhangs as its line says, and an unreadable value counts as the
+default its `W_IGNORED_ARGUMENT` puts in its place. A `roof` whose `kind=` or `slope_to=` does not
+read may rise as far as any roof on its footprint, and `walls` under a `level` that is not placed
+may hold any row, so a member only they could hold is deferred to them. A `circuit` line that
+reserves no region and an actuator patch that binds no door are refused the same way. [Redstone
+§14.2](/spec/redstone/#142-signal-binding) lists the lines that put a `pressure_plate` nowhere, and
+for a plate the drop reaches past the block array as well: its `->` binding is still read, so its
+signal stays in the netlist with no plate to drive it, and the finding says so in a note.
+
+A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with
+a note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws
+nothing, or a `level` that is not placed. That member's finding, or the scope's
+`W_NO_THEME_BOUND`, says why it did not build. A member whose line is wrong too is
+`E_INVALID_MEMBER` all the same, and so is one whose line also writes what the pass does not lower
+yet, so neither hides a line's own fault. The members under a `level` that is not placed are the
+exception: `E_UNSUPPORTED_NESTING` says that level produces no blocks, and their own lines are read
+once it is placed.
+
+`E_PARTIAL_BUILD` is the run-level counterpart: a finding above says a scope builds without
+something, and this says a scope the command was asked for did not build at all. A scope that
+lowers to air alone did not build either, whatever left it empty: every member deferred or
+refused, no theme gave its `mat_slot=` members a block, or it declares no member. It is reported
 once for the run, naming how many of the requested scopes were lost, by `cairn compile` and by a
 `cairn check --edition E --target V` that runs the same lowering pass.
 
-`W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation Model](/spec/compilation/)
-grants last-wins to local overrides within one phase, which is what an author restating a member
-is; two footprints that happen to intersect is not, and the grid cannot tell the two apart. The
-resolution the spec mandates still happens — the finding says which voxel it happened at.
+`W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation
+Model](/spec/compilation/) grants last-wins to local overrides within one phase, which is what an
+author restating a member is; two footprints that happen to intersect is not, and the grid cannot
+tell the two apart. The resolution the spec mandates still happens, and the finding says which voxel
+it happened at.
 
 ### Truth tables
 
 | Code | Meaning |
 |---|---|
 | `E_TRUTH_TABLE_EMPTY` | An `assert truth(...)` with no rows, or none whose output is `0` or `1`. |
+| `E_TRUTH_TABLE_DUPLICATE_INPUT` | An `assert truth(...)` lists one signal as two or more of its inputs. |
 | `E_TRUTH_TABLE_CONFLICT` | Two rows assign the same input combination different outputs. |
 | `W_TRUTH_TABLE_DUPLICATE_ROW` | Two rows cover the same input combination without contradicting each other. |
 | `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
 
-Both codes are reported on the later row. A row is compared with every earlier row that shares a
-combination with it, so whether a table is refused does not depend on the order its rows are
-written in: `0- -> 1` after `00 -> 1; 01 -> 0` is `E_TRUTH_TABLE_CONFLICT`, though it agrees with
-the first of the two. A conflict takes precedence over a duplicate on the same row, and its note is
-at the first row assigning the combination it names the other output. Any other finding's note is
-at the first row assigning the combination it names, so every finding about one combination points
-at the same row. The spec does not say which of two conflicting rows an evaluator would read,
-because the repair is to decide which row is wrong.
+`E_TRUTH_TABLE_DUPLICATE_INPUT` is reported on the whole `assert`, once per repeated signal, and no
+other truth-table code is raised for that table: every other one reads the rows against an input
+list that is wrong, so the rest of the table is left until the list names each signal once.
 
-A `-` makes the same combination reachable from rows that do not look alike, so both codes are
-about the combination rather than about the pattern: `0-` and `-1` both assign `01`. The fix
-differs with the shape. A row inside an earlier one — `01` under `0-` — is deleted. Two rows that
-merely cross are narrowed, because deleting either would lose the combinations only it assigns.
-When the earlier row is itself reported for overlapping a row before it, the fix is to settle that
-row first instead: in `0- -> 1; -0 -> 1; 10 -> 1`, `-0` is told to narrow away from `0-`, and
-deleting `10` because `-0` stands for it would, together with that, leave `10` unassigned.
+`E_TRUTH_TABLE_CONFLICT` and `W_TRUTH_TABLE_DUPLICATE_ROW` are reported on the later row. A row is
+compared with every earlier row that shares a combination with it, so whether a table is refused
+does not depend on the order its rows are written in: `0- -> 1` after `00 -> 1; 01 -> 0` is
+`E_TRUTH_TABLE_CONFLICT`, though it agrees with the first of the two. A conflict takes precedence
+over a duplicate on the same row, and its note is at the first row assigning the combination it
+names the other output. Any other finding's note is at the first row assigning the combination it
+names, so every finding about one combination points at the same row. The spec does not say which of
+two conflicting rows an evaluator would read, because the repair is to decide which row is wrong.
+
+A `-` makes the same combination reachable from rows that do not look alike, so both codes are about
+the combination rather than about the pattern: `0-` and `-1` both assign `01`. The fix differs with
+the shape. A row inside an earlier one, such as `01` under `0-`, is deleted. Two rows that merely
+cross are narrowed, because deleting either would lose the combinations only it assigns. When the
+earlier row is itself reported for overlapping a row before it, the fix is to settle that row first
+instead: in `0- -> 1; -0 -> 1; 10 -> 1`, `-0` is told to narrow away from `0-`, and deleting `10`
+because `-0` stands for it would, together with that, leave `10` unassigned.
 
 A `-` **output** is the one shape that is neither a conflict nor a repeat: the row declines to
-constrain its combinations, so there is nothing for a concrete output to contradict, and nothing
-for it to agree with either. The pair is `W_TRUTH_TABLE_DUPLICATE_ROW`, and its fix names the
-asymmetry — whichever of the two rows is deleted, the table reads differently afterwards. A table
-with rows but no `0` or `1` output among them constrains nothing, which is why
-`E_TRUTH_TABLE_EMPTY` covers it too; the sentence differs from the no-rows one, because the repair
-is to change a row rather than to add one.
+constrain its combinations, so there is nothing for a concrete output to contradict, and nothing for
+it to agree with either. The pair is `W_TRUTH_TABLE_DUPLICATE_ROW`, and its fix names the asymmetry:
+whichever of the two rows is deleted, the table reads differently afterwards. A table with rows but
+no `0` or `1` output among them constrains nothing, which is why `E_TRUTH_TABLE_EMPTY` covers it
+too; the sentence differs from the no-rows one, because the repair is to change a row rather than to
+add one.
 
 The two warnings are warnings because every row present is still a real constraint. One table can
 earn both `W_TRUTH_TABLE_DUPLICATE_ROW` and `W_TRUTH_TABLE_PARTIAL`: a repeated row, or one inside
 an earlier one, fills no combination the table did not already have. Two rows that cross are the
-exception — the coverage finding is withheld there, because a count taken without the later row
-would name a combination the table does assign.
+exception: the coverage finding is withheld there, because a count taken without the later row would
+name a combination the table does assign.
 
 ### Semantic categories
 
@@ -430,22 +592,42 @@ Beyond the codes above, lint covers:
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
+Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
+and no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
+holds only in part: a door, window, eave stair or pressure plate its own line puts outside its
+struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
+keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
+`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
+pinned target does not declare, and `W_INTENT_DEGRADED` names what an edition cannot carry, while a
+state literal goes unchecked (`W_STATE_LITERAL_UNCHECKED`) and no entity schema is checked. The
+redstone row runs only in part as well: the truth-table codes check a table against itself, nothing
+simulates the circuit, and routing congestion is `E_ROUTE_CONGESTION`, which only the Internal-tier
+`cairn synth --experimental-logic-synth` reaches.
+
 ### "did you mean"
 
-Three diagnostics reject an identifier against a closed vocabulary: an unknown keyword, an unknown
-`mat_slot=` name, and an unknown `--target` version. Each attaches a ``did you mean `X`?`` note when
-a candidate sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2
-for 4–6, and ≤ 3 beyond. The closed-set listing (`expected one of: ...`) is always printed as well.
+A diagnostic that rejects a name against a closed vocabulary attaches the nearest candidate when one
+sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2 for 4–6, and
+≤ 3 beyond. The names are a keyword, an argument key, a `mat_slot=` name, a place, def, theme or
+port reference, an abstract token, a `pressure_plate` side, a block id, and a `--target` version.
+The note reads ``did you mean `X`?``, with `X` written as the line would be (`home1.entry` for a
+port, `at=front.outside` for a plate); `E_UNKNOWN_ID` instead names the target's nearest block and
+carries it as `data.suggestion` ([§11.2](#112-machine-readable-payload)).
+
+An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
+...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
+reference, a token and a block id print no such list.
 
 ## 11.2 Machine-readable payload
 
-Every command that takes `--format json` — `check`, `info`, `parse` and `lower` — writes exactly one
-JSON document to stdout under it, for every input it is given. `check`'s document is an array of findings, so a source that does not parse is
-that array with one `E_PARSE` element. `info`'s is the report; where there is no report — a parse
-failure, or any error-severity finding — it writes `{"diagnostics": [ ... ]}` instead, told apart
-from a report by its keys and by the exit code. Which pass raised the finding does not change that:
-the strict per-edition dry-run sees what the edition-neutral gate unions away, and a refusal it
-raises writes the same document, after every requested edition has been walked.
+Every command that takes `--format json` (`check`, `info`, `parse` and `lower`) writes exactly one
+JSON document to stdout under it, for every source it can read. `check`'s document is an array of
+findings, so a source that does not parse is that array with one `E_PARSE` element. `info`'s is the
+report; where there is no report, after a parse failure or any error-severity finding, it writes
+`{"diagnostics": [ ... ]}` instead, told apart from a report by its keys and by the exit code. Which
+pass raised the finding does not change that: the strict per-edition dry-run sees what the
+edition-neutral gate unions away, and a refusal it raises writes the same document, after every
+requested edition has been walked.
 
 Which pass raised the finding does decide what the document carries, and this is the contract rather
 than an accident. Where the edition-neutral pass refuses, its warnings are elements of the document
@@ -456,9 +638,9 @@ that still has a report are reported as text on stderr in both formats.
 
 A run-level refusal is not an element of `check`'s array: an unshipped `--target` and a lowering
 that lost a scope (`E_PARTIAL_BUILD`) are facts about the command line and about the build rather
-than findings at a span, so both are reported on stderr and by the exit code in either format —
-the shape `compile` gives them. The array still carries every finding the run did reach, so it is
-a report of what was checked rather than an empty document.
+than findings at a span, so both are reported on stderr and by the exit code in either format, the
+shape `compile` gives them. The array still carries every finding the run did reach, so it is a
+report of what was checked rather than an empty document.
 
 This is settled rather than pending: `check --format json` has no machine-readable form for a
 run-level refusal, and a consumer reads the verdict from the exit code. Stderr is prose for a person
@@ -467,22 +649,21 @@ text rather than parse it. What the consumer can tell without it is *that* the r
 the run level rather than by a finding: an exit of `1` over an array that holds no element with
 `"severity": "error"` means exactly that, down to a `[]` over a source with nothing to report. A
 refusal can also arrive on a run that has error-severity findings of its own, and then the array
-reads like any other error failure; that the run was *also* refused at the run level is said only
-on stderr. No
-other failure reads that way — a source that does not parse is an array carrying `E_PARSE`, and a
-file that cannot be read writes no document at all. Which of the two refusals it was, and what the
-build lost, is said only on stderr.
+reads like any other error failure; that the run was *also* refused at the run level is said only on
+stderr. No other failure reads that way: a source that does not parse is an array carrying
+`E_PARSE`, and a file that cannot be read writes no document at all. Which of the two refusals it
+was, and what the build lost, is said only on stderr.
 
 One `info` refusal is a run-level refusal of the same kind: a palette carrying a blockstate a
 registry pack was expected to refuse costs that edition its portability row, and names no span in
 the source. Such a blockstate is either a leak in the pack or the compiler, which the author cannot
-repair, or a state literal on a stair in the source — a `facing` or `half` value outside the Java
-domain (`@oak_stairs[facing=up]`), or a key other than `facing` / `half` / `shape` — which nothing
-checks against the target until `E_STATE_DOMAIN` is implemented. The refusal names both. A literal
-on any other block is counted `unsupported` instead. It reads as prose on stderr in both formats.
-The document is still written — the promise is one document per input, not one element per
-refusal — so a run refused by nothing else writes `{"diagnostics": []}` and says the rest with its
-exit code.
+repair, or a state literal on a stair in the source (a `facing` or `half` value outside the Java
+domain such as `@oak_stairs[facing=up]`, or a key other than `facing` / `half` / `shape`), which
+nothing checks against the target until `E_STATE_DOMAIN` is implemented. The refusal names both. A
+literal on any other block is counted `unsupported` instead. It reads as prose on stderr in both
+formats. The document is still written, since the promise is one document per input, not one element
+per refusal, so a run refused by nothing else writes `{"diagnostics": []}` and says the rest with
+its exit code.
 
 `parse`'s product is the AST and `lower`'s is the block-array IR. A dump is not a report, so a
 failure is not the dump with a hole in it: each writes the same `{"diagnostics": [ ... ]}` document
@@ -506,17 +687,21 @@ dumping. Under every other `--format` the findings read as prose on stderr.
 
 `data` is an open object tagged with `kind`. Match on `(code, data.kind)` rather than parsing
 `primary`. Additions are strictly additive, so ignore unknown `kind` values rather than failing on
-them. Codes not listed below omit `data` entirely, so the JSON key is absent rather than `null`.
+them. A value added to a field the table below gives as one of a list is an addition too, so treat a
+value you do not know as you would an unknown `kind`. Removing or retyping a field, renaming a
+`kind`, or leaving out a field that was always present changes what the code means and is a break
+([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Codes not listed
+below omit `data` entirely, so the JSON key is absent rather than `null`.
 
 | Code | `data` payload |
 |---|---|
-| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. |
+| `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. Present when cells were dropped; absent when the walkway was past the router's cap and not laid. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`. See below. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`. The keys the row does not declare. Never empty. |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unknown_edition_scope`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `prerelease_not_a_tag`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
-| `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`. `reason` is one of `component_count`, `component_not_a_number`, `year_not_four_digits`, `month_out_of_range`, `patch_too_large`, `trailing_tokens`. `found` is the component the reason is about, and is empty when the failure names no fragment — `component_count`, and `component_not_a_number` on a value whose component is itself empty (`2026.`). |
+| `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`. `reason` is one of `component_count`, `component_not_a_number`, `year_not_four_digits`, `month_out_of_range`, `patch_too_large`, `trailing_tokens`. `found` is the component the reason is about, and is empty when the failure names no fragment: `component_count`, and `component_not_a_number` on a value whose component is itself empty (`2026.`). |
 | `W_FUTURE_CAIRN_VERSION` | `{ "kind": "future_cairn_version", "declared", "compiler" }`. Both verbatim: `declared` is the string in the file, `compiler` is the build that reported it. |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`. See below. |
 | The three `@intended_targets` codes | `{ "kind": "intended_targets", "edition", "targets": ["1.20.4"], "floor"? }`. The versions this finding is about, in source order, and the edition that weighed them. `floor` is the first one that refuses them, as written; absent for `W_INTENDED_TARGET_UNSUPPORTED`, which is not about a floor. |
@@ -535,11 +720,11 @@ are filled by independent rules and a renamed ID near its replacement carries bo
 
 `aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
 guess from a string distance; an alias is the registry pack's `aliases` component stating that two
-names are one block, so a quick-fix may apply an alias unasked and should not apply a suggestion.
-It holds every ID the target declares for that block — the closed set, never a pick from it — in
-the pack's own order, and is absent when the pack names none. The rendered note prints the first
-few and counts the rest; the payload is where the whole set lives. See
-[Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
+names are one block, so a quick-fix may apply an alias unasked and should not apply a suggestion. It
+holds every ID the target declares for that block, the closed set, never a pick from it, in the
+pack's own order, and is absent when the pack names none. The rendered note prints the first few and
+counts the rest; the payload is where the whole set lives. See [Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
@@ -560,94 +745,138 @@ holds `2^130`.
   rather than the source is the incomplete side.
 
 The `E_` / `W_` prefix is not the severity, in either direction. Most `W_` codes mark a
-partial-build degradation, but `W_UNUSED_DEF`, `W_TRUTH_TABLE_PARTIAL` and the two `@cairn` codes
-are warnings without being one; and two `E_`-prefixed codes are decided by the rule above rather
-than by their name:
+partial-build degradation, but some are warnings without being one, among them `W_UNUSED_DEF`, the
+two truth-table warnings, the two `@cairn` codes, `W_INTENDED_TARGET_CAP`,
+`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`, and
+`W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged; and two `E_`-prefixed codes are
+decided by the rule above rather than by their name:
 
-- `E_UNKNOWN_SLOT_TARGET` is an **error**, because a slot bound to a non-material value lowers
-  every member referencing it to air.
+- `E_UNKNOWN_SLOT_TARGET` is an **error**, because the fault is in the source: the slot is written
+  with a value that is not a material token. Its members degrade as they would with no theme bound,
+  so what is built does not set it apart from `W_NO_THEME_BOUND`.
 - `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule that matches nothing overrides
   nothing.
 
-`E_PARSE` is one code for every shape a parse fails in — a stray character, an odd indent, an
-integer past `i64`, a keyword where an item was expected — with the message saying which. A code per
-shape would make every future one a line of this table, for a distinction nothing branches on; what
-that costs is that a consumer reads the message to tell them apart. It is also the only code no
-check pass raises: parsing precedes them all, and a source that does not parse reaches none of
-them, so it is the one finding a build reports alone.
+`E_PARSE` is one code for every shape a parse fails in (a stray character, an odd indent, an integer
+past `i64`, a keyword where an item was expected), with the message saying which. A code per shape
+would make every future one a line of this table, for a distinction nothing branches on; what that
+costs is that a consumer reads the message to tell them apart. It is also the only code no check
+pass raises: parsing precedes them all, and a source that does not parse reaches none of them, so it
+is the one finding a build reports alone.
+
+A finding of block-array lowering is reported wherever a source is checked, whether a target is
+pinned or not. With no `--target`, in a plain `cairn check` and in the language server, which pins
+nothing, lowering runs with no target and reports the findings every target that reads their line
+raises, with the code, span and text a pinned check gives them. It weighs the source as if every
+block id some shipped version of the edition declares were declared. An abstract token, and an id no
+shipped version declares, are not deferred: each stands in for the block a target's pack names for
+it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no
+`W_PHASE_CONFLICT` between it and another block, and no `W_PALETTE_TOO_LARGE` that only it could
+cause, since the palette is counted without it. A stand-in overwritten by air, or air by a stand-in,
+is still a `W_PHASE_CONFLICT`, since no pack names air. A `pressure_plate` built from its default
+block takes the pack's plate, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a
+block" where a pinned check would name it. `E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN` are the
+pack's verdicts and are not raised. Neither is `E_PARTIAL_BUILD`, which counts what a build at a
+target loses. `--edition` alone picks that edition's theme variants. With neither flag, each
+edition's variants are lowered: a finding on a line only one edition's variant reads is that
+edition's verdict and is reported, and any other finding is reported when every edition raises it
+with the same code at the same span, once for each wording the editions give it. A check with
+`--target` lowers once, against the target, so no finding is reported twice.
 
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a
-partial-build degradation. The incomplete side is the source, which named no material, and not
-the compiler. The drop does not stop at the member either — a dropped `walls` lowers the wall
-height the volume is derived from, so the structure shrinks and every `door` and `window` that
-was to be cut into it is deferred as well.
+partial-build degradation. The incomplete side is the source, which named no material, and not the
+compiler. The drop does not stop at the member either: a dropped `walls` lowers the wall height the
+volume is derived from, so the structure shrinks and every `door` and `window` that was to be cut
+into it is deferred as well.
+
+`E_DUPLICATE_SELECTOR` is an **error** on the same test, though selector bindings are reserved and
+neither of the two values it is about is built. Whatever a binding comes to mean, the later row
+makes the earlier value dead text, and that is a fault in the source: it is there today and stays
+there once bindings are lowered. Every member the earlier row selects is selected by the later row
+too, so no edit to the members brings the earlier value back, where adding a member revives a row
+`E_THEME_SELECTOR_UNMATCHED` reports. The compiler's gap is the reservation itself, which each
+binding's `W_IGNORED_ARGUMENT` already reports. The code also gives two rows the verdict
+`E_DUPLICATE_ARG` gives one. The same key written twice inside one row is refused, and rows that
+select the same members are one binding list split over two lines
+([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), so where
+the line breaks does not decide whether the build is refused.
 
 The two `@cairn` codes are **warnings** by the same rule read the other way. The header is
 provenance: no pass branches on it, no palette entry comes from it, and the lockfile's
-`cairn_version` records the compiler rather than the file. `@cairn banana` builds byte-for-byte
-what `@cairn 2026.06` builds, so nothing about the result is unintended. What is lost is the
-header's own job — being readable by a later compiler — which is worth a word and not worth
-refusing the file over. `@requires` is an error on the same test because its floor *is* an input:
-it sets `cairn info`'s compatible range and the bound `cairn compile --target` is held to, so a
-floor that evaporates accepts a target it should not.
+`cairn_version` records the compiler rather than the file. `@cairn banana` builds byte-for-byte what
+`@cairn 2026.06` builds, so nothing about the result is unintended. What is lost is the header's own
+job, being readable by a later compiler, which is worth a word and not worth refusing the file over.
+`@requires` is an error on the same test because its floor *is* an input: it sets `cairn info`'s
+compatible range and the bound `cairn compile --target` is held to, so a floor that evaporates
+accepts a target it should not.
 
 `E_UNKNOWN_ARGUMENT` is an **error** for the same reason `E_UNKNOWN_KEYWORD` is, one level down.
 A key outside the keyword's vocabulary names nothing, so no pass will read the value however the
 compiler grows, and the member is built without whatever was being asked for. A misspelled argument
 that has a default is the worst of them: the build succeeds, at the default, and says nothing.
 
-Each keyword's vocabulary is closed, and a `theme` selector widens the one it names — writing
+Each keyword's vocabulary is closed, and a `theme` selector widens the one it names: writing
 `window[tags=...]` in a theme makes `tags=` a key something reads on a window, and on nothing else.
 The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; one edit away from a
 word the keyword already has is a typo written twice rather than a coinage, and is refused with the
 suggestion. Widening admits the word and nothing more: the match hands the member the row's
-bindings, which are reserved ([Materials and Themes](/spec/materials-themes/)), so a key the
-keyword defines and no pass reads is still an unreached key when a selector matches on it.
+bindings, which are reserved ([Materials and Themes](/spec/materials-themes/)), so a key the keyword
+defines and no pass reads is still an unreached key when a selector matches on it.
 
 A member's own `[key=value]` answers to that same vocabulary. `window[clas=outer]` is the same
-defect as `window clas=outer` — a word the author expects something to read that nothing does, with
-the `class` lost either way — so it earns the same code and the same suggestion. What the selector
+defect as `window clas=outer`: a word the author expects something to read that nothing does, with
+the `class` lost either way. It earns the same code and the same suggestion. What the selector
 *means* is a separate question and is not settled here: a member's selector is carried through
-verbatim and later passes decide whether one binds a fresh id or references an existing member.
-This check does not need that answer, because the word is one something reads or it is not,
-whichever the answer turns out to be. Note that a key in a member's own bracket does not make the
-member *carry* the attribute, so a `theme` row selecting on it matches nothing.
+verbatim and later passes decide whether one binds a fresh id or references an existing member. This
+check does not need that answer, because the word is one something reads or it is not, whichever the
+answer turns out to be. Note that a key in a member's own bracket does not make the member *carry*
+the attribute, so a `theme` row selecting on it matches nothing.
 
 A `struct` / `def` header line answers to a closed vocabulary of its own, the one [Components,
 Editing, and Multi-building](/spec/components-editing-sites/) states: `size=`, which lowering
 reads, and `class=`, which no pass reads yet. No `theme` selector widens it, since a selector names
 a member keyword. A key outside the two is the same defect one line up from a member's, and is
 refused with the suggestion: `struct s siz=7x7` is offered `size`. The missing-size warning the
-same typo causes cannot name it, and is raised only where block-array lowering runs, which
-`cairn check` does only with both `--edition` and `--target`; without this check a plain
-`cairn check` would say nothing about the line. Where both are raised, the error is printed before
-the warning.
+same typo causes cannot name it, since it says only that the struct has no size. The error is
+printed before the warning.
 
-`W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=`
-in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An
-**unreached key**: a `key=` this specification defines that no pass reads yet — `window shape=` /
-`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today — is carried
-into the IR and never consulted. Every `key=value` on the right of a `theme` selector row whose
+`W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=` in
+the vocabulary whose value the pass cannot read is dropped and a default put in its place, or, where
+the key itself decides whether the member is built at all, the member is left out instead under
+`W_DEFERRED_MEMBER` (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
+[§5.4](/spec/syntax/#54-selectors)).
+An **unread key**: a `key=` the keyword accepts and nothing reads where it is written, carried into
+the IR and never consulted. It comes in two kinds. An *unreached* key is one this specification
+defines that no pass reads yet. `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a
+header's `class=`, a `door`'s `mat_slot=`, which waits on the door block itself, and a `stair`'s
+`waterlogged=` are those keys today. Every `key=value` on the right of a `theme` selector row whose
 keyword the compiler knows is one too, reported on the binding whatever its key or value, since no
-pass lowers a selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). And a key
-**routed past**: one the keyword reads only under some ways of writing a sibling argument, on a
-member that writes it another way. The boundary is the keyword: a spec-defined key on a keyword the
-compiler knows is reported this way, while a spec-defined *keyword* it does not know is
-`E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three make the build differ from
-the source. The rule forbids *silent* substitution, and all three are announced. For the unreached
-key the gap is the compiler's rather than the source's, which is why it is not a refusal. Whether
+pass lowers a selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). An
+*inapplicable* key is one every member accepts, on a keyword that puts down nothing it would be read
+for; `mat_slot=` on a `level`, `circuit`, `place` or `connect` is that key today. A `mat_slot=` of
+either kind is not looked up in the theme, so a slot name the theme does not declare is this warning
+rather than `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one
+the keyword reads only under some ways of writing a sibling argument, on a member that writes it
+another way. The boundary is the keyword: a spec-defined key on a keyword the compiler knows is
+reported this way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its
+arguments are not judged at all. All three make the build differ from the source. The rule forbids
+*silent* substitution, and all three are announced. For an unreached key the gap is the compiler's
+rather than the source's, which is why it is not a refusal. An inapplicable key is no gap at all:
+the key is one every member accepts and its value changes nothing in the build, so the warning asks
+for its removal, where a refusal would make a key every member accepts one that some refuse. Whether
 autofix is offered is up to the implementation.
 
-An unreadable value is reported whether or not its member is then built. The value is wrong
-wherever the member ends up, so it is a repair of its own, and holding the finding back until a
-refusal on the same line is repaired only costs the author another compile. The note says which
-happened: what the default did to a member that is built, or that the member is not built either
-way and the refusal beside it is why. A member dropped before its arguments are read — a `roof`
-under a raised `level` — is the exception today: its values are not read, so they are not reported
-beside the drop. Most values are read only during block-array lowering, so a `cairn check` with no
-`--edition` / `--target`, and the language server, report an unreadable value only for the keys the
-check passes read themselves ([§11.1](#111-diagnostic-codes)).
+An unreadable value is reported whether or not its member is then built. The value is wrong wherever
+the member ends up, so it is a repair of its own, and holding the finding back until a refusal on
+the same line is repaired only costs the author another compile. The note says which of three things
+happened: what the default did to a member that is built; that the member is not built either way,
+and the refusal beside it is why; or that the member is left out instead of taking the default, and
+the deferral beside it is the one the value caused. A member dropped before its arguments are read
+is the exception today: a `roof` under a raised `level` has only its `kind=` and `slope_to=` read,
+for its refusal, so its other values are not reported beside the drop. Most values are read only
+during block-array lowering, and an unreadable one needs no target, so a `cairn check` with no
+`--target` and the language server report it as a pinned check does.
 
 The routed-past shape is the vocabulary's second axis: closed per keyword *and* per the way the
 argument that selects the lowering rule is written. `roof slope_to=` is read by the `kind=shed`
@@ -657,7 +886,7 @@ rule and by none of the others, so
 roof kind=gable slope_to=front
 ```
 
-builds a roof that ignores the direction it was pointed in — the same silent drop a key outside the
+builds a roof that ignores the direction it was pointed in: the same silent drop a key outside the
 vocabulary makes, one argument down. It stays a warning rather than becoming the refusal
 `E_UNKNOWN_ARGUMENT` is, because the repair is not decided: the key names something real on a
 keyword that reads it, and either the `kind=` is the argument that was meant or the `slope_to=` is
@@ -668,28 +897,28 @@ mistake. `place gap=` is the case: a row with no `at=` is placed relative to ano
 distance, and `at=origin` is anchored absolutely and does not, so `at=origin gap=5` is the same
 silent drop ([§9.3.2](/spec/components-editing-sites/#932-origin-selectors)).
 
-Where the **selector** names no rule at all — a value the dispatch does not know, or, on an axis
-with no absent arm, nothing written — no finding is raised here: that member lowers to nothing and
-`W_DEFERRED_MEMBER` is the whole repair, so a second finding about the argument that rule would not
-have read bills one repair twice. That deferral is raised during block-array lowering, so a `cairn
-check` with no `--edition` / `--target` reports neither ([§11.1](#111-diagnostic-codes)); the case
-that is always reported is the one where the member builds. A key another key makes inert *without*
-selecting a rule is a different shape again and is not reported today: `window step=` at `repeat=1`
-is a condition on a count rather than on a rule.
+Where the **selector** names no rule at all (a value the dispatch does not know, or nothing written
+on an axis with no absent arm), no finding is raised here: that member lowers to nothing and its
+refusal is the whole repair, so a second finding about the argument that rule would not have read
+bills one repair twice. That refusal is `E_INVALID_MEMBER`, or `E_INVALID_PLACE_ORIGIN` for a
+`place`'s `at=`, and needs no target either, so a `cairn check` with no `--target` reports it as a
+pinned check does. A key another key makes inert *without* selecting a rule is a different
+shape again and is not reported today: `window step=` at `repeat=1` is a condition on a count rather
+than on a rule.
 
 `E_MISPLACED_BINDING` is the fourth field of a member line asked the same question the other three
-are: is this word read by anything. A `-> value` tail is read by exactly one thing — the sensor set
-of [§14.2](/spec/redstone/#142-signal-binding) — so a tail on a member that is not a sensor is carried into
-the IR and dropped, and the signal it names is emitted by nothing. It is an **error** on the same
-test `E_UNKNOWN_ARGUMENT` meets: the build differs from the source, and no edit to the value
-repairs it.
+are: is this word read by anything. A `-> value` tail is read by exactly one thing, the sensor set
+of [§14.2](/spec/redstone/#142-signal-binding), so a tail on a member that is not a sensor is
+carried into the IR and dropped, and the signal it names is emitted by nothing. It is an **error**
+on the same test `E_UNKNOWN_ARGUMENT` meets: the build differs from the source, and no edit to the
+value repairs it.
 
 Only the host is asked here, because only the host can be asked without the Logic IR. Whether the
 tail's value names a signal, and whether that signal is driven twice or by nobody, are questions the
-redstone pipeline answers ([§14.2](/spec/redstone/#142-signal-binding)) — and the host is asked first, so a
-tail on a member that cannot emit earns this code and not also the value's. A member whose keyword
-is not in the known-keyword table is left to `E_UNKNOWN_KEYWORD`, which is why `lever -> sig.a` —
-a sensor this specification lists and the surface has not reached — is not told its host is wrong.
+redstone pipeline answers ([§14.2](/spec/redstone/#142-signal-binding)). The host is asked first, so
+a tail on a member that cannot emit earns this code and not also the value's. A member whose keyword
+is not in the known-keyword table is left to `E_UNKNOWN_KEYWORD`, which is why `lever -> sig.a`, a
+sensor this specification lists and the surface has not reached, is not told its host is wrong.
 
 ## 11.4 Constraint catalog
 

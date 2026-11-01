@@ -1,33 +1,13 @@
-//! `type_mismatch` pass — flags label-typed keys with non-label values and
-//! `size=` with a non-`Size` value.
-//!
-//! Walks the surface AST because the offending values may have been hoisted
-//! out of `IntentState` during lowering (when the value *was* a label) or
-//! kept (when it was not), and the AST is the simplest place where the
-//! original value type is still attached to its span.
+//! The `type_mismatch` pass: a label key with a non-label value, or `size=` with a non-`WxH` one.
+//! It walks the surface AST, where a value lowering hoisted still has its type and span.
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticSink};
+use super::DiagnosticSink;
 
-/// Keys whose value is a label and whose mistyping is otherwise silent.
-///
-/// Not every `as_label_str` call site is here. `circuit region=` is lifted
-/// the same way but has its own recognizer in `block_array`, which names
-/// the key and the offending kind in a `W_DEFERRED_MEMBER`; adding it to
-/// this list would report the same value twice with two different codes.
-/// `east_of=` / `north_of=` are owned by `E_INVALID_PLACE_ORIGIN` for the
-/// same reason. What is left are the keys whose mistyped value reaches a
-/// reader that skips silently.
-///
-/// `id` / `class` / `mat_slot` are hoisted onto [`crate::intent::Member`]'s
-/// own fields during lowering; `use` / `theme` stay in `intent_state` and
-/// are read by `resolve::resolve_site_placements`. The distinction does not
-/// reach the author: all five reject a non-label the same way, and for
-/// `use=` / `theme=` the rejection used to be the resolver's silent
-/// `continue`, which drops the whole placement — the same arm a `place` row
-/// with no `use=` at all takes. Naming the mistyped case here is what tells
-/// those two apart.
+/// Label keys whose mistyping is otherwise silent. `region=`, `east_of=` and `north_of=` are
+/// left out because another code already reports them.
 const LABEL_KEYS: &[&str] = &["id", "class", "mat_slot", "use", "theme"];
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
@@ -93,7 +73,10 @@ fn check_size(value: &Value, sink: &mut DiagnosticSink) {
         code: DiagnosticCode::TypeMismatchSize,
         span: value.span.clone(),
         primary: format!("`size=` expects a `WxH` literal, got {}", value.kind_name()),
-        notes: Vec::new(),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "write two whole numbers joined by `x`, such as `size=9x7`".to_owned(),
+        }],
         data: None,
     });
 }
@@ -109,7 +92,24 @@ fn check_label(key: &str, value: &Value, sink: &mut DiagnosticSink) {
             "`{key}=` expects a label (identifier or string), got {}",
             value.kind_name()
         ),
-        notes: Vec::new(),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: label_fix(key, value),
+        }],
         data: None,
     });
+}
+
+/// How to write `key=` as the label it expects, given the value written instead.
+fn label_fix(key: &str, value: &Value) -> String {
+    match (key, &value.kind) {
+        ("mat_slot", ValueKind::Token(token)) => format!(
+            "`mat_slot=` names a slot of the bound theme, not a block: bind the block there \
+             (`slot NAME -> @{token}`) and write `mat_slot=NAME`"
+        ),
+        ("mat_slot", _) => "write the name of a slot the bound theme declares".to_owned(),
+        ("use", _) => "write the name of a `def` this file declares".to_owned(),
+        ("theme", _) => "write the name of a `theme` this file declares".to_owned(),
+        _ => format!("write a name, such as `{key}=main`, or a quoted string"),
+    }
 }

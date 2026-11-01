@@ -19,16 +19,17 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 | `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot. |
 | `cairn compile <file.crn> --edition <e>` | Write the structure artifacts and a lockfile. `--target`, `--out`, `--lock`. |
 | `cairn synth <file.crn>` | Print one redstone pipeline stage as JSON. Experimental; see below. |
+| `cairn docs [page] [title]` | Print a page of the documentation site as Markdown, from the copy embedded in the binary, or list the pages. `--toc` lists a page's headings. See below. |
 
 `compile` writes gzipped `.nbt` for `--edition java` and uncompressed `.mcstructure` for `--edition bedrock`, one file per scope, plus `<source>.lock` next to the source. A Bedrock blockstate property the backend cannot translate is a hard error; intent it can only approximate (stair `shape`) is dropped with a `W_INTENT_DEGRADED` warning rather than in silence.
 
-`check --edition E --target V` pins the same `(edition, version)` pair a compile pins, which is what lets it reach the lowering-stage findings — `E_UNKNOWN_ID` above all — without building anything. That is the shape a CI gate wants: `cairn check` going green on a source `cairn compile` refuses is the gap the flag closes. What it does not take on is anything `compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement (`E_VERSION_CAP`), since holding `--target` to the floors belongs to the command that certifies a build.
+A `cairn check` with no `--target` still lowers, with no target, and reports the lowering-stage findings every target that reads their line raises, such as a roof bound outside the stair family, weighed as if every block id some shipped version declares were declared. `check --edition E --target V` pins the same `(edition, version)` pair a compile pins, which is what lets it reach the lowering-stage findings only a target can answer — `E_UNKNOWN_ID` above all — without building anything. That is the shape a CI gate wants, since an unpinned `cairn check` can go green on a source `cairn compile` refuses. What it does not take on is anything `compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement (`E_VERSION_CAP`), since holding `--target` to the floors belongs to the command that certifies a build.
 
 ## Targeting rules
 
 Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 
-- `--edition` is **required** for any subcommand that emits voxels, and `--target` is refused without it. The same `1.21` means different things on Java and Bedrock, and Java's DataVersion is unrelated to Bedrock's `block_version`.
+- `--edition` is **required** by `compile`, and every subcommand that takes `--target` refuses it without `--edition`. The same `1.21` means different things on Java and Bedrock, and Java's DataVersion is unrelated to Bedrock's `block_version`.
 - `--target` is an opaque label resolved through the pinned edition's data table, with DataVersion as the canonical ordering key ([versioning-editions "The target is a compile-time parameter"](https://cairn.kage1020.com/spec/versioning-editions/)). `latest` aliases the row that table names as latest, which is not necessarily the newest row it carries.
 - `compile --target` defaults to `latest`. `check --target` has no default, so `cairn check --edition java` still runs the unpinned gate rather than refusing ids on a version nobody chose.
 
@@ -38,11 +39,28 @@ Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 |---|---|
 | `0` | Success. Warnings do not change it. |
 | `1` | A parse failure, an `Error`-severity diagnostic, an I/O error, or a run-level refusal such as a `--target` the edition does not ship. |
-| `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`). |
+| `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`), or `cairn docs` was asked for a page or part the binary does not carry, for a title more than one part has, or for a `#fragment` together with a title or `--toc`. |
 
-A reader of stdout that stops early (`cairn lower f.crn | head -1`) does not change the code: output written after stdout has been closed is dropped, and the command exits as it would have with stdout open. This holds for stdout only: diagnostics go to stderr, and a closed stderr still ends the run with a panic.
+A reader of stdout that stops early (`cairn lower f.crn | head -1`) does not change the code: output written after stdout has been closed is dropped, and the command exits as it would have with stdout open. This holds for stdout only: diagnostics go to stderr, and a stderr whose reader has gone still ends the run with a panic.
 
 A run-level refusal is reported on stderr and by the exit code in both output formats, never as an element of the `--format json` array: it is not a finding at a span in the file, and giving it a line number would put a position on a fact that has none. A `check --format json` consumer reads the verdict from the exit code and treats stderr as unstructured prose: an exit of `1` over an array with no `"severity": "error"` element is a run-level refusal, and nothing else reads that way ([lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/)).
+
+## `cairn docs`
+
+Every Markdown page of [the documentation site](https://cairn.kage1020.com/), the specification among them, is compiled into the binary by [`cairn-lang-docs`](../../website/rust/README.md), so `cairn docs` shows the pages of the release that is running, with no network. A page is named by the path the site serves it at or by its file (`spec/index`, `spec/lint.md`), so a link to any page it lists can be passed as written, `index.md` and fragment included:
+
+```sh
+cairn docs                                     # every page, with its title
+cairn docs spec/syntax                         # one page, as Markdown
+cairn docs spec/syntax --toc                   # its headings, each a link `cairn docs` takes
+cairn docs /spec/#two-version-axes             # the section a link opens
+cairn docs spec/lint "Error vs warning"        # the section a citation names
+cairn docs ja/spec/syntax                      # the Japanese copy
+```
+
+The title is quoted the way `--help` and the code cite the spec: a heading without its number, a term a list item on the page defines in bold (`- **Term.**`), or the page's own title. A heading or the page's title is also taken with its number. A title that more than one part of the page has is refused with each part listed, and the `#fragment` of the section you mean picks one. `cargo xtask lint spec-citations` holds every citation in the repository to what `cairn docs` can print.
+
+Git Bash on Windows rewrites an argument that starts with `/` into a Windows path before `cairn` sees it, so leave the leading slash off there: `cairn docs spec/#two-version-axes`.
 
 ## `cairn synth` (experimental)
 

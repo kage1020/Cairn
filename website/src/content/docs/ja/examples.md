@@ -1,41 +1,40 @@
 ---
 title: "サンプル"
-description: 実際の .crn ファイル。言語面だけが画面に残るよう、どれも小さく保っています。
+description: 実際の .crn ファイル集。言語の書き方だけに集中できるよう、どれも小さくまとめています。
 ---
 
-すべて [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) にあり、意図的に最小限で
-す。最初のグループの 4 つは [チュートリアル](/ja/tutorial/) が順に辿ります。
+どのファイルも [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) にあり、あえて最小限の内容にしています。最初のグループの 4 つは、[チュートリアル](/ja/tutorial/)で順番に解説しています。
 
-> リファレンスコンパイラは未完成なので、これらは今日ビルドできるファイルではなく規範的な例示です。
+> どのファイルも、現在のコンパイラでコンパイルできます。ただし、レッドストーンはまだコンパイル結果に含まれないので、`redstone-door.crn` は回路なしで作られます。
 
-## まずここから
+## まずはここから
 
-| ファイル | 示すもの |
+| ファイル | 内容 |
 |---|---|
-| [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn) | 最小限の実用ビルド。`struct` / `theme` / スロット。 |
-| [`themed-tower.crn`](https://github.com/kage1020/Cairn/blob/main/examples/themed-tower.crn) | 抽象マテリアルトークン、階ごとの `level`、上書きによる intent 昇格。 |
-| [`redstone-door.crn`](https://github.com/kage1020/Cairn/blob/main/examples/redstone-door.crn) | 論理レッドストーン。信号バインディング、`circuit` 領域、アサーション。 |
-| [`village.crn`](https://github.com/kage1020/Cairn/blob/main/examples/village.crn) | `site` とトポロジカルな `connect` による複数建築。 |
+| [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn) | 実用的な最小のビルド。`struct`、`theme`、スロット。 |
+| [`themed-tower.crn`](https://github.com/kage1020/Cairn/blob/main/examples/themed-tower.crn) | 抽象マテリアルトークン、階ごとの `level`、上書きによる意図への昇格。 |
+| [`redstone-door.crn`](https://github.com/kage1020/Cairn/blob/main/examples/redstone-door.crn) | 論理で書くレッドストーン。信号の割り当て、`circuit` 領域、アサーション。 |
+| [`village.crn`](https://github.com/kage1020/Cairn/blob/main/examples/village.crn) | `site` と位置関係で結ぶ `connect` による、複数の建物の配置。 |
 
 ## 屋根の種類
 
-| ファイル | 示すもの |
+| ファイル | 内容 |
 |---|---|
-| [`roof-shed.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-shed.crn) | `kind=shed slope_to=front`。front の壁へ向かって上がる 1 枚のスロープ。 |
-| [`roof-hip.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-hip.crn) | 正方形 footprint の `kind=hip`。4 面が 1 つの頂部に集まる。 |
-| [`roof-flat.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-flat.crn) | `kind=flat`。1 層のデッキと、それを壁の外へ張り出させる overhang。 |
+| [`roof-shed.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-shed.crn) | `kind=shed slope_to=front`。正面の壁に向かって高くなる片流れの屋根。 |
+| [`roof-hip.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-hip.crn) | 正方形の敷地に `kind=hip`。4 つの斜面が 1 つの頂部に集まる寄棟屋根。 |
+| [`roof-flat.crn`](https://github.com/kage1020/Cairn/blob/main/examples/roof-flat.crn) | `kind=flat`。1 層の平らな屋根と、それを壁の外まで広げる軒の出 (overhang)。 |
 
-## walkway とポート
+## 通路とポート
 
-| ファイル | 示すもの |
+| ファイル | 内容 |
 |---|---|
-| [`l-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/l-walkway.crn) | 両軸で位置の異なる 2 つのポートを結ぶ Manhattan の L 字。 |
-| [`at-side-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/at-side-walkway.crn) | `at=left` / `at=right` のドアアンカーが、向かい合う角へポートを寄せる。 |
-| [`window-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/window-walkway.crn) | 窓のポート — 矩形の中心に張り付き、地面の段に固定される。 |
+| [`l-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/l-walkway.crn) | 縦横どちらの位置も異なる 2 つのポートを、L 字の直交経路で結ぶ。 |
+| [`at-side-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/at-side-walkway.crn) | ドアを `at=left` / `at=right` に置くと、ポートが向き合う角の側に寄る。 |
+| [`window-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/window-walkway.crn) | 窓のポート。窓の矩形の中心を基準にし、地面の高さに固定される。 |
 
 ## 境界のケース
 
-| ファイル | 示すもの |
+| ファイル | 内容 |
 |---|---|
-| [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | エディション共通のプリミティブが無いスロットに対する、エディション別テーマバリアント。 |
-| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | 配線座標を共有する 2 つのネット — 交差パスが報告し、修復しないもの。 |
+| [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | 両エディション共通のプリミティブがないスロットに、エディション別のテーマバリアントで対応する。 |
+| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | 狭い領域に 4 つのネットを通す例。ルーターは各ネットをほかのネットを避けて敷き、`void=2` の範囲で 1 本をブリッジ層に持ち上げます。`void=1` では `E_ROUTE_CONGESTION` で拒否します。 |

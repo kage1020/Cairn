@@ -2,7 +2,7 @@
   "name": "cairn-lang",
   "displayName": "Cairn",
   "description": "Language support for Cairn (.crn) — a Minecraft build description language.",
-  "version": "2026.10.0",
+  "version": "2026.11.0",
   "publisher": "kage1020",
   "license": "Apache-2.0",
   "repository": {
@@ -16,7 +16,7 @@
   },
   "packageManager": "pnpm@10.14.0",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "Programming Languages"
@@ -80,16 +80,19 @@
     "build": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --sourcemap",
     "build:prod": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --minify",
     "watch": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --sourcemap --watch",
+    "build:test": "esbuild src/test/extension.test.ts src/test/host.ts src/test/fake-cairn-lsp.ts --platform=node --format=cjs --target=node20 --outdir=out/test --sourcemap",
+    "test": "pnpm build && pnpm build:test && node --test --test-timeout=180000 --test-force-exit out/test/extension.test.js",
     "package": "pnpm check && pnpm build:prod && vsce package --no-dependencies"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^10.1.2"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
-    "@vscode/vsce": "^3.2.1",
-    "esbuild": "^0.28.1",
-    "typescript": "^5.6.3"
+    "@types/vscode": "^1.91.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
   }
 }

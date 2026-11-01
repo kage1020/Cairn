@@ -1,6 +1,6 @@
 {
   "name": "tree-sitter-cairn",
-  "version": "2026.10.0",
+  "version": "2026.11.0",
   "description": "tree-sitter grammar for the Cairn build description language",
   "keywords": [
     "parser",
@@ -37,7 +37,7 @@
   },
   "devDependencies": {
     "node-gyp": "^13.0.1",
-    "tree-sitter-cli": "^0.26.11"
+    "tree-sitter-cli": "^0.27.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

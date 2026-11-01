@@ -1,20 +1,5 @@
-//! Registry pack ingest.
-//!
-//! A *registry pack* is the bundle of JSON files describing the Minecraft
-//! identifiers, blockstate domains, item schemas, and `DataVersion` table
-//! that a compile depends on. It is the long-term replacement for the
-//! hardcoded tables this crate used to ship, and is hashed into the
-//! lockfile's `inputs.registry_pack_hash` field so a build is reproducible
-//! against a pinned set of bytes.
-//!
-//! Four components ship today: `data_versions` (which let `data_version.rs`
-//! stop carrying a hardcoded `(mc_version, DataVersion)` array), `materials`
-//! (abstract `@token` → id), `blocks` (the per-version id table an
-//! `E_UNKNOWN_ID` is decided against), and `aliases` (the spellings one
-//! block has worn, which is what turns a refused id into the name the
-//! target does use). Later additions — item and tag tables, the
-//! semantic-sensitivity catalog — slot in by extending [`PackFiles`] with
-//! new `Option` fields, so an older pack stays loadable.
+//! Registry packs: the JSON files of `DataVersion`s, materials, block ids and aliases a compile
+//! depends on, hashed into the lockfile so a build is reproducible.
 
 pub mod aliases;
 pub mod blocks;
@@ -32,20 +17,11 @@ pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
 pub use load::{
     PackSource, PackView, RegistryError, RegistryPack, SUPPORTED_DATA_VERSIONS_SCHEMA,
-    SUPPORTED_MANIFEST_SCHEMA, builtin_bedrock, builtin_java, load_builtin_bedrock,
-    load_builtin_java, load_from_dir,
+    SUPPORTED_MANIFEST_SCHEMA, builtin_pack, load_builtin_pack, load_from_dir,
 };
-pub use manifest::{PackEdition, PackFiles, PackManifest};
+pub use manifest::{PackFiles, PackManifest};
 
-/// Prepend `namespace` to a component entry that does not carry one.
-///
-/// Shared by the `materials`, `blocks` and `aliases` components because
-/// they name the same thing the same way: an entry may write `oak_planks`
-/// and inherit the catalog's namespace, or write `create:cogwheel` and keep
-/// its own. Three copies of this rule is three places for the components to
-/// drift apart on what counts as namespaced — and an alias group is matched
-/// against a block table by string equality, so a drift between those two
-/// would silently stop every group answering.
+/// Prepends `namespace` to a component entry that does not carry one.
 pub(crate) fn namespaced(namespace: &str, block: &str) -> String {
     if block.contains(':') {
         block.to_owned()

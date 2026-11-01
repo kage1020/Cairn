@@ -16,14 +16,14 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.41.4",
-    "astro": "^7.2.8",
-    "sharp": "^0.35.4",
-    "starlight-links-validator": "^0.25.3"
+    "@astrojs/starlight": "^0.42.6",
+    "astro": "^7.4.2",
+    "sharp": "^0.35.5",
+    "starlight-links-validator": "^0.27.0"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.10",
-    "typescript": "^5.9.3"
+    "@astrojs/check": "^0.9.12",
+    "typescript": "^6.0.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

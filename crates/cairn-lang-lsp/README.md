@@ -4,7 +4,7 @@ Language Server Protocol implementation for Cairn editors. It puts the parser an
 
 ## Status
 
-The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — a subset of what `cairn check` reports: the same `parse → lower → check` passes, without the `@intended_targets` findings the CLI merges in — on every `didOpen`/`didChange`, clearing them on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Hover and code actions are not yet wired.
+The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — what a `cairn check` with no `--edition` reports: the same `parse → lower → check` passes and the lowering-stage findings every target that reads their line raises, without the `@intended_targets` findings the CLI merges in — on every `didOpen`/`didChange`, clearing them on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Diagnostics are computed on a second thread that skips a revision a newer one has replaced, so a completion request is not kept waiting behind them. Hover and code actions are not yet wired.
 
 ## Shipped capabilities
 
@@ -31,7 +31,7 @@ The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-conten
 ## Dependencies
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the parser, IR, and lint engine.
-- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the built-in registry packs backing material-token completion.
+- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the built-in registry packs backing material-token completion and the block ids a check with no target weighs.
 - [`lsp-server`](https://crates.io/crates/lsp-server) / [`lsp-types`](https://crates.io/crates/lsp-types) for the synchronous stdio transport and protocol types (no async runtime).
 
 ## License

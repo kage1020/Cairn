@@ -1,14 +1,22 @@
 name: Release
 
+# Only main is published. The schedule promotes canary into main, and each push to main then
+# either publishes the version main carries, while it has no tag, or opens the release PR.
 on:
   schedule:
     - cron: "17 4 1 * *"
   push:
-    branches: [canary]
+    branches: [main]
   workflow_dispatch:
     inputs:
+      step:
+        description: "promote opens the canary-to-main PR; release does what a push to main does"
+        required: true
+        type: choice
+        options: [promote, release]
+        default: promote
       version:
-        description: "Override version (e.g. 2026.7.0). Leave empty to compute from tags."
+        description: "With release: the release PR's version (e.g. 2026.7.0). Leave empty to compute from tags."
         required: false
         type: string
 
@@ -19,29 +27,90 @@ permissions:
   id-token: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  compute-version:
-    name: Compute next CalVer
-    if: github.event_name != 'push'
+  promote:
+    name: Open the promote-to-main PR
+    if: github.event_name == 'schedule' || inputs.step == 'promote'
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.calc.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: canary
           fetch-depth: 0
-          fetch-tags: true
 
-      - id: calc
-        shell: bash
+      # No auto-merge: a merge it performs for GITHUB_TOKEN starts no workflow, and this merge has
+      # to start the release PR.
+      - name: Open the PR
         env:
-          OVERRIDE: ${{ github.event.inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
           set -euo pipefail
+          git fetch origin main
+          # A promote's own merge commit carries nothing canary lacks.
+          if [ -n "$(git rev-list --no-merges origin/main --not HEAD)" ]; then
+            echo "main has commits canary lacks; merge the open main-to-canary PR first:" >&2
+            git log --no-merges --format='  %h %s' origin/main --not HEAD >&2
+            exit 1
+          fi
+          if [ -z "$(git rev-list --no-merges HEAD --not origin/main)" ]; then
+            echo "canary has nothing main lacks; nothing to promote"
+            exit 0
+          fi
+          existing=$(gh pr list --base main --head canary --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "The promote PR #$existing is already open"
+            exit 0
+          fi
+          gh pr create \
+            --base main \
+            --head canary \
+            --title "chore: promote canary to main" \
+            --body "Opened by release.yml. Merge it with a merge commit; release.yml then opens the release PR on main, and nothing is published until that PR merges."
+
+  plan:
+    name: Decide between publishing and the release PR
+    if: github.event_name == 'push' || inputs.step == 'release'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: plan
+        shell: bash
+        env:
+          OVERRIDE: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          current=$(awk '
+            /^\[workspace\.package\]/   { in_section = 1; next }
+            /^\[/                       { in_section = 0 }
+            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' Cargo.toml)
+          if [[ ! "$current" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
+            echo "Read '$current' from [workspace.package]; that is not a CalVer number" >&2
+            exit 1
+          fi
+          if ! git rev-parse -q --verify "refs/tags/v$current" >/dev/null; then
+            if [ -n "$OVERRIDE" ]; then
+              echo "main carries $current, which has no tag yet; publish it before proposing another version" >&2
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "version=$current" >> "$GITHUB_OUTPUT"
+            echo "main carries $current, which has no tag yet; publishing it"
+            exit 0
+          fi
+          echo "publish=false" >> "$GITHUB_OUTPUT"
           if [ -n "$OVERRIDE" ]; then
             if [[ ! "$OVERRIDE" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
               echo "Refusing invalid override: $OVERRIDE" >&2
@@ -63,17 +132,17 @@ jobs:
             version="${year}.${month}.${next}"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Computed: $version"
+          echo "v$current is tagged; the release PR proposes $version"
 
-  release-minor:
-    name: Open monthly minor release PR
-    if: github.event_name != 'push'
-    needs: compute-version
+  release-pr:
+    name: Open the release PR
+    needs: plan
+    if: needs.plan.outputs.publish == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: canary
+          ref: main
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -84,12 +153,12 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: release-minor
-          save-if: ${{ github.ref == 'refs/heads/canary' }}
+          shared-key: release-pr
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Set workspace version
         env:
-          NEW_VERSION: ${{ needs.compute-version.outputs.version }}
+          NEW_VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
           sed -i -E '/^\[workspace\.package\]/,/^\[/ s/^version = ".*"/version = "'"$NEW_VERSION"'"/' Cargo.toml
@@ -103,20 +172,21 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
 
-      # release-pr never publishes, so no crates.io token is needed here.
+      # release-pr never publishes, so no crates.io token is needed here. The PR's base is the
+      # branch checked out, main.
       - name: Run release-plz release-pr
         id: release_pr
-        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        uses: release-plz/action@8921286633dfa0c4020f7f30bd1c14fe19cbb10e # v0.5.142
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Align the non-Cargo manifests with the version release-plz chose
+      - name: Align the non-Cargo manifests and fold in the changelog fragments
         if: steps.release_pr.outputs.prs_created == 'true'
         env:
           PR: ${{ steps.release_pr.outputs.pr }}
@@ -155,69 +225,31 @@ jobs:
           pnpm run generate
           cd ../..
 
+          # `publish` refuses to publish if this never ran.
+          python3 .github/scripts/changelog.py assemble --version "$version" --delete
+
           if [ -z "$(git status --porcelain)" ]; then
-            echo "manifests already agreed with $version; nothing to push"
+            echo "manifests and CHANGELOG.md already agreed with $version; nothing to push"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -qm "chore: align the non-Cargo manifests with $version"
+          git commit -qm "chore: align the non-Cargo manifests and generated parser with $version, and fold in changelog.d"
           git push origin "$branch"
 
-  release-patch:
-    name: Publish merged release
-    if: github.event_name == 'push'
+  publish:
+    name: Publish main
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: canary
+          ref: main
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Assert every copy of the version agrees before publishing
-        shell: bash
-        run: |
-          set -euo pipefail
-          version=$(awk '
-            /^\[workspace\.package\]/   { in_section = 1; next }
-            /^\[/                       { in_section = 0 }
-            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
-          ' Cargo.toml)
-          if [[ ! "$version" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
-            echo "Read '$version' from [workspace.package]; that is not a CalVer number" >&2
-            exit 1
-          fi
-          echo "Cargo [workspace.package]: $version"
-          drifted=0
-          compare() {
-            printf '  %-48s %s\n' "$1" "$2"
-            if [ "$2" != "$version" ]; then
-              drifted=1
-            fi
-          }
-          compare "crates/cairn-lang-tree-sitter/package.json" "$(jq -er '.version' crates/cairn-lang-tree-sitter/package.json)"
-          compare "crates/cairn-lang-tree-sitter/tree-sitter.json" "$(jq -er '.metadata.version' crates/cairn-lang-tree-sitter/tree-sitter.json)"
-          compare "editors/vscode/package.json" "$(jq -er '.version' editors/vscode/package.json)"
-          while read -r name declared; do
-            compare "[workspace.dependencies] $name" "$declared"
-          done < <(awk '
-            /^\[workspace\.dependencies\]/ { in_section = 1; next }
-            /^\[/                           { in_section = 0 }
-            in_section && /^cairn-[a-z-]+ = \{ version = "/ {
-              declared = $0
-              sub(/^.*version = "/, "", declared)
-              sub(/".*$/, "", declared)
-              print $1, declared
-            }
-          ' Cargo.toml)
-          if [ "$drifted" -ne 0 ]; then
-            echo 'A copy of the version disagrees with [workspace.package].' >&2
-            echo 'Refusing to publish: the artefacts would carry different numbers.' >&2
-            exit 1
-          fi
 
       - name: Install Rust toolchain
         run: rustup show
@@ -225,16 +257,22 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: release-patch
-          save-if: ${{ github.ref == 'refs/heads/canary' }}
+          shared-key: publish
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Assert every copy of the version agrees before publishing
+        run: cargo xtask lint versions
+
+      # The release PR's checks do not run on the fold, which was pushed with GITHUB_TOKEN.
+      - name: Assert the changelog fragments were folded into this version
+        run: python3 .github/scripts/changelog.py verify-release
 
       - name: Authenticate to crates.io via OIDC
         id: cratesio-auth
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       - name: Run release-plz release
-        id: release_plz
-        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        uses: release-plz/action@8921286633dfa0c4020f7f30bd1c14fe19cbb10e # v0.5.142
         with:
           command: release
         env:
@@ -242,16 +280,16 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}
 
       - name: Dispatch tag-triggered workflows for the new tag
-        if: steps.release_plz.outputs.releases_created == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.plan.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+          release_tag="v$VERSION"
           git fetch origin --tags --prune
-          release_tag=$(git tag --merged HEAD --list 'v*' --sort=-version:refname | head -n1 || true)
-          if [ -z "$release_tag" ]; then
-            echo "release-plz reported a release but no v* tag is reachable from HEAD; skipping publish dispatch." >&2
+          if ! git rev-parse -q --verify "refs/tags/$release_tag" >/dev/null; then
+            echo "release-plz finished without creating $release_tag; if the crates went out, tag main's HEAD as $release_tag and run the tag-triggered workflows by hand" >&2
             exit 1
           fi
           failed=()
@@ -264,32 +302,34 @@ jobs:
             exit 1
           fi
 
-      - name: Open promote-to-main PR on release
-        if: steps.release_plz.outputs.releases_created == 'true'
+      # Auto-merge holds the PR to a merge commit, which the next promote needs. The merge it
+      # performs starts no workflow, so canary's CI next runs on the PR after it.
+      - name: Open the main-to-canary PR and turn on auto-merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.plan.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin --tags --prune
-          new_tags=$(git tag --merged HEAD --list 'v*' --sort=-version:refname | head -n1 || true)
-          if [ -z "$new_tags" ]; then
-            echo "release-plz reported a release but no v* tag is reachable from HEAD; refusing to promote." >&2
-            exit 1
+          git fetch origin canary
+          if git merge-base --is-ancestor HEAD origin/canary; then
+            echo "canary already has main"
+            exit 0
           fi
-          release_tag="$new_tags"
-          echo "Detected release tag reachable from HEAD: $release_tag"
-          existing=$(gh pr list --base main --head canary --state open --json number --jq '.[0].number' 2>/dev/null || true)
+          existing=$(gh pr list --base canary --head main --state open --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             pr_number="$existing"
-            echo "Reusing existing promote PR #$pr_number"
+            echo "Reusing the open main-to-canary PR #$pr_number"
           else
             pr_number=$(gh pr create \
-              --base main \
-              --head canary \
-              --title "chore: promote canary to main for $release_tag" \
-              --body "Promote created by release.yml after release-plz published $release_tag. Approve to fire auto-merge; required status checks were already satisfied on canary." \
+              --base canary \
+              --head main \
+              --title "chore: merge main into canary after v$VERSION" \
+              --body "Opened by release.yml after publishing v$VERSION, so canary carries the release commit and any hotfix. Auto-merge merges it with a merge commit once it is approved; the next promote-to-main refuses while main has a commit canary lacks." \
               | grep -oE '[0-9]+$')
-            echo "Opened promote PR #$pr_number"
+            echo "Opened main-to-canary PR #$pr_number"
           fi
-          gh pr merge "$pr_number" --auto --merge || echo "auto-merge could not be enabled; reviewer can merge manually"
+          if ! gh pr merge "$pr_number" --auto --merge; then
+            echo "auto-merge could not be turned on for #$pr_number; merge it by hand with a merge commit, not a squash" >&2
+            exit 1
+          fi

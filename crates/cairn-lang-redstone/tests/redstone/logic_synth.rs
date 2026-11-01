@@ -1,0 +1,768 @@
+//! `synthesize`: gates in topological order, common subexpressions shared, and one finding per
+//! root cause.
+
+use std::fmt::Write as _;
+
+use cairn_lang_core::ast::Expr;
+use cairn_lang_core::check::Severity;
+use cairn_lang_core::logic_library::LogicPrimitive;
+use cairn_lang_core::{lower, parse};
+use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef, synthesize};
+
+use crate::common::{codes, line_of, load_example, only, synth_source};
+
+fn count_code(out: &cairn_lang_redstone::SynthOutput, code: DiagnosticCode) -> usize {
+    out.diagnostics.iter().filter(|d| d.code == code).count()
+}
+
+#[test]
+fn redstone_door_synthesises_two_inputs_one_or_gate_one_output() {
+    let source = load_example("redstone-door.crn");
+    let out = synth_source(&source);
+
+    assert!(
+        out.diagnostics
+            .iter()
+            .all(|d| d.severity() != Severity::Error),
+        "clean example must not raise errors: {:?}",
+        out.diagnostics,
+    );
+
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.kind == ScopeKind::Struct && e.name == "gatehouse")
+        .expect("gatehouse struct produced a Logic IR entry");
+    let ir = &entry.ir;
+
+    assert_eq!(ir.inputs.len(), 2, "sig.step + sig.exit → 2 input ports");
+    let input_names: Vec<String> = ir.inputs.iter().map(|p| p.name.to_string()).collect();
+    assert!(
+        input_names.contains(&"sig.step".to_string())
+            && input_names.contains(&"sig.exit".to_string()),
+        "expected sig.step and sig.exit, got {input_names:?}",
+    );
+
+    assert_eq!(
+        ir.outputs.len(),
+        1,
+        "one actuator (`door opened_by=sig.open`)"
+    );
+    assert_eq!(ir.outputs[0].name.to_string(), "sig.open");
+
+    assert_eq!(ir.nodes.len(), 1, "one combinational OR gate");
+    assert!(
+        matches!(ir.nodes[0].kind, GateKind::Or2 { .. }),
+        "gate 0 should be Or2, got {:?}",
+        ir.nodes[0].kind,
+    );
+
+    let SignalRef::Gate(driver_idx) = ir.outputs[0].driver else {
+        panic!(
+            "actuator driver should be a gate, got {:?}",
+            ir.outputs[0].driver
+        );
+    };
+    assert_eq!(driver_idx, 0);
+}
+
+#[test]
+fn unbound_signal_reports_e_logic_unbound_signal() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  door id=front side=front at=center
+  logic sig.open = sig.undefined
+  door[id=front] opened_by=sig.open
+";
+    let out = synth_source(source);
+    let unbound: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+        .collect();
+    assert_eq!(
+        unbound.len(),
+        1,
+        "expected exactly one E_LOGIC_UNBOUND_SIGNAL, got: {:?}",
+        out.diagnostics,
+    );
+    assert!(
+        unbound[0].primary.contains("sig.undefined"),
+        "diagnostic should name the missing signal, got: {}",
+        unbound[0].primary,
+    );
+}
+
+#[test]
+fn multiple_drivers_report_e_logic_multiple_drivers() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.dup = sig.a
+  logic sig.dup = sig.b
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.dup
+";
+    let out = synth_source(source);
+    let duplicates: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicMultipleDrivers)
+        .collect();
+    assert_eq!(
+        duplicates.len(),
+        1,
+        "expected one E_LOGIC_MULTIPLE_DRIVERS, got: {:?}",
+        out.diagnostics,
+    );
+    assert!(
+        duplicates[0]
+            .notes
+            .iter()
+            .any(|n| n.message == "first declared here"),
+        "duplicate diagnostic should include a `first declared here` note",
+    );
+}
+
+#[test]
+fn cyclic_bindings_report_e_logic_cycle() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  logic sig.a = sig.b
+  logic sig.b = sig.a
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.a
+";
+    let out = synth_source(source);
+    let cycles: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicCycle)
+        .collect();
+    assert!(
+        !cycles.is_empty(),
+        "expected at least one E_LOGIC_CYCLE, got: {:?}",
+        out.diagnostics,
+    );
+}
+
+#[test]
+fn unused_logic_binding_warns_and_still_synthesises() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step
+  logic sig.dead = sig.step
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.step
+";
+    let out = synth_source(source);
+    let warns: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnusedSignal)
+        .collect();
+    assert_eq!(
+        warns.len(),
+        1,
+        "expected one W_LOGIC_UNUSED_SIGNAL, got: {:?}",
+        out.diagnostics,
+    );
+
+    let has_error = out
+        .diagnostics
+        .iter()
+        .any(|d| d.severity() == Severity::Error);
+    assert!(!has_error, "warning must not block IR construction");
+
+    assert!(
+        out.scoped.scopes.iter().any(|e| e.name == "s"),
+        "the scope should still round-trip a Logic IR when only warnings fire",
+    );
+}
+
+/// `E_UNSUPPORTED_NESTING`'s note says these members produce no blocks, not that they are gone;
+/// this holds the note to that.
+#[test]
+fn signals_reach_synthesis_from_a_body_that_produces_no_blocks() {
+    let source = "@cairn 2026.06
+
+struct s size=1x1
+  walls class=outer mat_slot=wall height=3
+    pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step
+    logic sig.open = sig.step
+    door id=front side=front at=center
+    door[id=front] opened_by=sig.open
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("a body under a non-`level` member still produces a scope entry");
+    assert_eq!(entry.ir.inputs.len(), 1);
+    assert_eq!(entry.ir.outputs.len(), 1);
+    assert!(
+        out.diagnostics
+            .iter()
+            .all(|d| d.severity() != Severity::Error),
+        "synthesis must not raise errors: {:?}",
+        out.diagnostics,
+    );
+}
+
+#[test]
+fn nested_level_body_collects_signals() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  level y=0
+    pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step
+    logic sig.open = sig.step
+    door id=front side=front at=center
+    door[id=front] opened_by=sig.open
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("nested body still produces a scope entry");
+    assert_eq!(entry.ir.inputs.len(), 1);
+    assert_eq!(entry.ir.outputs.len(), 1);
+    assert!(
+        out.diagnostics
+            .iter()
+            .all(|d| d.severity() != Severity::Error),
+        "nested lowering must not raise errors: {:?}",
+        out.diagnostics,
+    );
+}
+
+#[test]
+fn common_subexpressions_share_a_single_gate() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.x = sig.a or sig.b
+  logic sig.y = sig.a or sig.b
+  door id=front side=front at=center
+  door id=back side=back at=center
+  door[id=front] opened_by=sig.x
+  door[id=back] opened_by=sig.y
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    assert_eq!(entry.ir.nodes.len(), 1, "single OR2 gate after CSE");
+    assert!(matches!(entry.ir.nodes[0].kind, GateKind::Or2 { .. }));
+}
+
+#[test]
+fn commutative_cse_shares_a_gate_when_operand_order_flips() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.x = sig.a or sig.b
+  logic sig.y = sig.b or sig.a
+  door id=front side=front at=center
+  door id=back side=back at=center
+  door[id=front] opened_by=sig.x
+  door[id=back] opened_by=sig.y
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    assert_eq!(
+        entry.ir.nodes.len(),
+        1,
+        "commutative CSE should collapse to a single OR node, got {:?}",
+        entry.ir.nodes,
+    );
+}
+
+#[test]
+fn and_gate_lowers_with_two_inputs() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.out = sig.a and sig.b
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.out
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    assert_eq!(entry.ir.nodes.len(), 1);
+    let GateKind::And2 { a, b } = entry.ir.nodes[0].kind else {
+        panic!("expected And2, got {:?}", entry.ir.nodes[0].kind);
+    };
+    assert!(matches!(a, SignalRef::Input(_)));
+    assert!(matches!(b, SignalRef::Input(_)));
+}
+
+#[test]
+fn not_gate_lowers_with_one_input() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  logic sig.out = not sig.a
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.out
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    assert_eq!(entry.ir.nodes.len(), 1);
+    let GateKind::Not { a } = entry.ir.nodes[0].kind else {
+        panic!("expected Not, got {:?}", entry.ir.nodes[0].kind);
+    };
+    assert!(matches!(a, SignalRef::Input(_)));
+}
+
+#[test]
+fn topologically_ordered_multi_gate_dag() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  logic sig.out = sig.mid and sig.tail
+  logic sig.mid = sig.a or sig.b
+  logic sig.tail = not sig.a
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.out
+";
+    let out = synth_source(source);
+    let entry = out
+        .scoped
+        .scopes
+        .iter()
+        .find(|e| e.name == "s")
+        .expect("scope entry present");
+    let ir = &entry.ir;
+    assert_eq!(ir.nodes.len(), 3, "three gates: OR, NOT, AND");
+
+    for (idx, node) in ir.nodes.iter().enumerate() {
+        let this_idx = u32::try_from(idx).expect("small index");
+        let mut seen = Vec::new();
+        node.kind.each_input(|r| seen.push(r));
+        for r in seen {
+            match r {
+                SignalRef::Input(i) => assert!(
+                    (i as usize) < ir.inputs.len(),
+                    "input index out of range at gate {idx}",
+                ),
+                SignalRef::Gate(j) => assert!(
+                    j < this_idx,
+                    "gate {idx} operand references gate {j} which is not earlier",
+                ),
+            }
+        }
+    }
+}
+
+#[test]
+fn cascade_suppression_reports_single_root_cause_for_shared_unbound() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  logic sig.x = sig.undef
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.undef
+";
+    let out = synth_source(source);
+    assert_eq!(
+        count_code(&out, DiagnosticCode::LogicUnboundSignal),
+        1,
+        "cascade suppression should collapse to a single finding, got: {:?}",
+        out.diagnostics,
+    );
+}
+
+#[test]
+fn actuator_side_unbound_signal_flags_the_driver_arg() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.ghost
+";
+    let out = synth_source(source);
+    let unbound: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+        .collect();
+    assert_eq!(unbound.len(), 1);
+    assert!(
+        unbound[0].primary.contains("sig.ghost"),
+        "expected the signal name in the primary, got: {}",
+        unbound[0].primary,
+    );
+    assert!(
+        unbound[0].primary.contains("actuator argument"),
+        "primary should distinguish the actuator source, got: {}",
+        unbound[0].primary,
+    );
+}
+
+#[test]
+fn sensor_and_logic_lhs_collision_reports_e_logic_multiple_drivers() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.step
+  logic sig.step = sig.step
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.step
+";
+    let out = synth_source(source);
+    let dups: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicMultipleDrivers)
+        .collect();
+    assert_eq!(dups.len(), 1);
+    assert!(
+        dups[0]
+            .notes
+            .iter()
+            .any(|n| n.message == "sensor emits this signal here"),
+        "sensor-collision diagnostic should note the sensor source, got: {:?}",
+        dups[0].notes,
+    );
+}
+
+#[test]
+fn self_referential_binding_reports_e_logic_cycle() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  logic sig.a = sig.a
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.a
+";
+    let out = synth_source(source);
+    assert!(
+        count_code(&out, DiagnosticCode::LogicCycle) >= 1,
+        "self-reference should be flagged as E_LOGIC_CYCLE, got: {:?}",
+        out.diagnostics,
+    );
+}
+
+#[test]
+fn multiple_independent_unbound_refs_in_one_rhs_all_reported() {
+    let source = "\
+@cairn 2026.06
+
+struct s size=1x1
+  logic sig.out = sig.undef1 or sig.undef2
+  door id=front side=front at=center
+  door[id=front] opened_by=sig.out
+";
+    let out = synth_source(source);
+    let unbound: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+        .collect();
+    assert_eq!(
+        unbound.len(),
+        2,
+        "expected two independent unbound findings, got: {:?}",
+        out.diagnostics,
+    );
+    let primaries: String = unbound.iter().map(|d| d.primary.as_str()).collect();
+    assert!(primaries.contains("sig.undef1"), "sig.undef1 must be named");
+    assert!(primaries.contains("sig.undef2"), "sig.undef2 must be named");
+}
+
+#[test]
+fn a_primitive_in_a_notation_it_has_no_gate_in_still_reports_its_operands() {
+    let unbound = "E_LOGIC_UNBOUND_SIGNAL";
+    let unsupported = "E_LOGIC_UNSUPPORTED_PRIMITIVE";
+    for (expression, primitive, expected_codes, primary, footer) in [
+        (
+            "sig.nope1 and sig.nope2",
+            LogicPrimitive::Not,
+            &[unbound, unbound, unsupported][..],
+            "struct=s: logic expression applies `not` between two operands, which the \
+             combinational lowering has no gate for",
+            "Fix: write `not` before its one operand",
+        ),
+        (
+            "not sig.nope1",
+            LogicPrimitive::And,
+            &[unbound, unsupported][..],
+            "struct=s: logic expression applies `and` before one operand, which the \
+             combinational lowering has no gate for",
+            "Fix: write `and` between its two operands",
+        ),
+    ] {
+        let source = format!(
+            "struct s size=1x1\n  logic sig.out = {expression}\n  \
+             door id=front side=front at=center\n  door[id=front] opened_by=sig.out\n"
+        );
+        let mut intent = lower(&parse(&source).expect("parse"));
+        match &mut intent.structs[0].logic[0].rhs {
+            Expr::Infix { primitive: p, .. } | Expr::Prefix { primitive: p, .. } => *p = primitive,
+            other => panic!("{expression:?}: expected a primitive, got {other:?}"),
+        }
+        let out = synthesize(&intent);
+        assert_eq!(codes(&out), expected_codes, "{expression:?}");
+        let finding = only(&out, DiagnosticCode::LogicUnsupportedPrimitive);
+        assert_eq!(finding.primary, primary, "{expression:?}");
+        let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(notes, [footer], "{expression:?}");
+    }
+}
+
+/// The walk reaches the `level`-nested `assert` first, though it is written below.
+#[test]
+fn an_unbound_assert_signal_is_reported_at_its_first_use_in_the_file() {
+    let source = "\
+struct s size=5x5
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  logic sig.o = not sig.a
+  assert truth(sig.zz -> sig.o) { 0 -> 1; 1 -> 0 }
+  level y=0
+    assert truth(sig.zz -> sig.o) { 0 -> 1; 1 -> 0 }
+";
+    let out = synth_source(source);
+    let unbound: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+        .collect();
+    assert_eq!(
+        unbound.len(),
+        1,
+        "one name, one finding: {:?}",
+        out.diagnostics
+    );
+    assert_eq!(
+        line_of(source, unbound[0].span.start),
+        4,
+        "the first `assert` naming `sig.zz` is on line 4: {:?}",
+        unbound[0],
+    );
+}
+
+const NESTING_FIX: &str = "Fix: declare each `logic` binding after the ones it references. A \
+                           binding is lowered by descending into whatever it names, so a chain \
+                           written in reverse nests each binding's expression inside the one \
+                           that references it, while the same graph in dependency order nests \
+                           none.";
+
+#[derive(Debug)]
+struct NestingRefusal {
+    line: usize,
+    primary: String,
+    noted: Vec<(usize, String)>,
+    footers: Vec<String>,
+}
+
+fn nesting_refusals(source: &str) -> Vec<NestingRefusal> {
+    synth_source(source)
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicNestingTooDeep)
+        .map(|d| NestingRefusal {
+            line: line_of(source, d.span.start),
+            primary: d.primary.clone(),
+            noted: d
+                .notes
+                .iter()
+                .filter_map(|n| {
+                    n.span
+                        .as_ref()
+                        .map(|span| (line_of(source, span.start), n.message.clone()))
+                })
+                .collect(),
+            footers: d
+                .notes
+                .iter()
+                .filter(|n| n.span.is_none())
+                .map(|n| n.message.clone())
+                .collect(),
+        })
+        .collect()
+}
+
+/// `stages` bindings of `ands` `and`s each, in reverse dependency order from line 4, after an
+/// unrelated binding on line 3 that the chain's count and anchor must leave out.
+fn reverse_chain_after_an_unrelated_binding(stages: usize, ands: usize) -> String {
+    let tail = " and sig.a".repeat(ands);
+    let mut source = String::from(
+        "struct s size=5x5\n  \
+         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+         logic sig.u = not sig.a\n",
+    );
+    for stage in 1..stages {
+        let _ = writeln!(source, "  logic sig.x{stage} = sig.x{}{tail}", stage + 1);
+    }
+    let _ = writeln!(source, "  logic sig.x{stages} = sig.a{tail}");
+    source.push_str("  door id=d side=front at=center\n  door[id=d] opened_by=sig.x1\n");
+    source
+}
+
+#[test]
+fn a_nesting_refusal_counts_its_chain_and_stands_on_where_it_starts() {
+    let found = nesting_refusals(&reverse_chain_after_an_unrelated_binding(3, 90));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0]
+            .primary
+            .contains("inside 3 chained bindings, starting with this one"),
+        "the count is the chain's own: {}",
+        found[0].primary,
+    );
+    assert_eq!(found[0].line, 4, "on `sig.x1`, not on `sig.u`");
+    assert_eq!(
+        found[0].noted,
+        [
+            (
+                5,
+                "chained binding 2 of 3, declared after the first".to_owned()
+            ),
+            (
+                6,
+                "chained binding 3 of 3, declared after the first".to_owned()
+            ),
+        ],
+    );
+    assert_eq!(found[0].footers, [NESTING_FIX]);
+}
+
+#[test]
+fn a_nesting_refusal_notes_three_bindings_and_counts_the_rest() {
+    for (stages, ands, more) in [
+        (4, 84, None),
+        (
+            5,
+            55,
+            Some("and 1 more chained binding, declared after the first"),
+        ),
+        (
+            6,
+            50,
+            Some("and 2 more chained bindings, each declared after the first"),
+        ),
+    ] {
+        let found = nesting_refusals(&reverse_chain_after_an_unrelated_binding(stages, ands));
+        assert_eq!(found.len(), 1, "{stages} x {ands}: {found:?}");
+        let found = &found[0];
+        assert!(
+            found.primary.contains(&format!(
+                "inside {stages} chained bindings, starting with this one"
+            )),
+            "{stages} x {ands}: the count is the chain's, not the scope's: {}",
+            found.primary,
+        );
+        assert_eq!(found.line, 4, "{stages} x {ands}: on `sig.x1`");
+        assert_eq!(
+            found.noted,
+            (2..=4)
+                .map(|position| (
+                    position + 3,
+                    format!("chained binding {position} of {stages}, declared after the first"),
+                ))
+                .collect::<Vec<_>>(),
+            "{stages} x {ands}: a note on each of the next three, in the order entered",
+        );
+        let footers: Vec<&str> = found.footers.iter().map(String::as_str).collect();
+        let expected: Vec<&str> = more.into_iter().chain([NESTING_FIX]).collect();
+        assert_eq!(footers, expected, "{stages} x {ands}");
+    }
+}
+
+#[test]
+fn two_chains_from_one_binding_are_two_nesting_refusals() {
+    let tail = " and sig.a".repeat(63);
+    let mut source = String::from(
+        "struct s size=5x5\n  \
+         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+         logic sig.top = sig.p1 or sig.q1\n",
+    );
+    for branch in ["p", "q"] {
+        for stage in 1..5 {
+            let _ = writeln!(
+                source,
+                "  logic sig.{branch}{stage} = sig.{branch}{}{tail}",
+                stage + 1
+            );
+        }
+        let _ = writeln!(source, "  logic sig.{branch}5 = sig.a{tail}");
+    }
+    source.push_str("  door id=d side=front at=center\n  door[id=d] opened_by=sig.top\n");
+
+    let found = nesting_refusals(&source);
+    assert_eq!(found.len(), 2, "one finding per chain: {found:?}");
+    for (refusal, first_line) in found.iter().zip([4, 9]) {
+        assert_eq!(refusal.line, 3, "on `sig.top`: {refusal:?}");
+        assert!(
+            refusal
+                .primary
+                .contains("inside 5 chained bindings, starting with this one"),
+            "{refusal:?}",
+        );
+        assert_eq!(
+            refusal
+                .noted
+                .iter()
+                .map(|(line, _)| *line)
+                .collect::<Vec<_>>(),
+            [first_line, first_line + 1, first_line + 2],
+            "each finding notes its own branch: {refusal:?}",
+        );
+        assert_eq!(
+            refusal.footers[0],
+            "and 1 more chained binding, declared after the first"
+        );
+    }
+}

@@ -5,7 +5,9 @@ git_tag_enable = false
 git_release_enable = false
 
 changelog_path = "./CHANGELOG.md"
-changelog_update = true
+# Only the CLI writes the shared changelog, since a version with two sections leaves it
+# unparseable and the release body empty.
+changelog_update = false
 
 allow_dirty = true
 publish_allow_dirty = true
@@ -22,9 +24,18 @@ publish = true
 git_tag_enable = true
 git_release_enable = true
 git_tag_name = "v{{ version }}"
-# GitHub refuses a release body over 125,000 characters with a bare 422, after
-# the crates are already on crates.io. A month whose entry outgrows that links
-# to the CHANGELOG at the tag instead of failing the release.
+changelog_update = true
+changelog_include = [
+  "cairn-lang-core",
+  "cairn-lang-docs",
+  "cairn-lang-formats",
+  "cairn-lang-lsp",
+  "cairn-lang-nbt",
+  "cairn-lang-redstone",
+  "cairn-lang-tree-sitter",
+  "cairn-lang-wasm",
+]
+# GitHub refuses a release body over 125,000 characters, after the crates are already published.
 git_release_body = """
 {%- if changelog | length > 120000 -%}
 This release's changelog entry is too long for a GitHub release body.
@@ -70,5 +81,7 @@ commit_parsers = [
   { message = "^chore(\\(release\\))?: release", skip = true },
   { message = "^chore\\(release\\)", skip = true },
   { message = "^chore", group = "chore", skip = true },
+  # A merge commit brings in commits that are listed on their own.
+  { message = "^Merge ", skip = true },
   { message = "^.*", group = "other" },
 ]

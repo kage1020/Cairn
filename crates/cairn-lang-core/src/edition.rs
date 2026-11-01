@@ -1,52 +1,25 @@
-//! Cross-cutting edition marker shared by resolver and CLI.
-//!
-//! The compilation target's edition (Java / Bedrock) surfaces at three layers
-//! that must agree: the CLI's `--edition` flag, the resolver's per-edition
-//! theme-variant selection (`spec/versioning-editions` "Java / Bedrock
-//! portability"), and the downstream backend that lowers to `.nbt` /
-//! `.mcstructure`. Keeping the marker enum here — in `cairn-lang-core`, the
-//! layer both callers depend on — avoids either a duplicated definition in
-//! `cairn-lang-formats` and `cairn-lang-cli` or a `formats → cli` dependency
-//! reversal.
-//!
-//! A third edition (Education) can slot in by adding one variant; the
-//! `Display` / `FromStr` pair keeps the CLI-facing string vocabulary
-//! (`"java"`, `"bedrock"`) canonical in one place.
+//! The Minecraft edition a build targets.
 
 use std::fmt;
 use std::str::FromStr;
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 /// A Minecraft edition Cairn can target.
 ///
-/// The variants are ordered `Java`, `Bedrock` so the derived `Ord` matches
-/// the spec's "Java as the base, Bedrock as overriding diffs" framing
-/// (`spec/versioning-editions` "Backend = data tables") — Java sorts first
-/// when the ordering is otherwise arbitrary.
-///
-/// The [`Serialize`] impl emits the canonical lowercase string
-/// (`"java"` / `"bedrock"`) rather than the derived variant name so JSON
-/// consumers of `cairn info` / lockfile-adjacent payloads see the same
-/// spelling the CLI accepts — enabling a wire-compatible upgrade from an
-/// older `edition: String` field to this enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Java sorts first: it is the base and Bedrock the diff (`spec/versioning-editions` "Backend =
+/// data tables").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Edition {
-    /// Java Edition. Emits gzip-compressed vanilla `.nbt` structures.
+    /// Java Edition, written as `.nbt`.
     Java,
-    /// Bedrock Edition. Emits uncompressed little-endian `.mcstructure`.
+    /// Bedrock Edition, written as `.mcstructure`.
     Bedrock,
 }
 
-impl Serialize for Edition {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
-    }
-}
-
 impl Edition {
-    /// Canonical lowercase name of the edition. Used by the CLI, the
-    /// registry-pack manifest, and any JSON that names an edition.
+    /// The lowercase name, as `--edition` spells it.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -62,16 +35,13 @@ impl fmt::Display for Edition {
     }
 }
 
-/// Failure while parsing an edition string. Carries the offending value verbatim
-/// so the CLI can surface it inside the "what is wrong / what is valid /
-/// suggested fix" self-correction triple (`spec/versioning-editions`
-/// "Fail-loud and minimum-version inference").
+/// A string that names no edition.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
     "unknown edition `{input}`. Valid: java, bedrock. Fix: pass one of the supported edition names"
 )]
 pub struct UnknownEdition {
-    /// Verbatim input string the caller passed.
+    /// The string as the caller passed it.
     pub input: String,
 }
 
@@ -111,16 +81,14 @@ mod tests {
     fn from_str_rejects_unknown_carrying_input() {
         let err = "foo".parse::<Edition>().unwrap_err();
         assert_eq!(err.input, "foo");
-        let msg = err.to_string();
-        assert!(msg.contains("foo"), "wrong: {msg}");
-        assert!(msg.contains("java, bedrock"), "valid: {msg}");
+        assert_eq!(
+            err.to_string(),
+            "unknown edition `foo`. Valid: java, bedrock. Fix: pass one of the supported edition names",
+        );
     }
 
     #[test]
     fn from_str_is_case_sensitive() {
-        // Lowercase is the canonical form — the CLI's clap layer already
-        // enforces it, so the parse is deliberately strict here to catch
-        // any accidental UPPER/MixedCase leak from a future entry point.
         assert!("Java".parse::<Edition>().is_err());
         assert!("BEDROCK".parse::<Edition>().is_err());
     }
@@ -131,14 +99,12 @@ mod tests {
     }
 
     #[test]
-    fn serialize_emits_canonical_lowercase_string() {
-        // Wire compatibility with the historical `edition: String` field —
-        // consumers of the info JSON continue to see `"java"` / `"bedrock"`
-        // rather than the derived enum name.
-        assert_eq!(serde_json::to_string(&Edition::Java).unwrap(), "\"java\"");
-        assert_eq!(
-            serde_json::to_string(&Edition::Bedrock).unwrap(),
-            "\"bedrock\"",
-        );
+    fn serde_uses_the_lowercase_name() {
+        for edition in [Edition::Java, Edition::Bedrock] {
+            let json = serde_json::to_string(&edition).unwrap();
+            assert_eq!(json, format!("\"{edition}\""));
+            assert_eq!(serde_json::from_str::<Edition>(&json).unwrap(), edition);
+        }
+        assert!(serde_json::from_str::<Edition>("\"Java\"").is_err());
     }
 }

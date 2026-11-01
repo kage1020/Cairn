@@ -193,7 +193,7 @@ jobs:
               || gh release view "$TAG" >/dev/null 2>&1
           fi
           uploads=("$ARCHIVE" "$ARCHIVE.sha256")
-          # No .sigstore on aarch64-pc-windows-msvc — cosign install skipped.
+          # aarch64-pc-windows-msvc is not signed.
           if [ -f "$ARCHIVE.sigstore" ]; then
             uploads+=("$ARCHIVE.sigstore")
           fi

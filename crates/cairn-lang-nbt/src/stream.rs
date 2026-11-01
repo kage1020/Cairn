@@ -1,62 +1,26 @@
-//! Streaming NBT encoder: write a root compound entry by entry instead of
-//! building the whole [`Tag`] tree first.
-//!
-//! The tree writers in [`crate::java`] and [`crate::bedrock`] need every
-//! tag in memory before the first byte goes out, which is the right shape
-//! for a palette and the wrong one for a list with an entry per voxel. A
-//! [`CompoundStream`] writes each named tag as it is handed one, and a
-//! [`ListStream`] writes each item the same way, so a caller can encode a
-//! list of millions of items while holding one at a time.
-//!
-//! The byte stream is the one the tree writers produce for the same tags in
-//! the same order: both go through the crate-internal `writer` core, which
-//! owns string validation, length prefixes and byte order.
-//!
-//! A list's length prefix is written before its first item, so the item
-//! count is declared up front and checked when the list's closure returns
-//! successfully. Writing a different number of items than declared panics.
-//! A wrong item type returns [`NbtIoError::HeterogeneousList`] instead, and
-//! the difference is whether the stream can still be finished. A wrong type
-//! is refused before the item is counted and before any byte of it is
-//! written, so the bytes so far are still a valid prefix and a retry with
-//! the right type continues the list. A short list is found only once its
-//! closure has returned, when the prefix promises items that will not
-//! follow. A long one is found at the extra item, before any of its bytes,
-//! but it is the same bug: a declared length that the caller's own loop
-//! disagrees with. Like any input the caller built wrong, both assert.
-//!
-//! An empty list always declares `TAG_End`, whatever element type the
-//! caller names, as [`List::of_tags`](crate::tag::List::of_tags) does.
-//!
-//! A [`CompoundStream`] writes every entry it is given, so naming one key
-//! twice writes it twice. A [`Compound`]'s map keeps only the last, so such
-//! a stream has no tree that writes the same bytes; the caller keeps keys
-//! unique.
+//! Streaming NBT encoder: writes a root entry by entry, in the bytes the tree writers produce for
+//! the same tags. A list declares its length up front, so a miscount panics, and the caller keeps
+//! compound keys unique.
 
 use std::io::Write;
 
+use crate::error::NbtIoError;
 use crate::tag::{Compound, Tag};
 use crate::writer::{
-    Endian, NbtIoError, check_item_type, write_compound_body, write_list_header, write_payload,
-    write_string, write_tag_id,
+    Endian, check_item_type, write_compound_body, write_list_header, write_payload, write_string,
+    write_tag_id,
 };
 
-/// `TAG_List`'s wire id.
 const LIST_ID: u8 = 9;
-/// `TAG_Compound`'s wire id.
 const COMPOUND_ID: u8 = 10;
 
-/// The body of a compound being written: each call appends one named tag,
-/// and the `TAG_End` terminator is written when the closure that received
-/// this stream returns successfully.
+/// A compound being written, terminated when the closure that received it returns `Ok`.
 pub struct CompoundStream<'w, W: Write> {
     writer: &'w mut W,
     endian: Endian,
 }
 
-/// The items of a list being written, after its element type and length
-/// prefix. Each call appends one item, which must carry the declared element
-/// type.
+/// A list being written after its header; each item must carry the declared element type.
 pub struct ListStream<'w, W: Write> {
     writer: &'w mut W,
     endian: Endian,
@@ -65,8 +29,6 @@ pub struct ListStream<'w, W: Write> {
     written: usize,
 }
 
-/// Write a root-level named compound whose body `body` streams, in the
-/// given byte order.
 pub(crate) fn stream_named_root<W, F>(
     writer: &mut W,
     endian: Endian,
@@ -92,16 +54,7 @@ where
     write_tag_id(compound.writer, 0)
 }
 
-/// Write a list's element type and length prefix, stream its items, and
-/// check the count. An empty list declares `TAG_End` whatever
-/// `element_type_id` says, as `List::of_tags` does. `body` runs even for
-/// an empty list, so a caller that writes an item into one is caught the
-/// same way as any other miscount.
-///
-/// The count check runs only after `body` returns `Ok`. An error from
-/// `body` (a failed write, an unencodable item) returns before it, so the
-/// caller gets that error rather than a panic about the count it left
-/// short.
+/// `body` runs even when `len` is 0, so an item written into an empty list panics as a miscount.
 fn stream_list_body<W, F>(
     writer: &mut W,
     endian: Endian,
@@ -132,47 +85,37 @@ where
 }
 
 impl<W: Write> CompoundStream<'_, W> {
-    /// Append one named tag, encoded exactly as the tree writers encode a
-    /// compound entry.
+    /// Appends one named tag.
     ///
     /// # Errors
     ///
-    /// [`NbtIoError::InvalidString`] or [`NbtIoError::LengthOverflow`] when
-    /// `name` cannot be written as an NBT string, any encoding error the
-    /// tag raises, and I/O failure on the writer.
+    /// A `name` that is not a valid NBT string, a tag the encoder rejects, or an I/O failure.
     pub fn tag(&mut self, name: &str, tag: &Tag) -> Result<(), NbtIoError> {
         write_tag_id(self.writer, tag.type_id())?;
         write_string(self.writer, self.endian, name)?;
         write_payload(self.writer, self.endian, tag)
     }
 
-    /// Append a named compound the caller already holds, without wrapping
-    /// it in a [`Tag`]: the bytes [`Self::tag`] writes for
-    /// `Tag::Compound(value.clone())`, without the clone.
+    /// Appends a named compound without cloning it into a [`Tag`].
     ///
     /// # Errors
     ///
-    /// [`NbtIoError::InvalidString`] or [`NbtIoError::LengthOverflow`] when
-    /// `name` cannot be written as an NBT string, any encoding error the
-    /// compound raises, and I/O failure on the writer.
+    /// A `name` that is not a valid NBT string, a tag the encoder rejects, or an I/O failure.
     pub fn compound_tag(&mut self, name: &str, value: &Compound) -> Result<(), NbtIoError> {
         write_tag_id(self.writer, COMPOUND_ID)?;
         write_string(self.writer, self.endian, name)?;
         write_compound_body(self.writer, self.endian, value)
     }
 
-    /// Append a named compound whose body `body` streams.
+    /// Appends a named compound whose entries `body` streams.
     ///
     /// # Errors
     ///
-    /// [`NbtIoError::InvalidString`] or [`NbtIoError::LengthOverflow`] when
-    /// `name` cannot be written as an NBT string, whatever `body` returns,
-    /// and I/O failure on the writer.
+    /// A `name` that is not a valid NBT string, `body`'s error, or an I/O failure.
     ///
     /// # Panics
     ///
-    /// Panics when a list `body` streams is given a number of items other
-    /// than it declared.
+    /// When a list `body` streams gets a different number of items than it declared.
     pub fn compound<F>(&mut self, name: &str, body: F) -> Result<(), NbtIoError>
     where
         F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
@@ -182,21 +125,15 @@ impl<W: Write> CompoundStream<'_, W> {
         stream_compound_body(self.writer, self.endian, body)
     }
 
-    /// Append a named list of `len` items of type `element_type_id`, which
-    /// `body` streams. When `len` is `0` the list declares `TAG_End`
-    /// whatever `element_type_id` says, as `List::of_tags` does.
+    /// Appends a named list of `len` items that `body` streams; an empty one declares `TAG_End`.
     ///
     /// # Errors
     ///
-    /// [`NbtIoError::InvalidString`] or [`NbtIoError::LengthOverflow`] when
-    /// `name` cannot be written as an NBT string,
-    /// [`NbtIoError::LengthOverflow`] for a `len` past the `i32` wire
-    /// limit, whatever `body` returns, and I/O failure on the writer.
+    /// An invalid `name`, a `len` past `i32::MAX`, `body`'s error, or an I/O failure.
     ///
     /// # Panics
     ///
-    /// Panics when `body` writes more than `len` items, or returns `Ok`
-    /// having written fewer.
+    /// When `body` writes a number of items other than `len`.
     pub fn list<F>(
         &mut self,
         name: &str,
@@ -214,9 +151,7 @@ impl<W: Write> CompoundStream<'_, W> {
 }
 
 impl<W: Write> ListStream<'_, W> {
-    /// Count one more item of type `actual`, refusing it when its type is
-    /// not the declared one. A refused item is not counted, and the caller
-    /// writes no byte of it.
+    /// Counts one more item, refusing a wrong type before the caller writes any of its bytes.
     fn claim(&mut self, actual: u8) -> Result<(), NbtIoError> {
         assert!(
             self.written < self.len,
@@ -228,34 +163,29 @@ impl<W: Write> ListStream<'_, W> {
         Ok(())
     }
 
-    /// Append one item.
+    /// Appends one item.
     ///
     /// # Errors
     ///
-    /// [`NbtIoError::HeterogeneousList`] when the item's type is not the
-    /// declared element type, any encoding error the item raises, and I/O
-    /// failure on the writer.
+    /// [`NbtIoError::HeterogeneousList`] for a wrong type, a tag the encoder rejects, or I/O.
     ///
     /// # Panics
     ///
-    /// Panics when the list already holds the `len` items it declared.
+    /// When the list already holds the items it declared.
     pub fn item(&mut self, tag: &Tag) -> Result<(), NbtIoError> {
         self.claim(tag.type_id())?;
         write_payload(self.writer, self.endian, tag)
     }
 
-    /// Append one compound item whose body `body` streams.
+    /// Appends one compound item whose entries `body` streams.
     ///
     /// # Errors
     ///
-    /// [`NbtIoError::HeterogeneousList`] when the list does not hold
-    /// compounds, whatever `body` returns, and I/O failure on the writer.
+    /// [`NbtIoError::HeterogeneousList`] for a list not of compounds, `body`'s error, or I/O.
     ///
     /// # Panics
     ///
-    /// Panics when the list already holds the `len` items it declared, or
-    /// when a list `body` streams is given a number of items other than it
-    /// declared.
+    /// When the list is already full, or a list `body` streams gets the wrong number of items.
     pub fn compound<F>(&mut self, body: F) -> Result<(), NbtIoError>
     where
         F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
@@ -264,21 +194,15 @@ impl<W: Write> ListStream<'_, W> {
         stream_compound_body(self.writer, self.endian, body)
     }
 
-    /// Append one list item of `len` items of type `element_type_id`, which
-    /// `body` streams. When `len` is `0` the inner list declares `TAG_End`
-    /// whatever `element_type_id` says, as `List::of_tags` does.
+    /// Appends one list item of `len` items that `body` streams; an empty one declares `TAG_End`.
     ///
     /// # Errors
     ///
-    /// [`NbtIoError::HeterogeneousList`] when this list does not hold lists,
-    /// [`NbtIoError::LengthOverflow`] for a `len` past the `i32` wire
-    /// limit, whatever `body` returns, and I/O failure on the writer.
+    /// [`NbtIoError::HeterogeneousList`] or a `len` past `i32::MAX`, `body`'s error, or I/O.
     ///
     /// # Panics
     ///
-    /// Panics when this list already holds the items it declared, or when
-    /// `body` writes more than `len` items or returns `Ok` having written
-    /// fewer.
+    /// When this list is already full, or `body` writes a number of items other than `len`.
     pub fn list<F>(&mut self, element_type_id: u8, len: usize, body: F) -> Result<(), NbtIoError>
     where
         F: FnOnce(&mut ListStream<'_, W>) -> Result<(), NbtIoError>,

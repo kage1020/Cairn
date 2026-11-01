@@ -25,8 +25,16 @@ include = [
 [lib]
 path = "bindings/rust/lib.rs"
 
-[lints]
-workspace = true
+# The workspace lints, with `unsafe_code` at `deny` so the `ffi` module can lift it.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
 
 [dependencies]
 tree-sitter-language = "0.1.7"
@@ -36,5 +44,4 @@ cc = "1.3.0"
 
 [dev-dependencies]
 cairn-lang-core.workspace = true
-serde_json = "1.0.150"
-tree-sitter = "0.26.11"
+tree-sitter = "0.27.1"

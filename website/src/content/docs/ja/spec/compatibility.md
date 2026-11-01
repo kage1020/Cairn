@@ -2,127 +2,123 @@
 title: "互換性ティア"
 ---
 
-Cairn は
-[日付ベースのバージョニング](/ja/spec/versioning-editions#101-ターゲットはコンパイル時パラメータ) (`YYYY.M[.PATCH]`)
-の下で単一のリリーストレインを出します。CalVer には semver の「メジャー」軸がないため、**何を壊して
-よくて何を壊してはいけないかの範囲**はバージョン番号ではなくこの文書で規定します。
+Cairn は [日付ベースのバージョニング](/ja/spec/#2-つのバージョン軸) (`YYYY.M.PATCH`) のもとで、単一のリリーストレインを出荷します。CalVer には semver の「メジャー」にあたる軸がないので、**リリースで何を壊してよく、何を壊してはいけないか** は、バージョン番号ではなくこの文書で定めます。
 
-プロジェクトの公開面はすべて **Stable**、**Evolving**、**Internal** の 3 ティアのどれか 1 つに
-属します。ティアがルールを定め、バージョン番号はいつ起こったかを記録するだけです。
+プロジェクトの公開面は、どれも **Stable**、**Evolving**、**Internal** の 3 つのティアのいずれか 1 つに属します。ルールを決めるのはティアで、バージョン番号はいつ変わったかを記録するだけです。
 
 ## C.1 ティアの定義
 
 ### Stable
 
-契約: **breaking change は 1 リリース前に `W_DEPRECATED` で予告し、最短でも次の月次 minor まで
-除去しない**。
+契約: **破壊的変更は 1 リリース前に `W_DEPRECATED` で予告し、早くても次の月次マイナーリリースまでは削除しない。** `W_DEPRECATED` は予約済みのコードで ([§C.3](#c3-破壊的変更の告知方法))、最初の非推奨化とともに追加します。今はまだ出力するものがありません。ソースにもコマンドラインにも書かれない面、たとえば JSON 出力のフィールドや終了コードには警告を載せる場所がないので、CHANGELOG の `Deprecations` の節だけで告知します。
 
-- Stable に到達した breaking change は次月の CHANGELOG から参照しなければならない (MUST)。
-- リネームは deprecation 期間中、旧名が機能し続けなければならない (MUST)。
-- デフォルト値は warning 付きで変更してよい (MAY); 意味論は変更してはならない (MUST NOT)。
-- 下流の利用者は minor で pin (`cairn ~= 2026.7`) でき、少なくとも次の月次 minor までは入力
-  が変わらずコンパイルできることを期待してよい。
+- Stable な面に入った破壊的変更は、翌月の CHANGELOG から参照しなければなりません (MUST)。
+- 名前を変更する場合、非推奨期間中は旧名も動作し続けなければなりません (MUST)。
+- 既定値は警告付きで変更してもかまいません (MAY)。意味は変更してはいけません (MUST NOT)。
+- 利用者はマイナーバージョンで固定 (`cairn ~= 2026.7`) でき、少なくとも次の月次マイナーリリースまでは、入力がそのままコンパイルできると期待できます。
 
 Stable な面:
 
-- spec の normative な `.crn` 構文 (キーワード、ヘッダー、ブロック種別、blockstate プリミティブ、
-  theme/material プリミティブ、エディションガード)。
-- `build.cairn.lock` のファイルフォーマット (フィールド、ハッシュ入力、
-  [§10.6](/ja/spec/versioning-editions#106-provenance-とロック) が定める `verified` の意味論)。
-- `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力スキーマ、プロセス
-  終了コード。
-- 正規マテリアル語彙の tier-1 トークン (ユーザーがソースに書く名前)。
-- spec に記載されたエラー/警告コード (`E_*`、`W_*`)。
+- 仕様が規範として定める `.crn` の構文 (キーワード、ヘッダ、ブロックの種類、ブロックステートのプリミティブ、テーマとマテリアルのプリミティブ、エディションガード)。ただし、節が[変更の余地あり](#変更の余地あり)と示したものは除きます。
+- ロックファイル (`<source>.lock`) の形式 (フィールド、ハッシュの入力、[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) が定める `verified` の意味)。
+- `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力のスキーマ、終了コード。
+- tier-1 のトークン。組み込みの `materials` カタログが宣言する抽象トークンで、[§7.2](/ja/spec/materials-themes/#tier-1-のトークン) に挙げています。トークンを足すことは破壊的変更ではありません。
+- [Lint §11.1](/ja/spec/lint/#111-診断コード) が挙げるエラーと警告のコード (`E_*`、`W_*`) と、仕様が予約済みのコードに定めている意味 ([§C.3](#c3-破壊的変更の告知方法))。
 
 ### Evolving
 
-契約: **breaking change は任意の月次 minor で出してよく、CHANGELOG に列挙する**。deprecation
-期間の約束はない。
+契約: **破壊的変更はどの月次マイナーリリースで出してもよく、CHANGELOG に列挙する。** 非推奨期間は約束しない。
 
-- 利用者は minor を上げる前に CHANGELOG を読むべき (SHOULD)。
-- patch は Evolving の breaking を入れてはならない (MUST NOT); 月次 minor だけが許される。
-- ある面が Evolving から Stable に昇格するときは、この文書での移動と CHANGELOG の両方で示す。
-  Stable → Evolving への降格は禁止で、spec 改訂を要する。
+- 利用者は、マイナーバージョンを上げる前に CHANGELOG を読むべきです (SHOULD)。
+- パッチリリースに Evolving な面の破壊的変更を含めてはいけません (MUST NOT)。許されるのは月次マイナーリリースだけです。
+- ある面を Evolving から Stable に昇格させるときは、この文書での移動と CHANGELOG の両方で示します。Stable から Evolving への降格は禁止で、行うには仕様の改訂が必要です。
 
 Evolving な面:
 
-- ドラフトと明記された spec 章・節 ([未決事項](/ja/spec/open-issues) と、本文中で「変更余地」と
-  注記された節)。
-- 新規導入された `cairn` サブコマンドの最初の 3 ヶ月分の月次 minor。
-- registry pack と constraint catalog のファイルレイアウト (それらの *ハッシュ* は Stable な
-  lock 意味論に入るが、*内部構造* は Evolving)。
-- 正規語彙の tier-2 トークン (tier-1 が解決される実装レベル名)。
-- CLI の人間可読な diagnostic フォーマットと文言 (*コード*は Stable、*文言*は違う)。
-- `cairn-lang-cli` の `--features` セット (cargo features) とワークスペース crate 群の `[features]`。
+- ドラフトと明記された仕様の章や節 ([未決事項](/ja/spec/open-issues/))。また、節が[変更の余地あり](#変更の余地あり)と示した構文。
+- 新しく追加された `cairn` サブコマンドの、最初の 3 か月分の月次マイナーリリース。
+- レジストリパックと制約カタログのファイル構成 (それらの *ハッシュ* は Stable なロックの意味に含まれますが、*内部構造* は Evolving です)。制約カタログはまだ同梱しておらず、ロックにはそのハッシュとしてゼロを記録します。
+- tier-2 のブロック。各 tier-1 のトークンが、ターゲットごとに解決するブロックです ([§7.2](/ja/spec/materials-themes/#tier-1-のトークン))。
+- 正規ブロックトークン。ターゲットが受け付ける名前 (そのレジストリパックに従います) と、それぞれがそのターゲットで指すブロックです ([§7.3](/ja/spec/materials-themes/#73-バージョンとエディションをまたぐ対応付け))。
+- CLI の人間向け診断の書式と文言 (*コード* は Stable ですが、*文言* は違います)。
+- `cairn-lang-cli` の `--features` の組 (cargo features) と、ワークスペースの各クレートの `[features]`。
+
+#### 変更の余地あり
+
+この印を使うのは、[§C.2](#c2-マイルストーンごとのティア表) の `.crn` の構文の行が対象とする構文、つまり 5〜9 章と、エディションガードを書く [§10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性) の構文です。そこでコンパイラがまだ組み上げない構文を定める節は、その構文を挙げる **変更の余地あり。** の段落で始めます。この印が挙げたものは、行がどのティアを与えていても Evolving のままです。節のそれ以外の部分については、印は何も定めません。その構文を組み上げる変更で印を外し、構文はその行のティアに従います。そのティアが Stable なら、その変更の CHANGELOG の項目に、構文が Stable に昇格したことを書きます。すでに Stable な構文に印を付けることはしません。それは降格にあたるからです。14 章には印を付けません。レッドストーンの DSL には専用の行があり、M6 まで Evolving だからです。
 
 ### Internal
 
-契約: **何も約束しない。任意のリリースで何でも変わりうる。Internal に依存する利用者は自分で pin
-する責任を負う**。
+契約: **何も約束しない。どのリリースで何が変わってもよい。Internal な面に依存する利用者は、自分でバージョンを固定する責任を負う。**
 
 Internal な面:
 
-- ワークスペース全 crate の Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、
-  `cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`)。これらは含まれる最初の月次 minor から
-  crates.io に publish するが、CLI の推移的公開依存ではない項目はすべて `#[doc(hidden)]` を付ける。
-- コンパイラの中間表現 (Intent IR、Semantic IR、block-array pivot のレイアウト)。
-- 増分ビルドキャッシュのオンディスク形状 (ワークスペース内の `target/` 相当)。
-- 言語サーバーの内部プロトコル (VS Code 等との LSP オンワイヤ仕様は Stable; `cairn-lang-lsp` の
-  内部分割の仕方は Stable ではない)。
+- ワークスペースの全クレートの Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、`cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-tree-sitter`、`cairn-lang-docs`)。これらは、含まれる最初の月次マイナーリリースから crates.io に公開しますが、CLI の推移的な公開依存でない項目にはすべて `#[doc(hidden)]` を付けます。まだ付けた項目はありません。
+- `cairn synth` と、それが出力する JSON。このコマンドは `--experimental-logic-synth` を付けたときにしか動きません。
+- コンパイラの中間表現 (Intent IR、Semantic IR、block-array ピボットのレイアウト)。
+- 増分ビルドキャッシュのディスク上の形式 (プロジェクト内の `target/` に相当するもの)。
+- 言語サーバーの内部プロトコル (VS Code などとの間の LSP の通信仕様は Stable ですが、`cairn-lang-lsp` の内部の分け方は Stable ではありません)。
 
 ## C.2 マイルストーンごとのティア表
 
-ある面のティアは固定ではなく、プロジェクトが [ロードマップ](/ja/roadmap/) を進むにつれて Stable
-に昇格していきます。本表が正本です。
+ある面のティアは固定ではなく、プロジェクトが [ロードマップ](/ja/roadmap/) を進むにつれて Stable に昇格していきます。この表が基準です。
 
-| 面 | 現在 (M1 前) | M2 (minimal build) | M3 (examples work) | M5 (DX) | M6 (redstone) |
+| 面 | M1 まで | M2 (minimal build) | M3 (examples work) | M5 (DX) | M6 (redstone) |
 |---|---|---|---|---|---|
-| `.crn` 構文 (5〜9 章) | Evolving | Evolving | **Stable** | Stable | Stable |
-| `build.cairn.lock` フォーマット | Evolving | **Stable** | Stable | Stable | Stable |
-| `cairn compile/check/info` フラグ | Evolving | Evolving | **Stable** | Stable | Stable |
-| diagnostic コード (`E_*`、`W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
-| tier-1 マテリアル語彙 | Evolving | Evolving | **Stable** | Stable | Stable |
-| LSP ワイヤプロトコル (LSP 標準) | — | — | — | **Stable** | Stable |
+| `.crn` の構文 (5〜9 章、§10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
+| ロックファイルの形式 | Evolving | **Stable** | Stable | Stable | Stable |
+| `cairn compile/check/info` のフラグ | Evolving | Evolving | **Stable** | Stable | Stable |
+| 診断コード (`E_*`、`W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
+| tier-1 のトークン | Evolving | Evolving | **Stable** | Stable | Stable |
+| LSP の通信プロトコル (LSP 標準) | — | — | — | **Stable** | Stable |
 | レッドストーン DSL (14 章) | Evolving | Evolving | Evolving | Evolving | **Stable** |
-| tier-2 語彙、registry pack レイアウト | Evolving | Evolving | Evolving | Evolving | Evolving |
-| Rust API (全 crate) | Internal | Internal | Internal | Internal | Internal |
+| tier-2 のブロック、正規ブロックトークン、レジストリパックの構成 | Evolving | Evolving | Evolving | Evolving | Evolving |
+| Rust API (全クレート) | Internal | Internal | Internal | Internal | Internal |
 
-表の読み方: **ある行が初めて Stable になる列が、ソフトな約束**です。それより前の列が Evolving で
-あるということは、その列が達成されるまで deprecation 期間なしで変更する権利をプロジェクトが
-留保することを意味します。
+表の読み方: **ある行が初めて Stable になる列が、緩やかな約束です。** その列のマイルストーンに到達するまで、プロジェクトは非推奨期間を設けずにその面を変更できます。
 
-Rust API の行は計画されたロードマップ中に昇格しません。Cairn は Rust ライブラリではなく `cairn`
-CLI バイナリと言語サーバーを通じて消費される設計です。下流の利用者が安定した埋め込み API を望む
-場合、プロジェクトはそれを別途トラックする新しい面として扱います。
+Rust API の行は、計画中のロードマップの範囲では昇格しません。Cairn は Rust ライブラリとしてではなく、`cairn` CLI のバイナリと言語サーバーを通じて使うように設計されています。利用者が安定した組み込み用 API を求める場合、プロジェクトはそれを別途管理する新しい面として扱います。
 
-## C.3 breaking はどう告知されるか
+## C.3 破壊的変更の告知方法
 
-ティアに関わらず、breaking change は CHANGELOG の `Breaking changes` 節に必ず載せます (MUST)。
-Stable な面ではこれが 2 回目の登場で、1 回目は前リリースの `Deprecations` 節です。
+ティアにかかわらず、破壊的変更は CHANGELOG の `Breaking changes` 節に必ず載せます (MUST)。Stable な面の場合、これは 2 回目の告知です。1 回目は前のリリースの `Deprecations` 節です。
 
 ```text
 ## 2026.11.0 — 2026-11-01
 
 ### Breaking changes
-- `cairn compile --java-target` を削除 (2026.10.0 で deprecated)。
+- `cairn compile --java-target` を削除 (2026.10.0 で非推奨)。
   `--target` と `--edition java` を使ってください。
 
 ### Deprecations
-- 矢印形のない `slot` キーワードを deprecate。`W_DEPRECATED_SLOT_ARROW` を出します。
-  最短でも 2026.12.0 までは削除しません。
+- 矢印のない形の `slot` キーワードを非推奨にしました。`W_DEPRECATED` を出します。
+  早くても 2026.12.0 までは削除しません。
 ```
 
-`W_DEPRECATED` と `E_BREAKING` のコード自体は Stable です。新しいコードの追加は breaking では
-なく、既存コードの意味変更が breaking です。
+破壊的変更は、すべてのファイルに同時に及びます。Cairn には、Rust のエディションのような、言語の改訂をファイルごとにオプトインする仕組みはありません。`@cairn` はファイルを書いたときの言語のバージョンを記録するだけで、規則を選びません ([§5.3](/ja/spec/syntax/#53-ヘッダ))。また、「エディション」は Java / Bedrock を指します ([用語集](/ja/spec/glossary/#エディションとバージョン))。リリースが壊してよい範囲は、オプトインではなくその面のティアで決まります。Stable な面を壊すときは `W_DEPRECATED` の猶予期間を置くので、ファイルは少なくとも 1 リリースのあいだに移行できます。
 
-## C.4 ティアに乗らないもの
+`W_DEPRECATED` と `E_BREAKING` は予約済みのコードです。どちらもまだ存在せず、それを必要とする最初の非推奨化や破壊的変更とともに、この章が先に定めておく意味で追加します。新しいコードの追加は破壊的変更ではありませんが、既存のコードの意味を変えることは破壊的変更です。
 
-次の 2 種類はこのマトリクスの外側に置かれます:
+`W_DEPRECATED` は、非推奨期間中の Stable な書き方を使うソースやコマンドラインに出す警告で、代わりの書き方と、その書き方を削除する最も早いリリースを示します。どの非推奨化も同じ 1 つのコードを出し、どの書き方についてのものかはメッセージで示します。`E_BREAKING` は、リリースが Stable な面から削除した書き方を使うソースやコマンドラインを拒否するエラーで、その書き方が本来受けるはずのエラーの代わりに出し、削除したリリースと代わりの書き方を示します。以後のどのリリースでもその書き方に出し続けるので、削除した書き方が本来のエラーに戻ることはありません。Evolving な面から削除した書き方には非推奨期間がなく、`E_BREAKING` も出しません。その書き方を使うソースは、ほかのソースと同じエラーを受け、代わりの書き方は CHANGELOG の項目が示します。
 
-- **spec に挙動を合わせるバグ修正**は、利用者がバグった挙動に依存していたとしても breaking
-  ではない。契約を定めるのは実装ではなく spec。
-- **出力 `.nbt` / `.litematic` / `.schem` / `.mcstructure` のビット一致**はどのティアでも約束
-  しない。2 つのリリースが同じソースから構造的に異なるファイルを生成してよく、肝心なのは結果が
-  ターゲット `(edition, version)` に対して valid であることと lockfile の `resolved_ir_hash`
-  と一致することです。[§10.6](/ja/spec/versioning-editions#106-provenance-とロック) を
-  参照。
+**予約済みのコード。** 安定したコマンドが出すコードは、[Lint §11.1](/ja/spec/lint/#111-診断コード) が挙げるコードです。レッドストーンのパイプラインのコードは Internal の `cairn synth` だけが出すもので、意図してこのカタログの外に置いています。それ以外に、仕様に名前だけがあり、そこに行のないコード、たとえば `E_STATE_DOMAIN` や `E_REQUIRES_CONFLICT` は予約済みのコードで、まだどのコマンドも出しません。予約済みのコードは、仕様が意味を定めていればその意味で加わり、その行が加わることはコードの追加にあたります。
+
+**コードの意味。** コードの重大度と、[Lint §11.2](/ja/spec/lint/#112-機械可読ペイロード) がそのコードに与えるペイロードも、コードの意味の一部です。ペイロードにフィールドを足すこと、ペイロードのなかったコードにペイロードを与えること、一覧のいずれかの値をとるフィールドに値を足すことは、追加にあたります。フィールドを削除したり型を変えたりすること、`kind` の名前を変えること、いつもあったフィールドを省くことは、コードの意味を変えます。
+
+**仮置き。** 仮置きの診断は、コンパイラがまだ組み上げないものの代わりに出る診断で、それが組み上がるとそこには出なくなります。仕様に挙動を合わせる変更なので、[§C.4](#c4-ティアの対象外) のとおり破壊的変更にはあたらず、仮置きのコードの意味も変わりません。仮置きの診断が代わりをするのは、[変更の余地あり](#変更の余地あり)の印が示すもの、コンパイラがまだ組み上げないとほかの章が述べているもの、仕様が将来の拡張のために予約しているものだけです。仕様そのものが拒否するソースは、同じコードを受け続けます。今の仮置きには、たとえば次のものがあります。
+
+- `E_PARSE`。仕様が定めていて、まだパースできない構文に出ます。たとえば座標の組、小数、`nbt={...}` の値、`edit`、`@edition`、`assert latency` です。
+- `E_UNKNOWN_KEYWORD`。仕様が定めていて、コンパイラがまだ知らないキーワードに出ます。たとえば `spawn`、`chest`、`lever`、`raw_block` です。
+- `W_IGNORED_ARGUMENT`。まだ届いていないキーに出ます。どのキーがそれにあたるかは [Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分) が挙げていて、theme のセレクタのバインディングもその 1 つです。
+- `E_UNRESOLVED_PORT`。`level` の下のメンバーのポートに出ます。このポートは、[§9.3.5](/ja/spec/components-editing-sites/#935-ポートと-connect) が将来の拡張のために予約しています。
+- `W_STATE_LITERAL_UNCHECKED`。`E_STATE_DOMAIN` がステートのリテラルをターゲットに照らして検査するようになるまで出ます。
+- `W_DEFERRED_MEMBER`。block-array パスがまだ lowering しないものを行が書いたメンバー ([Lint](/ja/spec/lint/#lowering)) に出ます。たとえば、lowering がまだ扱わないキーワードのメンバー、持ち上げた `level` の下の `floor` や `roof`、`repeat=` が 1 より大きく `sym=true` も持つ `window` です。
+
+どこでも出なくなった仮置きのコードも、[Lint §11.1](/ja/spec/lint/#111-診断コード) の行は残し、どのリリースから出なくなったかをそこに書きます。その名前を別の意味に使うことはありません。
+
+## C.4 ティアの対象外
+
+次の 2 つは、この表の対象外です。
+
+- **仕様に挙動を合わせるバグ修正** は、利用者がバグのある挙動に依存していたとしても、破壊的変更ではありません。契約を定めるのは実装ではなく仕様です。
+- **出力する `.nbt` / `.litematic` / `.schem` / `.mcstructure` のビット単位の一致** は、どのティアでも約束しません。現在あるのは `.nbt` と `.mcstructure` の出力だけです ([§12.1](/ja/spec/ecosystem-interop/#121-順方向の変換))。2 つのリリースが同じソースから構造の異なるファイルを生成してもかまいません。重要なのは、結果がターゲットの `(edition, version)` に対して有効であることと、ロックファイルの `resolved_ir_hash` と一致することです。[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。

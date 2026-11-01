@@ -1,36 +1,20 @@
-# Without this file nothing proposes a bump for a SHA-pinned action, and a pin
-# with nobody moving it is a pin that silently rots. Every third-party action
-# in `.github/workflows/` is pinned to a commit, so this entry is what turns
-# those pins from frozen into maintained: Dependabot resolves each SHA to the
-# release tag pointing at it, finds the newer release, and rewrites both the
-# SHA and the `# vX.Y.Z` comment beside it. The comment is an output Dependabot
-# maintains, not an input it reads — a wrong one misleads a human reader and
-# nothing else.
-#
-# `actions/checkout` and `actions/setup-node` are deliberately left on their
-# major tags. That is accepted risk, not an absence of it: those tags are
-# mutable by design, repointed at each `v6.x.y`, and `actions/checkout` is the
-# first step of every credentialed job here — including the two that hold
-# `id-token: write`, where it runs before any pinned action sees the workspace.
+# Every `cooldown` holds a new release back a week, long enough for a compromised one to be caught
+# and pulled. Security updates never wait.
 version: 2
 updates:
+  # Bumps each SHA-pinned action in `.github/workflows/` and the `# vX.Y.Z` comment beside it.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
-      # `ci`, not `build(deps)`: this changes CI configuration and no dependency
-      # a crate ships. `release-plz.toml` skips `^ci` and releases `^build`, so
-      # a `build` prefix would be a trap for whoever adds `cargo` or `npm` here
-      # later — those bumps do touch package files, and would land a changelog
-      # entry nobody asked for.
+      # `release-plz.toml` skips `ci` commits and releases `build` ones.
       prefix: ci
     groups:
-      # Grouping collapses the number of PRs and CI round-trips, not the number
-      # of SHA diffs a reviewer reads — that stays one per action either way.
-      # Split in two so a major bump to an action that holds credentials never
-      # arrives alongside a cache patch. Dependabot puts a dependency in the
-      # first group it matches, so this one has to stay above the catch-all.
+      # Actions that hold credentials bump apart from the rest. Dependabot puts a dependency in the
+      # first group it matches, so this one stays above the catch-all.
       release-credentials:
         patterns:
           - "rust-lang/crates-io-auth-action"
@@ -39,3 +23,78 @@ updates:
           - "softprops/action-gh-release"
       actions:
         patterns: ["*"]
+
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      # The release binaries build from `Cargo.lock`, so a bump here is one release-plz releases.
+      prefix: build(deps)
+    groups:
+      # For Cargo, Dependabot counts 0.x to 0.y as major, so this holds only compatible updates.
+      compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # npm bumps are `chore`: release-plz versions only the crates, and no crate builds from these
+  # manifests.
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      # Starlight and its plugins each support a narrow range of Astro releases.
+      astro:
+        patterns: ["astro", "@astrojs/*", "starlight-*"]
+      # For npm, Dependabot counts 0.x to 0.y as minor, though npm treats it as breaking.
+      patch:
+        patterns: ["*"]
+        update-types: [patch]
+
+  - package-ecosystem: npm
+    directory: /editors/vscode
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    ignore:
+      # `vsce package` refuses `@types/vscode` newer than `engines.vscode`; the two move by hand.
+      - dependency-name: "@types/vscode"
+      # The Node that VS Code's extension host runs picks the `@types/node` major.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      patch:
+        patterns: ["*"]
+        update-types: [patch]
+
+  - package-ecosystem: npm
+    directory: /crates/cairn-lang-tree-sitter
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      patch:
+        patterns: ["*"]
+        # A new `tree-sitter-cli` can change `src/parser.c`, which its own PR has to regenerate.
+        exclude-patterns: ["tree-sitter-cli"]
+        update-types: [patch]

@@ -1,16 +1,11 @@
-//! Core of the Cairn language.
-//!
-//! Hosts the surface-syntax lexer, parser, and AST, the Intent IR — the
-//! first semantic layer above the surface, where struct/site/def bodies are
-//! reorganised into typed members with roles — and the diagnostic-collecting
-//! `check` pipeline that turns structural surprises in a lowered module into
-//! position-anchored [`check::Diagnostic`] values. Registry-backed lifting
-//! (materials, themes, per-edition blockstate) lives in downstream layers.
+//! Core of the Cairn language: lexer, parser, AST, Intent IR, `check`, and the passes that
+//! resolve intent down to the block-array IR.
 
 pub mod ast;
 pub mod block_array;
 pub mod calver;
 pub mod check;
+pub(crate) mod diagnostic;
 pub mod edition;
 pub mod error;
 pub mod ids;
@@ -18,10 +13,12 @@ pub mod intent;
 pub mod lex;
 pub mod lines;
 pub mod lock;
+pub mod logic_library;
 pub mod parse;
 pub(crate) mod prose;
 pub mod resolve;
 pub mod suggest;
+pub(crate) mod version;
 
 pub use ast::{DottedRef, Module, Statement};
 pub use block_array::{
@@ -36,18 +33,12 @@ pub use ids::{
     PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem,
 };
 pub use intent::{
-    CircuitRegion, IntentModule, Member, MemberRole, ScopeKind, SemanticLevel, circuit_regions,
-    lower,
+    CircuitRegion, CircuitRegionDefect, IntentModule, Member, MemberRole, RejectedCircuitRegion,
+    ScopeKind, SemanticLevel, circuit_lines, circuit_regions, lower,
 };
 pub use lex::{Token, TokenKind, lex};
 pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, diagnose_parse_failure, parse};
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 
-/// The Cairn release version, in date-based versioning (`YYYY.M[.PATCH]`).
-///
-/// Read from this crate's package version, which is `[workspace.package]`'s,
-/// which is the number the release tooling bumps. Everything that has to name
-/// the compiler that produced an artefact — `cairn --version`, a lockfile's
-/// `cairn_version` — reads it from here, so it is derived rather than
-/// maintained.
+/// The Cairn release version (`YYYY.M[.PATCH]`), from the workspace package version.
 pub const CAIRN_VERSION: &str = env!("CARGO_PKG_VERSION");

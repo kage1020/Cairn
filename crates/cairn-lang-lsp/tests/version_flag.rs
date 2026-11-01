@@ -1,20 +1,5 @@
-//! Contract tests for the `cairn-lsp` command-line surface.
-//!
-//! The binary is spawned by editors (no arguments, or `--stdio`, which an LSP
-//! client appends when told to use the stdio transport — both mean LSP over
-//! stdio, and `lsp_stdio.rs` drives a session through each) and by users on
-//! the command line for support triage. The surface it exposes to that second
-//! audience is: `--version`/`-V` → `cairn-lsp <version>` and exit 0;
-//! `--help`/`-h` → usage string and exit 0; an unknown argument → exit 2
-//! with a message that lists the valid flags; a second argument after any
-//! flag → exit 2 naming that argument and the flag it followed. These tests
-//! pin that contract so a refactor of `main.rs` cannot silently reshape it.
-//!
-//! The version is compared against the number cargo derived for this crate
-//! rather than against `cairn-lang-core`'s `CAIRN_VERSION`, which is where the
-//! binary reads it from. Both resolve to `[workspace.package] version`, by two
-//! independent routes, so a constant that stops tracking the workspace shows up
-//! here instead of being restated.
+//! The `cairn-lsp` command line a user meets. The version is checked against the one cargo
+//! derived, so a `CAIRN_VERSION` that stops tracking the workspace shows up here.
 
 use std::process::Command;
 
@@ -76,9 +61,7 @@ fn help_flag_prints_usage_and_exits_zero() {
             stdout.contains("--version") && stdout.contains("--help"),
             "{flag} output missing flag documentation: {stdout}",
         );
-        // `--stdio` also appears in prose; the row under `OPTIONS:` is the
-        // one a reader scans, so pin that the flag has a row of its own
-        // with a description beside it.
+        // `--stdio` also appears in prose, so look for its row under `OPTIONS:`.
         let options: Vec<&str> = stdout
             .lines()
             .skip_while(|line| *line != "OPTIONS:")
@@ -126,12 +109,6 @@ fn unknown_flag_exits_with_code_two_and_names_the_flag() {
 
 #[test]
 fn extra_arguments_after_any_flag_are_rejected_naming_both() {
-    // Every flag takes no further argument, `--stdio` included: it is
-    // accepted because it names the only transport the server speaks, not
-    // as a gate that lets anything after it through. An argument after any
-    // flag is refused rather than silently dropped, and the message names
-    // both the leftover and the flag it followed, so `--help garbage` is
-    // not told that `--help` itself is unknown.
     for flag in ["-V", "--version", "-h", "--help", "--stdio"] {
         let output = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
             .args([flag, "garbage"])

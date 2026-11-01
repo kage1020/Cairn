@@ -39,8 +39,8 @@ Cairn source; emitted NBT/schematics are per-target build outputs.
 
 <CardGrid stagger>
   <Card title="Declare intent, not blockstate" icon="puzzle">
-    Stair facing, door orientation, pane connections, and bed head/foot are derived by the
-    compiler; you only override when the value *is* the intent.
+    The compiler derives stair facing, half, and shape, and is to derive door orientation, pane
+    connections, and bed head/foot the same way. You override only when the value *is* the intent.
   </Card>
   <Card title="Phase-ordered evaluation" icon="list-format">
     Write commands flat and order-free; the compiler sorts them into fixed phases: massing,
@@ -56,7 +56,8 @@ Cairn source; emitted NBT/schematics are per-target build outputs.
   </Card>
   <Card title="Logical redstone" icon="random">
     Describe a signal graph; the compiler synthesizes and place-and-routes the actual
-    dust/repeaters/torches per edition.
+    dust/repeaters/torches per edition. Experimental for now: the routed circuit does not reach
+    the built structure yet.
   </Card>
   <Card title="Lint as a first-class loop" icon="approve-check-circle">
     The compiler is also an architectural linter. Precision is earned through a self-correcting
@@ -70,6 +71,7 @@ Cairn source; emitted NBT/schematics are per-target build outputs.
 @requires version>=1.20
 
 theme medieval:
+  slot floor -> @oak_planks
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
 
@@ -87,6 +89,8 @@ cairn compile cottage.crn --edition java --target 1.21.4
 
 ## Status
 
-Cairn is at the **design stage**, draft `2026.06`. The language is being designed in the open and
-the reference compiler is a skeleton; see the [specification](/spec/) for the normative document
-and [Developer Guide](/development/) for the implementation roadmap.
+The specification is draft `2026.06`. The language is being designed in the open, and the reference
+compiler already builds Java and Bedrock structure files from one source; what it does not cover
+yet, the spec marks as not implemented. See the
+[specification](/spec/) for the normative document and the [roadmap](/roadmap/) for what lands
+when.

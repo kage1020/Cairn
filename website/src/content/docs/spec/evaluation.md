@@ -2,9 +2,9 @@
 title: "13. Evaluation Framework"
 ---
 
-The quality of the spec is iterated quantitatively, with a headless geometry simulator independent
-of Minecraft itself, rather than by taste. Vocabulary and syntax debates drift into preference, so
-the evaluation bench is fixed first.
+The spec improves by measurement, not taste, using a headless geometry simulator that does not
+depend on Minecraft itself. Vocabulary and syntax debates drift into preference, so the evaluation
+bench comes first.
 
 ```text
 test prompt set (~50)
@@ -12,6 +12,10 @@ test prompt set (~50)
   → headless lint (syntax + AABB geometry: "window outside wall", "door hanging", …)
   → return line-numbered errors and self-correct for up to 3 turns
 ```
+
+This chapter is the methodology the project is to follow, and none of it is automated in the
+repository yet: there is no prompt set, harness, metric or geometry simulator. Of the loop above,
+only the lint step exists, as `cairn check`.
 
 ## 13.1 Primary metrics
 
@@ -24,9 +28,9 @@ test prompt set (~50)
 
 ## 13.2 Reverse-conversion auxiliary metrics
 
-Reverse-conversion quality ([Ecosystem Interop](/spec/ecosystem-interop/)) is removed from the primary
-evaluation and treated as auxiliary, consistent with the lossy approach. What it measures is not
-"did it reproduce the shape" but **"did it become editable DSL"**.
+Reverse-conversion quality ([Ecosystem Interop](/spec/ecosystem-interop/)) is kept out of the
+primary evaluation and treated as auxiliary, consistent with the lossy approach. What it measures is
+not "did it reproduce the shape" but **"did it become editable DSL"**.
 
 - `block_iou`, `state_accuracy` (facing / shape / waterlogged match), `entity_accuracy` (frame,
   sign, villager, display retention).
@@ -39,10 +43,9 @@ evaluation and treated as auxiliary, consistent with the lossy approach. What it
 
 ## 13.3 Operating rule
 
-Vocabulary additions and syntax changes are adopted only in the direction that improves these
-metrics, especially fix convergence rate and edit stability. One experiment settles most syntax and
-vocabulary questions on real data: give the model only the spec, have it generate, and see where
-the errors are.
+A vocabulary addition or syntax change is adopted only if it improves these metrics, especially fix
+convergence rate and edit stability. One experiment settles most syntax and vocabulary questions on
+real data: give the model only the spec, have it generate, and see where the errors are.
 
 The reverse-conversion harness doubles as an engine that grows the `def` and `theme` standard
 library from a community schematic corpus:
@@ -55,5 +58,7 @@ corpus → import → normalize(edition/version) → L1 compact → cluster(shap
 ## 13.4 Redstone verification
 
 The headless geometry simulator extends to a per-tick redstone logic simulator. It simulates the
-synthesized circuit per target edition and checks it against the declared truth table and temporal
-assertions, in a synth → sim → diff → patch loop. See [Redstone](/spec/redstone/).
+synthesized circuit per target edition and checks it against the declared truth-table, latency and
+temporal assertions, in a synth → sim → diff → patch loop. Neither simulator exists yet, and of the
+three assertion kinds only truth tables and temporal assertions are parsed today. See
+[Redstone](/spec/redstone/#147-verification).

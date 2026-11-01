@@ -12,7 +12,11 @@ A cairn is a stack of stones raised to mark a place. So is a Minecraft build.
 cargo install cairn-lang-cli
 ```
 
-That installs the `cairn` binary. Prebuilt archives for Linux, macOS, and Windows (`x86_64` and `aarch64`) are attached to every [release](https://github.com/kage1020/Cairn/releases); each contains `cairn` and the `cairn-lsp` language server, and each carries a sigstore bundle except the Windows `aarch64` one, which cosign ships no binary for. From a checkout, `cargo build --release` puts both in `target/release/`.
+That installs the `cairn` binary.
+
+Every [release](https://github.com/kage1020/Cairn/releases) also attaches prebuilt archives for Linux, macOS, and Windows (`x86_64` and `aarch64`). Each archive contains `cairn` and the `cairn-lsp` language server. All but the Windows `aarch64` archive carry a sigstore bundle; cosign ships no binary for that platform.
+
+From a checkout, `cargo build --release` puts both binaries in `target/release/`.
 
 ## Quick start
 
@@ -42,7 +46,10 @@ Compile it:
 cairn compile cottage.crn --edition java --target 1.21.4
 ```
 
-You get `cottage.nbt`, a vanilla structure file a structure block can load, and `cottage.crn.lock`, which records the source hash, the resolved target, and the registry pack the build used.
+You get two files:
+
+- `cottage.nbt`, a vanilla structure file a structure block can load.
+- `cottage.crn.lock`, which records the source hash, the resolved target, and the registry pack the build used.
 
 The same file builds for Bedrock:
 
@@ -54,7 +61,7 @@ This writes `cottage.mcstructure`. Nothing in the source changed — the edition
 
 ## Before you build
 
-`cairn check` runs the same analysis without writing anything. Pin an edition and a target and it checks block ids too, naming the block you meant:
+`cairn check` runs the same analysis without writing anything. Give it an edition and a target and it checks block IDs too, naming the block you probably meant:
 
 ```
 $ cairn check cottage.crn --edition java --target 1.21.4
@@ -63,9 +70,9 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 …
 ```
 
-Diagnostics name what is wrong and what a valid value looks like, so a failed build tells you what to type next. `--format json` emits the same findings machine-readable, which is what makes a write-check-fix loop practical — by hand or by tooling.
+Diagnostics name what is wrong and what a valid value looks like, so a failed build tells you what to type next. `--format json` emits the same findings in machine-readable form, so the write-check-fix loop works as well for tools as it does by hand.
 
-`cairn info` answers the version question before you pick a target:
+`cairn info` tells you which versions a file builds for before you pick a target:
 
 ```
 $ cairn info cottage.crn
@@ -80,7 +87,7 @@ semantic-sensitive:      (none)
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
-- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, pressure plates, and `level` grouping.
+- Members: floors, walls, door openings, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, pressure plates, and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
@@ -88,7 +95,14 @@ semantic-sensitive:      (none)
 
 **Experimental.** `cairn synth --experimental-logic-synth` takes a `logic` graph through synthesis, netlist construction, edition selection, placement, routing, delay insertion, and crossing legalization, printing each stage as JSON. Redstone does not reach compiled artifacts yet, and the output shape is free to change.
 
-**Not yet.** Theme selector bindings (`window[class=small] -> frame=@spruce_wood` matches its windows and paints nothing, and `cairn check` says so), `.litematic` and `.schem` writers, importing existing schematics, redstone in compiled output and the tick simulator that verifies it, and the browser playground (the `cairn-lang-wasm` crate is still a placeholder with no exports).
+**Not yet.**
+
+- Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
+- Blockstate derived beyond the roof and stair geometry. A `door` cuts its opening but places no door block, and pane and fence connections and waterlogging are not derived.
+- `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
+- `.litematic` and `.schem` writers, and importing existing schematics.
+- Redstone in compiled output, gates and sequential macros beyond `and` / `or` / `not`, `assert latency`, and the tick simulator that verifies a circuit.
+- The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas
 
@@ -100,7 +114,7 @@ semantic-sensitive:      (none)
 
 ## Documentation
 
-<https://cairn.kage1020.com/> is the canonical home for the project's prose, mirrored at `/ja/<path>/` in Japanese.
+The project's prose lives at <https://cairn.kage1020.com/>. A Japanese translation lives under `/ja/<path>/`.
 
 - [Tutorial](https://cairn.kage1020.com/tutorial/) — the shortest path from install to a structure file in your world.
 - [Examples](examples/) — `cottage`, `themed-tower`, `village`, `redstone-door`, and the smaller files that cover one member each.
@@ -110,11 +124,16 @@ semantic-sensitive:      (none)
 
 Site source lives in [`website/src/content/docs/`](website/README.md) and is reviewed like code.
 
+The same pages ship with the compiler, and the site also serves them in a form language models read well:
+
+- `cairn docs` lists the site's pages, all but the home page and the playground, as they were when the installed `cairn` was built. `cairn docs spec/syntax` prints one page as Markdown, and `cairn docs spec/lint "Error vs warning"` prints only the section a citation names. It needs no network, and the pages always match what that release implements.
+- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) indexes the site for language models. The same pages are also served as Markdown at their URL followed by `index.md` ([`/spec/syntax/index.md`](https://cairn.kage1020.com/spec/syntax/index.md)), and [`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) holds every English page in one file.
+
 ## Versioning
 
-Releases use date-based versioning, `YYYY.M[.PATCH]`, covering the language, the compiler, and the registry packs as one bundle. That is a different axis from the Minecraft version you pass to `--target`; the two are always told apart by flag or keyword, never by format.
+Releases use date-based versioning, `YYYY.M[.PATCH]`, and version the language, the compiler, and the registry packs together as one bundle. This is a separate axis from the Minecraft version you pass to `--target`. The two are always told apart by flag or keyword, never by format.
 
-What a version bump is allowed to break is set by [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/): every surface is **Stable**, **Evolving**, or **Internal**. Monthly minors are the only window for an `Evolving` break, and a `Stable` break gets one release of `W_DEPRECATED` warning first.
+[Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/) set what a version bump may break. Every surface is **Stable**, **Evolving**, or **Internal**. Only a monthly minor release may break an `Evolving` surface, and a `Stable` surface warns with `W_DEPRECATED` for one release before it breaks.
 
 ## Contributing
 

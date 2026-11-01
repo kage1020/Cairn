@@ -1,30 +1,26 @@
-//! Load a [`RegistryPack`] from the bundled built-in or from a directory.
-//!
-//! The built-in pack is embedded at compile time via `include_str!` so the
-//! Cairn binary never has to find a data file at runtime. The on-disk
-//! loader exists for tests in this module and for a future
-//! `--registry-pack <dir>` CLI flag.
+//! Loads a [`RegistryPack`] from the packs embedded at compile time, or from a directory.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
 use cairn_lang_core::lock::HashHex;
+use cairn_lang_core::resolve::{VersionOrder, compare_versions};
 use cairn_lang_core::suggest::nearest_match;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
 use super::aliases::{AliasError, AliasIndex};
 use super::blocks::{BlocksError, BlocksIndex};
-use super::data_versions::DataVersionTable;
+use super::data_versions::{
+    BedrockTarget, DataVersionEntry, DataVersionTable, JavaTarget, UnsupportedTarget,
+};
 use super::hash::pack_hash;
-use super::manifest::{PackEdition, PackManifest};
+use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
-use crate::data_version::UnsupportedTarget;
 
-/// One embedded pack's files, included at compile time so the Cairn
-/// binary never has to find a data file at runtime.
 #[derive(Clone, Copy)]
 struct BuiltinFiles {
     manifest: &'static str,
@@ -53,87 +49,43 @@ macro_rules! builtin_files {
 const BUILTIN_JAVA: BuiltinFiles = builtin_files!("java");
 const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock");
 
-/// Highest manifest `schema_version` this Cairn build understands.
+/// The highest manifest `schema_version` this build reads.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
-/// Highest `data_versions.schema_version` this Cairn build understands.
-///
-/// Bumped to 2 by the `targetable` column. A `schema_version: 1` table
-/// still loads and still means what it meant — every row of one was a
-/// buildable target and the column defaults to `true` — but a v1 *reader*
-/// handed a v2 table would offer its ordering rows as `--target` values,
-/// so the version had to move.
+/// The highest `data_versions.schema_version` this build reads; version 2 adds `targetable`.
 pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 2;
 
-/// Where a [`RegistryPack`] came from. Surfaced in diagnostics so a
-/// `--registry-pack` user can tell at a glance which directory was read.
+/// Where a [`RegistryPack`] came from, for diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PackSource {
-    /// The pack bundled with the Cairn binary via `include_str!`.
+    /// The pack embedded in the binary.
     Builtin,
-    /// A pack loaded from a directory on disk.
+    /// A pack directory on disk.
     Path(PathBuf),
 }
 
-/// A loaded and validated registry pack.
-///
-/// `#[non_exhaustive]` so the "cannot be constructed without going through
-/// validation" guarantee the target lookup relies on holds outside this
-/// crate too: the fields stay readable, but a caller cannot assemble one
-/// from parts that skipped the loader's validators — the `data_versions`
-/// table, the per-version block tables, and the material overrides are each
-/// checked there, and each lookup below assumes it.
+/// A loaded and validated registry pack, built only by the loader and read-only after.
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct RegistryPack {
-    /// Top-level manifest.
-    pub manifest: PackManifest,
-    /// `(mc_version, data_version)` table.
-    pub data_versions: DataVersionTable,
-    /// Abstract material catalog. Empty when the pack's manifest declares
-    /// no `materials` component, which an older pack or a hand-written
-    /// `--registry-pack` directory may not.
-    pub materials: MaterialsIndex,
-    /// Per-version block-id tables. Empty when the pack omits the
-    /// component, which turns id validation off rather than making every
-    /// id invalid.
-    pub blocks: BlocksIndex,
-    /// Groups of spellings one block has worn. Empty when the pack omits
-    /// the component, which leaves a refused id answered by the typo
-    /// search alone.
-    pub aliases: AliasIndex,
-    /// `sha256:<hex>` over the manifest + component bytes in declared order.
-    /// Lands in the lockfile under `inputs.registry_pack_hash`.
-    pub bytes_hash: HashHex,
-    /// Provenance of the pack.
-    pub source: PackSource,
+    manifest: PackManifest,
+    data_versions: DataVersionTable,
+    materials: MaterialsIndex,
+    blocks: BlocksIndex,
+    aliases: AliasIndex,
+    bytes_hash: HashHex,
+    source: PackSource,
 }
 
-/// One registry pack, seen through the target a single compile pinned.
-///
-/// This is the type block-array lowering actually talks to. It exists
-/// because "the pack" is edition-wide while a compile is pinned to one
-/// version, and the id table is the part that differs between them: Bedrock
-/// 1.21.0 spells stone bricks `stonebrick` and 1.21.40 spells it
-/// `stone_bricks`, so a pack-wide answer to "does this id exist" would be
-/// wrong for one of them.
+/// A registry pack seen through the one version a compile pinned, whose ids it checks against.
 #[derive(Debug, Clone)]
 pub struct PackView<'a> {
-    /// The pack's abstract-token catalog.
     materials: &'a MaterialsIndex,
-    /// The pack's alias groups. Edition-wide and version-free by design —
-    /// the pinned version's id table below is what narrows a group to the
-    /// spellings this target actually declares.
+    /// Edition-wide; `ids` narrows a group to the spellings this target declares.
     aliases: &'a AliasIndex,
-    /// The pinned version, or `None` when the run pinned none. Read by
-    /// both halves of the view: a token may be respelled at this version,
-    /// and the id table belongs to it.
     mc_version: Option<&'a str>,
-    /// Sorted ids for the pinned version, or `None` when nothing is pinned
-    /// (or the pack ships no `blocks` component).
+    /// The pinned version's sorted ids; `None` unpinned or without a `blocks` component.
     ids: Option<&'a [String]>,
-    /// How the pinned target reads in a diagnostic — `"bedrock 1.21.60"`,
-    /// or just `"bedrock"` when no version is pinned.
+    /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
     label: String,
 }
 
@@ -153,12 +105,7 @@ impl TargetRegistry for PackView<'_> {
     }
 
     fn aliases_for(&self, id: &str) -> Vec<String> {
-        // No pinned version means no table to filter the group by, and an
-        // unfiltered group is a list of spellings from other versions and
-        // the other edition — the silent-substitution hazard read out as a
-        // suggestion. The commands in that position (`lower`, `info`) do
-        // not raise `E_UNKNOWN_ID` at all, so the answer costs them
-        // nothing.
+        // Unfiltered, a group would suggest spellings from other versions and editions.
         let Some(ids) = self.ids else {
             return Vec::new();
         };
@@ -174,94 +121,77 @@ impl TargetRegistry for PackView<'_> {
     }
 }
 
-/// Errors raised while reading or validating a registry pack.
+/// A registry pack that could not be read or failed validation.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum RegistryError {
-    /// Manifest JSON failed to deserialise.
+    /// The manifest failed to deserialise.
     #[error("registry pack manifest: {source}")]
     Manifest {
-        /// Underlying serde error.
+        /// The serde error.
         #[source]
         source: serde_json::Error,
     },
-    /// A component file's JSON failed to deserialise.
+    /// A component file failed to deserialise.
     #[error("registry pack `{file}`: {source}")]
     File {
-        /// Component name (e.g. `"data_versions"`).
+        /// The component, such as `"data_versions"`.
         file: String,
-        /// Underlying serde error.
+        /// The serde error.
         #[source]
         source: serde_json::Error,
     },
-    /// Filesystem I/O failed while loading a pack from disk.
+    /// Reading a pack directory failed.
     #[error("registry pack i/o at `{path}`: {source}")]
     Io {
-        /// Offending path.
+        /// The path.
         path: PathBuf,
-        /// Underlying I/O error.
+        /// The I/O error.
         #[source]
         source: std::io::Error,
     },
-    /// Manifest or component file declared a schema version this build
-    /// does not understand. Returning a structured error lets the CLI
-    /// tell the user which upgrade lane they need rather than failing
-    /// with an opaque "missing field" message.
+    /// The manifest or `data_versions` declared a schema newer than this build reads.
     #[error(
         "unsupported registry pack {kind} schema_version {got}; this Cairn supports up to {supported}"
     )]
     UnsupportedSchemaVersion {
-        /// Which schema (`"manifest"` or `"data_versions"`).
+        /// `"manifest"` or `"data_versions"`.
         kind: &'static str,
-        /// Version the pack declared.
+        /// The declared version.
         got: u32,
-        /// Highest version this build supports.
+        /// The highest version this build reads.
         supported: u32,
     },
-    /// `data_versions.versions` was empty — the table never has anything
-    /// to resolve against, so we refuse it at load time rather than emit
-    /// a confusing "unsupported target" later.
+    /// `data_versions.versions` was empty.
     #[error("registry pack `data_versions.versions` is empty")]
     EmptyVersionTable,
-    /// `data_versions.latest` did not name a **targetable** row of
-    /// `versions`. A dangling `latest` would resolve `--target latest` to
-    /// nothing; one naming an ordering row would resolve it to a version
-    /// the pack cannot build for. Both are pack-author bugs rather than
-    /// user errors.
+    /// `data_versions.latest` named no targetable row.
     #[error("registry pack `data_versions.latest` = `{latest}` is not a targetable version")]
     LatestNotInTable {
-        /// Verbatim `latest` value.
+        /// The `latest` value.
         latest: String,
     },
-    /// Every row of `data_versions.versions` is an ordering row, so the
-    /// pack can order a floor and build for nothing. Refused here rather
-    /// than at the first `--target`, which would report every version the
-    /// table names as unsupported and none as valid.
+    /// No row of `data_versions.versions` is targetable.
     #[error("registry pack `data_versions.versions` has no targetable version")]
     NoTargetableVersion,
-    /// The version table's rows are not ordered the way every lookup in
-    /// this module assumes. Holds the row pair and which of the two
-    /// properties they break.
+    /// The version table's rows do not ascend by both `data_version` and label.
     #[error("registry pack `data_versions.versions` is not a usable ordering: {reason}")]
     VersionOrderBroken {
         /// Which rows disagree, and about what.
         reason: String,
     },
-    /// The manifest declared an edition that does not match the slot the
-    /// pack was loaded into (e.g. a Bedrock pack handed to the Java
-    /// loader). Catches a misfiled `--registry-pack` directory before any
-    /// downstream code looks at the data.
+    /// The manifest's edition is not the one the pack was loaded as.
     #[error("registry pack edition `{got:?}` does not match expected `{expected:?}`")]
     EditionMismatch {
-        /// Expected edition.
-        expected: PackEdition,
-        /// Edition the manifest declared.
-        got: PackEdition,
+        /// The expected edition.
+        expected: Edition,
+        /// The manifest's edition.
+        got: Edition,
     },
     /// The pack's `materials` catalog failed to validate.
     #[error("registry pack `materials`: {source}")]
     Materials {
-        /// Underlying validation error from the materials catalog.
+        /// The validation error.
         #[source]
         source: MaterialsError,
     },
@@ -278,25 +208,18 @@ pub enum RegistryError {
     /// The pack's `blocks` table failed to validate.
     #[error("registry pack `blocks`: {source}")]
     Blocks {
-        /// Underlying validation error from the blocks table.
+        /// The validation error.
         #[source]
         source: BlocksError,
     },
     /// The pack's `aliases` catalog failed to validate.
     #[error("registry pack `aliases`: {source}")]
     Aliases {
-        /// Underlying validation error from the alias catalog.
+        /// The validation error.
         #[source]
         source: AliasError,
     },
-    /// An alias group named no id any version of the pack's own `blocks`
-    /// tables declares.
-    ///
-    /// Such a group can never answer: a lookup keeps the members the
-    /// pinned target declares, and this one has none to keep in any
-    /// target. It is what a misspelt spelling looks like from the loader's
-    /// side, and the symptom without this check is a rename that goes on
-    /// being reported as having no candidate.
+    /// An alias group names no id any version of the pack's `blocks` declares, so it never answers.
     #[error(
         "registry pack aliases group [{spellings}] names no id any version of `blocks` declares"
     )]
@@ -304,23 +227,14 @@ pub enum RegistryError {
         /// The group's spellings, comma-joined.
         spellings: String,
     },
-    /// The `blocks` component and the `data_versions` table describe
-    /// different sets of versions.
-    ///
-    /// A supported target with no id table would compile without any id
-    /// checked, which looks exactly like a clean build; an id table for a
-    /// target `--target` cannot name is dead data that nobody will notice
-    /// has gone stale. Both are pack-author mistakes, so the pack is
-    /// refused instead of half-checked.
+    /// `blocks` lacks a table for a targetable version, or has one for a version not in the table.
     #[error(
         "registry pack `blocks` and `data_versions` disagree: no id table for [{missing}], and an id table for unsupported [{extra}]"
     )]
     BlocksVersionMismatch {
-        /// Versions `data_versions` declares that `blocks` does not,
-        /// comma-joined.
+        /// Versions only `data_versions` declares, comma-joined.
         missing: String,
-        /// Versions `blocks` declares that `data_versions` does not,
-        /// comma-joined.
+        /// Versions only `blocks` declares, comma-joined.
         extra: String,
     },
 }
@@ -343,57 +257,68 @@ impl From<AliasError> for RegistryError {
     }
 }
 
-/// The buildable row a `--target` value names, as the owned
-/// `(mc_version, data_version)` pair the per-edition target types are
-/// built from.
-///
-/// Only `targetable` rows are candidates. The table also carries the
-/// releases the pack can *order against* but has no block data for, and
-/// resolving `--target` to one of those would pin a compile to a version
-/// whose id table is absent — which turns the `E_UNKNOWN_ID` check off
-/// rather than running it, the silent-substitution hazard
-/// `spec/versioning-editions` "Fail-loud and minimum-version inference"
-/// forbids.
+/// The targetable row `mc_version` names, as the row spells it. `1.21.0` names `1.21`
+/// (`spec/versioning-editions` "The target is a compile-time parameter").
 fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
     table
         .versions
         .iter()
         .filter(|e| e.targetable)
-        .find(|e| e.mc_version == mc_version)
+        .find(|e| compare_versions(&e.mc_version, mc_version).is_eq())
         .map(|e| (e.mc_version.clone(), e.data_version))
 }
 
 impl RegistryPack {
-    /// Resolve a CLI `--target` value against this pack's version table,
-    /// returning the raw `(mc_version, data_version)` row. The literal
-    /// `"latest"` aliases the row named by `DataVersionTable::latest`; the
-    /// per-edition wrappers stamp the pair into their edition's target
-    /// type.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// The `pack.json` body, of the edition the pack was loaded as.
+    #[must_use]
+    pub fn manifest(&self) -> &PackManifest {
+        &self.manifest
+    }
+
+    /// The version table, its rows strictly ascending by `data_version` and label.
+    #[must_use]
+    pub fn data_versions(&self) -> &DataVersionTable {
+        &self.data_versions
+    }
+
+    /// The materials catalog, empty without the component.
+    #[must_use]
+    pub fn materials(&self) -> &MaterialsIndex {
+        &self.materials
+    }
+
+    /// The block-id tables; empty without the component, which turns id checks off.
+    #[must_use]
+    pub fn blocks(&self) -> &BlocksIndex {
+        &self.blocks
+    }
+
+    /// The alias groups, empty without the component.
+    #[must_use]
+    pub fn aliases(&self) -> &AliasIndex {
+        &self.aliases
+    }
+
+    /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
+    #[must_use]
+    pub fn bytes_hash(&self) -> &HashHex {
+        &self.bytes_hash
+    }
+
+    /// Where the pack came from.
+    #[must_use]
+    pub fn source(&self) -> &PackSource {
+        &self.source
+    }
+
+    /// The `(mc_version, data_version)` row `requested` names, `"latest"` included.
     ///
     /// # Panics
     ///
-    /// Panics when the pack is not of `edition`. Both editions share the
-    /// `data_version` column with different meanings, so resolving against
-    /// the wrong pack would return a plausible-but-wrong integer — a
-    /// silent-substitution hazard of the kind
-    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
-    /// rules out. A full `assert!` rather than a `debug_assert!`: resolution
-    /// runs once per compile, and the guard must survive release builds once
-    /// `--registry-pack` can supply a pack.
-    ///
-    /// Also panics if the pack passed [`validate_data_versions`] but its
-    /// `latest` field nonetheless names no row in `versions`. That branch is
-    /// dead by construction: validation rejects exactly this case at load
-    /// time, and `RegistryPack` cannot be constructed without going through
-    /// validation.
+    /// When the pack is not of `edition`, whose integer would look valid and be wrong.
     fn resolve_target_row(
         &self,
-        edition: PackEdition,
+        edition: Edition,
         requested: &str,
     ) -> Result<(String, i32), UnsupportedTarget> {
         assert_eq!(
@@ -407,121 +332,106 @@ impl RegistryPack {
             );
         }
         targetable_row_for(&self.data_versions, requested).ok_or_else(|| UnsupportedTarget {
-            edition: self.manifest.edition.label(),
+            edition: self.manifest.edition,
             requested: requested.to_owned(),
             suggestion: self.suggestion_for(requested),
             supported: self.supported_list(),
         })
     }
 
-    /// Resolve a CLI `--target` value into a Java backend target.
+    /// Resolves a `--target` value to a Java target.
     ///
     /// # Errors
     ///
-    /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// [`UnsupportedTarget`] when `requested` is neither `"latest"` nor a targetable version.
     ///
     /// # Panics
     ///
-    /// Panics if called on a non-Java pack — resolving against the wrong
-    /// edition's `data_version` column would return a meaningful-but-wrong
-    /// integer, so it is a hard caller-bug guard rather than a recoverable
-    /// error.
-    pub fn resolve_java_target(
-        &self,
-        requested: &str,
-    ) -> Result<crate::data_version::JavaTarget, UnsupportedTarget> {
-        let (mc_version, data_version) = self.resolve_target_row(PackEdition::Java, requested)?;
-        Ok(crate::data_version::JavaTarget {
+    /// When the pack is not a Java pack.
+    pub fn resolve_java_target(&self, requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
+        let (mc_version, data_version) = self.resolve_target_row(Edition::Java, requested)?;
+        Ok(JavaTarget {
             mc_version,
             data_version,
         })
     }
 
-    /// Resolve a CLI `--target` value into a Bedrock backend target. The
-    /// pack's `data_version` column carries the `.mcstructure` block
-    /// palette `version` integer for Bedrock packs.
+    /// Resolves a `--target` value to a Bedrock target.
     ///
     /// # Errors
     ///
-    /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// [`UnsupportedTarget`] when `requested` is neither `"latest"` nor a targetable version.
     ///
     /// # Panics
     ///
-    /// Panics if called on a non-Bedrock pack, for the same caller-bug
-    /// reason as [`Self::resolve_java_target`].
+    /// When the pack is not a Bedrock pack.
     pub fn resolve_bedrock_target(
         &self,
         requested: &str,
-    ) -> Result<crate::data_version::BedrockTarget, UnsupportedTarget> {
-        let (mc_version, block_version) =
-            self.resolve_target_row(PackEdition::Bedrock, requested)?;
-        Ok(crate::data_version::BedrockTarget {
+    ) -> Result<BedrockTarget, UnsupportedTarget> {
+        let (mc_version, block_version) = self.resolve_target_row(Edition::Bedrock, requested)?;
+        Ok(BedrockTarget {
             mc_version,
             block_version,
         })
     }
 
-    /// Closest supported version for the matching field of
-    /// [`crate::data_version::UnsupportedTarget`], or `None` when no version
-    /// is close enough. Candidate pool is every `mc_version` plus the
-    /// `"latest"` alias, since the alias is just as legitimate a `--target`
-    /// value as any version string.
+    /// The targetable version or `"latest"` closest to `requested`, if any is close enough.
     fn suggestion_for(&self, requested: &str) -> Option<String> {
         let pool = self
-            .data_versions
-            .versions
-            .iter()
-            .filter(|e| e.targetable)
+            .targetable()
+            .into_iter()
             .map(|e| e.mc_version.as_str())
             .chain(std::iter::once("latest"));
         nearest_match(requested, pool).map(str::to_owned)
     }
 
-    /// The view of this pack that block-array lowering consults.
-    ///
-    /// `mc_version` is the target the run pinned, or `None` for a run that
-    /// pinned none (`cairn info`, `cairn lower`; `cairn check` does not
-    /// lower at all). Passing `None` leaves [`TargetRegistry::block_ids`]
-    /// empty, so id validation is skipped rather than run against a version
-    /// the caller never chose.
+    /// The rows `--target` may name, ascending by `data_version`.
+    #[must_use]
+    pub fn targetable(&self) -> Vec<&DataVersionEntry> {
+        self.data_versions
+            .versions
+            .iter()
+            .filter(|entry| entry.targetable)
+            .collect()
+    }
+
+    /// Every row, targetable or not, as the ordering an `@requires` floor is placed against
+    /// (`spec/versioning-editions` "The target is a compile-time parameter").
+    #[must_use]
+    pub fn version_order(&self) -> VersionOrder {
+        VersionOrder::new(
+            self.data_versions
+                .versions
+                .iter()
+                .map(|entry| (entry.mc_version.clone(), i64::from(entry.data_version))),
+        )
+    }
+
+    /// Whether some version this pack describes declares `id`; any id may be, without block
+    /// tables.
+    #[must_use]
+    pub fn may_declare(&self, id: &str) -> bool {
+        self.blocks.declared_by_some_version(id).unwrap_or(true)
+    }
+
+    /// The view block-array lowering consults for `mc_version`; `None` skips the id check.
     ///
     /// # Panics
     ///
-    /// Panics when the pack has block tables but none for `mc_version`, or
-    /// when the one it has is not sorted. Both are impossible for a pack
-    /// that came through the loader — `validate_blocks_cover_versions`
-    /// refuses the first and `BlocksIndex` builds sorted — so a panic here
-    /// means a `RegistryPack` was assembled some other way. The alternative
-    /// is a compile that checks no ids while looking clean, which is the
-    /// failure this component exists to remove.
+    /// When the pack has block tables but none, or an unsorted one, for `mc_version`.
     #[must_use]
     pub fn view<'a>(&'a self, mc_version: Option<&'a str>) -> PackView<'a> {
         let ids = mc_version.and_then(|version| {
             let ids = self.blocks.ids_for(version);
-            // INVARIANT(blocks-cover-versions): `validate_blocks_cover_versions`
-            // refuses at load time any pack whose `blocks` component and
-            // `data_versions` table name different versions, and every
-            // caller resolves `mc_version` through `data_versions` first.
-            // A miss here therefore means one of those two rules was
-            // bypassed, and the resulting compile would check no ids at
-            // all while looking like a clean build.
-            //
-            // A full `assert!` rather than a `debug_assert!`, matching
-            // `resolve_java_target`'s: the failure is a silent
-            // no-substitution, the kind release builds must not be allowed
-            // to reach, and the cost is one map lookup per compile.
+            // INVARIANT(blocks-cover-versions): the loader refuses tables that miss a version.
+            // Asserted in release too, since a skipped id check looks like a clean build.
             assert!(
                 ids.is_some() || self.blocks.is_empty(),
                 "pack `{}` has block tables but none for `{version}`",
                 self.manifest.name,
             );
-            // Sortedness is the other half of the same guarantee —
-            // `BlockIdSet::contains` binary-searches, so an unsorted table
-            // reports real ids as missing. `BlocksIndex` builds sorted by
-            // construction, so this holds unless a table arrived some other
-            // way; checked once here rather than per lookup.
+            // `BlockIdSet::contains` binary-searches.
             assert!(
                 ids.is_none_or(<[String]>::is_sorted),
                 "pack `{}` block table for `{version}` is not sorted",
@@ -535,113 +445,65 @@ impl RegistryPack {
             mc_version,
             ids,
             label: match mc_version {
-                Some(version) => format!("{} {version}", self.manifest.edition.label()),
-                None => self.manifest.edition.label().to_owned(),
+                Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
+                None => self.manifest.edition.as_str().to_owned(),
             },
         }
     }
 
-    /// Human-readable list of `mc_version` strings the pack supports,
-    /// followed by the `"latest"` alias. Used in
-    /// [`crate::data_version::UnsupportedTarget`]'s error message.
+    /// The targetable versions, then `"latest"`, comma-joined for an error message.
     #[must_use]
     pub fn supported_list(&self) -> String {
-        let mut entries: Vec<String> = self
-            .data_versions
-            .versions
-            .iter()
-            .filter(|e| e.targetable)
-            .map(|e| e.mc_version.clone())
+        let mut entries: Vec<&str> = self
+            .targetable()
+            .into_iter()
+            .map(|e| e.mc_version.as_str())
             .collect();
-        entries.push("latest".to_owned());
+        entries.push("latest");
         entries.join(", ")
     }
 }
 
-/// Built-in Java pack, parsed once per process. Lookups against
-/// [`crate::data_version`] go through this, so the static JSON is loaded
-/// at most once even when many `cairn compile` runs happen inside a single
-/// `cargo test` invocation.
+/// The built-in pack for `edition`, parsed once per process.
 ///
 /// # Panics
 ///
-/// Panics if the embedded JSON fails to parse or validate. That is a
-/// release-process invariant — the bundled files are part of the binary
-/// — so a failure here means the build artefact itself is broken; the
-/// `expect` surfaces that rather than papering it over.
-pub fn builtin_java() -> &'static RegistryPack {
-    builtin(PackEdition::Java)
-}
-
-/// Built-in Bedrock pack, parsed once per process. The mirror of
-/// [`builtin_java`] for `--edition bedrock` compiles.
-///
-/// # Panics
-///
-/// Panics if the embedded JSON fails to parse or validate, for the same
-/// build-invariant reason as [`builtin_java`].
-pub fn builtin_bedrock() -> &'static RegistryPack {
-    builtin(PackEdition::Bedrock)
-}
-
-fn builtin(edition: PackEdition) -> &'static RegistryPack {
+/// When the embedded pack fails to load, which means the build itself is broken.
+pub fn builtin_pack(edition: Edition) -> &'static RegistryPack {
     static JAVA: OnceLock<RegistryPack> = OnceLock::new();
     static BEDROCK: OnceLock<RegistryPack> = OnceLock::new();
     let cell = match edition {
-        PackEdition::Java => &JAVA,
-        PackEdition::Bedrock => &BEDROCK,
+        Edition::Java => &JAVA,
+        Edition::Bedrock => &BEDROCK,
     };
     cell.get_or_init(|| {
-        load_builtin(edition)
+        load_builtin_pack(edition)
             .expect("built-in registry pack failed to load — this is a build invariant")
     })
 }
 
-/// Parse the built-in Java pack from its embedded bytes.
+/// Parses the built-in pack for `edition`, returning the error [`builtin_pack`] panics on.
 ///
 /// # Errors
 ///
-/// Returns [`RegistryError`] if the embedded JSON fails to deserialise,
-/// declares an unsupported schema, or fails validation. In practice all
-/// of these would mean the bundled `registry-data/java/*.json` files have
-/// been corrupted, which is a release-process bug.
-pub fn load_builtin_java() -> Result<RegistryPack, RegistryError> {
-    load_builtin(PackEdition::Java)
-}
-
-/// Parse the built-in Bedrock pack from its embedded bytes.
-///
-/// # Errors
-///
-/// Returns [`RegistryError`] if the embedded JSON fails to deserialise,
-/// declares an unsupported schema, or fails validation. In practice all
-/// of these would mean the bundled `registry-data/bedrock/*.json` files
-/// have been corrupted, which is a release-process bug.
-pub fn load_builtin_bedrock() -> Result<RegistryPack, RegistryError> {
-    load_builtin(PackEdition::Bedrock)
-}
-
-/// Run the embedded files of `edition` through [`load_pack`].
-fn load_builtin(edition: PackEdition) -> Result<RegistryPack, RegistryError> {
+/// [`RegistryError`] when the embedded files are corrupt.
+pub fn load_builtin_pack(edition: Edition) -> Result<RegistryPack, RegistryError> {
     let files = match edition {
-        PackEdition::Java => BUILTIN_JAVA,
-        PackEdition::Bedrock => BUILTIN_BEDROCK,
+        Edition::Java => BUILTIN_JAVA,
+        Edition::Bedrock => BUILTIN_BEDROCK,
     };
     load_pack(&files, edition)
 }
 
-/// Load a pack from a directory laid out the same way as the built-in
-/// (`pack.json` + the files it names).
+/// Loads a Java pack from a directory holding `pack.json` and the files it names.
 ///
 /// # Errors
 ///
-/// Returns [`RegistryError`] on I/O failure, JSON parse failure, unsupported
-/// schema versions, or validation failure of the loaded data.
+/// [`RegistryError`] when a file cannot be read, parsed or validated.
 pub fn load_from_dir(dir: &Path) -> Result<RegistryPack, RegistryError> {
-    load_pack(&PackDir(dir), PackEdition::Java)
+    load_pack(&PackDir(dir), Edition::Java)
 }
 
-/// The manifest and the four component files it can name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Component {
     Manifest,
@@ -652,8 +514,6 @@ enum Component {
 }
 
 impl Component {
-    /// The error a malformed component is reported as: the manifest has
-    /// its own variant, the four files it names share one.
     fn parse_error(self, source: serde_json::Error) -> RegistryError {
         let file = match self {
             Component::Manifest => return RegistryError::Manifest { source },
@@ -669,10 +529,7 @@ impl Component {
     }
 }
 
-/// Where [`load_pack`] reads each file from. The embedded packs and a
-/// directory on disk share one parse → validate → hash pipeline through
-/// this, so a validation rule added for one can never silently miss the
-/// other.
+/// Where [`load_pack`] reads each file from, so embedded and on-disk packs share one validation.
 trait ComponentSource {
     /// Text of `component`, which the manifest names `file`.
     fn read_text(&self, component: Component, file: &str) -> Result<Cow<'_, str>, RegistryError>;
@@ -723,7 +580,7 @@ impl ComponentSource for PackDir<'_> {
 /// Parse, validate and hash one pack from `source`.
 fn load_pack(
     source: &impl ComponentSource,
-    expected_edition: PackEdition,
+    expected_edition: Edition,
 ) -> Result<RegistryPack, RegistryError> {
     let manifest_text = source.read_text(Component::Manifest, "pack.json")?;
     let manifest: PackManifest = parse_component(&manifest_text, Component::Manifest)?;
@@ -785,9 +642,7 @@ fn load_pack(
     })
 }
 
-/// Read, parse and index one optional component, or hand back its empty
-/// index when the manifest names no file for it. The text comes back too,
-/// because the pack hash covers it.
+/// An optional component's index and text, or its empty index when the manifest names none.
 fn optional_component<'s, C, I, E>(
     source: &'s impl ComponentSource,
     component: Component,
@@ -814,21 +669,8 @@ fn parse_component<T: DeserializeOwned>(
     serde_json::from_str(text).map_err(|source| component.parse_error(source))
 }
 
-/// Refuse an alias group none of the pack's own block tables can answer
-/// with.
-///
-/// A group is resolved by keeping the members the pinned target declares,
-/// so a group naming no id any version has is dead in every target — the
-/// shape a misspelt spelling takes. A pack with no `blocks` component is
-/// exempt for the same reason it is exempt from
-/// [`validate_blocks_cover_versions`]: there is nothing to check against,
-/// and reading that as "no group is answerable" would refuse every pack
-/// that ships aliases without tables.
-///
-/// The rule is "some id in the group", not "every id": a group exists
-/// precisely to hold the spellings this edition does *not* use beside the
-/// ones it does, and a Java pack listing Bedrock's `standing_sign` is the
-/// component working, not a mistake.
+/// Refuses an alias group no version declares a single spelling of. One is enough, since a group
+/// exists to hold the spellings this edition does not use.
 fn validate_aliases_answerable(
     aliases: &AliasIndex,
     blocks: &BlocksIndex,
@@ -850,11 +692,7 @@ fn validate_aliases_answerable(
     Ok(())
 }
 
-/// Refuse a materials override naming a version the pack does not support.
-///
-/// An override for `1.21.41` when the table declares `1.21.40` never fires:
-/// the token keeps resolving to its default id on every version, which is
-/// the exact silent-wrong-id outcome the overrides exist to prevent.
+/// Refuses a materials override naming a version `data_versions` lacks, which would never fire.
 fn validate_material_overrides(
     materials: &MaterialsIndex,
     data_versions: &DataVersionTable,
@@ -874,21 +712,7 @@ fn validate_material_overrides(
     Ok(())
 }
 
-/// Refuse a pack whose `blocks` component and `data_versions` table do not
-/// describe the same versions.
-///
-/// A pack with no `blocks` component at all is exempt: that is the
-/// documented "this pack cannot check ids" mode, not a disagreement. Once
-/// the component is there, though, a supported target with no id table
-/// compiles with nothing checked and looks exactly like a clean build,
-/// and an id table for a version `--target` cannot name is dead data
-/// nobody will notice going stale.
-///
-/// The versions compared are the **targetable** ones. An ordering row is
-/// there to place an `@requires` floor against and is never pinned, so it
-/// has no id table to be missing — which is the whole reason the column
-/// exists. The `extra` half stays every row, because an id table for a
-/// version the table does not name at all is still dead data.
+/// Refuses `blocks` tables that miss a targetable version, or cover one `data_versions` lacks.
 fn validate_blocks_cover_versions(
     blocks: &BlocksIndex,
     data_versions: &DataVersionTable,
@@ -921,7 +745,7 @@ fn validate_blocks_cover_versions(
     })
 }
 
-fn validate_manifest(manifest: &PackManifest, expected: PackEdition) -> Result<(), RegistryError> {
+fn validate_manifest(manifest: &PackManifest, expected: Edition) -> Result<(), RegistryError> {
     if manifest.schema_version > SUPPORTED_MANIFEST_SCHEMA {
         return Err(RegistryError::UnsupportedSchemaVersion {
             kind: "manifest",
@@ -965,32 +789,13 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
     Ok(())
 }
 
-/// The two properties every answer `VersionOrder` gives rests on.
-///
-/// **Keys are unique and ascending.** `DataVersion` is the ordering key,
-/// so two rows sharing one are two versions the compiler cannot tell
-/// apart, and a row out of order would make "the first row" something
-/// other than the oldest release.
-///
-/// **Labels in one numbering order the same way by text as by key.** This
-/// is the property that makes placing a floor *outside* the table's span
-/// sound: that answer is reached by comparing the floor's label against
-/// the first and last rows' labels, so the text has to agree with the keys
-/// about which rows those are. It is not implied by "one numbering
-/// scheme" — two dotted decimals whose keys run the other way would break
-/// it — and every table Cairn ships satisfies it, so it is checked here
-/// rather than assumed in a doc comment.
-///
-/// Labels are compared with `cairn_lang_core`'s label comparison, so two
-/// spellings of one version (`1.21` and `1.21.0`) count as a duplicate:
-/// the lookup treats them as the same row, and a table carrying both
-/// would evaluate a floor against whichever came first.
+/// Requires keys and labels both strictly ascending. A floor outside the table is placed by
+/// label, so labels must agree with keys; `1.21` and `1.21.0` count as one label.
 fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError> {
-    use cairn_lang_core::resolve::compare_versions;
-
     let mut previous: Option<&super::data_versions::DataVersionEntry> = None;
     for entry in &table.versions {
         if let Some(previous) = previous {
+            // `RegistryPack::targetable` returns the rows in this order, unsorted.
             if entry.data_version <= previous.data_version {
                 return Err(RegistryError::VersionOrderBroken {
                     reason: format!(
@@ -1017,937 +822,4 @@ fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError>
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn write_pack(tmp: &Path, manifest_json: &str, data_versions_json: &str) {
-        std::fs::create_dir_all(tmp).expect("mkdir");
-        std::fs::write(tmp.join("pack.json"), manifest_json).expect("write manifest");
-        std::fs::write(tmp.join("data_versions.json"), data_versions_json)
-            .expect("write data_versions");
-    }
-
-    fn write_pack_with_materials(
-        tmp: &Path,
-        manifest_json: &str,
-        data_versions_json: &str,
-        materials_json: &str,
-    ) {
-        write_pack(tmp, manifest_json, data_versions_json);
-        std::fs::write(tmp.join("materials.json"), materials_json).expect("write materials");
-    }
-
-    fn good_manifest() -> &'static str {
-        r#"{
-            "schema_version": 1,
-            "edition": "java",
-            "name": "test",
-            "description": "test",
-            "files": { "data_versions": "data_versions.json" }
-        }"#
-    }
-
-    fn good_data_versions() -> &'static str {
-        r#"{
-            "schema_version": 1,
-            "latest": "1.21.4",
-            "versions": [
-                { "mc_version": "1.20.4", "data_version": 3700 },
-                { "mc_version": "1.21.4", "data_version": 4189 }
-            ]
-        }"#
-    }
-
-    /// A pack carrying every component, so a test can vary one piece at a
-    /// time without re-spelling the other three.
-    fn write_full_pack(
-        tmp: &Path,
-        manifest_json: &str,
-        data_versions_json: &str,
-        materials_json: &str,
-        blocks_json: &str,
-    ) {
-        write_pack_with_materials(tmp, manifest_json, data_versions_json, materials_json);
-        std::fs::write(tmp.join("blocks.json"), blocks_json).expect("write blocks");
-    }
-
-    fn manifest_with_blocks() -> &'static str {
-        r#"{
-            "schema_version": 1,
-            "edition": "java",
-            "name": "test",
-            "description": "test",
-            "files": {
-                "data_versions": "data_versions.json",
-                "materials": "materials.json",
-                "blocks": "blocks.json"
-            }
-        }"#
-    }
-
-    /// One id list per version `good_data_versions` declares, so the
-    /// coverage check passes and a test that wants to break it says so.
-    fn good_blocks() -> &'static str {
-        r#"{
-            "schema_version": 1,
-            "namespace": "minecraft",
-            "base": { "mc_version": "1.20.4", "blocks": ["oak_planks", "stone"] },
-            "diffs": [
-                { "mc_version": "1.21.4", "inherits": "1.20.4", "added": ["pale_oak_planks"] }
-            ]
-        }"#
-    }
-
-    /// A pack carrying every component including `aliases`, for the tests
-    /// that are about renames rather than about ids.
-    fn write_pack_with_aliases(
-        tmp: &Path,
-        data_versions_json: &str,
-        blocks_json: &str,
-        aliases_json: &str,
-    ) {
-        write_full_pack(
-            tmp,
-            manifest_with_aliases(),
-            data_versions_json,
-            &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
-            blocks_json,
-        );
-        std::fs::write(tmp.join("aliases.json"), aliases_json).expect("write aliases");
-    }
-
-    fn manifest_with_aliases() -> &'static str {
-        r#"{
-            "schema_version": 1,
-            "edition": "java",
-            "name": "test",
-            "description": "test",
-            "files": {
-                "data_versions": "data_versions.json",
-                "materials": "materials.json",
-                "blocks": "blocks.json",
-                "aliases": "aliases.json"
-            }
-        }"#
-    }
-
-    /// One group over `good_blocks`: the id `1.21.4` added, beside a
-    /// spelling no version of this pack declares. That is the shape of a
-    /// cross-edition row, and it is answerable because one member is here.
-    fn good_aliases() -> &'static str {
-        r#"{
-            "schema_version": 1,
-            "namespace": "minecraft",
-            "groups": [{ "spellings": ["pale_oak_planks", "paleoak_planks"] }]
-        }"#
-    }
-
-    fn one_material(body: &str) -> String {
-        format!(r#"{{ "schema_version": 1, "namespace": "minecraft", "entries": [{body}] }}"#)
-    }
-
-    fn tmp_dir(label: &str) -> PathBuf {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("cairn-pack-{}-{label}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
-
-    #[test]
-    fn a_pack_without_a_blocks_component_loads_and_refutes_no_id() {
-        // The `materials`-only shape is what every pack written before this
-        // component looks like, and refusing it would strand them.
-        let pack = load_from_dir_or_die("no-blocks", |dir| {
-            write_pack_with_materials(
-                dir,
-                good_manifest(),
-                good_data_versions(),
-                &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
-            );
-        });
-        assert!(pack.blocks.is_empty());
-        assert!(pack.view(Some("1.20.4")).block_ids().is_none());
-    }
-
-    #[test]
-    fn a_blocks_component_folds_one_table_per_version() {
-        let pack = load_from_dir_or_die("folded", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
-                good_blocks(),
-            );
-        });
-        assert_eq!(
-            pack.blocks.versions().collect::<Vec<_>>(),
-            ["1.20.4", "1.21.4"]
-        );
-        let old = pack.view(Some("1.20.4"));
-        let new = pack.view(Some("1.21.4"));
-        let old_ids = old.block_ids().expect("1.20.4 table");
-        let new_ids = new.block_ids().expect("1.21.4 table");
-        assert!(!old_ids.contains("minecraft:pale_oak_planks"));
-        assert!(new_ids.contains("minecraft:pale_oak_planks"));
-        assert_eq!(new_ids.label(), "java 1.21.4");
-    }
-
-    #[test]
-    fn a_view_with_no_version_pinned_carries_no_id_table() {
-        let pack = load_from_dir_or_die("unpinned", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
-                good_blocks(),
-            );
-        });
-        let view = pack.view(None);
-        assert!(view.block_ids().is_none());
-        // The catalog still resolves — only the id check is off.
-        assert!(TargetRegistry::lookup(&view, "a.b").is_some());
-    }
-
-    #[test]
-    fn a_supported_version_with_no_id_table_is_refused() {
-        let err = load_from_dir_err("missing-version", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
-                r#"{
-                    "schema_version": 1,
-                    "namespace": "minecraft",
-                    "base": { "mc_version": "1.20.4", "blocks": ["oak_planks"] }
-                }"#,
-            );
-        });
-        let RegistryError::BlocksVersionMismatch { missing, extra } = err else {
-            panic!("expected BlocksVersionMismatch, got {err:?}");
-        };
-        assert_eq!(missing, "1.21.4");
-        assert_eq!(extra, "");
-    }
-
-    #[test]
-    fn an_id_table_for_an_unsupported_version_is_refused() {
-        let err = load_from_dir_err("extra-version", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
-                r#"{
-                    "schema_version": 1,
-                    "namespace": "minecraft",
-                    "base": { "mc_version": "1.20.4", "blocks": ["oak_planks"] },
-                    "diffs": [
-                        { "mc_version": "1.21.4", "inherits": "1.20.4", "added": ["stone"] },
-                        { "mc_version": "1.99", "inherits": "1.21.4", "added": ["dirt"] }
-                    ]
-                }"#,
-            );
-        });
-        let RegistryError::BlocksVersionMismatch { missing, extra } = err else {
-            panic!("expected BlocksVersionMismatch, got {err:?}");
-        };
-        assert_eq!(missing, "");
-        assert_eq!(extra, "1.99");
-    }
-
-    #[test]
-    fn a_malformed_blocks_table_is_refused_with_its_own_error() {
-        let err = load_from_dir_err("bad-fold", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
-                r#"{
-                    "schema_version": 1,
-                    "namespace": "minecraft",
-                    "base": { "mc_version": "1.20.4", "blocks": ["oak_planks"] },
-                    "diffs": [
-                        { "mc_version": "1.21.4", "inherits": "1.20.4", "removed": ["granite"] }
-                    ]
-                }"#,
-            );
-        });
-        assert!(
-            matches!(
-                err,
-                RegistryError::Blocks {
-                    source: super::super::blocks::BlocksError::RemovedNotInParent { .. }
-                }
-            ),
-            "expected the fold error to surface intact, got {err:?}",
-        );
-    }
-
-    #[test]
-    fn a_material_override_for_an_unsupported_version_is_refused() {
-        // The override would never fire, so the token would keep resolving
-        // to its default id everywhere — the silent wrong-id outcome the
-        // overrides exist to prevent.
-        let err = load_from_dir_err("bad-override", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &one_material(
-                    r#"{ "token": "a.b", "block": "oak_planks",
-                         "overrides": [{ "mc_version": "1.21.5", "block": "stone" }] }"#,
-                ),
-                good_blocks(),
-            );
-        });
-        let RegistryError::MaterialOverrideUnknownVersion { token, mc_version } = err else {
-            panic!("expected MaterialOverrideUnknownVersion, got {err:?}");
-        };
-        assert_eq!(token, "a.b");
-        assert_eq!(mc_version, "1.21.5");
-    }
-
-    #[test]
-    fn a_material_override_changes_the_id_for_that_version_only() {
-        let pack = load_from_dir_or_die("override", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &one_material(
-                    r#"{ "token": "a.b", "block": "oak_planks",
-                         "overrides": [{ "mc_version": "1.20.4", "block": "stone" }] }"#,
-                ),
-                good_blocks(),
-            );
-        });
-        assert_eq!(
-            TargetRegistry::lookup(&pack.view(Some("1.20.4")), "a.b").map(|s| s.id),
-            Some("minecraft:stone".to_owned()),
-        );
-        assert_eq!(
-            TargetRegistry::lookup(&pack.view(Some("1.21.4")), "a.b").map(|s| s.id),
-            Some("minecraft:oak_planks".to_owned()),
-        );
-    }
-
-    #[test]
-    fn a_pack_without_an_aliases_component_loads_and_names_no_rename() {
-        // Every pack written before this component looks like this, and it
-        // has to keep answering exactly as it did: no rename, and the typo
-        // search behind it untouched.
-        let pack = load_from_dir_or_die("no-aliases", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
-                good_blocks(),
-            );
-        });
-        assert!(pack.aliases.is_empty());
-        assert!(
-            pack.view(Some("1.21.4"))
-                .aliases_for("minecraft:paleoak_planks")
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn an_alias_answers_with_the_spellings_the_pinned_version_declares() {
-        let pack = load_from_dir_or_die("aliases", |dir| {
-            write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
-        });
-        assert_eq!(pack.aliases.len(), 1);
-        // `1.21.4` is the version that added `pale_oak_planks`, so the same
-        // group answers there and stays silent on `1.20.4` — the version
-        // scoping lives in the block tables, not in the row.
-        assert_eq!(
-            pack.view(Some("1.21.4"))
-                .aliases_for("minecraft:paleoak_planks"),
-            ["minecraft:pale_oak_planks".to_owned()],
-        );
-        assert!(
-            pack.view(Some("1.20.4"))
-                .aliases_for("minecraft:paleoak_planks")
-                .is_empty(),
-            "1.20.4 has neither spelling, so the group has nothing to offer it",
-        );
-    }
-
-    #[test]
-    fn a_view_with_no_version_pinned_names_no_rename() {
-        // Nothing narrows the group without a pinned table, and an
-        // unfiltered group is a list of spellings from other versions and
-        // the other edition offered as if this build could use them.
-        let pack = load_from_dir_or_die("aliases-unpinned", |dir| {
-            write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
-        });
-        assert!(
-            pack.view(None)
-                .aliases_for("minecraft:paleoak_planks")
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn an_alias_group_no_version_declares_is_refused() {
-        // Such a group can never answer, whatever the target — the shape a
-        // misspelt spelling takes, and one whose only symptom otherwise is
-        // a rename that goes on saying it has no candidate.
-        let err = load_from_dir_err("aliases-dead", |dir| {
-            write_pack_with_aliases(
-                dir,
-                good_data_versions(),
-                good_blocks(),
-                r#"{
-                    "schema_version": 1,
-                    "namespace": "minecraft",
-                    "groups": [{ "spellings": ["standing_sign", "oak_sign"] }]
-                }"#,
-            );
-        });
-        let RegistryError::AliasGroupUnanswerable { spellings } = err else {
-            panic!("expected AliasGroupUnanswerable, got {err:?}");
-        };
-        assert_eq!(spellings, "minecraft:standing_sign, minecraft:oak_sign");
-    }
-
-    #[test]
-    fn a_malformed_alias_catalog_is_refused_with_its_own_error() {
-        let err = load_from_dir_err("aliases-bad", |dir| {
-            write_pack_with_aliases(
-                dir,
-                good_data_versions(),
-                good_blocks(),
-                r#"{
-                    "schema_version": 1,
-                    "namespace": "minecraft",
-                    "groups": [{ "spellings": ["pale_oak_planks"] }]
-                }"#,
-            );
-        });
-        assert!(
-            matches!(
-                err,
-                RegistryError::Aliases {
-                    source: super::super::aliases::AliasError::GroupTooSmall { .. }
-                }
-            ),
-            "expected the catalog error to surface intact, got {err:?}",
-        );
-    }
-
-    #[test]
-    fn the_aliases_bytes_reach_the_pack_hash() {
-        // Same reasoning as the blocks half: the digest lands in the
-        // lockfile, and two builds resolved against different rename
-        // tables are two different sets of inputs. The manifest is shared
-        // between the two packs so nothing but the component bytes can
-        // separate them.
-        let one = load_from_dir_or_die("alias-hash-one", |dir| {
-            write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
-        });
-        let other = load_from_dir_or_die("alias-hash-other", |dir| {
-            write_pack_with_aliases(
-                dir,
-                good_data_versions(),
-                good_blocks(),
-                r#"{
-                    "schema_version": 1,
-                    "namespace": "minecraft",
-                    "groups": [{ "spellings": ["pale_oak_planks", "paleoak_plank"] }]
-                }"#,
-            );
-        });
-        assert_ne!(one.bytes_hash, other.bytes_hash);
-    }
-
-    #[test]
-    fn the_blocks_bytes_reach_the_pack_hash() {
-        // The hash lands in the lockfile as `inputs.registry_pack_hash`, so
-        // two builds resolved against different id tables must not record
-        // the same inputs.
-        //
-        // Both packs use the same manifest, so the manifest bytes — which
-        // `pack_hash` concatenates first — cannot be what separates them.
-        // Varying the manifest instead would leave the test green even with
-        // the `components.push` for `blocks` deleted entirely, which is the
-        // line it exists to hold.
-        let materials = one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#);
-        let one = load_from_dir_or_die("hash-one", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &materials,
-                good_blocks(),
-            );
-        });
-        let other = load_from_dir_or_die("hash-other", |dir| {
-            write_full_pack(
-                dir,
-                manifest_with_blocks(),
-                good_data_versions(),
-                &materials,
-                r#"{
-                    "schema_version": 1,
-                    "namespace": "minecraft",
-                    "base": { "mc_version": "1.20.4", "blocks": ["oak_planks", "dirt"] },
-                    "diffs": [
-                        { "mc_version": "1.21.4", "inherits": "1.20.4", "added": ["stone"] }
-                    ]
-                }"#,
-            );
-        });
-        assert_ne!(one.bytes_hash, other.bytes_hash);
-    }
-
-    /// Write a pack into a fresh directory and load it, panicking on any
-    /// failure. The directory outlives the call by design — these tests
-    /// run under the OS temp dir and the next run clears its own.
-    fn load_from_dir_or_die(label: &str, write: impl FnOnce(&Path)) -> RegistryPack {
-        let dir = tmp_dir(label);
-        write(&dir);
-        let loaded = load_from_dir(&dir);
-        let pack = loaded.unwrap_or_else(|err| panic!("load {label}: {err}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        pack
-    }
-
-    /// The mirror of [`load_from_dir_or_die`] for the packs that must be
-    /// refused: panics when the load unexpectedly succeeds.
-    fn load_from_dir_err(label: &str, write: impl FnOnce(&Path)) -> RegistryError {
-        let dir = tmp_dir(label);
-        write(&dir);
-        let loaded = load_from_dir(&dir);
-        let _ = std::fs::remove_dir_all(&dir);
-        match loaded {
-            Ok(_) => panic!("load {label} was expected to be refused"),
-            Err(err) => err,
-        }
-    }
-
-    #[test]
-    fn load_builtin_java_succeeds() {
-        let pack = load_builtin_java().expect("builtin pack");
-        assert_eq!(pack.manifest.edition, PackEdition::Java);
-        assert_eq!(pack.manifest.name, "cairn-builtin-java");
-        assert_eq!(pack.source, PackSource::Builtin);
-        assert!(!pack.data_versions.versions.is_empty());
-    }
-
-    #[test]
-    fn builtin_pack_includes_materials_catalog() {
-        let pack = load_builtin_java().expect("builtin pack");
-        assert!(
-            !pack.materials.is_empty(),
-            "built-in pack ships a non-empty materials catalog",
-        );
-        assert_eq!(
-            pack.materials.lookup_id("floor.wood.broadleaf"),
-            Some("minecraft:oak_planks"),
-        );
-        assert_eq!(
-            pack.materials.lookup_id("wall.stone.cobble"),
-            Some("minecraft:cobblestone"),
-        );
-        assert_eq!(
-            pack.materials.lookup_id("wood.dark"),
-            Some("minecraft:dark_oak_planks"),
-        );
-        assert_eq!(
-            pack.materials.lookup_id("roof.dark_wood"),
-            Some("minecraft:dark_oak_stairs"),
-        );
-    }
-
-    #[test]
-    fn pack_without_materials_component_loads_with_empty_index() {
-        let tmp = std::env::temp_dir().join("cairn-registry-no-materials");
-        let _ = std::fs::remove_dir_all(&tmp);
-        // `good_manifest()` already omits the `materials` key, so this
-        // exercises the backwards-compatible path that older packs ride on.
-        write_pack(&tmp, good_manifest(), good_data_versions());
-        let pack = load_from_dir(&tmp).expect("load");
-        assert!(pack.materials.is_empty());
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn pack_with_materials_component_lifts_tokens() {
-        let tmp = std::env::temp_dir().join("cairn-registry-materials");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let manifest = r#"{
-            "schema_version": 1,
-            "edition": "java",
-            "name": "test",
-            "description": "test",
-            "files": {
-                "data_versions": "data_versions.json",
-                "materials": "materials.json"
-            }
-        }"#;
-        let materials = r#"{
-            "schema_version": 1,
-            "namespace": "minecraft",
-            "entries": [
-                { "token": "wall.stone.cobble", "block": "cobblestone" }
-            ]
-        }"#;
-        write_pack_with_materials(&tmp, manifest, good_data_versions(), materials);
-        let pack = load_from_dir(&tmp).expect("load");
-        assert_eq!(
-            pack.materials.lookup_id("wall.stone.cobble"),
-            Some("minecraft:cobblestone"),
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn pack_with_duplicate_materials_token_is_error() {
-        let tmp = std::env::temp_dir().join("cairn-registry-dup-materials");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let manifest = r#"{
-            "schema_version": 1,
-            "edition": "java",
-            "name": "test",
-            "description": "test",
-            "files": {
-                "data_versions": "data_versions.json",
-                "materials": "materials.json"
-            }
-        }"#;
-        let materials = r#"{
-            "schema_version": 1,
-            "namespace": "minecraft",
-            "entries": [
-                { "token": "x.y", "block": "stone" },
-                { "token": "x.y", "block": "dirt" }
-            ]
-        }"#;
-        write_pack_with_materials(&tmp, manifest, good_data_versions(), materials);
-        let err = load_from_dir(&tmp).expect_err("duplicate token");
-        assert!(matches!(
-            err,
-            RegistryError::Materials {
-                source: MaterialsError::DuplicateMaterialEntry { ref token },
-            } if token == "x.y"
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn builtin_pack_resolves_known_targets() {
-        let pack = load_builtin_java().expect("builtin pack");
-        let t = pack.resolve_java_target("1.20.4").expect("1.20.4");
-        assert_eq!(t.mc_version, "1.20.4");
-        assert_eq!(t.data_version, 3700);
-        let t = pack.resolve_java_target("1.21").expect("1.21");
-        assert_eq!(t.data_version, 3953);
-        let t = pack.resolve_java_target("1.21.4").expect("1.21.4");
-        assert_eq!(t.data_version, 4189);
-    }
-
-    #[test]
-    fn builtin_pack_resolves_latest_alias() {
-        let pack = load_builtin_java().expect("builtin pack");
-        let latest = pack.resolve_java_target("latest").expect("latest");
-        assert_eq!(latest.mc_version, pack.data_versions.latest);
-    }
-
-    #[test]
-    fn builtin_pack_rejects_unknown_target() {
-        let pack = load_builtin_java().expect("builtin pack");
-        let err = pack
-            .resolve_java_target("0.0.0")
-            .expect_err("unknown target");
-        assert_eq!(err.requested, "0.0.0");
-        assert!(err.supported.contains("1.20.4"));
-        assert!(err.supported.contains("latest"));
-        // `0.0.0` is far from every supported version; the suggestion
-        // field must stay None so the error reads as a plain "no match".
-        assert!(err.suggestion.is_none());
-    }
-
-    #[test]
-    fn builtin_pack_suggests_near_target() {
-        // `1.21.5` is one substitution away from `1.21.4` — exactly the
-        // kind of typo the suggest pass is here to catch.
-        let pack = load_builtin_java().expect("builtin pack");
-        let err = pack
-            .resolve_java_target("1.21.5")
-            .expect_err("unknown target");
-        assert_eq!(err.suggestion.as_deref(), Some("1.21.4"));
-    }
-
-    #[test]
-    fn pack_hash_is_deterministic() {
-        let a = load_builtin_java().expect("a");
-        let b = load_builtin_java().expect("b");
-        assert_eq!(a.bytes_hash, b.bytes_hash);
-    }
-
-    #[test]
-    fn load_builtin_bedrock_succeeds() {
-        let pack = load_builtin_bedrock().expect("builtin pack");
-        assert_eq!(pack.manifest.edition, PackEdition::Bedrock);
-        assert_eq!(pack.manifest.name, "cairn-builtin-bedrock");
-        assert_eq!(pack.source, PackSource::Builtin);
-        assert!(!pack.data_versions.versions.is_empty());
-        // The materials catalog must cover the same abstract tokens the
-        // Java pack lifts, or a `.crn` that compiles for Java would fail
-        // resolution for Bedrock on vocabulary rather than parity.
-        let java = load_builtin_java().expect("java pack");
-        for token in java.materials.tokens() {
-            assert!(
-                pack.materials.lookup_id(token).is_some(),
-                "bedrock pack is missing token `{token}`",
-            );
-        }
-    }
-
-    #[test]
-    fn builtin_bedrock_resolves_known_targets_and_latest() {
-        // The block-palette `version` integer packs (major, minor, patch,
-        // revision) one byte each, major high. Deriving the expected value
-        // from the parts pins the JSON table against the documented
-        // packing rather than restating the packed integer.
-        let version = |major: i32, minor: i32, patch: i32, revision: i32| {
-            (major << 24) | (minor << 16) | (patch << 8) | revision
-        };
-        let pack = load_builtin_bedrock().expect("builtin pack");
-        // Each targetable row is the block-state version that release
-        // writes into a palette (PocketMine-MP's
-        // `BlockStateData::CURRENT_VERSION` in the release supporting it),
-        // whose revision need not be the client build's: those builds are
-        // 1.21.0.3, 1.21.40.3 and 1.21.60.10, so only 1.21.0's two
-        // coincide. The targetable set is pinned along with the integers,
-        // so a targetable row added, or a table regenerated with revision
-        // 0, fails here rather than in a user's lock; a regeneration from
-        // the build number fails for 1.21.40 and 1.21.60 but not for
-        // 1.21.0.
-        let expected = [
-            ("1.21.0", version(1, 21, 0, 3)),
-            ("1.21.40", version(1, 21, 40, 1)),
-            ("1.21.60", version(1, 21, 60, 33)),
-        ];
-        let targetable: Vec<&str> = pack
-            .data_versions
-            .versions
-            .iter()
-            .filter(|row| row.targetable)
-            .map(|row| row.mc_version.as_str())
-            .collect();
-        assert_eq!(targetable, expected.map(|(mc_version, _)| mc_version));
-        // An ordering row never reaches an artifact, so the built-in pack
-        // gives it the release's base integer with revision 0. The schema
-        // does not require that of a pack; this pins it for this one.
-        for row in pack.data_versions.versions.iter().filter(|r| !r.targetable) {
-            assert_eq!(row.data_version & 0xFF, 0, "{}", row.mc_version);
-        }
-        for (mc_version, block_version) in expected {
-            let t = pack.resolve_bedrock_target(mc_version).expect(mc_version);
-            assert_eq!(t.mc_version, mc_version);
-            assert_eq!(t.block_version, block_version, "{mc_version}");
-        }
-        let latest = pack.resolve_bedrock_target("latest").expect("latest");
-        assert_eq!(latest.mc_version, pack.data_versions.latest);
-        assert_eq!(latest.block_version, version(1, 21, 60, 33));
-    }
-
-    #[test]
-    fn builtin_bedrock_unknown_target_names_bedrock_edition() {
-        let pack = load_builtin_bedrock().expect("builtin pack");
-        let err = pack
-            .resolve_bedrock_target("1.21.61")
-            .expect_err("unknown target");
-        assert_eq!(err.edition, "bedrock");
-        assert_eq!(err.suggestion.as_deref(), Some("1.21.60"));
-        assert!(err.supported.contains("1.21.60"));
-        assert!(
-            err.to_string().starts_with("unsupported bedrock target"),
-            "error must name the bedrock vocabulary, got: {err}",
-        );
-    }
-
-    #[test]
-    fn bedrock_pack_hash_snapshot() {
-        let pack = load_builtin_bedrock().expect("builtin pack");
-        insta::assert_snapshot!("builtin_bedrock_pack_hash", pack.bytes_hash.as_str());
-    }
-
-    #[test]
-    fn load_from_dir_reports_missing_manifest() {
-        let tmp = std::env::temp_dir().join("cairn-registry-load-missing");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).expect("mkdir");
-        let err = load_from_dir(&tmp).expect_err("missing manifest");
-        assert!(matches!(err, RegistryError::Io { .. }));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn load_from_dir_reads_a_complete_pack() {
-        let tmp = std::env::temp_dir().join("cairn-registry-load-complete");
-        let _ = std::fs::remove_dir_all(&tmp);
-        write_pack(&tmp, good_manifest(), good_data_versions());
-        let pack = load_from_dir(&tmp).expect("load");
-        assert!(matches!(pack.source, PackSource::Path(ref p) if p == &tmp));
-        let t = pack.resolve_java_target("1.21.4").expect("resolve");
-        assert_eq!(t.data_version, 4189);
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    /// Row order in `data_versions.json` is part of the schema, as the
-    /// `DataVersionTable::versions` doc says: a table whose keys or labels
-    /// do not ascend row by row is refused at load.
-    #[test]
-    fn data_versions_rows_out_of_order_are_refused() {
-        let keys_descend = r#"{
-            "schema_version": 1,
-            "latest": "1.21.4",
-            "versions": [
-                { "mc_version": "1.21.4", "data_version": 4189 },
-                { "mc_version": "1.20.4", "data_version": 3700 }
-            ]
-        }"#;
-        let err = load_from_dir_err("order-keys", |dir| {
-            write_pack(dir, good_manifest(), keys_descend);
-        });
-        let RegistryError::VersionOrderBroken { reason } = &err else {
-            panic!("expected VersionOrderBroken, got {err}");
-        };
-        assert!(reason.contains("keys must ascend"), "{reason}");
-        let labels_descend = r#"{
-            "schema_version": 1,
-            "latest": "1.21.4",
-            "versions": [
-                { "mc_version": "1.21.4", "data_version": 3700 },
-                { "mc_version": "1.20.4", "data_version": 4189 }
-            ]
-        }"#;
-        let err = load_from_dir_err("order-labels", |dir| {
-            write_pack(dir, good_manifest(), labels_descend);
-        });
-        let RegistryError::VersionOrderBroken { reason } = &err else {
-            panic!("expected VersionOrderBroken, got {err}");
-        };
-        assert!(reason.contains("does not sort above"), "{reason}");
-    }
-
-    #[test]
-    fn unsupported_manifest_schema_version_is_error() {
-        let tmp = std::env::temp_dir().join("cairn-registry-bad-manifest-schema");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let bad = r#"{
-            "schema_version": 999,
-            "edition": "java",
-            "name": "x",
-            "description": "x",
-            "files": { "data_versions": "data_versions.json" }
-        }"#;
-        write_pack(&tmp, bad, good_data_versions());
-        let err = load_from_dir(&tmp).expect_err("bad schema");
-        assert!(matches!(
-            err,
-            RegistryError::UnsupportedSchemaVersion {
-                kind: "manifest",
-                got: 999,
-                ..
-            }
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn unsupported_data_versions_schema_is_error() {
-        let tmp = std::env::temp_dir().join("cairn-registry-bad-table-schema");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let bad = r#"{
-            "schema_version": 999,
-            "latest": "1.21.4",
-            "versions": [ { "mc_version": "1.21.4", "data_version": 4189 } ]
-        }"#;
-        write_pack(&tmp, good_manifest(), bad);
-        let err = load_from_dir(&tmp).expect_err("bad schema");
-        assert!(matches!(
-            err,
-            RegistryError::UnsupportedSchemaVersion {
-                kind: "data_versions",
-                got: 999,
-                ..
-            }
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn empty_version_table_is_error() {
-        let tmp = std::env::temp_dir().join("cairn-registry-empty");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let empty = r#"{ "schema_version": 1, "latest": "1.21.4", "versions": [] }"#;
-        write_pack(&tmp, good_manifest(), empty);
-        let err = load_from_dir(&tmp).expect_err("empty");
-        assert!(matches!(err, RegistryError::EmptyVersionTable));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn latest_not_in_table_is_error() {
-        let tmp = std::env::temp_dir().join("cairn-registry-dangling-latest");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let dangling = r#"{
-            "schema_version": 1,
-            "latest": "9.9.9",
-            "versions": [ { "mc_version": "1.21.4", "data_version": 4189 } ]
-        }"#;
-        write_pack(&tmp, good_manifest(), dangling);
-        let err = load_from_dir(&tmp).expect_err("dangling latest");
-        assert!(matches!(err, RegistryError::LatestNotInTable { ref latest } if latest == "9.9.9"));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn bedrock_manifest_into_java_loader_is_edition_mismatch() {
-        let tmp = std::env::temp_dir().join("cairn-registry-edition-mismatch");
-        let _ = std::fs::remove_dir_all(&tmp);
-        let bedrock = r#"{
-            "schema_version": 1,
-            "edition": "bedrock",
-            "name": "x",
-            "description": "x",
-            "files": { "data_versions": "data_versions.json" }
-        }"#;
-        write_pack(&tmp, bedrock, good_data_versions());
-        let err = load_from_dir(&tmp).expect_err("mismatch");
-        assert!(matches!(
-            err,
-            RegistryError::EditionMismatch {
-                expected: PackEdition::Java,
-                got: PackEdition::Bedrock,
-            }
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn malformed_manifest_json_is_error() {
-        let tmp = std::env::temp_dir().join("cairn-registry-bad-manifest-json");
-        let _ = std::fs::remove_dir_all(&tmp);
-        write_pack(&tmp, "{ not json", good_data_versions());
-        let err = load_from_dir(&tmp).expect_err("bad json");
-        assert!(matches!(err, RegistryError::Manifest { .. }));
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn pack_hash_snapshot() {
-        let pack = load_builtin_java().expect("builtin pack");
-        insta::assert_snapshot!("builtin_java_pack_hash", pack.bytes_hash.as_str());
-    }
-}
+mod tests;

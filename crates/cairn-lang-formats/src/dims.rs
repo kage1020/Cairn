@@ -2,13 +2,12 @@
 
 use cairn_lang_core::block_array::{BlockArray, Dims};
 
-/// A dimension too large for an `i32` wire field. Each backend maps it
-/// into its own error so the message can name the dialect.
+/// A dimension too large for an `i32` wire field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DimensionOverflow {
-    /// Which axis overflowed (`"x"` / `"y"` / `"z"`).
+    /// The axis, `"x"`, `"y"` or `"z"`.
     pub(crate) axis: &'static str,
-    /// Offending dimension value.
+    /// The dimension.
     pub(crate) value: u32,
 }
 
@@ -25,8 +24,7 @@ pub(crate) fn dims_to_i32(dims: &Dims) -> Result<[i32; 3], DimensionOverflow> {
     ])
 }
 
-/// Why a grid cannot have its voxel count written as the declared length
-/// of its per-voxel lists. Each backend maps it into its own error.
+/// Why a grid's voxel count cannot be the declared length of its per-voxel lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VolumeError {
     /// `x * y * z` overflows `usize`.
@@ -37,9 +35,7 @@ pub(crate) enum VolumeError {
     Mismatch { volume: usize, voxels: usize },
 }
 
-/// The voxel count of `block_array`, checked to fit an NBT list's length
-/// prefix and to be the length of its `voxels`, so a writer can declare it
-/// as a list length and index `voxels` at any coordinate inside the dims.
+/// The voxel count of `block_array`, checked to fit a list length and to equal `voxels.len()`.
 pub(crate) fn list_volume(block_array: &BlockArray) -> Result<usize, VolumeError> {
     let Dims { x, y, z } = block_array.dims;
     let volume = block_array
@@ -56,8 +52,7 @@ pub(crate) fn list_volume(block_array: &BlockArray) -> Result<usize, VolumeError
     Ok(volume)
 }
 
-/// Whether a list of `len` entries fits the `i32` length prefix of an NBT
-/// list.
+/// Whether `len` fits an NBT list's `i32` length prefix.
 pub(crate) fn fits_list_limit(len: usize) -> bool {
     i32::try_from(len).is_ok()
 }

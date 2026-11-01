@@ -1,29 +1,15 @@
-//! AST → Intent IR lowering.
-//!
-//! Intentionally total: every AST that survives [`crate::parse()`] lowers to a
-//! well-formed [`IntentModule`]. Validation lives elsewhere (the diagnostic
-//! passes in `crate::check`) so that diagnostic collection can run to
-//! completion instead of being short-circuited by the first structural
-//! surprise here.
+//! AST → Intent IR lowering, which is total: validation belongs to `crate::check`.
 
 use indexmap::IndexMap;
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::{
-    AssertIr, DefIr, IntentModule, IntentState, LogicBinding, Member, MemberBody, SelectorRule,
-    SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan, role_of,
+    AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
+    SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan, role_of,
 };
 
-/// Lower a parsed [`Module`] into its [`IntentModule`] form.
-///
-/// Total function: returns a value with [`SemanticLevel::Grouped`] for every
-/// successfully-parsed input. Unknown keywords are preserved via
-/// [`super::MemberRole::Other`] rather than rejected, and any duplication
-/// (repeated `size=`, duplicate slot, etc.) is *silently* normalised here
-/// on the IR side — the `check::duplicate` pass detects those by walking
-/// the surface [`Module`] directly, so the IR's last-write-wins shape is
-/// not load-bearing for diagnostics.
+/// Lower a parsed [`Module`] into its [`IntentModule`] form, at [`SemanticLevel::Grouped`].
 #[must_use]
 pub fn lower(module: &Module) -> IntentModule {
     let mut themes = Vec::new();
@@ -73,9 +59,6 @@ fn lower_theme(name: &str, body: &[ThemeRule], span: crate::error::Span) -> Them
     for rule in body {
         match rule {
             ThemeRule::Slot { slot, value, .. } => {
-                // Last-write-wins on duplicate slot names. The `duplicate`
-                // pass walks `&Module` directly, so the IR not remembering
-                // the earlier value is fine.
                 slots.insert(slot.clone(), ValueWithSpan::from_value(value.clone()));
             }
             ThemeRule::Selector {
@@ -172,16 +155,7 @@ fn split_size(header_args: &[Arg]) -> HeaderBreakdown {
     let mut size = None;
     let mut args: IndexMap<String, ValueWithSpan> = IndexMap::new();
     for arg in header_args {
-        // The first well-typed `size=WxH` hoists into `StructIr::size`; any
-        // additional `size=` occurrences are dropped from the IR. A repeated
-        // declaration is still visible to the `duplicate` pass via
-        // `&Module`, so it isn't lost — it just doesn't leak into the
-        // residual `args` map and contradict that field's documented
-        // contract (everything but a well-typed `size=`). Non-`Size` values
-        // for `size=` do fall through and end up in `args`, where
-        // `check::arguments` accepts the key; the type-mismatch pass reads
-        // the surface AST, so it flags the value whether or not it lands
-        // here.
+        // A repeated `size=WxH` is dropped here; `check::duplicate` reports it from the AST.
         if arg.key == "size"
             && let ValueKind::Size { w, h } = &arg.value.kind
         {
@@ -210,10 +184,7 @@ fn lower_body(body: &[Statement]) -> MemberBody {
     out
 }
 
-/// Append one body statement to a [`MemberBody`], grouping by statement
-/// flavour. Used both for the top-level body of a struct/def/site and for
-/// the nested body indented under a member (`level y=0` etc.), so the same
-/// triple of (members, logic, asserts) is preserved at every depth.
+/// Append one body statement to a [`MemberBody`], grouped by flavour.
 fn push_statement(stmt: &Statement, out: &mut MemberBody) {
     match stmt {
         Statement::Generic { .. } => out.members.push(lower_member(stmt)),
@@ -258,10 +229,7 @@ fn lower_member(stmt: &Statement) -> Member {
         span,
     } = stmt
     else {
-        // push_statement is the only caller and dispatches on the variant
-        // before reaching here; an unreachable here would still be wrong if
-        // dispatch ever changed, so route the non-generic flavours through
-        // the body grouping instead of relying on a panic.
+        // `push_statement` never sends one here; lowering stays total all the same.
         let mut body = MemberBody::default();
         push_statement(stmt, &mut body);
         return placeholder_member_carrying(body, stmt.span().clone());
@@ -274,10 +242,6 @@ fn lower_member(stmt: &Statement) -> Member {
     let mut intent_state = IntentState::new();
 
     for arg in args {
-        // `id` / `class` / `mat_slot` are hoisted into dedicated `Member`
-        // fields when the value is a plain label; anything that is not
-        // label-shaped, or a second occurrence of the same key, stays in
-        // `intent_state` for the `check` passes to diagnose.
         let hoisted = match arg.key.as_str() {
             "id" => hoist_label(&arg.value, &mut id),
             "class" => hoist_label(&arg.value, &mut class),
@@ -296,8 +260,8 @@ fn lower_member(stmt: &Statement) -> Member {
     let lowered_children = lower_body(children);
 
     Member {
-        id,
-        class,
+        id: id.map(|label| label.name),
+        class: class.map(|label| label.name),
         role,
         mat_slot,
         selector: lowered_selector,
@@ -310,12 +274,7 @@ fn lower_member(stmt: &Statement) -> Member {
     }
 }
 
-/// Wrap a child [`MemberBody`] in a synthetic `Other` member when the
-/// dispatcher reaches `lower_member` with a non-`Generic` statement. Never
-/// triggered by the current `push_statement` flow; exists so that a future
-/// caller that ignores the dispatch contract still produces an inspectable
-/// IR rather than panicking, in line with the "lowering is total"
-/// invariant.
+/// A synthetic `Other` member holding `body`, for a statement that is not a member line.
 fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Member {
     Member {
         id: None,
@@ -335,9 +294,6 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
 fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
     let mut map = IndexMap::with_capacity(args.len());
     for arg in args {
-        // Last-write-wins on duplicate keys. The `duplicate` pass walks the
-        // surface AST to detect repeats, so the IR's compacted shape here is
-        // intentional rather than load-bearing.
         map.insert(
             arg.key.clone(),
             ValueWithSpan::from_value(arg.value.clone()),
@@ -346,24 +302,18 @@ fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
     map
 }
 
-/// Try to move a label-valued `id` / `class` / `mat_slot` argument into a
-/// dedicated [`Member`] field. Accepts only the *textual* shapes
-/// ([`ValueKind::Ident`] and [`ValueKind::Str`]) — `@oak_planks` or
-/// `foo.bar` are canonical-token / reference values that may not stand in
-/// as a label, so they are left in [`IntentState`] for the
-/// `type_mismatch` pass (`crate::check`) to flag rather than silently
-/// coerced.
-///
-/// Returns `true` when the value was consumed; `false` keeps the argument
-/// in [`IntentState`] (non-label value, or a duplicate key).
-fn hoist_label(value: &Value, slot: &mut Option<String>) -> bool {
+/// Move an identifier or string `value` into an empty `slot`; `false` leaves it in [`IntentState`].
+fn hoist_label(value: &Value, slot: &mut Option<Label>) -> bool {
     if slot.is_some() {
         return false;
     }
-    let label = match &value.kind {
+    let name = match &value.kind {
         ValueKind::Ident(s) | ValueKind::Str(s) => s.clone(),
         _ => return false,
     };
-    *slot = Some(label);
+    *slot = Some(Label {
+        name,
+        span: value.span().clone(),
+    });
     true
 }

@@ -7,8 +7,8 @@ Every file lives in
 [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) and is intentionally minimal.
 The [Tutorial](/tutorial/) walks through the four in the first group.
 
-> The reference compiler is not finished, so these are normative illustrations rather than files you
-> can build today.
+> Every file here compiles with the current compiler. Redstone does not reach compiled output yet,
+> so `redstone-door.crn` builds without its circuit.
 
 ## Start here
 
@@ -40,4 +40,4 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 | File | Shows |
 |---|---|
 | [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | Per-edition theme variants for a slot with no cross-edition primitive. |
-| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | Two nets sharing a wire coordinate: what the crossing pass reports and does not repair. |
+| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | Four nets in a tight region: the router lays each one around the others and lifts one onto a bridge layer inside `void=2`; at `void=1` it refuses with `E_ROUTE_CONGESTION`. |

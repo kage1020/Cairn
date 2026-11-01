@@ -1,0 +1,32 @@
+name: Changelog
+
+# `edited` re-runs this on a retitle, since the title's `!` and a `breaking` fragment must agree.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  fragments:
+    # Meant to become a required check, which matches this name literally, so keep it stable.
+    name: Changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Test the CI scripts
+        run: python3 -m unittest discover -s .github/scripts
+
+      - name: Check this PR's fragments and title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: >-
+          python3 .github/scripts/changelog.py pr
+          --base "$BASE" --head-ref "$HEAD_REF" --author "$AUTHOR" --title "$TITLE"

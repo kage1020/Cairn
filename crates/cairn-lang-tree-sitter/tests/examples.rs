@@ -1,16 +1,13 @@
-//! Example integration test.
-//!
-//! For every `.crn` under `examples/` at the repo root, parse it with the
-//! tree-sitter grammar and assert the resulting syntax tree has no
-//! `ERROR` node. This is the primary regression guardrail against the
-//! reference parser: `cairn-lang-core` already accepts every file in
-//! `examples/`, so the grammar must accept them too.
+//! The grammar over the shipped examples, every one of which `cairn-lang-core` accepts.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tree_sitter::Parser;
+
+/// Set, it turns the highlight golden's skip on a missing `tree-sitter` CLI into a failure.
+const REQUIRE_CLI: &str = "CAIRN_REQUIRE_TREE_SITTER_CLI";
 
 fn examples_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -20,13 +17,28 @@ fn examples_dir() -> PathBuf {
         .join("examples")
 }
 
+/// How many `.crn` files `examples/` ships, so a sweep that finds fewer fails.
+const SHIPPED_EXAMPLES: usize = 12;
+
+/// Every `.crn` under `examples/`, sorted.
 fn crn_files() -> Vec<PathBuf> {
-    fs::read_dir(examples_dir())
+    let dir = examples_dir();
+    let mut found: Vec<PathBuf> = fs::read_dir(&dir)
         .expect("examples dir")
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|ext| ext == "crn"))
-        .collect()
+        .collect();
+    found.sort();
+    assert_eq!(
+        found.len(),
+        SHIPPED_EXAMPLES,
+        "found {} examples under {}, not the {SHIPPED_EXAMPLES} shipped; bump SHIPPED_EXAMPLES \
+         when adding one",
+        found.len(),
+        dir.display(),
+    );
+    found
 }
 
 #[test]
@@ -47,21 +59,7 @@ fn all_examples_parse_without_error() {
     assert!(failures.is_empty(), "grammar rejected: {failures:#?}");
 }
 
-/// Every comment line in the corpus reaches the tree as a `comment` node.
-///
-/// The scanner reads past blank and comment-only lines to find the next
-/// line that carries a level, and a line it reads past is consumed as
-/// whitespace — a comment consumed that way never reaches the `comment`
-/// extra, never becomes a node, and is rendered unstyled by
-/// `tree-sitter highlight` while every verdict in the crate stays green.
-/// That is the axis `parser_parity.rs` cannot see, and this is the corpus
-/// standing in for it.
-///
-/// Asserted per row rather than as a count, so a comment that moves is
-/// not paid for by one that appears. A row whose first non-space
-/// character is `#` is a comment-only line; a trailing comment sits on a
-/// row that has other nodes too, so both are covered by asking whether
-/// the row holds a comment at all.
+/// A comment line the scanner crosses as layout becomes no node, which no parity verdict shows.
 #[test]
 fn every_comment_line_in_the_corpus_is_a_node() {
     let mut parser = Parser::new();
@@ -104,19 +102,7 @@ fn comment_rows(node: tree_sitter::Node<'_>, out: &mut Vec<usize>) {
     }
 }
 
-/// Regression guard for `queries/highlights.scm` and `queries/locals.scm`:
-/// shells out to the locally installed `tree-sitter` CLI (a dev dependency
-/// installed via `pnpm install`) and compares its `highlight` output for
-/// `examples/cottage.crn` against the golden ANSI snapshot frozen in
-/// `tests/data/cottage.ansi`. A diff here means either the grammar or
-/// the queries changed in a way that alters highlighting; regenerate the
-/// golden deliberately if so.
-///
-/// The golden lives under `tests/data/` rather than `test/highlight/`
-/// (the tree-sitter CLI's default corpus scan target) so that `tree-sitter
-/// test` never tries to parse it as a corpus file, and so the grammar's
-/// `file-types` in `tree-sitter.json` doesn't need to claim `.ansi` files
-/// just to keep the CLI happy.
+/// The golden sits outside `test/highlight/`, where `tree-sitter test` would read it as corpus.
 #[test]
 fn cottage_highlight_golden_is_stable() {
     let golden = include_str!("data/cottage.ansi");
@@ -130,12 +116,13 @@ fn cottage_highlight_golden_is_stable() {
             "tree-sitter"
         });
 
-    // The CLI is installed by `pnpm install` in this crate; the workspace-wide
-    // `cargo test --workspace` in `.github/workflows/ci.yml` runs without a
-    // Node setup, so the binary is absent there. Skip in that case — the
-    // dedicated `tree-sitter.yml` workflow (which does `pnpm install`) is the
-    // authoritative gate for highlight-golden drift.
     if !cli.exists() {
+        assert!(
+            std::env::var_os(REQUIRE_CLI).is_none_or(|v| v.is_empty()),
+            "{REQUIRE_CLI} is set but the tree-sitter CLI is not at {} (run `pnpm install` in \
+             this crate)",
+            cli.display(),
+        );
         eprintln!(
             "skip: tree-sitter CLI not found at {} (run `pnpm install` in this crate first)",
             cli.display()

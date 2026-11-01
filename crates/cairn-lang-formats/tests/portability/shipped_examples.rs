@@ -1,0 +1,163 @@
+//! `cairn info`'s portability figures against what a pinned build emits, per shipped example and
+//! edition.
+
+use std::collections::BTreeMap;
+
+use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
+use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_formats::bedrock_structure::prepare_mcstructure;
+use cairn_lang_formats::data_version::resolve_bedrock_target;
+use cairn_lang_formats::portability::{
+    PortabilityReport, portability_for_bedrock, portability_for_java,
+};
+use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+
+use crate::common::{examples, lower_source, note_fields, supported_versions};
+
+/// Every structure's extent, keyed by scope.
+fn extents(ir: &BlockArrayIr) -> BTreeMap<&str, (u32, u32, u32)> {
+    ir.structures
+        .iter()
+        .map(|(key, ba)| (key.as_str(), (ba.dims.x, ba.dims.y, ba.dims.z)))
+        .collect()
+}
+
+fn non_air_entries(ir: &BlockArrayIr) -> usize {
+    ir.structures
+        .values()
+        .flat_map(|ba| ba.palette.entries.iter())
+        .filter(|entry| entry.id != BlockState::AIR_ID)
+        .count()
+}
+
+fn editions() -> [(Edition, &'static RegistryPack); 2] {
+    [
+        (Edition::Java, builtin_pack(Edition::Java)),
+        (Edition::Bedrock, builtin_pack(Edition::Bedrock)),
+    ]
+}
+
+/// The edition's report, failing the test on a leaked blockstate.
+fn report_for(
+    edition: Edition,
+    pack: &RegistryPack,
+    ir: &BlockArrayIr,
+    name: &str,
+) -> PortabilityReport {
+    match edition {
+        Edition::Java => portability_for_java(ir, pack.blocks(), pack.aliases()),
+        Edition::Bedrock => portability_for_bedrock(ir, pack.blocks(), pack.aliases())
+            .unwrap_or_else(|invalid| {
+                panic!(
+                    "{name} leaked a blockstate the pack was expected to refuse on \
+                     {edition}: {:?}",
+                    invalid.leaks(),
+                )
+            }),
+    }
+}
+
+#[test]
+fn no_shipped_example_reports_an_unsupported_entry() {
+    for (name, source) in &examples() {
+        for (edition, pack) in editions() {
+            let block_ir = lower_source(source, edition, None);
+            let counts = report_for(edition, pack, &block_ir, name).counts();
+            assert_eq!(
+                counts.unsupported, 0,
+                "{name} reports {} unsupported entries on {edition}; every shipped example is \
+                 expected to be buildable on both editions. Three things can produce this: a \
+                 material mapped onto a block the edition does not have, an intent whose states \
+                 the edition cannot express, or an id axis that has become too strict",
+                counts.unsupported,
+            );
+            assert!(
+                counts.total() > 0,
+                "{name} on {edition} counted nothing — an example with an empty palette would \
+                 make every assertion here vacuous",
+            );
+        }
+    }
+}
+
+#[test]
+fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
+    for (name, source) in &examples() {
+        for (edition, pack) in editions() {
+            let unpinned = lower_source(source, edition, None);
+            let reported = report_for(edition, pack, &unpinned, name).counts().total();
+            for version in supported_versions(pack) {
+                let built = lower_source(source, edition, Some(version));
+                assert!(
+                    built.diagnostics.is_empty(),
+                    "{name} does not build for {edition} {version}: {:?}",
+                    built.diagnostics,
+                );
+                assert_eq!(
+                    reported as usize,
+                    non_air_entries(&built),
+                    "{name}: `info` reports {reported} palette entries for {edition} but a build \
+                     pinned to {version} emits {}",
+                    non_air_entries(&built),
+                );
+                assert_eq!(
+                    extents(&unpinned),
+                    extents(&built),
+                    "{name}: the extent for {edition} moves between the range-wide lowering and \
+                     a build pinned to {version}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_build_notes_each_degraded_entry_by_the_fields_info_names_it_with() {
+    let pack = builtin_pack(Edition::Bedrock);
+    let mut roof_hip = None;
+    for (name, source) in &examples() {
+        let unpinned = lower_source(source, Edition::Bedrock, None);
+        let report = report_for(Edition::Bedrock, pack, &unpinned, name);
+        let from_info: Vec<(&str, &str, &DroppedIntent)> = report
+            .degraded()
+            .iter()
+            .flat_map(|entry| {
+                entry
+                    .dropped
+                    .iter()
+                    .map(|dropped| (entry.id.as_str(), entry.states.as_str(), dropped))
+            })
+            .collect();
+        if name == "roof-hip.crn" {
+            roof_hip = Some(from_info.len());
+        }
+
+        for version in supported_versions(pack) {
+            let target = resolve_bedrock_target(version).expect("a targetable version resolves");
+            let built = lower_source(source, Edition::Bedrock, Some(version));
+            assert!(
+                built.diagnostics.is_empty(),
+                "{name} does not build for bedrock {version}: {:?}",
+                built.diagnostics,
+            );
+            let mut notes = Vec::new();
+            for (scope, array) in &built.structures {
+                let (_, raised) = prepare_mcstructure(array, &target).unwrap_or_else(|err| {
+                    panic!("{name}: `{scope}` is refused for bedrock {version}: {err}")
+                });
+                notes.extend(raised);
+            }
+            assert_eq!(
+                note_fields(&notes),
+                from_info,
+                "{name} on bedrock {version}"
+            );
+        }
+    }
+    assert_eq!(
+        roof_hip,
+        Some(4),
+        "premise: `roof-hip` degrades several entries, so order and repeats are compared",
+    );
+}

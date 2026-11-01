@@ -1,98 +1,98 @@
-//! `data_versions.json` schema — the `(mc_version, version integer)` table.
-//!
-//! The table has two readers with different needs, which is why a row
-//! carries [`DataVersionEntry::targetable`]. `--target` may only name a
-//! version the pack has block and material data for — three per edition
-//! today. Ordering an `@requires` floor needs every *release*, because a
-//! floor may name any of them and "inside the table's span, naming no row"
-//! is only the same fact as "not a release of this edition" when the table
-//! carries them all (`spec/versioning-editions` "Fail-loud and
-//! minimum-version inference").
-//!
-//! Replaces the hardcoded `JAVA_TARGETS` array that lived in
-//! [`crate::data_version`] before the registry pack ingest landed. The
-//! file is loaded once per process and resolution against it happens via
-//! [`crate::data_version::resolve_java_target`] /
-//! [`crate::data_version::resolve_bedrock_target`]. Both editions share
-//! the schema; what the integer means is a per-edition contract documented
-//! on [`DataVersionEntry::data_version`].
+//! The `data_versions.json` table, and a `--target` resolved against it. The table lists every
+//! release, targetable or not, because ordering an `@requires` floor needs them all
+//! (`spec/versioning-editions` "Fail-loud and minimum-version inference").
 
+use std::fmt;
+
+use cairn_lang_core::Edition;
+use cairn_lang_core::suggest::did_you_mean;
 use serde::Deserialize;
 
-/// Body of `data_versions.json`.
+/// The body of `data_versions.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DataVersionTable {
-    /// Schema version of this file. Bumped only when an incompatible
-    /// shape change lands.
+    /// The file's schema version.
     pub schema_version: u32,
-    /// `mc_version` string the `"latest"` alias resolves to. Held
-    /// explicitly rather than implicit-by-last-entry so a pack author can
-    /// pin `"latest"` to something other than the newest known row when
-    /// the latest patch is unstable — and, since the newest row is now a
-    /// release the pack has no block data for, it is never the newest row.
-    /// Validated to name a [`DataVersionEntry::targetable`] row.
+    /// The `mc_version` `"latest"` resolves to, which must name a targetable row.
     pub latest: String,
-    /// Where the rows came from, for a reader asking whether to trust
-    /// them. Informational and not consumed by the compiler; `None` for a
-    /// pack that does not say.
-    ///
-    /// Recorded because the two halves of this table have different
-    /// provenance: the version integers of the targetable rows are what
-    /// the backend stamps into a structure file and are verified against
-    /// it, while the rest are an ordering key transcribed from a published
-    /// list.
+    /// Where the rows came from, for a human reader; the compiler ignores it.
     #[serde(default)]
     pub source: Option<String>,
-    /// Known Minecraft versions, oldest first. The order is required, not
-    /// a convention: each row's `data_version` must be higher than the
-    /// previous row's and its label must sort above the previous label, or
-    /// the pack does not load
-    /// ([`RegistryError::VersionOrderBroken`](super::RegistryError::VersionOrderBroken)).
+    /// The versions, oldest first, with `data_version` and label both strictly ascending.
     pub versions: Vec<DataVersionEntry>,
 }
 
 /// One row of the `DataVersionTable`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DataVersionEntry {
-    /// Human-facing Minecraft version, e.g. `"1.21.4"`.
+    /// The version, such as `"1.21.4"`.
     pub mc_version: String,
-    /// Edition-specific version integer. For Java packs this is the
-    /// `DataVersion` the structure NBT root carries; for Bedrock packs it
-    /// is the block-palette `version` integer every `.mcstructure`
-    /// palette entry carries: `(major << 24) | (minor << 16) |
-    /// (patch << 8) | revision` of the block-state version that release
-    /// writes, whose revision need not be the client build's. On Bedrock
-    /// that is exact only for a [`Self::targetable`] row: the other rows
-    /// never reach a file, so their integer is used only to order them.
+    /// Java's `DataVersion` or Bedrock's palette `version`. A row that is not targetable never
+    /// reaches a file, so its Bedrock integer only orders it.
     pub data_version: i32,
-    /// Release date in `YYYY-MM-DD` form. Informational; not consumed by
-    /// the compiler. `Option` so older packs without the field still load.
+    /// The release date, `YYYY-MM-DD`; the compiler ignores it.
     #[serde(default)]
     pub released: Option<String>,
-    /// Whether `--target` may name this version.
-    ///
-    /// `false` for a row that is here to be *ordered against* rather than
-    /// built for: the pack knows when the release happened and what its
-    /// version integer is, and has neither a block table nor material
-    /// overrides for it. Defaulted `true` so a `schema_version: 1` pack,
-    /// whose rows were all buildable targets, keeps meaning what it meant.
+    /// Whether `--target` may name this version; absent means `true`, as in `schema_version` 1.
     #[serde(default = "targetable_by_default")]
     pub targetable: bool,
 }
 
-/// A row that does not say is a buildable target, which is what every row
-/// of a `schema_version: 1` table was.
 fn targetable_by_default() -> bool {
     true
 }
+
+/// A resolved Java target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JavaTarget {
+    /// The version, such as `"1.21.4"`.
+    pub mc_version: String,
+    /// The `DataVersion` written into the structure root.
+    pub data_version: i32,
+}
+
+/// A resolved Bedrock target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BedrockTarget {
+    /// The version, such as `"1.21.60"`.
+    pub mc_version: String,
+    /// The palette entries' `version`, packed as `major << 24 | minor << 16 | patch << 8 | rev`.
+    pub block_version: i32,
+}
+
+/// A `--target` that is not `latest` and, compared as a version, no targetable version in the pack.
+#[derive(Debug)]
+pub struct UnsupportedTarget {
+    /// The edition whose version table was consulted.
+    pub edition: Edition,
+    /// The `--target` value, verbatim.
+    pub requested: String,
+    /// The closest supported version, bare; [`fmt::Display`] adds the `did you mean` phrasing.
+    pub suggestion: Option<String>,
+    /// The supported versions, formatted for printing.
+    pub supported: String,
+}
+
+impl fmt::Display for UnsupportedTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unsupported {} target `{}`. ",
+            self.edition, self.requested
+        )?;
+        if let Some(s) = &self.suggestion {
+            write!(f, "{} ", did_you_mean(s))?;
+        }
+        write!(f, "supported targets: {}", self.supported)
+    }
+}
+
+impl std::error::Error for UnsupportedTarget {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A `schema_version: 1` table has no `targetable` key and every row
-    /// of it was a buildable target, so the default has to be `true` or
-    /// such a pack silently loses every `--target` it used to accept.
     #[test]
     fn a_row_that_does_not_say_is_targetable() {
         let src = r#"{
@@ -105,8 +105,6 @@ mod tests {
         assert_eq!(t.source, None);
     }
 
-    /// And a row that says `false` is an ordering row: the pack knows
-    /// where the release sits and cannot build for it.
     #[test]
     fn a_row_may_be_ordered_against_without_being_buildable() {
         let src = r#"{

@@ -9,15 +9,13 @@
 # with zero `W_WALKWAY_BLOCKED` skips.
 #
 # The window's `y=` below is load-bearing for the Y-pin integration
-# assertion in `tests/window_walkway_lower.rs`: the test pins the
+# assertion in `crates/cairn-lang-core/tests/lower/window_walkway.rs`: the test pins the
 # walkway origin at `(_, 0, _)`, so a regression that honours
 # `window.y` would lift the strip off the ground and fail loud there.
 # It sits above the door's opening rather than in it: `door` and
 # `window` are both openings, so a window inside the doorway would be
 # two members of one phase contesting a cell with nothing but the line
-# order to separate them (`W_PHASE_CONFLICT`). The wall is one course
-# taller than the other walkway fixtures for that reason — a window
-# port must still fit inside the wall it is cut into.
+# order to separate them (`W_PHASE_CONFLICT`).
 
 def cottage size=5x5:
   floor  id=floor mat_slot=floor

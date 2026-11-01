@@ -6,22 +6,13 @@ on:
     tags: ["v*"]
     paths:
       - "crates/cairn-lang-tree-sitter/**"
-      # Two checks read `examples/` and this workflow is the only place either
-      # of them runs, so a file added or reshaped there is its business even
-      # when the crate itself is untouched. `packed-tarball` copies
-      # `examples/cottage.crn` and highlights it through the npm-packed
-      # grammar, which is the one check that an editor installing from npm
-      # resolves `.crn` at all. And `cottage_highlight_golden_is_stable` in
-      # `tests/examples.rs` needs the `tree-sitter` CLI that `pnpm install`
-      # puts in `node_modules/.bin`; without it the test prints `skip:` and
-      # returns, asserting nothing. That is what `ci.yml` gets — it runs
-      # `cargo test --workspace` on every push with no path filter, but sets up
-      # no Node, so the golden passes there whatever `cottage.crn` says.
+      # `packed-tarball` and the highlight golden read `examples/`, and only this workflow has the
+      # `tree-sitter` CLI they need.
       - "examples/**"
       - "Cargo.toml"
       - ".github/workflows/tree-sitter.yml"
   pull_request:
-    # Mirrors the `push` filter above, reasons included; keep the two in sync.
+    # Keep in step with the `push` filter.
     paths:
       - "crates/cairn-lang-tree-sitter/**"
       - "examples/**"
@@ -77,7 +68,21 @@ jobs:
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
 
-      - name: Compare the three version declarations
+      - name: Install Rust toolchain
+        if: hashFiles('xtask/Cargo.toml') != ''
+        working-directory: .
+        run: rustup show
+
+      - name: Compare every version declaration with the workspace version
+        if: hashFiles('xtask/Cargo.toml') != ''
+        working-directory: .
+        env:
+          TAG: ${{ needs.resolve-ref.outputs.tag }}
+        run: cargo xtask lint versions ${TAG:+--tag "$TAG"}
+
+      # A tag cut before `cargo xtask` existed is checked the way it was when it was released.
+      - name: Compare the three version declarations (a tag without xtask)
+        if: hashFiles('xtask/Cargo.toml') == ''
         shell: bash
         env:
           TAG: ${{ needs.resolve-ref.outputs.tag }}
@@ -119,7 +124,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -140,7 +145,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -148,6 +153,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
       - run: cargo test -p cairn-lang-tree-sitter
+        env:
+          CAIRN_REQUIRE_TREE_SITTER_CLI: "1"
 
   node-smoke:
     name: Node addon smoke (${{ matrix.os }}, node ${{ matrix.node }})
@@ -156,7 +163,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [22]
+        node: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -187,7 +194,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -249,7 +256,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16

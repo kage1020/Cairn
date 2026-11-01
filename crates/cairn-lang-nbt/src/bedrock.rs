@@ -1,30 +1,18 @@
-//! Bedrock-flavoured NBT writer (little-endian, uncompressed).
-//!
-//! Bedrock's on-disk structure format (`.mcstructure`) stores the same tag
-//! vocabulary as Java but flips every multi-byte scalar to little-endian
-//! and skips the gzip envelope entirely. There is no compressed entry
-//! point on purpose: emitting a gzip-wrapped `.mcstructure` would produce
-//! a file the game silently fails to load, so the API surface should not
-//! make that mistake expressible.
-//!
-//! The byte-level encoding lives in the crate-internal `writer` module,
-//! shared with the Java writer; this module only pins the byte order.
-//! [`stream_bedrock_uncompressed`] is the streaming twin of
-//! [`write_bedrock_uncompressed`] (see [`crate::stream`]).
+//! Bedrock NBT writer: little-endian and uncompressed. It has no gzip form because the game fails
+//! to load a gzip-wrapped `.mcstructure`.
 
 use std::io::Write;
 
+use crate::error::NbtIoError;
 use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
-use crate::writer::{Endian, NbtIoError, write_named_root};
+use crate::writer::{Endian, write_named_root};
 
-/// Write a root-level named compound as a Bedrock-format NBT byte stream.
-/// `.mcstructure` files use an empty `root_name`.
+/// Writes `root` as a named Bedrock NBT root; `.mcstructure` files use an empty `root_name`.
 ///
 /// # Errors
 ///
-/// Propagates any I/O failure on `writer` and any encoding error raised by
-/// the tag tree (`InvalidString`, `HeterogeneousList`, `LengthOverflow`).
+/// An I/O failure on `writer`, or a tag the encoder rejects.
 pub fn write_bedrock_uncompressed<W: Write>(
     writer: &mut W,
     root_name: &str,
@@ -33,21 +21,15 @@ pub fn write_bedrock_uncompressed<W: Write>(
     write_named_root(writer, Endian::Little, root_name, root)
 }
 
-/// Streaming twin of [`write_bedrock_uncompressed`]: write a root-level
-/// named compound whose entries `body` writes one at a time. The bytes are
-/// the ones [`write_bedrock_uncompressed`] writes for a root holding the
-/// same entries in the same order.
+/// Streaming form of [`write_bedrock_uncompressed`] for a root whose entries `body` writes.
 ///
 /// # Errors
 ///
-/// [`NbtIoError::InvalidString`] or [`NbtIoError::LengthOverflow`] when
-/// `root_name` cannot be written as an NBT string, whatever `body`
-/// returns, and I/O failure on `writer`.
+/// A `root_name` that is not a valid NBT string, `body`'s error, or an I/O failure on `writer`.
 ///
 /// # Panics
 ///
-/// Panics when a list `body` streams is given a number of items other than
-/// it declared (see [`crate::stream`]).
+/// When a list `body` streams gets a different number of items than it declared.
 pub fn stream_bedrock_uncompressed<W, F>(
     writer: &mut W,
     root_name: &str,

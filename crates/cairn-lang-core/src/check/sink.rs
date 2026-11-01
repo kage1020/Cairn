@@ -1,24 +1,15 @@
 //! Accumulator that the `check` passes push [`Diagnostic`]s into.
 
-use super::Diagnostic;
+use crate::diagnostic::{Diagnostic, sort_by_position};
 
-/// Collector that gathers diagnostics from one or more passes without
-/// short-circuiting.
-///
-/// Passes call [`Self::push`] for each finding. The driver in
-/// [`super::check`] consumes the sink via [`Self::into_sorted`] which
-/// returns a stable, position-ordered vector — a single pass might emit
-/// diagnostics out of order (e.g. a duplicate noticed mid-walk reports the
-/// second occurrence after a later attribute), and the sort makes the wire
-/// output reproducible.
+/// Collects the findings of every `check` pass; they leave only through [`Self::into_sorted`].
 #[derive(Debug, Default)]
 pub struct DiagnosticSink {
     diags: Vec<Diagnostic>,
 }
 
 impl DiagnosticSink {
-    /// Empty sink. Equivalent to `DiagnosticSink::default()` but spells out
-    /// the intent at call sites.
+    /// An empty sink.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -29,9 +20,7 @@ impl DiagnosticSink {
         self.diags.push(diagnostic);
     }
 
-    /// Number of diagnostics collected so far. Used by passes that need to
-    /// suppress a follow-on finding when an earlier one already covered the
-    /// same byte range.
+    /// Number of diagnostics collected so far.
     #[must_use]
     pub fn len(&self) -> usize {
         self.diags.len()
@@ -43,12 +32,10 @@ impl DiagnosticSink {
         self.diags.is_empty()
     }
 
-    /// Drain into a `Vec` sorted by primary span position
-    /// (`(start, end)`). Stable: passes that emit two diagnostics with the
-    /// same span preserve their push order.
+    /// The findings sorted by `(span.start, span.end)`, in push order among equal spans.
     #[must_use]
     pub fn into_sorted(mut self) -> Vec<Diagnostic> {
-        self.diags.sort_by_key(|d| (d.span.start, d.span.end));
+        sort_by_position(&mut self.diags);
         self.diags
     }
 }
@@ -56,7 +43,7 @@ impl DiagnosticSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::{DiagnosticCode, Severity};
+    use crate::diagnostic::DiagnosticCode;
 
     fn diag(start: usize, end: usize, code: DiagnosticCode, msg: &str) -> Diagnostic {
         Diagnostic {
@@ -91,12 +78,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_sink_has_severity_independent_invariants() {
+    fn a_new_sink_is_empty() {
         let sink = DiagnosticSink::new();
         assert!(sink.is_empty());
         assert_eq!(sink.len(), 0);
-        let drained = sink.into_sorted();
-        assert!(drained.is_empty());
-        assert_eq!(Severity::Error.as_str(), "error");
+        assert_eq!(sink.into_sorted(), [] as [Diagnostic; 0]);
     }
 }

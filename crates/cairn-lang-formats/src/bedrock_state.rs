@@ -1,70 +1,27 @@
-//! Java blockstate properties → Bedrock `states` translation.
-//!
-//! A Java vanilla structure carries a palette entry's state as
-//! `Properties: { facing: "north", half: "top", shape: "outer_left" }` —
-//! human-readable string keys shared by every edition's *tooling* but not by
-//! Bedrock's on-disk `states` vocabulary. Bedrock names the same intent with
-//! its own typed keys (`weirdo_direction: Int`, `upside_down_bit: Byte`), and
-//! for some intents (stair `shape`) it has **no** key at all.
-//!
-//! Per `spec/versioning-editions` "Folding the `(edition, version)` matrix"
-//! and "Java / Bedrock portability" — Java is the base and Bedrock the
-//! overriding diffs; `intent_state` is neutral and `resolved_state`
-//! per-edition — this module holds the hand-written Bedrock diff. It currently covers the **stair family**;
-//! further block families extend the same match dispatch additively as their
-//! lowering paths land. Any block with properties outside a covered family is
-//! a hard error rather than a silent pass-through.
-//!
-//! `shape` has no Bedrock equivalent — the portability section lists "stairs
-//! `shape` (no such state on Bedrock)" among the differences the canonical
-//! vocabulary does not absorb. A non-`straight` shape is **dropped with a
-//! degradation note** (`dropped_states: [shape]` in the matrix section,
-//! `W_INTENT_DEGRADED` in the portability one), never silently:
-//! `spec/versioning-editions` "Fail-loud and minimum-version inference"
-//! forbids implicit dropping. `shape=straight` is the Bedrock default, so it
-//! drops without a note.
-//!
-//! Numeric domains here are pinned against the Bedrock stair block-state
-//! listing on `minecraft.wiki` / `wiki.bedrock.dev` (`Stairs/BS`,
-//! consulted 2026-07 against Bedrock 1.21.60). The Cairn spec's own
-//! portability example uses different `weirdo_direction` values; the
-//! wiki listing is authoritative for the on-disk mapping.
+//! Java blockstate properties to Bedrock `states`, for the stair family only
+//! (`spec/versioning-editions` "Java / Bedrock portability"). A non-`straight` stair `shape` has
+//! no Bedrock state and drops with a degradation note; another block with properties is refused.
 
-use cairn_lang_core::block_array::is_stair;
+use cairn_lang_core::block_array::{BlockState, is_stair};
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
 use indexmap::IndexMap;
 use thiserror::Error;
 
-/// The Bedrock `states` compound for one palette entry, plus any intent that
-/// could not be represented and was dropped.
+/// One palette entry's Bedrock `states`, and the intents it had to drop.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StateTranslation {
-    /// Typed Bedrock `states` (e.g. `weirdo_direction: Int`,
-    /// `upside_down_bit: Byte`). Empty for a bare (property-free) block.
+    /// The typed Bedrock states, empty for a bare block.
     pub states: Compound,
-    /// One entry per intent Bedrock cannot express (e.g. a dropped
-    /// non-`straight` stair `shape`). Empty on a lossless translation.
-    ///
-    /// The pieces rather than the sentence, so a caller that wants to act
-    /// on the dropped property does not have to parse it back out of
-    /// English. [`degradation_detail`] writes the sentence, and both
-    /// `W_INTENT_DEGRADED` and `cairn info`'s portability note come off
-    /// that one function.
+    /// One entry per intent Bedrock cannot express; [`degradation_detail`] words it.
     pub degraded: Vec<DroppedIntent>,
 }
 
-/// A Java property that the Bedrock backend cannot map. Carries the
-/// self-correction triple (what is wrong / what is valid / suggested fix) so
-/// the lint loop can act on the message, per `spec/versioning-editions`
-/// "Fail-loud and minimum-version inference".
+/// A Java property the Bedrock backend cannot map.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BedrockStateError {
-    /// A block carries blockstate properties but is not a family this backend
-    /// knows how to translate. Java writes the properties verbatim; Bedrock
-    /// needs an explicit per-edition mapping, which does not exist for this
-    /// block yet.
+    /// A block outside the mapped families carries properties.
     #[error(
         "block `{id}[{properties}]` carries blockstate properties the Bedrock backend cannot map \
          (only {mapped} is mapped so far). Valid: a bare block id (e.g. \
@@ -72,92 +29,58 @@ pub enum BedrockStateError {
          property-free material, or compile with `--edition java`"
     )]
     UnmappableBlock {
-        /// Offending id verbatim.
+        /// The block id.
         id: String,
-        /// The entry's `key=value` pairs, comma-joined for the message.
+        /// The entry's `key=value` pairs, comma-joined.
         properties: String,
-        /// The block families this backend does map states for.
+        /// The families this backend maps.
         mapped: &'static str,
     },
-    /// A stair carried a property value outside the Java domain (e.g.
-    /// `facing=up`). The registry pack should reject these one layer up; a
-    /// leaked one is refused rather than mapped to a wrong Bedrock value.
+    /// A stair property value outside the Java domain, such as `facing=up`.
     #[error(
         "stair `{id}` has `{key}={value}`, which is not a valid Java `{key}`. Valid `{key}`: \
          {valid}. Fix: correct the source blockstate to one of those; `--edition java` would \
          write the same value unchanged, since Java has no such `{key}` either"
     )]
     UnknownStairState {
-        /// Offending id verbatim.
+        /// The block id.
         id: String,
-        /// The offending property key (`facing` / `half`).
+        /// The key, `facing` or `half`.
         key: &'static str,
-        /// The offending value verbatim.
+        /// The value.
         value: String,
-        /// Comma-joined valid values for `key`.
+        /// The valid values, comma-joined.
         valid: &'static str,
     },
-    /// A stair carried a property key this backend does not handle. Refused
-    /// (not ignored) so a future key cannot retroactively change the meaning
-    /// of already-shipped output.
+    /// A stair key this backend does not handle, refused so mapping it later changes no output.
     #[error(
         "stair `{id}` carries unknown blockstate `{key}`. Handled: {handled}. Fix: remove it \
          from the source blockstate, or compile with `--edition java`"
     )]
     UnknownStairKey {
-        /// Offending id verbatim.
+        /// The block id.
         id: String,
-        /// The unhandled property key.
+        /// The key.
         key: String,
-        /// Comma-joined keys this backend does handle.
+        /// The keys this backend handles, comma-joined.
         handled: &'static str,
     },
 }
 
-/// Valid Java `facing` values, in the order the message lists them.
 const FACING_VALID: &str = "east, west, south, north";
 
-/// Block families [`translate_states`] has a state mapping for.
-///
-/// Carried on the error for the same reason [`STAIR_KEYS_HANDLED`] is: the
-/// day a second family is mapped, every message naming the set has to
-/// follow, and a set spelled at each of those places goes stale one at a
-/// time.
 const MAPPED_FAMILIES: &str = "the stair family";
 
-/// Stair property keys [`translate_stair`] reads, in the order its match
-/// arms take them.
-///
-/// Carried on the error rather than restated wherever one is rendered, the
-/// way [`FACING_VALID`] already is: a fourth key handled here has to reach
-/// every message that lists them, and a list spelled at each of those
-/// places goes stale one at a time.
+/// The keys [`translate_stair`] matches, in its order.
 const STAIR_KEYS_HANDLED: &str = "facing, half, shape";
 
-/// Translate a Java palette entry's `(id, properties)` into its Bedrock
-/// `states` form.
-///
-/// The `id` must already be a concrete `namespace:identifier` (the backend
-/// rejects abstract tokens separately). The whole stair family shares one
-/// Bedrock state vocabulary, so the mapping is keyed off the family rather
-/// than each material id — and off `cairn-lang-core`'s [`is_stair`], because
-/// core asks the same question when it decides whether a roof or eave may
-/// attach stair states to a material. A second copy here could disagree
-/// about an id core paints and this module then has to write, which is a
-/// disagreement with no symptom until a structure file reaches the game.
+/// The Bedrock `states` for a Java palette entry whose id is concrete.
 ///
 /// # Errors
 ///
-/// - [`BedrockStateError::UnmappableBlock`] — a non-stair block with
-///   properties.
-/// - [`BedrockStateError::UnknownStairState`] — a stair `facing` / `half`
-///   value outside the Java domain.
-/// - [`BedrockStateError::UnknownStairKey`] — a stair property key other than
-///   `facing` / `half` / `shape`.
-pub fn translate_states(
-    id: &str,
-    properties: &IndexMap<String, String>,
-) -> Result<StateTranslation, BedrockStateError> {
+/// [`BedrockStateError`] for a non-stair block with properties, or a stair state it cannot map.
+pub fn translate_states(state: &BlockState) -> Result<StateTranslation, BedrockStateError> {
+    let (id, properties) = (state.id.as_str(), &state.properties);
     if properties.is_empty() {
         return Ok(StateTranslation {
             states: Compound::new(),
@@ -170,56 +93,21 @@ pub fn translate_states(
     } else {
         Err(BedrockStateError::UnmappableBlock {
             id: id.to_owned(),
-            properties: join_properties(properties),
+            properties: state.properties_text(),
             mapped: MAPPED_FAMILIES,
         })
     }
 }
 
-/// What one dropped intent cost, without naming what carried it.
-///
-/// The single place this wording lives. `W_INTENT_DEGRADED` from the
-/// `.mcstructure` writer and the `degraded:` note `cairn info` prints are
-/// the same fact told to the same reader at two moments, and a second
-/// wording would be a thing to keep in step. [`DroppedIntent`] carries the
-/// pieces so this is the only place they are put into words.
-///
-/// Without the id because the two callers introduce the entry
-/// differently. [`degradation_message`] makes the block the sentence's
-/// subject, because a [`ParityNote`](crate::bedrock_structure::ParityNote)
-/// has to read on its own — the CLI happens to prefix the id again when
-/// it renders one, which is that renderer's wart and not a reason for
-/// this split. `cairn info`'s note has already printed `id[states]` as
-/// its line's subject and wants the clause alone. Composing the one form
-/// from the other is what keeps that a matter of framing rather than of
-/// wording.
-///
-/// A `match` rather than a format over the pieces, because this sentence
-/// is about stairs. [`DroppedIntent`] is a closed set so that the day a
-/// second family drops an intent, this stops compiling until someone
-/// writes what *that* loss looks like — the alternative is a slab told to
-/// check its corners.
+/// What dropping one intent costs, worded per `key`: the value shows in the entry's `states`.
 #[must_use]
 pub fn degradation_detail(dropped: &DroppedIntent) -> String {
     match dropped {
-        DroppedIntent::Shape { value } => format!(
-            "shape={value} has no Bedrock state; Bedrock stairs render straight, so corners show \
-             visual gaps"
-        ),
+        DroppedIntent::Shape { .. } => {
+            "Bedrock has no `shape` state; its stairs render straight, so corners show visual gaps"
+                .to_owned()
+        }
     }
-}
-
-/// [`degradation_detail`] with the block that carried the intent, as
-/// `W_INTENT_DEGRADED` reports it.
-///
-/// The family word comes out of the same `match` for the same reason the
-/// sentence does: `stair` is true of this variant, not of the type.
-#[must_use]
-pub fn degradation_message(id: &str, dropped: &DroppedIntent) -> String {
-    let family = match dropped {
-        DroppedIntent::Shape { .. } => "stair",
-    };
-    format!("{family} `{id}` {}", degradation_detail(dropped))
 }
 
 fn translate_stair(
@@ -238,11 +126,7 @@ fn translate_stair(
                 states.insert("upside_down_bit", Tag::Byte(upside_down_bit(id, value)?));
             }
             "shape" => {
-                // Bedrock stairs have no `shape` state
-                // (`spec/versioning-editions` "Java / Bedrock portability").
-                // `straight` is Bedrock's default so it drops losslessly; any
-                // corner shape drops with a degradation note ("Backend = data
-                // tables" and "Fail-loud and minimum-version inference").
+                // No Bedrock `shape` state; `straight` is its default.
                 if value != "straight" {
                     degraded.push(DroppedIntent::Shape {
                         value: value.clone(),
@@ -262,9 +146,7 @@ fn translate_stair(
     Ok(StateTranslation { states, degraded })
 }
 
-/// Java `facing` → Bedrock `weirdo_direction`. Verified against the Bedrock
-/// stair block-state listing (wiki.bedrock.dev / minecraft.wiki `Stairs/BS`):
-/// `0 = east, 1 = west, 2 = south, 3 = north`.
+/// Java `facing` to `weirdo_direction`, as Bedrock 1.21.60's stair states number them.
 fn weirdo_direction(id: &str, facing: &str) -> Result<i32, BedrockStateError> {
     match facing {
         "east" => Ok(0),
@@ -280,8 +162,6 @@ fn weirdo_direction(id: &str, facing: &str) -> Result<i32, BedrockStateError> {
     }
 }
 
-/// Java `half` → Bedrock `upside_down_bit`. `top` flips the stair
-/// (`upside_down_bit = 1`); `bottom` is the default (`0`).
 fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
     match half {
         "top" => Ok(1),
@@ -295,231 +175,5 @@ fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
     }
 }
 
-pub(crate) fn join_properties(properties: &IndexMap<String, String>) -> String {
-    properties
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 #[cfg(test)]
-pub(crate) fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
-    pairs
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        .collect()
-}
-
-/// Stair properties in the `facing` / `half` / `shape` insertion order the
-/// lowering uses, so `translate_states` sees the same key stream as at
-/// runtime.
-#[cfg(test)]
-pub(crate) fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
-    props([("facing", facing), ("half", half), ("shape", shape)])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bare_block_has_empty_states_and_no_degradation() {
-        let t = translate_states("minecraft:oak_planks", &IndexMap::new()).expect("bare");
-        assert!(t.states.entries.is_empty());
-        assert!(t.degraded.is_empty());
-    }
-
-    #[test]
-    fn stair_maps_facing_and_half_straight_is_lossless() {
-        let t = translate_states(
-            "minecraft:dark_oak_stairs",
-            &stair_props("north", "bottom", "straight"),
-        )
-        .expect("stair");
-        assert_eq!(t.states.entries.get("weirdo_direction"), Some(&Tag::Int(3)));
-        assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(0)));
-        // `shape=straight` and no other keys leak in.
-        assert_eq!(t.states.entries.len(), 2);
-        assert!(t.degraded.is_empty());
-    }
-
-    #[test]
-    fn all_four_facings_map_to_distinct_weirdo_directions() {
-        let expected = [("east", 0), ("west", 1), ("south", 2), ("north", 3)];
-        for (facing, weirdo) in expected {
-            let t = translate_states(
-                "minecraft:oak_stairs",
-                &stair_props(facing, "bottom", "straight"),
-            )
-            .expect("stair");
-            assert_eq!(
-                t.states.entries.get("weirdo_direction"),
-                Some(&Tag::Int(weirdo)),
-                "facing={facing}"
-            );
-        }
-    }
-
-    #[test]
-    fn half_top_sets_upside_down_bit() {
-        let t = translate_states(
-            "minecraft:spruce_stairs",
-            &stair_props("east", "top", "straight"),
-        )
-        .expect("stair");
-        assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(1)));
-    }
-
-    #[test]
-    fn non_straight_shape_drops_as_the_property_and_the_value() {
-        let t = translate_states(
-            "minecraft:oak_stairs",
-            &stair_props("south", "top", "outer_left"),
-        )
-        .expect("stair");
-        // States carry only the mappable intent.
-        assert_eq!(t.states.entries.get("weirdo_direction"), Some(&Tag::Int(2)));
-        assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(1)));
-        assert_eq!(t.states.entries.len(), 2);
-        // One dropped intent, as the pieces: a consumer of
-        // `degraded_entries` reads which property was lost without
-        // parsing it back out of a sentence.
-        assert_eq!(
-            t.degraded,
-            [DroppedIntent::Shape {
-                value: "outer_left".to_owned(),
-            }],
-        );
-        // The sentence is written once, from those pieces, and the
-        // warning's form is the note's with the block named.
-        let detail = degradation_detail(&t.degraded[0]);
-        assert!(
-            detail.starts_with("shape=outer_left has no Bedrock state"),
-            "got: {detail}"
-        );
-        assert_eq!(
-            degradation_message("minecraft:oak_stairs", &t.degraded[0]),
-            format!("stair `minecraft:oak_stairs` {detail}"),
-        );
-
-        // `straight` produces no note.
-        let straight = translate_states(
-            "minecraft:oak_stairs",
-            &stair_props("south", "top", "straight"),
-        )
-        .expect("stair");
-        assert!(straight.degraded.is_empty());
-    }
-
-    #[test]
-    fn the_family_test_agrees_with_the_one_that_decided_to_paint_it() {
-        // `minecraft:mystairs` is the id the two plausible spellings of the
-        // stair rule disagree about: its path ends in `stairs` but not in
-        // `_stairs`. `cairn-lang-core` refuses to attach stair states to it,
-        // and this module has to refuse to translate them — a second copy of
-        // the rule that answered "stair" here would translate a blockstate
-        // core never intended to exist, with nothing between it and the
-        // written file.
-        //
-        // Pinned on behaviour rather than by calling the predicate, so the
-        // test still means something if the two ever stop sharing one.
-        let err = translate_states(
-            "minecraft:mystairs",
-            &stair_props("south", "top", "straight"),
-        )
-        .expect_err("not a stair");
-        assert!(matches!(
-            err,
-            BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:mystairs"
-        ));
-    }
-
-    #[test]
-    fn non_stair_with_properties_fails_loud() {
-        let err = translate_states("minecraft:oak_door", &props([("facing", "north")]))
-            .expect_err("stateful non-stair");
-        assert!(matches!(
-            err,
-            BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:oak_door"
-        ));
-        // Self-correction triple per `spec/versioning-editions` "Fail-loud
-        // and minimum-version inference": what is wrong / what is valid /
-        // suggested fix. Each fragment is pinned so a message reword that
-        // breaks the lint loop's expectation fails here first.
-        let msg = err.to_string();
-        assert!(msg.contains("minecraft:oak_door"), "wrong: {msg}");
-        assert!(msg.contains("facing=north"), "wrong: {msg}");
-        assert!(msg.contains("`minecraft:oak_planks`"), "valid: {msg}");
-        assert!(msg.contains("`*_stairs`"), "valid: {msg}");
-        assert!(msg.contains("--edition java"), "fix: {msg}");
-    }
-
-    #[test]
-    fn unknown_stair_facing_value_fails_loud() {
-        let err = translate_states(
-            "minecraft:oak_stairs",
-            &stair_props("up", "bottom", "straight"),
-        )
-        .expect_err("bad facing");
-        assert!(matches!(
-            err,
-            BedrockStateError::UnknownStairState { key: "facing", ref value, .. } if value == "up"
-        ));
-        let msg = err.to_string();
-        assert!(msg.contains("facing=up"), "wrong: {msg}");
-        // Valid values (FACING_VALID) surface in the message so the lint
-        // loop can steer back to the closed domain instead of guessing.
-        assert!(msg.contains("east, west, south, north"), "valid: {msg}");
-        // The value is no more valid on Java, where it would be written
-        // unchanged, so the fix does not send the author there.
-        assert!(
-            msg.contains("correct the source blockstate")
-                && msg.contains("Java has no such")
-                && !msg.contains("or compile with"),
-            "fix: {msg}",
-        );
-    }
-
-    #[test]
-    fn unknown_stair_half_value_fails_loud() {
-        // Mirrors the facing test to guard against a future
-        // `upside_down_bit()` refactor that silently maps unknown values to
-        // `0` — a silent drop that `spec/versioning-editions` "Fail-loud and
-        // minimum-version inference" forbids.
-        let err = translate_states(
-            "minecraft:oak_stairs",
-            &stair_props("north", "middle", "straight"),
-        )
-        .expect_err("bad half");
-        assert!(matches!(
-            err,
-            BedrockStateError::UnknownStairState { key: "half", ref value, .. } if value == "middle"
-        ));
-        let msg = err.to_string();
-        assert!(msg.contains("half=middle"), "wrong: {msg}");
-        assert!(msg.contains("top, bottom"), "valid: {msg}");
-        // The value is no more valid on Java, where it would be written
-        // unchanged, so the fix does not send the author there.
-        assert!(
-            msg.contains("correct the source blockstate")
-                && msg.contains("Java has no such")
-                && !msg.contains("or compile with"),
-            "fix: {msg}",
-        );
-    }
-
-    #[test]
-    fn unknown_stair_key_fails_loud() {
-        let err = translate_states("minecraft:oak_stairs", &props([("waterlogged", "true")]))
-            .expect_err("unknown key");
-        assert!(matches!(
-            err,
-            BedrockStateError::UnknownStairKey { ref key, .. } if key == "waterlogged"
-        ));
-        let msg = err.to_string();
-        assert!(msg.contains("waterlogged"), "wrong: {msg}");
-        assert!(msg.contains("Handled: facing, half, shape"), "valid: {msg}");
-        assert!(msg.contains("--edition java"), "fix: {msg}");
-    }
-}
+mod tests;

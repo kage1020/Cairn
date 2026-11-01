@@ -1,25 +1,12 @@
-//! Helpers shared by the `cairn-lang-core` integration test binaries.
-//!
-//! Every binary here drives the same front half of the pipeline — parse,
-//! lower, then either `check` or `resolve` + `lower_to_block_array` — and
-//! reads the same `examples/` tree. The plumbing lives once so a change to
-//! a pass's signature, or to where the examples are found, lands in one
-//! place.
+//! Helpers shared by the core integration test binaries.
 
-// Every test binary compiles this module on its own and calls a subset of
-// it, so the unused-item lint would fire per binary. The workspace has no
-// other `#![allow]`; the fix that removes this one is a dev-dependency
-// helper crate, worth doing if the set keeps growing.
-#![allow(dead_code)]
-
+use std::ops::Range;
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::{Diagnostic, check, lower, parse, resolve};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
-/// The number of `.crn` files `examples/` ships. Bump it with the next
-/// example; every sweep refuses a different count, and a loop over a
-/// filtered-down set passes silently.
+/// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
 pub const SHIPPED_EXAMPLES: usize = 12;
 
 /// The repository's `examples/` directory.
@@ -31,6 +18,10 @@ pub fn examples_dir() -> PathBuf {
 }
 
 /// The source of `examples/<name>`.
+///
+/// # Panics
+///
+/// When the file cannot be read.
 pub fn read_example(name: &str) -> String {
     let path = examples_dir().join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
@@ -38,8 +29,9 @@ pub fn read_example(name: &str) -> String {
 
 /// Every `.crn` under `examples/`, as `(file name, source)`, sorted by name.
 ///
-/// Refuses to return a set too small to be the shipped one: every sweep is
-/// a loop over this, and a loop over nothing passes.
+/// # Panics
+///
+/// When `examples/` cannot be read, or holds other than [`SHIPPED_EXAMPLES`] files.
 pub fn examples() -> Vec<(String, String)> {
     let dir = examples_dir();
     let entries =
@@ -72,13 +64,36 @@ pub fn examples() -> Vec<(String, String)> {
     found
 }
 
-/// Parse, lower and run the check passes over `source` with no registry
-/// pack. A parse failure panics with the source so the fixture is in the
-/// failure message.
+/// Parse, lower and check `source` with no registry pack.
+///
+/// # Panics
+///
+/// When `source` does not parse.
 pub fn diagnose(source: &str) -> Vec<Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
     check(&module, &ir, None)
+}
+
+/// The findings `source` raises with `code`, in report order.
+///
+/// # Panics
+///
+/// When `source` does not parse.
+pub fn of_code(source: &str, code: DiagnosticCode) -> Vec<Diagnostic> {
+    diagnose(source)
+        .into_iter()
+        .filter(|d| d.code == code)
+        .collect()
+}
+
+/// The single finding `source` raises with `code`.
+///
+/// # Panics
+///
+/// When `source` does not parse, or raises other than one such finding.
+pub fn one_of_code(source: &str, code: DiagnosticCode) -> Diagnostic {
+    exactly_one(of_code(source, code))
 }
 
 /// The codes of every finding `source` raises, in report order.
@@ -86,10 +101,45 @@ pub fn codes(source: &str) -> Vec<&'static str> {
     diagnose(source).iter().map(|d| d.code.as_str()).collect()
 }
 
-/// The text `diag` points at, so a test can assert what a finding
-/// underlines rather than only where.
+/// The text `diag` points at.
 pub fn slice<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
     &source[diag.span.clone()]
+}
+
+/// Byte offset of the `n`th (0-based) occurrence of `needle`.
+///
+/// # Panics
+///
+/// When `source` holds fewer than `n + 1` occurrences.
+pub fn nth(source: &str, needle: &str, n: usize) -> usize {
+    source
+        .match_indices(needle)
+        .nth(n)
+        .unwrap_or_else(|| panic!("occurrence {n} of `{needle}` not found in:\n{source}"))
+        .0
+}
+
+/// The byte range of the `n`th (0-based) occurrence of `needle`.
+///
+/// # Panics
+///
+/// When `source` holds fewer than `n + 1` occurrences.
+pub fn span_of(source: &str, needle: &str, n: usize) -> Range<usize> {
+    let start = nth(source, needle, n);
+    start..start + needle.len()
+}
+
+/// Each finding's code and span, in report order.
+pub fn code_spans(found: &[Diagnostic]) -> Vec<(&'static str, Range<usize>)> {
+    found
+        .iter()
+        .map(|d| (d.code.as_str(), d.span.clone()))
+        .collect()
+}
+
+/// The primaries of `found`.
+pub fn primaries(found: &[Diagnostic]) -> Vec<&str> {
+    found.iter().map(|d| d.primary.as_str()).collect()
 }
 
 /// The messages of `diag`'s notes, in order.
@@ -97,25 +147,46 @@ pub fn notes(diag: &Diagnostic) -> Vec<&str> {
     diag.notes.iter().map(|n| n.message.as_str()).collect()
 }
 
-/// The single finding in `found`, or a panic listing what was there.
+/// A finding as its code, the text it points at, its primary and its notes.
+pub type Finding<'a> = (DiagnosticCode, &'a str, &'a str, Vec<&'a str>);
+
+/// Each finding of `out` as a [`Finding`], in report order.
+pub fn findings<'a>(source: &'a str, out: &'a BlockArrayIr) -> Vec<Finding<'a>> {
+    out.diagnostics
+        .iter()
+        .map(|d| (d.code, slice(source, d), d.primary.as_str(), notes(d)))
+        .collect()
+}
+
+/// The single finding in `found`.
+///
+/// # Panics
+///
+/// When there is not exactly one, listing what was there.
 pub fn exactly_one(mut found: Vec<Diagnostic>) -> Diagnostic {
     assert_eq!(found.len(), 1, "expected one finding, got {found:#?}");
     found.remove(0)
 }
 
-/// Parse, lower, resolve and lower `source` to the block-array IR with no
-/// registry pack. Only the block-array pass's own diagnostics are kept.
+/// `source` lowered to the block-array IR with no registry pack; only that pass's diagnostics.
+///
+/// # Panics
+///
+/// When `source` does not parse.
 pub fn lowered(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     lower_to_block_array(&ir, &resolution, None)
 }
 
-/// [`lowered`], with the resolver's diagnostics merged in front of the
-/// block-array pass's the way the CLI reports them.
+/// [`lowered`], with the resolver's diagnostics ahead of the block-array pass's.
+///
+/// # Panics
+///
+/// When `source` does not parse.
 pub fn lowered_with_resolver_diagnostics(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     let mut out = lower_to_block_array(&ir, &resolution, None);
@@ -125,7 +196,65 @@ pub fn lowered_with_resolver_diagnostics(source: &str) -> BlockArrayIr {
     out
 }
 
-/// The single structure `ir` holds, for sources that declare exactly one.
+/// The primaries of the `W_DEFERRED_MEMBER` findings `ir` carries.
+pub fn defers(ir: &BlockArrayIr) -> Vec<&str> {
+    ir.diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DeferredMember)
+        .map(|d| d.primary.as_str())
+        .collect()
+}
+
+/// The primaries of the `E_INVALID_MEMBER` findings `ir` carries.
+pub fn refusals(ir: &BlockArrayIr) -> Vec<&str> {
+    ir.diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::InvalidMember)
+        .map(|d| d.primary.as_str())
+        .collect()
+}
+
+/// Whether `source` lays its walkway rather than skipping it for an unplaceable port.
+///
+/// # Panics
+///
+/// When `source` does not parse, or a walkway was neither skipped nor laid.
+pub fn walkway_was_laid(source: &str) -> bool {
+    let out = lowered(source);
+    let skipped = defers(&out)
+        .iter()
+        .any(|primary| primary.contains("was skipped because port"));
+    assert_eq!(
+        skipped,
+        out.walkways.is_empty(),
+        "a walkway that was not skipped has to have been laid",
+    );
+    !skipped
+}
+
+/// The cells of `array` that are not air.
+pub fn solid_cells(array: &BlockArray) -> usize {
+    array.voxels.iter().filter(|c| c.0 != 0).count()
+}
+
+/// The block state at `(x, y, z)` of `array`.
+///
+/// # Panics
+///
+/// When the cell is outside `array`.
+pub fn state_at(array: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
+    let i = array
+        .dims
+        .index(x, y, z)
+        .unwrap_or_else(|| panic!("({x}, {y}, {z}) is outside {:?}", array.dims));
+    &array.palette.entries[array.voxels[i].0 as usize]
+}
+
+/// The single structure `ir` holds.
+///
+/// # Panics
+///
+/// When `ir` holds more or fewer.
 pub fn only_structure(ir: &BlockArrayIr) -> &BlockArray {
     assert_eq!(
         ir.structures.len(),
@@ -135,8 +264,7 @@ pub fn only_structure(ir: &BlockArrayIr) -> &BlockArray {
     ir.structures.values().next().expect("one structure")
 }
 
-/// A theme and a `def` every site fixture can place: `hut` has a floor, a
-/// wall and a front door, so a placement of it is complete on its own.
+/// A theme and a complete `def hut` for site fixtures to place.
 pub const PRELUDE: &str = "theme plain:\n  \
 slot floor -> @oak_planks\n  \
 slot wall  -> @cobblestone\n\n\
@@ -150,11 +278,20 @@ pub fn struct_with(row: &str) -> String {
     format!("{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  {row}\n")
 }
 
+/// [`PRELUDE`] plus a site placing `hut`s `anchor` and `peer`, then `row`.
+pub fn duo_with(row: &str) -> String {
+    format!(
+        "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
+         place id=peer use=hut theme=plain east_of=anchor gap=4\n  {row}\n"
+    )
+}
+
+/// `header` above a one-struct body.
+pub fn with_header(header: &str) -> String {
+    format!("{header}struct s size=2x2\n  floor mat_slot=f\n")
+}
+
 /// [`PRELUDE`] plus a `def` whose body is a floor and then `row`.
-///
-/// The passes walk `ir.structs` and `ir.defs` in separate loops, so a
-/// struct-only suite leaves the `def` loop unexecuted — and a `def` is the
-/// half users reach first, since a `site` is what instantiates one.
 pub fn def_with(row: &str) -> String {
     format!("{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  {row}\n")
 }

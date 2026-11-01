@@ -10,52 +10,22 @@ use thiserror::Error;
 pub type Span = Range<usize>;
 
 /// 1-based line/column position used in human-readable diagnostics.
-///
-/// Both components are `NonZeroU32` because every source location is at line
-/// 1, column 1 or later; the type rules out an accidental `(0, 0)` sentinel
-/// that downstream code would have to special-case. `col` counts Unicode
-/// scalar values (`char`), not bytes, so the value matches what editors and
-/// `gcc`/`clang`-style tools display for the same source.
-///
-/// `Serialize` writes the two as plain numbers, so a payload embedding a
-/// position reads the same as one that spelled it `u32` by hand — what it
-/// gains is that the 1-based invariant travels with the type rather than
-/// being re-established at each producer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Position {
     /// 1-based line number.
     pub line: NonZeroU32,
-    /// 1-based column number, counted in Unicode scalar values from the start
-    /// of the line.
+    /// 1-based column number, in Unicode scalar values.
     pub col: NonZeroU32,
 }
 
 impl Position {
-    /// First byte of any source: line 1, column 1.
-    ///
-    /// Used as the fallback anchor when an error refers to an empty source —
-    /// there is no last token to point at. This means an empty-source EOF
-    /// error and a genuine error at `1:1` are indistinguishable by position
-    /// alone; a future diagnostics layer (LSP) that needs to tell them apart
-    /// should carry the distinction in the error variant rather than in the
-    /// `Position`.
+    /// Line 1, column 1.
     pub const START: Position = Position {
         line: NonZeroU32::MIN,
         col: NonZeroU32::MIN,
     };
 
-    /// Translate a position measured inside a detached slice onto the source
-    /// that slice was cut from.
-    ///
-    /// `self` counts from the start of the slice; `base` is where the slice
-    /// begins in the whole file. Only the first line of the slice sits at a
-    /// column offset — every line after it starts at column 1 in both
-    /// coordinate systems, so only its line number shifts.
-    ///
-    /// `@intended_targets` is the one directive that re-lexes its value as a
-    /// detached string, and every diagnostic from that sub-parse has to come
-    /// back through here: without it the caret lands on line 1 of the file
-    /// rather than on the directive.
+    /// Translate a position inside a detached slice onto the source it was cut from at `base`.
     #[must_use]
     pub(crate) fn rebased(self, base: Position) -> Self {
         let line = base.line.saturating_add(self.line.get() - 1);
@@ -74,10 +44,7 @@ impl std::fmt::Display for Position {
     }
 }
 
-/// Grammatical position in which an integer literal was being parsed when it
-/// failed. Surface-level diagnostics use this to phrase a message, and LSP
-/// quick-fix logic uses it to dispatch on the offending site without resorting
-/// to substring matches on the rendered text.
+/// Where in the grammar an integer literal that failed to parse sat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IntContext {
@@ -92,9 +59,7 @@ pub enum IntContext {
 }
 
 impl IntContext {
-    /// Phrasing used as the leading clause of a human-readable diagnostic.
-    /// Kept in sync with the legacy messages so substring matchers in
-    /// downstream tooling continue to work.
+    /// Leading clause of the message, which downstream substring matchers depend on.
     fn describe(self) -> &'static str {
         match self {
             Self::SizeWidth | Self::SizeHeight | Self::IntLiteral => "invalid integer literal",
@@ -103,14 +68,7 @@ impl IntContext {
     }
 }
 
-/// One-word rendering of [`IntErrorKind`] suitable for embedding in a
-/// diagnostic. `IntErrorKind` is `#[non_exhaustive]`, so the catch-all arm
-/// guards against future variants without misleading the reader.
-///
-/// `IntErrorKind::Zero` is only produced by `NonZero*::from_str` and never
-/// by the `u32` / `i64` parses this crate currently performs. It is not
-/// listed explicitly and falls through to `"invalid integer"`; callers
-/// parsing `NonZero*` types should phrase Zero themselves.
+/// Short rendering of an [`IntErrorKind`] for a diagnostic.
 #[must_use]
 pub fn describe_int_kind(kind: IntErrorKind) -> &'static str {
     match kind {
@@ -121,9 +79,6 @@ pub fn describe_int_kind(kind: IntErrorKind) -> &'static str {
     }
 }
 
-/// Names the limit rather than only reporting that one exists: the author
-/// (or the LLM editing loop the language is designed around) has to know how
-/// far to unwind to make the source legal again.
 fn render_nesting_too_deep(limit: usize) -> String {
     format!(
         "nesting is limited to {limit} levels here; \
@@ -132,19 +87,7 @@ fn render_nesting_too_deep(limit: usize) -> String {
     )
 }
 
-/// Name a character the lexer could not place.
-///
-/// Quoting it verbatim is right for a character the reader can see and
-/// useless otherwise: U+FEFF renders as nothing, so the message quoted an
-/// empty string, and U+00A0 renders as a space, so it read as though an
-/// ordinary space were the problem. Neither tells the author what to
-/// delete.
-///
-/// The test is whether the glyph carries the information, not whether it
-/// is ASCII. A full-width `＝` and a stray `あ` are both plainly visible
-/// and are the likeliest mistakes in a project with Japanese docs, so
-/// they keep their glyph; the codepoint rides along, because two
-/// characters that look alike are exactly when one is needed.
+/// Name a character the lexer could not place, by codepoint alone when it shows no glyph.
 fn render_unexpected_char(ch: char) -> String {
     if ch.is_control() || ch.is_whitespace() || ch == '\u{feff}' {
         format!("unexpected character U+{:04X}", ch as u32)
@@ -181,12 +124,6 @@ pub enum LexError {
         got: u32,
     },
     /// Indentation opens more than one level in a single step.
-    ///
-    /// Separate from [`LexError::OddIndent`] because the repair is
-    /// different and the other message actively misleads: a 4-space
-    /// indent already *is* a multiple of 2, so being told to make it one
-    /// leaves an author — or a generator reading the message back — with
-    /// nothing to change.
     #[error(
         "{position}: indentation opens more than one level at once \
          (got {got} spaces, expected {expected} spaces)"
@@ -219,15 +156,7 @@ pub enum LexError {
         /// The offending character.
         ch: char,
     },
-    /// A size literal is followed by text that would have continued it.
-    ///
-    /// `2x2x9` holds a third extent the token has no room for, and `2x2y`
-    /// runs the literal into a word. Both used to lex as a `Size` plus a
-    /// stray identifier: in a member's arguments that reached
-    /// `check::positional`, which reported a bare value the author never
-    /// wrote, at a column past the literal that produced it; in a
-    /// declaration header, which has no positional list, the parser
-    /// failed at the end of the line instead.
+    /// A size literal is followed by text that would have continued it, as in `2x2x9` or `2x2y`.
     #[error(
         "{position}: size literal `{literal}` is followed by `{found}`; \
          a size is two extents, as in `9x7`"
@@ -240,9 +169,7 @@ pub enum LexError {
         /// The character that would have continued it.
         found: char,
     },
-    /// An integer literal could not be parsed. Carries the failure `kind` so
-    /// downstream tooling (e.g. LSP quick-fix) can dispatch without parsing
-    /// the rendered message.
+    /// An integer literal could not be parsed.
     #[error("{position}: {}", render_invalid_int(*context, lexeme, *kind))]
     InvalidInt {
         /// Where the literal starts.
@@ -260,10 +187,8 @@ pub enum LexError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ParseError {
-    /// A lexer error surfaced from token production. Lexer integer-parse
-    /// failures are *not* wrapped here; they bubble up directly as
-    /// [`ParseError::InvalidInt`] so callers have a single match arm to
-    /// handle for any integer-parse failure regardless of layer.
+    /// A lexer error other than an integer-parse failure, which becomes
+    /// [`ParseError::InvalidInt`].
     #[error(transparent)]
     Lex(LexError),
     /// A syntactic mismatch with a human-readable message.
@@ -275,19 +200,11 @@ pub enum ParseError {
         message: String,
     },
     /// Value or expression nesting ran past the parser's depth limit.
-    ///
-    /// Raised instead of descending far enough to exhaust the native stack.
-    /// A Rust stack overflow aborts the process and cannot be caught, so it
-    /// would take down every embedder too — including the language server,
-    /// which re-parses on each keystroke.
     #[error("{position}: {}", render_nesting_too_deep(*limit))]
     NestingTooDeep {
-        /// First token of the level that went one too far.
-        ///
-        /// Not the bracket or keyword that opened it: the guard fires once
-        /// the level has been entered, so the position sits just inside.
+        /// First token inside the level that went one too far.
         position: Position,
-        /// The limit that was exceeded, so the message can state it.
+        /// The limit that was exceeded.
         limit: usize,
     },
     /// An integer literal could not be parsed.
@@ -347,8 +264,7 @@ impl LexError {
             .map_or(full.clone(), |(_, rest)| rest.to_owned())
     }
 
-    /// The same error with its position translated onto the enclosing
-    /// source. See [`Position::rebased`].
+    /// The same error with its position rebased onto the enclosing source.
     #[must_use]
     pub(crate) fn rebased(mut self, base: Position) -> Self {
         let position = match &mut self {
@@ -394,8 +310,7 @@ impl ParseError {
         }
     }
 
-    /// The same error with its position translated onto the enclosing
-    /// source. See [`Position::rebased`].
+    /// The same error with its position rebased onto the enclosing source.
     #[must_use]
     pub(crate) fn rebased(self, base: Position) -> Self {
         match self {

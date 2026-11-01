@@ -43,3 +43,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Claude Code: local state, except what the repository shares
+.claude/*
+!.claude/skills/
+!.claude/settings.json

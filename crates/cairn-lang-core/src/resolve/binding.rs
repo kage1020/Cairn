@@ -1,10 +1,4 @@
-//! Theme-binding data types and canonical/abstract token classification.
-//!
-//! [`ThemeBinding`] is the resolver's view of one `theme` block: it owns the
-//! same `slot NAME -> VALUE` map the IR carries, plus a [`SelectorMatch`]
-//! per selector rule that tracks which members the selector actually bound
-//! to. The "matched member spans" list is what the `unmatched-selector` pass
-//! consumes to emit `E_THEME_SELECTOR_UNMATCHED`.
+//! Theme-binding data types and canonical / abstract token classification.
 
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -13,14 +7,7 @@ use crate::ast::{Value, ValueKind};
 use crate::error::Span;
 use crate::intent::ValueWithSpan;
 
-/// Classification of a `@TOKEN` value used as a theme slot target.
-///
-/// Drawn from `spec/materials-themes` "Canonical vocabulary": a canonical
-/// token names a concrete Minecraft meaning (`@oak_planks`,
-/// `@oak_log[axis=x]`), an abstract token names an aesthetic choice that the
-/// theme policy may downgrade (`@floor.wood.broadleaf`). Anything else — a
-/// bare identifier, a string, a list — is `NotAToken` and surfaces as
-/// `E_UNKNOWN_SLOT_TARGET`.
+/// The kind of value a theme slot binds (`spec/materials-themes` "Canonical vocabulary").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TokenKind {
     /// Concrete canonical block token (`@oak_planks`, `@oak_log[axis=x]`).
@@ -31,14 +18,7 @@ pub enum TokenKind {
     NotAToken,
 }
 
-/// Classify the value behind a `slot NAME -> VALUE` binding (or any other
-/// `@`-prefixed token reference).
-///
-/// Rule: a token whose inner string contains `[` is canonical regardless of
-/// whether dots appear inside the brackets (state literals like
-/// `@oak_log[axis=x]` are canonical). A token whose inner string contains a
-/// `.` *outside* any bracket is abstract (`@floor.wood.broadleaf`).
-/// Everything else (`@oak_planks`) is canonical.
+/// Classifies a token value: a `.` before any `[` makes it abstract, anything else canonical.
 #[must_use]
 pub fn classify_token(value: &Value) -> TokenKind {
     let ValueKind::Token(inner) = &value.kind else {
@@ -47,9 +27,6 @@ pub fn classify_token(value: &Value) -> TokenKind {
     if inner.is_empty() {
         return TokenKind::NotAToken;
     }
-    // Slice off any state-literal tail so `@oak_log[axis=x]` is judged on
-    // `oak_log` alone — bracketed state is canonical metadata, never an
-    // abstract-token marker.
     let head = match inner.find('[') {
         Some(i) => &inner[..i],
         None => inner.as_str(),
@@ -62,11 +39,6 @@ pub fn classify_token(value: &Value) -> TokenKind {
 }
 
 /// Resolver-side view of one `theme` block.
-///
-/// Owns its slot map and selector rules verbatim from the IR — the resolver
-/// only annotates each selector with the spans of the members it matched, so
-/// downstream passes can locate unmatched selectors without re-walking the
-/// module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ThemeBinding {
     /// Theme name.
@@ -89,12 +61,7 @@ pub struct SelectorMatch {
     pub attrs: IndexMap<String, ValueWithSpan>,
     /// `key=value` bindings on the RHS of the arrow.
     pub bindings: IndexMap<String, ValueWithSpan>,
-    /// Byte ranges of every member this selector matched. Empty after
-    /// `resolve()` means the selector matched no member. That is
-    /// `E_THEME_SELECTOR_UNMATCHED` only when some scope applied the theme
-    /// and the keyword is known: a theme no scope applies is matched
-    /// against nothing, and an unknown keyword already has
-    /// `E_UNKNOWN_KEYWORD`.
+    /// Byte ranges of every member this selector matched.
     #[serde(skip)]
     pub matched_member_spans: Vec<Span>,
     /// Byte range of the originating `KEYWORD[...] -> ...` row in source.
@@ -125,9 +92,6 @@ mod tests {
 
     #[test]
     fn classify_token_treats_bracketed_state_as_canonical() {
-        // `oak_log[axis=x]` has a dot inside the bracket (`axis=x` carries no
-        // dot here, but the rule must hold even when state values contain
-        // dots) — the head before `[` is what decides.
         assert_eq!(
             classify_token(&token("oak_log[axis=x]")),
             TokenKind::Canonical
@@ -142,9 +106,7 @@ mod tests {
 
     #[test]
     fn classify_token_rejects_empty_token() {
-        // Defensive: an empty Token cannot be a meaningful slot target. The
-        // parser does not currently emit this shape, but the classifier owns
-        // the policy.
+        // The parser never emits this shape.
         assert_eq!(classify_token(&token("")), TokenKind::NotAToken);
     }
 }

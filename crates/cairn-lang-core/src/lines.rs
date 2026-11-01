@@ -1,29 +1,11 @@
-//! Where a line ends.
-//!
-//! Cairn accepts `\n`, `\r\n`, and a lone `\r` as one logical line break, so
-//! a file written on Windows lexes the same as one written on Linux. That
-//! rule is not the one Rust's standard library implements: `str::lines`
-//! splits on `\n` and `\r\n` but carries a lone `\r` into the middle of a
-//! line, and a hand-rolled `for byte in source.bytes()` loop that pushes on
-//! `b'\n'` misses it entirely.
-//!
-//! Every layer that turns a byte offset into a `line:column` — the lexer as
-//! it walks, [`crate::check::LineStarts`] from a span, `LineIndex` in the
-//! language server, and the completion scanner — has to agree, because a
-//! diagnostic's position is compared against an editor's cursor. They agree
-//! by taking the rule from here rather than each re-deciding it.
-//!
-//! The one implementation this cannot reach is the tree-sitter grammar: its
-//! `Point.row` comes from the tree-sitter runtime's own lexer, which
-//! advances the row on `\n` only, and an external scanner cannot override
-//! it.
+//! Where a line ends: `\n`, `\r\n` and a lone `\r` each break a line, unlike `str::lines`.
+//! Everything that turns a byte offset into a `line:column` takes the rule from here.
 
-/// Byte length of the line terminator beginning at `offset` — 2 for a
-/// `\r\n` pair, 1 for a lone `\r` or a `\n` — or `None` when no terminator
-/// begins there, including when `offset` is past the end of `source`.
-///
-/// Byte indexing is sound for this question: `\r` and `\n` are ASCII, and
-/// no byte of a multi-byte UTF-8 sequence is ASCII.
+use std::num::NonZeroU32;
+
+use crate::error::Position;
+
+/// Byte length of the line terminator beginning at `offset`, or `None` when none begins there.
 #[must_use]
 pub fn terminator_len(source: &str, offset: usize) -> Option<usize> {
     let bytes = source.as_bytes();
@@ -34,18 +16,8 @@ pub fn terminator_len(source: &str, offset: usize) -> Option<usize> {
     }
 }
 
-/// Byte offset at which each line of `source` begins.
-///
-/// Entry 0 is always 0, so an empty source is one empty line. A source that
-/// ends in a terminator gets a final entry at `source.len()`: the text after
-/// the last break is a line, even when it is empty. Both conventions match
-/// what a cursor at the end of such a file reports in an editor.
-///
-/// This differs from [`split`], which follows `str::lines` in *not* yielding
-/// that trailing empty line, so `split(s).count() + 1 == starts(s).len()`
-/// whenever `s` ends in a terminator. Positions are resolved against this
-/// one: a cursor can sit on the empty line after the last break, and an
-/// offset there has to name a line.
+/// Byte offset at which each line of `source` begins, including the empty line after a trailing
+/// terminator that [`split`] drops, since a cursor can sit on it.
 #[must_use]
 pub fn starts(source: &str) -> Vec<usize> {
     let mut starts = vec![0];
@@ -63,17 +35,11 @@ pub fn starts(source: &str) -> Vec<usize> {
 }
 
 /// Byte offset at which the line containing `offset` begins.
-///
-/// Agrees with [`starts`] plus a binary search, and allocates nothing. Both
-/// walk the source once, so prefer the index when many offsets are in
-/// question and this when one is.
 #[must_use]
 pub fn start_of(source: &str, offset: usize) -> usize {
     let bytes = source.as_bytes();
     let clamped = offset.min(source.len());
-    // An offset sitting on the `\n` of a `\r\n` is *inside* one break, not
-    // after it. The line that break ends begins one byte further on, so the
-    // line holding this offset is the one before the `\r`.
+    // The `\n` of a `\r\n` belongs to the line the `\r` ends.
     let search_end =
         if clamped > 0 && bytes[clamped - 1] == b'\r' && bytes.get(clamped) == Some(&b'\n') {
             clamped - 1
@@ -86,21 +52,8 @@ pub fn start_of(source: &str, offset: usize) -> usize {
         .map_or(0, |i| i + 1)
 }
 
-/// Byte offset at which the line preceding `next_start` ends: the first
-/// byte of the terminator that `next_start` follows.
-///
-/// `next_start` must be a line start other than 0 — one of [`starts`]'
-/// entries — which is exactly the condition under which a terminator
-/// precedes it. Callers that hold an index of line starts want this rather
-/// than `next_start - 1`: that is the terminator's *last* byte, and for a
-/// `\r\n` pair the `\r` belongs to the break too, so a range built from it
-/// would cover a carriage return.
-///
-/// Stepping back by hand is where the rule gets re-decided. The version
-/// this replaced asked whether the byte before the end was a `\r`, which is
-/// also true of the *previous* line's terminator when this line is empty —
-/// answering with an offset that is not on this line at all, and, for a
-/// source beginning with `\n`, underflowing before it could.
+/// Byte offset where the line before `next_start`, a nonzero entry of [`starts`], ends: the first
+/// byte of its terminator, which `next_start - 1` misses for a `\r\n`.
 #[must_use]
 pub fn end_before(source: &str, next_start: usize) -> usize {
     debug_assert!(
@@ -115,12 +68,7 @@ pub fn end_before(source: &str, next_start: usize) -> usize {
     }
 }
 
-/// Iterate the lines of `source` with their terminators removed.
-///
-/// Same contract as [`str::lines`] — no line for an empty source, and a
-/// trailing terminator does not produce a trailing empty line — extended
-/// with the lone `\r` that `str::lines` does not treat as a break. See
-/// [`starts`] for why the two disagree about that trailing line.
+/// Iterate the lines of `source` without terminators, as [`str::lines`] does plus the lone `\r`.
 #[must_use]
 pub fn split(source: &str) -> Split<'_> {
     Split { rest: source }
@@ -129,9 +77,7 @@ pub fn split(source: &str) -> Split<'_> {
 /// Iterator returned by [`split`].
 #[derive(Debug, Clone)]
 pub struct Split<'a> {
-    /// The not-yet-yielded tail, terminator of the previous line already
-    /// consumed. Empty means exhausted, which is why the final line of a
-    /// source ending in a break is not yielded.
+    /// The tail not yet yielded.
     rest: &'a str,
 }
 
@@ -158,27 +104,13 @@ impl<'a> DoubleEndedIterator for Split<'a> {
         if self.rest.is_empty() {
             return None;
         }
-        // A terminator at the very end closes the last line rather than
-        // opening an empty one — the half of `str::lines`' contract that a
-        // reverse walk has to reproduce, since a forward walk gets it from
-        // running out of input.
+        // A trailing terminator closes the last line rather than opening an empty one.
         let body = match trailing_terminator_len(self.rest) {
             Some(len) => &self.rest[..self.rest.len() - len],
             None => self.rest,
         };
-        // Everything after the last break in `body` is the line. Everything
-        // up to and including that break stays in `rest`, because the break
-        // is what closes the line before it — dropping it here would
-        // swallow an empty line between two breaks. When `body` holds no
-        // break at all, `start_of` answers 0 and both halves fall out: the
-        // whole of `body` is the line and nothing remains.
+        // The break before the line stays in `rest`: it closes the line before.
         let line_start = start_of(body, body.len());
-        // `line_start` is at most `body.len()`, and equals it only if
-        // `body` ends in a break — which `trailing_terminator_len` has
-        // already removed. So the tail always shrinks. That rests on the
-        // two saying the same thing about what a terminator is; should they
-        // ever stop, this walk stops consuming input, and a hang is a far
-        // worse way to find that out than a panic.
         debug_assert!(
             line_start < self.rest.len(),
             "the reverse walk must consume input: {:?} yielded nothing",
@@ -192,222 +124,89 @@ impl<'a> DoubleEndedIterator for Split<'a> {
 impl std::iter::FusedIterator for Split<'_> {}
 
 /// Length of the terminator `source` ends with, if it ends with one.
-///
-/// Defers the pair's shape to [`end_before`] rather than restating it: the
-/// last byte says whether a terminator ends here, and the shared rule says
-/// how far back it began.
 fn trailing_terminator_len(source: &str) -> Option<usize> {
     matches!(source.as_bytes().last()?, b'\r' | b'\n')
         .then(|| source.len() - end_before(source, source.len()))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Precomputed line-start byte offsets for a source string.
+#[derive(Debug, Clone)]
+pub struct LineStarts {
+    starts: Vec<usize>,
+}
 
-    /// Sources whose lines Rust already agrees about. `split` has to match
-    /// `str::lines` on all of them, or replacing one with the other changes
-    /// behaviour nobody asked to change.
-    const AGREED: &[&str] = &[
-        "",
-        "a",
-        "a\n",
-        "a\nb",
-        "a\nb\n",
-        "\n",
-        "a\n\nb\n",
-        "a\r\nb\r\n",
-        "a\r\n\r\nb",
-        "\r\n",
-    ];
-
-    #[test]
-    fn terminator_len_names_each_of_the_three_breaks() {
-        assert_eq!(terminator_len("a\r\nb", 1), Some(2));
-        assert_eq!(terminator_len("a\rb", 1), Some(1));
-        assert_eq!(terminator_len("a\nb", 1), Some(1));
-        assert_eq!(terminator_len("a\r\nb", 0), None);
-        // Past the end is not a terminator, so callers can ask about any
-        // offset without a bounds check of their own.
-        assert_eq!(terminator_len("a", 1), None);
-        assert_eq!(terminator_len("a", 99), None);
-        // The `\n` of a `\r\n` is the pair's second byte, not a break of
-        // its own — asking about it would double-count the line.
-        assert_eq!(terminator_len("a\r\nb", 2), Some(1));
-    }
-
-    #[test]
-    fn starts_a_new_line_after_every_break() {
-        assert_eq!(starts(""), vec![0]);
-        assert_eq!(starts("ab"), vec![0]);
-        assert_eq!(starts("ab\ncd"), vec![0, 3]);
-        assert_eq!(starts("ab\r\ncd"), vec![0, 4]);
-        assert_eq!(starts("ab\rcd"), vec![0, 3]);
-        // A trailing break opens a final empty line.
-        assert_eq!(starts("ab\r"), vec![0, 3]);
-        // Consecutive breaks of different kinds each open one line.
-        assert_eq!(starts("\r\r\n\n"), vec![0, 1, 3, 4]);
-    }
-
-    /// Sources with a lone `\r`, an empty line, or a break at either edge —
-    /// the shapes where stepping across a terminator can leave its own line.
-    const AWKWARD: &[&str] = &[
-        "\n",
-        "\nx",
-        "\n\r\n",
-        "\r\r",
-        "\r\r\r",
-        "a\r\r\n",
-        "a\rb\r\nc\nd",
-        "\r\n\r",
-        "x\r\ny",
-    ];
-
-    #[test]
-    fn end_before_stops_at_the_terminator_it_follows() {
-        assert_eq!(end_before("a\nb", 2), 1);
-        assert_eq!(end_before("a\r\nb", 3), 1);
-        assert_eq!(end_before("a\rb", 2), 1);
-        // A source opening with a break: the first line is empty and ends
-        // where it starts. Reading the byte before it would leave the
-        // source entirely.
-        assert_eq!(end_before("\nx", 1), 0);
-        assert_eq!(end_before("\r\nx", 2), 0);
-        // An empty line between two breaks gives up its own terminator and
-        // not the one that opened it.
-        assert_eq!(end_before("\r\r", 2), 1);
-        assert_eq!(end_before("a\r\r\n", 4), 2);
-    }
-
-    #[test]
-    fn end_before_never_leaves_the_line_it_ends() {
-        for source in AGREED.iter().copied().chain(AWKWARD.iter().copied()) {
-            let index = starts(source);
-            for pair in index.windows(2) {
-                let [line_start, next_start] = *pair else {
-                    unreachable!("windows(2)")
-                };
-                let end = end_before(source, next_start);
-                assert!(
-                    (line_start..next_start).contains(&end),
-                    "{source:?}: line {line_start}..{next_start} ends at {end}",
-                );
-                assert!(
-                    !source[line_start..end].contains(['\r', '\n']),
-                    "{source:?}: line {line_start}..{end} covers its terminator",
-                );
-                assert!(
-                    terminator_len(source, end).is_some(),
-                    "{source:?}: {end} should be where the terminator begins",
-                );
-            }
+impl LineStarts {
+    /// Index the line starts of `source`.
+    #[must_use]
+    pub fn new(source: &str) -> Self {
+        Self {
+            starts: starts(source),
         }
     }
 
-    #[test]
-    fn split_matches_str_lines_wherever_str_lines_is_right() {
-        for source in AGREED {
-            assert_eq!(
-                split(source).collect::<Vec<_>>(),
-                source.lines().collect::<Vec<_>>(),
-                "{source:?}",
-            );
+    /// The byte offset each line begins at, as [`crate::lines::starts`] computes them.
+    #[must_use]
+    pub fn line_starts(&self) -> &[usize] {
+        &self.starts
+    }
+
+    /// Resolve a byte offset, on a character boundary, into a 1-based `line:column` [`Position`],
+    /// clamping one past the end.
+    #[must_use]
+    pub fn position(&self, source: &str, byte_offset: usize) -> Position {
+        let clamped = byte_offset.min(source.len());
+        let line_index = self.line_of(clamped);
+        let line_start = self.starts[line_index];
+        let column_chars = source[line_start..clamped].chars().count() + 1;
+        let line = NonZeroU32::new(u32::try_from(line_index + 1).unwrap_or(u32::MAX))
+            .unwrap_or(NonZeroU32::MIN);
+        let col = NonZeroU32::new(u32::try_from(column_chars).unwrap_or(u32::MAX))
+            .unwrap_or(NonZeroU32::MIN);
+        Position { line, col }
+    }
+
+    /// Resolve a 1-based `line:column` back to a byte offset, clamping a line or column past the
+    /// end to the end of the source or the line.
+    #[must_use]
+    pub fn offset_of(&self, source: &str, position: Position) -> usize {
+        let line_index = position.line.get() as usize - 1;
+        let Some(&line_start) = self.starts.get(line_index) else {
+            return source.len();
+        };
+        let line_end = self.line_end(source, line_start);
+        let mut offset = line_start;
+        for _ in 1..position.col.get() {
+            let Some(c) = source[offset..line_end].chars().next() else {
+                break;
+            };
+            offset += c.len_utf8();
         }
+        offset
     }
 
-    #[test]
-    fn split_also_breaks_at_a_lone_carriage_return() {
-        assert_eq!(split("a\rb\r").collect::<Vec<_>>(), vec!["a", "b"]);
-        assert_eq!(split("a\r\rb").collect::<Vec<_>>(), vec!["a", "", "b"]);
-        // The case that motivates the module: `str::lines` yields one line
-        // here, so a scanner built on it sees `floor walls` as one command.
-        assert_eq!(
-            split("floor\rwalls").collect::<Vec<_>>(),
-            vec!["floor", "walls"]
-        );
+    /// Byte offset of the end of the line `byte_offset` sits on, before its terminator.
+    #[must_use]
+    pub fn line_end(&self, source: &str, byte_offset: usize) -> usize {
+        let clamped = byte_offset.min(source.len());
+        self.starts
+            .get(self.line_of(clamped) + 1)
+            .map_or(source.len(), |&next| end_before(source, next))
     }
 
-    #[test]
-    fn split_matches_str_lines_backwards_too() {
-        for source in AGREED {
-            assert_eq!(
-                split(source).rev().collect::<Vec<_>>(),
-                source.lines().rev().collect::<Vec<_>>(),
-                "{source:?}",
-            );
-        }
-    }
-
-    /// The two ends have to meet exactly once, or a line is yielded twice
-    /// or not at all. Alternating is the only way to catch that.
-    #[test]
-    fn split_yields_each_line_once_when_walked_from_both_ends() {
-        for source in AGREED.iter().copied().chain(AWKWARD.iter().copied()) {
-            let expected: Vec<&str> = split(source).collect();
-            let mut iterator = split(source);
-            let (mut front, mut back) = (Vec::new(), Vec::new());
-            let mut take_front = true;
-            loop {
-                let next = if take_front {
-                    iterator.next()
-                } else {
-                    iterator.next_back()
-                };
-                let Some(line) = next else { break };
-                if take_front { &mut front } else { &mut back }.push(line);
-                take_front = !take_front;
-            }
-            back.reverse();
-            front.extend(back);
-            assert_eq!(front, expected, "{source:?}");
-        }
-    }
-
-    #[test]
-    fn split_also_breaks_at_a_lone_carriage_return_backwards() {
-        assert_eq!(split("a\rb\r").rev().collect::<Vec<_>>(), vec!["b", "a"]);
-        assert_eq!(
-            split("a\r\rb").rev().collect::<Vec<_>>(),
-            vec!["b", "", "a"]
-        );
-    }
-
-    #[test]
-    fn start_of_agrees_with_the_index_at_every_offset() {
-        for source in AGREED.iter().copied().chain(AWKWARD.iter().copied()) {
-            let index = starts(source);
-            for offset in 0..=source.len() {
-                let from_index = index[index.partition_point(|&s| s <= offset) - 1];
-                assert_eq!(
-                    start_of(source, offset),
-                    from_index,
-                    "{source:?} at {offset}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn split_and_starts_describe_the_same_lines() {
-        for source in ["a\rb\r\nc\nd", "\r\n\r\r\n", "x", ""] {
-            let from_starts: Vec<&str> = starts(source)
-                .iter()
-                .map(|&start| {
-                    let end = source[start..]
-                        .char_indices()
-                        .find(|(i, _)| terminator_len(source, start + i).is_some())
-                        .map_or(source.len(), |(i, _)| start + i);
-                    &source[start..end]
-                })
-                .collect();
-            // `starts` keeps the trailing empty line that `split` drops, so
-            // the comparison is against the prefix.
-            let split_lines: Vec<&str> = split(source).collect();
-            assert_eq!(
-                from_starts[..split_lines.len()],
-                split_lines[..],
-                "{source:?}"
-            );
-        }
+    /// The 0-based index of the line `byte_offset` sits on; past the end is the last line, and the
+    /// `\n` of a `\r\n` is on the line the pair ends.
+    #[must_use]
+    pub fn line_of(&self, byte_offset: usize) -> usize {
+        // Never underflows: `starts[0]` is 0, which is `<=` every offset.
+        self.starts.partition_point(|&s| s <= byte_offset) - 1
     }
 }
+
+/// Compute a 1-based `line:column` for a byte offset into `source`; hold a [`LineStarts`] for many.
+#[must_use]
+pub fn position_at(source: &str, byte_offset: usize) -> Position {
+    LineStarts::new(source).position(source, byte_offset)
+}
+
+#[cfg(test)]
+mod tests;

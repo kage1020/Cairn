@@ -36,7 +36,7 @@ Labelling is all-or-nothing per case: one label anywhere in the expected tree ma
 
 One case per rule is the rule of thumb, not the invariant. A rule that declares its fields separately in several `choice` branches needs one per branch, because the branches are indistinguishable once parsed: `directive` declares `name` and `arg` once per directive keyword, and `binary_expression` declares `lhs` and `rhs` once for `or` and once for `and`.
 
-[`tests/field_labels.rs`](tests/field_labels.rs) holds the ledger. It reads the `(node, field)` pairs out of the generated `src/node-types.json` and asserts they are exactly the pairs labelled across the corpus. It runs under `cargo test`, needs no Node toolchain, and names the offending pairs on failure: an unlabelled pair means a rule whose `field(...)` could be deleted unnoticed, a label with no matching declaration means that deletion already happened. Branch-level gaps are outside what it can see, which is why the paragraph above has to be followed by hand.
+The `grammar-fields` rule of `cargo xtask lint` holds the ledger. It reads the `(node, field)` pairs out of the generated `src/node-types.json` and checks they are exactly the pairs labelled across the corpus. It needs no Node toolchain and names the offending pairs on failure: an unlabelled pair means a rule whose `field(...)` could be deleted unnoticed, a label with no matching declaration means that deletion already happened. Branch-level gaps are outside what it can see, which is why the paragraph above has to be followed by hand.
 
 ## License
 

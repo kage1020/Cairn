@@ -1,21 +1,5 @@
-//! Intent IR — the first semantic layer above the surface AST.
-//!
-//! The Intent IR keeps the surface form's structure (a module owns themes,
-//! defs, sites, and structs) but reorganises each body into typed groups:
-//! [`Member`]s carry roles and an [`IntentState`] of `key=value` attributes,
-//! `logic` and `assert` lines are split out of the generic statement stream,
-//! and the size header on a struct is hoisted into a dedicated field.
-//!
-//! This is what the spec calls the "rich member with invariants" layer
-//! (`spec/architecture` "The Intent IR is rich and carries invariants"). The
-//! current lowering produces it at semantic level [`SemanticLevel::Grouped`];
-//! registry-backed resolution (materials, themes, per-edition blockstate)
-//! belongs to the later [`SemanticLevel::Lifted`] tier.
-//!
-//! Each IR node carries a `span: Span` pointing at the originating byte range
-//! in the source. The `check` module relies on those spans to emit gcc-style
-//! diagnostics; spans are tagged `#[serde(skip)]` so the on-the-wire form is
-//! unchanged from the pre-span IR.
+//! Intent IR, the first semantic layer above the surface AST: each body sorted into typed
+//! [`Member`]s with roles, and `logic` and `assert` lines split out.
 
 mod keyword_table;
 mod lower;
@@ -23,6 +7,7 @@ mod member;
 mod patch;
 mod semantic_level;
 
+use std::fmt;
 use std::num::NonZeroU32;
 
 use indexmap::IndexMap;
@@ -32,13 +17,13 @@ use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
 pub use self::keyword_table::{
-    SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue, UNIVERSAL_ARGUMENTS, known_keywords,
-    role_of,
+    ACTUATOR_BINDINGS, MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue,
+    UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
 };
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
-    BodyKind, IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan,
+    BodyKind, IntentState, Label, Member, MemberBody, ResolvedState, ValueWithSpan,
 };
 pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;
@@ -46,8 +31,7 @@ pub use self::semantic_level::SemanticLevel;
 /// Intent IR for a whole `.crn` module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct IntentModule {
-    /// Maturity of this IR. The current [`lower()`] always returns
-    /// [`SemanticLevel::Grouped`].
+    /// Maturity of this IR; [`lower()`] always produces [`SemanticLevel::Grouped`].
     pub semantic_level: SemanticLevel,
     /// Headers carried through verbatim from the AST.
     pub headers: Vec<Header>,
@@ -61,15 +45,45 @@ pub struct IntentModule {
     pub structs: Vec<StructIr>,
 }
 
-/// `theme NAME:` block, normalised so slot bindings live in a map and
-/// selector bindings keep their full surface shape.
+impl IntentModule {
+    /// Every `struct`, `def` and `site` body, in that order, each in source order.
+    pub(crate) fn bodies(&self) -> impl Iterator<Item = ItemBody<'_>> {
+        let structs = self.structs.iter().map(|s| ItemBody {
+            kind: BodyKind::Geometry,
+            members: &s.members,
+            asserts: &s.asserts,
+        });
+        let defs = self.defs.iter().map(|d| ItemBody {
+            kind: BodyKind::Geometry,
+            members: &d.members,
+            asserts: &d.asserts,
+        });
+        let sites = self.sites.iter().map(|s| ItemBody {
+            kind: BodyKind::Site,
+            members: &s.placements,
+            asserts: &s.asserts,
+        });
+        structs.chain(defs).chain(sites)
+    }
+}
+
+/// One `struct`, `def` or `site` body, as [`IntentModule::bodies`] yields it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ItemBody<'a> {
+    /// Which roles the body has a reader for.
+    pub(crate) kind: BodyKind,
+    /// The body's top-level members: a `site`'s are its placements.
+    pub(crate) members: &'a [Member],
+    /// The body's top-level `assert` properties.
+    pub(crate) asserts: &'a [AssertIr],
+}
+
+/// `theme NAME:` block, with its slot bindings in a map.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ThemeIr {
     /// Theme name.
     pub name: String,
-    /// `slot NAME -> VALUE` bindings. Source order is preserved; if a slot is
-    /// declared twice the last wins here and the duplicate is flagged by the
-    /// `duplicate` pass in `crate::check`.
+    /// `slot NAME -> VALUE` bindings in source order; a repeated slot keeps its last value.
     pub slots: IndexMap<String, ValueWithSpan>,
     /// `KEYWORD[...] -> ...` selector bindings, in source order.
     pub selectors: Vec<SelectorRule>,
@@ -83,9 +97,9 @@ pub struct ThemeIr {
 pub struct SelectorRule {
     /// Member keyword on the LHS (`window`, `door`, ...).
     pub keyword: String,
-    /// `[attr=...]` selector attributes in source order.
+    /// `[attr=...]` selector attributes in source order; a repeated key keeps its last value.
     pub attrs: IndexMap<String, ValueWithSpan>,
-    /// `key=value` bindings on the RHS of the arrow.
+    /// `key=value` bindings on the RHS of the arrow; a repeated key keeps its last value.
     pub bindings: IndexMap<String, ValueWithSpan>,
     /// Byte range of the originating selector rule line.
     #[serde(skip)]
@@ -100,9 +114,7 @@ pub struct DefIr {
     /// Hoisted `size=WxH` header argument, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Remaining header `key=value` arguments: every one but a `size=`
-    /// whose value is a `WxH` literal. A `size=` of any other shape stays
-    /// here, and `check::type_mismatch` reports it.
+    /// Header `key=value` arguments other than a `size=WxH` hoisted into `size`.
     pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the def body.
     pub members: Vec<Member>,
@@ -117,9 +129,7 @@ pub struct DefIr {
     pub span: Span,
 }
 
-/// Lifted form of `struct NAME[ ARGS]` (single-building structural
-/// composition). Structurally identical to [`DefIr`] but kept as a distinct
-/// type so downstream passes can match on intent.
+/// Lifted form of `struct NAME[ ARGS]` (single-building structural composition).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StructIr {
     /// Struct name.
@@ -127,9 +137,7 @@ pub struct StructIr {
     /// Hoisted `size=WxH` header argument, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Remaining header `key=value` arguments: every one but a `size=`
-    /// whose value is a `WxH` literal. A `size=` of any other shape stays
-    /// here, and `check::type_mismatch` reports it.
+    /// Header `key=value` arguments other than a `size=WxH` hoisted into `size`.
     pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the struct body.
     pub members: Vec<Member>,
@@ -149,12 +157,9 @@ pub struct StructIr {
 pub struct SiteIr {
     /// Site name.
     pub name: String,
-    /// `place` / `connect` lines from the site body, kept as
-    /// [`Member`]s so role-based passes treat them uniformly with struct
-    /// members.
+    /// `place` / `connect` lines from the site body, as [`Member`]s.
     pub placements: Vec<Member>,
-    /// `logic` bindings from the site body. Rare, but legal at the site
-    /// scope so we don't drop them.
+    /// `logic` bindings from the site body.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub logic: Vec<LogicBinding>,
     /// `assert` properties from the site body.
@@ -189,7 +194,7 @@ pub struct LogicBinding {
     pub span: Span,
 }
 
-/// `assert ...` line lifted out of a body.
+/// `assert ...` command lifted out of a body.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -221,7 +226,7 @@ pub enum AssertIr {
 }
 
 impl AssertIr {
-    /// Byte range of the originating `assert ...` line in source.
+    /// Byte range of the originating `assert ...` command in source, through a table's `}`.
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {
@@ -230,13 +235,6 @@ impl AssertIr {
     }
 
     /// Every signal this property names, in declaration order.
-    ///
-    /// Lives here rather than at the consumer because the enum is
-    /// `#[non_exhaustive]`: a match written in another crate needs a
-    /// wildcard, and a wildcard is where a variant added later would go to
-    /// have its references silently unchecked. Written here the match is
-    /// exhaustive, so the next variant stops the compile until it says
-    /// which of its fields are signals.
     #[must_use]
     pub fn signal_refs(&self) -> Vec<&DottedRef> {
         match self {
@@ -253,12 +251,6 @@ impl AssertIr {
 }
 
 /// Which family of Intent IR scope a downstream pass is describing.
-///
-/// Introduced so passes that hand data off across crates (redstone
-/// placement, future routing) can key on scope identity without
-/// depending on the surface AST or on a downstream crate's local
-/// discriminator. The three variants intentionally mirror the shape of
-/// [`IntentModule::structs`] / [`IntentModule::defs`] / [`IntentModule::sites`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeKind {
@@ -270,17 +262,7 @@ pub enum ScopeKind {
     Site,
 }
 
-/// One recognised `circuit region=<label> void=<N>` fixture together
-/// with the footprint of its enclosing scope.
-///
-/// Produced by [`circuit_regions`] out of a lowered [`IntentModule`] so
-/// the redstone placement pass (`spec/redstone` "Place-and-route") has one
-/// entry point for looking up the reserved area of each scope instead of
-/// walking [`Member`]s and re-decoding `intent_state` at every caller.
-/// The block-array pass's [`crate::block_array`] recogniser owns the
-/// shape validation and per-shape diagnostics; this lift function
-/// silently filters out any malformed or size-less fixture so the two
-/// sides cannot both fire diagnostics for the same source line.
+/// One usable `circuit region=<label> void=<N>` reservation, with its scope's footprint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct CircuitRegion {
@@ -290,7 +272,7 @@ pub struct CircuitRegion {
     pub scope_name: String,
     /// `region=<label>` value the circuit member declared.
     pub label: String,
-    /// `void=<N>` service-layer height (`>= 1`).
+    /// `void=<N>` service-layer height, at least 1.
     pub void: u32,
     /// Width of the enclosing scope's footprint, copied from `size=WxH`.
     pub width: u32,
@@ -301,28 +283,23 @@ pub struct CircuitRegion {
     pub span: Span,
 }
 
-/// Lift every well-formed `circuit region=<label> void=<N>` fixture out
-/// of `module`, tagged with the enclosing scope's footprint.
-///
-/// Walks `module.structs` / `module.defs` at the top level (children
-/// under `level` blocks are not descended into for v1 — a circuit
-/// member nested inside a `level` stays a follow-up for the routing
-/// pass that actually needs it). Sites are skipped because they carry
-/// no `size` for the routing pass to budget against. Any circuit member
-/// whose `region=` value is missing, non-label, or empty, or whose
-/// `void=` is missing, non-integer, or zero, is dropped silently —
-/// downstream passes see the same "no reservation for this scope" state
-/// they would on a truly missing line and are expected to surface a
-/// diagnostic that names the malformed-fixture case alongside the
-/// missing-line one. (`cairn check` still reports each malformed shape
-/// individually via the block-array pass's `recognize_circuit_region`;
-/// this function is called from paths that skip the block-array lower,
-/// so it cannot rely on that pass firing.)
+/// The usable reservations among [`circuit_lines`], in the same order.
 #[must_use]
 pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
+    circuit_lines(module)
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect()
+}
+
+/// Every `circuit` line in a `struct` or `def` body, top level or under a `level`, read into the
+/// reservation it makes or the [`CircuitRegionDefect`] that keeps it from making one. `site`
+/// bodies are not walked.
+#[must_use]
+pub fn circuit_lines(module: &IntentModule) -> Vec<Result<CircuitRegion, RejectedCircuitRegion>> {
     let mut out = Vec::new();
     for s in &module.structs {
-        collect_circuit_regions(
+        collect_circuit_lines(
             ScopeKind::Struct,
             &s.name,
             s.size.as_ref(),
@@ -331,7 +308,7 @@ pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
         );
     }
     for d in &module.defs {
-        collect_circuit_regions(
+        collect_circuit_lines(
             ScopeKind::Def,
             &d.name,
             d.size.as_ref(),
@@ -342,55 +319,193 @@ pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
     out
 }
 
-fn collect_circuit_regions(
+/// A `circuit` line that reserves nothing, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RejectedCircuitRegion {
+    /// Which scope family the circuit member was declared under.
+    pub scope_kind: ScopeKind,
+    /// Source-level name of the scope.
+    pub scope_name: String,
+    /// What is wrong with the line.
+    pub defect: CircuitRegionDefect,
+    /// Byte range of the originating `circuit ...` line.
+    pub span: Span,
+}
+
+/// Why a `circuit` line is not a usable reservation: the first that applies, in the order listed.
+/// Its `Display` is the reason clause, without a repair.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CircuitRegionDefect {
+    /// The line sits under a `level`, at any depth.
+    #[non_exhaustive]
+    NestedUnderLevel,
+    /// The enclosing scope has no `size=WxH` header to reserve within.
+    #[non_exhaustive]
+    NoSize,
+    /// No `region=` key.
+    #[non_exhaustive]
+    RegionMissing,
+    /// `region=` holds a value that is not an identifier or a string.
+    #[non_exhaustive]
+    RegionNotLabel {
+        /// The value kind, as [`crate::ast::Value::kind_name`] names it.
+        found: &'static str,
+    },
+    /// `region=` is an empty string.
+    #[non_exhaustive]
+    RegionEmpty,
+    /// No `void=` key.
+    #[non_exhaustive]
+    VoidMissing,
+    /// `void=` holds a value that is not an integer.
+    #[non_exhaustive]
+    VoidNotInteger {
+        /// The value kind, as [`crate::ast::Value::kind_name`] names it.
+        found: &'static str,
+    },
+    /// `void=` is an integer below 1, which reserves no service layer.
+    #[non_exhaustive]
+    VoidBelowOne {
+        /// The integer written.
+        value: i64,
+    },
+    /// `void=` is an integer above [`u32::MAX`].
+    #[non_exhaustive]
+    VoidTooLarge {
+        /// The integer written.
+        value: i64,
+    },
+}
+
+impl fmt::Display for CircuitRegionDefect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NestedUnderLevel => f.write_str(
+                "it is written under a `level`, and only a `circuit` line at the scope's top \
+                 level is read as a reservation",
+            ),
+            Self::NoSize => {
+                f.write_str("the enclosing scope has no `size=WxH` header for it to reserve within")
+            }
+            Self::RegionMissing => f.write_str("it has no `region=`"),
+            Self::RegionNotLabel { found } => write!(
+                f,
+                "its `region=` must be an identifier or string label, got {found}",
+            ),
+            Self::RegionEmpty => f.write_str("its `region=` is an empty label"),
+            Self::VoidMissing => f.write_str("it has no `void=`"),
+            Self::VoidNotInteger { found } => {
+                write!(f, "its `void=` must be an integer, got {found}")
+            }
+            Self::VoidBelowOne { value } => {
+                write!(f, "its `void={value}` reserves no service layer")
+            }
+            Self::VoidTooLarge { value } => write!(
+                f,
+                "its `void={value}` is over the limit of {limit}",
+                limit = u32::MAX,
+            ),
+        }
+    }
+}
+
+/// Push each `circuit` line among `members`, and each under a `level` among them, onto `out`.
+fn collect_circuit_lines(
     scope_kind: ScopeKind,
     scope_name: &str,
     size: Option<&Size>,
     members: &[Member],
-    out: &mut Vec<CircuitRegion>,
+    out: &mut Vec<Result<CircuitRegion, RejectedCircuitRegion>>,
 ) {
-    let Some(size) = size else {
-        return;
-    };
     for m in members {
-        if !matches!(m.role, MemberRole::Circuit) {
-            continue;
+        match m.role {
+            MemberRole::Circuit => {
+                let read = size.ok_or(CircuitRegionDefect::NoSize).and_then(|size| {
+                    parse_circuit_region_fixture(m).map(|fixture| (size, fixture))
+                });
+                out.push(match read {
+                    Ok((size, (label, void))) => Ok(CircuitRegion {
+                        scope_kind,
+                        scope_name: scope_name.to_owned(),
+                        label,
+                        void,
+                        width: size.w.get(),
+                        depth: size.h.get(),
+                        span: m.span.clone(),
+                    }),
+                    Err(defect) => Err(RejectedCircuitRegion {
+                        scope_kind,
+                        scope_name: scope_name.to_owned(),
+                        defect,
+                        span: m.span.clone(),
+                    }),
+                });
+            }
+            MemberRole::Level => {
+                out.extend(circuit_lines_under_level(m).into_iter().map(|line| {
+                    Err(RejectedCircuitRegion {
+                        scope_kind,
+                        scope_name: scope_name.to_owned(),
+                        defect: CircuitRegionDefect::NestedUnderLevel,
+                        span: line.span.clone(),
+                    })
+                }));
+            }
+            _ => {}
         }
-        let Some((label, void)) = parse_circuit_region_fixture(m) else {
-            continue;
-        };
-        out.push(CircuitRegion {
-            scope_kind,
-            scope_name: scope_name.to_owned(),
-            label,
-            void,
-            width: size.w.get(),
-            depth: size.h.get(),
-            span: m.span.clone(),
-        });
     }
 }
 
-/// Parse the `region=<label>` / `void=<N>` payload of a `circuit`
-/// [`Member`] into `(label, void)` when both sides are well-formed.
-/// Returns `None` for any missing or malformed key so callers cannot
-/// silently accept a partial fixture. Callers that surface a
-/// diagnostic on `None` should mention every rejection cause the
-/// block-array pass's `recognize_circuit_region` distinguishes
-/// (`region=` absent / non-label / empty; `void=` absent / non-integer
-/// / zero) because this function is called from paths that skip
-/// `cairn check` and cannot rely on the per-shape `W_DEFERRED_MEMBER`
-/// stream to disambiguate.
-fn parse_circuit_region_fixture(member: &Member) -> Option<(String, u32)> {
-    let raw_region = member.intent_state.get("region")?;
-    let label = raw_region.value.as_label_str()?;
-    if label.is_empty() {
-        return None;
+/// Each `circuit` line indented under `level`, at any depth through the `level`s in its body, in
+/// source order.
+pub(crate) fn circuit_lines_under_level(level: &Member) -> Vec<&Member> {
+    let mut out = Vec::new();
+    push_circuit_lines_under_level(level, &mut out);
+    out
+}
+
+fn push_circuit_lines_under_level<'a>(level: &'a Member, out: &mut Vec<&'a Member>) {
+    for m in &level.children.members {
+        match m.role {
+            MemberRole::Circuit => out.push(m),
+            MemberRole::Level => push_circuit_lines_under_level(m, out),
+            _ => {}
+        }
     }
-    let raw_void = member.intent_state.get("void")?;
+}
+
+/// The `(label, void)` a `circuit` member declares, or its first defect.
+fn parse_circuit_region_fixture(member: &Member) -> Result<(String, u32), CircuitRegionDefect> {
+    let raw_region = member
+        .intent_state
+        .get("region")
+        .ok_or(CircuitRegionDefect::RegionMissing)?;
+    let label = raw_region
+        .value
+        .as_label_str()
+        .ok_or(CircuitRegionDefect::RegionNotLabel {
+            found: raw_region.value.kind_name(),
+        })?;
+    if label.is_empty() {
+        return Err(CircuitRegionDefect::RegionEmpty);
+    }
+    let raw_void = member
+        .intent_state
+        .get("void")
+        .ok_or(CircuitRegionDefect::VoidMissing)?;
     let void = match &raw_void.value.kind {
-        ValueKind::Int(v) if *v >= 1 => u32::try_from(*v).ok()?,
-        _ => return None,
+        ValueKind::Int(value) if *value < 1 => {
+            return Err(CircuitRegionDefect::VoidBelowOne { value: *value });
+        }
+        ValueKind::Int(value) => u32::try_from(*value)
+            .map_err(|_| CircuitRegionDefect::VoidTooLarge { value: *value })?,
+        _ => {
+            return Err(CircuitRegionDefect::VoidNotInteger {
+                found: raw_void.value.kind_name(),
+            });
+        }
     };
-    Some((label.to_owned(), void))
+    Ok((label.to_owned(), void))
 }

@@ -35,13 +35,19 @@ and aligns architectural knowledge (walls, roofs, symmetry) with the voxel world
 - Requirement words **MUST / SHOULD / MUST NOT / OPTIONAL** are used in the RFC 2119 sense.
 - The language is **Cairn**, the CLI is `cairn`, and source files use `.crn`.
 - Design principles are referenced as `P1`–`P5` (see [Design Principles](/spec/principles/)).
+- Outside this specification, a chapter is cited by its file name and a section by its title
+  without the number, as `spec/lint` "Error vs warning". `cairn docs` takes such a citation as
+  written and prints that section from the specification the installed compiler implements:
+  `cairn docs spec/lint "Error vs warning"`.
 
 ## Two version axes
 
-Cairn's own releases use date-based versioning (CalVer) `YYYY.M[.PATCH]`: `2026.7` for a monthly
-release, `2026.7.1` for an in-month patch. They sort chronologically as strings. A release bundles
-the language spec, the reference compiler, the standard library, and the `(edition, version)`
-registry and constraint catalogs.
+Cairn's own releases use date-based versioning (CalVer) `YYYY.M.PATCH`: `2026.7.0` for a monthly
+release, `2026.7.1` for an in-month patch. A version written without its patch, as `@cairn` allows,
+has patch `0`, so `2026.7` and `2026.7.0` name the same version. Versions compare component by
+component, as numbers: `2026.10.0` is later than `2026.8.2`, though it sorts before it as a string.
+A release bundles the language spec, the reference compiler, the standard library, and the
+`(edition, version)` registry and constraint catalogs.
 
 **Minecraft also moved to date-based versions**, so the two cannot be told apart by format. They are
 distinguished by field, flag, or keyword, never by shape:
@@ -55,6 +61,14 @@ distinguished by field, flag, or keyword, never by shape:
 In prose, disambiguate with a prefix: `cairn:2026.06` and `mc:1.21.4`.
 
 This document is **2026.6 (draft)**, superseding the former `v0.2` label. A `.crn` file MAY declare
-`@cairn 2026.06`, the language version it was written against. It is provenance only, so a future
-compiler can parse and warn correctly — which is why the value is checked to be a `CalVer` even
-though no pass branches on it. See [Syntax §5.3](/spec/syntax/#53-headers).
+`@cairn 2026.06`, the language version it was written against. It records provenance only, so that a
+future compiler can parse the file and warn correctly. No pass branches on it, but the value is
+still checked to be a `CalVer`. See [Syntax §5.3](/spec/syntax/#53-headers).
+
+The draft label comes off with the `2027.1.0` release. From then on the specification carries the
+version of the monthly minor that ships it, `2027.1` first, so a minor's specification and compiler
+share one version, and a patch release such as `2027.1.1` ships its minor's specification. A file
+written against `2027.1` MAY declare `@cairn 2027.1`, and a file written against a later release
+MAY declare that release. A value before `2027.1`, such as `@cairn 2026.06`, names the `2026.6`
+draft or a release that shipped it. It stays valid provenance, and a later compiler reads the file
+as it reads any other.

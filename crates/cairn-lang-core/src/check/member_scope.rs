@@ -1,78 +1,25 @@
-//! `member_scope` pass — flags a known keyword the enclosing body has no
-//! reader for.
-//!
-//! [`crate::intent::role_of`] is a single global table, so every keyword
-//! classifies to its role in every body. Nothing downstream restores the
-//! distinction: `block_array`'s phase buckets take the geometry roles and
-//! `resolve_site_placements` matches `place` and `connect`, so a member
-//! written into the wrong body falls off the end of both. In a `struct` or
-//! `def` body the misplaced `place` / `connect` at least earns a
-//! `W_DEFERRED_MEMBER` from lowering — but `check` does not lower (see the
-//! module doc on [`super::check`]), so `cairn check` exited 0 on it. In a
-//! `site` body nothing reported it at either stage: the resolver's loop
-//! `continue`s past a non-`place` row and the lowering loop does the same,
-//! so a `floor` written among the placements produced no voxels and no
-//! diagnostic anywhere.
-//!
-//! The legality itself lives on [`MemberRole::is_read_in`], next to
-//! [`MemberRole::keyword`], because `check::nesting` needs the same split
-//! and the readers it is derived from are in a third crate module.
-//!
-//! Two things are deliberately not this pass's business:
-//!
-//! * [`MemberRole::Other`] — the keyword is not in the table at all, so
-//!   `keyword_allowlist` owns it and the repair is the word, not the body.
-//! * `logic` / `assert` lines, which are not members at all: `intent::lower`
-//!   sorts them into [`crate::intent::MemberBody`]'s own fields, so they
-//!   never reach this walk. (Whether anything reads them is a separate
-//!   question, and the answer differs — redstone synthesis takes `logic`
-//!   from either body; nothing reads `assert` yet.)
-//!
-//! "Reaches nothing" is about the block array, and only about that.
-//! `redstone::synth`'s `collect_member` is role-agnostic and its
-//! `lower_site` walks a site's rows on purpose, so a `-> sig.NAME` tail or
-//! a `sig.` argument on a misplaced row *does* reach synthesis today — the
-//! message says so when one is present rather than overclaiming. It is
-//! still an error: the sensor or actuator would have nothing physical
-//! behind it, because the member that builds the block is the one being
-//! dropped. A site that hosts fixtures directly needs lowering support,
-//! not a checker exemption.
-//!
-//! One diagnostic per misplaced subtree, reported at its root. A member the
-//! body cannot read takes its children with it, so walking into them would
-//! count one mistake once per line underneath it — and the same holds for
-//! a member whose indented body [`super::nesting`] is about to report as
-//! lost, which is why the walk asks that pass before descending.
+//! The `member_scope` pass: a known keyword the enclosing body has no reader for, which would
+//! otherwise fall out of the build without a word. One finding per misplaced subtree, and one per
+//! `circuit` line under a `level`, which place-and-route never reads.
 
 use crate::ast::{SIGNAL_HEAD, ValueKind};
-use crate::intent::{BodyKind, IntentModule, Member, MemberRole};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::intent::{
+    BodyKind, CircuitRegionDefect, IntentModule, Member, MemberRole, circuit_lines_under_level,
+};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    for s in &ir.structs {
-        walk(&s.members, BodyKind::Geometry, false, sink);
-    }
-    for d in &ir.defs {
-        walk(&d.members, BodyKind::Geometry, false, sink);
-    }
-    for s in &ir.sites {
-        walk(&s.placements, BodyKind::Site, false, sink);
+    for body in ir.bodies() {
+        walk(body.members, body.kind, false, sink);
+        if body.kind == BodyKind::Geometry {
+            report_circuit_lines_under_levels(body.members, sink);
+        }
     }
 }
 
-/// Recurse with the body kind unchanged: nesting does not open a new body.
-/// A `level y=N` groups members inside the geometry body it already sits
-/// in — `flatten_members` splices its children into the same phase buckets
-/// — so a `place` indented under one is exactly as unreadable as a `place`
-/// written at the top of the `struct`. `inside_level` therefore says only
-/// how far down [`super::nesting`] is, not which vocabulary applies.
-///
-/// Two reasons to stop before a member's children, and they are the same
-/// reason stated from two sides: this pass owns the row itself, or
-/// `nesting` owns the whole indented body under it. Either way one
-/// finding already covers every line below, and a second one on a child
-/// would send the author to a different fix.
+/// Keeps the body kind: `flatten_members` splices a `level`'s children into the same buckets.
 fn walk(members: &[Member], body: BodyKind, inside_level: bool, sink: &mut DiagnosticSink) {
     for member in members {
         if matches!(member.role, MemberRole::Other(_)) {
@@ -92,12 +39,6 @@ fn report(member: &Member, body: BodyKind, sink: &mut DiagnosticSink) {
         span: None,
         message: advice(&member.role, body).to_owned(),
     }];
-    // Everything indented under a row this body cannot read goes with it,
-    // and `nesting` stays quiet about those lines precisely because this
-    // finding covers them — so the count has to be said here or nowhere.
-    // Counted over the whole subtree: a three-deep run loses three members,
-    // and "the 1 member indented under it" would understate the cost by the
-    // amount that matters most.
     let nested = subtree_size(member);
     if nested > 0 {
         notes.push(DiagnosticNote {
@@ -122,11 +63,6 @@ fn report(member: &Member, body: BodyKind, sink: &mut DiagnosticSink) {
     sink.push(Diagnostic {
         code: DiagnosticCode::MisplacedMember,
         span: member.span.clone(),
-        // Scoped to the block array on purpose. "Reaches no part of the
-        // build" would be false for a signal-bearing row, which redstone
-        // synthesis picks up from either body — the note above says so.
-        // The three nouns cover every role: geometry members lay blocks,
-        // `place` produces a placement, `connect` a walkway.
         primary: format!(
             "nothing in a {body} body lowers `{keyword}`: this member produces no blocks, no placement, and no walkway",
             body = body.describe(),
@@ -136,7 +72,89 @@ fn report(member: &Member, body: BodyKind, sink: &mut DiagnosticSink) {
     });
 }
 
-/// Members indented under `member`, at every depth.
+/// The line a scope's reservation comes from, which a `circuit` line under a `level` defers to.
+#[derive(Clone, Copy)]
+enum Kept<'a> {
+    /// The first `circuit` line among the scope's own members.
+    Own(&'a Member),
+    /// The first `circuit` line under a `level`, in a scope with none of its own.
+    FirstNested(&'a Member),
+}
+
+impl Kept<'_> {
+    /// The note pointing at the kept line, then the repair for a second line.
+    fn notes(self) -> [DiagnosticNote; 2] {
+        let (line, here, repair) = match self {
+            Kept::Own(line) => (
+                line,
+                "the scope's own `circuit` line is here",
+                "a scope reserves one region for its redstone: delete this line or move it to the scope's top level in place of that one, or split the logic across several scopes, each with its own `circuit` line",
+            ),
+            Kept::FirstNested(line) => (
+                line,
+                "the first `circuit` line under a `level` is here",
+                "a scope reserves one region for its redstone: move one of the two lines to the scope's top level and delete the other, or split the logic across several scopes, each with its own `circuit` line",
+            ),
+        };
+        [
+            DiagnosticNote {
+                span: Some(line.span.clone()),
+                message: here.to_owned(),
+            },
+            DiagnosticNote {
+                span: None,
+                message: repair.to_owned(),
+            },
+        ]
+    }
+}
+
+/// Reports each `circuit` line under a `level` among `members`.
+fn report_circuit_lines_under_levels(members: &[Member], sink: &mut DiagnosticSink) {
+    let mut kept = members
+        .iter()
+        .find(|m| matches!(m.role, MemberRole::Circuit))
+        .map(Kept::Own);
+    for line in members
+        .iter()
+        .filter(|m| matches!(m.role, MemberRole::Level))
+        .flat_map(circuit_lines_under_level)
+    {
+        report_circuit_line_under_level(line, kept, sink);
+        kept.get_or_insert(Kept::FirstNested(line));
+    }
+}
+
+fn report_circuit_line_under_level(
+    line: &Member,
+    kept: Option<Kept<'_>>,
+    sink: &mut DiagnosticSink,
+) {
+    let mut notes = vec![DiagnosticNote {
+        span: None,
+        message: "a `circuit` line belongs among the `struct`'s or `def`'s own members: its reservation spans the scope's `size=WxH`, and no pass reads a `level`'s `y=` for it".to_owned(),
+    }];
+    match kept {
+        Some(kept) => notes.extend(kept.notes()),
+        None => notes.push(DiagnosticNote {
+            span: None,
+            message:
+                "move it out of the `level` to the scope's top level; nothing else about it changes"
+                    .to_owned(),
+        }),
+    }
+    sink.push(Diagnostic {
+        code: DiagnosticCode::MisplacedMember,
+        span: line.span.clone(),
+        primary: format!(
+            "this `circuit` line reserves nothing: {}",
+            CircuitRegionDefect::NestedUnderLevel,
+        ),
+        notes,
+        data: None,
+    });
+}
+
 fn subtree_size(member: &Member) -> usize {
     member.children.members.len()
         + member
@@ -147,32 +165,17 @@ fn subtree_size(member: &Member) -> usize {
             .sum::<usize>()
 }
 
-/// Whether this line mentions a redstone signal.
-///
-/// Deliberately looser than `redstone::synth`'s own test, which keys the
-/// actuator side on a closed list of argument names: this is prose, and
-/// naming `sig.` where the author wrote `sig.` is both true and enough. A
-/// value that synthesis would ignore still costs nothing here — the note
-/// only softens a claim, it does not excuse the member.
 fn carries_signal(member: &Member) -> bool {
     let is_signal = |value: &crate::ast::Value| matches!(&value.kind, ValueKind::DotRef(reference) if reference.head() == SIGNAL_HEAD);
-    member.binding.as_ref().is_some_and(&is_signal)
+    member.binding.as_ref().is_some_and(is_signal)
         || member
             .intent_state
             .values()
             .any(|held| is_signal(&held.value))
 }
 
-/// Where the member the author wrote does belong.
-///
-/// `level` in a `site` body is called out separately because the generic
-/// site advice would misdirect: its children are usually `place` rows that
-/// belong exactly where they are, one indent level to the left, and telling
-/// the author to move them into a `struct` would cost them the placement.
 fn advice(role: &MemberRole, body: BodyKind) -> &'static str {
-    // Only reached for a role the body cannot read, so the geometry arm is
-    // `place` / `connect` and nothing else. Named rather than wildcarded so
-    // a third `BodyKind` has to answer here too.
+    // Reached only for a role the body cannot read, so `Geometry` here means `place` or `connect`.
     match (body, role) {
         (BodyKind::Geometry, _) => {
             "`place` and `connect` describe a site's layout, so they belong in a `site` body"

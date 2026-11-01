@@ -2,21 +2,23 @@
 title: "Compatibility Tiers"
 ---
 
-Cairn ships a single release train under
-[date-based versioning](/spec/versioning-editions/#101-the-target-is-a-compile-time-parameter) (`YYYY.M[.PATCH]`).
-Because CalVer has no semver-style "major" axis, the **scope of what is and is not safe to break in
-a release** is set by this document rather than by version numbers.
+Cairn ships a single release train under [date-based versioning](/spec/#two-version-axes)
+(`YYYY.M.PATCH`). Because CalVer has no semver-style "major" axis, the **scope of what is and is
+not safe to break in a release** is set by this document rather than by version numbers.
 
-Every public surface area of the project sits in exactly one of three tiers: **Stable**,
-**Evolving**, or **Internal**. The tier sets the rules; the version number only records when
-something happened.
+Every public surface of the project sits in exactly one of three tiers: **Stable**, **Evolving**, or
+**Internal**. The tier sets the rules; the version number only records when something happened.
 
 ## C.1 Tier definitions
 
 ### Stable
 
 The contract is: **breaking changes are announced one release in advance with a `W_DEPRECATED`
-warning, and removed in the following monthly minor at the earliest.**
+warning, and removed in the following monthly minor at the earliest.** `W_DEPRECATED` is a reserved
+code ([§C.3](#c3-how-a-break-is-communicated)): it is added with the first deprecation, and nothing
+emits it yet. A surface that no source or command line spells, such as a JSON output field or an
+exit code, has nothing to carry the warning, and is announced in the CHANGELOG's `Deprecations`
+section alone.
 
 - A breaking change reaching `Stable` MUST be referenced from the next month's CHANGELOG.
 - Renames MUST keep the old name working for the deprecation window.
@@ -27,13 +29,16 @@ warning, and removed in the following monthly minor at the earliest.**
 Stable surfaces:
 
 - `.crn` syntax that is normative in the spec (keywords, headers, block kinds, blockstate
-  primitives, theme/material primitives, edition guards).
-- `build.cairn.lock` file format (fields, hash inputs, the `verified` semantics defined in
+  primitives, theme/material primitives, edition guards), except what a section flags
+  [subject to change](#subject-to-change).
+- The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
   output schemas, and process exit codes.
-- The canonical material vocabulary's tier-1 tokens (the names users write in source).
-- Error/warning codes documented in the spec (`E_*`, `W_*`).
+- The tier-1 material vocabulary: the abstract tokens the built-in `materials` catalogs declare,
+  listed in [§7.2](/spec/materials-themes/#tier-1-tokens). Adding one is not a break.
+- The error and warning codes (`E_*`, `W_*`) [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists,
+  and the meaning the spec states for a reserved code ([§C.3](#c3-how-a-break-is-communicated)).
 
 ### Evolving
 
@@ -42,21 +47,36 @@ No deprecation window is promised.
 
 - Consumers SHOULD read the CHANGELOG before bumping the minor.
 - Patches MUST NOT introduce Evolving-tier breaks; only monthly minors may.
-- A surface MAY graduate from Evolving to Stable by being moved in this document plus
-  CHANGELOG; demotion (Stable → Evolving) is forbidden and constitutes a spec amendment.
+- A surface MAY graduate from Evolving to Stable by being moved in this document plus CHANGELOG.
+  Demotion (Stable → Evolving) is forbidden short of a spec amendment.
 
 Evolving surfaces:
 
-- Spec chapters or sections explicitly marked as draft (the
-  [Open Issues](/spec/open-issues/) list and any section flagged "subject to change" in its prose).
+- Spec chapters or sections explicitly marked as draft (the [Open Issues](/spec/open-issues/)
+  list), and the syntax a section flags [subject to change](#subject-to-change).
 - New `cairn` subcommands during their first three monthly minors after introduction.
-- registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
-  but the *internal structure* is Evolving).
-- Tier-2 canonical material tokens (the implementation-level names that tier-1 names resolve
-  to).
+- The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
+  but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
+  its hash as zeros.
+- The tier-2 material vocabulary: the block each tier-1 token resolves to at a target
+  ([§7.2](/spec/materials-themes/#tier-1-tokens)).
+- Canonical block tokens: the names a target accepts, which follow its registry pack, and the
+  block each names there ([§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)).
 - The CLI's human-readable diagnostic format and prose (the *codes* are Stable; the *prose*
   is not).
 - The `--features` set on `cairn-lang-cli` (cargo features) and `[features]` on workspace crates.
+
+#### Subject to change
+
+The flag is for the syntax the `.crn` syntax row of [§C.2](#c2-tier-of-each-surface-by-milestone)
+covers: chapters 5 to 9, and [§10.7](/spec/versioning-editions/#107-java--bedrock-portability),
+which writes the edition guards. A section there that specifies syntax the compiler does not build
+yet opens with a **Subject to change.** paragraph naming that syntax. What the flag names stays
+Evolving whatever tier the row gives, and the flag says nothing about the rest of its section. The
+change that builds the syntax takes the flag off. The syntax then takes the row's tier, and when
+that tier is Stable, the CHANGELOG entry says it graduates. No flag is added to syntax that is
+already Stable, since that would be a demotion. Chapter 14 carries no flag: the redstone DSL has a
+row of its own, Evolving until M6.
 
 ### Internal
 
@@ -66,9 +86,11 @@ surfaces are responsible for their own pinning.**
 Internal surfaces:
 
 - The Rust API of every workspace crate (`cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats`,
-  `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`). These crates are published to
-  crates.io from the first monthly minor that contains them, but every item that is not the CLI's
-  transitive public dependency is marked `#[doc(hidden)]`.
+  `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`, `cairn-lang-tree-sitter`,
+  `cairn-lang-docs`). These crates are published to crates.io from the first monthly minor that
+  contains them, but every item that is not the CLI's transitive public dependency is marked
+  `#[doc(hidden)]`. No item is marked yet.
+- `cairn synth`, which runs only behind `--experimental-logic-synth`, and the JSON it prints.
 - The compiler's intermediate representation (Intent IR, Semantic IR, block-array pivot
   layouts).
 - The on-disk shape of incremental build caches (`target/`-equivalents inside the project
@@ -81,25 +103,24 @@ Internal surfaces:
 The tier of a given surface is not fixed for all time. A surface earns its way to Stable as the
 project matures along the [roadmap](/roadmap/). The table is the canonical record.
 
-| Surface | Today (pre-M1) | At M2 (minimal build) | At M3 (examples work) | At M5 (DX) | At M6 (redstone) |
+| Surface | Through M1 | At M2 (minimal build) | At M3 (examples work) | At M5 (DX) | At M6 (redstone) |
 |---|---|---|---|---|---|
-| `.crn` syntax (chapters 5-9) | Evolving | Evolving | **Stable** | Stable | Stable |
-| `build.cairn.lock` format | Evolving | **Stable** | Stable | Stable | Stable |
+| `.crn` syntax (chapters 5-9, §10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
+| Lockfile format | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` flags | Evolving | Evolving | **Stable** | Stable | Stable |
 | Diagnostic codes (`E_*`, `W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Tier-1 material vocabulary | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP wire protocol (LSP std) | — | — | — | **Stable** | Stable |
 | Redstone DSL (chapter 14) | Evolving | Evolving | Evolving | Evolving | **Stable** |
-| Tier-2 vocabulary, registry pack layout | Evolving | Evolving | Evolving | Evolving | Evolving |
+| Tier-2 material vocabulary, canonical block tokens, registry pack layout | Evolving | Evolving | Evolving | Evolving | Evolving |
 | Rust API (every crate) | Internal | Internal | Internal | Internal | Internal |
 
-Reading the table: **the column where a row first turns Stable is the soft commitment.** Earlier
-columns being Evolving means the project reserves the right to change those surfaces without a
-deprecation window until that column lands.
+Reading the table: **the column where a row first turns Stable is the soft commitment.** Until that
+milestone lands, the project reserves the right to change the surface without a deprecation window.
 
-The Rust API row never graduates within the planned roadmap. Cairn is consumed through the
-`cairn` CLI binary and the language server, not as a Rust library. If a downstream consumer
-wants a stable embedding API the project will treat that as a new, separately-tracked surface.
+The Rust API row never graduates within the planned roadmap. Cairn is consumed through the `cairn`
+CLI binary and the language server, not as a Rust library. If a downstream consumer wants a stable
+embedding API, the project will treat that as a new, separately tracked surface.
 
 ## C.3 How a break is communicated
 
@@ -115,12 +136,67 @@ preceding release's `Deprecations` section.
   `--edition java`.
 
 ### Deprecations
-- `slot` keyword without an arrow form is now deprecated; emits `W_DEPRECATED_SLOT_ARROW`.
+- `slot` keyword without an arrow form is now deprecated; emits `W_DEPRECATED`.
   Will be removed no earlier than 2026.12.0.
 ```
 
-`W_DEPRECATED` and `E_BREAKING` codes are themselves Stable. Adding a new code is not a
-breaking change; changing the meaning of an existing code is.
+A break reaches every file at once. Cairn has no per-file opt-in to a revision of the language,
+such as Rust's editions: `@cairn` records the language version a file was written against and
+selects no rules ([§5.3](/spec/syntax/#53-headers)), and "edition" names Java or Bedrock
+([Glossary](/spec/glossary/#editions-and-versions)). What a release may break is bounded by the
+tier of the surface instead, and a Stable surface's `W_DEPRECATED` window gives a file at least one
+release to move.
+
+`W_DEPRECATED` and `E_BREAKING` are reserved codes: neither exists yet, and each is added with the
+first deprecation or break that needs it, with the meaning this chapter fixes for it before either
+is added. Adding a new code is not a breaking change; changing the meaning of an existing code is.
+
+`W_DEPRECATED` warns on a source or command line that uses a Stable form inside its deprecation
+window, and names the replacement and the earliest release that removes the form. Every deprecation
+raises the one code, and its message says which form it is about. `E_BREAKING` refuses a source or
+command line that uses a form a release has removed from a Stable surface, in place of the error the
+form would otherwise earn, and names that release and the replacement. It stays on that form in
+every later release, so a removed form never falls back to that other error. A form removed from an
+Evolving surface has no deprecation window and gets no `E_BREAKING`: it earns the error any source
+spelling it earns, and the CHANGELOG entry names the replacement.
+
+**Reserved codes.** The codes a stable command raises are the ones
+[Lint §11.1](/spec/lint/#111-diagnostic-codes) lists. The redstone pipeline's codes, which only the
+Internal `cairn synth` raises, are outside that catalog on purpose. Any other code the spec names,
+such as `E_STATE_DOMAIN` or `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
+reserved code lands with the meaning the spec states for it, where it states one, and its row
+landing is adding a code.
+
+**What a code means.** A code's severity, and the payload
+[Lint §11.2](/spec/lint/#112-machine-readable-payload) gives it, are part of what it means.
+Adding a field to a payload, a payload to a code that had none, or a value to a field the payload
+gives as one of a list is still adding. Removing or retyping a field, renaming a `kind`, or leaving
+out a field that was always present changes what the code means.
+
+**Placeholders.** A placeholder is a finding that stands in for what the compiler does not build
+yet, and stops being raised there once it is built. That is a bug fix that aligns behaviour with
+the spec, which [§C.4](#c4-what-is-not-covered-by-tier) never counts as a break, and the
+placeholder's code still means what it meant. A placeholder stands in only for what a
+[subject to change](#subject-to-change) flag names, what another chapter says the compiler does not
+build yet, or what the spec reserves for a later extension. Source the spec itself refuses keeps its
+code. The placeholders today include:
+
+- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as coordinate triples,
+  decimals, `nbt={...}` values, `edit`, `@edition` and `assert latency`;
+- `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
+  `spawn`, `chest`, `lever` and `raw_block`;
+- `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
+  lists, a theme selector's bindings among them;
+- `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which
+  [§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) reserves for a later extension;
+- `W_STATE_LITERAL_UNCHECKED`, until `E_STATE_DOMAIN` checks a state literal against the target;
+- `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet
+  ([Lint](/spec/lint/#lowering)), such as a member whose keyword lowering does not handle yet, a
+  `floor` or `roof` under a raised `level`, and a `window` with `repeat=` above 1 and `sym=true`.
+
+A placeholder that nothing raises any more keeps its row in
+[Lint §11.1](/spec/lint/#111-diagnostic-codes), which says from which release nothing raises it,
+and its name is never given another meaning.
 
 ## C.4 What is not covered by tier
 
@@ -129,7 +205,8 @@ Two classes of change sit outside this matrix:
 - **Bug fixes** that align behaviour with the spec are never breaking, even if a consumer was
   depending on the buggy behaviour. The spec, not the implementation, defines the contract.
 - **Output bit-equality** of emitted `.nbt` / `.litematic` / `.schem` / `.mcstructure` is not
-  promised at any tier. Two releases may produce structurally-different files for the same
-  source; what matters is that the result is valid for the target `(edition, version)` and
-  matches the lockfile's `resolved_ir_hash`. See
+  promised at any tier. Only the `.nbt` and `.mcstructure` writers exist today
+  ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases may produce
+  structurally-different files for the same source; what matters is that the result is valid for
+  the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock).

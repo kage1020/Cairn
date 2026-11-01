@@ -24,13 +24,16 @@ module.exports = grammar({
 
   externals: $ => [
     $._indent, $._dedent, $._newline, $._file_start, $._size_x, $._line_start,
-    $._file_end, $.bit_pattern, $._error_sentinel,
+    $._file_end, $.bit_pattern, $.bit, $._error_sentinel,
   ],
 
   word: $ => $.identifier,
 
+  // A named set replaces `global`, so `operand` lists `true` and `false` again. `not` needs no
+  // reserving: wherever an operand can start, the lexer already takes it as the keyword.
   reserved: {
     global: _ => ['true', 'false'],
+    operand: _ => ['true', 'false', 'and', 'or'],
   },
 
   conflicts: $ => [
@@ -38,27 +41,8 @@ module.exports = grammar({
   ],
 
   rules: {
-    // `_file_end` closes the layout a file may trail off in.
-    //
-    // Blank and comment lines after a declaration are crossed by the
-    // scanner on the way to the construct behind them. At the end of a
-    // file there is no such construct, so with nothing to cross to the
-    // layout was left with no token that could consume it and a file
-    // ending that way was refused. A declaration whose body holds a row
-    // absorbs its own trailing layout through that body's
-    // `repeat1($._newline)`, and a directive through its own, which is
-    // why this was the last position in the class.
-    //
-    // An external token rather than a `repeat($._newline)` here, because
-    // the question is one only the scanner can answer. That repeat is
-    // ambiguous against the one this rule opens with — for a file
-    // holding nothing but line breaks the two own the same tokens — and
-    // making the run reachable only after a declaration moves the
-    // problem rather than solving it: `_newline` then becomes valid
-    // between a declaration's header and the body it opens, which is
-    // exactly where the scanner has to cross layout instead of tokenising
-    // it. The scanner knows what LR cannot: whether what is left is
-    // layout all the way to the end of the file.
+    // `_file_end` takes the layout a file trails off in. A `repeat($._newline)` here would be
+    // ambiguous with the one this rule opens with.
     source_file: $ => seq(
       $._file_start,
       repeat($._newline),
@@ -101,6 +85,7 @@ module.exports = grammar({
 
     assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form)),
 
+    // A line break may stand between rows; the scanner measures no indent inside the braces.
     truth_form: $ => seq(
       'truth', '(',
       field('inputs', $.signal_list),
@@ -108,7 +93,7 @@ module.exports = grammar({
       field('output', $._dotted_ref),
       ')',
       '{',
-      repeat(seq($.truth_row, optional(';'))),
+      repeat(choice($._newline, seq($.truth_row, optional(';')))),
       '}',
     ),
 
@@ -116,20 +101,14 @@ module.exports = grammar({
 
     _dotted_ref: $ => choice($.signal_ref, $.identifier),
 
-    // `bit_pattern` is external, and the only token in this grammar that
-    // is a plain run of characters. `-` is a don't-care input, and `-`
-    // and `->` share a character: the lexer takes the longest match it
-    // can, so `/[01-]+/` reads `11--` out of `11--> 0` and leaves a bare
-    // `>` this rule's arrow cannot use. The scanner chooses where the
-    // token ends instead of falling into it.
+    // `bit_pattern` and `bit` are external: a regex would read `11--` out of `11--> 0`, and take
+    // the `1` of `101` as a whole output.
     truth_row: $ => seq(
       field('inputs', $.bit_pattern),
       '->',
       field('output', choice($.bit, $.dont_care)),
     ),
-    bit: $ => token(/[01]/),
-    // A `-` output. The arrow has already been taken by the time this can
-    // match, so unlike the input side there is no character to share.
+    // Unlike an input's `-`, an output's comes after the arrow and shares no character with it.
     dont_care: $ => token('-'),
 
     temporal_form: $ => seq('always', '(', $.temporal_expr, ')'),
@@ -154,8 +133,8 @@ module.exports = grammar({
       $.binary_expression,
       $.unary_expression,
       $.parenthesized_expression,
-      $.signal_ref,
-      $.identifier,
+      reserved('operand', $.signal_ref),
+      reserved('operand', $.identifier),
     ),
 
     binary_expression: $ => choice(
@@ -252,17 +231,13 @@ module.exports = grammar({
 
     attribute: $ => seq(field('key', $.identifier), '=', field('value', $._value)),
 
-    // A dotted token is abstract and names no block, so only an undotted
-    // one takes a state literal. The `[` has to touch the name: one after a
-    // space is whatever comes next, which in a value list is a nested list.
+    // Only an undotted token takes a state literal; a `[` after a space starts a nested list.
     material_ref: $ => choice(
       seq('@', $.identifier, repeat1(seq('.', $.identifier))),
       seq('@', $.identifier, optional($.state_literal)),
     ),
 
-    // Minecraft's block-state syntax rather than a Cairn list, so the comma
-    // between pairs is required. A property named twice is refused by
-    // `cairn-lang-core` alone; see `KNOWN_DIVERGENCES` in the parity test.
+    // Minecraft's block-state syntax, so pairs need commas. Core alone refuses a repeated property.
     state_literal: $ => seq(
       token.immediate('['),
       $.state_property,

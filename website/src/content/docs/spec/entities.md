@@ -4,6 +4,9 @@ title: "8. Entities"
 
 ## 8.1 Two tiers
 
+**Subject to change.** Nothing in this section is built yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 Opening up `nbt={}` for everything would destroy theming, editing, linting, and version tolerance.
 So important entities are **structured**, which lets them ride the named-member editing model.
 
@@ -13,6 +16,11 @@ version differences, is structured. Only one-off special NBT escapes through `nb
 - **Structured, first-class**: `sign`, `painting`, `item_frame`, `armor_stand`, `villager` (plus
   `trade`), `display` (text / block / item), and `bed` (treated as a block).
 - **Generic fallback**: `spawn id=.. type=<entity> at=<selector> [nbt={...}]` for other mobs.
+
+None of these is a keyword yet, `spawn` included: each is `E_UNKNOWN_KEYWORD`, so no build places
+an entity or a block entity. The example below also uses syntax the parser does not accept yet: a
+coordinate triple (`at=4,3,2`), a decimal (`scale=1.5`) and an `nbt={...}` value are `E_PARSE`
+([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)).
 
 ```
 villager id=trader at=stall[0] profession=librarian level=master
@@ -31,12 +39,19 @@ selector grammar in the DSL. Telling them apart is the compiler's job.
 
 ## 8.2 Anchor conventions
 
+**Subject to change.** `painting` and the anchor keys below (`anchor=`, `shape=`, `footprint=`,
+`bounds=`) are not built yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 Paintings, item frames, arch windows, stairwells, and overhanging roofs have a declared size that
 differs from the AABB they occupy. Left ambiguous, edit stability, theme swapping, and
 cross-implementation compatibility all break. This is the top open issue in this chapter.
 
 Every primitive therefore carries four things in the IR: an `anchor` (reference point), a declared
 bbox, an actual bbox, and a host face.
+
+The IR carries none of the four yet. In the example below, `painting` is `E_UNKNOWN_KEYWORD`, and
+the window's `anchor=` and `shape=` and the roof's `footprint=` and `bounds=` are accepted but read
+by no pass, so each is `W_IGNORED_ARGUMENT` ([Lint](/spec/lint/)).
 
 Overlapping AABBs resolve by a rule the spec fixes, either priority merge or a lint error
 ([Lint](/spec/lint/)). Neighbour-dependent blockstate (stairs, fences) breaks when overwritten without

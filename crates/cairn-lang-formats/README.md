@@ -12,7 +12,7 @@ Litematica `.litematic` and WorldEdit `.schem` are still to land, and no reverse
 
 ## Public API
 
-Every item the crate root re-exports, and nothing else. An item reachable only through a module path — `portability::PortabilityEntries`, `registry::AliasCatalog`, anything under `registry::blocks` — is deliberately absent: this table is the names you can write unqualified after `use cairn_lang_formats::*`, not everything that is `pub` somewhere in the tree. A test holds it to that in both directions, so a re-export added without a row fails `cargo test --workspace` and names the item.
+Every item the crate root re-exports, and nothing else. An item reachable only through a module path — `portability::PortabilityEntries`, `registry::AliasCatalog`, anything under `registry::blocks` — is deliberately absent: this table is the names you can write unqualified after `use cairn_lang_formats::*`, not everything that is `pub` somewhere in the tree. `cargo xtask lint` holds it to that in both directions, so a re-export added without a row fails and names the item.
 
 | Item | Role |
 |---|---|
@@ -27,7 +27,7 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `bedrock_structure::prepare_mcstructure` / `bedrock_structure::McStructure` | Check a `BlockArray` against the Bedrock backend and the NBT encoder and translate its palette, returning the parity notes alongside; `McStructure::write` then writes the `.mcstructure`, encoding both `block_indices` layers from the grid as it goes, and can fail only on I/O. |
 | `bedrock_structure::build_mcstructure_tag` | `BlockArray` → `(Compound, Vec<ParityNote>)` (Bedrock `.mcstructure` shape). Both per-voxel layers as tags, so for inspecting a structure rather than writing a large one. |
 | `bedrock_structure::write_mcstructure` | Uncompressed little-endian write of a built root. |
-| `bedrock_structure::ParityNote` | One degraded palette entry: its concrete id and the sentence the caller surfaces as `W_INTENT_DEGRADED`. The serializer has no source span, so attributing the note to a structure scope is the caller's job. |
+| `bedrock_structure::ParityNote` | One intent a palette entry dropped to fit Bedrock: the entry's `id` and `states`, spelled as `portability::PortabilityReport::degraded`'s entries spell them, and the `dropped` intent, which `bedrock_state::degradation_detail` words. The caller surfaces it as `W_INTENT_DEGRADED`; the serializer has no source span, so attributing the note to a structure scope is the caller's job. `#[non_exhaustive]`. |
 | `bedrock_structure::BedrockStructureError` | `Nbt`, `AbstractPaletteEntry`, `State`, `PaletteIndexOutOfRange`, `DimensionOverflow`, `VolumeOverflow`, `ListTooLong`, `VoxelCountMismatch`, `UnencodablePaletteString`. `#[non_exhaustive]`. |
 | `bedrock_state::translate_states` | One Java blockstate → the Bedrock `states` compound, or the reason it cannot be one. |
 | `bedrock_state::StateTranslation` | A successful translation: the typed `states` compound, plus one entry per piece of intent Bedrock cannot express. Empty `degraded` means lossless. |
@@ -35,20 +35,18 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `data_version::JavaTarget` / `data_version::resolve_java_target` | `--target <mc_version>` → `(mc_version, DataVersion)`. |
 | `data_version::BedrockTarget` / `data_version::resolve_bedrock_target` | `--target <mc_version>` → `(mc_version, block_version)`. |
 | `data_version::UnsupportedTarget` | A `--target` no version table matched: which edition was consulted, the value given, the nearest candidate when one is close enough to suggest, and the supported list. |
-| `data_version::supported_list` | That supported list on its own, pre-joined, so the CLI prints the same string the error does. |
 | `portability::portability_for_java` | `PortabilityReport` for Java: how many palette entries are portable, degraded, or unsupported, and which. |
 | `portability::portability_for_bedrock` | The same for Bedrock, or `InvalidPalette` when the palette carries states the pack should have refused. |
 | `portability::PortabilityReport` | The counts and both entry lists, kept together so the figure and the list can never describe different palettes. Fields are private for that reason. |
 | `portability::PortabilityCounts` | `portable` / `degraded` / `unsupported`, as `u32` palette-entry counts. |
 | `portability::InvalidPalette` | Returned instead of counts when the palette is not one a build could have produced. Carries every refusal, unreworded, because they are one bug's symptoms. |
-| `registry::builtin_java` / `registry::builtin_bedrock` | The block, alias, material, and data-version tables for one edition, built in and parsed once per process. |
-| `registry::load_builtin_java` / `registry::load_builtin_bedrock` | The same two packs as a `Result`, for a caller that wants the parse error rather than the panic. |
+| `registry::builtin_pack` | The block, alias, material, and data-version tables for one edition, built in and parsed once per process. |
+| `registry::load_builtin_pack` | The same pack as a `Result`, for a caller that wants the parse error rather than the panic. |
 | `registry::load_from_dir` | The same tables from an external pack directory. Loads it as a Java pack; there is no Bedrock equivalent yet. |
-| `registry::RegistryPack` | A loaded and validated pack. `#[non_exhaustive]`, so "cannot be built without passing the validators" holds outside this crate too. |
+| `registry::RegistryPack` | A loaded and validated pack. Its fields are private and read through accessors, so a pack cannot be built without passing the validators or changed after. |
 | `registry::RegistryError` | Everything reading or validating a pack can refuse: a missing or unreadable component, a schema version past what this build understands, a failed validator. |
-| `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a `--registry-pack` user can tell which directory was read. |
-| `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. |
-| `registry::PackEdition` | `java` / `bedrock`, closed, so `"BEDROCK"` cannot ride along as a valid pack. |
+| `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a reader can tell which directory was read. |
+| `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. An unknown edition, such as `"BEDROCK"`, is refused. |
 | `registry::PackFiles` | The component references inside a manifest. New components arrive as `Option` fields, so an older pack stays loadable. |
 
 ## Registry packs

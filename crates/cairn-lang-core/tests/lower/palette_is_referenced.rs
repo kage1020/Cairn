@@ -1,0 +1,167 @@
+//! Every palette entry an artifact carries is one its voxels use: a generator claims a face only
+//! if it emits one, and a member claims its material only once it is certain to paint.
+
+use std::collections::HashSet;
+
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
+
+use crate::common::{examples, lowered};
+
+/// Palette slots no voxel names; slot 0 is exempt, since air is interned there up front.
+fn unreferenced(ba: &BlockArray) -> Vec<String> {
+    assert_eq!(
+        ba.palette.entries.first().map(|s| s.id.as_str()),
+        Some(BlockState::AIR_ID),
+        "the exemption below is only sound while slot 0 is the air slot",
+    );
+    let used: HashSet<u16> = ba.voxels.iter().map(|i| i.0).collect();
+    ba.palette
+        .entries
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(slot, _)| u16::try_from(*slot).is_ok_and(|slot| !used.contains(&slot)))
+        .map(|(slot, state)| format!("[{slot}] {state:?}"))
+        .collect()
+}
+
+fn assert_every_entry_is_used(label: &str, ir: &BlockArrayIr) {
+    for (key, ba) in &ir.structures {
+        let dangling = unreferenced(ba);
+        assert!(
+            dangling.is_empty(),
+            "{label}: `{key}` ships palette entries no voxel references: {dangling:#?}",
+        );
+    }
+}
+
+#[test]
+fn no_shipped_example_ships_a_palette_entry_it_does_not_use() {
+    for (name, source) in examples() {
+        assert_every_entry_is_used(&name, &lowered(&source));
+    }
+}
+
+#[test]
+fn a_gable_too_small_for_a_high_apex_does_not_intern_one() {
+    // 3x3 leaves one ridge voxel, so only three of the four gable faces are emitted.
+    let ir = lowered(
+        "theme t:\n  \
+         slot wall -> @cobblestone\n  \
+         slot roof -> @spruce_stairs\n\n\
+         struct t size=3x3\n  \
+         walls mat_slot=wall height=2\n  \
+         roof kind=gable mat_slot=roof\n",
+    );
+    assert_every_entry_is_used("3x3 gable", &ir);
+
+    let ba = ir.structures.values().next().expect("one structure");
+    assert!(
+        ba.palette
+            .entries
+            .iter()
+            .any(|s| s.id == "minecraft:spruce_stairs"),
+        "the roof must reach the palette for this test to mean anything",
+    );
+}
+
+#[test]
+fn a_shed_shallow_enough_to_be_all_apex_does_not_intern_a_slope() {
+    // A one-deep slope span is a single layer, and that layer is the apex.
+    let ir = lowered(
+        "theme t:\n  \
+         slot wall -> @cobblestone\n  \
+         slot roof -> @spruce_stairs\n\n\
+         struct t size=3x1\n  \
+         walls mat_slot=wall height=2\n  \
+         roof kind=shed slope_to=front mat_slot=roof\n",
+    );
+    assert_every_entry_is_used("3x1 shed", &ir);
+
+    let ba = ir.structures.values().next().expect("one structure");
+    assert!(
+        ba.palette
+            .entries
+            .iter()
+            .any(|s| s.id == "minecraft:spruce_stairs"),
+        "the roof must reach the palette for this test to mean anything",
+    );
+}
+
+#[test]
+fn a_window_that_does_not_fit_the_wall_adds_no_palette_entry() {
+    let ir = lowered(
+        "theme t:\n  \
+         slot wall -> @cobblestone\n  \
+         slot glass -> @glass\n\n\
+         struct t size=5x5\n  \
+         walls mat_slot=wall height=3\n  \
+         window side=front y=9 offset=0 size=2x2 mat_slot=glass\n",
+    );
+
+    assert_eq!(
+        ir.diagnostics.len(),
+        1,
+        "the window must say it was dropped: {:#?}",
+        ir.diagnostics,
+    );
+    let ba = ir.structures.values().next().expect("one structure");
+    let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+    assert!(
+        !ids.contains(&"minecraft:glass"),
+        "a window that is never cut must not reach the palette, got {ids:?}",
+    );
+    assert_every_entry_is_used("dropped window", &ir);
+}
+
+#[test]
+fn a_window_that_runs_past_the_wall_adds_no_palette_entry() {
+    let ir = lowered(
+        "theme t:\n  \
+         slot wall -> @cobblestone\n  \
+         slot glass -> @glass\n\n\
+         struct t size=5x5\n  \
+         walls mat_slot=wall height=3\n  \
+         window side=front y=1 offset=4 size=4x2 mat_slot=glass\n",
+    );
+
+    assert_eq!(
+        ir.diagnostics.len(),
+        1,
+        "the window must say it was dropped: {:#?}",
+        ir.diagnostics,
+    );
+    let ba = ir.structures.values().next().expect("one structure");
+    let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+    assert!(
+        !ids.contains(&"minecraft:glass"),
+        "a window that is never cut must not reach the palette, got {ids:?}",
+    );
+}
+
+#[test]
+fn a_pressure_plate_with_nowhere_to_sit_adds_no_palette_entry() {
+    // With no overhang, a `<side>.outside` plate above the floor row has nowhere to sit.
+    let ir = lowered(
+        "theme t:\n  \
+         slot wall -> @cobblestone\n  \
+         slot plate -> @oak_pressure_plate\n\n\
+         struct t size=3x3\n  \
+         walls mat_slot=wall height=2\n  \
+         pressure_plate at=front.outside y=1 mat_slot=plate\n",
+    );
+
+    assert_eq!(
+        ir.diagnostics.len(),
+        1,
+        "the plate must say it was dropped: {:#?}",
+        ir.diagnostics,
+    );
+    let ba = ir.structures.values().next().expect("one structure");
+    let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+    assert!(
+        !ids.contains(&"minecraft:oak_pressure_plate"),
+        "a plate with nowhere to go must not reach the palette, got {ids:?}",
+    );
+    assert_every_entry_is_used("dropped plate", &ir);
+}

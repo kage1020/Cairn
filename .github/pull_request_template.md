@@ -1,6 +1,7 @@
 <!--
 PR title MUST be a Conventional Commits line. The title becomes the squash-merge
 commit message on `canary` and is parsed by release-plz to decide patch releases.
+A hotfix lands on `main` as a merge commit, so its own commits must be such lines too.
 
   feat(core): add lexer
   fix(formats): correct big-endian NBT length
@@ -10,7 +11,7 @@ commit message on `canary` and is parsed by release-plz to decide patch releases
   refactor(nbt): split codec into modules
   ci: add windows-11-arm to publish matrix
 
-Types that trigger a patch release:    feat, fix, perf, refactor, build
+Types that make a patch release due:   feat, fix, perf, refactor, build
 Types that do NOT:                     docs, test, ci, chore, style
 
 See CONTRIBUTING.md for the full convention.
@@ -31,6 +32,7 @@ See CONTRIBUTING.md for the full convention.
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace --locked`
+- [ ] `cargo xtask lint`
 - [ ] `cargo doc --workspace --no-deps --locked --all-features`, with and without `--document-private-items`, with `RUSTDOCFLAGS=-D warnings`
 - [ ] (if docs) `pnpm build` in `website/`
 
@@ -39,9 +41,10 @@ See CONTRIBUTING.md for the full convention.
 <!--
 If this touches a Stable surface (see spec/compatibility):
   - Did you add a `W_DEPRECATED` warning for the previous release? (link the PR)
-  - Did you update CHANGELOG `Deprecations` / `Breaking changes` accordingly?
+  - Did you add a `changelog.d/<slug>.deprecations.md` / `.breaking.md` fragment accordingly?
 If this is `feat!:` / `fix!:` etc., explain the migration path. A `!` title and a
-`Breaking changes` entry under CHANGELOG `[Unreleased]` come together: one without the
-other is incomplete (CONTRIBUTING.md, "Branches and pull requests").
+`changelog.d/<slug>.breaking.md` fragment come together: one without the other is
+incomplete, and the `Changelog` check reports it (changelog.d/README.md). Do not edit
+CHANGELOG.md itself.
 Delete this section if the change is purely internal.
 -->

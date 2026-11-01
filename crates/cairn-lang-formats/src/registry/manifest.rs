@@ -1,83 +1,35 @@
-//! Top-level `pack.json` schema describing a registry pack.
+//! The `pack.json` manifest of a registry pack.
 
+use cairn_lang_core::Edition;
 use serde::Deserialize;
 
-/// `pack.json` body.
-///
-/// Field order matters for the `manifest_roundtrip` test only; on disk the
-/// JSON keys can appear in any order because `serde_json` reads by name.
+/// The body of `pack.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PackManifest {
-    /// Schema version of the manifest itself. Bumped only when an
-    /// incompatible shape change lands.
+    /// The manifest's schema version.
     pub schema_version: u32,
-    /// Edition the pack targets.
-    pub edition: PackEdition,
-    /// Stable identifier for the pack. Surfaced in error messages so a
-    /// `--registry-pack` mismatch points the user at the actual pack.
+    /// The edition the pack targets.
+    pub edition: Edition,
+    /// The pack's name, shown in error messages.
     pub name: String,
-    /// Free-form description. Informational; not consumed by the compiler.
+    /// A description the compiler does not read.
     pub description: String,
-    /// Component file references.
+    /// The component files.
     pub files: PackFiles,
 }
 
-/// Edition a pack targets. Closed enum so a typo (`"jav"`, `"BEDROCK"`)
-/// cannot ride along as a valid pack.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum PackEdition {
-    /// Java Edition.
-    Java,
-    /// Bedrock Edition.
-    Bedrock,
-}
-
-impl PackEdition {
-    /// Lowercase label matching the manifest's on-disk spelling and the
-    /// CLI's `--edition` vocabulary. Used in error messages so the text a
-    /// user reads matches the flag value they typed.
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            PackEdition::Java => "java",
-            PackEdition::Bedrock => "bedrock",
-        }
-    }
-}
-
-/// Component file references inside a registry pack.
-///
-/// `data_versions` is the only required component in the initial cut.
-/// Later additions slot in `Option`-typed entries for blocks, items,
-/// tags, and the semantic-sensitivity catalog so older packs stay
-/// loadable.
+/// The component files of a pack; all but `data_versions` are optional, so older packs still load.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PackFiles {
-    /// Relative filename of the `DataVersionTable` JSON.
+    /// The `data_versions` file, relative to the pack.
     pub data_versions: String,
-    /// Relative filename of the abstract `materials` catalog JSON. Optional
-    /// for backwards compatibility: a pack predating the component lacks it,
-    /// and the loader fills [`crate::registry::MaterialsIndex::empty`]
-    /// in its place.
+    /// The `materials` file.
     #[serde(default)]
     pub materials: Option<String>,
-    /// Relative filename of the per-version `blocks` id table JSON.
-    /// Optional on the same terms as `materials`: a pack without it loads,
-    /// and the loader fills [`crate::registry::BlocksIndex::empty`] in its
-    /// place. A compile against such a pack cannot decide whether an id
-    /// exists, so it does not try — every id passes, exactly as it did
-    /// before this component existed. Nothing announces that; the pack is
-    /// what has to grow the table.
+    /// The `blocks` file; without it, every id passes as known.
     #[serde(default)]
     pub blocks: Option<String>,
-    /// Relative filename of the `aliases` group catalog JSON. Optional on
-    /// the same terms as `blocks`: a pack without it loads, and the loader
-    /// fills [`crate::registry::AliasIndex::empty`] in its place. An
-    /// `E_UNKNOWN_ID` against such a pack falls back to the typo search
-    /// alone, which is where every pack stood before this component
-    /// existed.
+    /// The `aliases` file; without it, an `E_UNKNOWN_ID` offers only the typo search.
     #[serde(default)]
     pub aliases: Option<String>,
 }
@@ -97,7 +49,7 @@ mod tests {
         }"#;
         let m: PackManifest = serde_json::from_str(src).expect("deserialise manifest");
         assert_eq!(m.schema_version, 1);
-        assert_eq!(m.edition, PackEdition::Java);
+        assert_eq!(m.edition, Edition::Java);
         assert_eq!(m.name, "cairn-builtin-java");
         assert_eq!(m.files.data_versions, "data_versions.json");
         assert!(m.files.materials.is_none(), "materials defaults to None");
