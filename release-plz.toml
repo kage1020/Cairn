@@ -5,7 +5,9 @@ git_tag_enable = false
 git_release_enable = false
 
 changelog_path = "./CHANGELOG.md"
-changelog_update = true
+# Only the CLI writes the shared changelog, since a version with two sections leaves it
+# unparseable and the release body empty.
+changelog_update = false
 
 allow_dirty = true
 publish_allow_dirty = true
@@ -22,6 +24,17 @@ publish = true
 git_tag_enable = true
 git_release_enable = true
 git_tag_name = "v{{ version }}"
+changelog_update = true
+changelog_include = [
+  "cairn-lang-core",
+  "cairn-lang-docs",
+  "cairn-lang-formats",
+  "cairn-lang-lsp",
+  "cairn-lang-nbt",
+  "cairn-lang-redstone",
+  "cairn-lang-tree-sitter",
+  "cairn-lang-wasm",
+]
 # GitHub refuses a release body over 125,000 characters, after the crates are already published.
 git_release_body = """
 {%- if changelog | length > 120000 -%}

@@ -177,7 +177,7 @@ A PR does not edit [CHANGELOG.md](CHANGELOG.md). Instead it adds a fragment unde
 
 Fragments avoid conflicts. With twenty PRs open at once, every one that edits the same `[Unreleased]` heading conflicts with the next merge; separate files never do. The release PR, monthly or patch, folds the fragments into the section `release-plz` writes for the new version, then deletes them.
 
-The `Changelog` workflow checks the name and shape of each fragment a PR adds or edits. It also reports issue or PR numbers, entries scoped to `ci` alone, and any change to `CHANGELOG.md` outside the release PR. [changelog.d/README.md](changelog.d/README.md) has the details and the commands to run the check locally. All of this applies to the root `CHANGELOG.md` only: `editors/vscode/CHANGELOG.md` belongs to the extension and is still edited by hand.
+The `Changelog` workflow checks the name and shape of each fragment a PR adds or edits. It also reports issue or PR numbers, entries scoped to `ci` alone, and a line `CHANGELOG.md` gains or loses outside the release PR. [changelog.d/README.md](changelog.d/README.md) has the details and the commands to run the check locally. All of this applies to the root `CHANGELOG.md` only: `editors/vscode/CHANGELOG.md` belongs to the extension and is still edited by hand.
 
 ## Revisiting a settled decision
 
