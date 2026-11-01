@@ -3,9 +3,9 @@
 //! (`spec/redstone` "Signal binding").
 
 use cairn_lang_core::DiagnosticCode;
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
+use cairn_lang_core::block_array::BlockArray;
 
-use crate::common::{lowered, notes, only_structure, slice, state_at};
+use crate::common::{Finding, findings, lowered, only_structure, state_at};
 
 const THEME: &str = "theme t:\n  slot wall -> @cobblestone\n\n";
 
@@ -35,9 +35,6 @@ const WALLS_PAINT_NOTHING: &str = "a `walls` member that would reach this row pa
 
 const INTERIOR_NEEDS: &str = "an interior needs a size of at least 3 on both axes";
 
-/// A finding as its code, the text it points at, its primary and its notes.
-type Finding<'a> = (DiagnosticCode, &'a str, &'a str, Vec<&'a str>);
-
 /// [`THEME`] and a 5x5 struct with walls up to row 3, `lines` after its walls.
 fn walled(lines: &str) -> String {
     walled_at("5x5", lines)
@@ -56,14 +53,6 @@ fn unpainted(lines: &str) -> String {
 /// The note on an `at=` naming no side, giving `example` as one.
 fn side_note(example: &str) -> String {
     format!("a side is one of front, back, left, right, as in `at={example}`")
-}
-
-/// Each finding of `out` as a [`Finding`], in report order.
-fn findings<'a>(src: &'a str, out: &'a BlockArrayIr) -> Vec<Finding<'a>> {
-    out.diagnostics
-        .iter()
-        .map(|d| (d.code, slice(src, d), d.primary.as_str(), notes(d)))
-        .collect()
 }
 
 /// Each finding of `found` as its code and the text it points at.
@@ -371,7 +360,7 @@ fn a_plate_outside_a_wall_no_roof_overhangs_is_refused_on_every_row() {
              `at=inside.left` with an `offset=` from 1 to 2",
         ],
     );
-    // A roof whose `overhang=` is unreadable draws none, and the same fix applies to it.
+    // An unreadable `overhang=` counts as none, so the same fix applies beside it.
     let line = "pressure_plate at=front.outside y=2";
     let roof = "roof kind=flat mat_slot=wall overhang=big";
     let src = walled(&format!("{roof}\n  {line}"));
@@ -685,29 +674,23 @@ fn a_plate_outside_an_overhang_a_level_scoped_roof_does_not_draw_only_defers() {
 }
 
 #[test]
-fn a_roof_under_a_level_with_no_offset_gives_a_plate_no_overhang_to_wait_on() {
-    let level = "level";
+fn a_roof_under_a_level_with_no_offset_still_gives_a_plate_an_overhang_to_wait_on() {
     let line = "pressure_plate at=front.outside offset=2 y=1";
     let src = walled(&format!(
-        "{level}\n    roof kind=flat mat_slot=wall overhang=1\n  {line}"
+        "level\n    roof kind=flat mat_slot=wall overhang=1\n  {line}"
     ));
     let out = lowered(&src);
-    let found = findings(&src, &out);
     assert_eq!(
-        located(&found),
-        [
-            (DiagnosticCode::InvalidMember, level),
-            (DiagnosticCode::InvalidMember, line),
-        ],
-    );
-    assert_eq!(
-        found[1],
-        (
-            DiagnosticCode::InvalidMember,
+        findings(&src, &out),
+        [(
+            DiagnosticCode::DeferredMember,
             line,
             "pressure_plate `at=front.outside` at y=1 has no exterior voxel to sit on",
-            vec![NO_ROOF_OVERHANG, OUTSIDE_FIX],
-        ),
+            vec![
+                "a `roof` written with an `overhang=` draws nothing, so the struct has no \
+                 overhang to hold the plate; it fits once that roof draws",
+            ],
+        )],
     );
 }
 

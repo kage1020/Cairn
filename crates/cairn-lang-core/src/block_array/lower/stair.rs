@@ -13,7 +13,7 @@ use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 use crate::block_array::roof::{Cardinal, STAIR_BASE_ID, StairShape, shed_high_side, stair_state};
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::members::{StructCtx, resolve_member_state, side_name, side_of};
+use super::members::{StructCtx, resolve_member_state, side_name, side_of, unplaced_walls_note};
 use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
 
 /// The note on a stair refused for its `kind=`, naming the one kind there is.
@@ -196,55 +196,84 @@ fn eave_row(
         NonNegRead::Refused => return None,
     };
     let y_world = y_local.saturating_add(y_offset);
-    if ctx.written_overhang == 0 {
+    let written = &ctx.written;
+    if written.overhang == 0 {
         diagnostics.push(diag_invalid_member(
             member,
-            "eave `stair` has no overhang to sit in: no roof on this struct is written with an `overhang=` of at least 1".to_owned(),
+            "eave `stair` has no overhang to sit in: no roof on this struct has an `overhang=` of at least 1".to_owned(),
             vec![
                 "an eave band sits one voxel outside the wall, in the ring a roof's `overhang=` \
-                 adds; give the struct's `roof` an `overhang=` of at least 1"
+                 adds; give a `roof` in the struct's body an `overhang=` of at least 1"
                     .to_owned(),
             ],
         ));
         return None;
     }
-    let past_the_struct = || {
-        format!(
-            "stair y={y_world} does not fit in the struct (dims.y={})",
-            ctx.dims.y
-        )
-    };
-    if y_world >= ctx.written_height {
-        diagnostics.push(diag_invalid_member(
-            member,
+    let above_written = y_world >= written.height;
+    if above_written && !written.unplaced_walls && y_world >= written.reach {
+        diagnostics.push(above_the_struct(member, y_world, ctx));
+        return None;
+    }
+    let past_the_struct = || past_the_struct(y_world, ctx);
+    let deferral = if above_written && written.unplaced_walls {
+        Some((
             past_the_struct(),
-            vec![format!(
-                "the struct's top row is {}; lower the stair or its `level`, or raise the `walls` \
-                 to reach its row",
-                ctx.written_height.saturating_sub(1),
-            )],
-        ));
-        return None;
-    }
-    // The overhang a roof draws, not the `overhang=` written: a roof that draws nothing gives none.
-    if ctx.overhang == 0 {
-        diagnostics.push(diag_deferred_member_noted(
-            member,
-            "eave `stair` has no overhang to sit in: the roof written with an `overhang=` draws nothing",
-            "the stair is built once that roof draws, and the roof's own finding says why it does not",
-        ));
-        return None;
-    }
-    if y_world >= ctx.dims.y {
-        diagnostics.push(diag_deferred_member_noted(
-            member,
-            &past_the_struct(),
-            "a `walls` member that would reach this row paints nothing; the stair is built once \
-             that member paints, and its own finding says why it does not",
-        ));
+            unplaced_walls_note("this row", "the stair is built"),
+        ))
+    } else if above_written {
+        Some((past_the_struct(), ROOF_SHAPE_UNREAD.to_owned()))
+    } else if ctx.overhang == 0 {
+        // The overhang a roof draws, not the `overhang=` written: a roof that draws nothing gives
+        // none.
+        Some((
+            "eave `stair` has no overhang to sit in: the roof written with an `overhang=` draws \
+             nothing"
+                .to_owned(),
+            "the stair is built once that roof draws".to_owned(),
+        ))
+    } else if y_world >= ctx.dims.y {
+        Some((
+            past_the_struct(),
+            ctx.shortfall().note("the stair is built"),
+        ))
+    } else {
+        None
+    };
+    if let Some((primary, note)) = deferral {
+        diagnostics.push(diag_deferred_member_noted(member, &primary, &note));
         return None;
     }
     Some(y_world)
+}
+
+/// The note on a stair deferred to a row only a roof whose shape does not read may rise to.
+const ROOF_SHAPE_UNREAD: &str = "a `roof` whose `kind=` or `slope_to=` does not read may rise to \
+                                 this row; the stair is built once that roof draws";
+
+/// The primary of a stair whose row is at or above `dims.y`.
+fn past_the_struct(y_world: u32, ctx: &StructCtx<'_>) -> String {
+    format!(
+        "stair y={y_world} does not fit in the struct (dims.y={})",
+        ctx.dims.y
+    )
+}
+
+/// The refusal of a stair at `y_world`, above every row the struct as written reaches.
+fn above_the_struct(member: &Member, y_world: u32, ctx: &StructCtx<'_>) -> Diagnostic {
+    let written_top = ctx.written.height.saturating_sub(1);
+    let mut notes = vec![format!("the struct's top row is {written_top}")];
+    notes.extend(ctx.unread_roof_note());
+    let built = ctx.dims.y;
+    if built <= written_top {
+        let rows = if built == written_top {
+            format!("row {built} waits")
+        } else {
+            format!("rows {built} to {written_top} wait")
+        };
+        notes.push(format!("{rows} on {}", ctx.shortfall().members()));
+    }
+    notes.push("lower the stair or its `level`, or raise the `walls` to reach its row".to_owned());
+    diag_invalid_member(member, past_the_struct(y_world, ctx), notes)
 }
 
 /// Paint `idx` along the whole `side` wall at `y_world`, one voxel out in the overhang column.

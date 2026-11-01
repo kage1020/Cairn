@@ -294,7 +294,8 @@ row's wall course as is left counting the row it opens at. A door under a one-ro
 opens that one row rather than cutting into the roof. The row it opens at MUST be inside a course
 of the masonry. A door whose row no `walls` member is written to hold is `E_INVALID_MEMBER` and cuts
 nothing, the same finding the `window` on that body earns. A door in a course whose `walls` paint
-nothing is `W_DEFERRED_MEMBER` instead, since those walls' own finding has the repair
+nothing, or beside `walls` under a `level` that is not placed, is `W_DEFERRED_MEMBER` instead, since
+the repair is on those walls or that level
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the courses a `walls`
 paints).
 

@@ -18,9 +18,8 @@ use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::paint_member;
 use super::phase::Phase;
-use super::sizing::{
-    max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls, written,
-};
+use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
+use super::written::{Written, written_members};
 
 /// What every body of one run is lowered against.
 #[derive(Clone, Copy)]
@@ -70,7 +69,7 @@ pub(super) fn lower_body_to_block_array<'a>(
     // Flattened once: sizing and the phase buckets must read the same paint set.
     let flattened = flatten_members(body.members, diagnostics);
     // Unflattened: a roof a `level` drops is still written.
-    let written = written(body.members);
+    let written_members = written_members(body.members);
     // A scope that reads no `mat_slot=` loses nothing to a missing theme (`spec/lint` "Materials
     // and targets"), so it is not reported.
     if theme_missing && flattened.iter().any(|(_, m)| m.read_slot().is_some()) {
@@ -108,14 +107,12 @@ pub(super) fn lower_body_to_block_array<'a>(
         interior_w,
         interior_h,
         wall_top: max_wall_top,
+        rise: roof_extra,
         wall_column,
-        written_height: written.height(roof_extra),
-        written_walls: written.walls,
-        written_overhang: written.overhang,
-        written_floor: written.floor,
+        written: Written::of(&written_members, interior_w, interior_h),
     };
 
-    let buckets = bucket_members(&flattened, diagnostics);
+    let buckets = bucket_members(&flattened, &written_members, diagnostics);
     let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
     // Before anything reads the grid: a voxel painted after the palette filled holds air.
@@ -204,8 +201,11 @@ struct PhaseBuckets<'a> {
 }
 
 /// File every member of the paint set under its phase, reporting the ones no phase reads.
+///
+/// An actuator patch picks its door among `written`, every member the body writes.
 fn bucket_members<'a>(
     flattened: &[(u32, &'a Member)],
+    written: &[(Option<u32>, &Member)],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> PhaseBuckets<'a> {
     let mut buckets = PhaseBuckets {
@@ -217,7 +217,7 @@ fn bucket_members<'a>(
         // An actuator patch overlays a door declared elsewhere, with no `side=`; only its shape is
         // checked here (`spec/redstone` "Signal binding").
         if is_actuator_patch(member) {
-            recognize_actuator_patch(member, flattened, diagnostics);
+            recognize_actuator_patch(member, written, diagnostics);
             buckets.phases.push(None);
             continue;
         }

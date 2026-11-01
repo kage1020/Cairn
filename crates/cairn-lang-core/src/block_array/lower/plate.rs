@@ -13,7 +13,7 @@ use crate::block_array::material::{IdOrigin, MaterialDeferred, TargetRegistry, v
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::members::{StructCtx, resolve_member_state, side_name};
+use super::members::{StructCtx, resolve_member_state, side_name, unplaced_walls_note};
 use super::stair::shift_outward;
 use super::token_diag::diag_unknown_id;
 
@@ -32,9 +32,9 @@ const ANCHOR_FORMS: &str = "write `at=<side>.outside` to sit outside a wall or `
 const BINDING_STILL_READ: &str =
     "its signal binding still reaches the netlist, with no plate placed to drive it";
 
-/// The note on a plate deferred because a `walls` member that would reach its row paints nothing.
-const WALLS_PAINT_NOTHING: &str = "a `walls` member that would reach this row paints nothing; the \
-                                   plate fits once that member's material resolves to a block";
+/// The note on a plate deferred to a row only a roof whose shape does not read may rise to.
+const ROOF_SHAPE_UNREAD: &str = "a `roof` whose `kind=` or `slope_to=` does not read may rise to \
+                                 this row; the plate fits once that roof draws";
 
 /// The note on an `at=<side>.outside` plate deferred because a roof does not draw its overhang.
 const ROOF_DRAWS_NOTHING: &str = "a `roof` written with an `overhang=` draws nothing, so the struct \
@@ -271,30 +271,40 @@ fn plate_voxel_position(
     {
         return Err(Box::new(diag_invalid_member(member, primary, notes)));
     }
-    if y_world >= ctx.written_height {
+    let written = &ctx.written;
+    let above_written = y_world >= written.height;
+    if above_written && !written.unplaced_walls && y_world >= written.reach {
         return Err(Box::new(above_the_struct(member, anchor, row, ctx)));
     }
-    if let PlateAnchor::Outside(_) = anchor
-        && ctx.written_overhang == 0
-    {
+    let outside = matches!(anchor, PlateAnchor::Outside(_));
+    if outside && written.overhang == 0 {
         return Err(Box::new(no_exterior_voxel(member, side, length, row, ctx)));
     }
-    // A struct shorter than its walls ask for is theirs to repair, so the plate only defers.
-    if y_world >= ctx.dims.y {
+    // From here the repair is on another member, so the plate only defers.
+    let deferral = if above_written && written.unplaced_walls {
+        Some((
+            row_past_the_struct(row, ctx),
+            unplaced_walls_note("this row", "the plate fits"),
+        ))
+    } else if above_written {
+        Some((row_past_the_struct(row, ctx), ROOF_SHAPE_UNREAD.to_owned()))
+    } else if y_world >= ctx.dims.y {
+        Some((
+            row_past_the_struct(row, ctx),
+            ctx.shortfall().note("the plate fits"),
+        ))
+    } else if outside && ctx.overhang == 0 {
+        // An overhang a roof is written with and does not draw is the roof's to repair.
+        Some((
+            no_exterior_primary(side, row),
+            ROOF_DRAWS_NOTHING.to_owned(),
+        ))
+    } else {
+        None
+    };
+    if let Some((primary, note)) = deferral {
         return Err(Box::new(diag_deferred_member_noted(
-            member,
-            &row_past_the_struct(row, ctx),
-            WALLS_PAINT_NOTHING,
-        )));
-    }
-    // An overhang a roof is written with and does not draw is the roof's to repair.
-    if let PlateAnchor::Outside(_) = anchor
-        && ctx.overhang == 0
-    {
-        return Err(Box::new(diag_deferred_member_noted(
-            member,
-            &no_exterior_primary(side, row),
-            ROOF_DRAWS_NOTHING,
+            member, &primary, &note,
         )));
     }
     let Some((wx, _wy, wz)) = wall_local_to_grid(
@@ -364,15 +374,14 @@ fn row_past_the_struct(row: PlateRow, ctx: &StructCtx<'_>) -> String {
     )
 }
 
-/// The refusal of a plate whose row is at or above the struct's height with every walls member
-/// painted.
+/// The refusal of a plate whose row is above every row the struct as written reaches.
 fn above_the_struct(
     member: &Member,
     anchor: PlateAnchor,
     row: PlateRow,
     ctx: &StructCtx<'_>,
 ) -> Diagnostic {
-    let top = ctx.written_height - 1;
+    let top = ctx.written.height.saturating_sub(1);
     let level = row.level;
     let runs_to = |highest: u32| {
         if highest == 0 {
@@ -391,13 +400,15 @@ fn above_the_struct(
     } else {
         format!("the struct's top row is {top}, below this plate's `level y={level}`")
     }];
+    notes.extend(ctx.unread_roof_note());
     let built = ctx.dims.y;
-    if built < ctx.written_height {
-        notes.push(if built == top {
-            format!("row {top} waits on a `walls` member that paints nothing")
+    if built <= top {
+        let rows = if built == top {
+            format!("row {built} waits")
         } else {
-            format!("rows {built} to {top} wait on a `walls` member that paints nothing")
-        });
+            format!("rows {built} to {top} wait")
+        };
+        notes.push(format!("{rows} on {}", ctx.shortfall().members()));
     }
     // Under a level above the top row, no `y=` brings the plate down far enough.
     notes.push(if level > top {
@@ -413,7 +424,7 @@ fn above_the_struct(
 /// written with an overhang.
 fn outside_needs_a_roof(anchor: PlateAnchor, ctx: &StructCtx<'_>) -> Option<String> {
     match anchor {
-        PlateAnchor::Outside(side) if ctx.written_overhang == 0 => Some(format!(
+        PlateAnchor::Outside(side) if ctx.written.overhang == 0 => Some(format!(
             "an `at={}.outside` plate also needs a `roof` in the struct's body with an \
              `overhang=` of at least 1",
             side_name(side),
@@ -517,7 +528,7 @@ fn no_exterior_voxel(
     let roof = "give a `roof` in the struct's body an `overhang=` of at least 1";
     let fix = if thin_axes(ctx).is_empty() {
         // On row 0 an inside plate would replace a floor block, one below the floor's top.
-        let (raised, on_the_floor) = if row.world() == 0 && ctx.written_floor {
+        let (raised, on_the_floor) = if row.world() == 0 && ctx.written.floor {
             (" y=1", ", on top of the floor")
         } else {
             ("", "")
@@ -560,7 +571,7 @@ fn inside_plate_refusal(
     }
     let valid_offsets = inside_offsets(length);
     if thin.is_empty() {
-        let inside_it = if ctx.written_walls.course_top_at(y).is_some() {
+        let inside_it = if ctx.written.walls.course_top_at(y).is_some() {
             "belongs to the neighbouring wall"
         } else {
             "is not an interior cell of this struct"

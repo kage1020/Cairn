@@ -68,7 +68,7 @@ pub struct SelectorAxis {
     /// The argument that selects the lowering rule.
     pub selector: &'static str,
     /// One arm per selector value that names a lowering rule; leave out a value naming none, whose
-    /// line already gets `E_INVALID_MEMBER`.
+    /// line already gets a refusal (`E_INVALID_MEMBER`, or `E_INVALID_PLACE_ORIGIN` on a `place`).
     pub arms: &'static [SelectorArm],
 }
 

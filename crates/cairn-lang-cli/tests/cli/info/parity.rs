@@ -424,7 +424,7 @@ fn a_warning_at_every_version_leaves_every_target_buildable() {
     assert_eq!(
         strings(entry, "buildable"),
         strings(entry, "considered"),
-        "a roof lowering does not draw under a raised `level` is a warning, not a refusal",
+        "a roof that lowering does not draw under a raised `level` is a warning, not a refusal",
     );
 }
 

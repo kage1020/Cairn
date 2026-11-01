@@ -81,8 +81,8 @@ pub enum DiagnosticCode {
     UnknownSlotTarget,
     /// A `theme` selector rule that matches no member; a warning despite its `E_` prefix.
     ThemeSelectorUnmatched,
-    /// A member the block-array pass does not build because another member did not, or because
-    /// the pass does not lower what its line writes yet.
+    /// A member, or part of one, the block-array pass leaves out because another member did not
+    /// build or because the pass does not lower what its line writes yet.
     DeferredMember,
     /// A member its own line keeps the block-array pass from building, whatever else builds.
     InvalidMember,

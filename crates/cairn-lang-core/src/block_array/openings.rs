@@ -169,6 +169,24 @@ impl WindowArgFault {
     pub(super) fn refusal(self) -> String {
         format!("window {}", self.clause())
     }
+
+    /// The note on that refusal, saying what the argument takes.
+    pub(super) fn fix(self) -> &'static str {
+        match self {
+            Self::OffsetMalformed => {
+                "write `offset=N`, where `N` is a non-negative integer: the window's first column \
+                 along the wall, counted from 0 at its left end seen from outside"
+            }
+            Self::YAbsent | Self::YMalformed => {
+                "write `y=N`, where `N` is a non-negative integer: the window's lowest row, counted \
+                 up from 0, the base row of the struct or of the window's `level`"
+            }
+            Self::SizeAbsent | Self::SizeMalformed => {
+                "write `size=WxH`, where `W` and `H` are positive integers: the window's width \
+                 along the wall and its height in rows"
+            }
+        }
+    }
 }
 
 /// The window arguments a port and a cut both need, read once.

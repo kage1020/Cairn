@@ -6,11 +6,8 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNo
 use crate::intent::{Member, ValueWithSpan};
 use crate::resolve::ScopeResolution;
 
-use crate::block_array::args::{
-    diag_deferred_member_reason, diag_invalid_member, member_or_slot_span,
-};
+use crate::block_array::args::{diag_deferred_member_reason, member_or_slot_span};
 use crate::block_array::material::is_stand_in;
-use crate::block_array::openings::WallSide;
 use crate::block_array::roof::{
     RoofKind, RoofVoxel, flat_block_state, flat_voxels, gable_ridge_axis, gable_stair_state,
     gable_voxels, hip_stair_state, hip_voxels, is_stair, shed_stair_state, shed_voxels,
@@ -19,7 +16,7 @@ use crate::block_array::{BlockState, PaletteIndex};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::members::{StructCtx, resolve_member_state};
-use super::sizing::roof_draws;
+use super::roof_kind::{parse_roof_kind, roof_draws, shed_slope_to};
 
 pub(super) fn fill_roof(
     member: &Member,
@@ -231,60 +228,4 @@ fn diag_incompatible_material(
             }),
         }),
     }
-}
-
-/// Resolve a `roof` member's `kind=`, or `None` after an `E_INVALID_MEMBER`.
-fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<RoofKind> {
-    let Some(raw) = member.ident_value("kind") else {
-        // A wrongly shaped value is named by its shape: `kind="shed"` spells a kind in the set.
-        let reason = match member.intent_state.get("kind") {
-            Some(raw) => format!(
-                "roof `kind=` must be an identifier naming one of {}, got {}",
-                RoofKind::names(),
-                raw.value.kind_name(),
-            ),
-            None => format!("missing `kind=` (expected one of {})", RoofKind::names()),
-        };
-        diagnostics.push(diag_invalid_member(member, reason, Vec::new()));
-        return None;
-    };
-    if let Some(k) = RoofKind::from_ident(raw) {
-        return Some(k);
-    }
-    diagnostics.push(diag_invalid_member(
-        member,
-        format!(
-            "unknown roof `kind={raw}` (expected one of {})",
-            RoofKind::names(),
-        ),
-        Vec::new(),
-    ));
-    None
-}
-
-/// Resolve a shed roof's required `slope_to=`, or `None` after an `E_INVALID_MEMBER`.
-pub(super) fn shed_slope_to(
-    member: &Member,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Option<WallSide> {
-    let Some(raw) = member.ident_value("slope_to") else {
-        let reason = match member.intent_state.get("slope_to") {
-            Some(written) => format!(
-                "shed `slope_to=` must be one of front, back, left, right, not {}",
-                written.value.describe(),
-            ),
-            None => "shed roof requires `slope_to=` (one of front, back, left, right)".to_owned(),
-        };
-        diagnostics.push(diag_invalid_member(member, reason, Vec::new()));
-        return None;
-    };
-    if let Some(side) = WallSide::from_ident(raw) {
-        return Some(side);
-    }
-    diagnostics.push(diag_invalid_member(
-        member,
-        format!("unknown shed `slope_to={raw}` (expected one of front, back, left, right)"),
-        Vec::new(),
-    ));
-    None
 }

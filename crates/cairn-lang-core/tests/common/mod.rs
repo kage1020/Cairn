@@ -147,6 +147,17 @@ pub fn notes(diag: &Diagnostic) -> Vec<&str> {
     diag.notes.iter().map(|n| n.message.as_str()).collect()
 }
 
+/// A finding as its code, the text it points at, its primary and its notes.
+pub type Finding<'a> = (DiagnosticCode, &'a str, &'a str, Vec<&'a str>);
+
+/// Each finding of `out` as a [`Finding`], in report order.
+pub fn findings<'a>(source: &'a str, out: &'a BlockArrayIr) -> Vec<Finding<'a>> {
+    out.diagnostics
+        .iter()
+        .map(|d| (d.code, slice(source, d), d.primary.as_str(), notes(d)))
+        .collect()
+}
+
 /// The single finding in `found`.
 ///
 /// # Panics

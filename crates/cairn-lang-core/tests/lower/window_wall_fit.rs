@@ -238,8 +238,8 @@ fn a_window_in_a_course_that_paints_nothing_defers_to_its_walls() {
             "window rows y=5..=5 lie in a course the walls are written to (y=1..=6) but not in one \
              they paint (y=1..=3)",
             vec![
-                "a `walls` member written to hold these rows paints nothing, and its own finding \
-                 says why; the opening is cut once that member paints"
+                "a `walls` member written to hold these rows paints nothing; the opening is cut once \
+                 that member's material resolves to a block"
             ],
         )],
     );

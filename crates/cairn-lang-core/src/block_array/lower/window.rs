@@ -1,7 +1,7 @@
 //! Cutting the rectangles of a `window` member.
 
 use crate::ast::ValueKind;
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::intent::Member;
 
 use crate::block_array::PaletteIndex;
@@ -14,7 +14,9 @@ use crate::block_array::openings::{
 };
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::members::{StructCtx, UNPAINTED_COURSE, palette_index_for, side_name, side_of};
+use super::members::{
+    StructCtx, UNPAINTED_COURSE, palette_index_for, side_name, side_of, unplaced_walls_note,
+};
 
 pub(super) fn fill_window(
     member: &Member,
@@ -87,19 +89,30 @@ fn cut_window(
     } = match read_window_args(member) {
         Ok(args) => args,
         Err(fault) => {
-            diagnostics.push(diag_invalid_member(member, fault.refusal(), Vec::new()));
+            diagnostics.push(diag_invalid_member(
+                member,
+                fault.refusal(),
+                vec![fault.fix().to_owned()],
+            ));
             return WindowCut::Refused;
         }
     };
     let y_start = y_start_local.saturating_add(y_offset);
-    let (repeat, step) = match window_series(member, sym, diagnostics) {
-        Ok(series) => series,
-        Err(refused) => return refused,
+    let Some((repeat, step)) = window_series(member, diagnostics) else {
+        return WindowCut::Refused;
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let refusal = window_span_refusal(side, offset, (sw, sh), (repeat, step), len)
-        .map(|reason| diag_invalid_member(member, reason, Vec::new()))
+        .map(|(reason, fix)| diag_invalid_member(member, reason, vec![fix]))
         .or_else(|| window_course_refusal(member, y_start, (sw, sh), ctx));
+    // The window's own line is asked before what the pass does not lower yet.
+    let own_fault = refusal
+        .as_ref()
+        .is_some_and(|refusal| refusal.code == DiagnosticCode::InvalidMember);
+    if !own_fault && let Some((deferral, cut)) = series_mirror_deferral(member, repeat, sym) {
+        diagnostics.push(deferral);
+        return cut;
+    }
     if let Some(refusal) = refusal {
         diagnostics.push(refusal);
         return WindowCut::Refused;
@@ -146,12 +159,8 @@ fn cut_window(
     WindowCut::Cut
 }
 
-/// A window's `repeat=` and `step=`, or the refusal after the finding that says why.
-fn window_series(
-    member: &Member,
-    sym: Option<bool>,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(u32, u32), WindowCut> {
+/// A window's `repeat=` and `step=`, or `None` after the finding that refuses the window.
+fn window_series(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<(u32, u32)> {
     // `repeat=0` is refused: an author who wants no window drops the line.
     let repeat = match nonneg_int_or_refuse(member, "repeat", diagnostics) {
         NonNegRead::Valid(0) => {
@@ -160,65 +169,89 @@ fn window_series(
                 "window `repeat=0` would stamp no instances; drop the window instead".to_owned(),
                 Vec::new(),
             ));
-            return Err(WindowCut::Refused);
+            return None;
         }
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 1,
-        NonNegRead::Refused => return Err(WindowCut::Refused),
+        NonNegRead::Refused => return None,
     };
     let step = match nonneg_int_or_refuse(member, "step", diagnostics) {
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 0,
-        NonNegRead::Refused => return Err(WindowCut::Refused),
+        NonNegRead::Refused => return None,
     };
-    // Before `sym=`, so the author hears about `step=` in this compile.
     if repeat > 1 && step == 0 {
         diagnostics.push(diag_invalid_member(
             member,
             "window `repeat=` requires a positive `step=` so instances do not overlap".to_owned(),
             Vec::new(),
         ));
-        return Err(WindowCut::Refused);
+        return None;
     }
-    if repeat > 1 {
-        match sym {
-            Some(false) => {}
-            Some(true) => {
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    "window with both `repeat=` and `sym=true` is not yet supported",
-                ));
-                return Err(WindowCut::Refused);
-            }
-            None => {
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    "window with `repeat=` greater than 1 is not cut while its `sym=` is \
-                     unreadable: `sym=true` with such a `repeat=` is not yet supported, and \
-                     `sym=false` is not what was written",
-                ));
-                return Err(WindowCut::RefusedForUnreadSym);
-            }
-        }
-    }
-    Ok((repeat, step))
+    Some((repeat, step))
 }
 
-/// Why a window series does not fit along its `len`-long wall, or `None` when it does.
+/// The deferral of a series of `repeat` windows whose `sym=` is `true` or unreadable, which the
+/// pass does not cut yet, with what [`cut_window`] reports it did.
+fn series_mirror_deferral(
+    member: &Member,
+    repeat: u32,
+    sym: Option<bool>,
+) -> Option<(Diagnostic, WindowCut)> {
+    if repeat <= 1 {
+        return None;
+    }
+    match sym {
+        Some(false) => None,
+        Some(true) => Some((
+            diag_deferred_member_reason(
+                member,
+                "window with both `repeat=` and `sym=true` is not yet supported",
+            ),
+            WindowCut::Refused,
+        )),
+        None => Some((
+            diag_deferred_member_reason(
+                member,
+                "window with `repeat=` greater than 1 is not cut while its `sym=` is unreadable: \
+                 `sym=true` with such a `repeat=` is not yet supported, and `sym=false` is not \
+                 what was written",
+            ),
+            WindowCut::RefusedForUnreadSym,
+        )),
+    }
+}
+
+/// Why a window series does not fit along its `len`-long wall and how to make it fit, or `None`
+/// when it does.
 fn window_span_refusal(
     side: WallSide,
     offset: u32,
     (sw, sh): (u32, u32),
     (repeat, step): (u32, u32),
     len: u32,
-) -> Option<String> {
+) -> Option<(String, String)> {
     let span_end = offset
         .saturating_add(step.saturating_mul(repeat.saturating_sub(1)))
         .saturating_add(sw);
     (span_end > len).then(|| {
-        format!(
-            "window extends beyond the `{}` wall (offset={offset} size={sw}x{sh} repeat={repeat} step={step}, wall length={len})",
-            side_name(side),
+        let fix = if repeat > 1 {
+            format!(
+                "the last instance ends at `offset + step * (repeat - 1) + size.w`, which must be \
+                 at most {len}; lower `offset=`, `step=` or `repeat=`, or narrow `size=`"
+            )
+        } else {
+            format!(
+                "the window ends at `offset + size.w`, which must be at most {len}; lower \
+                 `offset=` or narrow `size=`"
+            )
+        };
+        (
+            format!(
+                "window extends beyond the `{}` wall (offset={offset} size={sw}x{sh} repeat={repeat} step={step}, wall length={len})",
+                side_name(side),
+            ),
+            fix,
         )
     })
 }
@@ -236,6 +269,7 @@ fn window_course_refusal(
     if ctx.wall_column.contains_rows(y_start, sh) {
         return None;
     }
+    let written = &ctx.written;
     let rows = match y_start.checked_add(sh.saturating_sub(1)) {
         Some(last) => format!("window rows y={y_start}..={last}"),
         // Saturating would print a range that ends before it starts.
@@ -244,13 +278,13 @@ fn window_course_refusal(
                 member,
                 format!(
                     "window rows from y={y_start} run past the highest row a build can address (size={sw}x{sh}; the walls occupy {})",
-                    ctx.written_walls,
+                    written.walls,
                 ),
-                Vec::new(),
+                vec!["lower the window with `y=`, or shorten it with `size=`".to_owned()],
             ));
         }
     };
-    if ctx.written_walls.contains_rows(y_start, sh) {
+    if written.walls.contains_rows(y_start, sh) {
         let primary = if ctx.wall_column.is_empty() {
             format!(
                 "window at y={y_start} size={sw}x{sh} has no wall to cut into: no `walls` member on this struct paints",
@@ -258,7 +292,7 @@ fn window_course_refusal(
         } else {
             format!(
                 "{rows} lie in a course the walls are written to ({}) but not in one they paint ({})",
-                ctx.written_walls, ctx.wall_column,
+                written.walls, ctx.wall_column,
             )
         };
         return Some(diag_deferred_member_noted(
@@ -267,18 +301,40 @@ fn window_course_refusal(
             UNPAINTED_COURSE,
         ));
     }
-    let (primary, fix) = if ctx.written_walls.is_empty() {
+    if written.unplaced_walls {
+        let primary = if written.walls.is_empty() {
+            format!(
+                "window at y={y_start} size={sw}x{sh} has no wall to cut into: every `walls` member on this struct sits under a `level` that is not placed",
+            )
+        } else {
+            format!(
+                "{rows} are not all inside one placed wall course (size={sw}x{sh}; the placed walls occupy {})",
+                written.walls,
+            )
+        };
+        return Some(diag_deferred_member_noted(
+            member,
+            &primary,
+            &unplaced_walls_note("the window's rows", "the window is cut"),
+        ));
+    }
+    let (primary, fix) = if written.walls.is_empty() {
         (
             format!(
                 "window at y={y_start} size={sw}x{sh} has no wall to cut into: this struct declares no `walls` with a positive `height=`",
             ),
-            "add a `walls` member whose course holds the window's rows",
+            if written.unsized_walls {
+                "give the `walls` a positive `height=`, or add a `walls` member whose course holds \
+                 the window's rows"
+            } else {
+                "add a `walls` member whose course holds the window's rows"
+            },
         )
     } else {
         (
             format!(
                 "{rows} are not all inside one wall course (size={sw}x{sh}; the walls occupy {})",
-                ctx.written_walls,
+                written.walls,
             ),
             "move the window with `y=`, shorten it with `size=`, or raise the walls' `height=`, \
              so one course holds every row it cuts",

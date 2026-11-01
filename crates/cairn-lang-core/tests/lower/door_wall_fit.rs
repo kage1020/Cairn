@@ -179,8 +179,8 @@ fn a_door_in_walls_that_paint_nothing_defers_to_them() {
         [(
             "door has no wall to cut into: no `walls` member on this struct paints",
             vec![
-                "a `walls` member written to hold these rows paints nothing, and its own finding \
-                 says why; the opening is cut once that member paints"
+                "a `walls` member written to hold these rows paints nothing; the opening is cut once \
+                 that member's material resolves to a block"
             ],
         )],
     );

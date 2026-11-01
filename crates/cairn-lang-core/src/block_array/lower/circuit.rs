@@ -5,7 +5,9 @@ use crate::ast::{SIGNAL_HEAD, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticNote};
 use crate::intent::{Member, MemberRole, PatchTargetError, actuator_patch_target};
 
-use crate::block_array::args::{NonNegRead, diag_invalid_member, nonneg_int_or_refuse};
+use crate::block_array::args::{
+    NonNegRead, diag_deferred_member_noted, diag_invalid_member, nonneg_int_or_refuse,
+};
 
 /// Check a `circuit region=<label> void=<N>` line's shape without emitting voxels
 /// (`spec/redstone` "Place-and-route").
@@ -73,10 +75,11 @@ pub(super) fn is_actuator_patch(member: &Member) -> bool {
 
 /// Check a `door[id=X] opened_by=sig.Y` actuator patch's shape without emitting voxels.
 ///
-/// The `id=` must name exactly one physical `door` in `siblings`, the flattened paint set.
+/// The `id=` must name exactly one physical `door` in `written`, each member with its level's
+/// offset, `None` under a `level` that is not placed.
 pub(super) fn recognize_actuator_patch(
     member: &Member,
-    siblings: &[(u32, &Member)],
+    written: &[(Option<u32>, &Member)],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     debug_assert!(
@@ -106,17 +109,20 @@ pub(super) fn recognize_actuator_patch(
         return;
     }
     // The redstone front end picks the door through this too, so the two agree.
-    if let Err(reason) = actuator_patch_target(member, siblings.iter().map(|&(_, m)| m)) {
-        let mut diagnostic = diag_invalid_member(member, reason.to_string(), Vec::new());
-        if let Some(fix) = patch_target_fix(&reason) {
-            diagnostic.notes.push(DiagnosticNote {
-                span: None,
-                message: fix,
-            });
+    let door = match actuator_patch_target(member, written.iter().map(|&(_, m)| m)) {
+        Ok(door) => door,
+        Err(reason) => {
+            let mut diagnostic = diag_invalid_member(member, reason.to_string(), Vec::new());
+            if let Some(fix) = patch_target_fix(&reason) {
+                diagnostic.notes.push(DiagnosticNote {
+                    span: None,
+                    message: fix,
+                });
+            }
+            diagnostics.push(diagnostic);
+            return;
         }
-        diagnostics.push(diagnostic);
-        return;
-    }
+    };
     let unknown_intent_keys: Vec<&str> = member
         .intent_state
         .keys()
@@ -127,53 +133,50 @@ pub(super) fn recognize_actuator_patch(
         diagnostics.push(diag_invalid_member(
             member,
             format!(
-                "door actuator patch accepts only `opened_by=sig.<name>` today; unknown \
-                 attribute(s): {} (spec/redstone \"Signal binding\" reserves `lit_by=` / \
-                 `powered_by=` / `fired_by=` for future keywords)",
+                "door actuator patch takes only `opened_by=sig.<name>`; unknown attribute(s): {}",
                 unknown_intent_keys.join(", "),
             ),
-            Vec::new(),
+            vec!["move these onto the door's own line, or drop them".to_owned()],
         ));
         return;
     }
     let Some(opened_by) = member.intent_state.get("opened_by") else {
         diagnostics.push(diag_invalid_member(
             member,
-            "door actuator patch requires an `opened_by=sig.<name>` binding (only `opened_by=` is recognised on doors today)".to_owned(),
-            Vec::new(),
+            "door actuator patch has no `opened_by=`, so it binds no signal to the door".to_owned(),
+            vec!["write `opened_by=sig.<name>`, the signal that opens the door".to_owned()],
         ));
         return;
     };
-    match &opened_by.value.kind {
-        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD && dotref.tail().len() == 1 => {}
-        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD => {
-            diagnostics.push(diag_invalid_member(
-                member,
-                format!(
-                    "door actuator patch `opened_by=` must be a two-segment signal reference `sig.<name>`, got `{dotref}`",
-                ),
-                Vec::new(),
-            ));
+    let fault = match &opened_by.value.kind {
+        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD && dotref.tail().len() == 1 => {
+            None
         }
-        ValueKind::DotRef(dotref) => {
-            diagnostics.push(diag_invalid_member(
-                member,
-                format!(
-                    "door actuator patch `opened_by=` must be a signal reference `sig.<name>` (head must be `sig`), got `{dotref}`",
-                ),
-                Vec::new(),
-            ));
-        }
-        _ => {
-            diagnostics.push(diag_invalid_member(
-                member,
-                format!(
-                    "door actuator patch `opened_by=` must be a signal reference `sig.<name>`, got {}",
-                    opened_by.value.kind_name(),
-                ),
-                Vec::new(),
-            ));
-        }
+        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD => Some(format!(
+            "door actuator patch `opened_by=` must be a two-segment signal reference `sig.<name>`, got `{dotref}`",
+        )),
+        ValueKind::DotRef(dotref) => Some(format!(
+            "door actuator patch `opened_by=` must be a signal reference `sig.<name>` (head must be `sig`), got `{dotref}`",
+        )),
+        _ => Some(format!(
+            "door actuator patch `opened_by=` must be a signal reference `sig.<name>`, got {}",
+            opened_by.value.kind_name(),
+        )),
+    };
+    if let Some(primary) = fault {
+        diagnostics.push(diag_invalid_member(member, primary, Vec::new()));
+        return;
+    }
+    let unplaced = written
+        .iter()
+        .any(|&(y_offset, m)| y_offset.is_none() && std::ptr::eq(m, door));
+    if unplaced {
+        diagnostics.push(diag_deferred_member_noted(
+            member,
+            "door actuator patch binds a `door` under a `level` that is not placed, so no door is \
+             built for it to open",
+            "the door is built once that `level` is placed",
+        ));
     }
 }
 

@@ -262,16 +262,25 @@ fn invalid_lines<'a>(src: &'a str, out: &'a BlockArrayIr) -> Vec<(&'a str, &'a s
         .collect()
 }
 
-/// Asserts the one finding on `src` is the `E_INVALID_MEMBER` on `line` saying `primary`.
+/// Asserts the one finding on `src` is the `E_INVALID_MEMBER` on `line` saying `primary`, with
+/// `notes` and nothing else under it.
 #[track_caller]
-fn assert_refused_alone(src: &str, line: &str, primary: &str) {
+fn assert_refused_alone(src: &str, line: &str, primary: &str, notes: &[&str]) {
     let out = lowered(src);
     assert_eq!(
         out.diagnostics
             .iter()
-            .map(|d| (d.code, &src[d.span.start..d.span.end], d.primary.as_str()))
+            .map(|d| (
+                d.code,
+                &src[d.span.start..d.span.end],
+                d.primary.as_str(),
+                d.notes
+                    .iter()
+                    .map(|n| n.message.as_str())
+                    .collect::<Vec<_>>(),
+            ))
             .collect::<Vec<_>>(),
-        [(DiagnosticCode::InvalidMember, line, primary)],
+        [(DiagnosticCode::InvalidMember, line, primary, notes.to_vec())],
     );
 }
 
@@ -839,6 +848,35 @@ fn walls_only_fills_outline_above_floor() {
 }
 
 #[test]
+fn walls_one_row_tall_build_and_walls_with_no_positive_height_are_refused() {
+    let out = lowered(theme_t!(
+        "w",
+        "\nstruct s size=3x3\n  walls mat_slot=w height=1\n"
+    ));
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(out.structures["struct::s"].dims, Dims { x: 3, y: 2, z: 3 });
+    let form = "write `height=N`, where `N` is a positive integer: the walls fill the `N` rows \
+                above the base row";
+    for (walls, primary) in [
+        (
+            "walls mat_slot=w height=0",
+            "walls `height=` must be a positive integer that fits in u32, not integer `0`",
+        ),
+        (
+            "walls mat_slot=w height=\"3\"",
+            "walls `height=` must be a positive integer that fits in u32, not string `\"3\"`",
+        ),
+        (
+            "walls mat_slot=w",
+            "walls has no `height=`, so nothing says how many rows it rises",
+        ),
+    ] {
+        let src = format!("{}\nstruct s size=3x3\n  {walls}\n", theme_t!("w", ""));
+        assert_refused_alone(&src, walls, primary, &[form]);
+    }
+}
+
+#[test]
 fn floor_and_walls_combine() {
     let src = "theme t:\n  slot f -> @oak_planks\n  slot w -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  walls mat_slot=w height=2\n";
     let out = lowered(src);
@@ -876,18 +914,12 @@ fn a_stair_without_kind_is_refused_without_touching_a_voxel() {
 }
 
 #[test]
-fn circuit_region_recognised_without_deferred_warning() {
+fn circuit_region_recognised_without_a_finding() {
     let src = theme_t!(
         "f",
         "\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=2\n"
     );
-    let out = lowered(src);
-    assert_eq!(
-        deferred_count(&out),
-        0,
-        "circuit should not emit W_DEFERRED_MEMBER, got {:?}",
-        out.diagnostics,
-    );
+    assert_eq!(lowered(src).diagnostics, []);
 }
 
 /// A member lowering refuses, and what its one `E_INVALID_MEMBER` says.
@@ -966,7 +998,7 @@ fn a_malformed_circuit_is_refused_once_and_names_its_fault() {
 }
 
 #[test]
-fn actuator_patch_opened_by_recognised_without_deferred_warning() {
+fn actuator_patch_opened_by_recognised_without_a_finding() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  \
@@ -974,13 +1006,7 @@ fn actuator_patch_opened_by_recognised_without_deferred_warning() {
          door id=front side=front at=center\n  \
          door[id=front] opened_by=sig.open\n"
     );
-    let out = lowered(src);
-    assert_eq!(
-        deferred_count(&out),
-        0,
-        "actuator patch should not emit W_DEFERRED_MEMBER, got {:?}",
-        out.diagnostics,
-    );
+    assert_eq!(lowered(src).diagnostics, []);
 }
 
 #[test]
@@ -1057,13 +1083,7 @@ fn actuator_patch_selects_door_declared_inside_level() {
            door id=inner side=front at=center\n  \
          door[id=inner] opened_by=sig.tick\n"
     );
-    let out = lowered(src);
-    assert_eq!(
-        deferred_count(&out),
-        0,
-        "actuator patch should resolve a level-nested door id, got {:?}",
-        out.diagnostics,
-    );
+    assert_eq!(lowered(src).diagnostics, []);
 }
 
 #[test]
@@ -1318,16 +1338,6 @@ fn a_slot_read_under_a_level_still_warns_and_one_the_level_drops_does_not() {
             "level-scoped `roof` is not yet supported",
         ),
         (
-            "struct s size=3x3\n  level\n    walls mat_slot=f height=2\n",
-            DiagnosticCode::InvalidMember,
-            "level has no `y=`, so nothing says which row its members stand on",
-        ),
-        (
-            "struct s size=3x3\n  level y=top\n    walls mat_slot=f height=2\n",
-            DiagnosticCode::InvalidMember,
-            "level `y=` must be a non-negative integer that fits in u32, not identifier `top`",
-        ),
-        (
             "struct s size=3x3\n  level y=0\n    level y=1\n      walls mat_slot=f height=2\n",
             DiagnosticCode::DeferredMember,
             "nested `level` blocks are not yet supported; this level and every member \
@@ -1344,6 +1354,15 @@ fn a_slot_read_under_a_level_still_warns_and_one_the_level_drops_does_not() {
             [(code, primary)],
             "{src}",
         );
+    }
+    // `check` refuses a level with members under it and no offset.
+    for src in [
+        "struct s size=3x3\n  level\n    walls mat_slot=f height=2\n",
+        "struct s size=3x3\n  level y=top\n    walls mat_slot=f height=2\n",
+    ] {
+        let out = lowered(src);
+        lowered_struct(&out, "s", src);
+        assert_eq!(out.diagnostics, [], "{src}");
     }
 }
 
@@ -2078,6 +2097,10 @@ fn a_window_past_the_wall_end_is_refused_and_cuts_nothing() {
         "window side=front offset=3 y=2 size=3x2 mat_slot=g",
         "window extends beyond the `front` wall (offset=3 size=3x2 repeat=1 step=0, wall \
          length=5)",
+        &[
+            "the window ends at `offset + size.w`, which must be at most 5; lower `offset=` or narrow \
+             `size=`",
+        ],
     );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
@@ -2096,6 +2119,7 @@ fn an_unknown_roof_kind_is_refused_and_adds_no_height() {
         src,
         "roof kind=pyramid mat_slot=r",
         "unknown roof `kind=pyramid` (expected one of gable, shed, hip, flat)",
+        &[],
     );
     assert_eq!(lowered(src).structures["struct::s"].dims.y, 5);
 }
@@ -2127,6 +2151,7 @@ fn a_shed_roof_without_slope_to_is_refused() {
         src,
         "roof kind=shed mat_slot=r",
         "shed roof requires `slope_to=` (one of front, back, left, right)",
+        &[],
     );
 }
 
@@ -2198,6 +2223,7 @@ fn a_door_without_side_is_refused() {
         src,
         "door at=center",
         "missing `side=` (expected one of front, back, left, right)",
+        &[],
     );
 }
 
@@ -2211,6 +2237,71 @@ fn a_window_with_a_non_ident_side_is_refused() {
         src,
         "window side=3 offset=1 y=1 size=1x1 mat_slot=g",
         "`side=` must be one of front, back, left, right, not integer `3`",
+        &[],
+    );
+}
+
+#[test]
+fn a_side_typo_is_refused_with_what_was_written() {
+    assert_refused_alone(
+        theme_t!(
+            "w",
+            "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  door side=frnt at=center\n"
+        ),
+        "door side=frnt at=center",
+        "unknown `side=frnt` (expected one of front, back, left, right)",
+        &[],
+    );
+}
+
+#[test]
+fn a_window_missing_or_misreading_an_argument_it_needs_is_refused_with_its_form() {
+    let offset = "write `offset=N`, where `N` is a non-negative integer: the window's first column \
+                  along the wall, counted from 0 at its left end seen from outside";
+    let y = "write `y=N`, where `N` is a non-negative integer: the window's lowest row, counted up \
+             from 0, the base row of the struct or of the window's `level`";
+    let size = "write `size=WxH`, where `W` and `H` are positive integers: the window's width \
+                along the wall and its height in rows";
+    for (window, primary, note) in [
+        (
+            "window side=front offset=x y=1 size=1x1",
+            "window has an `offset=` that is not a non-negative integer that fits in u32",
+            offset,
+        ),
+        (
+            "window side=front offset=1 size=1x1",
+            "window has no `y=`",
+            y,
+        ),
+        (
+            "window side=front offset=1 y=x size=1x1",
+            "window has a `y=` that is not a non-negative integer that fits in u32",
+            y,
+        ),
+        (
+            "window side=front offset=1 y=1",
+            "window has no `size=WxH`",
+            size,
+        ),
+        (
+            "window side=front offset=1 y=1 size=3",
+            "window has a `size=` that is not a `WxH` of two positive integers",
+            size,
+        ),
+    ] {
+        assert_refused_alone(&walled_6x5_source(window), window, primary, &[note]);
+    }
+}
+
+#[test]
+fn a_window_whose_rows_run_past_the_last_addressable_row_is_refused() {
+    let window = "window side=front offset=1 y=4294967295 size=1x2";
+    assert_refused_alone(
+        &walled_6x5_source(window),
+        window,
+        "window rows from y=4294967295 run past the highest row a build can address (size=1x2; \
+         the walls occupy y=1..=3)",
+        &["lower the window with `y=`, or shorten it with `size=`"],
     );
 }
 
@@ -3460,29 +3551,45 @@ fn east_of_skipped_prior_does_not_silently_stack_at_origin() {
 }
 
 #[test]
-fn a_level_without_y_is_refused_and_drops_its_children() {
+fn a_level_without_y_drops_its_children_and_leaves_its_refusal_to_check() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2\n    walls id=upper mat_slot=w height=2\n"
     );
+    let out = lowered(src);
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(out.structures["struct::s"].dims.y, 4);
+}
+
+#[test]
+fn a_level_with_no_members_and_no_y_is_refused() {
     assert_refused_alone(
-        src,
+        theme_t!(
+            "w",
+            "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2\n"
+        ),
         "level id=floor2",
         "level has no `y=`, so nothing says which row its members stand on",
+        &[
+            "write `level y=N`, where `N` is a non-negative integer: the members under it are \
+             measured from row `N`, as the members of the body are from row 0",
+        ],
     );
-    assert_eq!(lowered(src).structures["struct::s"].dims.y, 4);
 }
 
 #[test]
 fn a_level_with_a_non_integer_y_is_refused_with_the_value_written() {
-    let src = theme_t!(
-        "w",
-        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2 y=top\n    walls id=upper mat_slot=w height=2\n"
-    );
     assert_refused_alone(
-        src,
+        theme_t!(
+            "w",
+            "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2 y=top\n"
+        ),
         "level id=floor2 y=top",
         "level `y=` must be a non-negative integer that fits in u32, not identifier `top`",
+        &[
+            "write `level y=N`, where `N` is a non-negative integer: the members under it are \
+             measured from row `N`, as the members of the body are from row 0",
+        ],
     );
 }
 
@@ -3622,8 +3729,12 @@ fn a_stair_on_a_struct_no_roof_gives_an_overhang_is_refused() {
     assert_refused_alone(
         &src,
         stair,
-        "eave `stair` has no overhang to sit in: no roof on this struct is written with an \
-         `overhang=` of at least 1",
+        "eave `stair` has no overhang to sit in: no roof on this struct has an `overhang=` of at \
+         least 1",
+        &[
+            "an eave band sits one voxel outside the wall, in the ring a roof's `overhang=` adds; give a \
+             `roof` in the struct's body an `overhang=` of at least 1",
+        ],
     );
 }
 
@@ -3664,6 +3775,10 @@ fn a_stair_above_the_struct_is_refused() {
         src,
         "stair id=e kind=stairs mat_slot=r side=front half=top facing=out y=99",
         "stair y=99 does not fit in the struct (dims.y=5)",
+        &[
+            "the struct's top row is 4",
+            "lower the stair or its `level`, or raise the `walls` to reach its row",
+        ],
     );
 }
 
@@ -3716,6 +3831,7 @@ fn a_window_repeated_zero_times_is_refused() {
         &walled_6x5_source(window),
         window,
         "window `repeat=0` would stamp no instances; drop the window instead",
+        &[],
     );
 }
 
@@ -3726,6 +3842,7 @@ fn a_repeated_window_without_step_is_refused() {
         &walled_6x5_source(window),
         window,
         "window `repeat=` requires a positive `step=` so instances do not overlap",
+        &[],
     );
 }
 
@@ -3744,6 +3861,10 @@ fn a_window_series_past_the_wall_end_is_refused() {
         window,
         "window extends beyond the `front` wall (offset=0 size=2x1 repeat=4 step=2, wall \
          length=6)",
+        &[
+            "the last instance ends at `offset + step * (repeat - 1) + size.w`, which must be at most \
+             6; lower `offset=`, `step=` or `repeat=`, or narrow `size=`",
+        ],
     );
 }
 
@@ -3794,6 +3915,10 @@ fn window_carve_stops_at_the_top_of_the_wall_not_the_top_of_the_volume() {
         "window side=front y=3 size=1x2",
         "window rows y=3..=4 are not all inside one wall course (size=1x2; the walls occupy \
          y=1..=3)",
+        &[
+            "move the window with `y=`, shorten it with `size=`, or raise the walls' `height=`, so \
+           one course holds every row it cuts",
+        ],
     );
 }
 
@@ -3807,6 +3932,10 @@ fn a_door_whose_level_sits_at_or_above_the_wall_it_would_carve_is_refused() {
         src,
         "door id=hole side=front at=center",
         "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)",
+        &[
+            "a door opens one row above the base of its `level`, or of the body outside one; move it \
+             under a `level` whose walls hold that row, or add walls there",
+        ],
     );
 }
 
@@ -4308,11 +4437,15 @@ fn pressure_plate_offset_past_the_wall_is_refused_before_the_wall_grid_is_asked(
 fn nonneg_int_rejects_values_that_do_not_fit_in_u32() {
     let src = theme_t!(
         "w",
-        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n    walls id=upper mat_slot=w height=1\n"
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n"
     );
     assert_refused_alone(
         src,
         "level id=huge y=5000000000",
         "level `y=` must be a non-negative integer that fits in u32, not integer `5000000000`",
+        &[
+            "write `level y=N`, where `N` is a non-negative integer: the members under it are \
+             measured from row `N`, as the members of the body are from row 0",
+        ],
     );
 }

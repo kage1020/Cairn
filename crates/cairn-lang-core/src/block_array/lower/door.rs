@@ -10,7 +10,7 @@ use crate::block_array::openings::{
 };
 
 use super::canvas::MemberCanvas;
-use super::members::{StructCtx, UNPAINTED_COURSE, side_name, side_of};
+use super::members::{StructCtx, UNPAINTED_COURSE, side_name, side_of, unplaced_walls_note};
 
 /// Most rows a doorway opens, counted from the row it opens at; a shorter course cuts fewer.
 const DOOR_HEIGHT: u32 = 2;
@@ -78,28 +78,51 @@ pub(super) fn carve_door(
 ///
 /// A row a `walls` member is written to hold and does not paint is that member's to repair.
 fn door_course_refusal(member: &Member, base_row: u32, ctx: &StructCtx<'_>) -> Diagnostic {
-    if ctx.written_walls.course_top_at(base_row).is_some() {
+    let written = &ctx.written;
+    if written.walls.course_top_at(base_row).is_some() {
         let primary = if ctx.wall_column.is_empty() {
             "door has no wall to cut into: no `walls` member on this struct paints".to_owned()
         } else {
             format!(
                 "door opens at y={base_row}, in a course the walls are written to ({}) but not in one they paint ({})",
-                ctx.written_walls, ctx.wall_column,
+                written.walls, ctx.wall_column,
             )
         };
         return diag_deferred_member_noted(member, &primary, UNPAINTED_COURSE);
     }
-    let (primary, fix) = if ctx.written_walls.is_empty() {
+    if written.unplaced_walls {
+        let primary = if written.walls.is_empty() {
+            "door has no wall to cut into: every `walls` member on this struct sits under a \
+             `level` that is not placed"
+                .to_owned()
+        } else {
+            format!(
+                "door opens at y={base_row}, which no placed wall course holds (the placed walls occupy {})",
+                written.walls,
+            )
+        };
+        return diag_deferred_member_noted(
+            member,
+            &primary,
+            &unplaced_walls_note("the row the door opens at", "the door is cut"),
+        );
+    }
+    let (primary, fix) = if written.walls.is_empty() {
         (
             "door has no wall to cut into: this struct declares no `walls` with a positive `height=`"
                 .to_owned(),
-            "add a `walls` member whose course holds the row the door opens at",
+            if written.unsized_walls {
+                "give the `walls` a positive `height=`, or add a `walls` member whose course holds \
+                 the row the door opens at"
+            } else {
+                "add a `walls` member whose course holds the row the door opens at"
+            },
         )
     } else {
         (
             format!(
                 "door opens at y={base_row}, which is not inside any wall course (the walls occupy {})",
-                ctx.written_walls,
+                written.walls,
             ),
             "a door opens one row above the base of its `level`, or of the body outside one; \
              move it under a `level` whose walls hold that row, or add walls there",

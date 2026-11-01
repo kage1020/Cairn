@@ -17,12 +17,14 @@ mod paint;
 mod phase;
 mod plate;
 mod roof_fill;
+mod roof_kind;
 mod site_floor;
 mod sizing;
 mod stair;
 mod token_diag;
 mod window;
 mod without_target;
+mod written;
 
 use std::collections::HashSet;
 
