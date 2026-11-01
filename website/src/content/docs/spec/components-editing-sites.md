@@ -4,6 +4,9 @@ title: "9. Components, Editing, and Multi-building"
 
 ## 9.1 `def`, the component construct
 
+**Subject to change.** A header's `class=` is accepted, but no pass reads it yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+
 `def` defines a slot-bearing Component, unified with `theme` and `site` by the same mechanism, so
 the reference system does not fracture across editing, theming, and multi-building.
 
@@ -27,7 +30,8 @@ def cottage class=house size=9x7:
 
 ## 9.2 Editing model
 
-**Subject to change.** Nothing in this section is built yet
+**Subject to change.** The address the compiler gives a member without `id=`, and the `edit` patch
+DSL that would use it, are not built yet
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 Important members carry `id=`. Members without one get a **meaning-based stable address** derived

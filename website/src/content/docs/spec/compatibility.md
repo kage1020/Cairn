@@ -26,9 +26,8 @@ it is added with the first deprecation, and nothing emits it yet.
 Stable surfaces:
 
 - `.crn` syntax that is normative in the spec (keywords, headers, block kinds, blockstate
-  primitives, theme/material primitives), except what a section flags
-  [subject to change](#subject-to-change). Edition guards join it when `@edition` parses
-  ([§10.7](/spec/versioning-editions/#writing-an-alternative)).
+  primitives, theme/material primitives, edition guards), except what a section flags
+  [subject to change](#subject-to-change).
 - The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
@@ -62,14 +61,17 @@ Evolving surfaces:
   is not).
 - The `--features` set on `cairn-lang-cli` (cargo features) and `[features]` on workspace crates.
 
-### Subject to change
+#### Subject to change
 
-A section that specifies syntax the compiler does not build yet opens with a **Subject to change.**
-paragraph naming that syntax. What the flag names stays Evolving whatever tier
-[§C.2](#c2-tier-of-each-surface-by-milestone) gives its chapter, and the rest of the section takes
-the chapter's tier. The change that builds the syntax takes the flag off, and its CHANGELOG entry
-says the syntax graduates to Stable. No flag is added to syntax that is already Stable, since that
-would be a demotion.
+The flag is for the syntax the `.crn` syntax row of [§C.2](#c2-tier-of-each-surface-by-milestone)
+covers: chapters 5 to 9, and [§10.7](/spec/versioning-editions/#107-java--bedrock-portability),
+which writes the edition guards. A section there that specifies syntax the compiler does not build
+yet opens with a **Subject to change.** paragraph naming that syntax. What the flag names stays
+Evolving whatever tier the row gives, and the flag says nothing about the rest of its section. The
+change that builds the syntax takes the flag off. The syntax then takes the row's tier, and when
+that tier is Stable, the CHANGELOG entry says it graduates. No flag is added to syntax that is
+already Stable, since that would be a demotion. Chapter 14 carries no flag: the redstone DSL has a
+row of its own, Evolving until M6.
 
 ### Internal
 
@@ -98,7 +100,7 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 
 | Surface | Through M1 | At M2 (minimal build) | At M3 (examples work) | At M5 (DX) | At M6 (redstone) |
 |---|---|---|---|---|---|
-| `.crn` syntax (chapters 5-9) | Evolving | Evolving | **Stable** | Stable | Stable |
+| `.crn` syntax (chapters 5-9, §10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Lockfile format | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` flags | Evolving | Evolving | **Stable** | Stable | Stable |
 | Diagnostic codes (`E_*`, `W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |

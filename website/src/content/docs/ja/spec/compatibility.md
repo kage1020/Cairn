@@ -19,7 +19,7 @@ Cairn は [日付ベースのバージョニング](/ja/spec/#2-つのバージ�
 
 Stable な面:
 
-- 仕様が規範として定める `.crn` の構文 (キーワード、ヘッダ、ブロックの種類、ブロックステートのプリミティブ、テーマとマテリアルのプリミティブ)。ただし、節が[変更の余地あり](#変更の余地あり)と示したものは除きます。エディションガードは、`@edition` がパースできるようになった時点でここに加わります ([§10.7](/ja/spec/versioning-editions/#代替を書くとき))。
+- 仕様が規範として定める `.crn` の構文 (キーワード、ヘッダ、ブロックの種類、ブロックステートのプリミティブ、テーマとマテリアルのプリミティブ、エディションガード)。ただし、節が[変更の余地あり](#変更の余地あり)と示したものは除きます。
 - ロックファイル (`<source>.lock`) の形式 (フィールド、ハッシュの入力、[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) が定める `verified` の意味)。
 - `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力のスキーマ、終了コード。
 - tier-1 のマテリアルトークン (ユーザーがソースに書く名前)。ただし [§7.2](/ja/spec/materials-themes/#72-正規トークン) の正規トークンには、どれが tier-1 かの区別がまだありません。
@@ -42,9 +42,9 @@ Evolving な面:
 - CLI の人間向け診断の書式と文言 (*コード* は Stable ですが、*文言* は違います)。
 - `cairn-lang-cli` の `--features` の組 (cargo features) と、ワークスペースの各クレートの `[features]`。
 
-### 変更の余地あり
+#### 変更の余地あり
 
-コンパイラがまだ組み上げない構文を定める節は、その構文を挙げる **変更の余地あり。** の段落で始めます。この印が挙げたものは、[§C.2](#c2-マイルストーンごとのティア表) がその章にどのティアを与えていても Evolving のままで、節の残りは章のティアに従います。その構文を組み上げる変更が印を外し、その変更の CHANGELOG の項目に、構文が Stable に昇格したことを書きます。すでに Stable な構文に印を付けることはしません。それは降格にあたるからです。
+この印を使うのは、[§C.2](#c2-マイルストーンごとのティア表) の `.crn` の構文の行が対象とする構文、つまり 5〜9 章と、エディションガードを書く [§10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性) の構文です。そこでコンパイラがまだ組み上げない構文を定める節は、その構文を挙げる **変更の余地あり。** の段落で始めます。この印が挙げたものは、行がどのティアを与えていても Evolving のままです。節のそれ以外の部分については、印は何も定めません。その構文を組み上げる変更で印を外し、構文はその行のティアに従います。そのティアが Stable なら、その変更の CHANGELOG の項目に、構文が Stable に昇格したことを書きます。すでに Stable な構文に印を付けることはしません。それは降格にあたるからです。14 章には印を付けません。レッドストーンの DSL には専用の行があり、M6 まで Evolving だからです。
 
 ### Internal
 
@@ -64,7 +64,7 @@ Internal な面:
 
 | 面 | M1 まで | M2 (minimal build) | M3 (examples work) | M5 (DX) | M6 (redstone) |
 |---|---|---|---|---|---|
-| `.crn` の構文 (5〜9 章) | Evolving | Evolving | **Stable** | Stable | Stable |
+| `.crn` の構文 (5〜9 章、§10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
 | ロックファイルの形式 | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` のフラグ | Evolving | Evolving | **Stable** | Stable | Stable |
 | 診断コード (`E_*`、`W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |

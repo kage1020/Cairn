@@ -1,11 +1,9 @@
-//! Just enough Markdown for the inventories: sections, fences, table rows and code spans.
+//! Just enough Markdown for the rules: sections, fences, headings, table rows and code spans.
+//!
+//! Fences and headings are read by `cairn-lang-docs`, whose reading `site-parity` holds to the
+//! built site's.
 
-/// The heading level of `line` and its text, if `line` is an ATX heading.
-fn heading(line: &str) -> Option<(usize, &str)> {
-    let level = line.chars().take_while(|c| *c == '#').count();
-    let text = line[level..].strip_prefix(' ')?;
-    (level > 0).then_some((level, text.trim()))
-}
+pub use cairn_lang_docs::{heading, lines};
 
 /// The numbered lines of the first level-`level` section whose title matches, fences left out.
 pub fn section(
@@ -13,17 +11,12 @@ pub fn section(
     level: usize,
     title_matches: impl Fn(&str) -> bool,
 ) -> Option<Vec<(usize, &str)>> {
-    let mut fenced = false;
     let mut found: Option<Vec<(usize, &str)>> = None;
-    for (index, line) in text.lines().enumerate() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
+    for (index, line) in lines(text).enumerate() {
+        if line.fenced {
             continue;
         }
-        if fenced {
-            continue;
-        }
-        if let Some((depth, title)) = heading(line) {
+        if let Some((depth, title)) = heading(line.text) {
             if found.is_some() && depth <= level {
                 break;
             }
@@ -33,7 +26,7 @@ pub fn section(
             }
         }
         if let Some(lines) = &mut found {
-            lines.push((index + 1, line));
+            lines.push((index + 1, line.text));
         }
     }
     found
@@ -110,6 +103,16 @@ Prose with `a::B` is not a row.
         assert_eq!(
             section(text, 2, |title| title == "A").unwrap(),
             [(5, "| `a` |")]
+        );
+    }
+
+    #[test]
+    fn a_fence_closes_only_on_a_bare_marker_run_as_long_as_its_opening() {
+        let text = "## A\n````\n```crn\n## B\n```\n````\n| `a` |\n";
+        assert_eq!(section(text, 2, |title| title == "B"), None);
+        assert_eq!(
+            section(text, 2, |title| title == "A").unwrap(),
+            [(7, "| `a` |")]
         );
     }
 

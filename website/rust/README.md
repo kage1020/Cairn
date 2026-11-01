@@ -10,6 +10,8 @@ The crate's manifest lives in the site's own directory, `website/`, so its packa
 
 `Page::cited` takes the title a citation quotes, in the form `spec/lint "Error vs warning"` takes in the compiler's `--help` and comments, and returns each part of the page with that title: the section of a heading whose title without its number matches, a term a `- **Term.**` list item defines, or the page itself. More than one part makes the citation ambiguous. `Page::anchored` returns the section a link's `#fragment` opens.
 
+`lines` and `heading` read any Markdown the way the pages are read: which lines fenced code holds, and which line is an ATX heading and at what level.
+
 ## License
 
 Apache-2.0. See [LICENSE](../../LICENSE).

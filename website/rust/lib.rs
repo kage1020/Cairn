@@ -141,7 +141,7 @@ impl Page {
     /// The terms list items define as `- **Term.**` or `- **Term**.`, each named without the stop.
     fn terms(&self, headings: &[(usize, Heading)]) -> Vec<(&'static str, Part)> {
         let markdown = self.markdown;
-        let all: Vec<Line> = lines(markdown).collect();
+        let all: Vec<Line<'static>> = lines(markdown).collect();
         let mut terms = Vec::new();
         for (index, line) in all.iter().enumerate() {
             if line.fenced {
@@ -229,14 +229,18 @@ pub enum Part {
     },
 }
 
-struct Line {
+/// A line of Markdown, read the way the site reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Line<'a> {
     start: usize,
-    text: &'static str,
+    /// The line without its line ending.
+    pub text: &'a str,
     /// Inside fenced code, the fence lines themselves included.
-    fenced: bool,
+    pub fenced: bool,
 }
 
-fn lines(markdown: &'static str) -> impl Iterator<Item = Line> {
+/// Each line of `markdown`, with whether fenced code holds it.
+pub fn lines(markdown: &str) -> impl Iterator<Item = Line<'_>> {
     let mut start = 0;
     let mut open: Option<(char, usize)> = None;
     markdown.split_inclusive('\n').map(move |raw| {
@@ -275,8 +279,8 @@ fn fence(line: &str) -> Option<(char, usize)> {
     (length >= 3).then_some((marker, length))
 }
 
-/// The level and text of an ATX heading line.
-fn heading(line: &str) -> Option<(usize, &str)> {
+/// The level and text of `line`, if it is an ATX heading.
+pub fn heading(line: &str) -> Option<(usize, &str)> {
     let line = line.trim_end();
     let unindented = line.trim_start_matches(' ');
     if line.len() - unindented.len() > 3 {
