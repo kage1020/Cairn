@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Test the changelog script
+      - name: Test the CI scripts
         run: python3 -m unittest discover -s .github/scripts
 
       - name: Check this PR's fragments and title
