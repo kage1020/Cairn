@@ -135,7 +135,7 @@ tree-sitter の文法は、2 つの点で既知の例外です。1 つ目に、�
 
 `sym=true` は、開口を壁の中点で鏡映します (`mirror_offset = wall_length - offset - size_w`)。鏡映した開口が元の矩形と重なる場合は `W_DEFERRED_MEMBER` で拒否し、元の側だけを描きます。壁の中点に対して対称に置いた窓 (`2 * offset + size_w = wall_length`) の鏡映もこれに当たり、元の矩形とぴったり重なります。一方、鏡映が元の矩形に接するだけの場合、つまり元の最後の列の次の列から始まる場合 (`2 * (offset + size_w) = wall_length`) や、元の最初の列の前の列で終わる場合 (`2 * offset = wall_length`) は、元の矩形とセルを共有しないので、拒否も報告もしません。両方が描かれ、窓の 2 倍の幅の 1 つの開口に見えます。
 
-`sym=` には裸の `true` か `false` を書き、`sym=` のない窓は鏡映しません。それ以外の値 (`sym=yes`、`sym="true"`、`sym=1`) は読み取れない値として扱います。窓は鏡映なしで描き、その値は `W_IGNORED_ARGUMENT` として報告します ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。ただし、`repeat=` が 1 より大きい窓は例外です。`sym=true` はそうした窓を拒否するので、読み取れない `sym=` をそこでは `false` とは読みません。窓は切り抜かれず、`W_IGNORED_ARGUMENT` とあわせて `W_DEFERRED_MEMBER` として報告します。
+`sym=` には裸の `true` か `false` を書き、`sym=` のない窓は鏡映しません。それ以外の値 (`sym=yes`、`sym="true"`、`sym=1`) は読み取れない値として扱います。窓は鏡映なしで描き、その値は `W_IGNORED_ARGUMENT` として報告します ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。ただし、`repeat=` が 1 より大きい窓は例外です。連続する窓の鏡映は将来の拡張のために予約しているので、`sym=true` の連続はまだ切り抜かず、`W_DEFERRED_MEMBER` として報告します。読み取れない `sym=` もそこでは `false` とは読まず、その窓も切り抜かずに、`W_IGNORED_ARGUMENT` とあわせて `W_DEFERRED_MEMBER` として報告します。
 
 **`at=` によるドアの位置。** ドアを壁のどの列に置くかは、3 つの名前付きの位置で決まります。
 
