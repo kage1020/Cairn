@@ -14,8 +14,11 @@ Every public surface of the project sits in exactly one of three tiers: **Stable
 ### Stable
 
 The contract is: **breaking changes are announced one release in advance with a `W_DEPRECATED`
-warning, and removed in the following monthly minor at the earliest.** `W_DEPRECATED` is reserved:
-it is added with the first deprecation, and nothing emits it yet.
+warning, and removed in the following monthly minor at the earliest.** `W_DEPRECATED` is a reserved
+code ([§C.3](#c3-how-a-break-is-communicated)): it is added with the first deprecation, and nothing
+emits it yet. A surface that no source or command line spells, such as a JSON output field or an
+exit code, has nothing to carry the warning, and is announced in the CHANGELOG's `Deprecations`
+section alone.
 
 - A breaking change reaching `Stable` MUST be referenced from the next month's CHANGELOG.
 - Renames MUST keep the old name working for the deprecation window.
@@ -34,7 +37,8 @@ Stable surfaces:
   output schemas, and process exit codes.
 - The tier-1 material vocabulary: the abstract tokens the built-in `materials` catalogs declare,
   listed in [§7.2](/spec/materials-themes/#tier-1-tokens). Adding one is not a break.
-- Error/warning codes documented in the spec (`E_*`, `W_*`).
+- The error and warning codes (`E_*`, `W_*`) [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists,
+  and the meaning the spec states for a reserved code ([§C.3](#c3-how-a-break-is-communicated)).
 
 ### Evolving
 
@@ -143,43 +147,56 @@ selects no rules ([§5.3](/spec/syntax/#53-headers)), and "edition" names Java o
 tier of the surface instead, and a Stable surface's `W_DEPRECATED` window gives a file at least one
 release to move.
 
-`W_DEPRECATED` and `E_BREAKING` codes are themselves Stable. Neither exists yet: each is added with
-the first deprecation or break that needs it. Adding a new code is not a breaking change; changing
-the meaning of an existing code is.
+`W_DEPRECATED` and `E_BREAKING` are reserved codes: neither exists yet, and each is added with the
+first deprecation or break that needs it, with the meaning this chapter fixes for it before either
+is added. Adding a new code is not a breaking change; changing the meaning of an existing code is.
 
-Their meanings are fixed now. `W_DEPRECATED` warns on a source that uses a Stable form inside its
-deprecation window, and names the replacement and the earliest release that removes the form.
-`E_BREAKING` refuses a source that uses a form a release has removed, in place of the error the form
-would otherwise earn, and names that release and the replacement. Every deprecation raises the one
-code, and its message says which form it is about.
+`W_DEPRECATED` warns on a source or command line that uses a Stable form inside its deprecation
+window, and names the replacement and the earliest release that removes the form. Every deprecation
+raises the one code, and its message says which form it is about. `E_BREAKING` refuses a source or
+command line that uses a form a release has removed from a Stable surface, in place of the error the
+form would otherwise earn, and names that release and the replacement. It stays on that form in
+every later release, so a removed form never falls back to that other error. A form removed from an
+Evolving surface has no deprecation window and gets no `E_BREAKING`: it earns the error any source
+spelling it earns, and the CHANGELOG entry names the replacement.
 
-The Stable codes are the ones [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists. A code the spec
-names without a row there, such as `E_STATE_DOMAIN` or `E_REQUIRES_CONFLICT`, is reserved: no
-command raises it, and its row landing is adding a code. A code's severity, and the payload
-[Lint §11.2](/spec/lint/#112-machine-readable-payload) gives it, are part of what it means. Adding
-a field to a payload, or a payload to a code that had none, is still adding.
+**Reserved codes.** The codes a stable command raises are the ones
+[Lint §11.1](/spec/lint/#111-diagnostic-codes) lists. The redstone pipeline's codes, which only the
+Internal `cairn synth` raises, are outside that catalog on purpose. Any other code the spec names,
+such as `E_STATE_DOMAIN` or `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
+reserved code lands with the meaning the spec states for it, where it states one, and its row
+landing is adding a code.
 
-Some findings are **placeholders**: they cover syntax or a check the spec defines and the compiler
-does not build yet, and stop covering it when it lands. That is adding the spec's own behaviour,
-which [§C.4](#c4-what-is-not-covered-by-tier) never counts as a break, and the placeholder still
-means what it meant. The placeholders are:
+**What a code means.** A code's severity, and the payload
+[Lint §11.2](/spec/lint/#112-machine-readable-payload) gives it, are part of what it means.
+Adding a field to a payload, a payload to a code that had none, or a value to a field the payload
+gives as one of a list is still adding. Removing or retyping a field, renaming a `kind`, or leaving
+out a field that was always present changes what the code means.
+
+**Placeholders.** A placeholder is a finding that stands in for what the compiler does not build
+yet, and stops being raised there once it is built. That is a bug fix that aligns behaviour with
+the spec, which [§C.4](#c4-what-is-not-covered-by-tier) never counts as a break, and the
+placeholder's code still means what it meant. A placeholder stands in only for what a
+[subject to change](#subject-to-change) flag names, what another chapter says the compiler does not
+build yet, or what the spec reserves for a later extension. Source the spec itself refuses keeps its
+code. The placeholders today include:
 
 - `E_PARSE`, on syntax the spec specifies that does not parse yet, such as coordinate triples,
   decimals, `nbt={...}` values, `edit`, `@edition` and `assert latency`;
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
   `spawn`, `chest`, `lever` and `raw_block`;
-- `E_UNKNOWN_ARGUMENT`, on a key the spec specifies for a keyword that does not take it yet, such as
-  `waterlogged=` on a `stair`;
-- `W_IGNORED_ARGUMENT`, on an unreached key ([Lint §11.3](/spec/lint/#113-error-vs-warning)): a
-  theme selector's bindings, `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a header's
-  `class=` and a `door`'s `mat_slot=`;
+- `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
+  lists, a theme selector's bindings among them;
+- `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which
+  [§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) reserves for a later extension;
 - `W_STATE_LITERAL_UNCHECKED`, until `E_STATE_DOMAIN` checks a state literal against the target;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet
-  ([Lint](/spec/lint/#lowering)), such as a `floor` or `roof` under a raised `level`, a nested
-  `level` and a `window` with both `repeat=` above 1 and `sym=true`.
+  ([Lint](/spec/lint/#lowering)), such as a member whose keyword lowering does not handle yet, a
+  `floor` or `roof` under a raised `level`, and a `window` with `repeat=` above 1 and `sym=true`.
 
-A placeholder covers only what the spec says the compiler does not build yet. Source the spec
-itself refuses keeps its code.
+A placeholder that nothing raises any more keeps its row in
+[Lint §11.1](/spec/lint/#111-diagnostic-codes), which says from which release nothing raises it,
+and its name is never given another meaning.
 
 ## C.4 What is not covered by tier
 

@@ -139,7 +139,7 @@ Dims.y = 1 + wall_top + roof_extra
 
 `level` の中のメンバーも、この 3 つの項すべてに、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 
-**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `pressure_plate` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面なので、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
+**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `pressure_plate` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
 
 **ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof` や `slope_to=` のない `shed` は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
 

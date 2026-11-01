@@ -216,8 +216,8 @@ gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 +
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, and
 `pressure_plate` read `N` as the base their geometry is measured from. A `floor` and a `roof` are
-planes a struct has one of, so under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and
-lowers to nothing.
+planes a struct has one of, and what one under a raised `level` builds is reserved for a later
+extension: under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to nothing.
 
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under
