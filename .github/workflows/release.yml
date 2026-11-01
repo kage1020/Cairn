@@ -302,8 +302,9 @@ jobs:
             exit 1
           fi
 
-      # No auto-merge: the merge into canary has to start canary's CI.
-      - name: Open the main-to-canary PR
+      # Auto-merge holds the PR to a merge commit, which the next promote needs. The merge it
+      # performs starts no workflow, so canary's CI next runs on the PR after it.
+      - name: Open the main-to-canary PR and turn on auto-merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.plan.outputs.version }}
@@ -317,11 +318,18 @@ jobs:
           fi
           existing=$(gh pr list --base canary --head main --state open --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            echo "The main-to-canary PR #$existing is already open"
-            exit 0
+            pr_number="$existing"
+            echo "Reusing the open main-to-canary PR #$pr_number"
+          else
+            pr_number=$(gh pr create \
+              --base canary \
+              --head main \
+              --title "chore: merge main into canary after v$VERSION" \
+              --body "Opened by release.yml after publishing v$VERSION, so canary carries the release commit and any hotfix. Auto-merge merges it with a merge commit once it is approved; the next promote-to-main refuses while main has a commit canary lacks." \
+              | grep -oE '[0-9]+$')
+            echo "Opened main-to-canary PR #$pr_number"
           fi
-          gh pr create \
-            --base canary \
-            --head main \
-            --title "chore: merge main into canary after v$VERSION" \
-            --body "Opened by release.yml after publishing v$VERSION, so canary carries the release commit and any hotfix. Merge it with a merge commit: the next promote-to-main refuses while main has a commit canary lacks."
+          if ! gh pr merge "$pr_number" --auto --merge; then
+            echo "auto-merge could not be turned on for #$pr_number; merge it by hand with a merge commit, not a squash" >&2
+            exit 1
+          fi
