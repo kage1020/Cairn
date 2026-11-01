@@ -1337,12 +1337,6 @@ fn a_slot_read_under_a_level_still_warns_and_one_the_level_drops_does_not() {
             DiagnosticCode::DeferredMember,
             "level-scoped `roof` is not yet supported",
         ),
-        (
-            "struct s size=3x3\n  level y=0\n    level y=1\n      walls mat_slot=f height=2\n",
-            DiagnosticCode::DeferredMember,
-            "nested `level` blocks are not yet supported; this level and every member \
-             declared under it were dropped",
-        ),
     ] {
         let out = lowered(src);
         lowered_struct(&out, "s", src);
@@ -1355,10 +1349,11 @@ fn a_slot_read_under_a_level_still_warns_and_one_the_level_drops_does_not() {
             "{src}",
         );
     }
-    // `check` refuses a level with members under it and no offset.
+    // `check` refuses a level with members under it and no offset, and a level inside a level.
     for src in [
         "struct s size=3x3\n  level\n    walls mat_slot=f height=2\n",
         "struct s size=3x3\n  level y=top\n    walls mat_slot=f height=2\n",
+        "struct s size=3x3\n  level y=0\n    level y=1\n      walls mat_slot=f height=2\n",
     ] {
         let out = lowered(src);
         lowered_struct(&out, "s", src);
@@ -3594,25 +3589,21 @@ fn a_level_with_a_non_integer_y_is_refused_with_the_value_written() {
 }
 
 #[test]
-fn nested_level_defers_per_inner_level_child() {
+fn a_level_inside_a_level_is_left_to_check() {
+    // `check` reports each inner level as `E_UNSUPPORTED_NESTING`.
     let src = theme_t!(
         "w",
-        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=outer y=0\n    level id=inner1 y=1\n      walls id=a mat_slot=w height=1\n    level id=inner2 y=2\n      walls id=b mat_slot=w height=1\n"
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=outer y=0\n    level id=inner1 y=4\n      walls id=a mat_slot=w height=1\n    level id=inner2 y=5\n      walls id=b mat_slot=w height=1\n"
     );
     let out = lowered(src);
-    let nested: Vec<(&str, &str)> = deferred_lines(src, &out)
-        .into_iter()
-        .filter(|(_, primary)| primary.contains("nested"))
-        .collect();
+    assert_eq!(out.diagnostics, [], "{src}");
+    let bare = lowered(theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n"
+    ));
     assert_eq!(
-        nested.len(),
-        2,
-        "one defer per inner level expected, got {nested:?}",
-    );
-    assert_eq!(
-        nested.iter().map(|&(line, _)| line).collect::<Vec<_>>(),
-        ["level id=inner1 y=1", "level id=inner2 y=2"],
-        "each defer sits on its inner level",
+        out.structures, bare.structures,
+        "the inner levels paint nothing"
     );
 }
 

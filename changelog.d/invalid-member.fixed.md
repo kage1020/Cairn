@@ -14,4 +14,5 @@
   `sym=true` mirror is. A `walls` refused for its `height=`, a `level` for its `y=`, a `stair` with
   no `kind=` and a `window` refused for its own arguments now say what to write, a `door` or
   `window` outside every course names the courses the walls are written to, and a `level` with
-  members under it and no `y=` is reported once, as `E_UNSUPPORTED_NESTING`.
+  members under it and no `y=`, or a `level` inside another, is reported once, as
+  `E_UNSUPPORTED_NESTING`.

@@ -186,11 +186,8 @@ pub(super) fn flatten_members<'a>(
                 continue;
             };
             for child in &member.children.members {
+                // `check` refuses a level inside a level as `E_UNSUPPORTED_NESTING`.
                 if matches!(child.role, MemberRole::Level) {
-                    diagnostics.push(diag_deferred_member_reason(
-                        child,
-                        "nested `level` blocks are not yet supported; this level and every member declared under it were dropped",
-                    ));
                     continue;
                 }
                 if let Some(reason) = level_offset_role_defer(&child.role, y_offset) {

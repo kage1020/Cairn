@@ -484,11 +484,11 @@ things, and in none of them does the member's own line keep it from being built.
 member keeps out: a `door` or `window` in a course whose `walls` paint nothing or beside `walls`
 under a `level` that is not placed, or an eave `stair` beside a `roof` that draws nothing. A member
 whose line writes what the pass does not lower yet: a `floor` or `roof` under a raised `level`, a
-nested `level`, a `window` with `repeat=` above 1 and a `sym=` that is `true` or unreadable, or a
-`pressure_plate` whose slot binds a state literal. And part of a member that is built: the mirror
-of a `sym=true` window that would overlap it, or the states a `mat_slot=` binding carries onto a
-roof that takes its own. The `place` and `connect` rows of a site it covers are in [Components,
-Editing, and Multi-building](/spec/components-editing-sites/).
+`window` with `repeat=` above 1 and a `sym=` that is `true` or unreadable, or a `pressure_plate`
+whose slot binds a state literal. And part of a member that is built: the mirror of a `sym=true`
+window that would overlap it, or the states a `mat_slot=` binding carries onto a roof that takes its
+own. The `place` and `connect` rows of a site it covers are in [Components, Editing, and
+Multi-building](/spec/components-editing-sites/).
 
 `E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
 ([§11.3](#113-error-vs-warning)): the member is dropped with nothing in its place, and the
