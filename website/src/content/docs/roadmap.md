@@ -31,11 +31,12 @@ remain.
 
 ## Release cadence
 
-- **Monthly minor** (`YYYY.M.0`) on the first of the month. The release PR is opened by a cron
-  job and merged after human review.
-- **Patches** (`YYYY.M.N`, `N ≥ 1`) are cut on demand: a maintainer starts the same release job
-  by hand, and it opens a release PR from `canary`. Typical triggers: registry/constraint pack
-  updates, regressions, and security fixes. No upper bound on patches per month.
+- **Monthly minor** (`YYYY.M.0`) on the first of the month. A cron job opens the PR that promotes
+  `canary` to `main`; its merge opens the release PR on `main`, which is merged after human review.
+- **Patches** (`YYYY.M.N`, `N ≥ 1`) are cut on demand: a maintainer starts the same promote by hand,
+  or merges a hotfix into `main`, and either opens a release PR on `main`. Typical triggers:
+  registry/constraint pack updates, regressions, and security fixes. No upper bound on patches per
+  month.
 - **Channel:** there is only one, `stable`. Cairn does not run a separate nightly or beta train.
   Behaviour that is not yet stable is gated by [compatibility tier](/spec/compatibility/), not by
   release channel.
@@ -113,22 +114,24 @@ What stands between today and that point:
 
 The release strategy itself is automated:
 
-1. **Monthly minor PR** is opened by a GitHub Actions cron at `04:17 UTC` on the first of each
-   month. The time is deliberately off the hour, because GitHub Actions crons are most likely to be
-   delayed or skipped on the hour. A patch runs the same job by hand, optionally with the version
-   to use.
-2. **Version is computed** from existing tags: no `vYYYY.M.*` tag yet → next is `YYYY.M.0`,
-   otherwise the next in-month patch. The job writes it into the workspace `Cargo.toml`.
-3. **release-plz** writes the changelog section from the commits and opens the release PR. The job
-   then brings the tree-sitter and VS Code manifests to the same version, regenerates the parser,
-   and folds the `changelog.d/` fragments into `CHANGELOG.md`.
-4. **Human review** merges the release PR into `canary`, for a patch as for a minor.
+1. **Monthly promote PR** from `canary` to `main` is opened by a GitHub Actions cron at `04:17 UTC`
+   on the first of each month. The time is deliberately off the hour, because GitHub Actions crons
+   are most likely to be delayed or skipped on the hour. A patch runs the same job by hand, or lands
+   a hotfix on `main`. Only `main` is published, so nothing on `canary` reaches users before it is
+   promoted.
+2. **Version is computed** when the promote or the hotfix lands on `main`, from existing tags: no
+   `vYYYY.M.*` tag yet → next is `YYYY.M.0`, otherwise the next in-month patch. The job writes it
+   into the workspace `Cargo.toml`, unless a maintainer running it by hand gives the version.
+3. **release-plz** writes the changelog section from the commits and opens the release PR against
+   `main`. The job then brings the tree-sitter and VS Code manifests to the same version,
+   regenerates the parser, and folds the `changelog.d/` fragments into `CHANGELOG.md`.
+4. **Human review** merges the release PR into `main`, for a patch as for a minor.
 5. **Publish** runs on that merge: `cargo publish` every crate except `xtask` to crates.io and tag
    `vYYYY.M.N`; build binaries for Linux, macOS, and Windows on `x86_64` and `aarch64`, each target
    on a runner of its own, and attach every archive with its SHA-256 checksum to a GitHub Release,
    beside a sigstore bundle for each archive except the Windows `aarch64` one, and a signed
-   CycloneDX SBOM; publish the tree-sitter grammar to npm; and open a PR that promotes `canary` to
-   `main`.
+   CycloneDX SBOM; publish the tree-sitter grammar to npm; and open a PR that merges `main` back
+   into `canary`.
 
 Compatibility expectations across this schedule are defined separately by
 [compatibility tier](/spec/compatibility/): the lockfile format is **Stable** from 2026.11.0, where

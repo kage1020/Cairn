@@ -135,18 +135,19 @@ Beyond those lists, no rule reads the prose. A row's description, a "Status" par
 
 ## Branches and pull requests
 
-`canary` is the trunk. `main` is the released state. After each publish, the pipeline opens a promote-to-main PR from `canary` and turns on auto-merge, so `main` advances by one approved merge commit per release and never runs ahead of a release.
+`canary` is the trunk. `main` is the branch releases are published from, and nothing is published from anywhere else. Once a month, the release workflow opens a promote-to-main PR from `canary`. Merging it opens the release PR on `main`, and merging that publishes `main`. The workflow then opens a PR that merges `main` back into `canary`, so `canary` carries every release commit and hotfix before the next promote.
 
 | Branch | Purpose |
 |---|---|
 | `canary` | All feature work, fixes, and docs land here. Protected. |
-| `main` | Moved only by the pipeline's promote-to-main PR, which a maintainer approves. No direct pushes; contributors never open a PR against it. |
+| `main` | Moved by the promote-to-main PR, the release PR, and hotfix PRs, each approved by a maintainer. No direct pushes. |
 | `<type>/<short-kebab>` | One change, targeting `canary`. Deleted after merge. |
-| `release-plz-*` | Opened by the release workflow: on a schedule for monthly minors, when a maintainer runs it by hand for patches. |
+| `hotfix/<short-kebab>` | A fix that cannot wait for the next promote, such as a security fix. Branched from `main`, targeting `main`, and opened only when a maintainer asks for it. Deleted after merge. |
+| `release-plz-*` | Opened by the release workflow against `main`, each time `main` gains a promote or a hotfix that makes a release due. |
 
 Name the branch after the Conventional Commits type the work will land under: `feat/parser-lexer`, `fix/wall-corner-shape`, `docs/roadmap-2027`.
 
-**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Squash merge is the only merge mode, so the title becomes the commit on `canary`, and `release-plz` reads it to decide whether a patch release is due. Commits on your own branch are free-form. The scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
+**The PR title must be a [Conventional Commits](https://www.conventionalcommits.org/) line.** Every PR is squash-merged, except the two the release workflow opens between `canary` and `main`, so the title becomes the commit on the branch the PR targets, and `release-plz` reads it to decide whether a patch release is due. Commits on your own branch are free-form. The scope names the crate or spec area (`feat(core)`, `fix(nbt)`, `docs(spec)`, `build(deps)`).
 
 | Type | When | Makes a patch release due? |
 |---|---|---|
@@ -161,7 +162,7 @@ Name the branch after the Conventional Commits type the work will land under: `f
 | `chore` | Anything that doesn't ship to users | No |
 | `style` | Formatting or lint-only changes | No |
 
-A patch release that is due goes out when a maintainer runs the release workflow by hand; only the monthly minor runs on a schedule.
+A patch release that is due goes out when a maintainer runs the release workflow by hand with `step: promote`, or when a hotfix lands on `main`. Only the monthly promote runs on a schedule.
 
 **A breaking change puts `!` before the colon**, after the type or, when one is written, after the scope: `feat(core)!: replace lexer`, `fix!: …`. The `!` and the changelog always go together. A PR that adds a `changelog.d/<slug>.breaking.md` fragment titles itself with `!`, and a PR titled with `!` adds that fragment.
 
@@ -169,7 +170,11 @@ The hand-written entry is what [compatibility "How a break is communicated"](htt
 
 The `!` does not choose the version. Semver would read it as a major bump, but here the release workflow computes the next `YYYY.M.PATCH` from the date and the existing tags, and writes it into `Cargo.toml` before `release-plz` runs. `release-plz` leaves alone a version that already differs from the published one. Nor does the `!` decide whether a release is due; the type does, per the table above. What it changes is the generated release notes. `release-plz` prefixes the commit's line with `[**breaking**]`, and `protect_breaking_commits` keeps that line even for a type whose lines are otherwise dropped (`docs!:`, `ci!:`).
 
-Every PR you open targets `canary`. The only PR against `main` is the pipeline's own promote-to-main. Merging needs one maintainer approval, and green CI is expected, although the branch rulesets do not require any check yet. The release PR follows the same rules; merging it publishes and opens the promote-to-main PR.
+Every PR you open targets `canary`, unless a maintainer asks for a hotfix. Merging needs one maintainer approval, and green CI is expected, although the branch rulesets do not require any check yet. The release PR follows the same rules.
+
+A hotfix branches from `main` as `hotfix/<short-kebab>` and is titled and given a fragment like any other PR. Its merge into `main` opens the release PR for the next patch, which holds only what `main` has, and merging that publishes the fix. The PR back into `canary` then brings the fix to `canary`.
+
+A maintainer merges the promote-to-main PR and the PR back into `canary` by hand, with a merge commit. A squash would leave `main`'s commits out of `canary`'s history, and the next promote refuses while `main` has a commit `canary` lacks. Neither PR turns on auto-merge, because a merge GitHub performs for the workflow's token starts no workflow, and the promote's merge has to start the release PR.
 
 ## Changelog entries
 

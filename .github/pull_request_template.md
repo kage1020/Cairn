@@ -1,6 +1,7 @@
 <!--
 PR title MUST be a Conventional Commits line. The title becomes the squash-merge
-commit message on `canary` and is parsed by release-plz to decide patch releases.
+commit message on `canary` (`main` for a hotfix) and is parsed by release-plz to
+decide patch releases.
 
   feat(core): add lexer
   fix(formats): correct big-endian NBT length

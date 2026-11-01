@@ -63,11 +63,12 @@ The `Changelog` workflow runs `changelog.py pr` on every PR. It reports, all at 
 - any change to CHANGELOG.md, except in the release PR, which `github-actions[bot]` opens from a
   `release-plz-*` branch. There it instead requires that every fragment was folded in.
 
-The promote-to-main PR, which `github-actions[bot]` opens from `canary`, is exempt: everything in it was checked on its way into `canary`. Until
-`Changelog` is a required check in the branch ruleset, a red result does not block the merge, and
-the reviewer asks for the fix.
+The two PRs `github-actions[bot]` opens between `canary` and `main` are exempt, since everything in
+them was checked on its way in: the promote-to-main PR from `canary`, and the PR that merges `main`
+back into `canary`. Until `Changelog` is a required check in the branch ruleset, a red result does
+not block the merge, and the reviewer asks for the fix.
 
-Run the same check before pushing, with your PR's own title:
+Run the same check before pushing, with your PR's own title, and `main` for `canary` in a hotfix:
 
 ```sh
 git fetch origin canary

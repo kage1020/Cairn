@@ -293,6 +293,15 @@ class PrTest(Case):
         self.assertRefused(self.repo.pr("chore: promote canary to main for v2026.11.0",
                                         head="canary", base="main"), "assembled by")
 
+    def test_the_main_to_canary_pr_passes(self) -> None:
+        self.repo.write("CHANGELOG.md", CHANGELOG.replace("## 2026.10.0", RELEASE_SECTION
+                                                          + "## 2026.10.0"))
+        self.repo.write("changelog.d/x.breaking.md", GOOD)
+        self.assertPasses(self.repo.pr("chore: merge main into canary after v2026.11.0",
+                                       head="main", author="github-actions[bot]"))
+        self.assertRefused(self.repo.pr("chore: merge main into canary after v2026.11.0",
+                                        head="main"), "assembled by")
+
     def test_the_pr_that_introduces_the_directory_may_move_entries(self) -> None:
         self.repo.git("checkout", "-q", "canary")
         self.repo.git("rm", "-q", "-r", "changelog.d")
