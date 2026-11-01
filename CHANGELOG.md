@@ -2,6 +2,172 @@
 
 ## [Unreleased]
 
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(core,tree-sitter)* read a truth table written one row per line ([#506](https://github.com/kage1020/Cairn/pull/506))
+
+### Build
+- *(deps)* Bump tree-sitter-cli from 0.26.11 to 0.27.1 in /crates/cairn-lang-tree-sitter ([#516](https://github.com/kage1020/Cairn/pull/516))
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core,redstone)* [**breaking**] face an even-span hip apex away from its ridge, and read logic primitives from a built-in library ([#552](https://github.com/kage1020/Cairn/pull/552))
+- *(tree-sitter)* end a truth output at its digits, and refuse an indent past 16 bits of levels ([#459](https://github.com/kage1020/Cairn/pull/459))
+- *(core,tree-sitter)* point six parser refusals at the text that is wrong ([#457](https://github.com/kage1020/Cairn/pull/457))
+
+## 2026.11.0 — 2026-11-01
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(core,tree-sitter)* read a truth table written one row per line ([#506](https://github.com/kage1020/Cairn/pull/506))
+
+### Build
+- *(deps)* Bump lsp-server from 0.8.0 to 0.10.0 ([#523](https://github.com/kage1020/Cairn/pull/523))
+
+### Changed
+- *(formats)* [**breaking**] make RegistryPack read-only behind accessors ([#530](https://github.com/kage1020/Cairn/pull/530))
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core,cli,lsp)* [**breaking**] report target-independent lowering findings in a check with no target ([#509](https://github.com/kage1020/Cairn/pull/509))
+- *(core)* [**breaking**] report mat_slot= on a role that reads no material as ignored, and stop resolving it ([#478](https://github.com/kage1020/Cairn/pull/478))
+- *(lsp)* [**breaking**] report an unreadable frame as itself, and apply a ranged didChange as an edit ([#461](https://github.com/kage1020/Cairn/pull/461))
+
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(cli)* print the documentation the binary was built with, and serve the site as Markdown ([#511](https://github.com/kage1020/Cairn/pull/511))
+
+### Changed
+- *(formats)* [**breaking**] make RegistryPack read-only behind accessors ([#530](https://github.com/kage1020/Cairn/pull/530))
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core,cli)* hold cairn info's buildable targets to what compile builds, and say how to fix more codes ([#547](https://github.com/kage1020/Cairn/pull/547))
+- *(redstone)* [**breaking**] count a cell's delay per input port, 2 ticks on the Java AND's inverted side ([#544](https://github.com/kage1020/Cairn/pull/544))
+- *(core,cli,lsp)* [**breaking**] report target-independent lowering findings in a check with no target ([#509](https://github.com/kage1020/Cairn/pull/509))
+- *(cli)* ask --out whether it folds case, not the platform ([#508](https://github.com/kage1020/Cairn/pull/508))
+- *(core)* [**breaking**] refuse a Windows device name as a place id or struct name ([#503](https://github.com/kage1020/Cairn/pull/503))
+- *(formats,cli)* [**breaking**] name the degraded entry once in W_INTENT_DEGRADED, and carry it as fields on ParityNote ([#499](https://github.com/kage1020/Cairn/pull/499))
+- *(core,redstone)* point three logic findings at the right line and refuse a repeated truth input ([#479](https://github.com/kage1020/Cairn/pull/479))
+- *(core,redstone)* refuse a second circuit line in a scope as E_DUPLICATE_CIRCUIT ([#476](https://github.com/kage1020/Cairn/pull/476))
+- *(cli)* cap a target below the floor before checking its block ids ([#472](https://github.com/kage1020/Cairn/pull/472))
+- *(formats)* name each degraded Bedrock entry by its Java state, and merge translated duplicates ([#471](https://github.com/kage1020/Cairn/pull/471))
+- *(formats)* accept either spelling of a version as --target ([#470](https://github.com/kage1020/Cairn/pull/470))
+- *(redstone)* count a buffer repeater's 15 blocks of dust without the sink ([#468](https://github.com/kage1020/Cairn/pull/468))
+- *(core)* report a repeated place id once, as E_DUPLICATE_PLACE_ID ([#467](https://github.com/kage1020/Cairn/pull/467))
+- *(cli)* report an edition named twice in `cairn info --editions` once ([#466](https://github.com/kage1020/Cairn/pull/466))
+- *(cli)* refuse a missing `cairn synth --edition` before the source is read ([#464](https://github.com/kage1020/Cairn/pull/464))
+- *(core)* count a refused place row's def as referenced ([#463](https://github.com/kage1020/Cairn/pull/463))
+- *(core)* close four site-lowering gaps left by the unreadable-value review ([#462](https://github.com/kage1020/Cairn/pull/462))
+- *(core)* [**breaking**] name what buries a walkway port and what stretched the router's search box ([#455](https://github.com/kage1020/Cairn/pull/455))
+- *(core,cli)* [**breaking**] refuse Windows-reserved and control characters in an identifier ([#456](https://github.com/kage1020/Cairn/pull/456))
+
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(redstone)* read a whole Placement IR dump back ([#536](https://github.com/kage1020/Cairn/pull/536))
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core,redstone)* [**breaking**] face an even-span hip apex away from its ridge, and read logic primitives from a built-in library ([#552](https://github.com/kage1020/Cairn/pull/552))
+- *(core,cli)* hold cairn info's buildable targets to what compile builds, and say how to fix more codes ([#547](https://github.com/kage1020/Cairn/pull/547))
+- *(redstone)* hold the Java AND's inverted side to the limit rather than the cell's budget ([#546](https://github.com/kage1020/Cairn/pull/546))
+- *(redstone)* [**breaking**] count a cell's delay per input port, 2 ticks on the Java AND's inverted side ([#544](https://github.com/kage1020/Cairn/pull/544))
+- *(core,redstone)* point three logic findings at the right line and refuse a repeated truth input ([#479](https://github.com/kage1020/Cairn/pull/479))
+- *(core,redstone)* refuse a second circuit line in a scope as E_DUPLICATE_CIRCUIT ([#476](https://github.com/kage1020/Cairn/pull/476))
+- *(core,redstone)* refuse a one-column pad region by width and anchor a rejected circuit line ([#474](https://github.com/kage1020/Cairn/pull/474))
+- *(redstone)* count a buffer repeater's 15 blocks of dust without the sink ([#468](https://github.com/kage1020/Cairn/pull/468))
+- *(redstone)* say a coord was refused a buffer repeater for touching its own net ([#454](https://github.com/kage1020/Cairn/pull/454))
+
+## 2026.11.0 — 2026-11-01
+
+### Changed
+- *(formats)* [**breaking**] make RegistryPack read-only behind accessors ([#530](https://github.com/kage1020/Cairn/pull/530))
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core)* [**breaking**] refuse an outside pressure plate on the floor row with no roof overhang ([#620](https://github.com/kage1020/Cairn/pull/620))
+- *(formats)* write a Bedrock palette past 65,536 distinct blocks instead of panicking ([#533](https://github.com/kage1020/Cairn/pull/533))
+- *(core,cli,lsp)* [**breaking**] report target-independent lowering findings in a check with no target ([#509](https://github.com/kage1020/Cairn/pull/509))
+- *(formats,cli)* [**breaking**] name the degraded entry once in W_INTENT_DEGRADED, and carry it as fields on ParityNote ([#499](https://github.com/kage1020/Cairn/pull/499))
+- *(core)* refuse a scope whose palette overflows instead of panicking ([#475](https://github.com/kage1020/Cairn/pull/475))
+- *(cli)* cap a target below the floor before checking its block ids ([#472](https://github.com/kage1020/Cairn/pull/472))
+- *(formats)* name each degraded Bedrock entry by its Java state, and merge translated duplicates ([#471](https://github.com/kage1020/Cairn/pull/471))
+- *(formats)* accept either spelling of a version as --target ([#470](https://github.com/kage1020/Cairn/pull/470))
+
+## 2026.11.0 — 2026-11-01
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+## 2026.11.0 — 2026-11-01
+
+### Fixed
+- *(core)* report `waterlogged=` on a `stair` as an unreached key ([#629](https://github.com/kage1020/Cairn/pull/629))
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core)* [**breaking**] refuse an outside pressure plate on the floor row with no roof overhang ([#620](https://github.com/kage1020/Cairn/pull/620))
+- *(core,redstone)* [**breaking**] face an even-span hip apex away from its ridge, and read logic primitives from a built-in library ([#552](https://github.com/kage1020/Cairn/pull/552))
+- *(core,cli)* hold cairn info's buildable targets to what compile builds, and say how to fix more codes ([#547](https://github.com/kage1020/Cairn/pull/547))
+- *(redstone)* hold the Java AND's inverted side to the limit rather than the cell's budget ([#546](https://github.com/kage1020/Cairn/pull/546))
+- *(redstone)* [**breaking**] count a cell's delay per input port, 2 ticks on the Java AND's inverted side ([#544](https://github.com/kage1020/Cairn/pull/544))
+- *(core)* [**breaking**] refuse a pressure_plate its own line cannot place as E_UNPLACEABLE_PLATE ([#541](https://github.com/kage1020/Cairn/pull/541))
+- *(core)* report each value of a key repeated in one theme selector row ([#535](https://github.com/kage1020/Cairn/pull/535))
+
+## 2026.11.0 — 2026-11-01
+
+### Added
+- *(cli)* print the documentation the binary was built with, and serve the site as Markdown ([#511](https://github.com/kage1020/Cairn/pull/511))
+- *(core,tree-sitter)* read a truth table written one row per line ([#506](https://github.com/kage1020/Cairn/pull/506))
+
+### Changed
+- [**breaking**] restructure crates, tests and comments, and move file checks to cargo xtask lint ([#490](https://github.com/kage1020/Cairn/pull/490))
+
+### Fixed
+- *(core)* report `waterlogged=` on a `stair` as an unreached key ([#629](https://github.com/kage1020/Cairn/pull/629))
+- *(core)* [**breaking**] refuse a member its own line keeps from being built with E_INVALID_MEMBER ([#627](https://github.com/kage1020/Cairn/pull/627))
+- *(core)* [**breaking**] refuse an outside pressure plate on the floor row with no roof overhang ([#620](https://github.com/kage1020/Cairn/pull/620))
+- *(core,redstone)* [**breaking**] face an even-span hip apex away from its ridge, and read logic primitives from a built-in library ([#552](https://github.com/kage1020/Cairn/pull/552))
+- *(core,cli)* hold cairn info's buildable targets to what compile builds, and say how to fix more codes ([#547](https://github.com/kage1020/Cairn/pull/547))
+- *(core)* [**breaking**] refuse a pressure_plate its own line cannot place as E_UNPLACEABLE_PLATE ([#541](https://github.com/kage1020/Cairn/pull/541))
+- *(core)* report each value of a key repeated in one theme selector row ([#535](https://github.com/kage1020/Cairn/pull/535))
+- *(core,cli,lsp)* [**breaking**] report target-independent lowering findings in a check with no target ([#509](https://github.com/kage1020/Cairn/pull/509))
+- *(core)* say what each role builds under W_NO_THEME_BOUND instead of "lower to air" ([#507](https://github.com/kage1020/Cairn/pull/507))
+- *(core)* keep an unplaceable floor from emptying the offered target list ([#505](https://github.com/kage1020/Cairn/pull/505))
+- *(core)* [**breaking**] refuse a Windows device name as a place id or struct name ([#503](https://github.com/kage1020/Cairn/pull/503))
+- *(core)* report a circuit line under a level as E_MISPLACED_MEMBER ([#501](https://github.com/kage1020/Cairn/pull/501))
+- *(core)* give a skipped sym=true mirror a note that applies, and pin which mirrors are skipped ([#500](https://github.com/kage1020/Cairn/pull/500))
+- *(core)* report W_NO_THEME_BOUND only on a scope that reads a mat_slot= ([#480](https://github.com/kage1020/Cairn/pull/480))
+- *(core,redstone)* point three logic findings at the right line and refuse a repeated truth input ([#479](https://github.com/kage1020/Cairn/pull/479))
+- *(core)* [**breaking**] report mat_slot= on a role that reads no material as ignored, and stop resolving it ([#478](https://github.com/kage1020/Cairn/pull/478))
+- *(core)* find a partial truth table's sample by prefix, not by a step-capped walk ([#477](https://github.com/kage1020/Cairn/pull/477))
+- *(core,redstone)* refuse a second circuit line in a scope as E_DUPLICATE_CIRCUIT ([#476](https://github.com/kage1020/Cairn/pull/476))
+- *(core)* refuse a scope whose palette overflows instead of panicking ([#475](https://github.com/kage1020/Cairn/pull/475))
+- *(core,redstone)* refuse a one-column pad region by width and anchor a rejected circuit line ([#474](https://github.com/kage1020/Cairn/pull/474))
+- *(core)* refuse a connect port nested under a level as level-scoped, not as undeclared ([#473](https://github.com/kage1020/Cairn/pull/473))
+- *(core)* say what a member builds in place of an abstract token no pack lowers ([#469](https://github.com/kage1020/Cairn/pull/469))
+- *(core)* report a repeated place id once, as E_DUPLICATE_PLACE_ID ([#467](https://github.com/kage1020/Cairn/pull/467))
+- *(core)* report a sym=true window whose mirror coincides with it ([#465](https://github.com/kage1020/Cairn/pull/465))
+- *(core)* count a refused place row's def as referenced ([#463](https://github.com/kage1020/Cairn/pull/463))
+- *(core)* close four site-lowering gaps left by the unreadable-value review ([#462](https://github.com/kage1020/Cairn/pull/462))
+- *(core)* skip a "did you mean" candidate the cap rules out by length ([#460](https://github.com/kage1020/Cairn/pull/460))
+- *(core,tree-sitter)* point six parser refusals at the text that is wrong ([#457](https://github.com/kage1020/Cairn/pull/457))
+- *(core)* [**breaking**] name what buries a walkway port and what stretched the router's search box ([#455](https://github.com/kage1020/Cairn/pull/455))
+- *(core,cli)* [**breaking**] refuse Windows-reserved and control characters in an identifier ([#456](https://github.com/kage1020/Cairn/pull/456))
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added
