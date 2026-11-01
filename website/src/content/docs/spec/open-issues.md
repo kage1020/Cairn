@@ -35,6 +35,14 @@ member layer above it ([Architecture](/spec/architecture/)).
 **Legacy `.schematic`** from before 1.13 is unsupported in v1. A numeric-ID mapping could be
 considered later as an option.
 
+**Language-evolution policy:** a Rust-style, year-based opt-in, or changes announced per release.
+Decided: per release, as
+[Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated) records. The tiers
+already bound what a release may break, and a Stable surface's `W_DEPRECATED` window already gives a
+file at least one release to move, so an opt-in would add a second bound and keep every past
+revision's rules alive in the compiler. "Edition" already names Java or Bedrock, and `@cairn` stays
+provenance.
+
 ## 15.2 Untouched topics
 
 **Primitive promotion.** Whether columns and arches should become semantic primitives. The
@@ -42,10 +50,3 @@ decision rests on experimental data from the [Evaluation Framework](/spec/evalua
 
 **Interiors.** Whether the `inside.front` prefix suffices or a higher-level `room` concept is
 needed, and whether furniture can be served by a `def` library.
-
-## 15.3 Language-evolution policy
-
-How to handle breaking changes as Cairn evolves is not settled. The options are a Rust-style
-"edition" mechanism with year-based opt-in, or announcing changes per release in the CHANGELOG. Note
-that "edition" already means Java or Bedrock here, so a different term would be needed. For now the
-latter suffices: CalVer plus `@cairn` provenance.

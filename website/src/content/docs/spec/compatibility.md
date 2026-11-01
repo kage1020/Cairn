@@ -135,6 +135,13 @@ preceding release's `Deprecations` section.
   Will be removed no earlier than 2026.12.0.
 ```
 
+A break reaches every file at once. Cairn has no per-file opt-in to a revision of the language,
+such as Rust's editions: `@cairn` records the language version a file was written against and
+selects no rules ([§5.3](/spec/syntax/#53-headers)), and "edition" names Java or Bedrock
+([Glossary](/spec/glossary/#editions-and-versions)). What a release may break is bounded by the
+tier of the surface instead, and a Stable surface's `W_DEPRECATED` window gives a file at least one
+release to move.
+
 `W_DEPRECATED` and `E_BREAKING` codes are themselves Stable. Neither exists yet: each is added with
 the first deprecation or break that needs it. Adding a new code is not a breaking change; changing
 the meaning of an existing code is.

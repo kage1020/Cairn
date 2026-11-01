@@ -64,3 +64,11 @@ This document is **2026.6 (draft)**, superseding the former `v0.2` label. A `.cr
 `@cairn 2026.06`, the language version it was written against. It records provenance only, so that a
 future compiler can parse the file and warn correctly. No pass branches on it, but the value is
 still checked to be a `CalVer`. See [Syntax §5.3](/spec/syntax/#53-headers).
+
+The draft label comes off with the `2027.1.0` release. From then on the specification carries the
+version of the monthly minor that ships it, `2027.1` first, so a minor's specification and compiler
+share one version, and a patch release such as `2027.1.1` ships its minor's specification. A file
+written against `2027.1` MAY declare `@cairn 2027.1`, and a file written against a later release
+MAY declare that release. A value before `2027.1`, such as `@cairn 2026.06`, names the `2026.6`
+draft or a release that shipped it. It stays valid provenance, and a later compiler reads the file
+as it reads any other.
