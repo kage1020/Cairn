@@ -166,7 +166,15 @@ impl MemberRole {
                 "side", "y", "offset", "size", "sym", "repeat", "step", "shape", "anchor",
             ],
             Self::Roof => &["kind", "overhang", "slope_to", "footprint", "bounds"],
-            Self::Stair => &["kind", "side", "half", "facing", "shape", "y"],
+            Self::Stair => &[
+                "kind",
+                "side",
+                "half",
+                "facing",
+                "shape",
+                "y",
+                "waterlogged",
+            ],
             Self::Level => &["y"],
             Self::PressurePlate => &["at", "offset", "y"],
             Self::Circuit => &["region", "void"],
@@ -210,11 +218,16 @@ impl MemberRole {
                 key: "mat_slot",
                 why: Unread::Unreached,
             }],
+            // From `spec/blockstate` "`waterlogged`"; the entry goes when stair lowering reads it.
+            Self::Stair => &[UnreadArgument {
+                key: "waterlogged",
+                why: Unread::Unreached,
+            }],
             Self::Level | Self::Circuit | Self::Place | Self::Connect => &[UnreadArgument {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
             }],
-            Self::Floor | Self::Walls | Self::Stair | Self::PressurePlate | Self::Other(_) => &[],
+            Self::Floor | Self::Walls | Self::PressurePlate | Self::Other(_) => &[],
         }
     }
 

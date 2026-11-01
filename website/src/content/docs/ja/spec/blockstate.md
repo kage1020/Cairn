@@ -52,11 +52,13 @@ IR はまだこの形を持っていません。`resolved_state` には何も入
 
 ## 6.3 `waterlogged`
 
-**変更の余地あり。** この節の内容は、まだどれも組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。`waterlogged` を設定するパスも読むパスもなく、`stair` に `waterlogged=false` を書くと `E_UNKNOWN_ARGUMENT` になります。下の例では、`fill`、`trapdoor`、`water` は `E_UNKNOWN_KEYWORD` に、`from=1,1,1` のような座標の組は `E_PARSE` になります。
+**変更の余地あり。** この節の内容は、まだどれも組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。`waterlogged` を設定するパスも読むパスもありません。`stair` に書いた `waterlogged=false` はまだ届いていないキーです。コンパイラは `W_IGNORED_ARGUMENT` で報告し ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))、このキーを書かなかったときと同じ階段を作ります。下の例では、`fill`、`trapdoor`、`water` は `E_UNKNOWN_KEYWORD` に、`from=1,1,1` のような座標の組は `E_PARSE` になります。
 
 既定では、塗りから決まります。`fill fluid=water` が水浸しにできるブロックと重なると、コンパイラが `waterlogged` を立てます。
 
 `waterlogged=auto|true|false` の 3 値で指定することもできます。水槽の中に空気の空間を残す (明示的な `false`)、水源と流水を区別する、水浸しにできるブロックの一覧がバージョンによって違うことに対応する、といった用途のためです。流水は `flow=` と `level=` で明示します。
+
+[§6.1](#61-既定では導出し上書きで昇格する) の上書きと同じく、`waterlogged=` は、ブロックを 1 つ置き、そのブロックのステートを行に書くメンバーに書きます。コンパイラが知っているキーワードのうち、そうしたメンバーは `stair` だけです。`roof` と `window` は置くブロックのステートをすべて導出し、上書きを取らないので、どちらに書いた `waterlogged=` も `E_UNKNOWN_ARGUMENT` になります。
 
 ```
 fill fluid=water kind=source from=1,1,1 to=5,3,5    # 重なったフェンス・階段・看板は自動で waterlogged になる

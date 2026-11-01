@@ -849,23 +849,23 @@ the key itself decides whether the member is built at all, the member is left ou
 An **unread key**: a `key=` the keyword accepts and nothing reads where it is written, carried into
 the IR and never consulted. It comes in two kinds. An *unreached* key is one this specification
 defines that no pass reads yet. `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a
-header's `class=`, and a `door`'s `mat_slot=`, which waits on the door block itself, are those keys
-today. Every `key=value` on the right of a `theme` selector row whose keyword the compiler knows is
-one too, reported on the binding whatever its key or value, since no pass lowers a selector's
-bindings yet ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every
-member accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
-`circuit`, `place` or `connect` is that key today. A `mat_slot=` of either kind is not looked up in
-the theme, so a slot name the theme does not declare is this warning rather than
-`E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword
-reads only under some ways of writing a sibling argument, on a member that writes it another way.
-The boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this
-way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are
-not judged at all. All three make the build differ from the source. The rule forbids *silent*
-substitution, and all three are announced. For an unreached key the gap is the compiler's rather
-than the source's, which is why it is not a refusal. An inapplicable key is no gap at all: the key
-is one every member accepts and its value changes nothing in the build, so the warning asks for its
-removal, where a refusal would make a key every member accepts one that some refuse. Whether autofix
-is offered is up to the implementation.
+header's `class=`, a `door`'s `mat_slot=`, which waits on the door block itself, and a `stair`'s
+`waterlogged=` are those keys today. Every `key=value` on the right of a `theme` selector row whose
+keyword the compiler knows is one too, reported on the binding whatever its key or value, since no
+pass lowers a selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). An
+*inapplicable* key is one every member accepts, on a keyword that puts down nothing it would be read
+for; `mat_slot=` on a `level`, `circuit`, `place` or `connect` is that key today. A `mat_slot=` of
+either kind is not looked up in the theme, so a slot name the theme does not declare is this warning
+rather than `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one
+the keyword reads only under some ways of writing a sibling argument, on a member that writes it
+another way. The boundary is the keyword: a spec-defined key on a keyword the compiler knows is
+reported this way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its
+arguments are not judged at all. All three make the build differ from the source. The rule forbids
+*silent* substitution, and all three are announced. For an unreached key the gap is the compiler's
+rather than the source's, which is why it is not a refusal. An inapplicable key is no gap at all:
+the key is one every member accepts and its value changes nothing in the build, so the warning asks
+for its removal, where a refusal would make a key every member accepts one that some refuse. Whether
+autofix is offered is up to the implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong wherever
 the member ends up, so it is a repair of its own, and holding the finding back until a refusal on
