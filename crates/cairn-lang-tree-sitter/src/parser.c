@@ -6108,7 +6108,7 @@ TS_PUBLIC const TSLanguage *tree_sitter_cairn(void) {
     .max_reserved_word_set_size = 4,
     .metadata = {
       .major_version = 234,
-      .minor_version = 10,
+      .minor_version = 11,
       .patch_version = 0,
     },
   };
