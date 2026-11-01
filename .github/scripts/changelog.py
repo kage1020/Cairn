@@ -131,6 +131,13 @@ def workspace_version() -> str:
     return manifest["workspace"]["package"]["version"]
 
 
+def repeated_versions(lines: list[str]) -> list[str]:
+    """The versions that head more than one section of CHANGELOG.md."""
+    versions = [line.split(" ")[1] for line in lines
+                if line.startswith("## ") and line != "## [Unreleased]"]
+    return sorted({version for version in versions if versions.count(version) > 1})
+
+
 def release_problems() -> list[str]:
     """What stops CHANGELOG.md and changelog.d/ from being ready to publish."""
     version = workspace_version()
@@ -144,7 +151,19 @@ def release_problems() -> list[str]:
                    None)
     if heading is None or not heading.startswith(f"## {version} "):
         problems.append(f"the first section under [Unreleased] is `{heading}`, not {version}'s")
+    for repeated in repeated_versions(lines):
+        problems.append(f"{repeated} heads more than one section, so release-plz cannot parse "
+                        "the changelog and publishes the release with an empty body; merge them "
+                        "into one")
     return problems
+
+
+def changelog_lines_changed(base: str) -> bool:
+    """Whether HEAD's CHANGELOG.md has a line `base`'s lacks, or lacks one it has."""
+    def lines(ref: str) -> set[str]:
+        shown = git("show", f"{ref}:CHANGELOG.md", ok_codes=(0, 128))
+        return set(shown.stdout.splitlines()) if shown.returncode == 0 else set()
+    return lines(base) != lines("HEAD")
 
 
 def pr(args: argparse.Namespace) -> int:
@@ -175,9 +194,10 @@ def pr(args: argparse.Namespace) -> int:
     ]
     ok = all([check_fragment(path) for path in touched])
 
-    if "CHANGELOG.md" in status and not bootstrap:
+    if "CHANGELOG.md" in status and not bootstrap and changelog_lines_changed(base):
         error(CHANGELOG, None, "CHANGELOG.md is assembled by the release PR; add a fragment "
-              "under changelog.d/ instead (see changelog.d/README.md)")
+              "under changelog.d/ instead (see changelog.d/README.md). A PR may only move "
+              "lines already there, such as merging two sections of one release")
         ok = False
 
     if not bootstrap:
@@ -219,6 +239,13 @@ def assemble(args: argparse.Namespace) -> int:
               "they belong in changelog.d/")
         return 1
     end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    again = next((i for i in range(end, len(lines)) if lines[i].startswith(f"## {args.version} ")),
+                 None)
+    if again is not None:
+        error(CHANGELOG, again + 1, f"a second section for {args.version}; release-plz writes "
+              "one when only `cairn-lang-cli` updates the changelog (`changelog_update` in "
+              "release-plz.toml)")
+        return 1
 
     sections: dict[str, list[str]] = {}
     current = None

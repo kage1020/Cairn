@@ -60,8 +60,10 @@ The `Changelog` workflow runs `changelog.py pr` on every PR. It reports, all at 
   need not open GitHub to learn what a line means;
 - an entry scoped to `ci` alone, which has no entry of its own, as release-plz skips the group;
 - a title with `!` and no `breaking` fragment added by this PR, or one added and no `!`;
-- any change to CHANGELOG.md, except in the release PR, which `github-actions[bot]` opens from a
-  `release-plz-*` branch. There it instead requires that every fragment was folded in.
+- a line CHANGELOG.md gains or loses, except in the release PR, which `github-actions[bot]` opens
+  from a `release-plz-*` branch. Moving lines already there, such as merging two sections of one
+  release, passes. The release PR instead must have folded every fragment in, and must head no
+  two sections with one version.
 
 The two PRs `github-actions[bot]` opens between `canary` and `main` are exempt, since everything in
 them was checked on its way in: the promote-to-main PR from `canary`, and the PR that merges `main`
@@ -84,13 +86,17 @@ python3 .github/scripts/changelog.py pr --base canary \
 ## At release
 
 The release PR, monthly or patch, runs `changelog.py assemble --version <version> --delete` after
-release-plz has written the new version's section, and refuses if the section under
-`[Unreleased]` is any other version's. Each fragment goes under its heading in that section,
-after the title lines release-plz wrote, in file-name order, and the fragment files are deleted in
-the same commit. The headings are then ordered as the table above, `Breaking changes` first and
-`Build` last, with any heading release-plz wrote that has no kind (`Other`, or a `Docs` line kept
-for its `!`) after them. Before publishing, `changelog.py verify-release` refuses a version that
-is not yet tagged if any fragment is left or its section is missing.
+release-plz has written the new version's section, and refuses if the section under `[Unreleased]`
+is any other version's, or if a second section has the same version. Only `cairn-lang-cli` writes
+that section, with the other packages' commits included (`changelog_update` and `changelog_include`
+in [release-plz.toml](../release-plz.toml)), since release-plz cannot parse a changelog that repeats
+a version and then publishes an empty release body. Each fragment goes under its heading in that
+section, after the title lines release-plz wrote, in file-name order, and the fragment files are
+deleted in the same commit. The headings are then ordered as the table above, `Breaking changes`
+first and `Build` last, with any heading release-plz wrote that has no kind (`Other`, or a `Docs`
+line kept for its `!`) after them. Before publishing, `changelog.py verify-release` refuses a
+version that is not yet tagged if any fragment is left, its section is missing, or a version heads
+two sections.
 
 To see what a fold would do, run `assemble --version <version>` on a copy where release-plz's
 section is in place; without `--delete` the fragments stay. Edit the release PR's CHANGELOG.md if

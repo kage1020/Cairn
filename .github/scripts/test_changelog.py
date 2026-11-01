@@ -259,6 +259,21 @@ class PrTest(Case):
         self.repo.write("CHANGELOG.md", CHANGELOG.replace("- *(core)* an old fix\n", ""))
         self.assertRefused(self.repo.pr("fix: x"), "assembled by the release PR")
 
+    def test_merging_two_sections_of_one_release_passes(self) -> None:
+        split = CHANGELOG.replace("## 2026.10.0", "## 2026.11.0 — 2026-11-01\n\n### Fixed\n"
+                                  "- *(core)* a fix\n- *(cli)* a cli fix\n\n"
+                                  "## 2026.11.0 — 2026-11-01\n\n### Fixed\n- *(core)* a fix\n\n"
+                                  "## 2026.10.0")
+        self.repo.git("checkout", "-q", "canary")
+        self.repo.write("CHANGELOG.md", split)
+        self.repo.commit("two sections")
+        self.repo.git("update-ref", "refs/remotes/origin/canary", "HEAD")
+        self.repo.git("checkout", "-q", "-B", "topic")
+        self.repo.write("CHANGELOG.md", CHANGELOG.replace(
+            "## 2026.10.0", "## 2026.11.0 — 2026-11-01\n\n### Fixed\n- *(core)* a fix\n"
+            "- *(cli)* a cli fix\n\n## 2026.10.0"))
+        self.assertPasses(self.repo.pr("ci: x"))
+
     def test_a_branch_named_like_the_release_pr_is_not_the_release_pr(self) -> None:
         self.repo.write("CHANGELOG.md", CHANGELOG + "- added\n")
         self.assertRefused(self.repo.pr("fix: x", head="release-plz-fix"), "assembled by")
@@ -387,6 +402,16 @@ class AssembleTest(Case):
         self.assertEqual(self.repo.read("CHANGELOG.md"), CHANGELOG)
         self.assertTrue((self.repo.dir / "changelog.d/a.fixed.md").exists())
 
+    def test_a_second_section_for_the_version_is_refused(self) -> None:
+        twice = CHANGELOG.replace("## 2026.10.0", RELEASE_SECTION + RELEASE_SECTION
+                                  + "## 2026.10.0")
+        self.repo.write("CHANGELOG.md", twice)
+        self.repo.write("changelog.d/a.fixed.md", GOOD)
+        self.assertRefused(self.repo.run("assemble", "--version", "2026.11.0", "--delete"),
+                           "CHANGELOG.md:19: a second section for 2026.11.0")
+        self.assertEqual(self.repo.read("CHANGELOG.md"), twice)
+        self.assertTrue((self.repo.dir / "changelog.d/a.fixed.md").exists())
+
     def test_a_line_above_the_first_heading_is_refused(self) -> None:
         self.repo.write("CHANGELOG.md", self.repo.read("CHANGELOG.md").replace(
             "2026-11-01\n\n", "2026-11-01\n\nA note.\n\n"))
@@ -434,6 +459,13 @@ class VerifyReleaseTest(Case):
         result = self.repo.run("verify-release")
         self.assertRefused(result, "never folded in")
         self.assertIn("not 2026.11.0's", result.stderr)
+
+    def test_a_version_with_two_sections_is_refused(self) -> None:
+        self.repo.manifest("2026.11.0")
+        self.repo.write("CHANGELOG.md", CHANGELOG.replace("## 2026.10.0", RELEASE_SECTION
+                                                          + RELEASE_SECTION + "## 2026.10.0"))
+        self.assertRefused(self.repo.run("verify-release"), "2026.11.0 heads more than one "
+                           "section, so release-plz cannot parse the changelog")
 
 
 if __name__ == "__main__":
