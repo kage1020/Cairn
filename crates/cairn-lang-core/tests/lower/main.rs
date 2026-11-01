@@ -22,6 +22,7 @@ mod struct_as_written;
 mod structure_volume;
 mod the_volume_is_what_gets_painted;
 mod unplaceable_plate;
+mod unreached_keys;
 mod unread_mat_slot;
 mod unreadable_argument_values;
 mod village;

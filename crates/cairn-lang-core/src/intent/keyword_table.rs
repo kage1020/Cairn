@@ -218,7 +218,7 @@ impl MemberRole {
                 key: "mat_slot",
                 why: Unread::Unreached,
             }],
-            // `spec/blockstate` "`waterlogged`": no pass sets the state yet.
+            // From `spec/blockstate` "`waterlogged`"; the entry goes when stair lowering reads it.
             Self::Stair => &[UnreadArgument {
                 key: "waterlogged",
                 why: Unread::Unreached,

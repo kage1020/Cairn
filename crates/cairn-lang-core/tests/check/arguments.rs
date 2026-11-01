@@ -491,33 +491,80 @@ fn a_stair_reads_the_height_it_is_written_at() {
 
 #[test]
 fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // The worked example in `spec/entities` "Anchor conventions" writes these on known keywords,
-    // and `spec/blockstate` "`waterlogged`" the last one.
-    for (line, key) in [
+    // Each is written on a known keyword in `spec/entities` "Anchor conventions" or the prose of
+    // `spec/blockstate` "`waterlogged`".
+    let rows = [
+        ("window side=front y=2 offset=4 size=3x3", "shape", "arch"),
         (
-            "  window side=front y=2 offset=4 size=3x3 shape=arch\n",
-            "shape",
-        ),
-        (
-            "  window side=front y=2 offset=4 size=3x3 anchor=bottom_center\n",
+            "window side=front y=2 offset=4 size=3x3",
             "anchor",
+            "bottom_center",
         ),
-        ("  roof kind=gable footprint=struct\n", "footprint"),
-        ("  roof kind=gable bounds=expand\n", "bounds"),
-        (
-            "  stair kind=stairs side=front waterlogged=false\n",
-            "waterlogged",
-        ),
-    ] {
-        let src = format!("struct s size=9x9\n{line}");
+        ("roof kind=gable", "footprint", "struct"),
+        ("roof kind=gable", "bounds", "expand"),
+        ("stair kind=stairs side=front", "waterlogged", "false"),
+    ];
+    for (line, key, value) in rows {
+        let keyword = keyword_of(line);
+        let src = format!("struct s size=9x9\n  {line} {key}={value}\n");
         let d = exactly_one(diagnose(&src));
         assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT", "source:\n{src}");
-        assert!(
-            d.primary.contains(&format!("`{key}=`")),
-            "got: {}",
+        assert_eq!(
             d.primary,
+            format!(
+                "`{key}=` is an argument `{keyword}` takes and no pass reads yet; the value was \
+                 ignored"
+            ),
         );
+        assert_eq!(&src[d.span.clone()], value, "source:\n{src}");
     }
+
+    // `mat_slot` has tests of its own in `tests/lower/unread_mat_slot.rs`.
+    let mut unreached: Vec<(&str, &str)> = known_keywords()
+        .iter()
+        .flat_map(|keyword| {
+            role_of(keyword)
+                .unread_arguments()
+                .iter()
+                .filter(|entry| entry.why == Unread::Unreached && entry.key != "mat_slot")
+                .map(move |entry| (*keyword, entry.key))
+        })
+        .collect();
+    unreached.sort_unstable();
+    let mut written: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|(line, key, _)| (keyword_of(line), *key))
+        .collect();
+    written.sort_unstable();
+    assert_eq!(written, unreached);
+}
+
+#[test]
+fn a_state_override_on_a_member_that_lays_many_blocks_is_refused() {
+    // `spec/blockstate` "`waterlogged`" takes the key on a member that places one block.
+    for line in [
+        "roof kind=gable waterlogged=false",
+        "window side=front y=2 offset=4 size=3x3 waterlogged=false",
+    ] {
+        let src = format!("struct s size=9x9\n  {line}\n");
+        let d = exactly_one(diagnose(&src));
+        assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT", "source:\n{src}");
+        assert_eq!(
+            d.primary,
+            format!(
+                "`waterlogged=` is not an argument `{}` reads",
+                keyword_of(line)
+            ),
+        );
+        assert_eq!(&src[d.span.clone()], "false", "source:\n{src}");
+    }
+}
+
+/// The keyword a member line opens with.
+fn keyword_of(line: &str) -> &str {
+    line.split(' ')
+        .next()
+        .expect("a member line opens with its keyword")
 }
 
 #[test]

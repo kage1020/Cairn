@@ -74,8 +74,8 @@ fields of their own. In place of `type`, a member carries the `role` its keyword
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)). No pass sets or reads
 `waterlogged`: on a `stair`, `waterlogged=false` is an unreached key, reported as
 `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), and the stair is built as if
-it were not written. In the example below, `fill`, `trapdoor` and `water` are `E_UNKNOWN_KEYWORD`,
-and a coordinate triple such as `from=1,1,1` is `E_PARSE`.
+the key were not written. In the example below, `fill`, `trapdoor` and `water` are
+`E_UNKNOWN_KEYWORD`, and a coordinate triple such as `from=1,1,1` is `E_PARSE`.
 
 The default is paint-derived: when `fill fluid=water` overlaps a waterloggable block, the compiler
 sets `waterlogged`.
@@ -83,6 +83,11 @@ sets `waterlogged`.
 A three-valued `waterlogged=auto|true|false` is allowed, for leaving an air pocket inside a tank
 (explicit `false`), distinguishing source from flowing, and version differences in the waterloggable
 table. Flowing water is made explicit with `flow=` and `level=`.
+
+Like the overrides in [§6.1](#61-derive-by-default-promote-on-override), `waterlogged=` is written
+on a member that places one block and names that block's state, and of the keywords the compiler
+knows only `stair` does. A `roof` or a `window` derives the state of every block it lays and takes
+no override, so `waterlogged=` on either is `E_UNKNOWN_ARGUMENT`.
 
 ```
 fill fluid=water kind=source from=1,1,1 to=5,3,5    # overlapping fences/stairs/signs auto-waterlogged
