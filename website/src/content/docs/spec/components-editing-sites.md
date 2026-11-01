@@ -67,7 +67,8 @@ past the structure block's 48³ limit are expressed as a composition of several 
 
 `east` advances along `+x` and `north` retreats along `-z`. This matches "front is `+z`" from
 [§5.4](/spec/syntax/#54-selectors): a building whose `front` faces south sits with its facade on `+z`, and
-`north_of=X` puts the next placement behind it.
+`north_of=X` puts the next placement behind it. The four wall selectors face outward along
+`front` `+z`, `back` `-z`, `left` `-x` and `right` `+x`.
 
 The Y axis is unaffected by topological selectors; every placement currently lands at `y = 0`.
 
