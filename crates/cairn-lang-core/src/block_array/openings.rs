@@ -128,8 +128,8 @@ pub(super) fn door_at_clause(written: &Written) -> String {
     }
 }
 
-/// The reason a door is deferred when [`door_anchor_offset`] refused its `at=`.
-pub(super) fn door_at_deferral(written: &Written) -> String {
+/// The primary of the `E_INVALID_MEMBER` for a door whose `at=` [`door_anchor_offset`] refused.
+pub(super) fn door_at_refusal(written: &Written) -> String {
     format!(
         "door {} — use `at=center | left | right`",
         door_at_clause(written)
@@ -165,9 +165,27 @@ impl WindowArgFault {
         }
     }
 
-    /// The reason `super::lower::window::cut_window` defers the window.
-    pub(super) fn deferral(self) -> String {
+    /// The primary of the `E_INVALID_MEMBER` that refuses the window.
+    pub(super) fn refusal(self) -> String {
         format!("window {}", self.clause())
+    }
+
+    /// The note on that refusal, saying what the argument takes.
+    pub(super) fn fix(self) -> &'static str {
+        match self {
+            Self::OffsetMalformed => {
+                "write `offset=N`, where `N` is a non-negative integer: the window's first column \
+                 along the wall, counted from 0 at its left end seen from outside"
+            }
+            Self::YAbsent | Self::YMalformed => {
+                "write `y=N`, where `N` is a non-negative integer: the window's lowest row, counted \
+                 up from 0, the base row of the struct or of the window's `level`"
+            }
+            Self::SizeAbsent | Self::SizeMalformed => {
+                "write `size=WxH`, where `W` and `H` are positive integers: the window's width \
+                 along the wall and its height in rows"
+            }
+        }
     }
 }
 

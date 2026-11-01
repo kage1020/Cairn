@@ -231,7 +231,7 @@ from the `severity` field rather than from the first letter.
 
 `E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: no `mat_slot=` pointing at a slot bound to
 something other than a material token resolves. A `floor` that names it is left air; a `walls` that
-names it is not built and takes up no rows, so a `door` or `window` cut into it is refused; a
+names it is not built and takes up no rows, so a `door` or `window` cut into it is deferred; a
 `window` that names it is not cut, so its wall stays; and a `roof`, eave `stair` or `pressure_plate`
 that names it is built from its default block. Were it a warning, a theme whose slots are all
 mistyped would still build at exit 0 every scope that keeps something to draw, such as a `roof`:
@@ -288,7 +288,7 @@ without a pack. A front end with no target (the language server, or a `cairn che
 
 The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
 or `pressure_plate` is built from its default block. A `walls` is not built and takes up no rows, so
-a `door` or `window` cut into it is refused. A `window` is not cut, so its wall stays, and a port on
+a `door` or `window` cut into it is deferred. A `window` is not cut, so its wall stays, and a port on
 it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
@@ -448,8 +448,8 @@ the author to a line that is correct.
 
 | Code | Meaning |
 |---|---|
-| `W_DEFERRED_MEMBER` | A member the block-array pass does not lower, so the scope builds without it. |
-| `E_UNPLACEABLE_PLATE` | A `pressure_plate` its own `at=`, `offset=` or `y=` puts on no voxel of its struct ([§14.2](/spec/redstone/#142-signal-binding)). |
+| `W_DEFERRED_MEMBER` | A member, or part of one, the block-array pass leaves out because another member did not build or because the pass does not lower what its line writes yet. |
+| `E_INVALID_MEMBER` | A member its own line keeps the block-array pass from building, whatever the rest of its struct builds. |
 | `W_STRUCT_NO_SIZE` | A `struct` declares no `size=WxH`, so lowering can derive no extent and skips it. |
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
@@ -479,20 +479,44 @@ targets](#materials-and-targets)), so every command that lowers can reach the li
 with a target that resolves among them. A warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
-the scope lowers, and the finding names what is missing from it.
+the scope lowers, and the finding names what is missing from it. In a struct body it covers three
+things, and in none of them does the member's own line keep it from being built. A member another
+member keeps out: a `door` or `window` in a course whose `walls` paint nothing or beside `walls`
+under a `level` that is not placed, or an eave `stair` beside a `roof` that draws nothing. A member
+whose line writes what the pass does not lower yet: a `floor` or `roof` under a raised `level`, a
+`window` with `repeat=` above 1 and a `sym=` that is `true` or unreadable, or a `pressure_plate`
+whose slot binds a state literal. And part of a member that is built: the mirror of a `sym=true`
+window that would overlap it, or the states a `mat_slot=` binding carries onto a roof that takes its
+own. The `place` and `connect` rows of a site it covers are in [Components, Editing, and
+Multi-building](/spec/components-editing-sites/).
 
-`E_UNPLACEABLE_PLATE` is an error for the reason `E_MISSING_MATERIAL` is
-([§11.3](#113-error-vs-warning)): the plate is dropped with nothing in its place, and the incomplete
-side is its own line rather than the compiler. The drop reaches past the block array as well. The
-plate's `->` binding is still read, so its signal stays in the netlist with no plate to drive it,
-and the finding says so in a note. [Redstone §14.2](/spec/redstone/#142-signal-binding) lists the
-lines that put a plate nowhere. A plate the struct would have held had another member built is
-`W_DEFERRED_MEMBER` instead, with the same note: a row that `walls` painting nothing would have
-reached, or an `at=<side>.outside` beside a `roof` written with an `overhang=` that draws nothing.
-The repair is on that member, whose finding, or the scope's `W_NO_THEME_BOUND`, says why it did
-not build, and the plate's line is correct. A plate whose line is wrong too is
-`E_UNPLACEABLE_PLATE` all the same, so a missing member never hides the plate's own fault. A `door`
-cut into such walls is deferred for the same reason.
+`E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
+([§11.3](#113-error-vs-warning)): the member is dropped with nothing in its place, and the
+incomplete side is its own line rather than the compiler. A line does that with an argument the
+member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose `y=`
+is not a non-negative integer, `walls` with no positive `height=`), a value outside the ones its key
+takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair` whose `half=` is an
+identifier other than `top` or `bottom`), or arguments that put it outside its struct as written: a
+`window` past the end of its wall, a `door` or `window` whose rows no course of the walls holds, an
+eave `stair` above the struct or on one where no `roof` has an `overhang=` of at least 1. The struct
+as written is every member at the size its line asks for, whether or not it builds: a `roof` that
+draws nothing still rises and overhangs as its line says, and an unreadable value counts as the
+default its `W_IGNORED_ARGUMENT` puts in its place. A `roof` whose `kind=` or `slope_to=` does not
+read may rise as far as any roof on its footprint, and `walls` under a `level` that is not placed
+may hold any row, so a member only they could hold is deferred to them. A `circuit` line that
+reserves no region and an actuator patch that binds no door are refused the same way. [Redstone
+§14.2](/spec/redstone/#142-signal-binding) lists the lines that put a `pressure_plate` nowhere, and
+for a plate the drop reaches past the block array as well: its `->` binding is still read, so its
+signal stays in the netlist with no plate to drive it, and the finding says so in a note.
+
+A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with
+a note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws
+nothing, or a `level` that is not placed. That member's finding, or the scope's
+`W_NO_THEME_BOUND`, says why it did not build. A member whose line is wrong too is
+`E_INVALID_MEMBER` all the same, and so is one whose line also writes what the pass does not lower
+yet, so neither hides a line's own fault. The members under a `level` that is not placed are the
+exception: `E_UNSUPPORTED_NESTING` says that level produces no blocks, and their own lines are read
+once it is placed.
 
 `E_PARTIAL_BUILD` is the run-level counterpart: a finding above says a scope builds without
 something, and this says a scope the command was asked for did not build at all. A scope that
@@ -568,11 +592,11 @@ Beyond the codes above, lint covers:
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
-Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are
-planned, and no command checks them yet: two `place` rows whose bodies overlap are not reported.
-Geometry holds only in part: a door, window or eave stair that would fall outside its wall is not
-drawn and is reported as `W_DEFERRED_MEMBER`, and a pressure plate its own line puts on no voxel is
-`E_UNPLACEABLE_PLATE`. version_caps / parity runs only in part, through codes of its own:
+Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
+and no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
+holds only in part: a door, window, eave stair or pressure plate its own line puts outside its
+struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
+keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
 `E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
 pinned target does not declare, and `W_INTENT_DEGRADED` names what an edition cannot carry, while a
 state literal goes unchecked (`W_STATE_LITERAL_UNCHECKED`) and no entity schema is checked. The
@@ -819,8 +843,9 @@ printed before the warning.
 
 `W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=` in
 the vocabulary whose value the pass cannot read is dropped and a default put in its place, or, where
-the key itself decides whether the member is built at all, the member is refused instead (`sym=` on
-a `window` whose `repeat=` is greater than 1 is that key today, [§5.4](/spec/syntax/#54-selectors)).
+the key itself decides whether the member is built at all, the member is left out instead under
+`W_DEFERRED_MEMBER` (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
+[§5.4](/spec/syntax/#54-selectors)).
 An **unread key**: a `key=` the keyword accepts and nothing reads where it is written, carried into
 the IR and never consulted. It comes in two kinds. An *unreached* key is one this specification
 defines that no pass reads yet. `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a
@@ -846,12 +871,12 @@ An unreadable value is reported whether or not its member is then built. The val
 the member ends up, so it is a repair of its own, and holding the finding back until a refusal on
 the same line is repaired only costs the author another compile. The note says which of three things
 happened: what the default did to a member that is built; that the member is not built either way,
-and the refusal beside it is why; or that the member is refused instead of taking the default, and
-the refusal beside it is the one the value caused. A member dropped before its arguments are read,
-such as a `roof` under a raised `level`, is the exception today: its values are not read, so they
-are not reported beside the drop. Most values are read only during block-array lowering, and an
-unreadable one needs no target, so a `cairn check` with no `--target` and the language server report
-it as a pinned check does.
+and the refusal beside it is why; or that the member is left out instead of taking the default, and
+the deferral beside it is the one the value caused. A member dropped before its arguments are read
+is the exception today: a `roof` under a raised `level` has only its `kind=` and `slope_to=` read,
+for its refusal, so its other values are not reported beside the drop. Most values are read only
+during block-array lowering, and an unreadable one needs no target, so a `cairn check` with no
+`--target` and the language server report it as a pinned check does.
 
 The routed-past shape is the vocabulary's second axis: closed per keyword *and* per the way the
 argument that selects the lowering rule is written. `roof slope_to=` is read by the `kind=shed`
@@ -875,9 +900,9 @@ silent drop ([§9.3.2](/spec/components-editing-sites/#932-origin-selectors)).
 Where the **selector** names no rule at all (a value the dispatch does not know, or nothing written
 on an axis with no absent arm), no finding is raised here: that member lowers to nothing and its
 refusal is the whole repair, so a second finding about the argument that rule would not have read
-bills one repair twice. That refusal is `W_DEFERRED_MEMBER`, or `E_UNPLACEABLE_PLATE` for a
-`pressure_plate`'s `at=`, and needs no target either, so a `cairn check` with no `--target` reports
-it as a pinned check does. A key another key makes inert *without* selecting a rule is a different
+bills one repair twice. That refusal is `E_INVALID_MEMBER`, or `E_INVALID_PLACE_ORIGIN` for a
+`place`'s `at=`, and needs no target either, so a `cairn check` with no `--target` reports it as a
+pinned check does. A key another key makes inert *without* selecting a rule is a different
 shape again and is not reported today: `window step=` at `repeat=1` is a condition on a count rather
 than on a rule.
 

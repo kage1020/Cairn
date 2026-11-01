@@ -69,7 +69,7 @@ fn a_finding_every_target_raises_is_worded_as_a_lowering_with_no_pack_words_it()
         located(SHED_ON_COBBLESTONE, &found),
         [
             ("E_INCOMPATIBLE_MATERIAL", "@cobblestone"),
-            ("W_DEFERRED_MEMBER", "door side=3"),
+            ("E_INVALID_MEMBER", "door side=3"),
         ],
     );
     for edition in [Edition::Java, Edition::Bedrock] {
@@ -266,11 +266,11 @@ fn a_finding_each_edition_raises_on_its_own_variant_is_reported_for_each() {
     let source = variant_roofs("@cobblestone", "@cobblestone");
     let java = [
         ("E_INCOMPATIBLE_MATERIAL", "5:16".to_owned()),
-        ("W_DEFERRED_MEMBER", "14:3".to_owned()),
+        ("E_INVALID_MEMBER", "14:3".to_owned()),
     ];
     let bedrock = [
         ("E_INCOMPATIBLE_MATERIAL", "9:16".to_owned()),
-        ("W_DEFERRED_MEMBER", "14:3".to_owned()),
+        ("E_INVALID_MEMBER", "14:3".to_owned()),
     ];
     assert_eq!(
         by_edition(&source),
@@ -291,7 +291,7 @@ fn a_finding_each_edition_raises_on_its_own_variant_is_reported_for_each() {
 
 #[test]
 fn a_finding_one_edition_variant_raises_is_that_editions_verdict() {
-    let door = ("W_DEFERRED_MEMBER", "14:3".to_owned());
+    let door = ("E_INVALID_MEMBER", "14:3".to_owned());
     let java_roof = ("E_INCOMPATIBLE_MATERIAL", "5:16".to_owned());
     assert_eq!(
         by_edition(&variant_roofs("@cobblestone", "@oak_stairs")),
@@ -318,7 +318,7 @@ fn a_finding_outside_the_variants_is_reported_once_as_each_edition_words_it() {
     let found = without_target(&source, None);
     assert_eq!(
         located(&source, &found),
-        [("W_DEFERRED_MEMBER", "door side=3")]
+        [("E_INVALID_MEMBER", "door side=3")]
     );
     for edition in [Edition::Java, Edition::Bedrock] {
         assert_eq!(found, lowered_for(&source, edition), "{edition:?}");
@@ -392,7 +392,7 @@ fn a_finding_on_a_line_both_editions_read_needs_each_to_raise_it_there() {
     let source = variant_roofs("@oak_stairs[half=top]", "@spruce_stairs");
     let literal = ("W_STATE_LITERAL_UNCHECKED", "5:16".to_owned());
     let roof = ("W_DEFERRED_MEMBER", "13:3".to_owned());
-    let door = ("W_DEFERRED_MEMBER", "14:3".to_owned());
+    let door = ("E_INVALID_MEMBER", "14:3".to_owned());
     assert_eq!(
         by_edition(&source),
         [
@@ -434,7 +434,7 @@ fn a_plate_its_own_line_puts_nowhere_is_refused_whichever_edition_paints_its_wal
         "theme t_java:\n  slot wall -> @stone\n\nstruct s size=5x5\n  \
          walls mat_slot=wall height=3\n  {plate}\n"
     );
-    let refused = ("E_UNPLACEABLE_PLATE", "6:3".to_owned());
+    let refused = ("E_INVALID_MEMBER", "6:3".to_owned());
     assert_eq!(
         by_edition(&source),
         [
@@ -453,7 +453,7 @@ fn a_plate_its_own_line_puts_nowhere_is_refused_whichever_edition_paints_its_wal
             notes(&found[0])
         ),
         (
-            vec![("E_UNPLACEABLE_PLATE", plate)],
+            vec![("E_INVALID_MEMBER", plate)],
             "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so the \
              voxel inside it belongs to the neighbouring wall",
             vec![

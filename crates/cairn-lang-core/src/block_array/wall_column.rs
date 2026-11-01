@@ -1,4 +1,4 @@
-//! The rows a struct's `walls` members paint: `walls height=H` under `level y=N` fills
+//! The rows a struct's `walls` members hold: `walls height=H` under `level y=N` fills
 //! `N + 1 ..= N + H`, and courses that touch merge into one.
 
 use std::fmt;
@@ -10,7 +10,7 @@ pub(super) struct WallColumn {
 }
 
 impl WallColumn {
-    /// Build the column from `(level y, height)` pairs, one per `walls` member the pass paints.
+    /// Build the column from `(level y, height)` pairs, one per `walls` member.
     pub(super) fn from_walls(walls: impl IntoIterator<Item = (u32, u32)>) -> Self {
         let mut spans: Vec<(u32, u32)> = walls
             .into_iter()
@@ -31,7 +31,7 @@ impl WallColumn {
         Self { spans: merged }
     }
 
-    /// Whether the struct paints any wall row at all.
+    /// Whether the column holds no row.
     pub(super) fn is_empty(&self) -> bool {
         self.spans.is_empty()
     }
@@ -58,7 +58,7 @@ impl WallColumn {
 }
 
 impl fmt::Display for WallColumn {
-    /// `y=1..=3`, or `y=1..=2, y=7..=8` across a gap, as deferral messages quote it.
+    /// `y=1..=3`, or `y=1..=2, y=7..=8` across a gap, as findings quote it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.spans.is_empty() {
             return f.write_str("none");

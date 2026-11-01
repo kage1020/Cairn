@@ -46,7 +46,7 @@ fn a_roof_with_no_kind_does_not_widen_the_footprint() {
         "a roof that draws nothing must not widen the array",
     );
     assert!(
-        codes(&lowered(&source)).contains(&"W_DEFERRED_MEMBER"),
+        codes(&lowered(&source)).contains(&"E_INVALID_MEMBER"),
         "the missing `kind=` is still reported: {:?}",
         codes(&lowered(&source)),
     );
@@ -62,7 +62,7 @@ fn a_roof_with_no_kind_and_an_unusable_overhang_reports_both_and_widens_nothing(
     assert!(
         out.diagnostics
             .iter()
-            .any(|d| d.code == DiagnosticCode::DeferredMember && d.primary.contains("kind=")),
+            .any(|d| d.code == DiagnosticCode::InvalidMember && d.primary.contains("kind=")),
         "the missing `kind=` is reported: {:?}",
         codes(&out),
     );
@@ -123,7 +123,7 @@ fn a_plate_outside_a_wall_beside_a_roof_that_draws_nothing_only_defers() {
             .map(|d| (d.code, slice(&source, d)))
             .collect::<Vec<_>>(),
         [
-            (DiagnosticCode::DeferredMember, roof),
+            (DiagnosticCode::InvalidMember, roof),
             (DiagnosticCode::DeferredMember, plate),
         ],
     );

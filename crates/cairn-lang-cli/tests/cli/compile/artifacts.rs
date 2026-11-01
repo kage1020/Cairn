@@ -1668,7 +1668,7 @@ fn a_walkway_whose_every_cell_is_blocked_is_lost_rather_than_written_as_air() {
 
 #[test]
 fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
-    // `nada`'s one member cannot voxelise, so `b`'s array holds only air.
+    // `nada`'s one member does not lower under a raised `level`, so `b`'s array holds only air.
     let fixture = Fixture::new(concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -1678,7 +1678,8 @@ fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
         "  floor id=f mat_slot=floor\n",
         "\n",
         "def nada size=3x3:\n",
-        "  walls id=w mat_slot=wall height=0\n",
+        "  level y=1\n",
+        "    floor id=w mat_slot=floor\n",
         "\n",
         "site s:\n",
         "  place id=a use=box theme=t at=origin\n",
@@ -1690,12 +1691,12 @@ fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
     assert_stream(
         &stderr,
         &[
-            (9, 3, "warning", "W_DEFERRED_MEMBER"),
+            (10, 5, "warning", "W_DEFERRED_MEMBER"),
             (0, 0, "error", "E_PARTIAL_BUILD"),
         ],
     );
     assert!(
-        stderr.contains("warning[W_DEFERRED_MEMBER]: walls without a positive `height=`"),
+        stderr.contains("warning[W_DEFERRED_MEMBER]: level-scoped `floor` is not yet supported"),
         "stderr={stderr}",
     );
     assert!(

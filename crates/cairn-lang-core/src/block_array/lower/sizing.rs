@@ -1,20 +1,15 @@
 //! How the `walls` and `roof` members of a paint set size its volume.
 
-use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 use crate::resolve::ScopeResolution;
 
-use crate::block_array::args::{diag_deferred_member_reason, nonneg_int_or_ignore};
+use crate::block_array::args::{diag_invalid_member, nonneg_int_or_ignore};
 use crate::block_array::material::TargetRegistry;
-use crate::block_array::openings::WallSide;
-use crate::block_array::roof::{
-    RoofKind, flat_extra_height, gable_extra_height, hip_extra_height, shed_extra_height,
-    shed_slope_span,
-};
-use crate::block_array::wall_column::WallColumn;
 
-use super::members::{member_will_paint, written_members};
+use super::members::member_will_paint;
+use super::roof_kind::{roof_draws, roof_rise};
+use super::written::height_value;
 
 /// Highest wall row across `(y_offset, height)` pairs, `0` with none.
 pub(super) fn max_wall_top(walls: &[(u32, u32)]) -> u32 {
@@ -44,49 +39,6 @@ pub(super) fn painting_walls<'a>(
         .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h)))
 }
 
-/// What a body's walls and roofs ask for as written, whether or not they paint or draw.
-pub(super) struct Written {
-    /// Every row the walls members are written to.
-    pub(super) walls: WallColumn,
-    /// The highest of those rows, `0` with none.
-    wall_top: u32,
-    /// The largest `overhang=` a roof is written with.
-    pub(super) overhang: u32,
-    /// Whether a `floor` is written on row 0.
-    pub(super) floor: bool,
-}
-
-impl Written {
-    /// The `y` extent of the body with these walls painted, its roofs rising `roof_extra` above.
-    pub(super) fn height(&self, roof_extra: u32) -> u32 {
-        1u32.saturating_add(self.wall_top)
-            .saturating_add(roof_extra)
-    }
-}
-
-/// The walls and roofs of `members` as written, through their levels.
-pub(super) fn written(members: &[Member]) -> Written {
-    let written = written_members(members);
-    let walls: Vec<(u32, u32)> = written
-        .iter()
-        .filter(|(_, m)| matches!(m.role, MemberRole::Walls))
-        .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h)))
-        .collect();
-    Written {
-        wall_top: max_wall_top(&walls),
-        walls: WallColumn::from_walls(walls),
-        overhang: written
-            .iter()
-            .filter(|(_, m)| matches!(m.role, MemberRole::Roof))
-            .filter_map(|(_, m)| m.nonneg_u32("overhang"))
-            .max()
-            .unwrap_or(0),
-        floor: written
-            .iter()
-            .any(|(y_offset, m)| *y_offset == 0 && matches!(m.role, MemberRole::Floor)),
-    }
-}
-
 /// Largest `overhang=` across the roofs that draw, reporting an unreadable one on every roof.
 ///
 /// The one reader that reports `overhang=`, so a value not checked here is reported nowhere.
@@ -112,7 +64,7 @@ pub(super) fn max_roof_overhang(
         .unwrap_or(0)
 }
 
-/// Tallest rise of any roof that draws ([`roof_draws`]), measured on the overhang-inflated box.
+/// Tallest rise of any roof that draws, measured on the overhang-inflated box.
 pub(super) fn max_roof_extra_height(
     flattened: &[(u32, &Member)],
     interior_w: u32,
@@ -125,72 +77,31 @@ pub(super) fn max_roof_extra_height(
         .iter()
         .map(|(_, m)| *m)
         .filter(|m| matches!(m.role, MemberRole::Roof))
-        .filter_map(|m| roof_draws(m).map(|k| roof_extra_height(k, m, roof_w, roof_h)))
+        .filter_map(|m| roof_rise(m, roof_w, roof_h))
         .max()
         .unwrap_or(0)
 }
 
-fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) -> u32 {
-    match kind {
-        RoofKind::Gable => gable_extra_height(roof_w.min(roof_h)),
-        RoofKind::Shed => {
-            // An unusable `slope_to=` contributes `0`; `fill_roof` reports it.
-            match member
-                .ident_value("slope_to")
-                .and_then(WallSide::from_ident)
-            {
-                Some(slope_to) => shed_extra_height(shed_slope_span(roof_w, roof_h, slope_to)),
-                None => 0,
-            }
-        }
-        RoofKind::Hip => hip_extra_height(roof_w, roof_h),
-        RoofKind::Flat => flat_extra_height(),
-    }
-}
+/// The note on a `walls` refused for its `height=`, saying what one is.
+const WALLS_HEIGHT_FORM: &str = "write `height=N`, where `N` is a positive integer: the walls fill \
+                                 the `N` rows above the base row";
 
-/// The kind this roof will draw with, or `None` when it draws nothing, such as a `shed` with no
-/// usable `slope_to=`.
-///
-/// Both roof walks ask this, so the footprint and the height agree on which roofs are real.
-pub(super) fn roof_draws(member: &Member) -> Option<RoofKind> {
-    let kind = roof_kind_of(member)?;
-    if matches!(kind, RoofKind::Shed)
-        && member
-            .ident_value("slope_to")
-            .and_then(WallSide::from_ident)
-            .is_none()
-    {
-        return None;
-    }
-    Some(kind)
-}
-
-fn roof_kind_of(member: &Member) -> Option<RoofKind> {
-    let raw = member.intent_state.get("kind")?;
-    let ValueKind::Ident(name) = &raw.value.kind else {
-        return None;
-    };
-    RoofKind::from_ident(name)
-}
-
+/// The walls member's positive `height=`, or `None` after the `E_INVALID_MEMBER` refusing it.
 pub(super) fn wall_height(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<u32> {
-    match height_value(member) {
-        Some(h) if h >= 1 => Some(h),
-        _ => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                "walls without a positive `height=` cannot voxelise",
-            ));
-            None
-        }
+    if let Some(h) = height_value(member) {
+        return Some(h);
     }
-}
-
-/// A positive `height=` that fits `u32`, else `None` rather than a saturated height.
-fn height_value(member: &Member) -> Option<u32> {
-    let raw = member.intent_state.get("height")?;
-    match &raw.value.kind {
-        ValueKind::Int(v) if *v > 0 => u32::try_from(*v).ok(),
-        _ => None,
-    }
+    let primary = match member.intent_state.get("height") {
+        Some(raw) => format!(
+            "walls `height=` must be a positive integer that fits in u32, not {}",
+            raw.value.describe(),
+        ),
+        None => "walls has no `height=`, so nothing says how many rows it rises".to_owned(),
+    };
+    diagnostics.push(diag_invalid_member(
+        member,
+        primary,
+        vec![WALLS_HEIGHT_FORM.to_owned()],
+    ));
+    None
 }

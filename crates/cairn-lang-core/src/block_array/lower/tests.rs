@@ -254,6 +254,36 @@ fn deferred_lines<'a>(src: &'a str, out: &'a BlockArrayIr) -> Vec<(&'a str, &'a 
         .collect()
 }
 
+/// Each `E_INVALID_MEMBER` in `out`, as the text of `src` its span covers and its primary.
+fn invalid_lines<'a>(src: &'a str, out: &'a BlockArrayIr) -> Vec<(&'a str, &'a str)> {
+    findings(out, DiagnosticCode::InvalidMember)
+        .into_iter()
+        .map(|d| (&src[d.span.start..d.span.end], d.primary.as_str()))
+        .collect()
+}
+
+/// Asserts the one finding on `src` is the `E_INVALID_MEMBER` on `line` saying `primary`, with
+/// `notes` and nothing else under it.
+#[track_caller]
+fn assert_refused_alone(src: &str, line: &str, primary: &str, notes: &[&str]) {
+    let out = lowered(src);
+    assert_eq!(
+        out.diagnostics
+            .iter()
+            .map(|d| (
+                d.code,
+                &src[d.span.start..d.span.end],
+                d.primary.as_str(),
+                d.notes
+                    .iter()
+                    .map(|n| n.message.as_str())
+                    .collect::<Vec<_>>(),
+            ))
+            .collect::<Vec<_>>(),
+        [(DiagnosticCode::InvalidMember, line, primary, notes.to_vec())],
+    );
+}
+
 /// Asserts a `W_DEFERRED_MEMBER` on the member written as `line`, whose primary has `needle`.
 #[track_caller]
 fn assert_defers_on(src: &str, out: &BlockArrayIr, line: &str, needle: &str) {
@@ -818,6 +848,35 @@ fn walls_only_fills_outline_above_floor() {
 }
 
 #[test]
+fn walls_one_row_tall_build_and_walls_with_no_positive_height_are_refused() {
+    let out = lowered(theme_t!(
+        "w",
+        "\nstruct s size=3x3\n  walls mat_slot=w height=1\n"
+    ));
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(out.structures["struct::s"].dims, Dims { x: 3, y: 2, z: 3 });
+    let form = "write `height=N`, where `N` is a positive integer: the walls fill the `N` rows \
+                above the base row";
+    for (walls, primary) in [
+        (
+            "walls mat_slot=w height=0",
+            "walls `height=` must be a positive integer that fits in u32, not integer `0`",
+        ),
+        (
+            "walls mat_slot=w height=\"3\"",
+            "walls `height=` must be a positive integer that fits in u32, not string `\"3\"`",
+        ),
+        (
+            "walls mat_slot=w",
+            "walls has no `height=`, so nothing says how many rows it rises",
+        ),
+    ] {
+        let src = format!("{}\nstruct s size=3x3\n  {walls}\n", theme_t!("w", ""));
+        assert_refused_alone(&src, walls, primary, &[form]);
+    }
+}
+
+#[test]
 fn floor_and_walls_combine() {
     let src = "theme t:\n  slot f -> @oak_planks\n  slot w -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  walls mat_slot=w height=2\n";
     let out = lowered(src);
@@ -833,14 +892,20 @@ fn floor_and_walls_combine() {
 }
 
 #[test]
-fn a_stair_without_kind_defers_without_touching_a_voxel() {
+fn a_stair_without_kind_is_refused_without_touching_a_voxel() {
     let src = theme_t!(
         "f",
         "\nstruct s size=3x3\n  floor mat_slot=f\n  stair side=front\n"
     );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(deferred_count(&out), 1);
+    assert_eq!(
+        invalid_lines(src, &out),
+        [(
+            "stair side=front",
+            "stair has no `kind=`, so nothing says what it builds"
+        )],
+    );
     for z in 0..3 {
         for x in 0..3 {
             assert_eq!(block_id(ba, x, 0, z), "minecraft:cobblestone");
@@ -849,22 +914,16 @@ fn a_stair_without_kind_defers_without_touching_a_voxel() {
 }
 
 #[test]
-fn circuit_region_recognised_without_deferred_warning() {
+fn circuit_region_recognised_without_a_finding() {
     let src = theme_t!(
         "f",
         "\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=2\n"
     );
-    let out = lowered(src);
-    assert_eq!(
-        deferred_count(&out),
-        0,
-        "circuit should not emit W_DEFERRED_MEMBER, got {:?}",
-        out.diagnostics,
-    );
+    assert_eq!(lowered(src).diagnostics, []);
 }
 
-/// A member lowering defers, and what its one `W_DEFERRED_MEMBER` says.
-struct OneDeferral {
+/// A member lowering refuses, and what its one `E_INVALID_MEMBER` says.
+struct OneRefusal {
     /// The member lines, after the source's shared head.
     members: &'static str,
     /// Text the primary contains.
@@ -875,7 +934,7 @@ struct OneDeferral {
     note: Option<&'static str>,
 }
 
-impl OneDeferral {
+impl OneRefusal {
     /// A row that checks only what the primary says.
     const fn says(members: &'static str, says: &'static [&'static str]) -> Self {
         Self {
@@ -887,14 +946,16 @@ impl OneDeferral {
     }
 }
 
-/// Asserts `head` plus each row's members earns one `W_DEFERRED_MEMBER` saying what the row says.
-fn assert_each_defers_once(head: &str, rows: &[OneDeferral]) {
+/// Asserts `head` plus each row's members earns one finding, an `E_INVALID_MEMBER` saying what the
+/// row says.
+fn assert_each_refused_once(head: &str, rows: &[OneRefusal]) {
     for row in rows {
         let src = format!("{head}{}", row.members);
         let out = lowered(&src);
-        let deferred = deferrals(&out);
-        assert_eq!(deferred.len(), 1, "{src}{:#?}", out.diagnostics);
-        let primary = &deferred[0].primary;
+        let refused = &out.diagnostics;
+        assert_eq!(refused.len(), 1, "{src}{refused:#?}");
+        assert_eq!(refused[0].code, DiagnosticCode::InvalidMember, "{src}");
+        let primary = &refused[0].primary;
         for text in row.says {
             assert!(
                 primary.contains(text),
@@ -909,26 +970,26 @@ fn assert_each_defers_once(head: &str, rows: &[OneDeferral]) {
         }
         if let Some(note) = row.note {
             assert!(
-                deferred[0].notes.iter().any(|n| n.message == note),
+                refused[0].notes.iter().any(|n| n.message == note),
                 "expected the note {note:?}, got {:?}\n{src}",
-                deferred[0].notes,
+                refused[0].notes,
             );
         }
     }
 }
 
 #[test]
-fn a_malformed_circuit_defers_once_and_names_its_fault() {
-    assert_each_defers_once(
+fn a_malformed_circuit_is_refused_once_and_names_its_fault() {
+    assert_each_refused_once(
         theme_t!("f", "\nstruct s size=3x3\n  floor mat_slot=f\n"),
         &[
-            OneDeferral::says("  circuit void=2\n", &["region="]),
-            OneDeferral::says("  circuit region=floor\n", &["void="]),
-            OneDeferral::says("  circuit region=floor void=0\n", &["void=0"]),
-            // Past `u32`: reported once, by `nonneg_int_or_defer`.
-            OneDeferral::says("  circuit region=floor void=99999999999\n", &["void="]),
-            OneDeferral::says("  circuit region=\"\" void=2\n", &["non-empty"]),
-            OneDeferral::says(
+            OneRefusal::says("  circuit void=2\n", &["region="]),
+            OneRefusal::says("  circuit region=floor\n", &["void="]),
+            OneRefusal::says("  circuit region=floor void=0\n", &["void=0"]),
+            // Past `u32`: reported once, by `nonneg_int_or_refuse`.
+            OneRefusal::says("  circuit region=floor void=99999999999\n", &["void="]),
+            OneRefusal::says("  circuit region=\"\" void=2\n", &["non-empty"]),
+            OneRefusal::says(
                 "  circuit region=42 void=2\n",
                 &["identifier or string label", "integer"],
             ),
@@ -937,7 +998,7 @@ fn a_malformed_circuit_defers_once_and_names_its_fault() {
 }
 
 #[test]
-fn actuator_patch_opened_by_recognised_without_deferred_warning() {
+fn actuator_patch_opened_by_recognised_without_a_finding() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  \
@@ -945,51 +1006,45 @@ fn actuator_patch_opened_by_recognised_without_deferred_warning() {
          door id=front side=front at=center\n  \
          door[id=front] opened_by=sig.open\n"
     );
-    let out = lowered(src);
-    assert_eq!(
-        deferred_count(&out),
-        0,
-        "actuator patch should not emit W_DEFERRED_MEMBER, got {:?}",
-        out.diagnostics,
-    );
+    assert_eq!(lowered(src).diagnostics, []);
 }
 
 #[test]
-fn a_malformed_actuator_patch_defers_once_and_names_its_fault() {
-    assert_each_defers_once(
+fn a_malformed_actuator_patch_is_refused_once_and_names_its_fault() {
+    assert_each_refused_once(
         theme_t!(
             "w",
             "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  \
              door id=front side=front at=center\n",
         ),
         &[
-            OneDeferral::says(
+            OneRefusal::says(
                 "  door[id=front class=main] opened_by=sig.open\n",
                 &["class", "id="],
             ),
             // The parser accepts an empty selector.
-            OneDeferral {
+            OneRefusal {
                 members: "  door[] opened_by=sig.open\n",
                 says: &["id="],
                 never: &["unknown attribute"],
                 note: None,
             },
-            OneDeferral::says("  door[id=3] opened_by=sig.open\n", &["integer"]),
-            OneDeferral::says("  door[id=back] opened_by=sig.open\n", &["back", "front"]),
-            OneDeferral::says("  door[id=front]\n", &["opened_by"]),
-            OneDeferral::says("  door[id=front] opened_by=3\n", &["sig.", "integer"]),
-            OneDeferral::says("  door[id=front] opened_by=foo.bar\n", &["sig."]),
+            OneRefusal::says("  door[id=3] opened_by=sig.open\n", &["integer"]),
+            OneRefusal::says("  door[id=back] opened_by=sig.open\n", &["back", "front"]),
+            OneRefusal::says("  door[id=front]\n", &["opened_by"]),
+            OneRefusal::says("  door[id=front] opened_by=3\n", &["sig.", "integer"]),
+            OneRefusal::says("  door[id=front] opened_by=foo.bar\n", &["sig."]),
             // `powered_by=` is reserved (`spec/redstone` "Signal binding") but not read.
-            OneDeferral::says(
+            OneRefusal::says(
                 "  door[id=front] opened_by=sig.open powered_by=sig.on\n",
                 &["powered_by", "opened_by"],
             ),
-            OneDeferral::says(
+            OneRefusal::says(
                 "  door[id=front] opened_by=sig.open.extra\n",
                 &["two-segment", "sig.open.extra"],
             ),
             // The per-body `duplicate` check misses a second `id=front` under a `level`.
-            OneDeferral {
+            OneRefusal {
                 members: "  level y=0\n    door id=front side=back at=center\n  \
                           door[id=front] opened_by=sig.open\n",
                 says: &["2 physical doors"],
@@ -1000,16 +1055,16 @@ fn a_malformed_actuator_patch_defers_once_and_names_its_fault() {
             },
         ],
     );
-    assert_each_defers_once(
+    assert_each_refused_once(
         theme_t!("w", "\nstruct s size=5x5\n  walls mat_slot=w height=3\n"),
         &[
-            OneDeferral {
+            OneRefusal {
                 members: "  door side=front at=center\n  door[id=front] opened_by=sig.open\n",
                 says: &["1 physical door is declared in this scope, without an `id=`"],
                 never: &[],
                 note: Some("Fix: add `id=front` to the `door` this patch is meant to bind."),
             },
-            OneDeferral::says(
+            OneRefusal::says(
                 "  door[id=front] opened_by=sig.open\n",
                 &["no physical door"],
             ),
@@ -1028,13 +1083,7 @@ fn actuator_patch_selects_door_declared_inside_level() {
            door id=inner side=front at=center\n  \
          door[id=inner] opened_by=sig.tick\n"
     );
-    let out = lowered(src);
-    assert_eq!(
-        deferred_count(&out),
-        0,
-        "actuator patch should resolve a level-nested door id, got {:?}",
-        out.diagnostics,
-    );
+    assert_eq!(lowered(src).diagnostics, []);
 }
 
 #[test]
@@ -1277,41 +1326,38 @@ fn a_slot_read_under_a_level_still_warns_and_one_the_level_drops_does_not() {
         );
     }
     // A dropped member paints nothing whatever the theme, so it is no reader.
-    for (src, deferral) in [
+    for (src, code, primary) in [
         (
             "struct s size=3x3\n  level y=1\n    floor mat_slot=f\n",
+            DiagnosticCode::DeferredMember,
             "level-scoped `floor` is not yet supported",
         ),
         (
             "struct s size=3x3\n  level y=1\n    roof kind=flat mat_slot=r\n",
+            DiagnosticCode::DeferredMember,
             "level-scoped `roof` is not yet supported",
-        ),
-        (
-            "struct s size=3x3\n  level\n    walls mat_slot=f height=2\n",
-            "level requires `y=N` (non-negative integer) to place its children",
-        ),
-        (
-            "struct s size=3x3\n  level y=top\n    walls mat_slot=f height=2\n",
-            "`y=` must be a non-negative integer that fits in u32",
-        ),
-        (
-            "struct s size=3x3\n  level y=0\n    level y=1\n      walls mat_slot=f height=2\n",
-            "nested `level` blocks are not yet supported; this level and every member \
-             declared under it were dropped",
         ),
     ] {
         let out = lowered(src);
         lowered_struct(&out, "s", src);
         assert_eq!(
-            primaries_of(&out, DiagnosticCode::NoThemeBound),
-            Vec::<&str>::new(),
+            out.diagnostics
+                .iter()
+                .map(|d| (d.code, d.primary.as_str()))
+                .collect::<Vec<_>>(),
+            [(code, primary)],
             "{src}",
         );
-        assert_eq!(
-            primaries_of(&out, DiagnosticCode::DeferredMember),
-            [deferral],
-            "{src}",
-        );
+    }
+    // `check` refuses a level with members under it and no offset, and a level inside a level.
+    for src in [
+        "struct s size=3x3\n  level\n    walls mat_slot=f height=2\n",
+        "struct s size=3x3\n  level y=top\n    walls mat_slot=f height=2\n",
+        "struct s size=3x3\n  level y=0\n    level y=1\n      walls mat_slot=f height=2\n",
+    ] {
+        let out = lowered(src);
+        lowered_struct(&out, "s", src);
+        assert_eq!(out.diagnostics, [], "{src}");
     }
 }
 
@@ -1394,8 +1440,9 @@ fn has_id(out: &BlockArrayIr, id: &str) -> bool {
     struct_s(out).palette.entries.iter().any(|e| e.id == id)
 }
 
-fn refused_for_no_wall(out: &BlockArrayIr) -> bool {
-    primaries_of(out, DiagnosticCode::DeferredMember)
+/// Whether `out` refuses a cut with `code` for want of a wall to cut into.
+fn refused_for_no_wall(out: &BlockArrayIr, code: DiagnosticCode) -> bool {
+    primaries_of(out, code)
         .iter()
         .any(|p| p.contains("has no wall to cut into"))
 }
@@ -1429,7 +1476,7 @@ fn abstract_token_deferral_says_what_each_member_does_instead() {
             ),
             voxels: |out| {
                 assert_eq!(struct_s(out).dims.y, 1);
-                assert!(refused_for_no_wall(out));
+                assert!(refused_for_no_wall(out, DiagnosticCode::DeferredMember));
             },
         },
         DeferralArm {
@@ -1473,7 +1520,7 @@ fn a_member_refused_before_its_material_defers_no_abstract_token() {
             consequence: None,
             voxels: |out| {
                 assert_eq!(struct_s(out).dims.y, 1);
-                assert!(refused_for_no_wall(out));
+                assert!(refused_for_no_wall(out, DiagnosticCode::InvalidMember));
             },
         },
         DeferralArm {
@@ -1483,7 +1530,7 @@ fn a_member_refused_before_its_material_defers_no_abstract_token() {
                 assert_eq!(struct_s(out).dims.y, 4);
                 assert!(!has_id(out, STAIR_BASE_ID));
                 assert_eq!(
-                    primaries_of(out, DiagnosticCode::DeferredMember),
+                    primaries_of(out, DiagnosticCode::InvalidMember),
                     vec!["shed roof requires `slope_to=` (one of front, back, left, right)"],
                 );
             },
@@ -1496,7 +1543,7 @@ fn a_member_refused_before_its_material_defers_no_abstract_token() {
                 assert_eq!(struct_s(out).dims.y, 4);
                 assert!(!has_id(out, STAIR_BASE_ID));
                 assert_eq!(
-                    primaries_of(out, DiagnosticCode::DeferredMember),
+                    primaries_of(out, DiagnosticCode::InvalidMember),
                     vec![
                         "unknown shed `slope_to=sideways` (expected one of front, back, left, \
                          right)"
@@ -1981,23 +2028,25 @@ fn door_at_right_carves_last_column_of_front_wall() {
 }
 
 #[test]
-fn door_at_unknown_value_defers_with_named_anchors_in_note() {
+fn door_at_unknown_value_is_refused_naming_the_anchors() {
     let src = theme_t!(
         "w",
         "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=middle\n"
     );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(deferred_count(&out), 1);
     for x in 0..9 {
         assert_eq!(block_id(ba, x, 1, 6), "minecraft:cobblestone");
     }
-    assert_defers_on(
-        src,
-        &out,
-        "door side=front at=middle",
-        "at=center | left | right",
+    assert_eq!(
+        invalid_lines(src, &out),
+        [(
+            "door side=front at=middle",
+            "door has `at=middle`, which is not one of center, left, right — use \
+             `at=center | left | right`",
+        )],
     );
+    assert_eq!(deferred_count(&out), 0);
 }
 
 #[test]
@@ -2033,30 +2082,41 @@ fn window_places_glass_with_symmetry() {
 }
 
 #[test]
-fn window_out_of_bounds_warns_and_skips() {
+fn a_window_past_the_wall_end_is_refused_and_cuts_nothing() {
     let src = theme_t!(
         "w",
         "  slot g -> @glass_pane\n\nstruct s size=5x5\n  walls mat_slot=w height=4\n  window side=front offset=3 y=2 size=3x2 mat_slot=g\n"
     );
+    assert_refused_alone(
+        src,
+        "window side=front offset=3 y=2 size=3x2 mat_slot=g",
+        "window extends beyond the `front` wall (offset=3 size=3x2 repeat=1 step=0, wall \
+         length=5)",
+        &[
+            "the window ends at `offset + size.w`, which must be at most 5; lower `offset=` or narrow \
+             `size=`",
+        ],
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    let deferred = deferred_count(&out);
-    assert_eq!(deferred, 1);
     for x in 0..5 {
         assert_eq!(block_id(ba, x, 2, 4), "minecraft:cobblestone");
     }
 }
 
 #[test]
-fn unknown_roof_kind_warns_and_skips() {
+fn an_unknown_roof_kind_is_refused_and_adds_no_height() {
     let src = theme_t!(
         "w",
         "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=4\n  roof kind=pyramid mat_slot=r\n"
     );
-    let out = lowered(src);
-    let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(deferred_count(&out), 1);
-    assert_eq!(ba.dims.y, 5);
+    assert_refused_alone(
+        src,
+        "roof kind=pyramid mat_slot=r",
+        "unknown roof `kind=pyramid` (expected one of gable, shed, hip, flat)",
+        &[],
+    );
+    assert_eq!(lowered(src).structures["struct::s"].dims.y, 5);
 }
 
 #[test]
@@ -2077,14 +2137,17 @@ fn shed_roof_voxelises_with_slope_to_front() {
 }
 
 #[test]
-fn shed_roof_without_slope_to_emits_deferred_warning() {
+fn a_shed_roof_without_slope_to_is_refused() {
     let src = theme_t!(
         "w",
         "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=shed mat_slot=r\n"
     );
-    let out = lowered(src);
-    assert_eq!(deferred_count(&out), 1);
-    assert_defers_on(src, &out, "roof kind=shed mat_slot=r", "slope_to");
+    assert_refused_alone(
+        src,
+        "roof kind=shed mat_slot=r",
+        "shed roof requires `slope_to=` (one of front, back, left, right)",
+        &[],
+    );
 }
 
 #[test]
@@ -2146,30 +2209,94 @@ fn block_state_at(ba: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
 }
 
 #[test]
-fn door_without_side_emits_deferred_warning() {
+fn a_door_without_side_is_refused() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  door at=center\n"
     );
-    let out = lowered(src);
-    assert_eq!(deferred_count(&out), 1);
-    assert_defers_on(src, &out, "door at=center", "missing `side=");
+    assert_refused_alone(
+        src,
+        "door at=center",
+        "missing `side=` (expected one of front, back, left, right)",
+        &[],
+    );
 }
 
 #[test]
-fn window_with_non_ident_side_emits_deferred_warning() {
+fn a_window_with_a_non_ident_side_is_refused() {
     let src = theme_t!(
         "w",
         "  slot g -> @glass_pane\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=3 offset=1 y=1 size=1x1 mat_slot=g\n"
     );
-    let out = lowered(src);
-    let deferred = deferred_count(&out);
-    assert!(deferred >= 1, "expected a side= diagnostic, got {deferred}");
-    assert_defers_on(
+    assert_refused_alone(
         src,
-        &out,
         "window side=3 offset=1 y=1 size=1x1 mat_slot=g",
-        "`side=`",
+        "`side=` must be one of front, back, left, right, not integer `3`",
+        &[],
+    );
+}
+
+#[test]
+fn a_side_typo_is_refused_with_what_was_written() {
+    assert_refused_alone(
+        theme_t!(
+            "w",
+            "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  door side=frnt at=center\n"
+        ),
+        "door side=frnt at=center",
+        "unknown `side=frnt` (expected one of front, back, left, right)",
+        &[],
+    );
+}
+
+#[test]
+fn a_window_missing_or_misreading_an_argument_it_needs_is_refused_with_its_form() {
+    let offset = "write `offset=N`, where `N` is a non-negative integer: the window's first column \
+                  along the wall, counted from 0 at its left end seen from outside";
+    let y = "write `y=N`, where `N` is a non-negative integer: the window's lowest row, counted up \
+             from 0, the base row of the struct or of the window's `level`";
+    let size = "write `size=WxH`, where `W` and `H` are positive integers: the window's width \
+                along the wall and its height in rows";
+    for (window, primary, note) in [
+        (
+            "window side=front offset=x y=1 size=1x1",
+            "window has an `offset=` that is not a non-negative integer that fits in u32",
+            offset,
+        ),
+        (
+            "window side=front offset=1 size=1x1",
+            "window has no `y=`",
+            y,
+        ),
+        (
+            "window side=front offset=1 y=x size=1x1",
+            "window has a `y=` that is not a non-negative integer that fits in u32",
+            y,
+        ),
+        (
+            "window side=front offset=1 y=1",
+            "window has no `size=WxH`",
+            size,
+        ),
+        (
+            "window side=front offset=1 y=1 size=3",
+            "window has a `size=` that is not a `WxH` of two positive integers",
+            size,
+        ),
+    ] {
+        assert_refused_alone(&walled_6x5_source(window), window, primary, &[note]);
+    }
+}
+
+#[test]
+fn a_window_whose_rows_run_past_the_last_addressable_row_is_refused() {
+    let window = "window side=front offset=1 y=4294967295 size=1x2";
+    assert_refused_alone(
+        &walled_6x5_source(window),
+        window,
+        "window rows from y=4294967295 run past the highest row a build can address (size=1x2; \
+         the walls occupy y=1..=3)",
+        &["lower the window with `y=`, or shorten it with `size=`"],
     );
 }
 
@@ -3419,59 +3546,64 @@ fn east_of_skipped_prior_does_not_silently_stack_at_origin() {
 }
 
 #[test]
-fn level_without_y_defers_and_drops_its_children() {
+fn a_level_without_y_drops_its_children_and_leaves_its_refusal_to_check() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2\n    walls id=upper mat_slot=w height=2\n"
     );
     let out = lowered(src);
-    let defers = deferred_lines(src, &out);
-    assert_eq!(
-        defers.len(),
-        1,
-        "level with missing y= should defer once, got {defers:?}",
-    );
-    assert_eq!(
-        defers[0].0, "level id=floor2",
-        "the defer sits on the level"
-    );
-    assert!(
-        defers[0].1.contains("level requires `y="),
-        "defer reason should mention required y=; got {}",
-        defers[0].1,
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(out.structures["struct::s"].dims.y, 4);
+}
+
+#[test]
+fn a_level_with_no_members_and_no_y_is_refused() {
+    assert_refused_alone(
+        theme_t!(
+            "w",
+            "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2\n"
+        ),
+        "level id=floor2",
+        "level has no `y=`, so nothing says which row its members stand on",
+        &[
+            "write `level y=N`, where `N` is a non-negative integer: the members under it are \
+             measured from row `N`, as the members of the body are from row 0",
+        ],
     );
 }
 
 #[test]
-fn level_with_non_integer_y_defers_with_generic_reason() {
-    let src = theme_t!(
-        "w",
-        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2 y=top\n    walls id=upper mat_slot=w height=2\n"
+fn a_level_with_a_non_integer_y_is_refused_with_the_value_written() {
+    assert_refused_alone(
+        theme_t!(
+            "w",
+            "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2 y=top\n"
+        ),
+        "level id=floor2 y=top",
+        "level `y=` must be a non-negative integer that fits in u32, not identifier `top`",
+        &[
+            "write `level y=N`, where `N` is a non-negative integer: the members under it are \
+             measured from row `N`, as the members of the body are from row 0",
+        ],
     );
-    let out = lowered(src);
-    assert_defers_on(src, &out, "level id=floor2 y=top", "`y=`");
 }
 
 #[test]
-fn nested_level_defers_per_inner_level_child() {
+fn a_level_inside_a_level_is_left_to_check() {
+    // `check` reports each inner level as `E_UNSUPPORTED_NESTING`.
     let src = theme_t!(
         "w",
-        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=outer y=0\n    level id=inner1 y=1\n      walls id=a mat_slot=w height=1\n    level id=inner2 y=2\n      walls id=b mat_slot=w height=1\n"
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=outer y=0\n    level id=inner1 y=4\n      walls id=a mat_slot=w height=1\n    level id=inner2 y=5\n      walls id=b mat_slot=w height=1\n"
     );
     let out = lowered(src);
-    let nested: Vec<(&str, &str)> = deferred_lines(src, &out)
-        .into_iter()
-        .filter(|(_, primary)| primary.contains("nested"))
-        .collect();
+    assert_eq!(out.diagnostics, [], "{src}");
+    let bare = lowered(theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n"
+    ));
     assert_eq!(
-        nested.len(),
-        2,
-        "one defer per inner level expected, got {nested:?}",
-    );
-    assert_eq!(
-        nested.iter().map(|&(line, _)| line).collect::<Vec<_>>(),
-        ["level id=inner1 y=1", "level id=inner2 y=2"],
-        "each defer sits on its inner level",
+        out.structures, bare.structures,
+        "the inner levels paint nothing"
     );
 }
 
@@ -3505,83 +3637,156 @@ fn eave_stair_source(stair: &str) -> String {
     )
 }
 
-#[test]
-fn stair_without_kind_defers() {
-    let stair = "stair id=e mat_slot=r side=front half=top facing=out";
+/// The one finding on `eave_stair_source(stair)`: its `E_INVALID_MEMBER`, as primary and notes.
+fn eave_refusal(stair: &str) -> (String, Vec<String>) {
     let src = eave_stair_source(stair);
-    assert_defers_on(&src, &lowered(&src), stair, "stair without `kind=`");
+    let out = lowered(&src);
+    assert_eq!(
+        invalid_lines(&src, &out),
+        [(stair, out.diagnostics[0].primary.as_str())]
+    );
+    assert_eq!(out.diagnostics.len(), 1, "{:#?}", out.diagnostics);
+    let refusal = &out.diagnostics[0];
+    (
+        refusal.primary.clone(),
+        refusal.notes.iter().map(|n| n.message.clone()).collect(),
+    )
+}
+
+/// The note on a stair refused for its `kind=`.
+const STAIR_KINDS: &str =
+    "write `kind=stairs`, the one stair kind: a band of stairs in the overhang outside a wall";
+
+#[test]
+fn a_stair_without_kind_is_refused() {
+    assert_eq!(
+        eave_refusal("stair id=e mat_slot=r side=front half=top facing=out"),
+        (
+            "stair has no `kind=`, so nothing says what it builds".to_owned(),
+            vec![STAIR_KINDS.to_owned()],
+        ),
+    );
 }
 
 #[test]
-fn stair_with_unknown_kind_defers() {
-    let stair = "stair id=e kind=spiral mat_slot=r side=front half=top";
-    let src = eave_stair_source(stair);
-    assert_defers_on(&src, &lowered(&src), stair, "stair `kind=spiral`");
+fn a_stair_with_an_unknown_kind_is_refused() {
+    assert_eq!(
+        eave_refusal("stair id=e kind=spiral mat_slot=r side=front half=top"),
+        (
+            "unknown stair `kind=spiral`".to_owned(),
+            vec![STAIR_KINDS.to_owned()],
+        ),
+    );
 }
 
 #[test]
-fn stair_with_unknown_half_defers() {
-    let stair = "stair id=e kind=stairs mat_slot=r side=front half=middle";
-    let src = eave_stair_source(stair);
-    assert_defers_on(&src, &lowered(&src), stair, "stair `half=middle`");
-}
-
-#[test]
-fn stair_with_unknown_facing_defers() {
-    let stair = "stair id=e kind=stairs mat_slot=r side=front half=top facing=north";
-    let src = eave_stair_source(stair);
-    assert_defers_on(&src, &lowered(&src), stair, "stair `facing=north`");
-}
-
-#[test]
-fn stair_with_unknown_shape_defers() {
-    let stair = "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left";
-    let src = eave_stair_source(stair);
-    assert_defers_on(&src, &lowered(&src), stair, "stair `shape=inner_left`");
-}
-
-#[test]
-fn stair_without_overhang_defers() {
-    // A roof that will not draw gives no overhang, however large its `overhang=`.
-    let stair = "stair id=e kind=stairs mat_slot=r side=front half=top facing=out";
-    for roof in ["roof kind=flat mat_slot=r", "roof mat_slot=r overhang=2"] {
-        let src = format!(
-            "{}  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  \
-             {roof}\n  {stair}\n",
-            theme_t!("w", ""),
-        );
-        let out = lowered(&src);
-        let reason = deferred_lines(&src, &out)
-            .into_iter()
-            .find(|&(line, primary)| line == stair && primary.contains("eave `stair`"))
-            .unwrap_or_else(|| {
-                panic!(
-                    "expected the eave to defer under `{roof}`, got {:?}",
-                    out.diagnostics
-                )
-            })
-            .1
-            .to_owned();
-        assert!(
-            reason.contains("draws an overhang"),
-            "the reason must name the overhang a roof draws, not the key the author may well have written: {reason}",
+fn a_stair_with_an_unknown_state_is_refused_with_the_values_it_takes() {
+    for (stair, primary, notes) in [
+        (
+            "stair id=e kind=stairs mat_slot=r side=front half=middle",
+            "unknown stair `half=middle`",
+            vec!["`half=` takes one of top, bottom"],
+        ),
+        (
+            "stair id=e kind=stairs mat_slot=r side=front half=top facing=north",
+            "unknown stair `facing=north`",
+            vec!["`facing=` takes one of out, in"],
+        ),
+        (
+            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left",
+            "unknown stair `shape=inner_left`",
+            vec!["`shape=` takes one of straight, outer_left, outer_right"],
+        ),
+    ] {
+        assert_eq!(
+            eave_refusal(stair),
+            (
+                primary.to_owned(),
+                notes.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+            ),
+            "{stair}",
         );
     }
 }
 
 #[test]
-fn stair_with_y_out_of_bounds_defers() {
+fn a_stair_on_a_struct_no_roof_gives_an_overhang_is_refused() {
+    let stair = "stair id=e kind=stairs mat_slot=r side=front half=top facing=out";
+    let src = format!(
+        "{}  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  \
+         roof kind=flat mat_slot=r\n  {stair}\n",
+        theme_t!("w", ""),
+    );
+    assert_refused_alone(
+        &src,
+        stair,
+        "eave `stair` has no overhang to sit in: no roof on this struct has an `overhang=` of at \
+         least 1",
+        &[
+            "an eave band sits one voxel outside the wall, in the ring a roof's `overhang=` adds; give a \
+             `roof` in the struct's body an `overhang=` of at least 1",
+        ],
+    );
+}
+
+#[test]
+fn a_stair_beside_a_roof_that_draws_no_overhang_defers_to_the_roof() {
+    // A roof that will not draw gives no overhang, however large its `overhang=`.
+    let stair = "stair id=e kind=stairs mat_slot=r side=front half=top facing=out";
+    let src = format!(
+        "{}  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  \
+         roof mat_slot=r overhang=2\n  {stair}\n",
+        theme_t!("w", ""),
+    );
+    let out = lowered(&src);
+    assert_eq!(
+        deferred_lines(&src, &out),
+        [(
+            stair,
+            "eave `stair` has no overhang to sit in: the roof written with an `overhang=` draws \
+             nothing",
+        )],
+    );
+    assert_eq!(
+        invalid_lines(&src, &out),
+        [(
+            "roof mat_slot=r overhang=2",
+            "missing `kind=` (expected one of gable, shed, hip, flat)",
+        )],
+    );
+}
+
+#[test]
+fn a_stair_above_the_struct_is_refused() {
     let src = theme_t!(
         "w",
         "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out y=99\n"
     );
-    let out = lowered(src);
-    assert_defers_on(
+    assert_refused_alone(
         src,
-        &out,
         "stair id=e kind=stairs mat_slot=r side=front half=top facing=out y=99",
-        "y=99",
+        "stair y=99 does not fit in the struct (dims.y=5)",
+        &[
+            "the struct's top row is 4",
+            "lower the stair or its `level`, or raise the `walls` to reach its row",
+        ],
     );
+}
+
+#[test]
+fn a_stair_on_a_row_only_unpainted_walls_reach_defers_to_them() {
+    let src = "theme t:\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  \
+               walls mat_slot=w height=3\n  roof kind=flat mat_slot=r overhang=1\n  \
+               stair id=e kind=stairs mat_slot=r side=front y=2\n";
+    let out = lowered(src);
+    assert_eq!(
+        deferred_lines(src, &out),
+        [(
+            "stair id=e kind=stairs mat_slot=r side=front y=2",
+            "stair y=2 does not fit in the struct (dims.y=2)",
+        )],
+    );
+    assert_eq!(invalid_lines(src, &out), []);
 }
 
 #[test]
@@ -3611,17 +3816,25 @@ fn walled_6x5_source(window: &str) -> String {
 }
 
 #[test]
-fn window_repeat_zero_defers() {
+fn a_window_repeated_zero_times_is_refused() {
     let window = "window side=front y=1 size=1x1 repeat=0";
-    let src = walled_6x5_source(window);
-    assert_defers_on(&src, &lowered(&src), window, "repeat=0");
+    assert_refused_alone(
+        &walled_6x5_source(window),
+        window,
+        "window `repeat=0` would stamp no instances; drop the window instead",
+        &[],
+    );
 }
 
 #[test]
-fn window_repeat_without_step_defers() {
+fn a_repeated_window_without_step_is_refused() {
     let window = "window side=front y=1 size=1x1 repeat=3";
-    let src = walled_6x5_source(window);
-    assert_defers_on(&src, &lowered(&src), window, "requires a positive `step=`");
+    assert_refused_alone(
+        &walled_6x5_source(window),
+        window,
+        "window `repeat=` requires a positive `step=` so instances do not overlap",
+        &[],
+    );
 }
 
 #[test]
@@ -3632,10 +3845,18 @@ fn window_repeat_with_sym_defers() {
 }
 
 #[test]
-fn window_span_beyond_wall_defers() {
+fn a_window_series_past_the_wall_end_is_refused() {
     let window = "window side=front y=1 size=2x1 repeat=4 step=2";
-    let src = walled_6x5_source(window);
-    assert_defers_on(&src, &lowered(&src), window, "extends beyond");
+    assert_refused_alone(
+        &walled_6x5_source(window),
+        window,
+        "window extends beyond the `front` wall (offset=0 size=2x1 repeat=4 step=2, wall \
+         length=6)",
+        &[
+            "the last instance ends at `offset + step * (repeat - 1) + size.w`, which must be at most \
+             6; lower `offset=`, `step=` or `repeat=`, or narrow `size=`",
+        ],
+    );
 }
 
 #[test]
@@ -3680,32 +3901,32 @@ fn window_carve_stops_at_the_top_of_the_wall_not_the_top_of_the_volume() {
         "w",
         "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  window side=front y=3 size=1x2\n"
     );
-    let out = lowered(src);
-    assert!(
-        deferred_lines(src, &out).contains(&(
-            "window side=front y=3 size=1x2",
-            "window rows y=3..=4 are not all inside one wall course (size=1x2; the walls \
-             occupy y=1..=3)",
-        )),
-        "expected wall-column defer, got {:?}",
-        out.diagnostics,
+    assert_refused_alone(
+        src,
+        "window side=front y=3 size=1x2",
+        "window rows y=3..=4 are not all inside one wall course (size=1x2; the walls occupy \
+         y=1..=3)",
+        &[
+            "move the window with `y=`, shorten it with `size=`, or raise the walls' `height=`, so \
+           one course holds every row it cuts",
+        ],
     );
 }
 
 #[test]
-fn door_defers_when_its_level_sits_at_or_above_the_wall_it_would_carve() {
+fn a_door_whose_level_sits_at_or_above_the_wall_it_would_carve_is_refused() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n"
     );
-    let out = lowered(src);
-    assert!(
-        deferred_lines(src, &out).contains(&(
-            "door id=hole side=front at=center",
-            "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)",
-        )),
-        "expected a wall-course defer, got {:?}",
-        out.diagnostics,
+    assert_refused_alone(
+        src,
+        "door id=hole side=front at=center",
+        "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)",
+        &[
+            "a door opens one row above the base of its `level`, or of the body outside one; move it \
+             under a `level` whose walls hold that row, or add walls there",
+        ],
     );
 }
 
@@ -3734,10 +3955,10 @@ fn findings_of(out: &BlockArrayIr) -> Vec<Finding> {
         .collect()
 }
 
-/// The `E_UNPLACEABLE_PLATE` finding with `primary` and `notes`.
-fn unplaceable(primary: &str, notes: &[&str]) -> Finding {
+/// The `E_INVALID_MEMBER` finding with `primary` and `notes`.
+fn invalid_member(primary: &str, notes: &[&str]) -> Finding {
     (
-        DiagnosticCode::UnplaceablePlate,
+        DiagnosticCode::InvalidMember,
         primary.to_owned(),
         notes.iter().map(|&n| n.to_owned()).collect(),
     )
@@ -3767,7 +3988,7 @@ fn pressure_plate_outside_on_the_floor_row_without_an_overhang_is_refused() {
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
         findings_of(&out),
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
             &[
                 "no roof on this struct draws an overhang, so it has no voxel outside its walls",
@@ -3800,7 +4021,7 @@ fn pressure_plate_outside_defers_beside_a_roof_that_draws_nothing() {
                     .collect::<Vec<_>>(),
                 [
                     (
-                        DiagnosticCode::DeferredMember,
+                        DiagnosticCode::InvalidMember,
                         "missing `kind=` (expected one of gable, shed, hip, flat)",
                     ),
                     (
@@ -3895,7 +4116,7 @@ fn pressure_plate_inside_at_a_corner_is_refused_and_keeps_the_side_wall() {
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so the \
              voxel inside it belongs to the neighbouring wall",
             &[
@@ -3914,7 +4135,7 @@ fn pressure_plate_inside_at_a_corner_is_refused_at_the_floor_row_too() {
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so the \
              voxel inside it is not an interior cell of this struct",
             &["use an `offset=` from 1 to 3 to reach an interior voxel"],
@@ -3939,7 +4160,7 @@ fn pressure_plate_inside_at_a_corner_claims_no_wall_where_none_is_painted() {
         let ba = out.structures.get("struct::s").unwrap();
         assert_eq!(
             findings,
-            [unplaceable(
+            [invalid_member(
                 "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
                  the voxel inside it is not an interior cell of this struct",
                 &["use an `offset=` from 1 to 3 to reach an interior voxel"],
@@ -3956,7 +4177,7 @@ fn pressure_plate_inside_at_a_corner_of_a_long_left_wall_names_that_wall() {
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `at=inside.left offset=5` is at a corner of the left wall, so the \
              voxel inside it belongs to the neighbouring wall",
             &["use an `offset=` from 1 to 4 to reach an interior voxel"],
@@ -3982,7 +4203,7 @@ fn pressure_plate_inside_is_refused_at_both_corners_of_every_side() {
                 let case = format!("overhang={overhang} inside.{side} offset={offset}");
                 assert_eq!(
                     findings,
-                    [unplaceable(
+                    [invalid_member(
                         &format!(
                             "pressure_plate `at=inside.{side} offset={offset}` is at a corner of \
                              the {side} wall, so the voxel inside it belongs to the neighbouring \
@@ -4044,7 +4265,7 @@ fn pressure_plate_inside_a_two_deep_struct_is_refused_and_keeps_the_back_wall() 
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has no \
              interior voxel",
             &[
@@ -4066,7 +4287,7 @@ fn pressure_plate_inside_a_two_deep_struct_at_the_floor_row_is_offered_the_outsi
     let (out, findings) = lowered_inside_plate("5x2", "", "at=inside.front offset=2 y=0");
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             primary,
             &[
                 "an interior needs a size of at least 3 on both axes",
@@ -4079,7 +4300,7 @@ fn pressure_plate_inside_a_two_deep_struct_at_the_floor_row_is_offered_the_outsi
     let (out, findings) = lowered_inside_plate("5x2", &roof, "at=inside.front offset=2 y=0");
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             primary,
             &[
                 "an interior needs a size of at least 3 on both axes",
@@ -4101,7 +4322,7 @@ fn pressure_plate_inside_a_one_deep_struct_with_an_overhang_is_refused() {
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has no \
              interior voxel",
             &[
@@ -4124,7 +4345,7 @@ fn pressure_plate_inside_a_one_deep_struct_is_not_offered_the_outside_anchor_abo
         lowered_inside_plate("5x1", &overhang_roof(1), "at=inside.front offset=2 y=9");
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has no \
              interior voxel",
             &[
@@ -4142,7 +4363,7 @@ fn pressure_plate_inside_a_narrow_struct_names_the_narrow_axis() {
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(
         findings,
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `at=inside.front offset=1`: the struct's size.w is 2, so it has no \
              interior voxel, and `offset=1` is at a corner of the front wall besides",
             &[
@@ -4178,7 +4399,7 @@ fn pressure_plate_inside_reports_a_thin_axis_and_a_corner_in_one_pass() {
         let (out, findings) = lowered_inside_plate(size, "", plate);
         assert_eq!(
             findings,
-            [unplaceable(
+            [invalid_member(
                 primary,
                 &["an interior needs a size of at least 3 on both axes", grow],
             )],
@@ -4196,7 +4417,7 @@ fn pressure_plate_offset_past_the_wall_is_refused_before_the_wall_grid_is_asked(
     ));
     assert_eq!(
         findings_of(&out),
-        [unplaceable(
+        [invalid_member(
             "pressure_plate `offset=3` runs past the front wall (length 3)",
             &["an `at=inside.front` plate takes an `offset=` of 1, clear of the wall's corners"],
         )],
@@ -4207,8 +4428,15 @@ fn pressure_plate_offset_past_the_wall_is_refused_before_the_wall_grid_is_asked(
 fn nonneg_int_rejects_values_that_do_not_fit_in_u32() {
     let src = theme_t!(
         "w",
-        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n    walls id=upper mat_slot=w height=1\n"
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n"
     );
-    let out = lowered(src);
-    assert_defers_on(src, &out, "level id=huge y=5000000000", "fits in u32");
+    assert_refused_alone(
+        src,
+        "level id=huge y=5000000000",
+        "level `y=` must be a non-negative integer that fits in u32, not integer `5000000000`",
+        &[
+            "write `level y=N`, where `N` is a non-negative integer: the members under it are \
+             measured from row `N`, as the members of the body are from row 0",
+        ],
+    );
 }

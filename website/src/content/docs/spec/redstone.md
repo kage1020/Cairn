@@ -103,19 +103,20 @@ a struct needs a `size` of at least 3 on both axes to have an interior at all. T
 from the footprint whether or not a `walls` member paints it, and the rule holds at every `y`,
 including the floor row `y = 0`. A plate outside it is not placed.
 
-**A plate that cannot be placed.** A plate whose own line puts it on no voxel is
-`E_UNPLACEABLE_PLATE`, and the build stops. Its line does that with no `at=` or one other than
-`<side>.outside` or `inside.<side>`, an `offset=` or `y=` that is not a non-negative integer, an
-`offset=` at or past its wall's length, a row at or above the struct's height
-([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), an
-`at=<side>.outside` on a struct with no roof written with an `overhang=` of at least 1, or an
-`at=inside.<side>` outside the interior. A plate the struct would have held had another member
-built is `W_DEFERRED_MEMBER` instead, because that member's finding has the repair: a row that
-`walls` painting nothing would have reached, or an `at=<side>.outside` beside a `roof` written with
-an `overhang=` that draws nothing ([Lint](/spec/lint/#lowering)). The plate's own line is judged
-first, so a line that puts it nowhere is the error even when such a member is missing too. Either
-way the plate's `->` binding is still read, since synthesis reads the member line and not the
-voxels, so the signal stays in the netlist with no plate to drive it, and the finding says so.
+**A plate that cannot be placed.** A plate whose own line puts it on no voxel is `E_INVALID_MEMBER`,
+and the build stops. Its line does that with no `at=` or one other than `<side>.outside` or
+`inside.<side>`, an `offset=` or `y=` that is not a non-negative integer, an `offset=` at or past
+its wall's length, a row above every row the struct as written reaches ([Compilation Model
+§4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), an `at=<side>.outside` on a
+struct where no roof has an `overhang=` of at least 1, or an `at=inside.<side>` outside the
+interior. A plate the struct would have held had another member built is `W_DEFERRED_MEMBER`
+instead, because the repair is on that member: a row that `walls` painting nothing, a `roof` drawing
+nothing or `walls` under a `level` that is not placed would have reached, or an `at=<side>.outside`
+beside a `roof` with an `overhang=` that draws nothing ([Lint](/spec/lint/#lowering)). The plate's
+own line is judged first, so a line that puts it nowhere is the error even when such a member is
+missing too. Either way the plate's `->` binding is still read, since synthesis reads the member
+line and not the voxels, so the signal stays in the netlist with no plate to drive it, and the
+finding says so.
 
 **Signal names.** Sensors emit into the `sig.` namespace and actuators read from it, so a name
 outside it can never be read, whether on the left of a `logic` line, in a sensor's `->` tail, or as

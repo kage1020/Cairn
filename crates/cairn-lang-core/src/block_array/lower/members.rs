@@ -5,7 +5,7 @@ use crate::intent::{Member, MemberRole, ValueWithSpan};
 use crate::resolve::ScopeResolution;
 
 use crate::block_array::args::{
-    NonNegRead, diag_deferred_member_reason, member_or_slot_span, nonneg_int_or_defer,
+    diag_deferred_member_reason, diag_invalid_member, member_or_slot_span,
 };
 use crate::block_array::material::{MaterialDeferred, TargetRegistry, resolve_block_state};
 use crate::block_array::openings::WallSide;
@@ -14,10 +14,12 @@ use crate::block_array::{BlockState, Dims, PaletteIndex};
 
 use super::canvas::ScopePalette;
 use super::phase::Phase;
+use super::roof_kind::roof_line_refused;
 use super::token_diag::{
     MemberFallback, TokenSite, diag_abstract_token, diag_state_literal_unchecked,
     diag_unknown_abstract_token, diag_unknown_id,
 };
+use super::written::Written;
 
 /// Per-body context every member painter reads.
 pub(super) struct StructCtx<'a> {
@@ -30,16 +32,77 @@ pub(super) struct StructCtx<'a> {
     pub(super) interior_h: u32,
     /// Highest wall row; the roof starts above it. A cut checks [`StructCtx::wall_column`] instead.
     pub(super) wall_top: u32,
+    /// Rows the tallest roof that draws rises above [`Self::wall_top`].
+    pub(super) rise: u32,
     /// Every row the walls members paint, gaps and all; ports read this same column.
     pub(super) wall_column: WallColumn,
-    /// Every row the walls members are written to, whether or not they paint.
-    pub(super) written_walls: WallColumn,
-    /// The `y` extent [`Self::dims`] would have had every walls member painted.
-    pub(super) written_height: u32,
-    /// The [`Self::overhang`] the struct would have had every roof drawn.
-    pub(super) written_overhang: u32,
-    /// Whether a `floor` is written on row 0, whether or not it paints.
-    pub(super) written_floor: bool,
+    /// The struct as written, which a member's own line is judged against.
+    pub(super) written: Written,
+}
+
+impl StructCtx<'_> {
+    /// The note on a refusal above the struct as written when a roof whose shape does not read
+    /// may raise its top row, or `None`.
+    pub(super) fn unread_roof_note(&self) -> Option<String> {
+        (self.written.reach > self.written.height).then(|| {
+            format!(
+                "a `roof` whose `kind=` or `slope_to=` does not read may raise it to row {}",
+                self.written.reach - 1,
+            )
+        })
+    }
+
+    /// Which members keep [`Self::dims`] below the written height.
+    pub(super) fn shortfall(&self) -> Shortfall {
+        Shortfall {
+            walls: self.written.wall_top > self.wall_top,
+            roof: self.written.rise > self.rise,
+        }
+    }
+}
+
+/// Which members keep the struct built below the struct as written.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Shortfall {
+    /// A `walls` member that would reach higher paints nothing.
+    walls: bool,
+    /// A `roof` that would rise higher draws nothing.
+    roof: bool,
+}
+
+impl Shortfall {
+    /// The members the missing rows wait on, completing "rows N to M wait on …".
+    pub(super) fn members(self) -> &'static str {
+        match self {
+            Self {
+                walls: true,
+                roof: true,
+            } => "a `walls` member that paints nothing and a `roof` that draws nothing",
+            Self { roof: true, .. } => "a `roof` that draws nothing",
+            Self { .. } => "a `walls` member that paints nothing",
+        }
+    }
+
+    /// The note on a member deferred to a row the struct as written reaches and the struct built
+    /// does not, with `outcome` saying what happens to it then: "the stair is built".
+    pub(super) fn note(self, outcome: &str) -> String {
+        match self {
+            Self {
+                walls: true,
+                roof: true,
+            } => format!(
+                "a `walls` member that paints nothing and a `roof` that draws nothing keep the \
+                 struct below this row; {outcome} once both build"
+            ),
+            Self { roof: true, .. } => format!(
+                "a `roof` that would rise to this row draws nothing; {outcome} once that roof draws"
+            ),
+            Self { .. } => format!(
+                "a `walls` member that would reach this row paints nothing; {outcome} once that \
+                 member's material resolves to a block"
+            ),
+        }
+    }
 }
 
 /// What the phase model does with a member.
@@ -72,6 +135,38 @@ pub(super) fn member_disposition(role: &MemberRole) -> MemberDisposition {
     }
 }
 
+/// The note on an opening deferred because the `walls` member written to hold its rows paints
+/// nothing.
+pub(super) const UNPAINTED_COURSE: &str = "a `walls` member written to hold these rows paints \
+                                           nothing; the opening is cut once that member's \
+                                           material resolves to a block";
+
+/// The note on a member deferred because a `walls` member under a `level` that is not placed may
+/// hold `rows`, with `outcome` saying what happens to it then: "the door is cut".
+pub(super) fn unplaced_walls_note(rows: &str, outcome: &str) -> String {
+    format!(
+        "a `level` that is not placed holds a `walls` member that may reach {rows}; {outcome} once \
+         that `level` is placed"
+    )
+}
+
+/// The note on a `level` with no `y=`, saying what one is.
+const LEVEL_Y_FORM: &str = "write `level y=N`, where `N` is a non-negative integer: the members \
+                            under it are measured from row `N`, as the members of the body are \
+                            from row 0";
+
+/// The `E_INVALID_MEMBER` on a `level` whose `y=` is missing or not a non-negative integer.
+fn level_offset_refusal(level: &Member) -> Diagnostic {
+    let primary = match level.intent_state.get("y") {
+        Some(raw) => format!(
+            "level `y=` must be a non-negative integer that fits in u32, not {}",
+            raw.value.describe(),
+        ),
+        None => "level has no `y=`, so nothing says which row its members stand on".to_owned(),
+    };
+    diag_invalid_member(level, primary, vec![LEVEL_Y_FORM.to_owned()])
+}
+
 /// Flatten `level` blocks into the body's paint set, each member with its level's `y` offset.
 ///
 /// Sizing reads the same list, so the volume and the paint agree on which members count.
@@ -82,27 +177,26 @@ pub(super) fn flatten_members<'a>(
     let mut out: Vec<(u32, &'a Member)> = Vec::new();
     for member in members {
         if matches!(member.role, MemberRole::Level) {
-            let y_offset = match nonneg_int_or_defer(member, "y", diagnostics) {
-                NonNegRead::Valid(v) => v,
-                NonNegRead::Absent => {
-                    diagnostics.push(diag_deferred_member_reason(
-                        member,
-                        "level requires `y=N` (non-negative integer) to place its children",
-                    ));
-                    continue;
+            let Some(y_offset) = member.nonneg_u32("y") else {
+                // `check` refuses a level with members under it and no offset as
+                // `E_UNSUPPORTED_NESTING`.
+                if member.children.members.is_empty() {
+                    diagnostics.push(level_offset_refusal(member));
                 }
-                NonNegRead::Deferred => continue,
+                continue;
             };
             for child in &member.children.members {
+                // `check` refuses a level inside a level as `E_UNSUPPORTED_NESTING`.
                 if matches!(child.role, MemberRole::Level) {
-                    diagnostics.push(diag_deferred_member_reason(
-                        child,
-                        "nested `level` blocks are not yet supported; this level and every member declared under it were dropped",
-                    ));
                     continue;
                 }
                 if let Some(reason) = level_offset_role_defer(&child.role, y_offset) {
-                    diagnostics.push(diag_deferred_member_reason(child, reason));
+                    // A roof's own line is read first, so the deferral hides none of its faults.
+                    let refused = matches!(child.role, MemberRole::Roof)
+                        && roof_line_refused(child, diagnostics);
+                    if !refused {
+                        diagnostics.push(diag_deferred_member_reason(child, reason));
+                    }
                     continue;
                 }
                 out.push((y_offset, child));
@@ -110,30 +204,6 @@ pub(super) fn flatten_members<'a>(
         } else {
             out.push((0, member));
         }
-    }
-    out
-}
-
-/// Every member a body places, each with its level's `y` offset, the ones [`flatten_members`]
-/// drops for their role at that offset included.
-pub(super) fn written_members(members: &[Member]) -> Vec<(u32, &Member)> {
-    let mut out: Vec<(u32, &Member)> = Vec::new();
-    for member in members {
-        if !matches!(member.role, MemberRole::Level) {
-            out.push((0, member));
-            continue;
-        }
-        let Some(y_offset) = member.nonneg_u32("y") else {
-            continue;
-        };
-        out.extend(
-            member
-                .children
-                .members
-                .iter()
-                .filter(|child| !matches!(child.role, MemberRole::Level))
-                .map(|child| (y_offset, child)),
-        );
     }
     out
 }
@@ -255,15 +325,16 @@ pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Opt
             ),
             None => "missing `side=` (expected one of front, back, left, right)".to_owned(),
         };
-        diagnostics.push(diag_deferred_member_reason(member, &reason));
+        diagnostics.push(diag_invalid_member(member, reason, Vec::new()));
         return None;
     };
     if let Some(side) = WallSide::from_ident(raw) {
         return Some(side);
     }
-    diagnostics.push(diag_deferred_member_reason(
+    diagnostics.push(diag_invalid_member(
         member,
-        &format!("unknown `side={raw}` (expected one of front, back, left, right)"),
+        format!("unknown `side={raw}` (expected one of front, back, left, right)"),
+        Vec::new(),
     ));
     None
 }

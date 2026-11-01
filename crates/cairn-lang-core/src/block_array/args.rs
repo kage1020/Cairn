@@ -5,13 +5,13 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{Member, ValueWithSpan};
 
-/// A non-negative integer `key=` read for a caller that skips the member on an unusable value.
+/// A non-negative integer `key=` read for a caller that refuses the member on an unusable value.
 ///
-/// `Deferred`: a `W_DEFERRED_MEMBER` is already pushed and the member must not be drawn.
+/// `Refused`: an `E_INVALID_MEMBER` is already pushed and the member must not be drawn.
 pub(super) enum NonNegRead {
     Valid(u32),
     Absent,
-    Deferred,
+    Refused,
 }
 
 /// Read `key=` as a non-negative `u32`, or `None` when absent or unusable; an unusable value
@@ -66,7 +66,7 @@ pub(super) fn read_or_ignore<'m, T>(
 
 /// [`read_or_ignore`] for a key whose value is a bare identifier.
 ///
-/// A non-identifier is unreadable; an identifier the caller does not support is its to defer.
+/// A non-identifier is unreadable; an identifier the caller does not support is its to refuse.
 pub(super) fn ident_or_ignore<'m>(
     member: &'m Member,
     key: &'static str,
@@ -116,22 +116,27 @@ impl UnreadArgument {
     }
 }
 
-pub(super) fn nonneg_int_or_defer(
+pub(super) fn nonneg_int_or_refuse(
     member: &Member,
     key: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> NonNegRead {
-    if !member.intent_state.contains_key(key) {
+    let Some(raw) = member.intent_state.get(key) else {
         return NonNegRead::Absent;
-    }
+    };
     if let Some(v) = member.nonneg_u32(key) {
         NonNegRead::Valid(v)
     } else {
-        diagnostics.push(diag_deferred_member_reason(
+        diagnostics.push(diag_invalid_member(
             member,
-            &format!("`{key}=` must be a non-negative integer that fits in u32"),
+            format!(
+                "{} `{key}=` must be {NONNEG_U32}, not {}",
+                member.role.keyword(),
+                raw.value.describe(),
+            ),
+            Vec::new(),
         ));
-        NonNegRead::Deferred
+        NonNegRead::Refused
     }
 }
 
@@ -166,6 +171,28 @@ pub(super) fn diag_deferred_member_noted(member: &Member, reason: &str, note: &s
             span: None,
             message: note.to_owned(),
         }],
+        data: None,
+    }
+}
+
+/// The `E_INVALID_MEMBER` on `member`, with `primary` saying what its line writes wrong and
+/// `notes` what would be valid.
+pub(super) fn diag_invalid_member(
+    member: &Member,
+    primary: String,
+    notes: Vec<String>,
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::InvalidMember,
+        span: member.span.clone(),
+        primary,
+        notes: notes
+            .into_iter()
+            .map(|message| DiagnosticNote {
+                span: None,
+                message,
+            })
+            .collect(),
         data: None,
     }
 }

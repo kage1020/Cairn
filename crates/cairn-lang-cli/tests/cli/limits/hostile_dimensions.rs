@@ -154,11 +154,11 @@ fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
         ("place-id-space", place("\"home 1\""), PLACE_ID),
         ("place-id-colon", place("\"home:1\""), PLACE_ID),
         ("place-id-empty", place("\"\""), PLACE_ID),
-        // Numbers past `u32`, which a saturating read would clamp instead of deferring.
+        // Numbers past `u32`, which a saturating read would clamp instead of refusing.
         (
             "height-past-u32",
             source("struct tower size=3x3\n  walls mat_slot=wall height=5000000000\n"),
-            &[(10, 3, "warning", "W_DEFERRED_MEMBER")],
+            &[(10, 3, "error", "E_INVALID_MEMBER")],
         ),
         (
             "overhang-past-u32",

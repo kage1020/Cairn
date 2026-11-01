@@ -194,7 +194,7 @@ every row of y … y + size.h - 1 in one course    # window, vertical
 ```
 
 Those are the rules a port reads for itself. It also anchors only on an opening the openings pass
-actually cut. A `window` deferred by an argument only the cut reads (`repeat=` or `step=`,
+actually cut. A `window` left uncut by an argument only the cut reads (`repeat=` or `step=`,
 including a `repeat=` above 1 written beside `sym=true` or an unreadable `sym=`), or whose own
 `mat_slot=` resolves to no block, leaves its wall standing, and its port is refused with it. A
 `sym=true` window whose mirror is skipped is reported with `W_DEFERRED_MEMBER` for the mirror, but

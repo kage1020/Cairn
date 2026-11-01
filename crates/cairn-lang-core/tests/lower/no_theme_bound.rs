@@ -32,13 +32,12 @@ const S_HAS_NO_THEME: &str =
     "struct `s` has no theme bound, so no `mat_slot=` in it resolves to a block";
 
 /// The deferral a `door` earns with no `walls` that paints.
-const DOOR_HAS_NO_WALL: &str = "door requires a `walls` member that paints — a positive \
-                                `height=` and a `mat_slot=` that resolves — to carve into";
+const DOOR_HAS_NO_WALL: &str =
+    "door has no wall to cut into: no `walls` member on this struct paints";
 
 /// The deferral `BODY`'s `window` earns with no `walls` that paints.
-const WINDOW_HAS_NO_WALL: &str = "window at y=1 size=1x1 has no wall to cut into (this struct \
-                                  declares no `walls` that paints — one with a positive \
-                                  `height=` and a `mat_slot=` that resolves)";
+const WINDOW_HAS_NO_WALL: &str =
+    "window at y=1 size=1x1 has no wall to cut into: no `walls` member on this struct paints";
 
 /// Each finding of `out` as its code, the text it points at and its primary.
 fn findings<'a>(src: &'a str, out: &'a BlockArrayIr) -> Vec<(DiagnosticCode, &'a str, &'a str)> {

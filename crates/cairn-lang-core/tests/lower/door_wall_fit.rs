@@ -5,7 +5,7 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
 
-use crate::common::{defers, lowered, only_structure, state_at, walkway_was_laid};
+use crate::common::{defers, lowered, only_structure, refusals, state_at, walkway_was_laid};
 
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
@@ -13,7 +13,7 @@ const THEME: &str = "theme t:\n  \
                      slot roof  -> @spruce_stairs\n  \
                      slot gravel -> @gravel\n\n";
 
-/// Nothing at all was reported, where [`defers`] would see only `W_DEFERRED_MEMBER`.
+/// Nothing at all was reported, where [`refusals`] would see only `E_INVALID_MEMBER`.
 fn assert_clean(ir: &BlockArrayIr) {
     assert!(
         ir.diagnostics.is_empty(),
@@ -36,7 +36,7 @@ fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_carving_air()
     );
     let out = lowered(&src);
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         ["door opens at y=1, which is not inside any wall course (the walls occupy y=7..=10)"],
     );
 }
@@ -52,7 +52,7 @@ fn the_door_and_the_window_on_that_body_give_the_same_answer() {
     );
     let out = lowered(&src);
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         [
             "door opens at y=1, which is not inside any wall course (the walls occupy y=7..=10)",
             "window rows y=1..=2 are not all inside one wall course (size=1x2; the walls occupy y=7..=10)",
@@ -101,7 +101,7 @@ fn a_door_is_checked_against_its_own_course_and_not_the_tallest_one() {
     };
     let out = lowered(&two_courses(2));
     assert_eq!(
-        defers(&out),
+        refusals(&out),
         [
             "door opens at y=3, which is not inside any wall course (the walls occupy y=1..=2, y=7..=10)"
         ],
@@ -145,10 +145,44 @@ fn a_door_on_a_struct_with_no_walls_says_there_is_no_wall() {
     );
     let out = lowered(&src);
     assert_eq!(
-        defers(&out),
-        [
-            "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into"
-        ],
+        refusals(&out),
+        ["door has no wall to cut into: this struct declares no `walls` with a positive `height=`"],
+    );
+    assert_eq!(defers(&out), Vec::<&str>::new());
+}
+
+#[test]
+fn a_door_in_walls_that_paint_nothing_defers_to_them() {
+    // With no registry pack the abstract token gives the walls no block, so they paint nothing.
+    let src = "theme t:\n  slot wall -> @wall.stone.cobble\n\n\
+               struct hut size=5x5\n  \
+               walls mat_slot=wall height=3\n  \
+               door id=e side=front at=center\n";
+    let out = lowered(src);
+    assert_eq!(refusals(&out), Vec::<&str>::new());
+    let deferred: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DeferredMember)
+        .map(|d| {
+            (
+                d.primary.as_str(),
+                d.notes
+                    .iter()
+                    .map(|n| n.message.as_str())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        deferred,
+        [(
+            "door has no wall to cut into: no `walls` member on this struct paints",
+            vec![
+                "a `walls` member written to hold these rows paints nothing; the opening is cut once \
+                 that member's material resolves to a block"
+            ],
+        )],
     );
 }
 
@@ -195,7 +229,7 @@ fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
                  walls id=w mat_slot=wall height=4\n  \
                  door id=e side=front at=center\n",
             );
-            defers(&lowered(&src)).is_empty()
+            lowered(&src).diagnostics.is_empty()
         };
         let anchored = walkway_was_laid(&site_with_door_port(wall_level));
         assert_eq!(
@@ -276,10 +310,10 @@ fn the_walkway_defer_states_the_rule_the_door_broke() {
     );
     // The member that cannot be built says so on its own line.
     assert!(
-        defers(&out)
+        refusals(&out)
             .iter()
             .any(|d| d.starts_with("door opens at y=1")),
         "the doorway that could not be cut says so itself: {:?}",
-        defers(&out),
+        refusals(&out),
     );
 }

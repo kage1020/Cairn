@@ -79,7 +79,7 @@ fn an_unreadable_sym_on_a_window_that_is_not_cut_is_still_reported() {
     let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
     assert_eq!(
         codes,
-        vec!["W_DEFERRED_MEMBER", "W_IGNORED_ARGUMENT"],
+        vec!["E_INVALID_MEMBER", "W_IGNORED_ARGUMENT"],
         "{:#?}",
         ir.diagnostics
     );
@@ -133,7 +133,7 @@ fn a_repeated_window_with_no_step_is_refused_for_the_step_first() {
     assert_eq!(
         findings(&ir),
         vec![
-            ("W_DEFERRED_MEMBER", NO_STEP),
+            ("E_INVALID_MEMBER", NO_STEP),
             (
                 "W_IGNORED_ARGUMENT",
                 "`sym=` must be `true` or `false`, not identifier `yes`; the value was ignored",
@@ -147,7 +147,7 @@ fn a_repeated_window_with_no_step_is_refused_for_the_step_first() {
     // The same order for a readable `sym=true`, which refuses the series too.
     assert_eq!(
         findings(&lowered(&window(" repeat=3 sym=true"))),
-        vec![("W_DEFERRED_MEMBER", NO_STEP)],
+        vec![("E_INVALID_MEMBER", NO_STEP)],
     );
 }
 
@@ -165,7 +165,7 @@ fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
         assert_eq!(
             findings(&window),
             vec![(
-                "W_DEFERRED_MEMBER",
+                "E_INVALID_MEMBER",
                 format!("`side=` must be one of front, back, left, right, not {described}")
                     .as_str(),
             )],
@@ -182,7 +182,7 @@ fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
         assert_eq!(
             findings(&shed),
             vec![(
-                "W_DEFERRED_MEMBER",
+                "E_INVALID_MEMBER",
                 format!(
                     "shed `slope_to=` must be one of front, back, left, right, not {described}"
                 )
@@ -292,10 +292,7 @@ fn an_unreadable_stair_state_on_a_stair_that_is_not_built_is_still_reported() {
     assert_eq!(
         findings(&unknown),
         vec![
-            (
-                "W_DEFERRED_MEMBER",
-                "stair `half=sideways` is not yet supported (use `top` or `bottom`)",
-            ),
+            ("E_INVALID_MEMBER", "unknown stair `half=sideways`"),
             (
                 "W_IGNORED_ARGUMENT",
                 "`facing=` must be `out` or `in`, not integer `1`; the value was ignored",
@@ -318,7 +315,7 @@ fn an_unreadable_stair_state_on_a_stair_that_is_not_built_is_still_reported() {
         .collect();
     assert_eq!(
         codes,
-        vec!["W_DEFERRED_MEMBER", "W_IGNORED_ARGUMENT"],
+        vec!["E_INVALID_MEMBER", "W_IGNORED_ARGUMENT"],
         "{:#?}",
         no_overhang.diagnostics
     );

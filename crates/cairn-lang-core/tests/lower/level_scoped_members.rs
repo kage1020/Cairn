@@ -3,7 +3,7 @@
 
 use cairn_lang_core::block_array::BlockArrayIr;
 
-use crate::common::{lowered, only_structure};
+use crate::common::{codes, lowered, only_structure};
 
 fn defer_reasons(ir: &BlockArrayIr) -> Vec<String> {
     ir.diagnostics.iter().map(|d| d.primary.clone()).collect()
@@ -228,4 +228,13 @@ fn a_placed_def_flattens_its_levels_the_way_a_struct_does() {
         placement.dims, ba.dims,
         "the placement record must carry the dims the voxels were built into",
     );
+}
+
+#[test]
+fn a_level_with_members_and_no_offset_is_refused_once_by_check_and_not_again_by_lowering() {
+    for level in ["level id=up", "level id=up y=top"] {
+        let src = source(&format!("  {level}\n    walls mat_slot=wall height=2\n"));
+        assert_eq!(codes(&src), ["E_UNSUPPORTED_NESTING"], "{src}");
+        assert_eq!(lowered(&src).diagnostics, [], "{src}");
+    }
 }

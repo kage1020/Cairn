@@ -153,7 +153,7 @@ fn an_out_of_range_height_is_reported_rather_than_saturating() {
     assert!(
         out.diagnostics
             .iter()
-            .any(|d| d.code == DiagnosticCode::DeferredMember),
+            .any(|d| d.code == DiagnosticCode::InvalidMember),
         "an unusable `height=` must be named; got {:?}",
         out.diagnostics
             .iter()

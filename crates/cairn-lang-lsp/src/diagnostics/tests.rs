@@ -163,8 +163,8 @@ fn a_lowering_finding_every_target_raises_is_reported_as_a_pinned_check_words_it
                 range((4, 15), (4, 27)),
             ),
             (
-                "W_DEFERRED_MEMBER",
-                lsp_types::DiagnosticSeverity::WARNING,
+                "E_INVALID_MEMBER",
+                lsp_types::DiagnosticSeverity::ERROR,
                 range((9, 2), (9, 13)),
             ),
         ],

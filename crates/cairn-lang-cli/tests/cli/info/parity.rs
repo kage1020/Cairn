@@ -414,7 +414,8 @@ fn a_warning_at_every_version_leaves_every_target_buildable() {
          \x20\x20slot floor -> @cobblestone\n\n\
          struct hut size=5x5\n\
          \x20\x20floor mat_slot=floor\n\
-         \x20\x20door  side=front at=center\n",
+         \x20\x20level y=1\n\
+         \x20\x20\x20\x20roof kind=flat\n",
     )
     .expect("write source");
 
@@ -423,7 +424,7 @@ fn a_warning_at_every_version_leaves_every_target_buildable() {
     assert_eq!(
         strings(entry, "buildable"),
         strings(entry, "considered"),
-        "a door with no walls to carve into is a warning, not a refusal",
+        "a roof that lowering does not draw under a raised `level` is a warning, not a refusal",
     );
 }
 

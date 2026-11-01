@@ -50,27 +50,37 @@ fn skip_notes<'a>(src: &str, out: &'a BlockArrayIr) -> Vec<&'a DiagnosticNote> {
     skip(src, out).notes.iter().collect()
 }
 
-/// The suffix a note carries when the member's own line defers too.
+/// The suffix a note carries when the member's own line is reported too.
 const OWN_LINE: &str = "; the member says so on its own line too";
 
-/// Asserts the member's own line really carries the deferral `note` claims it does.
-fn assert_own_line_holds(out: &BlockArrayIr, note: &DiagnosticNote) {
-    if !note.message.ends_with(OWN_LINE) {
+/// Asserts the member's own line carries the finding `note` claims, with `code`, or that the note
+/// claims none when `code` is `None`.
+#[track_caller]
+fn assert_own_line_holds(out: &BlockArrayIr, note: &DiagnosticNote, code: Option<DiagnosticCode>) {
+    let Some(code) = code else {
+        assert!(
+            !note.message.ends_with(OWN_LINE),
+            "the note says the member's line is reported too: {:?}",
+            note.message,
+        );
         return;
-    }
+    };
+    assert!(
+        note.message.ends_with(OWN_LINE),
+        "the note should say the member's line is reported too: {:?}",
+        note.message,
+    );
     let span = note
         .span
         .clone()
         .expect("a note naming a line points at it");
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::DeferredMember
-                && d.span == span
-                && !d.primary.starts_with("walkway `")),
-        "the note says the member's line defers too, and nothing is there: {:#?}",
-        out.diagnostics,
-    );
+    let own: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.span == span && !d.primary.starts_with("walkway `"))
+        .map(|d| d.code)
+        .collect();
+    assert_eq!(own, [code], "{:#?}", out.diagnostics);
 }
 
 /// Every contract a port has, none of which is the reason for any case here.
@@ -81,14 +91,22 @@ const CHECKLIST: [&str; 4] = [
     "cannot anchor a port yet",
 ];
 
-/// Asserts the row's one note begins with `reason` and points at the line starting `member_line`.
-fn assert_reason(probe_members: &str, gap: u32, reason: &str, member_line: Option<&str>) {
+/// Asserts the row's one note begins with `reason`, points at the line starting `member_line`, and
+/// that line carries the finding `own`, if any.
+#[track_caller]
+fn assert_reason(
+    probe_members: &str,
+    gap: u32,
+    reason: &str,
+    member_line: Option<&str>,
+    own: Option<DiagnosticCode>,
+) {
     let src = site(probe_members, gap);
     let out = lowered(&src);
     let notes = skip_notes(&src, &out);
     assert_eq!(notes.len(), 1, "one note for the one port: {notes:#?}");
     let note = notes[0];
-    assert_own_line_holds(&out, note);
+    assert_own_line_holds(&out, note, own);
     assert!(
         note.message.starts_with(reason),
         "expected the note to begin {reason:?}, got {:?}",
@@ -123,6 +141,7 @@ fn a_stair_is_refused_for_its_role() {
         6,
         "`a.p` is a `stair`, and only a `door` or a `window` can anchor a port",
         Some("stair id=p"),
+        None,
     );
 }
 
@@ -133,6 +152,7 @@ fn a_side_typo_is_refused_with_what_was_written() {
         6,
         "`a.p` has `side=frnt`, which is not one of front, back, left, right",
         Some("door id=p"),
+        Some(DiagnosticCode::InvalidMember),
     );
 }
 
@@ -143,6 +163,7 @@ fn a_door_at_typo_is_refused_with_what_was_written() {
         6,
         "`a.p` is a door that has `at=middle`, which is not one of center, left, right",
         Some("door id=p"),
+        Some(DiagnosticCode::InvalidMember),
     );
 }
 
@@ -153,6 +174,7 @@ fn a_door_without_masonry_is_refused_for_the_wall() {
         6,
         "`a.p` is a door with no wall to open",
         Some("door id=p"),
+        Some(DiagnosticCode::InvalidMember),
     );
 }
 
@@ -163,6 +185,7 @@ fn a_window_without_y_is_refused_for_that_argument() {
         6,
         "`a.p` is a window that has no `y=`",
         Some("window id=p"),
+        Some(DiagnosticCode::InvalidMember),
     );
 }
 
@@ -173,6 +196,7 @@ fn a_window_past_the_wall_end_is_refused_with_its_extent() {
         6,
         "`a.p` is a window that runs past the end of its wall (`offset + size.w` = 3 + 3, wall length 5)",
         Some("window id=p"),
+        Some(DiagnosticCode::InvalidMember),
     );
 }
 
@@ -183,6 +207,7 @@ fn a_window_outside_the_courses_is_refused_with_its_rows() {
         6,
         "`a.p` is a window whose rows y=3..=4 are not all inside one wall course (the walls occupy y=1..=3)",
         Some("window id=p"),
+        Some(DiagnosticCode::InvalidMember),
     );
 }
 
@@ -247,7 +272,7 @@ fn two_refused_ports_get_one_note_each_in_row_order() {
         "{messages:#?}"
     );
     for note in notes {
-        assert_own_line_holds(&out, note);
+        assert_own_line_holds(&out, note, Some(DiagnosticCode::InvalidMember));
     }
 }
 
@@ -341,39 +366,47 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
 }
 
 #[test]
-fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
-    // The port reads `offset=`, `y=`, `size=`; the cut also defers on `repeat=` or `step=`,
+fn a_window_the_cut_refuses_for_its_repeat_anchors_no_walkway() {
+    // The port reads `offset=`, `y=`, `size=`; the cut also refuses on `repeat=` or `step=`,
     // including a `repeat=` above 1 beside `sym=`.
-    for (args, own_line) in [
+    for (args, code, own_line) in [
         (
             "offset=0 y=1 size=1x1 repeat=0 mat_slot=glass",
+            DiagnosticCode::InvalidMember,
             "window `repeat=0` would stamp no instances; drop the window instead",
         ),
         (
             "offset=0 y=1 size=1x1 repeat=abc mat_slot=glass",
-            "`repeat=` must be a non-negative integer that fits in u32",
+            DiagnosticCode::InvalidMember,
+            "window `repeat=` must be a non-negative integer that fits in u32, not identifier \
+             `abc`",
         ),
         (
             "offset=0 y=1 size=1x1 repeat=3 step=3 mat_slot=glass",
+            DiagnosticCode::InvalidMember,
             "window extends beyond the `front` wall (offset=0 size=1x1 repeat=3 step=3, wall length=5)",
         ),
         (
             "offset=1 y=1 size=1x1 repeat=2 step=2 sym=true",
+            DiagnosticCode::DeferredMember,
             "window with both `repeat=` and `sym=true` is not yet supported",
         ),
         (
             "offset=1 y=1 size=1x1 repeat=2 step=2 sym=yes",
+            DiagnosticCode::DeferredMember,
             "window with `repeat=` greater than 1 is not cut while its `sym=` is unreadable: \
              `sym=true` with such a `repeat=` is not yet supported, and `sym=false` is not what \
              was written",
         ),
         (
             "offset=0 y=1 size=1x1 repeat=2 mat_slot=glass",
+            DiagnosticCode::InvalidMember,
             "window `repeat=` requires a positive `step=` so instances do not overlap",
         ),
         (
             "offset=0 y=1 size=1x1 step=abc mat_slot=glass",
-            "`step=` must be a non-negative integer that fits in u32",
+            DiagnosticCode::InvalidMember,
+            "window `step=` must be a non-negative integer that fits in u32, not identifier `abc`",
         ),
     ] {
         let src = site(&format!("{WALLS}  window id=p side=front {args}\n"), 6);
@@ -392,7 +425,7 @@ fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
         assert!(
             out.diagnostics
                 .iter()
-                .any(|d| d.span == span && d.primary == own_line),
+                .any(|d| d.span == span && d.code == code && d.primary == own_line),
             "`{args}`: the window's own line says why: {:#?}",
             out.diagnostics,
         );
@@ -450,9 +483,12 @@ fn a_window_whose_rows_overflow_prints_no_backwards_range() {
         ),
     );
     assert!(
-        out.diagnostics.iter().any(|d| d.primary
-            == "window rows from y=4294967295 run past the highest row a build can address \
-                (size=1x2; the walls occupy y=1..=3)"),
+        out.diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::InvalidMember
+                && d.primary
+                    == "window rows from y=4294967295 run past the highest row a build can address \
+                    (size=1x2; the walls occupy y=1..=3)"),
         "{:#?}",
         out.diagnostics,
     );

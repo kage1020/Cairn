@@ -35,7 +35,7 @@ fn a_bare_check_reports_the_lowering_findings_a_pinned_check_reports() {
         &bare.stderr,
         &[
             (5, 16, "error", "E_INCOMPATIBLE_MATERIAL"),
-            (10, 3, "warning", "W_DEFERRED_MEMBER"),
+            (10, 3, "error", "E_INVALID_MEMBER"),
         ],
     );
     let headlines: Vec<&str> = bare
@@ -53,7 +53,7 @@ fn a_bare_check_reports_the_lowering_findings_a_pinned_check_reports() {
                  so those states have nowhere to go"
             ),
             format!(
-                "{path}:10:3: warning[W_DEFERRED_MEMBER]: `side=` must be one of front, back, \
+                "{path}:10:3: error[E_INVALID_MEMBER]: `side=` must be one of front, back, \
                  left, right, not integer `3`"
             ),
         ],
@@ -82,7 +82,7 @@ fn the_json_report_of_a_bare_check_is_the_pinned_one() {
         json_stream(&bare.stdout),
         reported(&[
             (5, 16, "error", "E_INCOMPATIBLE_MATERIAL"),
-            (10, 3, "warning", "W_DEFERRED_MEMBER"),
+            (10, 3, "error", "E_INVALID_MEMBER"),
         ]),
     );
     let pinned = check(

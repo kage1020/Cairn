@@ -55,6 +55,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
              window[class=small] -> frame=@spruce_wood\n  \
              window[class=small] -> frame=@dark_oak_wood\n\n\
              struct s size=5x5\n  \
+             walls mat_slot=wall height=3\n  \
              window class=small side=front offset=1 y=1 size=1x1 mat_slot=wall\n",
         ),
     ),
@@ -128,12 +129,15 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     ),
     (
         "E_UNKNOWN_ARGUMENT",
-        Source::WithPrologue("struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n"),
+        Source::WithPrologue("struct s size=5x5\n  walls clas=outer mat_slot=wall height=3\n"),
     ),
     (
-        // The forbidden example `spec/syntax` "Lexical" gives.
+        // A bare value beside the keys, which `spec/syntax` "Lexical" forbids.
         "E_UNEXPECTED_POSITIONAL",
-        Source::WithPrologue("struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),
+        Source::WithPrologue(
+            "struct s size=5x5\n  walls mat_slot=wall height=3\n  \
+             window front side=front y=1 size=1x1 mat_slot=wall\n",
+        ),
     ),
     (
         // The site half; core's suite covers the geometry half.
@@ -156,6 +160,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         "E_CONNECT_ARITY",
         Source::WithPrologue(
             "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
+             \x20\x20walls id=w mat_slot=wall height=3\n\
              \x20\x20door id=entry side=front at=center\n\
              \nsite s:\n  place id=a use=hut theme=t at=origin\n\
              \x20\x20place id=b use=hut theme=t east_of=a gap=4\n\

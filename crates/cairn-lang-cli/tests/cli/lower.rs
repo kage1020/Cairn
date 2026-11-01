@@ -50,26 +50,26 @@ fn json_format_round_trips_as_block_array_ir() {
 
 #[test]
 fn deferred_member_warnings_print_to_stderr() {
-    // Stair lowering has no `inner_left`, so it defers.
+    // Lowering has no roof under a raised `level`, so it defers.
     let source = concat!(
         "theme t:\n",
         "  slot floor -> @spruce_planks\n",
         "\n",
         "struct s size=2x2\n",
         "  floor mat_slot=floor\n",
-        "  roof kind=flat overhang=1\n",
-        "  stair kind=stairs side=front shape=inner_left\n",
+        "  level y=1\n",
+        "    roof kind=flat\n",
     );
     let tmp = TempDir::new().expect("tempdir");
-    let src_path = tmp.path().join("stair-inner-left.crn");
+    let src_path = tmp.path().join("level-roof.crn");
     fs::write(&src_path, source).expect("write source");
     let out = cairn("lower", &[src_path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
-    assert_stream(&stderr, &[(7, 3, "warning", "W_DEFERRED_MEMBER")]);
+    assert_stream(&stderr, &[(7, 5, "warning", "W_DEFERRED_MEMBER")]);
     assert!(
-        stderr.contains("shape=inner_left"),
-        "the deferred primary should name the offending `shape=inner_left`, stderr={stderr}",
+        stderr.contains("level-scoped `roof` is not yet supported"),
+        "the deferred primary should name what is not lowered, stderr={stderr}",
     );
 }
 
