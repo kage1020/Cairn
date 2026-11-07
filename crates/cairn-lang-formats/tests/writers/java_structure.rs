@@ -14,8 +14,8 @@ fn target_1_21_4() -> JavaTarget {
     resolve_java_target("1.21.4").expect("known target")
 }
 
-fn output_filename_nbt(source_scope: &str) -> String {
-    output_filename(source_scope, OutputExt::Nbt)
+fn output_filename_nbt(stem: &str) -> String {
+    output_filename(stem, OutputExt::Nbt)
 }
 
 fn unit_air() -> BlockArray {
@@ -309,46 +309,13 @@ fn abstract_palette_id_rejected() {
 }
 
 #[test]
-fn output_filename_strips_struct_prefix() {
-    assert_eq!(output_filename_nbt("struct::cottage"), "cottage.nbt");
+fn output_filename_appends_the_extension_to_the_stem() {
     assert_eq!(output_filename_nbt("cottage"), "cottage.nbt");
-}
-
-#[test]
-fn output_filename_strips_site_and_name_prefixes_to_place_id() {
-    assert_eq!(output_filename_nbt("site::hamlet::home1"), "home1.nbt");
     assert_eq!(
-        output_filename_nbt("site::village::cottage_2"),
-        "cottage_2.nbt"
-    );
-}
-
-#[test]
-fn output_filename_preserves_inner_colons_and_unicode() {
-    assert_eq!(output_filename_nbt("struct::deep::room"), "deep::room.nbt");
-    assert_eq!(output_filename_nbt("塔"), "塔.nbt");
-}
-
-#[test]
-fn output_filename_flattens_walkway_scope_to_site_prefixed_name() {
-    assert_eq!(
-        output_filename_nbt("walkway::hamlet::home1.entry__home2.entry"),
+        output_filename_nbt("hamlet_walkway_home1_entry__home2_entry"),
         "hamlet_walkway_home1_entry__home2_entry.nbt",
     );
-    assert_eq!(
-        output_filename_nbt("walkway::village::a.door__b.door"),
-        "village_walkway_a_door__b_door.nbt",
-    );
-    assert_eq!(
-        output_filename_nbt("walkway::no_site"),
-        "walkway::no_site.nbt"
-    );
-}
-
-#[test]
-fn output_filename_handles_empty_input() {
-    // Left malformed, since a silent rename would hide a bad scope key.
-    assert_eq!(output_filename_nbt(""), ".nbt");
+    assert_eq!(output_filename_nbt("塔"), "塔.nbt");
 }
 
 #[test]
