@@ -157,7 +157,7 @@ const LEVEL_Y_FORM: &str = "write `level y=N`, where `N` is a non-negative integ
 
 /// The `E_INVALID_MEMBER` on a `level` whose `y=` is missing or not a non-negative integer.
 fn level_offset_refusal(level: &Member) -> Diagnostic {
-    let primary = match level.intent_state.get("y") {
+    let primary = match level.arguments.get("y") {
         Some(raw) => format!(
             "level `y=` must be a non-negative integer that fits in u32, not {}",
             raw.value.describe(),
@@ -318,7 +318,7 @@ pub(super) fn member_will_paint(
 
 pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
     let Some(raw) = member.ident_value("side") else {
-        let reason = match member.intent_state.get("side") {
+        let reason = match member.arguments.get("side") {
             Some(written) => format!(
                 "`side=` must be one of front, back, left, right, not {}",
                 written.value.describe(),
