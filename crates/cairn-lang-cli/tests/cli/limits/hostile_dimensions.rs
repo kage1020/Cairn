@@ -245,7 +245,7 @@ fn circuit(size: &str) -> String {
         "  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a".to_owned(),
         "  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b".to_owned(),
         "  logic sig.o = sig.a and sig.b".to_owned(),
-        "  door id=d side=front at=center mat_slot=wall opened_by=sig.o".to_owned(),
+        "  door id=d side=front at=center opened_by=sig.o".to_owned(),
         "  circuit region=floor void=3".to_owned(),
     ]
     .join("\n");
@@ -288,13 +288,7 @@ fn routing_a_giant_reservation_answers_within_the_deadline() {
             "{name}: `synth --stage route` ended as {outcome:?}; a reservation the attenuation \
              cap cannot span must be refused, not routed\nstderr={stderr}",
         );
-        assert_stream(
-            &stderr,
-            &[
-                (14, 43, "warning", "W_IGNORED_ARGUMENT"),
-                (15, 3, "error", "E_ATTENUATION_LIMIT"),
-            ],
-        );
+        assert_stream(&stderr, &[(15, 3, "error", "E_ATTENUATION_LIMIT")]);
         assert!(
             elapsed < ANSWERED_WITHOUT_SEARCHING,
             "{name}: `synth --stage route` took {elapsed:?}; refusing on the straight line is \
@@ -703,14 +697,7 @@ fn a_walled_in_sink_is_refused_without_searching_the_reservation() {
         "`synth --stage route` ended as {outcome:?}\nstderr={stderr}",
     );
     // Congestion, not distance: the sink is walled in whatever the cap allows.
-    assert_stream(
-        &stderr,
-        &[
-            (7, 44, "warning", "W_IGNORED_ARGUMENT"),
-            (8, 43, "warning", "W_IGNORED_ARGUMENT"),
-            (14, 3, "error", "E_ROUTE_CONGESTION"),
-        ],
-    );
+    assert_stream(&stderr, &[(14, 3, "error", "E_ROUTE_CONGESTION")]);
     assert!(stderr.contains("cannot reach (5,0,1)"), "got {stderr:?}");
     // 12.4 million coords of reservation: searched, it runs past `DEADLINE`.
     assert!(

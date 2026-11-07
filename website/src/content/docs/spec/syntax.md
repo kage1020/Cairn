@@ -284,20 +284,27 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
+The same column resolves both the door and any `connect` walkway anchored to it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 Numeric offsets (`at=N`) are reserved for a future extension. A door with no `at=`, or one that
 names no anchor, is `E_INVALID_MEMBER` and cuts nothing.
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
-level's base plane. It takes the two rows a doorway wants, or, if fewer remain, as much of that
-row's wall course as is left counting the row it opens at. A door under a one-row course therefore
-opens that one row rather than cutting into the roof. The row it opens at MUST be inside a course
-of the masonry. A door whose row no `walls` member is written to hold is `E_INVALID_MEMBER` and cuts
-nothing, the same finding the `window` on that body earns. A door in a course whose `walls` paint
-nothing, or beside `walls` under a `level` that is not placed, is `W_DEFERRED_MEMBER` instead, since
-the repair is on those walls or that level
+level's base plane, and stands two rows tall: its door block takes that row and the one above it
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). Both rows
+MUST be inside one course of the masonry. A door whose two rows the walls as written hold in no one
+course is `E_INVALID_MEMBER` and cuts nothing, the same finding the `window` on that body earns. A
+door under a one-row course is one: the row above it is the roof's, or nothing's. A door in a course
+whose `walls` paint nothing, or beside `walls` under a `level` that is not placed, is
+`W_DEFERRED_MEMBER` instead, since the repair is on those walls or that level
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the courses a `walls`
 paints).
+
+**What a door is built from.** A door's `mat_slot=` names its door block, and a door without one is
+built from the registry pack's `@door.default`
+([Materials and Themes §7.2](/spec/materials-themes/#tier-1-tokens)). The block MUST be a door, one
+whose id ends in `_door`. Any other is `E_INCOMPATIBLE_MATERIAL` ([Lint](/spec/lint/)), as a sloped
+roof bound outside the stair family is, and the door is built from `@door.default` beside the
+error.
 
 ## 5.5 IDs, classes, addresses
 

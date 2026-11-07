@@ -28,6 +28,16 @@ const PINNED: Table = &[
             ("natural", &["true", "false"]),
         ],
     ),
+    (
+        "minecraft:oak_door",
+        &[
+            ("facing", &["north", "south", "west", "east"]),
+            ("half", &["upper", "lower"]),
+            ("hinge", &["left", "right"]),
+            ("open", &["true", "false"]),
+            ("powered", &["true", "false"]),
+        ],
+    ),
     ("minecraft:oak_log", &[("axis", &["x", "y", "z"])]),
     ("minecraft:oak_planks", &[]),
     (

@@ -42,6 +42,18 @@ impl WallSide {
             Self::Right => (1, 0),
         }
     }
+
+    /// Unit step `(dx, dz)` along the wall toward its right end as seen from outside, the way
+    /// [`wall_local_to_grid`]'s `u` grows.
+    #[must_use]
+    pub fn along(self) -> (i32, i32) {
+        match self {
+            Self::Front => (1, 0),
+            Self::Back => (-1, 0),
+            Self::Left => (0, 1),
+            Self::Right => (0, -1),
+        }
+    }
 }
 
 /// Length of the wall along its `offset` axis, given the authored `size=WxH`.

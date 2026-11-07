@@ -18,7 +18,7 @@ struct NoSidewaysLog {
 
 impl NoSidewaysLog {
     fn pinned() -> Self {
-        let mut ids: Vec<String> = ["cobblestone", "gravel", "oak_log", "oak_planks"]
+        let mut ids: Vec<String> = ["cobblestone", "gravel", "oak_door", "oak_log", "oak_planks"]
             .iter()
             .map(|id| format!("minecraft:{id}"))
             .collect();

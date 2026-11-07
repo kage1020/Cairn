@@ -81,7 +81,7 @@ struct sim size=7x5
   logic sig.or_ab    = sig.a or sig.b
   logic sig.combined = sig.and_ab and sig.or_ab
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=d side=front at=center opened_by=sig.combined
 
   circuit region=floor void=3
 ";
@@ -138,7 +138,7 @@ struct dup size=20x5
 
   logic sig.s0 = sig.a and sig.a
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.s0
+  door id=d side=front at=center opened_by=sig.s0
 
   circuit region=floor void=2
 ";
@@ -192,7 +192,7 @@ struct pack size=5x3
   logic sig.c0 = not sig.a
   logic sig.c1 = sig.c0 and sig.a
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.c1
+  door id=d side=front at=center opened_by=sig.c1
 
   circuit region=floor void=1
 ";
@@ -360,7 +360,7 @@ struct alpha size=7x5
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
-  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  door id=d side=front at=center opened_by=sig.open
   circuit region=floor void=2
 
 struct beta size=8x3
@@ -370,7 +370,7 @@ struct beta size=8x3
   logic sig.and_cd   = sig.c and sig.d
   logic sig.or_cd    = sig.c or sig.d
   logic sig.combined = sig.and_cd and sig.or_cd
-  door id=e side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=e side=front at=center opened_by=sig.combined
   circuit region=floor void=1
 ";
     let placement = placement_from_source(source, Edition::Java);

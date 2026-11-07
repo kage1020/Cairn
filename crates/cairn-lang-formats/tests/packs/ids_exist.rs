@@ -62,29 +62,34 @@ fn every_id_core_hardcodes_exists_in_every_supported_target() {
 
 /// Without the token, lowering falls back to a Java id that Bedrock does not have.
 #[test]
-fn both_packs_declare_the_token_that_redirects_the_plate() {
-    for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
-        for version in supported_versions(pack) {
-            let id = pack
-                .materials()
-                .lookup_id_for("pressure_plate.default", Some(version))
-                .unwrap_or_else(|| {
-                    panic!(
-                        "the {} pack declares no `pressure_plate.default`, so lowering falls \
-                         back to a hardcoded Java id",
-                        edition(pack),
-                    )
-                });
-            let ids = pack
-                .blocks()
-                .ids_for(version)
-                .unwrap_or_else(|| panic!("{} {version} has no block table", edition(pack)));
-            assert!(
-                ids.binary_search(&id.to_owned()).is_ok(),
-                "the {edition} pack plates with `{id}`, which {edition} {version} does not \
-                 declare",
-                edition = edition(pack),
-            );
+fn both_packs_declare_the_tokens_that_redirect_the_member_defaults() {
+    for (token, member) in [
+        ("pressure_plate.default", "plate"),
+        ("door.default", "door"),
+    ] {
+        for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
+            for version in supported_versions(pack) {
+                let id = pack
+                    .materials()
+                    .lookup_id_for(token, Some(version))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "the {} pack declares no `{token}`, so lowering falls back to a \
+                             hardcoded Java id",
+                            edition(pack),
+                        )
+                    });
+                let ids = pack
+                    .blocks()
+                    .ids_for(version)
+                    .unwrap_or_else(|| panic!("{} {version} has no block table", edition(pack)));
+                assert!(
+                    ids.binary_search(&id.to_owned()).is_ok(),
+                    "the {edition} pack builds a {member} from `{id}`, which {edition} {version} \
+                     does not declare",
+                    edition = edition(pack),
+                );
+            }
         }
     }
 }
@@ -96,6 +101,7 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
         ("sign.oak", "minecraft:standing_sign"),
         ("sign.oak_wall", "minecraft:wall_sign"),
         ("pressure_plate.default", "minecraft:wooden_pressure_plate"),
+        ("door.default", "minecraft:wooden_door"),
     ] {
         assert_eq!(
             bedrock.materials().lookup_id(token),
@@ -109,6 +115,7 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
         ("sign.oak", "minecraft:oak_sign"),
         ("sign.oak_wall", "minecraft:oak_wall_sign"),
         ("pressure_plate.default", "minecraft:oak_pressure_plate"),
+        ("door.default", "minecraft:oak_door"),
     ] {
         assert_eq!(
             java.materials().lookup_id(token),

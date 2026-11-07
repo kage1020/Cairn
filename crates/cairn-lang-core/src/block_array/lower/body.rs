@@ -20,6 +20,7 @@ use crate::block_array::{
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
+use super::door::{HungDoor, hang_doors};
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::paint_member;
 use super::phase::Phase;
@@ -253,8 +254,13 @@ fn paint_phases(
 ) -> Canvas {
     let PhaseBuckets { by_phase, phases } = buckets;
     let mut canvas = Canvas::new(ctx.dims, phases);
-    for bucket in by_phase {
-        run_phase(bucket, ctx, palette, &mut canvas, diagnostics);
+    let mut hung = Vec::new();
+    for (index, bucket) in by_phase.into_iter().enumerate() {
+        run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+        // A door's hinge reads the wall beside it, which a later opening in the phase may cut.
+        if index == Phase::Openings.index() {
+            hang_doors(&hung, palette, &mut canvas);
+        }
     }
     canvas
 }
@@ -306,7 +312,7 @@ fn bucket_members<'a>(
 }
 
 /// Paint one phase's bucket, each member through its own [`MemberCanvas`] so its writes are
-/// filed under it.
+/// filed under it; each door that stands is added to `hung`.
 ///
 /// [`MemberCanvas`]: super::canvas::MemberCanvas
 pub(super) fn run_phase(
@@ -314,6 +320,7 @@ pub(super) fn run_phase(
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut Canvas,
+    hung: &mut Vec<HungDoor>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (index, y_offset, member) in bucket {
@@ -324,6 +331,7 @@ pub(super) fn run_phase(
             ctx,
             palette,
             &mut member_canvas,
+            hung,
             diagnostics,
         );
     }

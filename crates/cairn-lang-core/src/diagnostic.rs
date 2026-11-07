@@ -436,7 +436,7 @@ pub enum DiagnosticData {
     IncompatibleMaterial {
         /// The fully namespaced id the member was bound to.
         id: String,
-        /// Family the member's geometry needs, as a bare noun (`stair`).
+        /// Family the member's geometry needs, as a bare noun (`stair` or `door`).
         required: String,
         /// `mat_slot=` name the member read, when it has one.
         #[serde(skip_serializing_if = "Option::is_none")]

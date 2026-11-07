@@ -97,7 +97,7 @@ struct sim size=5x5
   logic sig.or_ab    = sig.a or sig.b
   logic sig.combined = sig.and_ab and sig.or_ab
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=d side=front at=center opened_by=sig.combined
 ";
     let synth = synth_source(source);
     let netlist = compile_netlist(&synth.scoped);
@@ -260,14 +260,14 @@ struct alpha size=5x5
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   logic sig.na = not sig.a
-  door id=d side=front at=center mat_slot=wall opened_by=sig.na
+  door id=d side=front at=center opened_by=sig.na
 
 struct beta size=5x5
   floor mat_slot=wall
   pressure_plate id=q at=front.outside offset=0 y=0 -> sig.b1
   pressure_plate id=r at=inside.front  offset=1 y=0 -> sig.b2
   logic sig.both = sig.b1 and sig.b2
-  door id=e side=front at=center mat_slot=wall opened_by=sig.both
+  door id=e side=front at=center opened_by=sig.both
 ";
     let synth = synth_source(source);
     let netlist = compile_netlist(&synth.scoped);
@@ -301,8 +301,8 @@ struct sim size=5x5
   logic sig.both = sig.a and sig.b
   logic sig.na   = not sig.a
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.both
-  door id=e side=back  at=center mat_slot=wall opened_by=sig.na
+  door id=d side=front at=center opened_by=sig.both
+  door id=e side=back  at=center opened_by=sig.na
 ";
     let synth = synth_source(source);
     let netlist = compile_netlist(&synth.scoped);
@@ -346,8 +346,8 @@ struct sim size=5x5
   logic sig.both = sig.a and sig.b
   logic sig.na   = not sig.a
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.both
-  door id=e side=back  at=center mat_slot=wall opened_by=sig.na
+  door id=d side=front at=center opened_by=sig.both
+  door id=e side=back  at=center opened_by=sig.na
 ";
     let synth = synth_source(source);
     let netlist = compile_netlist(&synth.scoped);
