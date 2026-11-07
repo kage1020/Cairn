@@ -28,7 +28,9 @@ pub use roof::is_stair;
 
 use crate::diagnostic::Diagnostic;
 use crate::error::Span;
-use crate::ids::{PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
+use crate::ids::{
+    PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem, walkway_artifact_stem,
+};
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -65,6 +67,24 @@ pub struct Walkway {
     pub footprint: Footprint,
     /// Canonical id of the path material, e.g. `minecraft:gravel`.
     pub path_material: String,
+}
+
+impl BlockArrayIr {
+    /// The file name, without extension, the [`Self::structures`] entry `scope` is written to.
+    #[must_use]
+    pub fn artifact_stem(&self, scope: &str) -> String {
+        self.walkways
+            .get(scope)
+            .map_or_else(|| artifact_stem(scope), Walkway::artifact_stem)
+    }
+}
+
+impl Walkway {
+    /// The file name, without extension, this walkway is written to.
+    #[must_use]
+    pub fn artifact_stem(&self) -> String {
+        walkway_artifact_stem(&self.site, &self.from, &self.to)
+    }
 }
 
 /// One resolved `place` line from a `site` block.

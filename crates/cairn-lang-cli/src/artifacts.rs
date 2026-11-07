@@ -62,7 +62,8 @@ pub(crate) fn prepare_artifacts<'a>(
         for note in &degraded {
             eprintln!("{}", degraded_warning(scope, note));
         }
-        let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
+        let file_name = output_filename(&block_ir.artifact_stem(scope), target.output_ext());
+        let path = artifact_path(out_dir, scope, &file_name)?;
         // Distinct scope keys can name one file, and the resolver's `E_OUTPUT_NAME_COLLISION`
         // sees only resolved scopes.
         let location = entry_location(&path, case).map_err(|err| {
