@@ -131,8 +131,12 @@ BEDROCK_STATE_MAPS = {
     ),
 }
 
-# The Java state the `.mcstructure` writer carries as the water layer rather than as a state.
+# The Java state the `.mcstructure` writer carries in the water layer.
 WATER_LAYER_STATE = "waterlogged"
+
+# The Java blocks that always stand in water though they have no `waterlogged` state, which
+# GeyserMC's `BlockRegistryPopulator` waterlogs in code, out of reach of its `blocks.nbt`.
+IN_WATER = ("bubble_column", "kelp", "kelp_plant", "seagrass", "tall_seagrass")
 
 DIFF_LINES_SHOWN = 40
 
@@ -279,6 +283,9 @@ JavaState = tuple[str, dict[str, str]]
 BedrockStates = dict[str, bool | int | str]
 # Geyser's stand-in for a Java block Bedrock has no block for, which is not the block's image.
 PLACEHOLDER = "unknown"
+# The Java blocks Geyser maps to its stand-in. A new one fails the run: the pack would otherwise
+# lose a block without a sign.
+PLACEHOLDER_BLOCKS = frozenset({"test_block", "test_instance_block"})
 
 
 @dataclass(frozen=True)
@@ -393,9 +400,10 @@ def family_of(
 
 
 def accepts(table: dict[str, States], block: str, family: Family) -> bool:
-    """Whether the palette's `block` declares every state and value `family` writes."""
+    """Whether the palette's `block` declares every state and value `family` writes, and `family`
+    writes every state it declares."""
     domains = table.get(block)
-    if domains is None:
+    if domains is None or set(domains) != {state for state, _ in family.states}:
         return False
     for state, rule in family.states:
         domain = domains.get(state)
@@ -413,7 +421,8 @@ class VersionMap:
 
     # Each `(Bedrock id, Java id)` pair's family, for the pairs the palette accepts.
     families: dict[tuple[str, str], Family]
-    # The other pairs, named as `states.json` names them, in name order.
+    # The pairs whose states the palette does not declare, named as `states.json` names them, in
+    # name order.
     refused: list[str]
 
 
@@ -433,6 +442,10 @@ def version_families(java: JavaStates, mappings: list[dict], table: dict[str, St
         bedrock_id = bare(named) if ":" in named else named
         states = {name: bedrock_value(raw) for name, raw in entry.get("state", {}).items()}
         groups.setdefault((bedrock_id, java_id), []).append((properties, states))
+    placeholders = {java_id for bedrock_id, java_id in groups if bedrock_id == PLACEHOLDER}
+    if not placeholders <= PLACEHOLDER_BLOCKS:
+        new = ", ".join(f"`{j}`" for j in sorted(placeholders - PLACEHOLDER_BLOCKS))
+        raise Refused(f"the state map maps {new} to no Bedrock block; add it to PLACEHOLDER_BLOCKS")
     families = {}
     refused = []
     for (bedrock_id, java_id), rows in sorted(groups.items()):
@@ -440,7 +453,9 @@ def version_families(java: JavaStates, mappings: list[dict], table: dict[str, St
             continue
         pair = pair_name(bedrock_id, java_id)
         family = family_of(pair, rows, java)
-        if family is not None and accepts(table, bedrock_id, family):
+        if family is None:
+            raise Refused(f"a Bedrock state of `{pair}` is no function of its Java states")
+        if accepts(table, bedrock_id, family):
             families[(bedrock_id, java_id)] = family
         else:
             refused.append(pair)
@@ -520,6 +535,7 @@ def states_text(maps: dict[str, VersionMap], sensitivity: dict) -> str:
         f'  "schema_version": {STATES_SCHEMA},',
         f'  "namespace": {json.dumps(NAMESPACE)},',
         f'  "refused": {json.dumps(refused)},',
+        f'  "in_water": {json.dumps(list(IN_WATER))},',
         '  "families": [',
     ]
     for i, ((family, versions), ids) in enumerate(ordered):

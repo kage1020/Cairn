@@ -463,86 +463,104 @@ fn every_example_lists_every_supported_target() {
     }
 }
 
+/// Sources the `buildable targets` row and `compile --target` are compared over.
+const BUILDABLE_FIXTURES: &[(&str, &str)] = &[
+    // Two blocks Bedrock declares on disjoint parts of its range.
+    (
+        "split.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @stonebrick\n\
+         \x20\x20slot wall  -> @pale_moss_block\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20walls class=outer mat_slot=wall height=3\n",
+    ),
+    // A default mapping the earliest target respells, beside the respelling written out.
+    (
+        "mix.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @floor.stone.smooth\n\
+         \x20\x20slot wall  -> @stonebrick\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20walls class=outer mat_slot=wall height=3\n",
+    ),
+    // A floor above part of the supported range.
+    (
+        "floor.crn",
+        "@requires version>=1.21.40\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A scope that does not lower: only `E_PARTIAL_BUILD` refuses it.
+    (
+        "partial.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\n\
+         struct nosize\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A floor no edition's table can place, refusing every version at once.
+    (
+        "unorderable.crn",
+        "@requires version>=24w14a\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A floor Java places and Bedrock cannot, so the editions disagree in one run.
+    (
+        "cross_edition.crn",
+        "@requires version>=1.21.4\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A state no Bedrock version's map carries, refusing every version of the edition.
+    (
+        "states.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @frame[facing=north]\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A state only some Bedrock versions' maps carry, refusing the others alone.
+    (
+        "some_states.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @cherry_wood[axis=x]\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A value only the newest Bedrock version's map holds, its Java release being the first
+    // to have it.
+    (
+        "new_value.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @noteblock[instrument=trumpet]\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // One that builds everywhere, so "refuse everything" fails.
+    (
+        "clean.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+];
+
 #[test]
 fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let fixtures: &[(&str, &str)] = &[
-        // Two blocks Bedrock declares on disjoint parts of its range.
-        (
-            "split.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @stonebrick\n\
-             \x20\x20slot wall  -> @pale_moss_block\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n\
-             \x20\x20walls class=outer mat_slot=wall height=3\n",
-        ),
-        // A default mapping the earliest target respells, beside the respelling written out.
-        (
-            "mix.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @floor.stone.smooth\n\
-             \x20\x20slot wall  -> @stonebrick\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n\
-             \x20\x20walls class=outer mat_slot=wall height=3\n",
-        ),
-        // A floor above part of the supported range.
-        (
-            "floor.crn",
-            "@requires version>=1.21.40\n\n\
-             theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // A scope that does not lower: only `E_PARTIAL_BUILD` refuses it.
-        (
-            "partial.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n\n\
-             struct nosize\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // A floor no edition's table can place, refusing every version at once.
-        (
-            "unorderable.crn",
-            "@requires version>=24w14a\n\n\
-             theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // A floor Java places and Bedrock cannot, so the editions disagree in one run.
-        (
-            "cross_edition.crn",
-            "@requires version>=1.21.4\n\n\
-             theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // A state Bedrock's writer cannot carry, refused after every source gate has passed.
-        (
-            "states.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @oak_log[axis=x]\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // One that builds everywhere, so "refuse everything" fails.
-        (
-            "clean.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-    ];
-
-    for (name, source) in fixtures {
+    for (name, source) in BUILDABLE_FIXTURES {
         let path = tmp.path().join(name);
         std::fs::write(&path, source).expect("write fixture");
         let axes = info_json_at(&path, "java,bedrock");

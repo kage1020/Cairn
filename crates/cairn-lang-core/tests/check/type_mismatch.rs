@@ -43,6 +43,30 @@ fn a_mat_slot_given_a_block_says_to_bind_it_in_the_theme() {
 }
 
 #[test]
+fn a_coordinate_on_a_label_or_size_key_is_a_type_mismatch() {
+    for (src, code, primary) in [
+        (
+            "struct s size=1x1\n  walls mat_slot=1,2,3\n",
+            DiagnosticCode::TypeMismatchLabel,
+            "`mat_slot=` expects a label (identifier or string), got coordinate",
+        ),
+        (
+            "struct s size=1,2,3\n  floor mat_slot=m\n",
+            DiagnosticCode::TypeMismatchSize,
+            "`size=` expects a `WxH` literal, got coordinate",
+        ),
+    ] {
+        let found = of_code(src, code);
+        assert_eq!(found.len(), 1, "for {src:?}, got {found:#?}");
+        assert_eq!(
+            (slice(src, &found[0]), found[0].primary.as_str()),
+            ("1,2,3", primary),
+            "for {src:?}",
+        );
+    }
+}
+
+#[test]
 fn class_set_to_dotted_ref_is_flagged() {
     let src = "struct s size=1x1\n  walls class=foo.bar mat_slot=m\n";
     let diags = diagnose(src);

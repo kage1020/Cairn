@@ -236,6 +236,15 @@ CI times neither bench. A timing gate on shared runners would be noise, and a pr
 
 Before it times anything, each bench checks that its generated source does the work it was built for. `lowering` checks that every placement and walkway comes out of block-array lowering; `place_and_route` checks that every scope comes through every pass with one placed cell per gate. A generator that stopped reaching the passes therefore fails in CI instead of quietly timing less work.
 
+## Publishing the VS Code extension
+
+For each release tag, the `vsix` job in `publish.yml` packages the extension, signs it, and attaches it to the GitHub release with its SHA-256. The `marketplace` and `open-vsx` jobs then publish that same file. A re-run reuses the `.vsix` the release already carries, since neither registry lets a published version be replaced. To replace a bad build before the registries take it, delete the three `cairn-lang-<version>.vsix*` assets from the release and run the workflow again.
+
+Each registry needs a one-time setup by a maintainer before the first release that runs these jobs:
+
+- **Visual Studio Marketplace** uses Trusted Publishing, so there is no token to store. On the `kage1020` publisher in the Marketplace management portal, add a Trusted Publishing policy for the repository `kage1020/Cairn`, the workflow `publish.yml` and the environment `marketplace`. The job creates that environment on its first run if it is missing. In the repository's environment settings, limit it to `canary` and the `v*` tags, the refs `publish.yml` runs from.
+- **Open VSX** takes a token. Sign the Eclipse Foundation Open VSX Publisher Agreement with the account that publishes, create the `kage1020` namespace once (`npx ovsx create-namespace kage1020 -p <token>`), and store that account's access token as the repository secret `OVSX_PAT`.
+
 ## Versioning
 
 Date-based, `YYYY.M[.PATCH]`. Notable changes go in [CHANGELOG.md](CHANGELOG.md). [Compatibility Tiers](https://cairn.kage1020.com/spec/compatibility/), not the number itself, set what a version bump may break.

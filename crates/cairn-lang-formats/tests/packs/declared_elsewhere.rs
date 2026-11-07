@@ -12,11 +12,8 @@ fn around(edition: Edition, version: &str, id: &str) -> Option<DeclaredElsewhere
 }
 
 fn declared(edition: Edition, until: Option<&str>, since: Option<&str>) -> DeclaredElsewhere {
-    DeclaredElsewhere {
-        edition,
-        until: until.map(str::to_owned),
-        since: since.map(str::to_owned),
-    }
+    DeclaredElsewhere::new(edition, until.map(str::to_owned), since.map(str::to_owned))
+        .expect("a version on one side at least")
 }
 
 #[test]

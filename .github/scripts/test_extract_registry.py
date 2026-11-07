@@ -357,6 +357,70 @@ class ExtractBedrock(Case):
         )
 
 
+class GeyserMappings(Case):
+    """`geyser_mappings` offline, its one pinned state map served by a fake `fetch`."""
+
+    MAP = load.write_nbt({"bedrock_mappings": [{"bedrock_identifier": "minecraft:air"}]})
+    SHA256 = hashlib.sha256(MAP).hexdigest()
+    URL = "https://raw.githubusercontent.com/GeyserMC/mappings/abc/blocks.nbt"
+
+    def setUp(self) -> None:
+        self.cache = self.temporary_folder()
+        self.cached = self.cache / f"geyser-mappings-{self.SHA256[:12]}.nbt"
+        self.fetched: list[str] = []
+        self.patch(registry, "BEDROCK_STATE_MAPS", {"1.21.0": ("abc", self.SHA256, "1.21")})
+
+    def serve(self, body: bytes) -> None:
+        def fetch(url: str, timeout: int) -> bytes:
+            self.fetched.append(url)
+            return body
+
+        self.patch(registry, "fetch", fetch)
+
+    def test_a_cached_map_that_matches_its_pin_is_read_without_a_download(self) -> None:
+        self.cached.write_bytes(self.MAP)
+        self.serve(b"")
+        self.assertEqual(
+            registry.geyser_mappings("1.21.0", self.cache),
+            [{"bedrock_identifier": "minecraft:air"}],
+        )
+        self.assertEqual(self.fetched, [])
+
+    def test_a_cached_map_that_fails_its_pin_is_downloaded_again(self) -> None:
+        self.cached.write_bytes(b"corrupt")
+        self.serve(self.MAP)
+        self.assertEqual(
+            registry.geyser_mappings("1.21.0", self.cache),
+            [{"bedrock_identifier": "minecraft:air"}],
+        )
+        self.assertEqual(self.fetched, [self.URL])
+        self.assertEqual(self.cached.read_bytes(), self.MAP)
+
+    def test_a_download_that_fails_its_pin_is_refused_and_not_cached(self) -> None:
+        self.serve(b"corrupt")
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.0", self.cache),
+            f"the state map at {self.URL} does not match its pinned SHA-256",
+        )
+        self.assertFalse(self.cached.exists())
+
+    def test_a_map_whose_nbt_does_not_read_is_refused(self) -> None:
+        body = load.write_nbt({"other": []})
+        pin = ("abc", hashlib.sha256(body).hexdigest(), "1.21")
+        self.patch(registry, "BEDROCK_STATE_MAPS", {"1.21.0": pin})
+        self.serve(body)
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.0", self.cache),
+            "the state map for Bedrock 1.21.0 does not read: 'bedrock_mappings'",
+        )
+
+    def test_a_version_with_no_pinned_map_is_refused(self) -> None:
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.1", self.cache),
+            "no state map is pinned for Bedrock 1.21.1; add it to BEDROCK_STATE_MAPS",
+        )
+
+
 class ExtractJava(Case):
     """`extract_java` offline: Mojang's metadata, the jar and the data generator are faked."""
 
@@ -641,12 +705,37 @@ class VersionFamilies(unittest.TestCase):
         self.assertEqual(sorted(version_map.families), [("oak_planks", "oak_planks")])
         self.assertEqual(version_map.refused, ["oak_stairs"])
 
+    def test_a_pair_that_leaves_out_a_state_the_palette_declares_is_refused(self):
+        palette = {**BEDROCK_TABLE, "oak_stairs": {**BEDROCK_TABLE["oak_stairs"], "lit": [False]}}
+        version_map = registry.version_families(JAVA, mappings(), palette)
+        self.assertEqual(sorted(version_map.families), [("oak_planks", "oak_planks")])
+        self.assertEqual(version_map.refused, ["oak_stairs"])
+
+    def test_a_bedrock_state_some_java_state_lacks_fails_the_run(self):
+        entries = mappings()
+        bit = entries[0]["state"]["upside_down_bit"]
+        entries[0] = {**entries[0], "state": {"upside_down_bit": bit}}
+        with self.assertRaisesRegex(
+            load.Refused, "a Bedrock state of `oak_stairs` is no function of its Java states"
+        ):
+            registry.version_families(JAVA, entries, BEDROCK_TABLE)
+
     def test_geysers_placeholder_maps_nothing(self):
         entries = mappings()
         entries[-1] = {"bedrock_identifier": "minecraft:unknown"}
-        version_map = registry.version_families(JAVA, entries, BEDROCK_TABLE)
+        with mock.patch.object(registry, "PLACEHOLDER_BLOCKS", frozenset({"oak_planks"})):
+            version_map = registry.version_families(JAVA, entries, BEDROCK_TABLE)
         self.assertEqual(sorted(version_map.families), [("oak_stairs", "oak_stairs")])
         self.assertEqual(version_map.refused, [])
+
+    def test_a_block_newly_mapped_to_the_placeholder_fails_the_run(self):
+        entries = mappings()
+        entries[-1] = {"bedrock_identifier": "minecraft:unknown"}
+        with self.assertRaisesRegex(
+            load.Refused,
+            "the state map maps `oak_planks` to no Bedrock block; add it to PLACEHOLDER_BLOCKS",
+        ):
+            registry.version_families(JAVA, entries, BEDROCK_TABLE)
 
     def test_a_map_whose_length_is_not_the_java_states_is_refused(self):
         with self.assertRaisesRegex(load.Refused, "entries for"):
@@ -696,6 +785,9 @@ class StatesText(unittest.TestCase):
         )
         body = json.loads(text)
         self.assertEqual(body["refused"], {"1.2": ["oak_stairs"]})
+        self.assertEqual(
+            body["in_water"], ["bubble_column", "kelp", "kelp_plant", "seagrass", "tall_seagrass"]
+        )
         self.assertEqual(
             [(row["mc_versions"], row["ids"]) for row in body["families"]],
             [(["1.0", "1.1", "1.2"], ["oak_planks"]), (["1.0", "1.1"], ["oak_stairs"])],

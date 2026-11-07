@@ -133,7 +133,7 @@ fn a_pane_joins_the_whole_faces_and_the_panes_beside_it() {
                 "id": "minecraft:glass_pane",
                 "properties": {"east": "true", "north": "false", "south": "false", "west": "true"},
             },
-            "cells": [[1, 1, 2], [2, 1, 2]],
+            "runs": [{ "from": [1, 1, 2], "len": 2 }],
         }]),
     );
 }
