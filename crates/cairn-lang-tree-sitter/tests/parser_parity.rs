@@ -843,6 +843,74 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("string_unterminated", "theme t:\n  slot a -> \"x\n", Reject),
+    // -- coordinate triples ---------------------------------------------
+    (
+        "coordinate_triple",
+        "struct s size=5x5\n  fill from=1,1,1 to=3,2,3\n",
+        Accept,
+    ),
+    (
+        "coordinate_in_a_header",
+        "struct s size=5x5 at=0,0,0\n  floor a=1\n",
+        Accept,
+    ),
+    // A selector's `,` after an integer is a separator unless another component follows it.
+    (
+        "coordinate_in_a_selector_beside_a_separator",
+        "struct s size=5x5\n  door[y=2,side=front, at=1,2,3, id=d] opened_by=sig.a\n",
+        Accept,
+    ),
+    (
+        "coordinate_in_a_theme_selector",
+        "theme t:\n  window[at=1,2,3] -> mat_slot=g\n",
+        Accept,
+    ),
+    // A list's commas separate its items, so three integers in a list stay three.
+    (
+        "integers_in_a_list_are_no_coordinate",
+        "struct s size=5x5\n  floor tags=[1,2,3]\n",
+        Accept,
+    ),
+    (
+        "coordinate_spaced",
+        "struct s size=5x5\n  fill from=1, 1, 1\n",
+        Reject,
+    ),
+    (
+        "coordinate_space_before_a_comma",
+        "struct s size=5x5\n  fill from=1 ,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_two_components",
+        "struct s size=5x5\n  fill from=1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_four_components",
+        "struct s size=5x5\n  fill from=1,1,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_negative_component",
+        "struct s size=5x5\n  fill from=1,-1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_trailing_comma",
+        "struct s size=5x5\n  fill from=1,1,1,\n",
+        Reject,
+    ),
+    (
+        "coordinate_as_a_positional",
+        "struct s size=5x5\n  fill 1,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_as_a_binding",
+        "struct s size=5x5\n  lever -> 1,1,1\n",
+        Reject,
+    ),
     // -- indentation ----------------------------------------------------
     (
         "dedent_two_levels",
@@ -1182,6 +1250,11 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "integer_out_of_range",
         "struct s size=3x3\n  floor n=99999999999999999999\n",
+        Accept,
+    ),
+    (
+        "coordinate_component_out_of_range",
+        "struct s size=3x3\n  fill from=99999999999999999999,1,1\n",
         Accept,
     ),
     // -- a size literal that runs into a word --------------------------

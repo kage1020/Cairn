@@ -959,9 +959,107 @@ impl<'a> Parser<'a> {
             return Err(literal);
         }
         self.expect(&TokenKind::Eq)?;
-        let value = self.parse_value()?;
+        let value = if self.at_coordinate() {
+            self.parse_coordinate()?
+        } else {
+            self.parse_value()?
+        };
         let span = start_byte..self.last_byte();
         Ok(Arg { key, value, span })
+    }
+
+    /// Whether the next tokens are an integer, a `,` and another component, which only a
+    /// coordinate triple puts after `=`: a separator in a selector is followed by a key.
+    fn at_coordinate(&self) -> bool {
+        let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        matches!(kind(0), Some(TokenKind::Int { .. }))
+            && matches!(kind(1), Some(TokenKind::Comma))
+            && matches!(kind(2), Some(TokenKind::Int { .. } | TokenKind::Minus))
+    }
+
+    /// Read a coordinate triple `X,Y,Z`, three integers joined by `,` with nothing between.
+    fn parse_coordinate(&mut self) -> Result<Value, ParseError> {
+        let start_byte = self.current_byte();
+        let start_position = self.position();
+        let mut components: Vec<u64> = Vec::with_capacity(3);
+        loop {
+            let position = self.position();
+            match self.peek().map(|t| t.kind.clone()) {
+                Some(TokenKind::Int { lexeme }) => {
+                    // Under the `i64` ceiling every integer has; a run of digits is never negative.
+                    let component =
+                        lexeme
+                            .parse::<i64>()
+                            .map_err(|err| ParseError::InvalidInt {
+                                position,
+                                context: IntContext::IntLiteral,
+                                lexeme: lexeme.clone(),
+                                kind: *err.kind(),
+                            })?;
+                    components.push(component.unsigned_abs());
+                    self.advance();
+                }
+                Some(TokenKind::Minus) => {
+                    return Err(ParseError::Syntax {
+                        position,
+                        message: "a coordinate component is never negative: a coordinate \
+                                  counts from the low corner of the footprint, as `0,0,0`"
+                            .into(),
+                    });
+                }
+                _ => {
+                    let got = self.next_token_text();
+                    return Err(ParseError::Syntax {
+                        position,
+                        message: format!(
+                            "a coordinate triple expected an integer after `,`, got {got}; \
+                             write `x,y,z`, as `4,3,2`"
+                        ),
+                    });
+                }
+            }
+            if !self.continues_coordinate() {
+                break;
+            }
+            let comma = &self.tokens[self.pos];
+            let next = &self.tokens[self.pos + 1];
+            if comma.span.start != self.last_byte() || next.span.start != comma.span.end {
+                return Err(ParseError::Syntax {
+                    position: comma.position,
+                    message: "a coordinate triple is written with nothing between its \
+                              components and the `,` joining them, as `4,3,2`"
+                        .into(),
+                });
+            }
+            self.advance();
+        }
+        if components.len() == 3 {
+            let value = ValueKind::Coord {
+                x: components[0],
+                y: components[1],
+                z: components[2],
+            };
+            return Ok(Value::new(value, start_byte..self.last_byte()));
+        }
+        let written = &self.source[start_byte..self.last_byte()];
+        let count = match components.len() {
+            2 => "two components",
+            _ => "more than three components",
+        };
+        Err(ParseError::Syntax {
+            position: start_position,
+            message: format!(
+                "the coordinate `{written}` has {count}; a coordinate triple is three, `x,y,z`, \
+                 as `4,3,2`"
+            ),
+        })
+    }
+
+    /// Whether a `,` and another component follow the component just read.
+    fn continues_coordinate(&self) -> bool {
+        let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        matches!(kind(0), Some(TokenKind::Comma))
+            && matches!(kind(1), Some(TokenKind::Int { .. } | TokenKind::Minus))
     }
 
     /// The refusal for a key that is the `x` of a size literal with no height, as in `size=9x`,
