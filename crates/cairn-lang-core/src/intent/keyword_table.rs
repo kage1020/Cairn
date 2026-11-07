@@ -186,6 +186,26 @@ impl MemberRole {
         })
     }
 
+    /// The keys of [`Self::arguments`] that name a blockstate of the block this role places, which
+    /// an author writes as intent (`spec/blockstate` "Derive by default, promote on override").
+    #[must_use]
+    pub fn state_arguments(&self) -> &'static [&'static str] {
+        match self {
+            Self::Stair => &["half", "facing", "shape", "waterlogged"],
+            Self::Floor
+            | Self::Walls
+            | Self::Door
+            | Self::Window
+            | Self::Roof
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Circuit
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => &[],
+        }
+    }
+
     /// Keys in [`Self::accepted_arguments`] that no pass reads on this role, with the reason; a
     /// `mat_slot` entry also stops [`super::Member::read_slot`] reading the slot.
     #[must_use]

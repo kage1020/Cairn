@@ -37,7 +37,7 @@ fn walk(
 /// `mat_slot` is also `None` for a value that failed to hoist, which another code reports.
 fn names_no_material(member: &Member) -> bool {
     member.mat_slot.is_none()
-        && !member.intent_state.contains_key("mat_slot")
+        && !member.arguments.contains_key("mat_slot")
         && matches!(
             without_a_material(&member.role),
             WithoutAMaterial::PaintsNothing

@@ -745,6 +745,12 @@ resolved_state:
   bedrock: { weirdo_direction: 0, upside_down_bit: false }              # no shape → corners don't join
 ```
 
+Lowering records `resolved_state` once, in the canonical vocabulary
+([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)), whose state names
+are Java's ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)). The
+Bedrock row is what the Bedrock backend maps that record to as it writes, so `cairn lower` shows
+only the canonical one.
+
 When a resolved difference becomes a visual or functional one, the build says so. `themed-tower`'s
 eave stair is `shape=outer_left`:
 

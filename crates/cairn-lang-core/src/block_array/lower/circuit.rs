@@ -14,7 +14,7 @@ use crate::block_array::args::{
 ///
 /// `void=0` is refused too: an author who wants no headroom drops the line.
 pub(super) fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Diagnostic>) {
-    let Some(raw_region) = member.intent_state.get("region") else {
+    let Some(raw_region) = member.arguments.get("region") else {
         diagnostics.push(diag_invalid_member(
             member,
             "circuit requires `region=<label>` (e.g. `region=floor`, `region=basement`)".to_owned(),
@@ -124,9 +124,8 @@ pub(super) fn recognize_actuator_patch(
         }
     };
     let unknown_intent_keys: Vec<&str> = member
-        .intent_state
-        .keys()
-        .map(String::as_str)
+        .written_fields()
+        .map(|(key, _)| key)
         .filter(|k| !ACTUATOR_PATCH_INTENT_KEYS.contains(k))
         .collect();
     if !unknown_intent_keys.is_empty() {
@@ -140,7 +139,7 @@ pub(super) fn recognize_actuator_patch(
         ));
         return;
     }
-    let Some(opened_by) = member.intent_state.get("opened_by") else {
+    let Some(opened_by) = member.arguments.get("opened_by") else {
         diagnostics.push(diag_invalid_member(
             member,
             "door actuator patch has no `opened_by=`, so it binds no signal to the door".to_owned(),
