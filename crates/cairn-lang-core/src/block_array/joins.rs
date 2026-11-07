@@ -151,7 +151,7 @@ pub enum JoinKind {
         /// Whether it stands open.
         open: bool,
     },
-    /// A chest that pairs with a chest of the same block beside it.
+    /// A chest, which pairs with a chest of the same block and facing beside it.
     Chest {
         /// The way its front faces, a sideways face.
         facing: Face,
@@ -195,4 +195,26 @@ pub struct Joins {
     pub never_joined_by_face: bool,
     /// Whether the game's `wall_post_override` tag holds it.
     pub raises_post: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Face;
+
+    #[test]
+    fn a_quarter_turn_steps_through_the_sideways_faces_and_leaves_down_and_up_unturned() {
+        let turns = Face::SIDES.map(|face| (face.clockwise(), face.counter_clockwise()));
+        assert_eq!(
+            turns,
+            [
+                (Some(Face::East), Some(Face::West)),
+                (Some(Face::South), Some(Face::North)),
+                (Some(Face::West), Some(Face::East)),
+                (Some(Face::North), Some(Face::South)),
+            ],
+        );
+        for face in [Face::Down, Face::Up] {
+            assert_eq!((face.clockwise(), face.counter_clockwise()), (None, None));
+        }
+    }
 }

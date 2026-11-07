@@ -2025,6 +2025,7 @@ fn the_family_is_reported_before_the_properties_it_makes_moot() {
     let Ok(id) = geometry_material_id(
         member,
         Some(scope),
+        None,
         Some(&state),
         || Ok::<_, std::convert::Infallible>(STAIR_BASE_ID.to_owned()),
         &GeometryMemberDescription {

@@ -72,7 +72,7 @@ pub enum ConnectionKind {
     WoodenFence,
     /// A fence gate.
     FenceGate,
-    /// A chest that pairs with the chest beside it.
+    /// A chest, which pairs with a chest of the same block and facing beside it.
     Chest,
 }
 

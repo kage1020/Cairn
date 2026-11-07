@@ -45,6 +45,7 @@ pub(super) fn fill_roof(
     let Ok(base_id) = geometry_material_id(
         member,
         ctx.scope,
+        ctx.registry,
         resolved.as_ref(),
         || Ok::<_, Infallible>(kind.base_block_id().to_owned()),
         &GeometryMemberDescription {

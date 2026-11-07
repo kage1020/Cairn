@@ -235,6 +235,17 @@ fn a_gate_whose_default_facing_or_open_is_unreadable_is_refused() {
 }
 
 #[test]
+fn a_chest_whose_default_facing_is_no_sideways_face_is_refused() {
+    assert_eq!(
+        malformed(&serde_json::json!({
+            "mc_versions": ["1.0"], "ids": ["stone"], "kind": "chest",
+            "defaults": {"facing": "up"},
+        })),
+        "the default `facing=up` is no sideways face"
+    );
+}
+
+#[test]
 fn a_default_no_rule_reads_is_refused() {
     assert_eq!(
         malformed(&serde_json::json!({

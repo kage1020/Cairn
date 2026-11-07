@@ -83,7 +83,7 @@ fn size_single_writes_the_chests_type_and_both_are_recorded_as_intent() {
 }
 
 #[test]
-fn an_unknown_facing_or_size_refuses_the_chest() {
+fn an_unknown_facing_or_size_refuses_the_chest_and_both_are_reported() {
     for (line, primary, note) in [
         (
             "chest at=inside.back offset=2 y=1 facing=up",
@@ -104,6 +104,31 @@ fn an_unknown_facing_or_size_refuses_the_chest() {
         assert_eq!(findings(&src, &out), expected);
         assert_eq!(chests(only_structure(&out)), [], "{line}");
     }
+
+    let line = "chest at=inside.back offset=2 y=1 facing=up size=double";
+    let src = storeroom(line);
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [
+            (
+                DiagnosticCode::InvalidMember,
+                line,
+                "unknown chest `facing=up`",
+                vec!["`facing=` takes one of in, out, left, right"],
+            ),
+            (
+                DiagnosticCode::InvalidMember,
+                line,
+                "unknown chest `size=double`",
+                vec![
+                    "`size=` takes `single`, which keeps the chest from pairing; leave it out to \
+                     let the chest pair with the one beside it",
+                ],
+            ),
+        ],
+    );
+    assert_eq!(chests(only_structure(&out)), []);
 }
 
 #[test]
@@ -193,7 +218,8 @@ fn a_chest_bound_outside_the_chest_family_is_refused_and_built_from_the_default_
 
 #[test]
 fn a_chest_is_refused_or_deferred_wherever_a_plate_is() {
-    // Past the wall, at its corner, above the walls, and outside a struct with no overhang.
+    // Past the wall, at its corner, above the walls, outside a struct with no overhang, and with
+    // no anchor.
     let unroofed = |line: &str| {
         format!("{THEME}struct s size=7x5\n  walls mat_slot=wall height=3\n  {line}\n")
     };

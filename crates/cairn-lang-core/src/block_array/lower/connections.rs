@@ -39,7 +39,7 @@ impl Height {
     }
 }
 
-/// Which half of a pair a chest is, as its `type` names it.
+/// A chest's `type`: single, or the half of a pair it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChestType {
     Single,

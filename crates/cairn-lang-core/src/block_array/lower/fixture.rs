@@ -17,9 +17,9 @@ use super::stair::shift_outward;
 /// A one-cell member set against a wall, as its findings name it.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Fixture {
-    /// Its keyword: `pressure_plate`.
+    /// Its keyword, such as `pressure_plate`.
     pub(super) keyword: &'static str,
-    /// What a note calls it: `plate`.
+    /// What a note calls it, such as `plate`.
     pub(super) noun: &'static str,
 }
 

@@ -546,3 +546,131 @@ fn a_chest_that_writes_its_type_faces_another_way_or_is_another_block_pairs_with
         ],
     );
 }
+
+#[test]
+fn rows_of_four_and_five_pair_two_by_two_and_leave_the_far_end_of_an_odd_row_single() {
+    let south = |kind| format!("minecraft:chest[facing=south,type={kind}]");
+    let row = |count: u32| {
+        let lines: Vec<String> = (1..=count)
+            .map(|offset| format!("chest at=inside.back offset={offset} y=1"))
+            .collect();
+        paired(&lines.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    assert_eq!(
+        row(4),
+        [
+            ((3, 1, 2), south("right")),
+            ((4, 1, 2), south("left")),
+            ((5, 1, 2), south("right")),
+            ((6, 1, 2), south("left")),
+        ],
+    );
+    assert_eq!(
+        row(5),
+        [
+            ((2, 1, 2), south("single")),
+            ((3, 1, 2), south("right")),
+            ((4, 1, 2), south("left")),
+            ((5, 1, 2), south("right")),
+            ((6, 1, 2), south("left")),
+        ],
+    );
+}
+
+#[test]
+fn a_single_chest_inside_a_row_splits_it_into_rows_that_pair_on_their_own() {
+    let south = |kind| format!("minecraft:chest[facing=south,type={kind}]");
+    assert_eq!(
+        paired(&[
+            "chest at=inside.back offset=1 y=1",
+            "chest at=inside.back offset=2 y=1 size=single",
+            "chest at=inside.back offset=3 y=1",
+        ]),
+        [
+            ((4, 1, 2), south("single")),
+            ((5, 1, 2), south("single")),
+            ((6, 1, 2), south("single")),
+        ],
+    );
+    assert_eq!(
+        paired(&[
+            "chest at=inside.back offset=1 y=1",
+            "chest at=inside.back offset=2 y=1",
+            "chest at=inside.back offset=3 y=1 size=single",
+            "chest at=inside.back offset=4 y=1",
+            "chest at=inside.back offset=5 y=1",
+        ]),
+        [
+            ((2, 1, 2), south("right")),
+            ((3, 1, 2), south("left")),
+            ((4, 1, 2), south("single")),
+            ((5, 1, 2), south("right")),
+            ((6, 1, 2), south("left")),
+        ],
+    );
+}
+
+#[test]
+fn chests_turned_along_the_wall_have_no_chest_on_their_left_or_right() {
+    let east = "minecraft:chest[facing=east,type=single]".to_owned();
+    assert_eq!(
+        paired(&[
+            "chest at=inside.back offset=1 y=1 facing=left",
+            "chest at=inside.back offset=2 y=1 facing=left",
+        ]),
+        [((5, 1, 2), east.clone()), ((6, 1, 2), east)],
+    );
+}
+
+#[test]
+fn chests_by_a_side_wall_pair_from_their_own_left_inside_and_outside() {
+    // Inside the left wall they face east, and their own left is north, toward `offset=0`.
+    let east = |kind| format!("minecraft:chest[facing=east,type={kind}]");
+    assert_eq!(
+        paired(&[
+            "chest at=inside.left offset=1 y=1",
+            "chest at=inside.left offset=2 y=1",
+        ]),
+        [((2, 1, 2), east("left")), ((2, 1, 3), east("right"))],
+    );
+    // Outside the right wall they face east too, and `offset=` grows north, away from their left.
+    assert_eq!(
+        paired(&[
+            "chest at=right.outside offset=1 y=1",
+            "chest at=right.outside offset=2 y=1",
+        ]),
+        [((8, 1, 3), east("left")), ((8, 1, 4), east("right"))],
+    );
+}
+
+#[test]
+fn a_block_the_target_reads_as_no_chest_is_refused_and_one_it_cannot_say_of_goes_by_its_id() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n  slot ender -> @ender_chest\n\n\
+                  struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+                  chest at=inside.back offset=2 y=1 mat_slot=ender\n";
+    let out = lowered_with(source, &Rules);
+    assert_eq!(
+        out.diagnostics
+            .iter()
+            .map(|d| (d.code, d.primary.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            cairn_lang_core::DiagnosticCode::IncompatibleMaterial,
+            "chest derives `facing` / `type` from the wall it stands by and the chest beside it and \
+             `minecraft:ender_chest` is not a chest, so those states have nowhere to go",
+        )],
+    );
+    assert_eq!(
+        chests(only_structure(&out)),
+        [(
+            (4, 1, 1),
+            "minecraft:chest[facing=south,type=single]".to_owned()
+        )],
+    );
+    let out = lowered_with(source, &Silent);
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(
+        chests(only_structure(&out)),
+        [((4, 1, 1), "minecraft:ender_chest[facing=south]".to_owned())],
+    );
+}

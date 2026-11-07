@@ -137,29 +137,33 @@ fn place_chest(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Refusal> {
     let toward = match written.facing.map(|name| (name, Toward::from_ident(name))) {
-        None => None,
-        Some((_, Some(toward))) => Some(toward),
-        Some((other, None)) => {
-            return Err(Box::new(diag_invalid_member(
-                member,
-                format!("unknown chest `facing={other}`"),
-                vec![format!("`facing=` takes one of {FACINGS}")],
-            )));
-        }
+        None => Ok(None),
+        Some((_, Some(toward))) => Ok(Some(toward)),
+        Some((other, None)) => Err(Box::new(diag_invalid_member(
+            member,
+            format!("unknown chest `facing={other}`"),
+            vec![format!("`facing=` takes one of {FACINGS}")],
+        ))),
     };
     let single = match written.size {
-        None => false,
-        Some("single") => true,
-        Some(other) => {
-            return Err(Box::new(diag_invalid_member(
-                member,
-                format!("unknown chest `size={other}`"),
-                vec![
-                    "`size=` takes `single`, which keeps the chest from pairing; leave it out to \
-                     let the chest pair with the one beside it"
-                        .to_owned(),
-                ],
-            )));
+        None => Ok(false),
+        Some("single") => Ok(true),
+        Some(other) => Err(Box::new(diag_invalid_member(
+            member,
+            format!("unknown chest `size={other}`"),
+            vec![
+                "`size=` takes `single`, which keeps the chest from pairing; leave it out to let \
+                 the chest pair with the one beside it"
+                    .to_owned(),
+            ],
+        ))),
+    };
+    let (toward, single) = match (toward, single) {
+        (Ok(toward), Ok(single)) => (toward, single),
+        (Err(refusal), Ok(_)) | (Ok(_), Err(refusal)) => return Err(refusal),
+        (Err(facing), Err(size)) => {
+            diagnostics.push(*facing);
+            return Err(size);
         }
     };
     let (anchor, cell) = fixture_cell(CHEST, member, y_offset, ctx)?;
@@ -209,6 +213,7 @@ fn chest_block_id(
     geometry_material_id(
         member,
         ctx.scope,
+        ctx.registry,
         resolved.as_ref(),
         || default_block_id(member, ctx.registry, CHEST_TOKEN, CHEST_BASE_ID),
         &GeometryMemberDescription {

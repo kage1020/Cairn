@@ -284,6 +284,7 @@ fn door_block_id(
     geometry_material_id(
         member,
         ctx.scope,
+        ctx.registry,
         resolved.as_ref(),
         || default_block_id(member, ctx.registry, DOOR_TOKEN, DOOR_BASE_ID),
         &GeometryMemberDescription {
