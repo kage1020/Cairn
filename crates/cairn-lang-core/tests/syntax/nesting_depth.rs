@@ -38,6 +38,15 @@ fn nested_mux(depth: usize) -> String {
     )
 }
 
+/// `logic sig.out = delay(delay(…sig.a…, 1), 1)`, which costs descent and tree depth.
+fn nested_delay(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}sig.a{}\n",
+        "delay(".repeat(depth),
+        ", 1)".repeat(depth),
+    )
+}
+
 /// One indented block per level, the third recursive production.
 fn nested_blocks(depth: usize) -> String {
     let mut source = String::from("struct a size=1x1\n");
@@ -55,6 +64,7 @@ fn descent_shapes(depth: usize) -> Vec<(&'static str, String)> {
         ("parens", nested_parens(depth)),
         ("not", chained_not(depth)),
         ("mux", nested_mux(depth)),
+        ("delay", nested_delay(depth)),
         ("blocks", nested_blocks(depth)),
     ]
 }
@@ -111,6 +121,10 @@ fn expression_shapes(depth: usize) -> Vec<(&'static str, String)> {
                 "mux(sel=sig.s, b=sig.b, a={})",
                 chain("or", depth - 1)
             )),
+        ),
+        (
+            "or chain in the operand of an application",
+            logic(&format!("pulse({}, 2)", chain("or", depth - 1))),
         ),
     ]
 }

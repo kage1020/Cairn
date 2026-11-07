@@ -158,7 +158,7 @@ impl Serialize for BufferSegment {
 
 impl BufferSegment {
     /// Every segment word, for the error an unknown word earns.
-    const WORDS: &'static [&'static str] = &["a", "b", "sel", "out"];
+    const WORDS: &'static [&'static str] = &["a", "b", "sel", "set", "reset", "out"];
 
     /// The segment's word in the JSON form, one of [`Self::WORDS`].
     const fn as_str(self) -> &'static str {

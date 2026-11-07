@@ -91,12 +91,24 @@ fn gate_to_cell(
         GateKind::Xor2 { a, b } => (LogicalCell::Xor, two_input(a, b, node_index, inputs_len)),
         GateKind::Nand2 { a, b } => (LogicalCell::Nand, two_input(a, b, node_index, inputs_len)),
         GateKind::Nor2 { a, b } => (LogicalCell::Nor, two_input(a, b, node_index, inputs_len)),
-        GateKind::Not { a } => (
-            LogicalCell::Not,
-            vec![CellPortDriver {
-                port: PortName::A,
-                net: ref_of(a),
-            }],
+        GateKind::Not { a } => (LogicalCell::Not, one_input(ref_of(a))),
+        GateKind::Delay { a, stages } => (LogicalCell::Delay { stages }, one_input(ref_of(a))),
+        GateKind::Pulse { a, stages } => (LogicalCell::Pulse { stages }, one_input(ref_of(a))),
+        GateKind::EdgeRising { a } => (LogicalCell::EdgeRising, one_input(ref_of(a))),
+        GateKind::EdgeFalling { a } => (LogicalCell::EdgeFalling, one_input(ref_of(a))),
+        GateKind::Counter { a, stages } => (LogicalCell::Counter { stages }, one_input(ref_of(a))),
+        GateKind::Latch { set, reset } => (
+            LogicalCell::Latch,
+            vec![
+                CellPortDriver {
+                    port: PortName::Set,
+                    net: ref_of(set),
+                },
+                CellPortDriver {
+                    port: PortName::Reset,
+                    net: ref_of(reset),
+                },
+            ],
         ),
         GateKind::Mux { sel, a, b } => (
             LogicalCell::Mux,
@@ -121,6 +133,13 @@ fn gate_to_cell(
         drivers,
         span,
     }
+}
+
+fn one_input(net: NetRef) -> Vec<CellPortDriver> {
+    vec![CellPortDriver {
+        port: PortName::A,
+        net,
+    }]
 }
 
 fn two_input(a: SignalRef, b: SignalRef, node_index: u32, inputs_len: u32) -> Vec<CellPortDriver> {

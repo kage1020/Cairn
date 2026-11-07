@@ -16,7 +16,7 @@ pub enum DiagnosticCode {
     LogicMultipleDrivers,
     /// The `logic` bindings form a cycle.
     LogicCycle,
-    /// A `logic` binding uses an expression form the combinational lowering has no gate for.
+    /// A `logic` binding uses an expression form the logic lowering has no gate for.
     LogicUnsupportedPrimitive,
     /// A `logic` binding nothing reads.
     LogicUnusedSignal,

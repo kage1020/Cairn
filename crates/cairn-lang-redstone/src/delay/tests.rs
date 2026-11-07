@@ -1,3 +1,5 @@
+use std::mem::{Discriminant, discriminant};
+
 use cairn_lang_core::Edition;
 use cairn_lang_core::error::Span;
 use strum::IntoEnumIterator;
@@ -294,11 +296,44 @@ const fn ports(cell: EditionCell) -> &'static [PortName] {
         | EditionCell::BedrockTorchNand
         | EditionCell::JavaTorchNor
         | EditionCell::BedrockTorchNor => &[PortName::A, PortName::B],
-        EditionCell::JavaInverterTorch | EditionCell::BedrockInverterTorch => &[PortName::A],
+        EditionCell::JavaInverterTorch
+        | EditionCell::BedrockInverterTorch
+        | EditionCell::JavaRepeaterDelay { .. }
+        | EditionCell::BedrockRepeaterDelay { .. }
+        | EditionCell::JavaTorchPulse { .. }
+        | EditionCell::BedrockTorchPulse { .. }
+        | EditionCell::JavaTorchEdgeRising
+        | EditionCell::BedrockTorchEdgeRising
+        | EditionCell::JavaTorchEdgeFalling
+        | EditionCell::BedrockTorchEdgeFalling
+        | EditionCell::JavaRepeaterCounter { .. }
+        | EditionCell::BedrockRepeaterCounter { .. } => &[PortName::A],
         EditionCell::JavaTorchMux | EditionCell::BedrockTorchMux => {
             &[PortName::Sel, PortName::A, PortName::B]
         }
+        EditionCell::JavaTorchLatch | EditionCell::BedrockTorchLatch => {
+            &[PortName::Set, PortName::Reset]
+        }
     }
+}
+
+/// Each port of every variant, a variant that counts stages standing for all of its counts.
+fn every_port() -> Vec<(Discriminant<EditionCell>, PortName)> {
+    EditionCell::iter()
+        .flat_map(|cell| {
+            ports(cell)
+                .iter()
+                .map(move |&port| (discriminant(&cell), port))
+        })
+        .collect()
+}
+
+/// `table`'s `(cell, port)` pairs, as [`every_port`] lists them.
+fn rows<T>(table: &[(EditionCell, PortName, T)]) -> Vec<(Discriminant<EditionCell>, PortName)> {
+    table
+        .iter()
+        .map(|(cell, port, _)| (discriminant(cell), *port))
+        .collect()
 }
 
 #[test]
@@ -332,12 +367,38 @@ fn each_port_counts_the_stages_between_it_and_the_output() {
         (EditionCell::BedrockTorchMux, PortName::Sel, 2),
         (EditionCell::BedrockTorchMux, PortName::A, 2),
         (EditionCell::BedrockTorchMux, PortName::B, 2),
+        (EditionCell::JavaRepeaterDelay { stages: 3 }, PortName::A, 3),
+        (
+            EditionCell::BedrockRepeaterDelay { stages: 1 },
+            PortName::A,
+            1,
+        ),
+        (EditionCell::JavaTorchPulse { stages: 4 }, PortName::A, 6),
+        (EditionCell::BedrockTorchPulse { stages: 1 }, PortName::A, 3),
+        (EditionCell::JavaTorchEdgeRising, PortName::A, 3),
+        (EditionCell::BedrockTorchEdgeRising, PortName::A, 3),
+        (EditionCell::JavaTorchEdgeFalling, PortName::A, 2),
+        (EditionCell::BedrockTorchEdgeFalling, PortName::A, 2),
+        (EditionCell::JavaTorchLatch, PortName::Set, 4),
+        (EditionCell::JavaTorchLatch, PortName::Reset, 5),
+        (EditionCell::BedrockTorchLatch, PortName::Set, 4),
+        (EditionCell::BedrockTorchLatch, PortName::Reset, 5),
+        (
+            EditionCell::JavaRepeaterCounter { stages: 1 },
+            PortName::A,
+            3,
+        ),
+        (
+            EditionCell::BedrockRepeaterCounter { stages: 9 },
+            PortName::A,
+            3,
+        ),
     ];
-    let rows: Vec<_> = table.iter().map(|&(cell, port, _)| (cell, port)).collect();
-    let every: Vec<_> = EditionCell::iter()
-        .flat_map(|cell| ports(cell).iter().map(move |&port| (cell, port)))
-        .collect();
-    assert_eq!(rows, every, "one row per port of every variant");
+    assert_eq!(
+        rows(&table),
+        every_port(),
+        "one row per port of every variant"
+    );
     let counted: Vec<_> = table
         .iter()
         .map(|&(cell, port, _)| (cell, port, cell.port_delay_ticks(port)))
@@ -362,6 +423,18 @@ fn only_the_merge_and_the_comparator_pass_strength_on() {
         (EditionCell::BedrockTorchNor, true),
         (EditionCell::JavaTorchMux, true),
         (EditionCell::BedrockTorchMux, true),
+        (EditionCell::JavaRepeaterDelay { stages: 0 }, true),
+        (EditionCell::BedrockRepeaterDelay { stages: 0 }, true),
+        (EditionCell::JavaTorchPulse { stages: 0 }, true),
+        (EditionCell::BedrockTorchPulse { stages: 0 }, true),
+        (EditionCell::JavaTorchEdgeRising, true),
+        (EditionCell::BedrockTorchEdgeRising, true),
+        (EditionCell::JavaTorchEdgeFalling, true),
+        (EditionCell::BedrockTorchEdgeFalling, true),
+        (EditionCell::JavaTorchLatch, true),
+        (EditionCell::BedrockTorchLatch, true),
+        (EditionCell::JavaRepeaterCounter { stages: 0 }, true),
+        (EditionCell::BedrockRepeaterCounter { stages: 0 }, true),
     ];
     let every: Vec<_> = EditionCell::iter()
         .map(|cell| (cell, cell.regenerates()))
@@ -403,12 +476,46 @@ fn a_port_restores_strength_where_its_cell_regenerates_and_on_the_comparator_sid
         (EditionCell::BedrockTorchMux, PortName::Sel, true),
         (EditionCell::BedrockTorchMux, PortName::A, true),
         (EditionCell::BedrockTorchMux, PortName::B, true),
+        (
+            EditionCell::JavaRepeaterDelay { stages: 2 },
+            PortName::A,
+            true,
+        ),
+        (
+            EditionCell::BedrockRepeaterDelay { stages: 2 },
+            PortName::A,
+            true,
+        ),
+        (EditionCell::JavaTorchPulse { stages: 2 }, PortName::A, true),
+        (
+            EditionCell::BedrockTorchPulse { stages: 2 },
+            PortName::A,
+            true,
+        ),
+        (EditionCell::JavaTorchEdgeRising, PortName::A, true),
+        (EditionCell::BedrockTorchEdgeRising, PortName::A, true),
+        (EditionCell::JavaTorchEdgeFalling, PortName::A, true),
+        (EditionCell::BedrockTorchEdgeFalling, PortName::A, true),
+        (EditionCell::JavaTorchLatch, PortName::Set, true),
+        (EditionCell::JavaTorchLatch, PortName::Reset, true),
+        (EditionCell::BedrockTorchLatch, PortName::Set, true),
+        (EditionCell::BedrockTorchLatch, PortName::Reset, true),
+        (
+            EditionCell::JavaRepeaterCounter { stages: 2 },
+            PortName::A,
+            true,
+        ),
+        (
+            EditionCell::BedrockRepeaterCounter { stages: 2 },
+            PortName::A,
+            true,
+        ),
     ];
-    let rows: Vec<_> = table.iter().map(|&(cell, port, _)| (cell, port)).collect();
-    let every: Vec<_> = EditionCell::iter()
-        .flat_map(|cell| ports(cell).iter().map(move |&port| (cell, port)))
-        .collect();
-    assert_eq!(rows, every, "one row per port of every variant");
+    assert_eq!(
+        rows(&table),
+        every_port(),
+        "one row per port of every variant"
+    );
     let restored: Vec<_> = table
         .iter()
         .map(|&(cell, port, _)| (cell, port, cell.port_regenerates(port)))

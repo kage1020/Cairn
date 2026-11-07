@@ -505,6 +505,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  logic s.out = mux (sel=a.b, a=c.d, b=e.f)\n",
         Accept,
     ),
+    (
+        "logic_macro_call",
+        "struct s size=3x3\n  logic s.out = pulse(sig.ring, 4)\n",
+        Accept,
+    ),
     // What the library does not hold, and two operands with no infix primitive between them.
     (
         "logic_word_the_library_lacks",
@@ -513,7 +518,7 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     (
         "logic_call",
-        "struct s size=3x3\n  logic s.out = pulse(sig.ring, 4)\n",
+        "struct s size=3x3\n  logic s.out = toggle(sig.ring)\n",
         Reject,
     ),
     (
@@ -831,6 +836,23 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "latency_two_sources",
         "struct s size=3x3\n  assert latency(a.b, e.f -> c.d) <= 4\n",
         Reject,
+    ),
+    // A macro's name is a keyword only where an operand starts.
+    (
+        "macro_names_a_signal",
+        "struct s size=3x3\n  logic sig.delay = sig.counter or sig.latch\n",
+        Accept,
+    ),
+    // At the head of an operand it is the primitive, which `.` cannot follow.
+    (
+        "macro_heads_no_signal",
+        "struct s size=3x3\n  logic sig.x = latch.pulse\n",
+        Reject,
+    ),
+    (
+        "macro_name_as_a_value",
+        "struct s size=3x3\n  floor at=counter mat=edge_rising\n",
+        Accept,
     ),
     // `latency` is a keyword only after `assert`, so a signal may still be named for it.
     (
@@ -1515,6 +1537,17 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  fill from=99999999999999999999,1,1\n",
         Accept,
     ),
+    // `parse_applied` refuses a stage count of 0 and one past `u32`.
+    (
+        "stage_count_zero",
+        "struct s size=3x3\n  logic s.out = pulse(a.b, 0)\n",
+        Accept,
+    ),
+    (
+        "stage_count_out_of_range",
+        "struct s size=3x3\n  logic s.out = delay(a.b, 4294967296)\n",
+        Accept,
+    ),
     // -- a size literal that runs into a word --------------------------
     // Ending the literal before the tail needs negative lookahead, which tree-sitter rejects.
     (
@@ -1742,88 +1775,153 @@ fn generated_at_the_bounds() -> impl Iterator<Item = (String, String)> {
 fn library_primitives() -> impl Iterator<Item = (String, String, Verdict)> {
     LogicPrimitive::ALL.into_iter().flat_map(|primitive| {
         let word = primitive.name();
-        let logic = |value: String| format!("struct s size=3x3\n  logic s.out = {value}\n");
         match primitive.notation() {
             Notation::Prefix => vec![(
                 format!("library prefix `{word}`"),
-                logic(format!("{word} a.b")),
+                library_logic(&format!("{word} a.b")),
                 Accept,
             )],
             Notation::Infix { .. } => vec![
                 (
                     format!("library infix `{word}`"),
-                    logic(format!("a.b {word} c.d")),
+                    library_logic(&format!("a.b {word} c.d")),
                     Accept,
                 ),
                 (
                     format!("library infix `{word}` as an operand"),
-                    logic(word.to_owned()),
+                    library_logic(word),
                     Reject,
                 ),
             ],
-            Notation::Call { operands } => {
-                let call = |named: &[&str]| {
-                    let named: Vec<String> = named
-                        .iter()
-                        .enumerate()
-                        .map(|(i, name)| format!("{name}=s.v{i}"))
-                        .collect();
-                    logic(format!("{word}({})", named.join(", ")))
-                };
-                let mut out: Vec<_> = permutations(operands)
-                    .into_iter()
-                    .map(|order| {
-                        (
-                            format!("library call `{word}` naming {order:?}"),
-                            call(&order),
-                            Accept,
-                        )
-                    })
-                    .collect();
-                for (i, left_out) in operands.iter().enumerate() {
-                    let mut named = operands.to_vec();
-                    named.remove(i);
-                    out.push((
-                        format!("library call `{word}` without `{left_out}`"),
-                        call(&named),
-                        Reject,
-                    ));
-                    named.insert(i, left_out);
-                    named.push(left_out);
-                    out.push((
-                        format!("library call `{word}` naming `{left_out}` twice"),
-                        call(&named),
-                        Reject,
-                    ));
-                }
-                let positional: Vec<String> =
-                    (0..operands.len()).map(|i| format!("s.v{i}")).collect();
-                out.extend([
-                    (
-                        format!("library call `{word}` with an operand it does not name"),
-                        call(&[operands, &["zz"]].concat()),
-                        Reject,
-                    ),
-                    (
-                        format!("library call `{word}` with a trailing comma"),
-                        call(operands).replace(")\n", ",)\n"),
-                        Reject,
-                    ),
-                    (
-                        format!("library call `{word}` with positional operands"),
-                        logic(format!("{word}({})", positional.join(", "))),
-                        Reject,
-                    ),
-                    (
-                        format!("library call `{word}` as an infix operand"),
-                        call(operands).replace(" = ", " = a.b and "),
-                        Accept,
-                    ),
-                ]);
-                out
-            }
+            Notation::Call { operands } => called_primitive(word, operands),
+            Notation::Apply { counted } => applied_primitive(word, counted),
         }
     })
+}
+
+/// A `logic` line whose expression is `value`.
+fn library_logic(value: &str) -> String {
+    format!("struct s size=3x3\n  logic s.out = {value}\n")
+}
+
+/// The [`library_primitives`] cases of a primitive called with named operands.
+fn called_primitive(word: &str, operands: &[&str]) -> Vec<(String, String, Verdict)> {
+    let call = |named: &[&str]| {
+        let named: Vec<String> = named
+            .iter()
+            .enumerate()
+            .map(|(i, name)| format!("{name}=s.v{i}"))
+            .collect();
+        library_logic(&format!("{word}({})", named.join(", ")))
+    };
+    let mut out: Vec<_> = permutations(operands)
+        .into_iter()
+        .map(|order| {
+            (
+                format!("library call `{word}` naming {order:?}"),
+                call(&order),
+                Accept,
+            )
+        })
+        .collect();
+    for (i, left_out) in operands.iter().enumerate() {
+        let mut named = operands.to_vec();
+        named.remove(i);
+        out.push((
+            format!("library call `{word}` without `{left_out}`"),
+            call(&named),
+            Reject,
+        ));
+        named.insert(i, left_out);
+        named.push(left_out);
+        out.push((
+            format!("library call `{word}` naming `{left_out}` twice"),
+            call(&named),
+            Reject,
+        ));
+    }
+    let positional: Vec<String> = (0..operands.len()).map(|i| format!("s.v{i}")).collect();
+    out.extend([
+        (
+            format!("library call `{word}` with an operand it does not name"),
+            call(&[operands, &["zz"]].concat()),
+            Reject,
+        ),
+        (
+            format!("library call `{word}` with a trailing comma"),
+            call(operands).replace(")\n", ",)\n"),
+            Reject,
+        ),
+        (
+            format!("library call `{word}` with positional operands"),
+            library_logic(&format!("{word}({})", positional.join(", "))),
+            Reject,
+        ),
+        (
+            format!("library call `{word}` as an infix operand"),
+            call(operands).replace(" = ", " = a.b and "),
+            Accept,
+        ),
+    ]);
+    out
+}
+
+/// The [`library_primitives`] cases of a primitive applied to one operand, and a stage count when
+/// it is `counted`.
+fn applied_primitive(word: &str, counted: bool) -> Vec<(String, String, Verdict)> {
+    let apply = |args: &str| library_logic(&format!("{word}({args})"));
+    let (takes, other) = if counted {
+        ("a.b, 2", "a.b")
+    } else {
+        ("a.b", "a.b, 2")
+    };
+    vec![
+        (
+            format!("library application `{word}`"),
+            apply(takes),
+            Accept,
+        ),
+        (
+            format!("library application `{word}` of an infix expression"),
+            apply(&takes.replace("a.b", "a.b or c.d")),
+            Accept,
+        ),
+        (
+            format!("library application `{word}` as an infix operand"),
+            apply(takes).replace(" = ", " = a.b and "),
+            Accept,
+        ),
+        (
+            format!("library application `{word}` with the other stage count"),
+            apply(other),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` with a named operand"),
+            apply(&format!("x={takes}")),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` with a trailing comma"),
+            apply(&format!("{takes},")),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` with no operand"),
+            apply(""),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` with no parentheses"),
+            library_logic(&format!("{word} a.b")),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` as an operand"),
+            library_logic(word),
+            Reject,
+        ),
+    ]
 }
 
 /// Every order of `items`.
@@ -1910,6 +2008,16 @@ fn library_groupings() -> Vec<String> {
             out.push(format!("{word}({}) {} z.z", named.join(", "), infix[0]));
         }
     }
+    let applied = LogicPrimitive::ALL
+        .into_iter()
+        .filter_map(|primitive| Some((primitive.name(), primitive.applied_counted()?)));
+    for (word, counted) in applied {
+        let count = if counted { ", 3" } else { "" };
+        for p in &infix {
+            out.push(format!("{word}(a.b {p} c.d{count}) {p} z.z"));
+            out.push(format!("not {word}(a.b{count}) {p} z.z"));
+        }
+    }
     out
 }
 
@@ -1968,6 +2076,14 @@ fn core_grouping(expr: &cairn_lang_core::ast::Expr) -> String {
                 .map(|operand| format!("{}={}", operand.name, core_grouping(&operand.value)))
                 .collect();
             format!("({} {})", primitive.name(), named.join(" "))
+        }
+        Expr::Apply {
+            primitive,
+            operand,
+            stages,
+        } => {
+            let count = stages.map(|n| format!(" {n}")).unwrap_or_default();
+            format!("({} {}{count})", primitive.name(), core_grouping(operand))
         }
         other => panic!("no grouping for {other:?}"),
     }
@@ -2030,6 +2146,17 @@ fn grammar_grouping(node: tree_sitter::Node<'_>, source: &str) -> String {
             named.sort();
             let named: Vec<String> = named.into_iter().map(|(_, text)| text).collect();
             format!("({word} {})", named.join(" "))
+        }
+        "apply_expression" => {
+            let count = node
+                .child_by_field_name("stages")
+                .map(|stages| format!(" {}", stages.utf8_text(source.as_bytes()).expect("utf-8")))
+                .unwrap_or_default();
+            format!(
+                "({} {}{count})",
+                word(0),
+                grammar_grouping(field("operand"), source)
+            )
         }
         _ => node.utf8_text(source.as_bytes()).expect("utf-8").to_owned(),
     }

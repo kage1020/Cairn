@@ -607,6 +607,17 @@ pub enum Expr {
         /// Every operand the primitive names, in the order its notation lists them.
         operands: Vec<NamedOperand>,
     },
+    /// An applied primitive of the built-in logic library, its operand and, for one that counts
+    /// stages, its stage count: `edge_rising(x)`, `pulse(x, 4)`.
+    Apply {
+        /// The primitive applied.
+        primitive: LogicPrimitive,
+        /// Its operand.
+        operand: Box<Expr>,
+        /// The stage count after the operand, `None` for a primitive that counts none.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stages: Option<u32>,
+    },
 }
 
 /// One named operand of an [`Expr::Call`].

@@ -47,6 +47,48 @@ pub enum EditionCell {
     /// Bedrock 2:1 MUX — two torch NORs feeding a common dust line, one of `sel` and inverted `a`,
     /// the other of inverted `sel` and inverted `b`.
     BedrockTorchMux,
+    /// Java DELAY — `stages` repeaters in series.
+    JavaRepeaterDelay {
+        /// Repeaters in series.
+        stages: u32,
+    },
+    /// Bedrock DELAY — `stages` repeaters in series.
+    BedrockRepeaterDelay {
+        /// Repeaters in series.
+        stages: u32,
+    },
+    /// Java PULSE — the torch NOR of inverted `a` and of `a` through `stages + 1` repeaters.
+    JavaTorchPulse {
+        /// Stages the pulse lasts at most.
+        stages: u32,
+    },
+    /// Bedrock PULSE — the torch NOR of inverted `a` and of `a` through `stages + 1` repeaters.
+    BedrockTorchPulse {
+        /// Stages the pulse lasts at most.
+        stages: u32,
+    },
+    /// Java rising-edge detector — the torch NOR of `a` inverted once and twice.
+    JavaTorchEdgeRising,
+    /// Bedrock rising-edge detector — the torch NOR of `a` inverted once and twice.
+    BedrockTorchEdgeRising,
+    /// Java falling-edge detector — the torch NOR of `a` and inverted `a`.
+    JavaTorchEdgeFalling,
+    /// Bedrock falling-edge detector — the torch NOR of `a` and inverted `a`.
+    BedrockTorchEdgeFalling,
+    /// Java LATCH — two torch NORs each powered by the other, `set` gated by a held `reset`.
+    JavaTorchLatch,
+    /// Bedrock LATCH — two torch NORs each powered by the other, `set` gated by a held `reset`.
+    BedrockTorchLatch,
+    /// Java COUNTER — `stages` flip-flops of locking repeaters in a twisted ring.
+    JavaRepeaterCounter {
+        /// Flip-flops in the ring.
+        stages: u32,
+    },
+    /// Bedrock COUNTER — `stages` flip-flops of locking repeaters in a twisted ring.
+    BedrockRepeaterCounter {
+        /// Flip-flops in the ring.
+        stages: u32,
+    },
 }
 
 impl EditionCell {
@@ -60,14 +102,26 @@ impl EditionCell {
             | Self::JavaTorchXor
             | Self::JavaTorchNand
             | Self::JavaTorchNor
-            | Self::JavaTorchMux => Edition::Java,
+            | Self::JavaTorchMux
+            | Self::JavaRepeaterDelay { .. }
+            | Self::JavaTorchPulse { .. }
+            | Self::JavaTorchEdgeRising
+            | Self::JavaTorchEdgeFalling
+            | Self::JavaTorchLatch
+            | Self::JavaRepeaterCounter { .. } => Edition::Java,
             Self::BedrockTorchAnd
             | Self::BedrockTorchOr
             | Self::BedrockInverterTorch
             | Self::BedrockTorchXor
             | Self::BedrockTorchNand
             | Self::BedrockTorchNor
-            | Self::BedrockTorchMux => Edition::Bedrock,
+            | Self::BedrockTorchMux
+            | Self::BedrockRepeaterDelay { .. }
+            | Self::BedrockTorchPulse { .. }
+            | Self::BedrockTorchEdgeRising
+            | Self::BedrockTorchEdgeFalling
+            | Self::BedrockTorchLatch
+            | Self::BedrockRepeaterCounter { .. } => Edition::Bedrock,
         }
     }
 
@@ -84,19 +138,43 @@ impl EditionCell {
             Self::JavaTorchNand | Self::BedrockTorchNand => "TorchNAND",
             Self::JavaTorchNor | Self::BedrockTorchNor => "TorchNOR",
             Self::JavaTorchMux | Self::BedrockTorchMux => "TorchMUX",
+            Self::JavaRepeaterDelay { .. } | Self::BedrockRepeaterDelay { .. } => "RepeaterDelay",
+            Self::JavaTorchPulse { .. } | Self::BedrockTorchPulse { .. } => "TorchPulse",
+            Self::JavaTorchEdgeRising | Self::BedrockTorchEdgeRising => "TorchEdgeRising",
+            Self::JavaTorchEdgeFalling | Self::BedrockTorchEdgeFalling => "TorchEdgeFalling",
+            Self::JavaTorchLatch | Self::BedrockTorchLatch => "TorchLatch",
+            Self::JavaRepeaterCounter { .. } | Self::BedrockRepeaterCounter { .. } => {
+                "RepeaterCounter"
+            }
         }
     }
 
-    /// Tick delay from input `port` to this cell's output, excluding buffer repeaters.
+    /// Tick delay from input `port` to this cell's output, or for a macro to the last change one
+    /// change at `port` makes there, excluding buffer repeaters.
     #[must_use]
     pub const fn port_delay_ticks(self, port: PortName) -> u32 {
         match self {
-            // The side operand passes the inverter before the comparator. An AND has no `sel`, so
-            // asked for one it errs on the slow side.
+            // The side operand passes the inverter before the comparator. Asked for a port an AND
+            // does not have, it errs on the slow side.
             Self::JavaComparatorAnd => match port {
                 PortName::A => 1,
-                PortName::B | PortName::Sel => 2,
+                PortName::B | PortName::Sel | PortName::Set | PortName::Reset => 2,
             },
+            // A falling `reset` re-arms `set` through its two-tick hold and three torches.
+            Self::JavaTorchLatch | Self::BedrockTorchLatch => match port {
+                PortName::Set => 4,
+                PortName::A | PortName::B | PortName::Sel | PortName::Reset => 5,
+            },
+            Self::JavaRepeaterDelay { stages } | Self::BedrockRepeaterDelay { stages } => stages,
+            // The pulse ends once `a` is out of its repeaters, one more than its stages, and
+            // through the NOR.
+            Self::JavaTorchPulse { stages } | Self::BedrockTorchPulse { stages } => {
+                stages.saturating_add(2)
+            }
+            Self::JavaTorchEdgeRising
+            | Self::BedrockTorchEdgeRising
+            | Self::JavaRepeaterCounter { .. }
+            | Self::BedrockRepeaterCounter { .. } => 3,
             Self::JavaRepeaterOr
             | Self::JavaInverterTorch
             | Self::BedrockInverterTorch
@@ -109,7 +187,9 @@ impl EditionCell {
             | Self::JavaTorchXor
             | Self::BedrockTorchXor
             | Self::JavaTorchMux
-            | Self::BedrockTorchMux => 2,
+            | Self::BedrockTorchMux
+            | Self::JavaTorchEdgeFalling
+            | Self::BedrockTorchEdgeFalling => 2,
             Self::BedrockTorchOr => 0,
         }
     }
@@ -131,7 +211,19 @@ impl EditionCell {
             | Self::JavaTorchNor
             | Self::BedrockTorchNor
             | Self::JavaTorchMux
-            | Self::BedrockTorchMux => true,
+            | Self::BedrockTorchMux
+            | Self::JavaRepeaterDelay { .. }
+            | Self::BedrockRepeaterDelay { .. }
+            | Self::JavaTorchPulse { .. }
+            | Self::BedrockTorchPulse { .. }
+            | Self::JavaTorchEdgeRising
+            | Self::BedrockTorchEdgeRising
+            | Self::JavaTorchEdgeFalling
+            | Self::BedrockTorchEdgeFalling
+            | Self::JavaTorchLatch
+            | Self::BedrockTorchLatch
+            | Self::JavaRepeaterCounter { .. }
+            | Self::BedrockRepeaterCounter { .. } => true,
             Self::JavaComparatorAnd | Self::BedrockTorchOr => false,
         }
     }
@@ -141,10 +233,10 @@ impl EditionCell {
     #[must_use]
     pub const fn port_regenerates(self, port: PortName) -> bool {
         match self {
-            // The side operand ends at the inverter. An AND has no `sel`, so asked for one it errs
-            // on the strict side.
+            // The side operand ends at the inverter. Asked for a port an AND does not have, it
+            // errs on the strict side.
             Self::JavaComparatorAnd => match port {
-                PortName::A | PortName::Sel => false,
+                PortName::A | PortName::Sel | PortName::Set | PortName::Reset => false,
                 PortName::B => true,
             },
             _ => self.regenerates(),

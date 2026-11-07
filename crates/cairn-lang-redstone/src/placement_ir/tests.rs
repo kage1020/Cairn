@@ -797,7 +797,7 @@ fn malformed_dumps_are_refused_rather_than_guessed_at() {
             format!(
                 r#"{{{crossing},"drivers":[],"buffer_coords":[{{"port":"c","coord":{{"x":0,"y":0,"z":0}}}}],{coord}}}"#
             ),
-            "unknown variant `c`, expected one of `a`, `b`, `sel`, `out`",
+            "unknown variant `c`, expected one of `a`, `b`, `sel`, `set`, `reset`, `out`",
         ),
         (
             format!(r#"{{"stage":"placement","edition":"java",{cell},{coord}}}"#),
@@ -1031,7 +1031,7 @@ fn an_output_buffer_off_the_out_segment_is_refused() {
         "{fine}",
     );
 
-    for port in ["a", "b", "sel"] {
+    for port in ["a", "b", "sel", "set", "reset"] {
         let json = format!(
             r#"{{{head},"buffer_coords":[{},{}]}}"#,
             on("out", 12),

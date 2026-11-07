@@ -58,6 +58,8 @@ pub enum IntContext {
     WithinBound,
     /// Bound of `assert latency(...) <= N`.
     LatencyBound,
+    /// Stage count of an applied macro, as in `pulse(x, N)`.
+    StageCount,
 }
 
 impl IntContext {
@@ -67,6 +69,7 @@ impl IntContext {
             Self::SizeWidth | Self::SizeHeight | Self::IntLiteral => "invalid integer literal",
             Self::WithinBound => "invalid `within` bound",
             Self::LatencyBound => "invalid `latency` bound",
+            Self::StageCount => "invalid stage count",
         }
     }
 }

@@ -46,7 +46,10 @@ impl CallWording {
         Self {
             callee: primitive.name(),
             names,
-            shape: format!("`{}`", primitive.call_template().unwrap_or_default()),
+            shape: format!(
+                "`{}`",
+                primitive.parenthesised_template().unwrap_or_default()
+            ),
             every_name: and_list(&quoted(names, "")).unwrap_or_default(),
         }
     }
@@ -990,6 +993,25 @@ impl<'a> Parser<'a> {
                 depth,
             ));
         }
+        if let Some((primitive, counted)) = self
+            .peek_primitive()
+            .and_then(|primitive| Some((primitive, primitive.applied_counted()?)))
+        {
+            self.advance();
+            let (operand, stages, operand_depth) =
+                self.nested(|p| p.parse_applied(primitive, counted))?;
+            let depth = operand_depth + 1;
+            self.charge_expr_depth(depth)?;
+            let operand = Box::new(operand);
+            return Ok((
+                Expr::Apply {
+                    primitive,
+                    operand,
+                    stages,
+                },
+                depth,
+            ));
+        }
         if self.peek_is(&TokenKind::LParen) {
             self.advance();
             let inner = self.nested(|p| p.parse_expr_at(infix_rank_above(None)))?;
@@ -1069,6 +1091,87 @@ impl<'a> Parser<'a> {
             })
             .collect();
         Ok((operands, depth))
+    }
+
+    /// The parenthesised operand of the applied `primitive` and, when `counted`, the stage count
+    /// after it, with the operand's depth.
+    fn parse_applied(
+        &mut self,
+        primitive: LogicPrimitive,
+        counted: bool,
+    ) -> Result<(Expr, Option<u32>, usize), ParseError> {
+        let name = primitive.name();
+        let shape = primitive.parenthesised_template().unwrap_or_default();
+        let takes = if counted {
+            "its operand and a stage count"
+        } else {
+            "its one operand"
+        };
+        if !self.peek_is(&TokenKind::LParen) {
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected `(` after `{name}`, got {found}: `{name}` is applied to {takes}, as in \
+                 `{shape}`"
+            )));
+        }
+        self.advance();
+        if self.is_at_key_eq()
+            && let Some(TokenKind::Ident(key)) = self.peek().map(|token| &token.kind)
+        {
+            return Err(self.syntax_here(&format!(
+                "`{name}` takes its operand by position, not as `{key}=`: write it as in `{shape}`"
+            )));
+        }
+        if self.peek_is(&TokenKind::RParen) {
+            return Err(self.syntax_here(&format!(
+                "expected an operand, got `)`: `{name}` is applied to {takes}, as in `{shape}`"
+            )));
+        }
+        let (operand, depth) = self.parse_expr_at(infix_rank_above(None))?;
+        if !counted {
+            if self.peek_is(&TokenKind::Comma) {
+                return Err(self.syntax_here(&format!(
+                    "expected `)`, got `,`: `{name}` counts no stages, so it is applied to its one \
+                     operand alone, as in `{shape}`"
+                )));
+            }
+            self.expect_operand_end(&[TokenKind::RParen])?;
+            return Ok((operand, None, depth));
+        }
+        if self.peek_is(&TokenKind::RParen) {
+            return Err(self.syntax_here(&format!(
+                "expected `,` and a stage count, got `)`: `{name}` is applied to {takes}, as in \
+                 `{shape}`"
+            )));
+        }
+        self.expect_operand_end(&[TokenKind::Comma])?;
+        let position = self.position();
+        let Some(TokenKind::Int { lexeme, .. }) = self.peek().map(|token| token.kind.clone())
+        else {
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected a stage count, a whole number of at least 1, got {found}: `{name}` is \
+                 applied to {takes}, as in `{shape}`"
+            )));
+        };
+        let stages: u32 =
+            lexeme
+                .parse()
+                .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
+                    position,
+                    context: IntContext::StageCount,
+                    lexeme: lexeme.clone(),
+                    kind: *err.kind(),
+                })?;
+        if stages == 0 {
+            return Err(self.syntax_here(&format!(
+                "expected a stage count of at least 1, got `0`: `{name}` with no stage builds \
+                 nothing"
+            )));
+        }
+        self.advance();
+        self.expect(&TokenKind::RParen)?;
+        Ok((operand, Some(stages), depth))
     }
 
     /// Take `name=` for one of `unnamed`, returning its index in the call's names.
@@ -1224,13 +1327,18 @@ impl<'a> Parser<'a> {
         };
         let notation = |word: &str| LogicPrimitive::from_name(word).map(LogicPrimitive::notation);
         let is_prefix = |word: &str| notation(word) == Some(Notation::Prefix);
-        let is_call = |word: &str| matches!(notation(word), Some(Notation::Call { .. }));
+        let is_call = |word: &str| {
+            matches!(
+                notation(word),
+                Some(Notation::Call { .. } | Notation::Apply { .. })
+            )
+        };
         let between = ": two operands need an infix primitive between them".to_owned();
         match (found, bare_word_before) {
             (Some(TokenKind::LParen), Some(word)) => {
                 let callable: Vec<String> = LogicPrimitive::ALL
                     .into_iter()
-                    .filter(|primitive| primitive.call_operands().is_some())
+                    .filter(|primitive| primitive.parenthesised_template().is_some())
                     .map(|primitive| format!("`{}`", primitive.name()))
                     .collect();
                 let callable = or_list(&callable).unwrap_or_default();

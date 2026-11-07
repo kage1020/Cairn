@@ -33,9 +33,9 @@ Four IR layers, with the cell library sitting between them ([redstone "Connectio
 ```
 Intent IR        logic declarations / circuit region / signal binding
    ↓ logic_synth
-Logic IR         logical expressions / dependency DAG (edition-neutral, zero delay)
+Logic IR         logical expressions / dependency DAG (edition-neutral, no ticks)
    ↓
-Netlist IR       cells / nets (Logical Cell selection; still edition-neutral, zero delay)
+Netlist IR       cells / nets (Logical Cell selection; still edition-neutral, no ticks)
    ↓ Edition Cell selection (cell library tier 2; edition-tagged, still no delay)
    ↓ logic_place
 Placement IR     cell coordinates + actual wire length — delay/tick first determined here
@@ -48,7 +48,7 @@ The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile
 ## v1 scope
 
 - **Combinational**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux` are synthesised end to end, each to a cell on both editions.
-- **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`. Named in the spec, implemented nowhere yet.
+- **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` are synthesised the same way, each to one cell of torches and repeaters on both editions that keeps its feedback inside it, so the Logic IR stays a DAG. A macro's stage count travels with its cell, and its ticks are its Edition Cell's.
 - **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; evaluating one waits on the simulator.
 
 Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).

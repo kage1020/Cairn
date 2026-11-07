@@ -55,8 +55,9 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
-  // A named set replaces `global`, so `operand` lists `true` and `false` again. `not` and `mux`
-  // need no reserving: wherever an operand can start, the lexer already takes each as a keyword.
+  // A named set replaces `global`, so `operand` lists `true` and `false` again. `not` and the
+  // called and applied primitives need no reserving: wherever an operand can start, the lexer
+  // already takes each as a keyword.
   reserved: {
     global: _ => ['true', 'false'],
     operand: _ => ['true', 'false', 'and', 'or', 'xor', 'nand', 'nor'],
@@ -187,6 +188,7 @@ module.exports = grammar({
       $.binary_expression,
       $.unary_expression,
       $.call_expression,
+      $.apply_expression,
       $.parenthesized_expression,
       reserved('operand', $.signal_ref),
       reserved('operand', $.identifier),
@@ -206,9 +208,26 @@ module.exports = grammar({
 
     unary_expression: $ => prec(4, seq('not', field('operand', $._bool_expr))),
 
-    call_expression: $ => callOf($, 'mux', ['sel', 'a', 'b']),
+    call_expression: $ => choice(
+      callOf($, 'mux', ['sel', 'a', 'b']),
+      callOf($, 'latch', ['set', 'reset']),
+    ),
 
     ...namedOperands('mux', ['sel', 'a', 'b']),
+    ...namedOperands('latch', ['set', 'reset']),
+
+    // One operand by position, and a stage count after it for a primitive that counts stages.
+    apply_expression: $ => choice(
+      seq(choice('edge_rising', 'edge_falling'), '(', field('operand', $._bool_expr), ')'),
+      seq(
+        choice('delay', 'pulse', 'counter'),
+        '(',
+        field('operand', $._bool_expr),
+        ',',
+        field('stages', $.integer),
+        ')',
+      ),
+    ),
 
     parenthesized_expression: $ => seq('(', $._bool_expr, ')'),
 

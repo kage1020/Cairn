@@ -12,6 +12,7 @@ mod edition_netlist;
 mod front_end_cascades;
 mod latency;
 mod logic_synth;
+mod macros;
 mod netlist;
 mod placement;
 mod placement_ir_roundtrip;

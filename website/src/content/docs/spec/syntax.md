@@ -37,8 +37,10 @@ do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change))
 
 No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
 parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
-`within` bound of an `assert always` and the `<=` bound of an `assert latency`. A decimal such as `scale=1.5` ([Entities](/spec/entities/)) is
-therefore `E_PARSE` too until the parser reads one.
+`within` bound of an `assert always`, the `<=` bound of an `assert latency` and the stage count of
+a macro such as `pulse(sig.ring, 4)`, which is at least 1 ([Redstone
+§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)). A decimal such as `scale=1.5`
+([Entities](/spec/entities/)) is therefore `E_PARSE` too until the parser reads one.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
