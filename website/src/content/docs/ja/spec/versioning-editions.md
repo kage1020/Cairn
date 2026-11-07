@@ -97,7 +97,7 @@ Bedrock のパックは、ステートマップをさらに 2 つのコンポー
 
 ```text
 E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
-  First appears in 1.21.4. Fix: --target 1.21.4, or @requires java version>=1.21.4
+  First target that declares it: 1.21.4. Fix: --target 1.21.4, or @requires java version>=1.21.4
 
 E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
   Valid java targets: 1.21.4. Fix: --target 1.21.4, or lower the @requires floor
