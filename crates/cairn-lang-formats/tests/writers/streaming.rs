@@ -40,9 +40,17 @@ fn assert_same_bytes(label: &str, what: &str, actual: &[u8], expected: &[u8]) {
     );
 }
 
-/// Asserts both Java write paths agree with the tree for `array`.
+/// Asserts both Java write paths agree with the tree for `array`, at a target on each side of the
+/// `DataVersion` that renames a palette entry's keys.
 fn assert_java_streams_the_tree(label: &str, array: &BlockArray) {
-    let target = resolve_java_target("latest").expect("latest");
+    for mc_version in ["1.21.4", "26.3"] {
+        let label = format!("{label} at {mc_version}");
+        assert_java_target_streams_the_tree(&label, array, mc_version);
+    }
+}
+
+fn assert_java_target_streams_the_tree(label: &str, array: &BlockArray, mc_version: &str) {
+    let target = resolve_java_target(mc_version).expect("a shipped target");
     let mut tree = Vec::new();
     write_compound_gzip(
         &mut tree,

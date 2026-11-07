@@ -192,10 +192,10 @@ fn palette_entry_with_properties_keeps_them() {
     );
 }
 
-/// The game reads a block state as `id` and `properties` from 26.3, and runs no fixer on a file
-/// that already carries its `DataVersion`.
+/// The game reads a block state as `id` and `properties` from `DataVersion` 5006, a 26.3
+/// snapshot, and runs no fixer on a file that already carries a version that new.
 #[test]
-fn a_target_from_26_3_names_a_palette_entrys_block_and_properties_in_lower_case() {
+fn a_palette_entry_names_its_block_and_properties_in_lower_case_from_data_version_5006() {
     let mut palette = Palette::new_with_air();
     let mut stairs = BlockState::bare("minecraft:oak_stairs");
     stairs
@@ -210,8 +210,11 @@ fn a_target_from_26_3_names_a_palette_entrys_block_and_properties_in_lower_case(
         entities: vec![],
         source_scope: "struct::stairs".to_owned(),
     };
-    let keys_of = |mc_version: &str| {
-        let target = resolve_java_target(mc_version).expect("known target");
+    let keys_of = |data_version: i32| {
+        let target = JavaTarget {
+            mc_version: "26.3".to_owned(),
+            data_version,
+        };
         let root = build_structure_tag(&ba, &target).expect("build");
         let Tag::List(palette) = &root.entries["palette"] else {
             unreachable!()
@@ -221,8 +224,11 @@ fn a_target_from_26_3_names_a_palette_entrys_block_and_properties_in_lower_case(
         };
         entry.entries.keys().cloned().collect::<Vec<_>>()
     };
-    assert_eq!(keys_of("1.21.4"), ["Name", "Properties"]);
-    assert_eq!(keys_of("26.3"), ["id", "properties"]);
+    assert_eq!(keys_of(5005), ["Name", "Properties"]);
+    assert_eq!(keys_of(5006), ["id", "properties"]);
+    let shipped = |mc_version| resolve_java_target(mc_version).expect("known").data_version;
+    assert_eq!(keys_of(shipped("1.21.4")), ["Name", "Properties"]);
+    assert_eq!(keys_of(shipped("26.3")), ["id", "properties"]);
 }
 
 #[test]
