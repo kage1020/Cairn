@@ -388,7 +388,8 @@ pub enum DiagnosticData {
         /// The catalog token involved; absent for `authored`.
         #[serde(skip_serializing_if = "Option::is_none")]
         token: Option<String>,
-        /// Nearest id the target does declare, when one is within the suggestion cap.
+        /// Nearest id the target does declare, when one is within the suggestion cap and no other
+        /// version of the edition declares the id.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
         /// Ids the pack's alias table declares for the same block: facts, unlike `suggestion`.

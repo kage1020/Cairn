@@ -1341,6 +1341,50 @@ fn a_state_map_belongs_to_a_bedrock_pack_with_block_tables() {
 }
 
 #[test]
+fn an_untargetable_version_is_never_offered_for_an_id_it_declares() {
+    let pack = load_from_dir_or_die("untargetable-id", |dir| {
+        write_full_pack(
+            dir,
+            manifest_with_blocks(),
+            r#"{
+            "schema_version": 2,
+            "latest": "1.21.4",
+            "versions": [
+                { "mc_version": "1.20.4", "data_version": 3700 },
+                { "mc_version": "1.21.1", "data_version": 3955, "targetable": false },
+                { "mc_version": "1.21.4", "data_version": 4189 }
+            ]
+        }"#,
+            &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+            r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "base": { "mc_version": "1.20.4", "blocks": ["gone_block", "oak_planks"] },
+            "diffs": [
+                {
+                    "mc_version": "1.21.1",
+                    "inherits": "1.20.4",
+                    "added": ["odd_block"],
+                    "removed": ["gone_block"]
+                },
+                { "mc_version": "1.21.4", "inherits": "1.21.1", "removed": ["odd_block"] }
+            ]
+        }"#,
+        );
+    });
+    let pinned = pack.view(Some("1.21.4"));
+    assert_eq!(
+        pinned.declared_elsewhere("minecraft:gone_block"),
+        DeclaredElsewhere::new(Edition::Java, Some("1.20.4".to_owned()), None),
+    );
+    assert_eq!(pinned.declared_elsewhere("minecraft:odd_block"), None);
+    assert_eq!(
+        pack.view(None).declared_elsewhere("minecraft:gone_block"),
+        None
+    );
+}
+
+#[test]
 fn a_pair_only_an_untargetable_version_takes_names_no_version() {
     let pack = load_from_dir_or_die("untargetable-pair", |dir| {
         write_full_pack(

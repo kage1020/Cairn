@@ -172,21 +172,25 @@ impl TargetRegistry for PackView<'_> {
     }
 
     fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
+        self.ids?;
         let pinned = self.mc_version?;
-        let versions: Vec<&str> = self.blocks.versions().collect();
-        let at = versions.iter().position(|version| *version == pinned)?;
+        // A `--target` the note offers must be one `resolve_target` accepts.
+        let at = self
+            .targetable
+            .iter()
+            .position(|version| *version == pinned)?;
         let declares = |version: &&&str| {
             self.blocks
                 .ids_for(version)
                 .is_some_and(|ids| contains(ids, id))
         };
-        let until = versions[..at].iter().rev().find(declares);
-        let since = versions[at + 1..].iter().find(declares);
-        (until.is_some() || since.is_some()).then(|| DeclaredElsewhere {
-            edition: self.edition,
-            until: until.map(|version| (*version).to_owned()),
-            since: since.map(|version| (*version).to_owned()),
-        })
+        let until = self.targetable[..at].iter().rev().find(declares);
+        let since = self.targetable[at + 1..].iter().find(declares);
+        DeclaredElsewhere::new(
+            self.edition,
+            until.map(|version| (*version).to_owned()),
+            since.map(|version| (*version).to_owned()),
+        )
     }
 
     fn state_domain(&self, state: &BlockState) -> StateDomain {
