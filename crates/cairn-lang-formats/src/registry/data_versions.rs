@@ -27,9 +27,13 @@ pub struct DataVersionTable {
 pub struct DataVersionEntry {
     /// The version, such as `"1.21.4"`.
     pub mc_version: String,
-    /// Java's `DataVersion` or Bedrock's palette `version`. A row that is not targetable never
-    /// reaches a file, so its Bedrock integer only orders it.
+    /// The row's key in its edition's version order: Java's `DataVersion`, and on Bedrock any
+    /// strictly ascending integer, which the built-in pack packs from the release number.
     pub data_version: i32,
+    /// The block-state `version` a Bedrock row's structures carry, which a targetable Bedrock row
+    /// must give and a Java row never does; several releases can carry the same one.
+    #[serde(default)]
+    pub block_version: Option<i32>,
     /// The release date, `YYYY-MM-DD`; the compiler ignores it.
     #[serde(default)]
     pub released: Option<String>,
@@ -56,6 +60,9 @@ pub struct JavaTarget {
 pub struct BedrockTarget {
     /// The version, such as `"1.21.60"`.
     pub mc_version: String,
+    /// The row's key in Bedrock's version order, which an `@requires` floor is weighed against
+    /// and no structure writes.
+    pub order_key: i32,
     /// The palette entries' `version`, packed as `major << 24 | minor << 16 | patch << 8 | rev`.
     pub block_version: i32,
 }

@@ -334,12 +334,12 @@ fn a_source_no_supported_version_can_build_says_so() {
     );
     assert_eq!(
         strings(entry, "considered"),
-        ["1.21.0", "1.21.40", "1.21.60"]
+        ["1.21.0", "1.21.40", "1.21.60", "1.26.60"]
     );
 
     // The premise, asked of the command that decides it.
     let out = tmp.path().join("out");
-    for version in ["1.21.0", "1.21.40", "1.21.60"] {
+    for version in ["1.21.0", "1.21.40", "1.21.60", "1.26.60"] {
         assert!(
             !compile_accepts(&src, "bedrock", version, &out.join(version)),
             "premise: bedrock {version} should refuse this source",
@@ -355,7 +355,7 @@ fn a_source_no_supported_version_can_build_says_so() {
     );
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "the row must carry the same answer the JSON does, got: {stdout}",
     );
@@ -365,6 +365,7 @@ fn a_source_no_supported_version_can_build_says_so() {
             (3, 17, "error", "E_UNKNOWN_ID"),
             (2, 17, "error", "E_UNKNOWN_ID"),
             (3, 17, "error", "E_UNKNOWN_ID"),
+            (2, 17, "error", "E_UNKNOWN_ID"),
             (2, 17, "error", "E_UNKNOWN_ID"),
         ],
     );
@@ -395,7 +396,7 @@ fn a_palette_whose_default_ids_never_overlap_can_still_have_a_buildable_target()
     assert_eq!(strings(entry, "buildable"), ["1.21.0"]);
     assert_eq!(
         strings(entry, "considered"),
-        ["1.21.0", "1.21.40", "1.21.60"],
+        ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
         "the versions weighed are carried too, so an empty set can be read",
     );
 
@@ -550,11 +551,11 @@ fn the_versions_weighed_are_listed_in_release_order() {
     let axes = info_json_at(&examples_dir().join("cottage.crn"), "java,bedrock");
     assert_eq!(
         strings(buildable_entry(&axes, "java"), "considered"),
-        ["1.20.4", "1.21", "1.21.4"],
+        ["1.20.4", "1.21", "1.21.4", "26.3"],
     );
     assert_eq!(
         strings(buildable_entry(&axes, "bedrock"), "considered"),
-        ["1.21.0", "1.21.40", "1.21.60"],
+        ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
     );
 }
 
@@ -658,7 +659,7 @@ fn an_unplaceable_floor_does_not_hide_what_each_version_refused() {
     );
     assert_eq!(
         strings(&row, "considered"),
-        ["1.21.0", "1.21.40", "1.21.60"],
+        ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
         "{row}",
     );
     assert_eq!(
@@ -667,7 +668,7 @@ fn an_unplaceable_floor_does_not_hide_what_each_version_refused() {
     );
 }
 
-/// Two floors at different heights: `1.21.0` is under both, the two after it only the second.
+/// Two floors at different heights: `1.21.0` is under both, the three after it only the second.
 #[test]
 fn a_floor_above_every_release_names_the_line_under_each_version() {
     let (_tmp, row) = buildable_row(
@@ -689,6 +690,7 @@ fn a_floor_above_every_release_names_the_line_under_each_version() {
             ("1.21.0".to_owned(), "below_floor".to_owned()),
             ("1.21.40".to_owned(), "below_floor".to_owned()),
             ("1.21.60".to_owned(), "below_floor".to_owned()),
+            ("1.26.60".to_owned(), "below_floor".to_owned()),
         ],
         "{row}",
     );
@@ -700,7 +702,7 @@ fn a_floor_above_every_release_names_the_line_under_each_version() {
         ],
         "{row}",
     );
-    for later in [1, 2] {
+    for later in [1, 2, 3] {
         assert_eq!(
             floors(&row["reason"]["versions"][later], "floors"),
             [("bedrock version>=1.99".to_owned(), 5, 3)],
@@ -744,7 +746,7 @@ fn a_floor_is_credited_only_with_the_versions_it_refuses() {
     );
     assert!(
         below[1].ends_with(
-            "bedrock 1.21.0, 1.21.40, 1.21.60 are below the `bedrock version>=1.99` `def cottage` \
+            "bedrock 1.21.0, 1.21.40, 1.21.60, 1.26.60 are below the `bedrock version>=1.99` `def cottage` \
              declares"
         ),
         "{stderr}",
@@ -799,6 +801,7 @@ fn a_floor_does_not_hide_a_scope_that_produced_no_voxels() {
             ("1.21.0".to_owned(), "below_floor".to_owned()),
             ("1.21.40".to_owned(), "below_floor".to_owned()),
             ("1.21.60".to_owned(), "below_floor".to_owned()),
+            ("1.26.60".to_owned(), "below_floor".to_owned()),
         ],
         "both causes, in one run: {row}",
     );
@@ -825,7 +828,7 @@ fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
     assert_eq!(code, Some(0), "info reports; the build refuses: {stderr}");
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "{stdout}",
     );
@@ -862,6 +865,7 @@ fn a_refused_lowering_names_what_each_version_refused() {
             ("1.21.0".to_owned(), "lowering_refused".to_owned()),
             ("1.21.40".to_owned(), "lowering_refused".to_owned()),
             ("1.21.60".to_owned(), "lowering_refused".to_owned()),
+            ("1.26.60".to_owned(), "lowering_refused".to_owned()),
         ],
         "{row}",
     );
@@ -895,6 +899,7 @@ fn versions_refused_for_different_reasons_each_carry_their_own() {
             ("1.21.0".to_owned(), "below_floor".to_owned()),
             ("1.21.40".to_owned(), "lowering_refused".to_owned()),
             ("1.21.60".to_owned(), "lowering_refused".to_owned()),
+            ("1.26.60".to_owned(), "lowering_refused".to_owned()),
         ],
         "{row}",
     );
@@ -943,7 +948,7 @@ fn naming_the_reason_does_not_move_the_exit_code_or_the_text_row() {
     assert_eq!(code, Some(0), "info reports; the build refuses: {stderr}");
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "the text row is unchanged: {stdout}",
     );
@@ -1056,7 +1061,7 @@ fn a_block_only_part_of_the_range_declares_stays_portable() {
     // `stone_bricks` is `stonebrick` on Bedrock 1.21.0, and `info` lowers the default mapping.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "renamed.crn", "floor.stone.smooth");
-    for target in ["1.21.0", "1.21.40", "1.21.60"] {
+    for target in ["1.21.0", "1.21.40", "1.21.60", "1.26.60"] {
         let run = compile(&src, "bedrock", target, &tmp.path().join(target), None);
         let stderr = stderr_of(&run);
         assert_eq!(
