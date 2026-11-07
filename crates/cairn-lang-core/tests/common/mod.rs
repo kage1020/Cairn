@@ -7,7 +7,7 @@ use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_t
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
-pub const SHIPPED_EXAMPLES: usize = 12;
+pub const SHIPPED_EXAMPLES: usize = 13;
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
@@ -248,6 +248,44 @@ pub fn state_at(array: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
         .index(x, y, z)
         .unwrap_or_else(|| panic!("({x}, {y}, {z}) is outside {:?}", array.dims));
     &array.palette.entries[array.voxels[i].0 as usize]
+}
+
+/// The door standing with its lower half at `(x, y, z)` of `array`, as `id[properties]` per half.
+///
+/// # Panics
+///
+/// When either cell is outside `array`.
+pub fn door_at(array: &BlockArray, x: u32, y: u32, z: u32) -> [String; 2] {
+    [y, y + 1].map(|y| {
+        let state = state_at(array, x, y, z);
+        format!("{}[{}]", state.id, state.properties_text())
+    })
+}
+
+/// The two halves of a closed oak door facing `facing`, hinged on `hinge`, as [`door_at`] reads.
+pub fn oak_door(facing: &str, hinge: &str) -> [String; 2] {
+    ["lower", "upper"].map(|half| {
+        format!("minecraft:oak_door[facing={facing},half={half},hinge={hinge},open=false]")
+    })
+}
+
+/// Each chest of `array`, by its cell, as `id[properties]`, in `(x, y, z)` order.
+pub fn chests(array: &BlockArray) -> Vec<((u32, u32, u32), String)> {
+    let mut found = Vec::new();
+    for x in 0..array.dims.x {
+        for y in 0..array.dims.y {
+            for z in 0..array.dims.z {
+                let state = state_at(array, x, y, z);
+                if state.id.ends_with("chest") {
+                    found.push((
+                        (x, y, z),
+                        format!("{}[{}]", state.id, state.properties_text()),
+                    ));
+                }
+            }
+        }
+    }
+    found
 }
 
 /// The single structure `ir` holds.

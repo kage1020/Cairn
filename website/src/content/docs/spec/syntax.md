@@ -68,10 +68,10 @@ comes next, `mat_slot=@a[1]` would leave a bare value on a member line that read
 `E_UNEXPECTED_POSITIONAL`, and `mat_slot=[@a[b]]` would put a list where a label belongs, which is
 `E_TYPE_MISMATCH_LABEL`.
 
-The literal's properties and values are not yet checked against the target: `E_STATE_DOMAIN`
-([Versioning and Editions](/spec/versioning-editions/)) is not implemented, so a Java build writes
-`@oak_log[axis=q]` as written. Each literal the build reads earns a `W_STATE_LITERAL_UNCHECKED`
-([Lint](/spec/lint/)) on the token, so that is said rather than silent.
+A build that pins a version checks the literal's properties and values against the states its
+block takes there, so `@oak_log[axis=q]` is `E_STATE_DOMAIN` ([Lint](/spec/lint/)), naming `x`, `y`
+and `z` ([Versioning and
+Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)).
 
 Besides that literal, the one place a comma carries meaning is the input list of
 `assert truth(...)`, where it separates the signals whose count the row width is checked against. A
@@ -171,7 +171,7 @@ means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
+`pressure_plate`, `chest`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
 is global, so writing one in the other body parses and classifies and then reaches nothing. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
 A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
@@ -223,12 +223,12 @@ worse than an absent one, because a reader will still believe it.
 @requires bedrock version>=1.21.40
 ```
 
-The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 /
-1.21.40 / 1.21.60`: `1.21.4` is Java's newest release and names no Bedrock release at all. A label
-is dot-separated components that each begin with a digit and carry only letters and digits, with an
-optional `-` and a pre-release tag of dot-separated letters and digits. `1.21.4`, `1.21.4-rc1`, and
-`24w14a` are all labels. Which of them the *target edition* can order is not a syntax question and
-is not answered here. See [Versioning and Editions](/spec/versioning-editions/).
+The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4 / 26.3` and Bedrock
+`1.21.0 / 1.21.40 / 1.21.60 / 1.26.60`: `1.21.4` is a Java release and names no Bedrock release at
+all. A label is dot-separated components that each begin with a digit and carry only letters and
+digits, with an optional `-` and a pre-release tag of dot-separated letters and digits. `1.21.4`,
+`1.21.4-rc1`, and `24w14a` are all labels. Which of them the *target edition* can order is not a
+syntax question and is not answered here. See [Versioning and Editions](/spec/versioning-editions/).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.
@@ -284,20 +284,27 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
+The same column resolves both the door and any `connect` walkway anchored to it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 Numeric offsets (`at=N`) are reserved for a future extension. A door with no `at=`, or one that
 names no anchor, is `E_INVALID_MEMBER` and cuts nothing.
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
-level's base plane. It takes the two rows a doorway wants, or, if fewer remain, as much of that
-row's wall course as is left counting the row it opens at. A door under a one-row course therefore
-opens that one row rather than cutting into the roof. The row it opens at MUST be inside a course
-of the masonry. A door whose row no `walls` member is written to hold is `E_INVALID_MEMBER` and cuts
-nothing, the same finding the `window` on that body earns. A door in a course whose `walls` paint
-nothing, or beside `walls` under a `level` that is not placed, is `W_DEFERRED_MEMBER` instead, since
-the repair is on those walls or that level
+level's base plane, and stands two rows tall: its door block takes that row and the one above it
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). Both rows
+MUST be inside one course of the masonry. A door whose two rows the walls as written hold in no one
+course is `E_INVALID_MEMBER` and cuts nothing, the same finding the `window` on that body earns. A
+door under a one-row course is one: the row above it is the roof's, or nothing's. A door in a course
+whose `walls` paint nothing, or beside `walls` under a `level` that is not placed, is
+`W_DEFERRED_MEMBER` instead, since the repair is on those walls or that level
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the courses a `walls`
 paints).
+
+**What a door is built from.** A door's `mat_slot=` names its door block, and a door without one is
+built from the registry pack's `@door.default`
+([Materials and Themes §7.2](/spec/materials-themes/#tier-1-tokens)). The block MUST be a door, one
+whose id ends in `_door`. Any other is `E_INCOMPATIBLE_MATERIAL` ([Lint](/spec/lint/)), as a sloped
+roof bound outside the stair family is, and the door is built from `@door.default` beside the
+error.
 
 ## 5.5 IDs, classes, addresses
 

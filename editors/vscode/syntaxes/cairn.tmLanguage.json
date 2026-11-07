@@ -40,7 +40,7 @@
       }
     },
     "member-keyword": {
-      "match": "^\\s*(floor|walls|door|window|roof|stair|level|pressure_plate|circuit|place|connect)\\b",
+      "match": "^\\s*(floor|walls|door|window|roof|stair|level|pressure_plate|chest|circuit|place|connect)\\b",
       "captures": {
         "1": { "name": "keyword.other.member.cairn" }
       }

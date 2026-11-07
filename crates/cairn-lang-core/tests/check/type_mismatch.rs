@@ -90,6 +90,15 @@ fn window_size_with_proper_literal_passes() {
 }
 
 #[test]
+fn a_chests_size_is_its_state_and_not_a_footprint() {
+    let src = "struct s size=5x5\n  chest at=inside.front offset=1 size=single\n  \
+               window side=front offset=2 y=1 size=single\n";
+    let found = of_code(src, DiagnosticCode::TypeMismatchSize);
+    let at: Vec<usize> = found.iter().map(|d| d.span.start).collect();
+    assert_eq!(at, [src.rfind("single").expect("the window's size")]);
+}
+
+#[test]
 fn duplicate_size_and_size_mismatch_pass_independently() {
     let src = "struct s size=2x2 size=foo\n  floor\n";
     let diags = diagnose(src);

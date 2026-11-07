@@ -180,9 +180,19 @@ def write_nbt(root: dict) -> bytes:
 # --- comparing a written structure with the game's copy ------------------------------------
 
 ROOT_KEYS = {"DataVersion", "size", "palette", "palettes", "blocks", "entities"}
-PALETTE_KEYS = {"Name", "Properties"}
 BLOCK_KEYS = {"pos", "state", "nbt"}
 ENTITY_KEYS = {"pos", "blockPos", "nbt"}
+# The first `DataVersion` (a 26.3 snapshot) whose block states the game reads as `id` and
+# `properties`; it runs no fixer on a file that already carries a version that new. `cargo xtask
+# lint state-keys` holds it to the Java writer's.
+LOWERCASE_STATE_KEYS_FROM = 5006
+
+
+def state_keys(data_version: int) -> tuple[str, str]:
+    """The keys a palette entry names its block and its properties by, at `data_version`."""
+    if data_version >= LOWERCASE_STATE_KEYS_FROM:
+        return "id", "properties"
+    return "Name", "Properties"
 
 
 def strict_layout(structure: dict) -> None:
@@ -214,19 +224,20 @@ def strict_layout(structure: dict) -> None:
     one = ("palette" in structure) != ("palettes" in structure)
     require(one, "the root needs exactly one of `palette` and `palettes`")
     require(type(structure["DataVersion"]) is Int, "`DataVersion` is not an `Int`")
+    name, props = state_keys(structure["DataVersion"])
     ints(structure["size"], "`size`")
     palettes = [structure["palette"]] if "palette" in structure else structure["palettes"]
     require(isinstance(palettes, list) and bool(palettes), "`palettes` holds no palette")
     for palette in palettes:
         require(isinstance(palette, list), "a palette is not a list")
         for entry in palette:
-            compound(entry, PALETTE_KEYS, "a palette entry")
-            require(isinstance(entry.get("Name"), str), "a palette entry has no `Name`")
-            properties = entry.get("Properties", {})
+            compound(entry, {name, props}, "a palette entry")
+            require(isinstance(entry.get(name), str), f"a palette entry has no `{name}`")
+            properties = entry.get(props, {})
             textual = isinstance(properties, dict) and all(
                 isinstance(v, str) for v in properties.values()
             )
-            require(textual, f"{entry['Name']}'s `Properties` are not all strings")
+            require(textual, f"{entry[name]}'s `{props}` are not all strings")
     require(isinstance(structure["blocks"], list), "`blocks` is not a list")
     seen = set()
     for block in structure["blocks"]:
@@ -245,10 +256,11 @@ def strict_layout(structure: dict) -> None:
 def block_states(structure: dict) -> dict[tuple[int, int, int], tuple[str, dict]]:
     """Each block of a structure by position, as its id and properties."""
     palette = structure["palette"] if "palette" in structure else structure["palettes"][0]
+    name, props = state_keys(structure.get("DataVersion", 0))
     states = {}
     for block in structure.get("blocks", []):
         entry = palette[block["state"]]
-        states[tuple(block["pos"])] = (entry["Name"], entry.get("Properties", {}))
+        states[tuple(block["pos"])] = (entry[name], entry.get(props, {}))
     return states
 
 
@@ -357,12 +369,12 @@ def write_atomically(path: Path, data: bytes) -> None:
     os.replace(partial, path)
 
 
-def server_jar(version: str, cache: Path) -> tuple[Path, int]:
-    """The vanilla server jar for `version` in `cache`, and the Java major version it needs."""
+def version_meta(version: str, cache: Path) -> dict:
+    """Mojang's version JSON for `version`, kept in `cache`."""
     cache.mkdir(parents=True, exist_ok=True)
     meta_path = cache / f"{version}.json"
     try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        return json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         manifest = fetch_json(MANIFEST_URL)
         urls = [v["url"] for v in manifest["versions"] if v["id"] == version]
@@ -370,14 +382,25 @@ def server_jar(version: str, cache: Path) -> tuple[Path, int]:
             raise Refused(f"Mojang's version manifest has no {version}") from None
         meta = fetch_json(urls[0])
         write_atomically(meta_path, json.dumps(meta).encode("utf-8"))
-    download = meta["downloads"]["server"]
+        return meta
+
+
+def server_download(version: str, cache: Path) -> tuple[dict, int]:
+    """Mojang's `downloads.server` entry for `version`, and the Java major version it needs."""
+    meta = version_meta(version, cache)
+    return meta["downloads"]["server"], int(meta["javaVersion"]["majorVersion"])
+
+
+def server_jar(version: str, cache: Path) -> tuple[Path, int]:
+    """The vanilla server jar for `version` in `cache`, and the Java major version it needs."""
+    download, needs_java = server_download(version, cache)
     jar = cache / f"server-{version}.jar"
     if not jar.exists() or hashlib.sha1(jar.read_bytes()).hexdigest() != download["sha1"]:
         body = fetch(download["url"], 300)
         if hashlib.sha1(body).hexdigest() != download["sha1"]:
             raise Refused(f"the {version} server jar does not match the SHA-1 Mojang publishes")
         write_atomically(jar, body)
-    return jar, int(meta["javaVersion"]["majorVersion"])
+    return jar, needs_java
 
 
 def run_tool(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -448,10 +471,10 @@ def data_generator(java: str, jar: Path, cwd: Path, log: Path, mode: str, *args:
 # A state the game always saves with properties, so a reload that adds none never loaded it.
 SENTINEL = {
     "size": [1, 1, 1],
-    "palette": [{"Name": "minecraft:oak_stairs"}],
     "blocks": [{"pos": [0, 0, 0], "state": 0}],
     "entities": [],
 }
+SENTINEL_BLOCK = "minecraft:oak_stairs"
 
 
 def check_target(cairn: str, java: str, target: Target, cache: Path, work: Path) -> list[str]:
@@ -474,7 +497,16 @@ def check_target(cairn: str, java: str, target: Target, cache: Path, work: Path)
     structures = root / "in" / "data" / "minecraft" / target.structure_folder()
     files = compile_examples(cairn, target, structures, root / "locks")
     sentinel = structures / "sentinel.nbt"
-    sentinel.write_bytes(write_nbt({**SENTINEL, "DataVersion": target.data_version}))
+    name, _ = state_keys(target.data_version)
+    sentinel.write_bytes(
+        write_nbt(
+            {
+                **SENTINEL,
+                "palette": [{name: SENTINEL_BLOCK}],
+                "DataVersion": target.data_version,
+            }
+        )
+    )
     for mode, source, output in (("--dev", "in", "snbt"), ("--server", "snbt", "out")):
         data_generator(
             java, jar, root / "runtime", root / f"{mode[2:]}.log", mode,

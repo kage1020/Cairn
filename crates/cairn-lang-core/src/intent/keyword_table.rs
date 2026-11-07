@@ -12,6 +12,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "stair",
     "level",
     "pressure_plate",
+    "chest",
     "circuit",
     "place",
     "connect",
@@ -52,6 +53,8 @@ pub enum MemberRole {
     Level,
     /// `pressure_plate` fixture.
     PressurePlate,
+    /// `chest` fixture.
+    Chest,
     /// `circuit` redstone region marker.
     Circuit,
     /// `place` site placement.
@@ -161,7 +164,7 @@ impl MemberRole {
         Some(match self {
             Self::Floor => &[],
             Self::Walls => &["height"],
-            Self::Door => &["side", "at", "opened_by"],
+            Self::Door => &["side", "at", "opened_by", "hinge", "open"],
             Self::Window => &[
                 "side", "y", "offset", "size", "sym", "repeat", "step", "shape", "anchor",
             ],
@@ -177,6 +180,7 @@ impl MemberRole {
             ],
             Self::Level => &["y"],
             Self::PressurePlate => &["at", "offset", "y"],
+            Self::Chest => &["at", "offset", "y", "facing", "size"],
             Self::Circuit => &["region", "void"],
             // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
             // fix this set.
@@ -184,6 +188,27 @@ impl MemberRole {
             Self::Connect => &["path"],
             Self::Other(_) => return None,
         })
+    }
+
+    /// The keys of [`Self::arguments`] that name a blockstate of the block this role places, which
+    /// an author writes as intent (`spec/blockstate` "Derive by default, promote on override").
+    #[must_use]
+    pub fn state_arguments(&self) -> &'static [&'static str] {
+        match self {
+            Self::Stair => &["half", "facing", "shape", "waterlogged"],
+            Self::Door => &["hinge", "open"],
+            Self::Chest => &["facing", "size"],
+            Self::Floor
+            | Self::Walls
+            | Self::Window
+            | Self::Roof
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Circuit
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => &[],
+        }
     }
 
     /// Keys in [`Self::accepted_arguments`] that no pass reads on this role, with the reason; a
@@ -213,11 +238,6 @@ impl MemberRole {
                     why: Unread::Unreached,
                 },
             ],
-            // The door block itself is not placed yet; this entry goes when it is.
-            Self::Door => &[UnreadArgument {
-                key: "mat_slot",
-                why: Unread::Unreached,
-            }],
             // From `spec/blockstate` "`waterlogged`"; the entry goes when stair lowering reads it.
             Self::Stair => &[UnreadArgument {
                 key: "waterlogged",
@@ -227,7 +247,12 @@ impl MemberRole {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
             }],
-            Self::Floor | Self::Walls | Self::PressurePlate | Self::Other(_) => &[],
+            Self::Floor
+            | Self::Walls
+            | Self::Door
+            | Self::PressurePlate
+            | Self::Chest
+            | Self::Other(_) => &[],
         }
     }
 
@@ -293,6 +318,7 @@ impl MemberRole {
             | Self::Window
             | Self::Level
             | Self::PressurePlate
+            | Self::Chest
             | Self::Circuit
             | Self::Connect
             | Self::Other(_) => &[],
@@ -327,6 +353,7 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "stair" => MemberRole::Stair,
         "level" => MemberRole::Level,
         "pressure_plate" => MemberRole::PressurePlate,
+        "chest" => MemberRole::Chest,
         "circuit" => MemberRole::Circuit,
         "place" => MemberRole::Place,
         "connect" => MemberRole::Connect,

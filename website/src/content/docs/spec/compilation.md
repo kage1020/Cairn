@@ -11,7 +11,7 @@ phases in this fixed order:
 massing     floor / walls / volume
 envelope    roof / stair
 openings    door / window
-fixtures    sign / painting / frame / bed / sensors / actuators
+fixtures    sign / painting / frame / bed / chest / sensors / actuators
 logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
 logic_place cell placement → Placement IR
 logic_route routing, delay insertion and crossing legalization over the Placement IR, delay determined
@@ -20,7 +20,7 @@ raw         escape hatch
 
 Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `raw` are not keywords
 yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
-`envelope`, `openings` and `fixtures`, whose one member is `pressure_plate`. `cairn compile` does
+`envelope`, `openings` and `fixtures`, whose members are `pressure_plate` and `chest`. `cairn compile` does
 not run the three `logic_*` phases, so a `logic` line lays no redstone in the artifact; they are
 reached only through `cairn synth --experimental-logic-synth`.
 
@@ -214,8 +214,8 @@ Each term counts only the members that will paint:
 Members inside a `level` count in all three, at their offset: `walls height=3` written directly
 gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
-**Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, and
-`pressure_plate` read `N` as the base their geometry is measured from. A `floor` and a `roof` are
+**Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`,
+`pressure_plate` and `chest` read `N` as the base their geometry is measured from. A `floor` and a `roof` are
 planes a struct has one of, and what one under a raised `level` builds is reserved for a later
 extension: under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to nothing.
 
@@ -236,8 +236,8 @@ is `E_UNKNOWN_ID`, so no artifact ships from that shape.
 
 ## 4.8 Within-phase conflicts and the palette
 
-Across phases, the phase order decides: a `door` cut through `walls` is massing followed by
-openings, and the hole is the point. Inside one phase, only source order separates two members,
+Across phases, the phase order decides: a `door` set into `walls` is massing followed by
+openings, and taking the wall's cells is the point. Inside one phase, only source order separates two members,
 which is what [§4.1](#41-phase-evaluation) grants to "local overrides within the same phase".
 
 That grant is for an author restating a member. Two footprints that intersect by accident are a

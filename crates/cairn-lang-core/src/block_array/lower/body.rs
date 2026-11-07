@@ -3,6 +3,8 @@
 
 use std::collections::HashSet;
 
+use indexmap::IndexMap;
+
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{Member, MemberRole, Size};
@@ -10,15 +12,21 @@ use crate::resolve::ScopeResolution;
 
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::wall_column::WallColumn;
-use crate::block_array::{BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex};
+use crate::block_array::{
+    BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex, ResolvedBlock,
+    ResolvedMember,
+};
 
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
+use super::connections::derive_connections;
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
+use super::door::{HungDoor, hang_doors};
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::paint_member;
 use super::phase::Phase;
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
+use super::token_diag::{diag_derived_state_domain, diag_state_unmapped};
 use super::written::{Written, written_members};
 
 /// What every body of one run is lowered against.
@@ -43,9 +51,11 @@ pub(super) struct BodyDescriptor<'a> {
     pub(super) source_scope: String,
 }
 
-/// What lowering one body produced: the voxels, and the wall column they were painted against.
+/// What lowering one body produced: the voxels, who built them, and the wall column they were
+/// painted against.
 pub(super) struct LoweredBody {
     pub(super) array: BlockArray,
+    pub(super) members: Vec<ResolvedMember>,
     pub(super) walls: WallColumn,
     /// The spans of the `door` and `window` members that painted at least one cell.
     pub(super) cut: HashSet<Span>,
@@ -140,14 +150,7 @@ pub(super) fn lower_body_to_block_array<'a>(
             contested.values().sum(),
         ));
     }
-    let cut: HashSet<Span> = flattened
-        .iter()
-        .zip(&canvas.wrote)
-        .filter(|((_, m), wrote)| {
-            **wrote && matches!(m.role, MemberRole::Door | MemberRole::Window)
-        })
-        .map(|((_, m), _)| m.span.clone())
-        .collect();
+    let cut = cut_openings(&flattened, &canvas.wrote);
     let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
     debug_assert!(
         never_painted.is_empty(),
@@ -166,16 +169,82 @@ pub(super) fn lower_body_to_block_array<'a>(
     };
     // After the prune, so dropped entries are not sorted and the grid is renumbered once.
     array.canonicalize_palette();
+    let members = resolved_members(&flattened, canvas.owners(), &array);
+    if let Some(registry) = registry {
+        diagnostics.extend(state_findings(&members, registry));
+    }
 
     Some(LoweredBody {
         array,
+        members,
         walls: ctx.wall_column,
         cut,
     })
 }
 
+/// The spans of the doors and windows of `flattened` that `wrote` says cut their opening.
+fn cut_openings(flattened: &[(u32, &Member)], wrote: &[bool]) -> HashSet<Span> {
+    flattened
+        .iter()
+        .zip(wrote)
+        .filter(|((_, m), wrote)| {
+            **wrote && matches!(m.role, MemberRole::Door | MemberRole::Window)
+        })
+        .map(|((_, m), _)| m.span.clone())
+        .collect()
+}
+
+/// The findings on each state a member resolved to that `registry` cannot carry: a derived pair
+/// outside the block's states, or a state its state map has no form for.
+fn state_findings<'a>(
+    members: &'a [ResolvedMember],
+    registry: &'a dyn TargetRegistry,
+) -> impl Iterator<Item = Diagnostic> + 'a {
+    members.iter().flat_map(move |member| {
+        member.resolved_state.iter().flat_map(move |block| {
+            let outside = diag_derived_state_domain(&member.span, &block.state, registry);
+            let unmapped = diag_state_unmapped(member.span.clone(), &block.state, registry);
+            outside.into_iter().chain(unmapped)
+        })
+    })
+}
+
+/// Each member of `flattened` that owns a cell of `array`, with the states its cells hold.
+fn resolved_members(
+    flattened: &[(u32, &Member)],
+    owners: &[u32],
+    array: &BlockArray,
+) -> Vec<ResolvedMember> {
+    let mut built: Vec<IndexMap<PaletteIndex, ResolvedBlock>> =
+        vec![IndexMap::new(); flattened.len()];
+    for (index, (&owner, &state)) in owners.iter().zip(&array.voxels).enumerate() {
+        let (Some(member), Some(cell)) = (owner.checked_sub(1), array.dims.position(index)) else {
+            continue;
+        };
+        built[member as usize]
+            .entry(state)
+            .or_insert_with(|| ResolvedBlock {
+                state: array.palette.entries[usize::from(state.0)].clone(),
+                cells: Vec::new(),
+            })
+            .cells
+            .push(cell);
+    }
+    flattened
+        .iter()
+        .zip(built)
+        .filter(|(_, blocks)| !blocks.is_empty())
+        .map(|((_, member), blocks)| ResolvedMember {
+            role: member.role.keyword().to_owned(),
+            id: member.id.clone(),
+            resolved_state: blocks.into_values().collect(),
+            span: member.span.clone(),
+        })
+        .collect()
+}
+
 /// Paint one body's members onto a fresh canvas, phase by phase in `spec/compilation` "Phase
-/// evaluation" order.
+/// evaluation" order, then set the connection states the painted blocks derive.
 ///
 /// No test pins the order: neighbouring phases write disjoint cells, so only a two-step swap shows.
 fn paint_phases(
@@ -186,8 +255,16 @@ fn paint_phases(
 ) -> Canvas {
     let PhaseBuckets { by_phase, phases } = buckets;
     let mut canvas = Canvas::new(ctx.dims, phases);
-    for bucket in by_phase {
-        run_phase(bucket, ctx, palette, &mut canvas, diagnostics);
+    let mut hung = Vec::new();
+    for (index, bucket) in by_phase.into_iter().enumerate() {
+        run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+        // A door's hinge reads the wall beside it, which a later opening in the phase may cut.
+        if index == Phase::Openings.index() {
+            hang_doors(&hung, palette, &mut canvas);
+        }
+    }
+    if let Some(registry) = ctx.registry {
+        derive_connections(&mut canvas, palette, registry);
     }
     canvas
 }
@@ -239,7 +316,7 @@ fn bucket_members<'a>(
 }
 
 /// Paint one phase's bucket, each member through its own [`MemberCanvas`] so its writes are
-/// filed under it.
+/// filed under it; each door that stands is added to `hung`.
 ///
 /// [`MemberCanvas`]: super::canvas::MemberCanvas
 pub(super) fn run_phase(
@@ -247,6 +324,7 @@ pub(super) fn run_phase(
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut Canvas,
+    hung: &mut Vec<HungDoor>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (index, y_offset, member) in bucket {
@@ -257,6 +335,7 @@ pub(super) fn run_phase(
             ctx,
             palette,
             &mut member_canvas,
+            hung,
             diagnostics,
         );
     }
@@ -314,9 +393,9 @@ fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagn
         notes: vec![DiagnosticNote {
             span: None,
             message: "every state a member writes counts, including one a later member \
-                      covers; a vanilla registry has far fewer, so check the block ids with \
-                      `--edition` and `--target`, and each state literal by hand, since no \
-                      target checks its properties (`W_STATE_LITERAL_UNCHECKED`)"
+                      covers; a vanilla registry has far fewer, so check the block ids and \
+                      state literals with `--edition` and `--target`, which pins a version \
+                      whose tables check both"
                 .to_owned(),
         }],
         data: None,

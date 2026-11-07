@@ -50,8 +50,8 @@ pub(super) fn diag_no_theme_bound_generic(
                 span: None,
                 message: "a `floor` is left air; no `walls` is built or takes up rows, so no \
                           `door` or `window` is cut; a `roof` is built from its default block, \
-                          and so is an eave `stair` or `pressure_plate` that still fits the \
-                          shorter structure"
+                          and so is an eave `stair`, `pressure_plate` or `chest` that still fits \
+                          the shorter structure"
                     .to_owned(),
             },
             DiagnosticNote {

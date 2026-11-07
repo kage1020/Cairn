@@ -28,6 +28,8 @@
     { "token": "roof.cool_wood", "block": "spruce_stairs" },
     { "token": "sign.oak", "block": "standing_sign" },
     { "token": "sign.oak_wall", "block": "wall_sign" },
+    { "token": "door.default", "block": "wooden_door" },
+    { "token": "chest.default", "block": "chest" },
     { "token": "pressure_plate.default", "block": "wooden_pressure_plate" }
   ]
 }

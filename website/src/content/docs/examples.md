@@ -35,6 +35,12 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 | [`at-side-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/at-side-walkway.crn) | `at=left` / `at=right` door anchors pulling ports toward the facing corners. |
 | [`window-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/window-walkway.crn) | A window port, anchored at the rectangle's centre and pinned to the ground row. |
 
+## Blockstates
+
+| File | Shows |
+|---|---|
+| [`storeroom.crn`](https://github.com/kage1020/Cairn/blob/main/examples/storeroom.crn) | `chest` against the walls: each faces away from its wall, two side by side pair, and `size=single` keeps two apart. |
+
 ## Edge cases
 
 | File | Shows |

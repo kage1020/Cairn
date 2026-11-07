@@ -345,7 +345,7 @@ const SWEEP: &[(&str, &str)] = &[
     ("walls", "  walls id=w class=outer mat_slot=m height=3\n"),
     (
         "door",
-        "  door id=d class=c side=front at=center opened_by=sig.a\n",
+        "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a hinge=left open=false\n",
     ),
     (
         "window",
@@ -363,6 +363,10 @@ const SWEEP: &[(&str, &str)] = &[
     (
         "pressure_plate",
         "  pressure_plate id=p class=c mat_slot=m at=front.outside offset=0 y=0\n",
+    ),
+    (
+        "chest",
+        "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single\n",
     ),
     ("circuit", "  circuit id=c class=c region=r void=2\n"),
     (
@@ -929,11 +933,6 @@ impl UnreadSlot {
 
 const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
-        keyword: "door",
-        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door side=front at=center mat_slot=%SLOT%\n",
-        why: Unread::Unreached,
-    },
-    UnreadSlot {
         keyword: "level",
         body: "struct s size=7x5\n  floor mat_slot=wall\n  level y=0 mat_slot=%SLOT%\n    walls mat_slot=wall height=3\n",
         why: Unread::Inapplicable,
@@ -1063,10 +1062,20 @@ fn every_role_whose_mat_slot_is_unread_has_a_fixture() {
 
 #[test]
 fn a_slot_name_the_theme_lacks_on_a_role_that_reads_it_is_still_refused() {
-    let src = format!(
-        "{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  window side=front y=2 offset=2 size=2x1 mat_slot=nosuch\n"
-    );
-    assert_eq!(codes(&src), ["E_UNRESOLVED_SLOT"], "{:#?}", diagnose(&src));
+    for member in [
+        "window side=front y=2 offset=2 size=2x1",
+        "door side=front at=center",
+    ] {
+        let src = format!(
+            "{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  {member} mat_slot=nosuch\n"
+        );
+        assert_eq!(
+            codes(&src),
+            ["E_UNRESOLVED_SLOT"],
+            "{member}: {:#?}",
+            diagnose(&src)
+        );
+    }
 }
 
 #[test]

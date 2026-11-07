@@ -23,9 +23,12 @@ const PORT_GROUND_V: u32 = 0;
 
 /// World row a door port's doorway opens at: one above the floor slab.
 ///
-/// `carve_door` asks about `y_offset + 1`; the two agree because no port reaches a door under a
+/// `fill_door` asks about `y_offset + 1`; the two agree because no port reaches a door under a
 /// `level`.
 const DOOR_PORT_BASE_V: u32 = 1;
+
+/// Rows a door stands, from [`DOOR_PORT_BASE_V`].
+const DOOR_PORT_ROWS: u32 = 2;
 
 /// Why [`port_world_position`] placed no port, one variant per refusal in the order it asks.
 #[derive(Debug, PartialEq, Eq)]
@@ -44,6 +47,8 @@ pub(super) enum PortRejection {
     DoorNoWalls { member: Span },
     /// The walls paint, but not the row a door opens at.
     DoorOutsideCourse { walls: WallColumn, member: Span },
+    /// The course holding the row a door opens at ends there, leaving no row for its upper half.
+    DoorShortCourse { walls: WallColumn, member: Span },
     /// A window's `offset=` / `y=` / `size=` cannot be used.
     WindowArgument { fault: WindowArgFault, member: Span },
     /// A window's rectangle runs past the far end of its wall.
@@ -90,6 +95,7 @@ impl PortRejection {
             | Self::DoorAt { member, .. }
             | Self::DoorNoWalls { member }
             | Self::DoorOutsideCourse { member, .. }
+            | Self::DoorShortCourse { member, .. }
             | Self::WindowArgument { member, .. }
             | Self::WindowPastWall { member, .. }
             | Self::WindowNoWalls { member }
@@ -138,6 +144,11 @@ impl PortRejection {
                 "is a door that opens at y={DOOR_PORT_BASE_V}, the row above the floor slab, which \
                  is not inside any wall course (the walls occupy {walls})",
             ),
+            Self::DoorShortCourse { walls, .. } => format!(
+                "is a door that stands at y={DOOR_PORT_BASE_V}..={}, and the wall course holding \
+                 y={DOOR_PORT_BASE_V} ends there (the walls occupy {walls})",
+                DOOR_PORT_BASE_V + DOOR_PORT_ROWS - 1,
+            ),
             Self::WindowArgument { fault, .. } => format!("is a window that {}", fault.clause()),
             Self::WindowPastWall {
                 offset,
@@ -164,7 +175,7 @@ impl PortRejection {
                 ),
             },
             Self::NotCut { role, .. } => {
-                // A door is carved to air, so only a window has a material to blame.
+                // A door whose `mat_slot=` resolves to nothing falls back to its default block.
                 let why = if *role == "window" {
                     "the finding on its own line, or on the material its `mat_slot=` names, says why"
                 } else {
@@ -209,6 +220,7 @@ pub(super) fn port_world_position<S: BuildHasher>(
         | MemberRole::Stair
         | MemberRole::Level
         | MemberRole::PressurePlate
+        | MemberRole::Chest
         | MemberRole::Circuit
         | MemberRole::Place
         | MemberRole::Connect
@@ -245,6 +257,12 @@ pub(super) fn port_world_position<S: BuildHasher>(
         }
         if walls.course_top_at(DOOR_PORT_BASE_V).is_none() {
             return Err(PortRejection::DoorOutsideCourse {
+                walls: walls.clone(),
+                member: member.span.clone(),
+            });
+        }
+        if !walls.contains_rows(DOOR_PORT_BASE_V, DOOR_PORT_ROWS) {
+            return Err(PortRejection::DoorShortCourse {
                 walls: walls.clone(),
                 member: member.span.clone(),
             });

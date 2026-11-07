@@ -27,45 +27,50 @@ structs:
       - role:
           kind: Floor
         mat_slot: wall
+        arguments: {}
         intent_state: {}
       - class: outer
         role:
           kind: Walls
         mat_slot: wall
-        intent_state:
+        arguments:
           height:
             kind: Int
             value: 3
+        intent_state: {}
       - role:
           kind: Roof
         mat_slot: wall
-        intent_state:
+        arguments:
           kind:
             kind: Ident
             value: flat
           overhang:
             kind: Int
             value: 1
+        intent_state: {}
       - id: front
         role:
           kind: Door
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
           at:
             kind: Ident
             value: center
+        intent_state: {}
       - id: back
         role:
           kind: Door
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: back
           at:
             kind: Ident
             value: center
+        intent_state: {}
       - id: plate1
         role:
           kind: PressurePlate
@@ -74,7 +79,7 @@ structs:
           value:
             - sig
             - a
-        intent_state:
+        arguments:
           at:
             kind: DotRef
             value:
@@ -86,6 +91,7 @@ structs:
           y:
             kind: Int
             value: 0
+        intent_state: {}
       - id: plate2
         role:
           kind: PressurePlate
@@ -94,7 +100,7 @@ structs:
           value:
             - sig
             - b
-        intent_state:
+        arguments:
           at:
             kind: DotRef
             value:
@@ -106,39 +112,43 @@ structs:
           y:
             kind: Int
             value: 0
+        intent_state: {}
       - role:
           kind: Door
         selector:
           id:
             kind: Ident
             value: front
-        intent_state:
+        arguments:
           opened_by:
             kind: DotRef
             value:
               - sig
               - f1
+        intent_state: {}
       - role:
           kind: Door
         selector:
           id:
             kind: Ident
             value: back
-        intent_state:
+        arguments:
           opened_by:
             kind: DotRef
             value:
               - sig
               - f2
+        intent_state: {}
       - role:
           kind: Circuit
-        intent_state:
+        arguments:
           region:
             kind: Ident
             value: floor
           void:
             kind: Int
             value: 2
+        intent_state: {}
     logic:
       - lhs:
           - sig
