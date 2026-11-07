@@ -1,6 +1,6 @@
 # cairn-lang-formats
 
-Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids a given `(edition, version)` actually has.
+Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has.
 
 Each format is a serializer or deserializer around the **block-array IR**, which the specification names as the universal pivot ([architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/)). Adding a format means adding a backend here — the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
 
@@ -33,7 +33,7 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `bedrock_state::StateTranslation` | A successful translation: the typed `states` compound, plus one entry per piece of intent Bedrock cannot express. Empty `degraded` means lossless. |
 | `bedrock_state::BedrockStateError` | `UnmappableBlock`, `UnknownStairState`, `UnknownStairKey` — each carrying the what-is-wrong / what-is-valid / suggested-fix triple the lint loop reads. |
 | `data_version::JavaTarget` / `data_version::resolve_java_target` | `--target <mc_version>` → `(mc_version, DataVersion)`. |
-| `data_version::BedrockTarget` / `data_version::resolve_bedrock_target` | `--target <mc_version>` → `(mc_version, block_version)`. |
+| `data_version::BedrockTarget` / `data_version::resolve_bedrock_target` | `--target <mc_version>` → `(mc_version, data_version, block_version)`: the release's key in Bedrock's version order, and the block-state version its structures carry, which several releases can share. |
 | `data_version::UnsupportedTarget` | A `--target` no version table matched: which edition was consulted, the value given, the nearest candidate when one is close enough to suggest, and the supported list. |
 | `portability::portability_for_java` | `PortabilityReport` for Java: how many palette entries are portable, degraded, or unsupported, and which. |
 | `portability::portability_for_bedrock` | The same for Bedrock, or `InvalidPalette` when the palette carries states the pack should have refused. |
@@ -51,7 +51,14 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 
 ## Registry packs
 
-A pack is the closed vocabulary every id-level answer comes from: which blocks exist in a version, which name a renamed block goes by there, and which canonical token an abstract material resolves to. `registry-data/<edition>/pack.json` holds the built-in pair, and `load_from_dir` takes an external one. Each table carries a `schema_version` the loader refuses to read past, so a pack written for a newer Cairn fails loudly instead of being half-understood.
+A pack is the closed vocabulary every id-level answer comes from: which blocks exist in a version and the values each of their states takes, which name a renamed block goes by there, and which canonical token an abstract material resolves to. `registry-data/<edition>/pack.json` holds the built-in pair, and `load_from_dir` takes an external one. Each table carries a `schema_version` the loader refuses to read past, so a pack written for a newer Cairn fails loudly instead of being half-understood.
+
+The block tables, and the integers of each version table's targetable rows, are extracted from the game: Java's from the server jar's `--reports`, Bedrock's from the block palette GeyserMC ships for the release, pinned by commit and SHA-256. `pack.json` records the file each table came from. To regenerate an edition's tables, or check the committed ones with `--check`:
+
+```sh
+python3 .github/scripts/extract_registry.py java --java <a Java 25 or later>
+python3 .github/scripts/extract_registry.py bedrock
+```
 
 Because the tables are closed, a suggestion cannot name a block that does not exist in the target — the "valid candidates" half of a diagnostic is looked up, never generated ([principles P3](https://cairn.kage1020.com/spec/principles/)).
 

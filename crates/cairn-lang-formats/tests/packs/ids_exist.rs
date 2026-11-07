@@ -127,7 +127,7 @@ fn the_bedrock_pack_respells_stone_bricks_for_the_version_that_predates_it() {
             Some("minecraft:stonebrick"),
             "bedrock 1.21.0 predates the `stone_bricks` rename",
         );
-        for later in ["1.21.40", "1.21.60"] {
+        for later in ["1.21.40", "1.21.60", "1.26.60"] {
             assert_eq!(
                 bedrock.materials().lookup_id_for(token, Some(later)),
                 Some("minecraft:stone_bricks"),
@@ -178,11 +178,11 @@ fn every_id_the_examples_intern_exists_in_its_target() {
 fn both_packs_declare_the_versions_these_tests_expect_to_walk() {
     assert_eq!(
         supported_versions(builtin_pack(Edition::Java)),
-        vec!["1.20.4", "1.21", "1.21.4"],
+        vec!["1.20.4", "1.21", "1.21.4", "26.3"],
     );
     assert_eq!(
         supported_versions(builtin_pack(Edition::Bedrock)),
-        vec!["1.21.0", "1.21.40", "1.21.60"],
+        vec!["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
     );
     for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
         for version in supported_versions(pack) {

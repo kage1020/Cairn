@@ -1,7 +1,7 @@
 {
-  "schema_version": 2,
-  "latest": "1.21.60",
-  "source": "Release list from Mojang/bedrock-samples `version.json`. The integer is (major<<24)|(minor<<16)|(patch<<8)|revision of the block-state version that release writes into a palette, which need not be the build number: for a targetable row it is PocketMine-MP's `BlockStateData::CURRENT_VERSION` in the release supporting that version (the `maxVersion` of the pmmp/BedrockBlockUpgradeSchema schema that upgrades to it). The other rows are ordering keys that never reach an artifact, and carry revision 0.",
+  "schema_version": 3,
+  "latest": "1.26.60",
+  "source": "Release list from Mojang/bedrock-samples `version.json`. `data_version` is each release's own number packed as (major<<24)|(minor<<16)|(patch<<8), an ordering key that never reaches an artifact. A targetable row's `block_version` is the block-state version its palette carries, packed the same way with the revision in the low byte; it is extracted by `.github/scripts/extract_registry.py`, and releases can share one.",
   "versions": [
     {
       "mc_version": "1.19.30",
@@ -89,7 +89,8 @@
     },
     {
       "mc_version": "1.21.0",
-      "data_version": 18153475,
+      "data_version": 18153472,
+      "block_version": 18153475,
       "released": "2024-06-13"
     },
     {
@@ -106,7 +107,8 @@
     },
     {
       "mc_version": "1.21.40",
-      "data_version": 18163713,
+      "data_version": 18163712,
+      "block_version": 18163713,
       "released": "2024-10-22"
     },
     {
@@ -117,7 +119,8 @@
     },
     {
       "mc_version": "1.21.60",
-      "data_version": 18168865,
+      "data_version": 18168832,
+      "block_version": 18168865,
       "released": "2025-02-11"
     },
     {
@@ -191,6 +194,18 @@
       "data_version": 18491392,
       "released": "2026-08-04",
       "targetable": false
+    },
+    {
+      "mc_version": "1.26.50",
+      "data_version": 18493952,
+      "released": "2026-09-15",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.26.60",
+      "data_version": 18496512,
+      "block_version": 18168865,
+      "released": "2026-10-27"
     }
   ]
 }

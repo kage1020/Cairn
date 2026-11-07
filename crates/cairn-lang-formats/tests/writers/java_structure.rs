@@ -192,6 +192,39 @@ fn palette_entry_with_properties_keeps_them() {
     );
 }
 
+/// The game reads a block state as `id` and `properties` from 26.3, and runs no fixer on a file
+/// that already carries its `DataVersion`.
+#[test]
+fn a_target_from_26_3_names_a_palette_entrys_block_and_properties_in_lower_case() {
+    let mut palette = Palette::new_with_air();
+    let mut stairs = BlockState::bare("minecraft:oak_stairs");
+    stairs
+        .properties
+        .insert("facing".to_owned(), "north".to_owned());
+    let idx = palette.intern(stairs);
+    let ba = BlockArray {
+        dims: Dims { x: 1, y: 1, z: 1 },
+        palette,
+        voxels: vec![idx],
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: "struct::stairs".to_owned(),
+    };
+    let keys_of = |mc_version: &str| {
+        let target = resolve_java_target(mc_version).expect("known target");
+        let root = build_structure_tag(&ba, &target).expect("build");
+        let Tag::List(palette) = &root.entries["palette"] else {
+            unreachable!()
+        };
+        let Tag::Compound(entry) = &palette.items[1] else {
+            unreachable!()
+        };
+        entry.entries.keys().cloned().collect::<Vec<_>>()
+    };
+    assert_eq!(keys_of("1.21.4"), ["Name", "Properties"]);
+    assert_eq!(keys_of("26.3"), ["id", "properties"]);
+}
+
 #[test]
 fn blocks_entries_count_equals_dims_volume() {
     let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");

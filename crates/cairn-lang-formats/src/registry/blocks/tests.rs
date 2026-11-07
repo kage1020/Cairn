@@ -335,3 +335,150 @@ fn a_chain_of_diffs_folds_through_its_middle_version() {
         ],
     );
 }
+
+const WITH_STATES: &str = r#"{
+    "schema_version": 2,
+    "namespace": "minecraft",
+    "base": { "mc_version": "1.0", "blocks": {
+        "oak_log": { "axis": ["x", "y", "z"] },
+        "stone": {}
+    } },
+    "diffs": [
+        { "mc_version": "1.1", "inherits": "1.0",
+          "added": { "lever": { "powered": [false, true], "facing_direction": [0, 1] } },
+          "changed": { "oak_log": { "pillar_axis": ["y", "x", "z"] } },
+          "removed": ["stone"] }
+    ]
+}"#;
+
+#[test]
+fn a_block_reads_its_states_in_the_tables_order() {
+    let index = parse(WITH_STATES).expect("catalog");
+    let log = index
+        .states_of("1.0", "minecraft:oak_log")
+        .expect("oak_log has states");
+    let axis: Vec<String> = log
+        .domain("axis")
+        .expect("axis")
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(axis, ["x", "y", "z"]);
+    assert!(
+        index
+            .states_of("1.0", "minecraft:stone")
+            .is_some_and(BlockStates::is_empty)
+    );
+}
+
+#[test]
+fn a_bedrock_value_keeps_its_type_and_prints_as_a_literal_writes_it() {
+    let index = parse(WITH_STATES).expect("catalog");
+    let lever = index
+        .states_of("1.1", "minecraft:lever")
+        .expect("lever has states");
+    assert_eq!(
+        lever.properties().collect::<Vec<_>>(),
+        [
+            (
+                "powered",
+                [StateValue::Bool(false), StateValue::Bool(true)].as_slice()
+            ),
+            (
+                "facing_direction",
+                [StateValue::Int(0), StateValue::Int(1)].as_slice()
+            ),
+        ],
+    );
+    assert_eq!(StateValue::Bool(true).to_string(), "true");
+    assert_eq!(StateValue::Int(3).to_string(), "3");
+}
+
+#[test]
+fn a_changed_block_reads_its_new_states_in_that_version_only() {
+    let index = parse(WITH_STATES).expect("catalog");
+    let old = index.states_of("1.0", "minecraft:oak_log").expect("1.0");
+    let new = index.states_of("1.1", "minecraft:oak_log").expect("1.1");
+    assert!(old.domain("axis").is_some() && old.domain("pillar_axis").is_none());
+    assert!(new.domain("pillar_axis").is_some() && new.domain("axis").is_none());
+}
+
+#[test]
+fn a_removed_block_has_no_states_in_the_version_that_removes_it() {
+    let index = parse(WITH_STATES).expect("catalog");
+    assert_eq!(index.states_of("1.1", "minecraft:stone"), None);
+    assert_eq!(index.states_of("1.2", "minecraft:oak_log"), None);
+}
+
+#[test]
+fn a_table_of_bare_ids_records_no_states() {
+    let index = parse(TWO_VERSIONS).expect("catalog");
+    assert_eq!(index.states_of("1.0", "minecraft:cobblestone"), None);
+}
+
+#[test]
+fn since_and_until_are_the_first_and_last_versions_declaring_an_id() {
+    let index = parse(
+        r#"{
+        "schema_version": 2,
+        "namespace": "minecraft",
+        "base": { "mc_version": "1.0", "blocks": { "stone": {}, "chain": {} } },
+        "diffs": [
+            { "mc_version": "1.1", "inherits": "1.0", "added": { "lantern": {} } },
+            { "mc_version": "1.2", "inherits": "1.1", "removed": ["chain"],
+              "added": { "iron_chain": {} } }
+        ]
+    }"#,
+    )
+    .expect("catalog");
+    let span = |id: &str| (index.since(id), index.until(id));
+    assert_eq!(span("minecraft:stone"), (Some("1.0"), Some("1.2")));
+    assert_eq!(span("minecraft:lantern"), (Some("1.1"), Some("1.2")));
+    assert_eq!(span("minecraft:chain"), (Some("1.0"), Some("1.1")));
+    assert_eq!(span("minecraft:iron_chain"), (Some("1.2"), Some("1.2")));
+    assert_eq!(span("minecraft:dirt"), (None, None));
+}
+
+#[test]
+fn changing_an_id_the_parent_lacks_is_refused() {
+    let err = parse(
+        r#"{
+        "schema_version": 2,
+        "namespace": "minecraft",
+        "base": { "mc_version": "1.0", "blocks": { "stone": {} } },
+        "diffs": [
+            { "mc_version": "1.1", "inherits": "1.0",
+              "changed": { "lever": { "powered": ["true", "false"] } } }
+        ]
+    }"#,
+    )
+    .expect_err("changed not in parent");
+    assert_eq!(
+        err,
+        BlocksError::ChangedNotInParent {
+            version: "1.1".to_owned(),
+            inherits: "1.0".to_owned(),
+            id: "minecraft:lever".to_owned(),
+        },
+    );
+}
+
+#[test]
+fn a_property_with_no_value_is_refused() {
+    let err = parse(
+        r#"{
+        "schema_version": 2,
+        "namespace": "minecraft",
+        "base": { "mc_version": "1.0", "blocks": { "lever": { "powered": [] } } }
+    }"#,
+    )
+    .expect_err("empty domain");
+    assert_eq!(
+        err,
+        BlocksError::EmptyDomain {
+            version: "1.0".to_owned(),
+            id: "minecraft:lever".to_owned(),
+            property: "powered".to_owned(),
+        },
+    );
+}

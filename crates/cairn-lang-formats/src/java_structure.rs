@@ -201,7 +201,10 @@ impl JavaStructure<'_> {
         root.tag("size", &Tag::List(List::of_ints(self.size)))?;
         root.tag(
             "palette",
-            &Tag::List(palette_list(&block_array.palette.entries)),
+            &Tag::List(palette_list(
+                &block_array.palette.entries,
+                self.data_version,
+            )),
         )?;
         root.list("blocks", 10, self.volume, |blocks| {
             // `blocks_list`'s (y, z, x) order.
@@ -250,7 +253,10 @@ pub fn build_structure_tag(
     root.insert("size", Tag::List(List::of_ints(prepared.size)));
     root.insert(
         "palette",
-        Tag::List(palette_list(&block_array.palette.entries)),
+        Tag::List(palette_list(
+            &block_array.palette.entries,
+            prepared.data_version,
+        )),
     );
     root.insert("blocks", Tag::List(blocks_list(block_array)?));
     root.insert("entities", Tag::List(List::empty()));
@@ -314,20 +320,35 @@ pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
     )
 }
 
-fn palette_list(entries: &[BlockState]) -> List {
-    let compounds: Vec<Compound> = entries.iter().map(palette_entry).collect();
+/// The first `DataVersion` whose block states the game reads as `id` and `properties`; an older
+/// file's `Name` and `Properties` reach it only through the `DataFixer`, which a file stamped with
+/// the newer version skips.
+const LOWERCASE_STATE_KEYS_FROM: i32 = 5006;
+
+/// The keys a palette entry names its block and its properties by, for `data_version`.
+fn palette_entry_keys(data_version: i32) -> (&'static str, &'static str) {
+    if data_version >= LOWERCASE_STATE_KEYS_FROM {
+        ("id", "properties")
+    } else {
+        ("Name", "Properties")
+    }
+}
+
+fn palette_list(entries: &[BlockState], data_version: i32) -> List {
+    let keys = palette_entry_keys(data_version);
+    let compounds: Vec<Compound> = entries.iter().map(|e| palette_entry(e, keys)).collect();
     List::of_compounds(compounds)
 }
 
-fn palette_entry(state: &BlockState) -> Compound {
+fn palette_entry(state: &BlockState, (id_key, properties_key): (&str, &str)) -> Compound {
     let mut compound = Compound::new();
-    compound.insert("Name", Tag::String(state.id.clone()));
+    compound.insert(id_key, Tag::String(state.id.clone()));
     if !state.properties.is_empty() {
         let mut props = Compound::new();
         for (k, v) in &state.properties {
             props.insert(k.clone(), Tag::String(v.clone()));
         }
-        compound.insert("Properties", Tag::Compound(props));
+        compound.insert(properties_key, Tag::Compound(props));
     }
     compound
 }

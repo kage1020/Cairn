@@ -577,13 +577,13 @@ fn targetable_rows_are_the_buildable_ones_in_data_version_order() {
         .into_iter()
         .map(|e| e.mc_version.as_str())
         .collect();
-    assert_eq!(java, ["1.20.4", "1.21", "1.21.4"]);
+    assert_eq!(java, ["1.20.4", "1.21", "1.21.4", "26.3"]);
     let bedrock: Vec<&str> = builtin_pack(Edition::Bedrock)
         .targetable()
         .into_iter()
         .map(|e| e.mc_version.as_str())
         .collect();
-    assert_eq!(bedrock, ["1.21.0", "1.21.40", "1.21.60"]);
+    assert_eq!(bedrock, ["1.21.0", "1.21.40", "1.21.60", "1.26.60"]);
 }
 
 #[test]
@@ -757,12 +757,13 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         (major << 24) | (minor << 16) | (patch << 8) | revision
     };
     let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
-    // The block-state version each release writes (PocketMine-MP's
-    // `BlockStateData::CURRENT_VERSION`), whose revision is not the client build's.
+    // The block-state version each release's palette carries, whose revision is not the client
+    // build's, and which 1.26.60 shares with 1.21.60 because no state changed form between them.
     let expected = [
         ("1.21.0", version(1, 21, 0, 3)),
         ("1.21.40", version(1, 21, 40, 1)),
         ("1.21.60", version(1, 21, 60, 33)),
+        ("1.26.60", version(1, 21, 60, 33)),
     ];
     let targetable: Vec<&str> = pack
         .data_versions()
@@ -772,14 +773,19 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         .map(|row| row.mc_version.as_str())
         .collect();
     assert_eq!(targetable, expected.map(|(mc_version, _)| mc_version));
-    // This pack gives ordering rows revision 0, though the schema does not require it.
-    for row in pack
-        .data_versions()
-        .versions
-        .iter()
-        .filter(|r| !r.targetable)
-    {
-        assert_eq!(row.data_version & 0xFF, 0, "{}", row.mc_version);
+    // This pack keys every row by its own release number, though the schema does not require it.
+    for row in &pack.data_versions().versions {
+        let parts: Vec<i32> = row
+            .mc_version
+            .split('.')
+            .map(|part| part.parse().expect("a numeric Bedrock label"))
+            .collect();
+        assert_eq!(
+            row.data_version,
+            version(parts[0], parts[1], parts[2], 0),
+            "{}",
+            row.mc_version
+        );
     }
     for (mc_version, block_version) in expected {
         let t = pack.resolve_bedrock_target(mc_version).expect(mc_version);
@@ -787,8 +793,8 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         assert_eq!(t.block_version, block_version, "{mc_version}");
     }
     let latest = pack.resolve_bedrock_target("latest").expect("latest");
-    assert_eq!(latest.mc_version, pack.data_versions().latest);
-    assert_eq!(latest.block_version, version(1, 21, 60, 33));
+    assert_eq!(latest.mc_version, "1.26.60");
+    assert_eq!(latest.data_version, version(1, 26, 60, 0));
 }
 
 #[test]
@@ -1010,4 +1016,110 @@ fn malformed_manifest_json_is_error() {
 fn pack_hash_snapshot() {
     let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     insta::assert_snapshot!("builtin_java_pack_hash", pack.bytes_hash().as_str());
+}
+
+fn bedrock_pack(data_versions: &'static str) -> Result<RegistryPack, RegistryError> {
+    let files = BuiltinFiles {
+        manifest: r#"{
+            "schema_version": 1,
+            "edition": "bedrock",
+            "name": "test",
+            "description": "test",
+            "files": { "data_versions": "data_versions.json" }
+        }"#,
+        data_versions,
+        materials: "",
+        blocks: "",
+        aliases: "",
+    };
+    load_pack(&files, Edition::Bedrock)
+}
+
+#[test]
+fn two_bedrock_releases_sharing_a_block_version_keep_their_own_keys() {
+    let pack = bedrock_pack(
+        r#"{
+        "schema_version": 3,
+        "latest": "1.26.60",
+        "versions": [
+            { "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168865 },
+            { "mc_version": "1.26.60", "data_version": 18496512, "block_version": 18168865 }
+        ]
+    }"#,
+    )
+    .expect("pack");
+    let old = pack.resolve_bedrock_target("1.21.60").expect("1.21.60");
+    let new = pack.resolve_bedrock_target("1.26.60").expect("1.26.60");
+    assert_eq!(old.block_version, new.block_version);
+    assert_eq!(
+        (old.data_version, new.data_version),
+        (18_168_832, 18_496_512)
+    );
+}
+
+#[test]
+fn a_targetable_bedrock_row_without_a_block_version_is_refused() {
+    let err = bedrock_pack(
+        r#"{
+        "schema_version": 3,
+        "latest": "1.21.60",
+        "versions": [
+            { "mc_version": "1.21.50", "data_version": 18166272, "targetable": false },
+            { "mc_version": "1.21.60", "data_version": 18168832 }
+        ]
+    }"#,
+    )
+    .expect_err("no block_version");
+    assert!(matches!(
+        err,
+        RegistryError::BlockVersionMisplaced { ref mc_version, edition: Edition::Bedrock }
+            if mc_version == "1.21.60"
+    ));
+}
+
+#[test]
+fn a_java_row_with_a_block_version_is_refused() {
+    let dir = pack_dir();
+    write_pack(
+        dir.path(),
+        good_manifest(),
+        r#"{
+        "schema_version": 3,
+        "latest": "1.21.4",
+        "versions": [
+            { "mc_version": "1.21.4", "data_version": 4189, "block_version": 4189 }
+        ]
+    }"#,
+    );
+    let err = load_from_dir(dir.path()).expect_err("block_version on Java");
+    assert!(matches!(
+        err,
+        RegistryError::BlockVersionMisplaced { ref mc_version, edition: Edition::Java }
+            if mc_version == "1.21.4"
+    ));
+}
+
+#[test]
+fn block_tables_resolved_newest_first_are_refused() {
+    let dir = pack_dir();
+    write_full_pack(
+        dir.path(),
+        manifest_with_blocks(),
+        good_data_versions(),
+        r#"{ "schema_version": 1, "namespace": "minecraft", "entries": [] }"#,
+        r#"{
+        "schema_version": 1,
+        "namespace": "minecraft",
+        "base": { "mc_version": "1.21.4", "blocks": ["oak_planks", "pale_oak_planks"] },
+        "diffs": [
+            { "mc_version": "1.20.4", "inherits": "1.21.4", "removed": ["pale_oak_planks"] }
+        ]
+    }"#,
+    );
+    let err = load_from_dir(dir.path()).expect_err("newest first");
+    assert!(matches!(
+        err,
+        RegistryError::BlocksOutOfOrder { ref version, ref follows }
+            if version == "1.20.4" && follows == "1.21.4"
+    ));
 }

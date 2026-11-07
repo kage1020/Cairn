@@ -12,6 +12,7 @@ on:
       - "crates/cairn-lang-cli/src/**"
       - "Cargo.lock"
       - ".github/scripts/minecraft_load.py"
+      - ".github/scripts/extract_registry.py"
       - ".github/workflows/minecraft.yml"
   pull_request:
     # Keep in step with the `push` filter.
@@ -24,10 +25,11 @@ on:
       - "crates/cairn-lang-cli/src/**"
       - "Cargo.lock"
       - ".github/scripts/minecraft_load.py"
+      - ".github/scripts/extract_registry.py"
       - ".github/workflows/minecraft.yml"
   schedule:
-    # Weekly, off the hour, for a change to the runner's Java or to Mojang's endpoints, which no
-    # path above sees.
+    # Weekly, off the hour, for a change to Java 25 or to Mojang's endpoints, which no path above
+    # sees.
     - cron: "37 5 * * 1"
   workflow_dispatch:
 
@@ -63,15 +65,21 @@ jobs:
           # The script checks each jar against Mojang's SHA-1, so an older set is a safe start.
           restore-keys: minecraft-
 
+      - name: Install Java
+        # 26.3's server needs Java 25, which the older targets run on too.
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+
       - name: Build cairn
         run: cargo build -p cairn-lang-cli --locked
 
       - name: Load the examples
-        # The runner image ships Java 21, which every shipped target runs on.
         run: >-
           python3 .github/scripts/minecraft_load.py
           --cairn ./target/debug/cairn
-          --java "$JAVA_HOME_21_X64/bin/java"
+          --java "$JAVA_HOME/bin/java"
           --cache ~/.cache/cairn-minecraft
 
       - name: Save the server jars
@@ -80,3 +88,32 @@ jobs:
         with:
           path: ~/.cache/cairn-minecraft
           key: ${{ steps.jars.outputs.cache-primary-key }}
+
+  tables:
+    name: Registry tables match the game
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Restore the server jars and palettes
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/cairn-minecraft
+          key: minecraft-${{ hashFiles('crates/cairn-lang-formats/registry-data/java/data_versions.json') }}
+          restore-keys: minecraft-
+
+      - name: Install Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Java
+        run: >-
+          python3 .github/scripts/extract_registry.py java --check
+          --java "$JAVA_HOME/bin/java"
+          --cache ~/.cache/cairn-minecraft
+
+      - name: Bedrock
+        run: python3 .github/scripts/extract_registry.py bedrock --check --cache ~/.cache/cairn-minecraft
