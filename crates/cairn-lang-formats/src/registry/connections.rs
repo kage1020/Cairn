@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use cairn_lang_core::block_array::{Face, Faces, JoinKind, Joins};
+use cairn_lang_core::block_array::{Covers, Face, Faces, JoinKind, Joins};
 use indexmap::IndexMap;
 use serde::Deserialize;
 
@@ -40,8 +40,8 @@ pub struct ConnectionRow {
     pub kind: Option<ConnectionKind>,
     /// Whether a pane, fence or wall never joins them by a whole face.
     #[serde(default)]
-    pub exception: bool,
-    /// Whether a wall under them raises its post whatever its sides.
+    pub never_joined_by_face: bool,
+    /// Whether the game's `wall_post_override` tag holds them.
     #[serde(default)]
     pub raises_post: bool,
     /// The default state's value of each property the rules read.
@@ -49,7 +49,10 @@ pub struct ConnectionRow {
     pub defaults: IndexMap<String, String>,
     /// The faces their models cover whole.
     #[serde(default)]
-    pub sturdy: Option<SturdyRow>,
+    pub sturdy: Option<ByState>,
+    /// What their bottoms cover of a wall below: `post`, and the directions of its sides.
+    #[serde(default)]
+    pub covers: Option<ByState>,
 }
 
 /// The kind of connecting block a [`ConnectionRow`] describes.
@@ -68,19 +71,24 @@ pub enum ConnectionKind {
     FenceGate,
 }
 
-/// The whole faces of a [`ConnectionRow`]'s blocks.
+/// Names that hold of a [`ConnectionRow`]'s blocks, in every state alike or by state.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub enum SturdyRow {
-    /// Looked up from the values of `reads`, comma-joined.
-    Lookup {
-        /// The properties read, in order.
-        reads: Vec<String>,
-        /// Their values, comma-joined, to the faces whole there.
-        map: IndexMap<String, Vec<String>>,
-    },
-    /// The same faces in every state.
+pub enum ByState {
+    /// Looked up from the values of some of the blocks' properties.
+    Lookup(StateLookup),
+    /// The same names in every state.
     Every(Vec<String>),
+}
+
+/// A [`ByState`] looked up from the values of [`Self::reads`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StateLookup {
+    /// The properties read, in order.
+    pub reads: Vec<String>,
+    /// Their values, comma-joined, to the names that hold there.
+    pub map: IndexMap<String, Vec<String>>,
 }
 
 /// Why a `connections` component does not validate.
@@ -96,6 +104,20 @@ pub enum ConnectionsError {
         got: u32,
         /// The highest version this build reads.
         supported: u32,
+    },
+    /// The component has no rows; a pack without connection tables names no `connections` file.
+    #[error(
+        "registry pack `connections` has no rows; a pack without connection tables names no \
+         `connections` file"
+    )]
+    NoRows,
+    /// A row names no block, or no version, and so describes nothing.
+    #[error("registry pack `connections` `rows[{index}]` names no {missing}")]
+    EmptyRow {
+        /// The row's place in `rows`, from 0.
+        index: usize,
+        /// `"block"` or `"version"`.
+        missing: &'static str,
     },
     /// Two rows describe one block at one version.
     #[error("registry pack `connections` describes `{id}` twice at `{mc_version}`")]
@@ -125,20 +147,58 @@ pub struct ConnectionIndex {
 
 #[derive(Debug, Clone)]
 struct Row {
-    kind: Option<ConnectionKind>,
-    exception: bool,
+    kind: Option<RowKind>,
+    never_joined_by_face: bool,
     raises_post: bool,
     defaults: IndexMap<String, String>,
-    sturdy: Sturdy,
+    sturdy: Held<Faces>,
+    covers: Held<Covers>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RowKind {
+    Joins(JoinKind),
+    /// A fence gate, with the `facing` and `open` its default state holds.
+    Gate {
+        facing: Face,
+        open: bool,
+    },
+}
+
+/// What holds of a row's blocks, parsed from a [`ByState`].
 #[derive(Debug, Clone)]
-enum Sturdy {
-    Every(Faces),
+enum Held<T> {
+    Every(T),
     Lookup {
         reads: Vec<String>,
-        map: HashMap<String, Faces>,
+        map: HashMap<String, T>,
     },
+}
+
+impl<T: Copy + Default> Held<T> {
+    /// What holds where `value` gives each property's value; nothing for values the map lacks.
+    fn at<'v>(&self, value: impl Fn(&str) -> Option<&'v str>) -> T {
+        match self {
+            Self::Every(held) => *held,
+            Self::Lookup { reads, map } => {
+                let values: Option<Vec<&str>> = reads.iter().map(|key| value(key)).collect();
+                values
+                    .and_then(|values| map.get(&values.join(",")).copied())
+                    .unwrap_or_default()
+            }
+        }
+    }
+
+    /// Each property the lookup reads, paired with every value one of its keys names.
+    fn named(&self) -> impl Iterator<Item = (&str, &str)> {
+        let (reads, map): (&[String], Option<&HashMap<String, T>>) = match self {
+            Self::Every(_) => (&[], None),
+            Self::Lookup { reads, map } => (reads, Some(map)),
+        };
+        map.into_iter()
+            .flat_map(HashMap::keys)
+            .flat_map(move |key| reads.iter().map(String::as_str).zip(key.split(',')))
+    }
 }
 
 impl ConnectionIndex {
@@ -152,8 +212,8 @@ impl ConnectionIndex {
     ///
     /// # Errors
     ///
-    /// [`ConnectionsError`] when the schema is too new, a row is malformed, or two rows describe
-    /// one block at one version.
+    /// [`ConnectionsError`] when the schema is too new, the catalog has no rows, a row is empty or
+    /// malformed, or two rows describe one block at one version.
     pub fn from_catalog(catalog: ConnectionsCatalog) -> Result<Self, ConnectionsError> {
         if catalog.schema_version > SUPPORTED_CONNECTIONS_SCHEMA {
             return Err(ConnectionsError::UnsupportedSchemaVersion {
@@ -161,10 +221,23 @@ impl ConnectionIndex {
                 supported: SUPPORTED_CONNECTIONS_SCHEMA,
             });
         }
+        if catalog.rows.is_empty() {
+            return Err(ConnectionsError::NoRows);
+        }
         let mut index = Self::default();
-        for row in catalog.rows {
-            let first = row.ids.first().cloned().unwrap_or_default();
-            let at = index.rows.len();
+        for (at, row) in catalog.rows.into_iter().enumerate() {
+            let Some(first) = row.ids.first() else {
+                return Err(ConnectionsError::EmptyRow {
+                    index: at,
+                    missing: "block",
+                });
+            };
+            if row.mc_versions.is_empty() {
+                return Err(ConnectionsError::EmptyRow {
+                    index: at,
+                    missing: "version",
+                });
+            }
             index.rows.push(
                 parse_row(&row).map_err(|problem| ConnectionsError::MalformedRow {
                     id: first.clone(),
@@ -203,6 +276,24 @@ impl ConnectionIndex {
         Some(self.by_version.get(mc_version)?.keys().map(String::as_str))
     }
 
+    /// Each state `mc_version`'s table names of a block, as `(id, property, value)`: every
+    /// default its row gives and every value a lookup's key holds.
+    pub fn named_states(&self, mc_version: &str) -> impl Iterator<Item = (&str, &str, &str)> {
+        self.by_version
+            .get(mc_version)
+            .into_iter()
+            .flatten()
+            .flat_map(|(id, &at)| {
+                let row = &self.rows[at];
+                row.defaults
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value.as_str()))
+                    .chain(row.sturdy.named())
+                    .chain(row.covers.named())
+                    .map(move |(key, value)| (id.as_str(), key, value))
+            })
+    }
+
     /// What the canonical block `id` with `properties` is to the connection rules at
     /// `mc_version`, or `None` when there is no table for the version.
     #[must_use]
@@ -223,36 +314,32 @@ impl ConnectionIndex {
                 .or_else(|| row.defaults.get(key))
                 .map(String::as_str)
         };
-        let sturdy = match &row.sturdy {
-            Sturdy::Every(faces) => *faces,
-            Sturdy::Lookup { reads, map } => {
-                let values: Option<Vec<&str>> = reads.iter().map(|key| value(key)).collect();
-                values
-                    .and_then(|values| map.get(&values.join(",")).copied())
-                    .unwrap_or(Faces::NONE)
-            }
-        };
-        let kind = row.kind.and_then(|kind| {
-            Some(match kind {
-                ConnectionKind::Pane => JoinKind::Pane,
-                ConnectionKind::Wall => JoinKind::Wall,
-                ConnectionKind::Fence => JoinKind::Fence { wooden: false },
-                ConnectionKind::WoodenFence => JoinKind::Fence { wooden: true },
-                ConnectionKind::FenceGate => JoinKind::FenceGate {
-                    facing: value("facing")
-                        .and_then(Face::from_name)
-                        .filter(|face| Face::SIDES.contains(face))?,
-                    open: value("open")? == "true",
+        let kind = row.kind.and_then(|kind| match kind {
+            RowKind::Joins(kind) => Some(kind),
+            RowKind::Gate { facing, open } => Some(JoinKind::FenceGate {
+                facing: match properties.get("facing") {
+                    Some(written) => side_named(written)?,
+                    None => facing,
                 },
-            })
+                open: match properties.get("open") {
+                    Some(written) => written.parse().ok()?,
+                    None => open,
+                },
+            }),
         });
         Some(Joins {
             kind,
-            sturdy,
-            exception: row.exception,
+            sturdy: row.sturdy.at(value),
+            covers: row.covers.at(value),
+            never_joined_by_face: row.never_joined_by_face,
             raises_post: row.raises_post,
         })
     }
+}
+
+/// The sideways face `name` names, or `None` for any other name.
+fn side_named(name: &str) -> Option<Face> {
+    Face::from_name(name).filter(|face| Face::SIDES.contains(face))
 }
 
 /// `faces` as a set, or the first name that is no face.
@@ -263,31 +350,60 @@ fn faces_of(faces: &[String]) -> Result<Faces, String> {
         .collect()
 }
 
-fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
-    let sturdy = match &row.sturdy {
-        None => Sturdy::Every(Faces::NONE),
-        Some(SturdyRow::Every(faces)) => Sturdy::Every(faces_of(faces)?),
-        Some(SturdyRow::Lookup { reads, map }) => {
-            let mut parsed = HashMap::with_capacity(map.len());
-            for (key, faces) in map {
-                if key.split(',').count() != reads.len() {
-                    return Err(format!(
-                        "the `sturdy` key `{key}` holds no value for each of {}",
-                        reads.join(", ")
-                    ));
-                }
-                parsed.insert(key.clone(), faces_of(faces)?);
-            }
-            Sturdy::Lookup {
-                reads: reads.clone(),
-                map: parsed,
-            }
+/// `parts` as what a bottom covers, or the first name that is no part of a wall.
+fn covers_of(parts: &[String]) -> Result<Covers, String> {
+    parts.iter().try_fold(Covers::default(), |covers, name| {
+        covers
+            .with(name)
+            .ok_or_else(|| format!("`{name}` is no part of a wall: `post`, or a side's direction"))
+    })
+}
+
+/// The `field` names a row writes, parsed by `parse`; nothing when the row leaves it out.
+fn held<T: Default>(
+    field: &str,
+    written: Option<&ByState>,
+    parse: impl Fn(&[String]) -> Result<T, String>,
+) -> Result<Held<T>, String> {
+    let lookup = match written {
+        None => return Ok(Held::Every(T::default())),
+        Some(ByState::Every(names)) => return Ok(Held::Every(parse(names)?)),
+        Some(ByState::Lookup(lookup)) => lookup,
+    };
+    if lookup.reads.is_empty() || lookup.map.is_empty() {
+        return Err(format!(
+            "the `{field}` lookup reads no property or maps no value; a list says what holds in \
+             every state"
+        ));
+    }
+    let mut map = HashMap::with_capacity(lookup.map.len());
+    for (key, names) in &lookup.map {
+        if key.split(',').count() != lookup.reads.len() {
+            return Err(format!(
+                "the `{field}` key `{key}` holds no value for each of {}",
+                lookup.reads.join(", ")
+            ));
         }
-    };
-    let mut needs: Vec<&str> = match &sturdy {
-        Sturdy::Lookup { reads, .. } => reads.iter().map(String::as_str).collect(),
-        Sturdy::Every(_) => Vec::new(),
-    };
+        map.insert(key.clone(), parse(names)?);
+    }
+    Ok(Held::Lookup {
+        reads: lookup.reads.clone(),
+        map,
+    })
+}
+
+fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
+    let sturdy = held("sturdy", row.sturdy.as_ref(), faces_of)?;
+    let covers = held("covers", row.covers.as_ref(), covers_of)?;
+    let mut needs: Vec<&str> = [&row.sturdy, &row.covers]
+        .into_iter()
+        .flatten()
+        .flat_map(|written| match written {
+            ByState::Lookup(lookup) => lookup.reads.as_slice(),
+            ByState::Every(_) => &[],
+        })
+        .map(String::as_str)
+        .collect();
     if row.kind == Some(ConnectionKind::FenceGate) {
         needs.extend(GATE_READS);
     }
@@ -296,12 +412,40 @@ fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
             "the rules read `{missing}`, which `defaults` does not give"
         ));
     }
+    if let Some(unread) = row
+        .defaults
+        .keys()
+        .find(|key| !needs.contains(&key.as_str()))
+    {
+        return Err(format!(
+            "`defaults` gives `{unread}`, which the rules do not read"
+        ));
+    }
+    let kind = match row.kind {
+        None => None,
+        Some(ConnectionKind::Pane) => Some(RowKind::Joins(JoinKind::Pane)),
+        Some(ConnectionKind::Wall) => Some(RowKind::Joins(JoinKind::Wall)),
+        Some(ConnectionKind::Fence) => Some(RowKind::Joins(JoinKind::Fence { wooden: false })),
+        Some(ConnectionKind::WoodenFence) => Some(RowKind::Joins(JoinKind::Fence { wooden: true })),
+        Some(ConnectionKind::FenceGate) => {
+            let facing = &row.defaults["facing"];
+            let open = &row.defaults["open"];
+            Some(RowKind::Gate {
+                facing: side_named(facing)
+                    .ok_or_else(|| format!("the default `facing={facing}` is no sideways face"))?,
+                open: open
+                    .parse()
+                    .map_err(|_| format!("the default `open={open}` is neither true nor false"))?,
+            })
+        }
+    };
     Ok(Row {
-        kind: row.kind,
-        exception: row.exception,
+        kind,
+        never_joined_by_face: row.never_joined_by_face,
         raises_post: row.raises_post,
         defaults: row.defaults.clone(),
         sturdy,
+        covers,
     })
 }
 

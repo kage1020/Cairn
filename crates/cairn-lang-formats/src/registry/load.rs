@@ -279,7 +279,10 @@ impl PackView<'_> {
                     .is_none_or(|ids| contains(ids, id));
                 if declared { vec![id] } else { Vec::new() }
             }
-            Edition::Bedrock => self.state_maps?.at(version)?.java_ids(id),
+            Edition::Bedrock => self
+                .state_maps?
+                .at(version)?
+                .java_ids(id, &state.properties),
         };
         let mut joins = canonical
             .into_iter()
@@ -470,6 +473,18 @@ pub enum RegistryError {
         mc_version: String,
         /// The id.
         id: String,
+    },
+    /// A Java pack's `connections` names a state its `blocks` does not give the block there.
+    #[error(
+        "registry pack `connections` names `{state}` of `{id}`, which `blocks` does not give it at `{mc_version}`"
+    )]
+    ConnectionsUnknownState {
+        /// The version.
+        mc_version: String,
+        /// The id.
+        id: String,
+        /// The state, `property=value`.
+        state: String,
     },
     /// `states` has no map for a targetable version.
     #[error("registry pack `states` has no map for the targetable [{missing}]")]
@@ -1150,6 +1165,22 @@ fn validate_connections(
                 mc_version: version.to_owned(),
                 id: unknown.to_owned(),
             });
+        }
+        for (id, key, value) in connections.named_states(version) {
+            let Some(states) = blocks.states_of(version, id) else {
+                continue;
+            };
+            let held = states
+                .properties()
+                .find(|(property, _)| *property == key)
+                .is_some_and(|(_, values)| values.iter().any(|held| held.to_string() == value));
+            if !held {
+                return Err(RegistryError::ConnectionsUnknownState {
+                    mc_version: version.to_owned(),
+                    id: id.to_owned(),
+                    state: format!("{key}={value}"),
+                });
+            }
         }
     }
     Ok(())

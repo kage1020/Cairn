@@ -610,17 +610,26 @@ KIND_STATES = {
 PANE_STATES = {**KIND_STATES["pane"], WATER_LAYER_STATE: BOOLEAN}
 # The states the rules read of a neighbouring fence gate, which it does not derive.
 GATE_READS = ("facing", "open")
+# The square of a wall's cell, `(x0, x1, z0, z1)`, that the bottom of the block above must cover
+# to cover each part of the wall, as `WallBlock` tests its post and its sides.
+WALL_PARTS = {
+    "post": (7, 9, 7, 9),
+    "north": (7, 9, 0, 9),
+    "east": (7, 16, 7, 9),
+    "south": (7, 9, 7, 16),
+    "west": (0, 9, 7, 9),
+}
 
 # A box of a model, `(low corner, high corner, faces it shows)`.
 Box = tuple[tuple[float, float, float], tuple[float, float, float], frozenset[str]]
 
 
 @dataclass(frozen=True)
-class Sturdy:
-    """The whole faces of a block's states, looked up from the values of `reads`."""
+class Lookup:
+    """The names that hold in each of a block's states, looked up from the values of `reads`."""
 
     reads: tuple[str, ...]
-    # The `reads` values, comma-joined, to the faces whole there; one `""` key without `reads`.
+    # The `reads` values, comma-joined, to the names held there; one `""` key without `reads`.
     table: tuple[tuple[str, tuple[str, ...]], ...]
 
 
@@ -630,11 +639,14 @@ class Joins:
 
     # `pane`, `wall`, `fence`, `wooden_fence` or `fence_gate`; `None` for one that only has faces.
     kind: str | None
-    exception: bool
-    # In `wall_post_override`: a wall under it raises its post.
+    never_joined_by_face: bool
+    # Whether the game's `wall_post_override` tag holds it.
     raises_post: bool
-    # `None` when no state has a whole face.
-    sturdy: Sturdy | None
+    # Its whole faces; `None` when no state has one.
+    sturdy: Lookup | None
+    # The `WALL_PARTS` its bottom covers; `None` for a connecting block, which the rules read by
+    # its connection states, and when no state covers one.
+    covers: Lookup | None = None
     # The default state's value of each property the rules read of the block, by name.
     defaults: tuple[tuple[str, str], ...] = ()
 
@@ -787,10 +799,15 @@ def placed_boxes(boxes: list[Box], x: int, y: int) -> list[Box]:
     return placed
 
 
-def covers_square(rects: list[tuple[float, float, float, float]]) -> bool:
-    """Whether `rects`, each `(u0, u1, v0, v1)`, cover the square from 0 to 16 between them."""
-    us = sorted({0, 16, *(u for r in rects for u in r[:2] if 0 < u < 16)})
-    vs = sorted({0, 16, *(v for r in rects for v in r[2:] if 0 < v < 16)})
+def covers_square(
+    rects: list[tuple[float, float, float, float]],
+    square: tuple[float, float, float, float] = (0, 16, 0, 16),
+) -> bool:
+    """Whether `rects`, each `(u0, u1, v0, v1)`, cover `square`, the whole face unless given,
+    between them."""
+    lo_u, hi_u, lo_v, hi_v = square
+    us = sorted({lo_u, hi_u, *(u for r in rects for u in r[:2] if lo_u < u < hi_u)})
+    vs = sorted({lo_v, hi_v, *(v for r in rects for v in r[2:] if lo_v < v < hi_v)})
     return all(
         any(r[0] <= u0 and u1 <= r[1] and r[2] <= v0 and v1 <= r[3] for r in rects)
         for u0, u1 in zip(us, us[1:])
@@ -814,6 +831,14 @@ def whole_faces(boxes: list[Box]) -> frozenset[str]:
     return frozenset(whole)
 
 
+def covered_parts(boxes: list[Box]) -> frozenset[str]:
+    """The `WALL_PARTS` the boxes that rest on the block's bottom cover, seen from above."""
+    resting = [
+        (low[0], top[0], low[2], top[2]) for low, top, _ in boxes if low[1] == 0 and top[1] > 0
+    ]
+    return frozenset(part for part, square in WALL_PARTS.items() if covers_square(resting, square))
+
+
 def condition_holds(when: dict | None, properties: dict[str, str]) -> bool:
     """Whether a multipart `when` holds for `properties`."""
     if when is None:
@@ -832,7 +857,10 @@ def condition_holds(when: dict | None, properties: dict[str, str]) -> bool:
 
 def state_models(blockstate: dict, properties: dict[str, str]) -> list[list[dict]]:
     """Each set of models the game may draw `properties` with, every set one choice per part."""
-    listed = lambda models: models if isinstance(models, list) else [models]  # noqa: E731
+
+    def listed(models: dict | list[dict]) -> list[dict]:
+        return models if isinstance(models, list) else [models]
+
     if "variants" in blockstate:
         matching = [
             models
@@ -842,9 +870,9 @@ def state_models(blockstate: dict, properties: dict[str, str]) -> list[list[dict
                 for k, v in (pair.split("=") for pair in key.split(",") if pair)
             )
         ]
-        if len(matching) > 1:
-            raise Refused(f"{len(matching)} variants match the state {properties}")
-        return [[model] for model in listed(matching[0])] if matching else []
+        if len(matching) != 1:
+            raise Refused(f"{len(matching)} variants match the state {properties}, not one")
+        return [[model] for model in listed(matching[0])]
     parts = [
         listed(part["apply"])
         for part in blockstate.get("multipart", [])
@@ -853,14 +881,15 @@ def state_models(blockstate: dict, properties: dict[str, str]) -> list[list[dict
     return [list(choice) for choice in itertools.product(*parts)] if parts else []
 
 
-def state_faces(
+def state_shapes(
     client: zipfile.ZipFile, blockstate: dict, properties: dict[str, str], cache: dict
-) -> frozenset[str]:
-    """The faces of a state that are whole whichever of its models the game draws."""
+) -> tuple[frozenset[str], frozenset[str]]:
+    """The faces of a state that are whole, and the `WALL_PARTS` its bottom covers, whichever of
+    its models the game draws."""
     drawn = state_models(blockstate, properties)
     if not drawn:
-        return frozenset()
-    faces = None
+        return frozenset(), frozenset()
+    faces, parts = None, None
     for models in drawn:
         boxes = [
             box
@@ -869,31 +898,47 @@ def state_faces(
                 model_boxes(client, model["model"], cache), model.get("x", 0), model.get("y", 0)
             )
         ]
-        whole = whole_faces(boxes)
+        whole, covered = whole_faces(boxes), covered_parts(boxes)
         faces = whole if faces is None else faces & whole
-    return faces
+        parts = covered if parts is None else parts & covered
+    return faces, parts
 
 
-def block_sturdy(
-    client: zipfile.ZipFile, name: str, block: dict, cache: dict
-) -> Sturdy | None:
-    """The whole faces of each state of `block`, read off its models; `None` when none has one."""
+def lookup(
+    name: str, block: dict, rows: list[tuple[dict[str, str], dict]], held: str
+) -> Lookup | None:
+    """The `held` names of each state in `rows` as a lookup; `None` when no state holds one."""
+    if not any(names[held] for _, names in rows):
+        return None
+    rule = decided_by(rows, sorted(block.get("properties", {})), held)
+    if rule is None:
+        raise Refused(f"the {held} of `{name}` are no function of its states")
+    return Lookup(rule.reads, rule.table)
+
+
+def block_shapes(
+    client: zipfile.ZipFile, name: str, block: dict, cache: dict, connects: bool
+) -> tuple[Lookup | None, Lookup | None]:
+    """The whole faces of each state of `block` and, unless it `connects`, the `WALL_PARTS` its
+    bottom covers, read off its models."""
     try:
         blockstate = json.loads(client.read(f"assets/{NAMESPACE}/blockstates/{name}.json"))
     except KeyError:
-        # Air and the other blocks the game never draws ship no blockstate file.
-        return None
+        raise Refused(f"the client ships no blockstate file for `{name}`") from None
     rows = []
     for state in block["states"]:
         properties = dict(state.get("properties", {}))
-        faces = state_faces(client, blockstate, properties, cache)
-        rows.append((properties, {"faces": tuple(face for face in FACES if face in faces)}))
-    if not any(bedrock["faces"] for _, bedrock in rows):
-        return None
-    rule = decided_by(rows, sorted(block.get("properties", {})), "faces")
-    if rule is None:
-        raise Refused(f"the faces of `{name}` are no function of its states")
-    return Sturdy(rule.reads, rule.table)
+        faces, parts = state_shapes(client, blockstate, properties, cache)
+        rows.append(
+            (
+                properties,
+                {
+                    "faces": tuple(face for face in FACES if face in faces),
+                    "covers": () if connects else tuple(p for p in WALL_PARTS if p in parts),
+                },
+            )
+        )
+    return lookup(name, block, rows, "faces"), lookup(name, block, rows, "covers")
 
 
 def block_kind(name: str, states: dict, tags: dict[str, set[str]]) -> str | None:
@@ -932,14 +977,19 @@ def connection_table(
         name = bare(identifier)
         states = {k: list(v) for k, v in block.get("properties", {}).items()}
         kind = block_kind(name, states, tags)
-        sturdy = block_sturdy(client, name, block, cache)
-        reads = {*(sturdy.reads if sturdy else ()), *(GATE_READS if kind == "fence_gate" else ())}
+        sturdy, covers = block_shapes(client, name, block, cache, kind is not None)
+        reads = {
+            *(sturdy.reads if sturdy else ()),
+            *(covers.reads if covers else ()),
+            *(GATE_READS if kind == "fence_gate" else ()),
+        }
         default = next(dict(s.get("properties", {})) for s in block["states"] if s.get("default"))
         joins = Joins(
             kind=kind,
-            exception=name in exceptions,
+            never_joined_by_face=name in exceptions,
             raises_post=name in tags["wall_post_override"],
             sturdy=sturdy,
+            covers=covers,
             defaults=tuple(sorted((key, default[key]) for key in reads)),
         )
         if joins != Joins(None, False, False, None):
@@ -966,21 +1016,22 @@ def joins_json(joins: Joins, versions: list[str], ids: list[str]) -> dict:
     row: dict = {"mc_versions": versions, "ids": ids}
     if joins.kind is not None:
         row["kind"] = joins.kind
-    if joins.exception:
-        row["exception"] = True
+    if joins.never_joined_by_face:
+        row["never_joined_by_face"] = True
     if joins.raises_post:
         row["raises_post"] = True
     if joins.defaults:
         row["defaults"] = dict(joins.defaults)
-    if joins.sturdy is not None:
-        sturdy = joins.sturdy
-        if sturdy.reads:
-            row["sturdy"] = {
-                "reads": list(sturdy.reads),
-                "map": {key: list(faces) for key, faces in sturdy.table},
+    for field, held in (("sturdy", joins.sturdy), ("covers", joins.covers)):
+        if held is None:
+            continue
+        if held.reads:
+            row[field] = {
+                "reads": list(held.reads),
+                "map": {key: list(names) for key, names in held.table},
             }
         else:
-            row["sturdy"] = list(sturdy.table[0][1])
+            row[field] = list(held.table[0][1])
     return row
 
 
