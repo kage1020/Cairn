@@ -3,6 +3,8 @@
 
 use std::collections::HashSet;
 
+use indexmap::IndexMap;
+
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{Member, MemberRole, Size};
@@ -10,7 +12,10 @@ use crate::resolve::ScopeResolution;
 
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::wall_column::WallColumn;
-use crate::block_array::{BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex};
+use crate::block_array::{
+    BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex, ResolvedBlock,
+    ResolvedMember,
+};
 
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
@@ -43,9 +48,11 @@ pub(super) struct BodyDescriptor<'a> {
     pub(super) source_scope: String,
 }
 
-/// What lowering one body produced: the voxels, and the wall column they were painted against.
+/// What lowering one body produced: the voxels, who built them, and the wall column they were
+/// painted against.
 pub(super) struct LoweredBody {
     pub(super) array: BlockArray,
+    pub(super) members: Vec<ResolvedMember>,
     pub(super) walls: WallColumn,
     /// The spans of the `door` and `window` members that painted at least one cell.
     pub(super) cut: HashSet<Span>,
@@ -166,12 +173,61 @@ pub(super) fn lower_body_to_block_array<'a>(
     };
     // After the prune, so dropped entries are not sorted and the grid is renumbered once.
     array.canonicalize_palette();
+    let members = resolved_members(&flattened, canvas.owners(), &array);
 
     Some(LoweredBody {
         array,
+        members,
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// Each member of `flattened` that owns a cell of `array`, with the states its cells hold, in the
+/// order of the first cell each owns.
+fn resolved_members(
+    flattened: &[(u32, &Member)],
+    owners: &[u32],
+    array: &BlockArray,
+) -> Vec<ResolvedMember> {
+    debug_assert_eq!(
+        owners.len(),
+        array.voxels.len(),
+        "the canvas and the array lay out one grid",
+    );
+    // Keyed by first cell, not source line: `resolved_ir_hash` reads this order, and
+    // `spec/compilation` "Within-phase conflicts and the palette" keeps it free of line order.
+    let mut built: IndexMap<usize, IndexMap<PaletteIndex, ResolvedBlock>> = IndexMap::new();
+    for (index, (&owner, &state)) in owners.iter().zip(&array.voxels).enumerate() {
+        let Some(member) = owner.checked_sub(1) else {
+            continue;
+        };
+        let cell = array
+            .dims
+            .position(index)
+            .expect("a voxel's index lies in the dims it was laid out by");
+        built
+            .entry(member as usize)
+            .or_default()
+            .entry(state)
+            .or_insert_with(|| ResolvedBlock {
+                state: array.palette.entries[usize::from(state.0)].clone(),
+                runs: Vec::new(),
+            })
+            .push(cell);
+    }
+    built
+        .into_iter()
+        .map(|(member, blocks)| {
+            let (_, member) = flattened[member];
+            ResolvedMember {
+                role: member.role.keyword().to_owned(),
+                id: member.id.clone(),
+                resolved_state: blocks.into_values().collect(),
+                span: member.span.clone(),
+            }
+        })
+        .collect()
 }
 
 /// Paint one body's members onto a fresh canvas, phase by phase in `spec/compilation` "Phase

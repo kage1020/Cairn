@@ -40,7 +40,7 @@ theme medieval:
 
 ## 7.2 正規トークン
 
-テーマが割り当てるのは、生のブロック ID ではなく **正規トークン** です。`(edition, version)` ごとに ID、ステート名、ステートの値、シリアライズの形式を解決するのはバックエンドです ([バージョンとエディション](/ja/spec/versioning-editions/))。LLM は、`pillar_axis` も、リトルエンディアンの NBT も、Bedrock の `weirdo_direction` も知る必要がありません。
+テーマが割り当てるのは、生のブロック ID ではなく **正規トークン** です。`(edition, version)` ごとに ID、ステート名、ステートの値、シリアライズの形式を解決するのはバックエンドです ([バージョンとエディション](/ja/spec/versioning-editions/))。LLM は、`pillar_axis` も、リトルエンディアンの NBT も、Bedrock の `weirdo_direction` も知る必要がありません。正規の語彙は、ステート名とステートの値を Java と同じに綴ります。`@oak_stairs[facing=east]` は Java の `facing` を書き、Bedrock のバックエンドがそれを自分の `weirdo_direction` に写します。
 
 現時点のバックエンドが解決する範囲は、これより狭くなっています。正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせるだけなので ([§7.3](#73-バージョンとエディションをまたぐ対応付け))、`@water_cauldron` はどの Bedrock のバージョンでも `E_UNKNOWN_ID` になります。また、Bedrock への書き出しでステートを変換できるのは階段の系統だけで、`@oak_log[axis=x]` は Java 向けにはコンパイルできても、Bedrock 向けには拒否されます。
 

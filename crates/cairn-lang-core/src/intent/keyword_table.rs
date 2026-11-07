@@ -154,10 +154,10 @@ pub struct UnreadArgument {
 }
 
 impl MemberRole {
-    /// The `key=` arguments this role's vocabulary holds, in spec order, including spec'd keys
-    /// nothing reads yet; `None` for an unknown keyword.
+    /// The `key=` keys this role's own vocabulary holds, in spec order, its blockstate keys and
+    /// spec'd keys nothing reads yet included; `None` for an unknown keyword.
     #[must_use]
-    pub fn arguments(&self) -> Option<&'static [&'static str]> {
+    pub fn own_keys(&self) -> Option<&'static [&'static str]> {
         Some(match self {
             Self::Floor => &[],
             Self::Walls => &["height"],
@@ -184,6 +184,26 @@ impl MemberRole {
             Self::Connect => &["path"],
             Self::Other(_) => return None,
         })
+    }
+
+    /// The keys of [`Self::own_keys`] that name a blockstate of the block this role places
+    /// (`spec/blockstate` "Derive by default, promote on override").
+    #[must_use]
+    pub fn state_arguments(&self) -> &'static [&'static str] {
+        match self {
+            Self::Stair => &["half", "facing", "shape", "waterlogged"],
+            Self::Floor
+            | Self::Walls
+            | Self::Door
+            | Self::Window
+            | Self::Roof
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Circuit
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => &[],
+        }
     }
 
     /// Keys in [`Self::accepted_arguments`] that no pass reads on this role, with the reason; a
@@ -303,7 +323,7 @@ impl MemberRole {
     /// favours the role's own (`sid` on a `door` is `side`, not `id`).
     #[must_use]
     pub fn accepted_arguments(&self) -> Option<Vec<&'static str>> {
-        let mut all = self.arguments()?.to_vec();
+        let mut all = self.own_keys()?.to_vec();
         all.extend_from_slice(UNIVERSAL_ARGUMENTS);
         Some(all)
     }

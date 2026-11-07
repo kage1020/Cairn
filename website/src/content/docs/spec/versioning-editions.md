@@ -753,16 +753,23 @@ produces it.
 
 ## 10.7 Java / Bedrock portability
 
-Derivation rules are edition-specific: **`intent_state` is neutral, `resolved_state` is
-per-edition**. The contract is "from the same intent, resolve the nearest legal representation per
-edition", not "guarantee the same result".
+Derivation rules are edition-specific: **`intent_state` is neutral, and the blocks it resolves to
+differ by edition**. The contract is "from the same intent, resolve the nearest legal representation
+per edition", not "guarantee the same result".
 
 ```yaml
-intent_state: { primitive: stairs, corner: inner_left, facing: east }   # edition-neutral
-resolved_state:
+intent_state: { facing: east, shape: inner_left }                       # edition-neutral
+written:
   java:    { facing: east, half: bottom, shape: inner_left }
   bedrock: { weirdo_direction: 0, upside_down_bit: false }              # no shape → corners don't join
 ```
+
+Lowering records each member's `resolved_state` for the target it lowers at
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)): its block IDs are
+the ones that target resolved, a theme's edition variant included, and its state names and values
+are the canonical vocabulary's, which are Java's
+([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)). The Bedrock row is
+what the Bedrock writer maps those states to as it writes, so the record never shows it.
 
 When a resolved difference becomes a visual or functional one, the build says so. `themed-tower`'s
 eave stair is `shape=outer_left`:

@@ -24,6 +24,7 @@ pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.
 
 use crate::diagnostic::Diagnostic;
+use crate::error::Span;
 use crate::ids::{
     PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem, walkway_artifact_stem,
 };
@@ -39,6 +40,10 @@ pub struct BlockArrayIr {
     /// Walkway metadata per `connect`; each walkway's array sits in [`Self::structures`].
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub walkways: IndexMap<WalkwayScopeKey, Walkway>,
+    /// Each struct and place body's members that own a cell once it is painted, in the order of
+    /// the first cell each owns, keyed like [`Self::structures`]; a walkway has no entry.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub members: IndexMap<String, Vec<ResolvedMember>>,
     /// Lowering's findings, apart from the resolver's.
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
@@ -116,6 +121,61 @@ pub struct BlockArray {
     pub source_scope: String,
 }
 
+/// One member's `resolved_state`: each block state its cells hold, with those cells, as the
+/// lowering's target resolved them (`spec/blockstate` "`intent_state` and `resolved_state`").
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ResolvedMember {
+    /// The keyword the member was written with.
+    pub role: String,
+    /// The member's `id=`, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Each block state the member resolved to, in the order its first cell is laid out.
+    pub resolved_state: Vec<ResolvedBlock>,
+    /// Byte range of the member's own line.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+/// One block state a member resolved to, and the cells that hold it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ResolvedBlock {
+    /// The state, as the palette holds it.
+    pub state: BlockState,
+    /// The cells, as runs along `x`, in [`Dims::index`] order.
+    pub runs: Vec<CellRun>,
+}
+
+impl ResolvedBlock {
+    /// Each cell, `(x, y, z)`, in [`Dims::index`] order.
+    pub fn cells(&self) -> impl Iterator<Item = (u32, u32, u32)> + '_ {
+        self.runs.iter().flat_map(|run| {
+            let (x, y, z) = run.from;
+            (x..x + run.len).map(move |x| (x, y, z))
+        })
+    }
+
+    /// Add `cell`, which follows every cell held so far in [`Dims::index`] order.
+    fn push(&mut self, cell: (u32, u32, u32)) {
+        let (x, y, z) = cell;
+        match self.runs.last_mut() {
+            Some(run) if run.from.1 == y && run.from.2 == z && run.from.0 + run.len == x => {
+                run.len += 1;
+            }
+            _ => self.runs.push(CellRun { from: cell, len: 1 }),
+        }
+    }
+}
+
+/// `len` cells along `x` from `from`, `(x, y, z)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CellRun {
+    /// The run's first cell.
+    pub from: (u32, u32, u32),
+    /// How many cells the run holds, one or more.
+    pub len: u32,
+}
+
 /// Voxel extents of a [`BlockArray`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Dims {
@@ -188,6 +248,21 @@ impl Dims {
         }
         let row = (y as usize) * (self.z as usize) + (z as usize);
         Some(row * (self.x as usize) + (x as usize))
+    }
+
+    /// The `(x, y, z)` cell at `index`, the inverse of [`Self::index`]; `None` past the volume.
+    #[must_use]
+    pub fn position(self, index: usize) -> Option<(u32, u32, u32)> {
+        if index >= self.volume() {
+            return None;
+        }
+        let index = u64::try_from(index).ok()?;
+        let (width, depth) = (u64::from(self.x), u64::from(self.z));
+        Some((
+            u32::try_from(index % width).ok()?,
+            u32::try_from(index / width / depth).ok()?,
+            u32::try_from(index / width % depth).ok()?,
+        ))
     }
 }
 

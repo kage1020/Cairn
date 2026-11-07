@@ -1,7 +1,7 @@
 //! Named member of an Intent IR, the rich member of `spec/architecture`
 //! "The Intent IR is rich and carries invariants".
 
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -34,11 +34,10 @@ pub struct Member {
     /// `-> VALUE` tail at the end of the line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<Value>,
-    /// `key=value` attributes the fields above did not consume.
+    /// `key=value` attributes the fields above did not consume and that name no blockstate.
+    pub arguments: Arguments,
+    /// The blockstate keys the line writes, those [`MemberRole::state_arguments`] names.
     pub intent_state: IntentState,
-    /// Per-edition resolved blockstate; `None` until the member is `Lifted`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved_state: Option<ResolvedState>,
     /// Nested body indented under this member.
     #[serde(default, skip_serializing_if = "MemberBody::is_empty")]
     pub children: MemberBody,
@@ -58,10 +57,30 @@ impl Member {
             .map(|slot| slot.name.as_str())
     }
 
+    /// The value the line writes for `key=`, blockstate or not; a hoisted key is not here.
+    #[must_use]
+    pub fn written(&self, key: &str) -> Option<&ValueWithSpan> {
+        self.arguments
+            .get(key)
+            .or_else(|| self.intent_state.get(key))
+    }
+
+    /// Every `key=value` [`Self::written`] answers for, in source order.
+    pub fn written_fields(&self) -> impl Iterator<Item = (&str, &ValueWithSpan)> {
+        let mut fields: Vec<(&str, &ValueWithSpan)> = self
+            .arguments
+            .iter()
+            .chain(self.intent_state.iter())
+            .map(|(key, value)| (key.as_str(), value))
+            .collect();
+        fields.sort_by_key(|(_, value)| value.span.start);
+        fields.into_iter()
+    }
+
     /// Read `key=` as a non-negative `u32`, or `None`.
     #[must_use]
     pub fn nonneg_u32(&self, key: &str) -> Option<u32> {
-        match &self.intent_state.get(key)?.value.kind {
+        match &self.written(key)?.value.kind {
             ValueKind::Int(v) if *v >= 0 => u32::try_from(*v).ok(),
             _ => None,
         }
@@ -70,7 +89,7 @@ impl Member {
     /// Read `key=` as a bare identifier, or `None`.
     #[must_use]
     pub fn ident_value(&self, key: &str) -> Option<&str> {
-        match &self.intent_state.get(key)?.value.kind {
+        match &self.written(key)?.value.kind {
             ValueKind::Ident(name) => Some(name.as_str()),
             _ => None,
         }
@@ -204,12 +223,12 @@ impl MemberBody {
     }
 }
 
-/// Raw `key=value` attributes attached to a [`Member`], in source order.
+/// The blockstate `key=value` attributes a [`Member`]'s line writes, in source order.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct IntentState {
     /// Attributes in source order.
-    pub fields: IndexMap<String, ValueWithSpan>,
+    fields: IndexMap<String, ValueWithSpan>,
 }
 
 impl IntentState {
@@ -217,6 +236,11 @@ impl IntentState {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Record `key=value`, a key of its member's [`MemberRole::state_arguments`].
+    pub(super) fn insert(&mut self, key: String, value: ValueWithSpan) {
+        self.fields.insert(key, value);
     }
 }
 
@@ -228,9 +252,32 @@ impl Deref for IntentState {
     }
 }
 
-impl DerefMut for IntentState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.fields
+/// The `key=value` attributes a [`Member`]'s line writes that name no blockstate, in source order.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Arguments {
+    /// Attributes in source order.
+    fields: IndexMap<String, ValueWithSpan>,
+}
+
+impl Arguments {
+    /// Construct an empty argument list.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record `key=value`, a key no [`MemberRole::state_arguments`] of its member names.
+    pub(super) fn insert(&mut self, key: String, value: ValueWithSpan) {
+        self.fields.insert(key, value);
+    }
+}
+
+impl Deref for Arguments {
+    type Target = IndexMap<String, ValueWithSpan>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
     }
 }
 
@@ -263,26 +310,4 @@ pub struct Label {
     /// Byte range of the value in the original source.
     #[serde(skip)]
     pub span: Span,
-}
-
-/// Resolved, per-edition blockstate for a [`Member`]; always empty for now.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[serde(transparent)]
-pub struct ResolvedState {
-    /// Resolved state fields in source-stable order.
-    pub fields: IndexMap<String, ValueWithSpan>,
-}
-
-impl Deref for ResolvedState {
-    type Target = IndexMap<String, ValueWithSpan>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.fields
-    }
-}
-
-impl DerefMut for ResolvedState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.fields
-    }
 }

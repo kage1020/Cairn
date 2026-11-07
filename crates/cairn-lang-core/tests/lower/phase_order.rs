@@ -13,6 +13,11 @@ fn conflicts(ir: &BlockArrayIr) -> Vec<&cairn_lang_core::check::Diagnostic> {
         .collect()
 }
 
+/// `ir` as `resolved_ir_hash` reads it: every field it serializes, so source spans aside.
+fn hashed(ir: &BlockArrayIr) -> serde_json::Value {
+    serde_json::to_value(ir).expect("the IR serializes")
+}
+
 fn ids(ba: &BlockArray) -> Vec<&str> {
     ba.palette.entries.iter().map(|s| s.id.as_str()).collect()
 }
@@ -55,7 +60,7 @@ fn a_plate_and_an_eave_stair_on_one_cell_lower_the_same_whichever_line_comes_fir
     let plate_first = lowered(&eave_source(&format!("{PLATE}{EAVE}")));
     let eave_first = lowered(&eave_source(&format!("{EAVE}{PLATE}")));
 
-    assert_eq!(only_structure(&plate_first), only_structure(&eave_first));
+    assert_eq!(hashed(&plate_first), hashed(&eave_first));
     // Guard: the comparison is vacuous if neither side painted a plate.
     assert!(
         ids(only_structure(&plate_first)).contains(&"minecraft:oak_pressure_plate"),
@@ -123,7 +128,7 @@ fn every_palette_entry_of_a_permuted_pair_survives_the_permutation() {
     let b = lowered(&source(
         "  floor mat_slot=deck\n  window side=front y=1 offset=1 size=1x1 mat_slot=glass\n",
     ));
-    assert_eq!(only_structure(&a), only_structure(&b));
+    assert_eq!(hashed(&a), hashed(&b));
     assert_eq!(
         ids(only_structure(&a)),
         [
@@ -138,7 +143,8 @@ fn every_palette_entry_of_a_permuted_pair_survives_the_permutation() {
 
 #[test]
 fn permuting_two_members_of_one_phase_that_share_no_voxel_leaves_the_array_equal() {
-    // A first-use palette would record their order, so the whole `BlockArray` is compared.
+    // A first-use palette, or members in line order, would record their order, so the whole IR is
+    // compared.
     let glass_first = lowered(&source(concat!(
         "  window side=front y=1 offset=1 size=1x1 mat_slot=glass\n",
         "  window side=back  y=1 offset=1 size=1x1 mat_slot=deck\n",
@@ -147,7 +153,7 @@ fn permuting_two_members_of_one_phase_that_share_no_voxel_leaves_the_array_equal
         "  window side=back  y=1 offset=1 size=1x1 mat_slot=deck\n",
         "  window side=front y=1 offset=1 size=1x1 mat_slot=glass\n",
     )));
-    assert_eq!(only_structure(&glass_first), only_structure(&deck_first));
+    assert_eq!(hashed(&glass_first), hashed(&deck_first));
     assert_eq!(
         ids(only_structure(&glass_first)),
         [

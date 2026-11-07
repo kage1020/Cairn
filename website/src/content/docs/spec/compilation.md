@@ -278,7 +278,10 @@ rows, and `resolved_ir_hash`:
   on which of their lines came first, so nothing about the artifact may either. That is the promise
   §4.1 opens with, and it is a claim about the bytes, not only about the voxels. Sorting is what
   makes it true: the palette is derived from the finished grid alone, so any permutation of the
-  source that leaves the grid alone leaves the whole `BlockArray` alone.
+  source that leaves the grid alone leaves the whole `BlockArray` alone. The body's `members`
+  record is ordered the same way, by the first cell each member owns
+  ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), so it does not
+  move either.
 
 The sort is over the resolved state, so it is stable across editions and versions in the sense that
 matters: it does not consult source spans, member ids, phases, or paint order. It is not a claim

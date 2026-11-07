@@ -53,17 +53,35 @@ member:
   id: eave
   type: block | block_entity | entity      # typed in the IR; the distinction is the compiler's job
   primitive: stairs
-  intent_state:   { half: top, facing: out, shape: outer_left }  # author intent. Edit diffs look only here
-  resolved_state: { facing: south, waterlogged: false }          # derived, including paint-derived state
+  intent_state:   { half: top, facing: out, shape: outer_left }  # author intent
+  resolved_state:                                                # derived, including paint-derived state
+    - state: { id: minecraft:oak_stairs, properties: { facing: south, half: top, shape: outer_left } }
+      runs: [{ from: [0, 4, 0], len: 1 }]
 ```
 
 The two are named apart from Minecraft's own term "blockstate" on purpose. Keeping resolved state
 (derived or paint-origin) out of intent state (authored) is what makes edits stable.
 
-The IR does not hold this shape yet. `resolved_state` is never populated: the blockstate that
-lowering derives goes straight into the block array's palette. `intent_state` carries every
-`key=value` the line writes, blockstate or not, except `id`, `class` and `mat_slot`, which become
-fields of their own. In place of `type`, a member carries the `role` its keyword classifies to.
+A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a
+`stair`, `half`, `facing`, `shape` and `waterlogged`. No other keyword names one yet. Every other
+`key=value` the line writes is one of the member's arguments, apart from `id`, `class` and
+`mat_slot`, which become fields of their own. Where a key goes depends on the keyword: `shape=` on a
+`stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
+([Entities §8.2](/spec/entities/#82-anchor-conventions)).
+
+Lowering records each member's `resolved_state` beside the block array it builds: every state the
+member's cells hold once the body is painted, with the cells that hold it as runs along `x`, each
+from its first cell, in block-array order. A cell belongs to the member that painted it last, so a
+door's cut is recorded on the door and not on the wall it cut, and a member none of whose cells
+survive records nothing. `cairn lower --format json` prints the record under `members`, keyed like
+`structures`, which is what lets two builds be compared member by member. A body lists its members
+in the order of the first cell each owns, so reordering lines that share no cell leaves the record
+as it was, as it leaves the grid ([Compilation Model
+§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The record is made each time a
+body is lowered: its block ids are those the lowering's target resolved, a theme's edition variant
+and a pinned version's override included, and its property names are the canonical vocabulary's.
+
+In place of `type`, a member carries the `role` its keyword classifies to.
 
 `bed` is treated as a block member rather than an entity, to keep the IR types clean.
 

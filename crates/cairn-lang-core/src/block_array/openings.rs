@@ -111,7 +111,7 @@ pub(super) enum Written {
 
 impl Written {
     pub(super) fn of_ident(member: &Member, key: &str) -> Self {
-        let Some(raw) = member.intent_state.get(key) else {
+        let Some(raw) = member.written(key) else {
             return Self::Absent;
         };
         match &raw.value.kind {
@@ -216,25 +216,19 @@ pub(super) struct WindowArgs {
 ///
 /// The [`WindowArgFault`] for the first argument that cannot be used.
 pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgFault> {
-    let offset = if member.intent_state.contains_key("offset") {
+    let offset = if member.written("offset").is_some() {
         member
             .nonneg_u32("offset")
             .ok_or(WindowArgFault::OffsetMalformed)?
     } else {
         0
     };
-    let y = match (
-        member.intent_state.contains_key("y"),
-        member.nonneg_u32("y"),
-    ) {
+    let y = match (member.written("y").is_some(), member.nonneg_u32("y")) {
         (_, Some(y)) => y,
         (false, None) => return Err(WindowArgFault::YAbsent),
         (true, None) => return Err(WindowArgFault::YMalformed),
     };
-    let (width, height) = match (
-        member.intent_state.contains_key("size"),
-        size_value(member, "size"),
-    ) {
+    let (width, height) = match (member.written("size").is_some(), size_value(member, "size")) {
         (_, Some(size)) => size,
         (false, None) => return Err(WindowArgFault::SizeAbsent),
         (true, None) => return Err(WindowArgFault::SizeMalformed),

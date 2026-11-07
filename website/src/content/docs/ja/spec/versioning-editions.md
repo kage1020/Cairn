@@ -393,14 +393,16 @@ W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 
 ## 10.7 Java / Bedrock の可搬性
 
-導出規則はエディションごとに異なります。**`intent_state` は中立で、`resolved_state` はエディション別です。** 契約は「同じ intent から、エディションごとに最も近い正しい表現へ解決する」ことであり、「同じ結果を保証する」ことではありません。
+導出規則はエディションごとに異なります。**`intent_state` は中立で、そこから解決するブロックはエディションごとに異なります。** 契約は「同じ intent から、エディションごとに最も近い正しい表現へ解決する」ことであり、「同じ結果を保証する」ことではありません。
 
 ```yaml
-intent_state: { primitive: stairs, corner: inner_left, facing: east }   # エディション中立
-resolved_state:
+intent_state: { facing: east, shape: inner_left }                       # エディション中立
+written:
   java:    { facing: east, half: bottom, shape: inner_left }
   bedrock: { weirdo_direction: 0, upside_down_bit: false }              # shape が無いので角がつながらない
 ```
+
+lowering は各メンバーの `resolved_state` を、lowering するターゲットに対して記録します ([ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。ブロック ID は、テーマのエディション別の変種も含めて、そのターゲットが解決したものです。ステート名とステートの値は正規の語彙のもので、Java のものと同じです ([マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン))。Bedrock の行は、Bedrock のライターが書き出すときにそのステートを写した結果なので、記録には現れません。
 
 解決結果の違いが見た目や機能の違いになるときは、ビルドがそれを知らせます。`themed-tower` の軒の階段は `shape=outer_left` です。
 

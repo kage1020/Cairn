@@ -73,6 +73,7 @@ fn one_state_ir(states: Vec<BlockState>) -> BlockArrayIr {
         structures,
         placements: IndexMap::new(),
         walkways: IndexMap::new(),
+        members: IndexMap::new(),
         diagnostics: Vec::new(),
     }
 }
@@ -294,6 +295,7 @@ fn a_walkway_strip_is_counted_like_any_other_entry() {
         structures,
         placements: IndexMap::new(),
         walkways: IndexMap::new(),
+        members: IndexMap::new(),
         diagnostics: Vec::new(),
     };
     let report = bedrock_report(&ir, &table(), &no_aliases());
@@ -320,6 +322,7 @@ fn empty_ir_produces_zero_counts() {
         structures: IndexMap::new(),
         placements: IndexMap::new(),
         walkways: IndexMap::new(),
+        members: IndexMap::new(),
         diagnostics: Vec::new(),
     };
     assert_eq!(

@@ -26,7 +26,7 @@ pub(super) fn parse_roof_kind(
 ) -> Option<RoofKind> {
     let Some(raw) = member.ident_value("kind") else {
         // A wrongly shaped value is named by its shape: `kind="shed"` spells a kind in the set.
-        let reason = match member.intent_state.get("kind") {
+        let reason = match member.written("kind") {
             Some(raw) => format!(
                 "roof `kind=` must be an identifier naming one of {}, got {}",
                 RoofKind::names(),
@@ -57,7 +57,7 @@ pub(super) fn shed_slope_to(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<WallSide> {
     let Some(raw) = member.ident_value("slope_to") else {
-        let reason = match member.intent_state.get("slope_to") {
+        let reason = match member.written("slope_to") {
             Some(written) => format!(
                 "shed `slope_to=` must be one of front, back, left, right, not {}",
                 written.value.describe(),
