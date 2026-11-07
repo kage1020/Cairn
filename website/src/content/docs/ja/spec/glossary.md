@@ -56,7 +56,7 @@ title: "用語集"
 - **論理セル、エディションセル、物理タイル (Logical cell / edition cell / physical tile)**: 3 段のセルライブラリです。Logic IR が論理セルを選び、エディションごとのセルライブラリがそれを物理タイルに lowering します。Java 版と Bedrock 版の違いは、このライブラリの中に閉じ込めます。[レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い) を参照してください。
 - **組み合わせ回路と順序回路 (Combinational vs sequential)**: v1 が提供するのは、決まった種類の組み合わせゲートと、厳選した順序回路のマクロ (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`) です。任意の FSM や CPU は v1 の範囲外です。`logic` の行はその両方を受け付けます。組み合わせ回路のプリミティブ (`and`、`or`、`not`、`xor`、`nand`、`nor`、`mux`) と、帰還をセルの内側に閉じた 1 つのセルとなるマクロです。[レッドストーン §14.4](/ja/spec/redstone/#144-時間モデル) を参照してください。
 - **真理値、レイテンシ、時相のアサーション (Truth / latency / temporal assertion)**: 3 種類の検証です。時相のアサーションは、範囲を区切った `eventually within N` だけで、完全な LTL ではありません。`assert latency` は配置した回路で数えた tick と照合します。残りの 2 つを組み上がった回路に照らして検査するシミュレータは、まだありません。[レッドストーン §14.7](/ja/spec/redstone/#147-検証) を参照してください。
-- **QC / BUD**: 疑似接続 (quasi-connectivity) と、ブロック更新検出器 (block-update-detector) の挙動です。セルライブラリはこれらを **吸収しません**。更新順序の意味論に依存する回路は、`E_NO_PORTABLE_IMPL` のコンパイルエラーになります。ただし、このコードはまだ実装していません。回路が更新順序に依存するかどうかを検査するものは、まだありません。
+- **QC / BUD**: 疑似接続 (quasi-connectivity) と、ブロック更新検出器 (block-update-detector) の挙動です。セルライブラリはこれらを **吸収しません**。更新順序の意味論に依存する回路は、`E_NO_PORTABLE_IMPL` のコンパイルエラーになります。回路が駆動するものを見張るオブザーバーと、Java でセンサーが真上のセルを通して動力を与えるピストンやディスペンサーがこれにあたります。[レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い) を参照してください。
 
 ## Lint と評価
 

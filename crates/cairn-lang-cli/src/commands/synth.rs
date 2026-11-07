@@ -3,11 +3,13 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
-use cairn_lang_core::{Edition, lower};
+use cairn_lang_core::{Edition, IntentModule, lower, resolve};
+use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{
     PlacementStage, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
-    compile_placement, compile_routing, synthesize, verify_latency,
+    compile_placement, compile_routing, synthesize, verify_latency, verify_portable,
 };
 use clap::ValueEnum;
 
@@ -97,7 +99,7 @@ fn dispatch_synth_stage(
     stage: SynthStage,
     edition: StageEdition,
     synth: &cairn_lang_redstone::SynthOutput,
-    ir: &cairn_lang_core::IntentModule,
+    ir: &IntentModule,
     file: &Path,
     source: &str,
     lines: &LineStarts,
@@ -136,6 +138,10 @@ fn dispatch_synth_stage(
         ),
     };
     let edition_netlist = compile_edition_netlist(&netlist, edition);
+    let portable = verify_portable(ir, &built_for(ir, edition), edition);
+    if report_diagnostics(file, source, lines, &portable) {
+        return Err(ExitCode::from(1));
+    }
     if matches!(stage, SynthStage::Edition) {
         return Ok((
             serde_json::to_string_pretty(&edition_netlist),
@@ -197,6 +203,15 @@ fn dispatch_synth_stage(
             unreachable!("earlier guards return for non-Crossing stages")
         }
     }
+}
+
+/// `ir` built for `edition` on the built-in pack, for the checks that read the struct as it stands.
+fn built_for(ir: &IntentModule, edition: Edition) -> BlockArrayIr {
+    lower_to_block_array(
+        ir,
+        &resolve(ir, Some(edition)),
+        Some(&builtin_pack(edition).view(None)),
+    )
 }
 
 /// The spelling clap accepts for `--stage`, for runtime messages.

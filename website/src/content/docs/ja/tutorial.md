@@ -113,7 +113,7 @@ struct gatehouse size=7x5
 
 **アサーションは 3 種類です。** 組み合わせ論理を検証する `truth(…)`、遅延の上限を検証する `latency(in -> out) <= N`、時間の範囲を区切った時相論理を検証する `always(in -> eventually out within N)` です。完全な LTL は意図的に持たず、tick 単位のシミュレータで安く判定できるものだけに絞っています。ただし、このシミュレータはまだありません。レイテンシの上限はシミュレータを必要とせず、`cairn synth --experimental-logic-synth --stage crossing` が、ビルドするエディションについて配置した回路の tick を数え、守れない上限を `E_SIM_ASSERTION_FAILED` で拒否します。ここの OR は Java ではリピーター 2 つで 1 tick、Bedrock ではダストの合流で 0 tick です。
 
-**エディションの違いは、言語ではなくセルライブラリが吸収します。** 同じ論理が、Java では `ComparatorAND` セルに、Bedrock では `TorchAND` セルになります。疑似接続 (quasi-connectivity) やブロック更新の順序に依存する回路は、気付かないうちに壊れる仕掛けを残すのではなく、コンパイルエラーにする方針です。ただし、回路がそれに依存しているかを検査するものは、まだありません。
+**エディションの違いは、言語ではなくセルライブラリが吸収します。** 同じ論理が、Java では `ComparatorAND` セルに、Bedrock では `TorchAND` セルになります。疑似接続 (quasi-connectivity) やブロック更新の順序に依存する回路は、気付かないうちに壊れる仕掛けを残すのではなく、コンパイルエラー `E_NO_PORTABLE_IMPL` になります。たとえば、回路が開けるドアを見張るオブザーバーや、Java でレバーが真上のセルを通して動力を与えるピストンです。
 
 続きは[レッドストーン](/ja/spec/redstone/)で。
 

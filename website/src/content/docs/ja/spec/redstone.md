@@ -278,13 +278,32 @@ Java の `ComparatorAND` は減算モードのコンパレーターで、一方�
 - **吸収するもの**: リピーター、オブザーバー、コンパレーター、向き。どれもセルの実装の違いです。
 - **吸収しないもの**: QC (疑似接続)、BUD、更新順序。ブロック更新順序という暗黙の意味論に依存しており、エディション間で移植できる実装が存在しません。
 
-更新順序の意味論を必要とする論理は、気付かないうちに壊れるのではなく、コンパイルエラーになります。「変換ではなく再コンパイル」という方針と一致します。ただし、これを検査するパスはまだないので、下の `E_NO_PORTABLE_IMPL` は現在出ません。
+更新順序の意味論を必要とする論理は、気付かないうちに壊れるのではなく、コンパイルエラー `E_NO_PORTABLE_IMPL` になります。「変換ではなく再コンパイル」という方針と一致します。ライブラリのセルは、マクロのものも含めてどれも自分のタイミングを自分で保つので、回路が更新順序を必要とするのは、組み上げた構造物のあるコンポーネントが、別のコンポーネントをブロック更新を通して読む場合だけです。そうなる形は 2 つで、どちらもそのエディション向けに組み上げた構造物に照らして検査します。
+
+- **回路を読み返すオブザーバー (BUD)。どのエディションでも。** `->` の付いた `observer` で、その正面が、バインディングが駆動する `lamp`・`piston`・`dispenser`・`door`、または駆動されるピストンのヘッドが入るセルを見ているもの。その信号は回路自身の変化で、ブロック更新が届いた時点で現れます。指摘はオブザーバーの行に出し、バインディングを注記で示します。直し方には、同じパルスを順序に依存せずに書いた形 `edge_rising(sig.x) or edge_falling(sig.x)` を示します。
+- **上のセルを通して動力を受けるピストンとディスペンサー (QC)。Java で。** 駆動される `piston` か `dispenser` で、センサーが真上のセルを通して動力を与え、直接は与えていないもの。このとき、ブロック更新が届くまでその動力に反応しません。センサーが真上のセルに動力を与えるのは、そのセルの隣に立つとき、またはその隣のブロックを丸ごと動力源にするときです。`lever` と `button` は取り付いたブロックを、`pressure_plate` は真下のブロックを、`observer` は背面のブロックを丸ごと動力源にします。どのブロックが動力を伝えるかを記録した表はないので、空気、センサー、アクチュエーター以外のブロックはすべて伝えるものとみなします。ピストンは正面からは動力を受けません。Bedrock には疑似接続がないので、同じソースがそのままビルドできます。
+
+[Tier 0 の部品](#tier-0-の部品)と生のメンバーは作者が責任を持つものなので、どちらも検査しません。センサーがコンポーネントに直接も動力を与えている場合は順序への依存ではないので、報告しません。`cairn synth --experimental-logic-synth` は、エディションを指定するすべての段階でこれを検査します。次の例では、ディスペンサーの 2 段上のレバーが、ディスペンサーの真上のセルの隣に立っています。
+
+```
+theme t:
+  slot wall -> @cobblestone
+
+struct s size=7x5
+  floor mat_slot=wall
+  walls mat_slot=wall height=4
+  roof kind=flat mat_slot=wall overhang=1
+  dispenser id=p at=inside.back offset=2 y=1 fired_by=sig.p
+  lever id=sw at=inside.back offset=2 y=3 -> sig.a
+  logic sig.p = not sig.a
+  circuit region=floor void=2
+```
 
 ```text
-E_NO_PORTABLE_IMPL line 15:
-  this circuit requires update-order (quasi-connectivity / BUD) semantics.
-  No portable redstone implementation exists for the target edition.
-  Fix: redesign the logic to be order-independent, or drop to Tier 0 with an @edition guard.
+dispenser.crn:8:3: error[E_NO_PORTABLE_IMPL]: struct=s: on java, the dispenser `p` also takes power from the lever `sw` through the cell above it, and acts on it only once a block update reaches it: this circuit requires update-order (quasi-connectivity) semantics
+dispenser.crn:9:3:   note: the lever `sw` powers the cell above the dispenser `p` from here
+  note: bedrock has no quasi-connectivity, so the same source builds there
+  note: Fix: move the lever `sw` so that it powers no block beside the cell above the dispenser `p`, or redesign the logic to be order-independent; or drop to Tier 0 with an `@edition java` guard
 ```
 
 手で置いたレッドストーンは、エディションをまたぐと壊れます。論理として記述しておけば、コンパイラがエディションごとに正しい回路を出力できます。部品ではなく論理を書く、最大の理由です。

@@ -144,7 +144,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   simulator checks the other two against a built circuit yet.
 - **QC / BUD.** Quasi-connectivity / block-update-detector behaviors. **Not absorbed** by the cell
   library; a circuit that depends on update-order semantics is an `E_NO_PORTABLE_IMPL` compile
-  error. That code is not implemented yet: nothing checks a circuit for update-order dependence.
+  error: an observer that watches what the circuit drives, and on Java a piston or dispenser a
+  sensor powers through the cell above it. See [redstone §14.6](/spec/redstone/#146-edition-differences).
 
 ## Lint and evaluation
 
