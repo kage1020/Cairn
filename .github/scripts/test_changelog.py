@@ -447,6 +447,55 @@ class HostEncodingTest(Case):
         self.assertEqual(result.stderr, f"{Path('changelog.d/説明.fixed.md')}: {NAMING}\n")
 
 
+class ExtensionTest(Case):
+    INTRO = "# Changelog — Cairn VS Code extension\n\nVersions track the CLI.\n\n"
+    OLDER = "## 2026.10.0 — 2026-10-01\n\n### Added\n\n- an old entry\n"
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo.dir / "editors/vscode").mkdir(parents=True)
+
+    def extension(self, text: str) -> subprocess.CompletedProcess[str]:
+        self.repo.write("CHANGELOG.md", CHANGELOG.replace("## 2026.10.0", RELEASE_SECTION
+                                                          + "## 2026.10.0"))
+        self.repo.write("editors/vscode/CHANGELOG.md", text)
+        return self.repo.run("extension", "--version", "2026.11.0")
+
+    def test_the_unreleased_entries_take_the_release_heading(self) -> None:
+        result = self.extension(self.INTRO + "## [Unreleased]\n\n### Fixed\n\n- a fix\n\n"
+                                + self.OLDER)
+        self.assertPasses(result)
+        self.assertEqual(self.repo.read("editors/vscode/CHANGELOG.md"), self.INTRO
+                         + "## 2026.11.0 — 2026-11-01\n\n### Fixed\n\n- a fix\n\n" + self.OLDER)
+        self.assertEqual(result.stdout, f"wrote ## 2026.11.0 — 2026-11-01 into "
+                                        f"{Path('editors/vscode/CHANGELOG.md')}\n")
+
+    def test_a_release_with_no_entry_says_the_extension_did_not_change(self) -> None:
+        said = ("## 2026.11.0 — 2026-11-01\n\nNo change to the extension itself; it ships with "
+                "this Cairn release.\n\n")
+        for before in ("", "## [Unreleased]\n\n"):
+            with self.subTest(before=before):
+                self.assertPasses(self.extension(self.INTRO + before + self.OLDER))
+                self.assertEqual(self.repo.read("editors/vscode/CHANGELOG.md"),
+                                 self.INTRO + said + self.OLDER)
+
+    def test_a_second_run_changes_nothing(self) -> None:
+        self.assertPasses(self.extension(self.INTRO + "## [Unreleased]\n\n- a fix\n"))
+        folded = self.repo.read("editors/vscode/CHANGELOG.md")
+        self.assertPasses(self.repo.run("extension", "--version", "2026.11.0"))
+        self.assertEqual(self.repo.read("editors/vscode/CHANGELOG.md"), folded)
+
+    def test_a_section_under_another_heading_is_refused(self) -> None:
+        self.assertRefused(self.extension(self.INTRO + "## 2026.11.0\n\n- a fix\n"),
+                           "a section for 2026.11.0 under another heading than CHANGELOG.md's "
+                           "`## 2026.11.0 — 2026-11-01`")
+
+    def test_a_version_release_plz_wrote_no_section_for_is_refused(self) -> None:
+        self.repo.write("editors/vscode/CHANGELOG.md", self.INTRO + "## [Unreleased]\n")
+        self.assertRefused(self.repo.run("extension", "--version", "2026.11.0"),
+                           "no section for 2026.11.0 to take the extension's heading from")
+
+
 class VerifyReleaseTest(Case):
     def test_a_tagged_version_passes_with_fragments_waiting(self) -> None:
         self.repo.git("tag", "v2026.10.0")

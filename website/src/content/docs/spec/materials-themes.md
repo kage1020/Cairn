@@ -72,7 +72,9 @@ that select the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is 
 A theme binds **canonical tokens**, not raw block IDs. The backend resolves the ID, state names,
 state values, and serialization per `(edition, version)`
 ([Versioning and Editions](/spec/versioning-editions/)). An LLM never needs to know `pillar_axis`,
-little-endian NBT, or Bedrock's `weirdo_direction`.
+little-endian NBT, or Bedrock's `weirdo_direction`. The canonical vocabulary spells state names and
+state values as Java does: `@oak_stairs[facing=east]` writes Java's `facing`, and the Bedrock backend
+maps it to its own `weirdo_direction`.
 
 The backend resolves less than that today. A canonical token is written as `minecraft:<token>` and
 checked against the pinned target ([§7.3](#73-mappings-across-version-and-edition)), so
@@ -148,7 +150,7 @@ is not separated: `@cauldron[fluid=water]` names a state `minecraft:cauldron` do
 pinned target refuses it as `E_STATE_DOMAIN` rather than reading it as `water_cauldron`. A merged id
 is checked per target like any other. No floor is inferred for a new block: `@pale_oak_planks` with
 no `@requires` checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it, naming
-1.21.4 as the version it first appears in. A deleted id is `E_UNKNOWN_ID`, naming the last version
+1.21.4 as the first target that declares it. A deleted id is `E_UNKNOWN_ID`, naming the last target
 that declares it; an id no version declares names the nearest block the target has when one is near
 enough.
 

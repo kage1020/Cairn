@@ -19,8 +19,8 @@ use crate::block_array::openings::{
 use super::canvas::{Canvas, MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{
-    StructCtx, UNPAINTED_COURSE, default_block_id, resolve_member_state, side_name, side_of,
-    unplaced_walls_note,
+    MemberState, StructCtx, UNPAINTED_COURSE, default_block_id, resolve_member_state, side_name,
+    side_of, unplaced_walls_note,
 };
 use super::phase::Phase;
 use super::stair::inward_cardinal;
@@ -201,7 +201,7 @@ fn stand_door(
     }
     let id = door_block_id(member, ctx, diagnostics)
         .map_err(|refusal| diagnostics.push(*refusal))
-        .ok()?;
+        .ok()??;
     let Some(lower) = wall_local_to_grid(
         side,
         at,
@@ -231,19 +231,24 @@ fn stand_door(
     })
 }
 
-/// The block a door is built from: its `mat_slot=`, or the pack's default door.
+/// The block a door is built from: its `mat_slot=`, or the pack's default door; `None` for a
+/// binding whose state literal the target refused, which builds no door.
 fn door_block_id(
     member: &Member,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<String, Box<Diagnostic>> {
-    let resolved = resolve_member_state(
+) -> Result<Option<String>, Box<Diagnostic>> {
+    let resolved = match resolve_member_state(
         member,
         ctx.scope,
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-    );
+    ) {
+        MemberState::Bound(state) => Some(state),
+        MemberState::Unbound => None,
+        MemberState::Refused => return Ok(None),
+    };
     geometry_material_id(
         member,
         ctx.scope,
@@ -256,6 +261,7 @@ fn door_block_id(
         },
         diagnostics,
     )
+    .map(Some)
 }
 
 /// Settle the hinge of each door in `hung` whose line writes none, from the wall beside it now

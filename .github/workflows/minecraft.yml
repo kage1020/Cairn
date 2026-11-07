@@ -101,7 +101,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/cairn-minecraft
-          key: minecraft-tables-${{ hashFiles('crates/cairn-lang-formats/registry-data/*/data_versions.json') }}
+          # The script pins the palettes and state maps, so a new pin needs a new key to be saved.
+          key: minecraft-tables-${{ hashFiles('crates/cairn-lang-formats/registry-data/*/data_versions.json', '.github/scripts/extract_registry.py') }}
           # Not the load job's key, which saves no palette or state map. The script checks each file
           # against its published hash, so an older set, the load job's included, is a safe start.
           restore-keys: |

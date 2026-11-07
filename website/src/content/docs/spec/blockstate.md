@@ -5,8 +5,8 @@ title: "6. Blockstate Model"
 ## 6.1 Derive by default, promote on override
 
 **Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape` and a
-door's `hinge` and `open` are built. The others, the `beam`, `chest` and `note_block` keywords, and
-coordinate triples are not ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+door's `hinge` and `open` are built. The others and the `beam`, `chest` and `note_block` keywords
+are not ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
@@ -49,9 +49,8 @@ Cases that MUST stay overridable, because each can be intent:
 Two easy-to-miss cases belong to derivation, not intent: `torch` ↔ `wall_torch` and `sign` ↔
 `wall_sign` are substituted automatically by attachment face.
 
-The example below uses syntax the parser does not accept yet. Only its `stair` line is accepted:
-`beam`, `chest` and `note_block` are `E_UNKNOWN_KEYWORD`, and a coordinate triple such as
-`at=2,1,2` is `E_PARSE`.
+The example below uses keywords the compiler does not know yet. Only its `stair` line is accepted:
+`beam`, `chest` and `note_block` are `E_UNKNOWN_KEYWORD`.
 
 ```
 stair id=eave   kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left  # eaves
@@ -67,8 +66,10 @@ member:
   id: eave
   type: block | block_entity | entity      # typed in the IR; the distinction is the compiler's job
   primitive: stairs
-  intent_state:   { half: top, facing: out, shape: outer_left }  # author intent. Edit diffs look only here
-  resolved_state: { facing: south, waterlogged: false }          # derived, including paint-derived state
+  intent_state:   { half: top, facing: out, shape: outer_left }  # author intent
+  resolved_state:                                                # derived, including paint-derived state
+    - state: { id: minecraft:oak_stairs, properties: { facing: south, half: top, shape: outer_left } }
+      runs: [{ from: [0, 4, 0], len: 1 }]
 ```
 
 The two are named apart from Minecraft's own term "blockstate" on purpose. Keeping resolved state
@@ -82,17 +83,18 @@ on the keyword: `shape=` on a `stair` is intent, and `shape=` on a `window` is a
 opening's outline ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
 
 Lowering records each member's `resolved_state` beside the block array it builds: every state the
-member's cells hold once the body is painted, with the cells that hold it. A cell belongs to the
-member that painted it last, so a door's block is recorded on the door and not on the wall it was
-set into, and a member none of whose cells survive records nothing. `cairn lower --format json` prints the record
-under `members`, keyed like `structures`, which is what lets two builds be compared member by
-member. It is written once, in the canonical vocabulary, and each backend maps it to its own edition
-as it writes ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
+member's cells hold once the body is painted, with the cells that hold it as runs along `x`, each
+from its first cell, in block-array order. A cell belongs to the member that painted it last, so a
+door's block is recorded on the door and not on the wall it was set into, and a member none of
+whose cells survive records nothing. `cairn lower --format json` prints the record under `members`,
+keyed like `structures`, which is what lets two builds be compared member by member. A body lists
+its members in the order of the first cell each owns, so reordering lines that share no cell leaves
+the record as it was, as it leaves the grid ([Compilation Model
+§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The record is made each time a
+body is lowered: its block ids are those the lowering's target resolved, a theme's edition variant
+and a pinned version's override included, and its property names are the canonical vocabulary's.
 
-In place of `type`, a member carries the `role` its keyword classifies to. The two answer different
-questions, so `type` will sit beside `role` rather than replace it: `role` is the architectural
-function a selector matches, and `type` the kind of object the compiler places for it. `type` is
-added with the first keyword that places a block entity or an entity.
+In place of `type`, a member carries the `role` its keyword classifies to.
 
 `bed` is treated as a block member rather than an entity, to keep the IR types clean.
 
@@ -103,7 +105,7 @@ added with the first keyword that places a block entity or an entity.
 `waterlogged`: on a `stair`, `waterlogged=false` is an unreached key, reported as
 `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), and the stair is built as if
 the key were not written. In the example below, `fill`, `trapdoor` and `water` are
-`E_UNKNOWN_KEYWORD`, and a coordinate triple such as `from=1,1,1` is `E_PARSE`.
+`E_UNKNOWN_KEYWORD`.
 
 The default is paint-derived: when `fill fluid=water` overlaps a waterloggable block, the compiler
 sets `waterlogged`.

@@ -128,7 +128,8 @@ pub(super) fn lower_body_to_block_array<'a>(
     let mut palette = match palette.into_palette() {
         Ok(palette) => palette,
         Err(Overflow::Full(full)) => {
-            diagnostics.push(diag_palette_too_large(&body, full));
+            let checked = registry.is_some_and(|registry| registry.block_ids().is_some());
+            diagnostics.push(diag_palette_too_large(&body, full, checked));
             return None;
         }
         Err(Overflow::StandIn) => return None,
@@ -208,36 +209,49 @@ fn state_findings<'a>(
     })
 }
 
-/// Each member of `flattened` that owns a cell of `array`, with the states its cells hold.
+/// Each member of `flattened` that owns a cell of `array`, with the states its cells hold, in the
+/// order of the first cell each owns.
 fn resolved_members(
     flattened: &[(u32, &Member)],
     owners: &[u32],
     array: &BlockArray,
 ) -> Vec<ResolvedMember> {
-    let mut built: Vec<IndexMap<PaletteIndex, ResolvedBlock>> =
-        vec![IndexMap::new(); flattened.len()];
+    debug_assert_eq!(
+        owners.len(),
+        array.voxels.len(),
+        "the canvas and the array lay out one grid",
+    );
+    // Keyed by first cell, not source line: `resolved_ir_hash` reads this order, and
+    // `spec/compilation` "Within-phase conflicts and the palette" keeps it free of line order.
+    let mut built: IndexMap<usize, IndexMap<PaletteIndex, ResolvedBlock>> = IndexMap::new();
     for (index, (&owner, &state)) in owners.iter().zip(&array.voxels).enumerate() {
-        let (Some(member), Some(cell)) = (owner.checked_sub(1), array.dims.position(index)) else {
+        let Some(member) = owner.checked_sub(1) else {
             continue;
         };
-        built[member as usize]
+        let cell = array
+            .dims
+            .position(index)
+            .expect("a voxel's index lies in the dims it was laid out by");
+        built
+            .entry(member as usize)
+            .or_default()
             .entry(state)
             .or_insert_with(|| ResolvedBlock {
                 state: array.palette.entries[usize::from(state.0)].clone(),
-                cells: Vec::new(),
+                runs: Vec::new(),
             })
-            .cells
             .push(cell);
     }
-    flattened
-        .iter()
-        .zip(built)
-        .filter(|(_, blocks)| !blocks.is_empty())
-        .map(|((_, member), blocks)| ResolvedMember {
-            role: member.role.keyword().to_owned(),
-            id: member.id.clone(),
-            resolved_state: blocks.into_values().collect(),
-            span: member.span.clone(),
+    built
+        .into_iter()
+        .map(|(member, blocks)| {
+            let (_, member) = flattened[member];
+            ResolvedMember {
+                role: member.role.keyword().to_owned(),
+                id: member.id.clone(),
+                resolved_state: blocks.into_values().collect(),
+                span: member.span.clone(),
+            }
         })
         .collect()
 }
@@ -375,8 +389,20 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
     }
 }
 
-/// A body painted more distinct block states than its palette holds.
-fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagnostic {
+/// A body painted more distinct block states than its palette holds; `checked` when a pinned
+/// target checked its block ids.
+fn diag_palette_too_large(
+    body: &BodyDescriptor<'_>,
+    full: PaletteFull,
+    checked: bool,
+) -> Diagnostic {
+    let fix = if checked {
+        "the pinned target declares each block id, so split the members across more than one \
+         `struct`, each painting fewer"
+    } else {
+        "a vanilla registry has far fewer, so check the block ids and state literals by pinning \
+         a shipped version with `--edition` and `--target`"
+    };
     Diagnostic {
         code: DiagnosticCode::PaletteTooLarge,
         span: body.header_span.clone(),
@@ -388,11 +414,9 @@ fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagn
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "every state a member writes counts, including one a later member \
-                      covers; a vanilla registry has far fewer, so check the block ids and \
-                      state literals with `--edition` and `--target`, which pins a version \
-                      whose tables check both"
-                .to_owned(),
+            message: format!(
+                "every state a member writes counts, including one a later member covers; {fix}"
+            ),
         }],
         data: None,
     }

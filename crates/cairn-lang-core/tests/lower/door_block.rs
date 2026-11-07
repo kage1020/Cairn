@@ -111,7 +111,7 @@ fn the_door_records_both_halves_as_its_resolved_state() {
                         "facing": "north", "half": "lower", "hinge": "right", "open": "false"
                     },
                 },
-                "cells": [[0, 1, 6]],
+                "runs": [{ "from": [0, 1, 6], "len": 1 }],
             },
             {
                 "state": {
@@ -120,7 +120,7 @@ fn the_door_records_both_halves_as_its_resolved_state() {
                         "facing": "north", "half": "upper", "hinge": "right", "open": "false"
                     },
                 },
-                "cells": [[0, 2, 6]],
+                "runs": [{ "from": [0, 2, 6], "len": 1 }],
             },
         ]),
     );

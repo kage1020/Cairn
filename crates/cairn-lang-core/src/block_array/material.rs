@@ -1,5 +1,5 @@
-//! Translate a resolved theme-slot value into a [`BlockState`] and check its id against the
-//! pinned target.
+//! Translate a resolved theme-slot value into a [`BlockState`], and the pinned target's answers
+//! about its id and its states.
 
 use indexmap::IndexMap;
 
@@ -10,6 +10,18 @@ use crate::resolve::{TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
+
+/// A block state the pinned target's state map has no form for, as
+/// [`TargetRegistry::unmapped_state`] reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnmappedState {
+    /// The target, as a diagnostic names it, such as `"bedrock 1.21.40"`.
+    pub registry: String,
+    /// Why, as a clause.
+    pub reason: String,
+    /// The edition's other targetable versions whose state maps have a form for it, oldest first.
+    pub mapped_at: Vec<String>,
+}
 
 /// What the registry pack tells lowering, for one compile.
 ///
@@ -30,22 +42,24 @@ pub trait TargetRegistry {
         Vec::new()
     }
 
-    /// Why the pinned target's state map has no form for `state`, as a clause, or `None` when it
-    /// has one or the registry keeps no state map
-    /// (`spec/versioning-editions` "The `edition portability` row").
-    fn unmapped_state(&self, state: &BlockState) -> Option<String> {
+    /// Why the pinned target's state map has no form for `state`, or `None` when it has one, the
+    /// registry keeps no state map, or `state` is not one of its block's states
+    /// (`spec/versioning-editions` "Java / Bedrock portability").
+    fn unmapped_state(&self, state: &BlockState) -> Option<UnmappedState> {
         let _ = state;
         None
     }
 
-    /// The nearest versions of the pinned target's edition on either side of it that declare
-    /// `id`, asked only for an id the target does not declare; `None` when no other does.
+    /// The nearest targetable versions of the pinned target's edition on either side of it that
+    /// declare `id`, asked only for an id the target does not declare; `None` when no other does,
+    /// or no version is pinned.
     fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
         let _ = id;
         None
     }
 
-    /// What the pinned target's tables say about `state`'s properties
+    /// What the pinned target's tables say about `state`'s properties, [`StateDomain::Unrecorded`]
+    /// unless the registry overrides it
     /// (`spec/versioning-editions` "A state is checked against its block's states at the target").
     fn state_domain(&self, state: &BlockState) -> StateDomain {
         let _ = state;
@@ -98,6 +112,9 @@ pub enum StateDomain {
     Unpinned,
     /// The pinned target's pack records no states for the block.
     Unrecorded,
+    /// The block's id, or its state map, is another code's to answer: `E_UNKNOWN_ID` or
+    /// `E_STATE_UNMAPPED`.
+    AnsweredElsewhere,
     /// Each property or value outside the block's states at the target, in the state's order;
     /// empty when there is none.
     Checked(Vec<OutOfDomain>),
@@ -250,7 +267,8 @@ pub struct UnknownId {
     pub registry: String,
     /// Whether the author named the id or the pack's catalog did.
     pub origin: IdOrigin,
-    /// Closest id the target does declare, within `nearest_match`'s edit cap.
+    /// Closest id the target does declare, within `nearest_match`'s edit cap; `None` when another
+    /// version of the edition declares the id.
     pub suggestion: Option<String>,
     /// The ids this target declares for the same block, from the registry's alias table.
     pub aliases: Vec<String>,
@@ -258,16 +276,66 @@ pub struct UnknownId {
     pub elsewhere: Option<DeclaredElsewhere>,
 }
 
-/// The versions of the pinned edition nearest the target that declare an id it does not
-/// (`spec/versioning-editions` "Which registry an unknown ID is unknown to").
+/// The versions of the pinned edition nearest the target that declare an id it does not, at
+/// least one of them (`spec/versioning-editions` "Which registry an unknown ID is unknown to").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredElsewhere {
-    /// The edition, which a floor that needs the id names.
-    pub edition: Edition,
-    /// The last version before the target that declares the id, where a removed id was last.
-    pub until: Option<String>,
-    /// The first version after the target that declares the id, where a new id first appears.
-    pub since: Option<String>,
+    edition: Edition,
+    sides: Sides,
+}
+
+/// Which sides of the target a version declaring the id lies on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Sides {
+    /// Only before it: the last version that does.
+    Until(String),
+    /// Only after it: the first version that does.
+    Since(String),
+    /// Both: the last before and the first after.
+    Both { until: String, since: String },
+}
+
+impl DeclaredElsewhere {
+    /// The answer for an id `until`, the last version before the target, and `since`, the first
+    /// after it, declare; `None` when neither does.
+    #[must_use]
+    pub fn new(edition: Edition, until: Option<String>, since: Option<String>) -> Option<Self> {
+        let sides = match (until, since) {
+            (Some(until), Some(since)) => Sides::Both { until, since },
+            (Some(until), None) => Sides::Until(until),
+            (None, Some(since)) => Sides::Since(since),
+            (None, None) => return None,
+        };
+        Some(Self { edition, sides })
+    }
+
+    /// The pinned target's edition.
+    #[must_use]
+    pub fn edition(&self) -> Edition {
+        self.edition
+    }
+
+    /// The last version before the target that declares the id.
+    #[must_use]
+    pub fn until(&self) -> Option<&str> {
+        match &self.sides {
+            Sides::Until(until) | Sides::Both { until, .. } => Some(until),
+            Sides::Since(_) => None,
+        }
+    }
+
+    /// The first version after the target that declares the id.
+    #[must_use]
+    pub fn since(&self) -> Option<&str> {
+        match &self.sides {
+            Sides::Since(since) | Sides::Both { since, .. } => Some(since),
+            Sides::Until(_) => None,
+        }
+    }
+
+    pub(crate) fn sides(&self) -> &Sides {
+        &self.sides
+    }
 }
 
 /// Who chose the id that turned out not to exist.
@@ -374,8 +442,8 @@ pub(crate) fn validated_id(
     if ids.contains(&state.id) {
         return Ok(state);
     }
-    // Both can be filled: a rename has aliases, a typo a suggestion, and one id can be both. An id
-    // another version declares is no typo, so the nearest spelling would only mislead.
+    // An id another version of the edition declares is no typo, so it gets no nearest spelling;
+    // aliases answer it either way, and only an id no version declares can carry both.
     let aliases = registry.aliases_for(&state.id);
     let elsewhere = registry.declared_elsewhere(&state.id);
     Err(MaterialDeferred::UnknownId(Box::new(UnknownId {
