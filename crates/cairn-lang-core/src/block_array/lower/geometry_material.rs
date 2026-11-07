@@ -96,10 +96,12 @@ pub(super) struct GeometryMemberDescription {
 }
 
 /// The block id a member whose geometry derives its blockstates paints, given its resolved
-/// `mat_slot=` binding; `fallback` answers when the binding is absent or unusable.
+/// `mat_slot=` binding; `fallback` answers when the binding is absent or unusable, and when it
+/// names a material outside [`GeometryMemberDescription::requires`] (`E_INCOMPATIBLE_MATERIAL`).
 ///
-/// A material outside [`GeometryMemberDescription::requires`] is `E_INCOMPATIBLE_MATERIAL`, and the
-/// member is still built from `fallback` so the pass can finish.
+/// # Errors
+///
+/// `fallback`'s error, when the member falls back to it.
 pub(super) fn geometry_material_id<E>(
     member: &Member,
     scope: Option<&ScopeResolution>,

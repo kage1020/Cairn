@@ -64,8 +64,8 @@ pub(super) fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Di
 /// The selector attributes an actuator patch reads.
 const ACTUATOR_PATCH_SELECTOR_KEYS: &[&str] = &["id"];
 
-/// The intent-state keys an actuator patch reads.
-const ACTUATOR_PATCH_INTENT_KEYS: &[&str] = &["opened_by"];
+/// The keys an actuator patch reads.
+const ACTUATOR_PATCH_ARGUMENT_KEYS: &[&str] = &["opened_by"];
 
 /// Whether a `door` line is an actuator patch: the selector form `door[…]`, which binds a signal
 /// to a door declared elsewhere (`spec/redstone` "Signal binding").
@@ -123,17 +123,17 @@ pub(super) fn recognize_actuator_patch(
             return;
         }
     };
-    let unknown_intent_keys: Vec<&str> = member
+    let unknown_keys: Vec<&str> = member
         .written_fields()
         .map(|(key, _)| key)
-        .filter(|k| !ACTUATOR_PATCH_INTENT_KEYS.contains(k))
+        .filter(|k| !ACTUATOR_PATCH_ARGUMENT_KEYS.contains(k))
         .collect();
-    if !unknown_intent_keys.is_empty() {
+    if !unknown_keys.is_empty() {
         diagnostics.push(diag_invalid_member(
             member,
             format!(
                 "door actuator patch takes only `opened_by=sig.<name>`; unknown attribute(s): {}",
-                unknown_intent_keys.join(", "),
+                unknown_keys.join(", "),
             ),
             vec!["move these onto the door's own line, or drop them".to_owned()],
         ));

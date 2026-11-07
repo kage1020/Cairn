@@ -227,6 +227,8 @@ jobs:
 
           # `publish` refuses to publish if this never ran.
           python3 .github/scripts/changelog.py assemble --version "$version" --delete
+          # publish.yml packages no `.vsix` whose changelog lacks a section for its version.
+          python3 .github/scripts/changelog.py extension --version "$version"
 
           if [ -z "$(git status --porcelain)" ]; then
             echo "manifests and CHANGELOG.md already agreed with $version; nothing to push"

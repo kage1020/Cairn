@@ -6,6 +6,9 @@ use crate::intent::Member;
 use super::Dims;
 use super::args::size_value;
 
+/// Rows a door block stands, from the row it opens at.
+pub(super) const DOOR_HEIGHT: u32 = 2;
+
 /// A struct wall, named as seen from outside (`spec/syntax` "Selectors").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WallSide {
@@ -115,16 +118,21 @@ pub(super) enum Written {
     Absent,
     /// The key carries an identifier the port does not accept.
     Ident(String),
-    /// The key carries a value of some other shape (a number, a string, …).
-    OtherShape,
+    /// The key carries an integer, a numeric offset on a door's `at=`.
+    Int(i64),
+    /// The key carries a value of some other shape, worded as [`crate::ast::Value::describe`] does.
+    OtherShape(String),
 }
 
 impl Written {
     pub(super) fn of_ident(member: &Member, key: &str) -> Self {
-        match member.written(key).map(|v| &v.value.kind) {
-            None => Self::Absent,
-            Some(ValueKind::Ident(s)) => Self::Ident(s.clone()),
-            Some(_) => Self::OtherShape,
+        let Some(raw) = member.written(key) else {
+            return Self::Absent;
+        };
+        match &raw.value.kind {
+            ValueKind::Ident(s) => Self::Ident(s.clone()),
+            ValueKind::Int(n) => Self::Int(*n),
+            _ => Self::OtherShape(raw.value.describe()),
         }
     }
 }
@@ -134,9 +142,12 @@ pub(super) fn door_at_clause(written: &Written) -> String {
     match written {
         Written::Absent => "has no `at=`".to_owned(),
         Written::Ident(s) => format!("has `at={s}`, which is not one of center, left, right"),
-        Written::OtherShape => "has an `at=` that is not one of center, left, right (numeric \
-                                offsets are reserved)"
-            .to_owned(),
+        Written::Int(n) => format!(
+            "has `at={n}`, which is not one of center, left, right (numeric offsets are reserved)"
+        ),
+        Written::OtherShape(described) => {
+            format!("has an `at=` that is {described}, not one of center, left, right")
+        }
     }
 }
 
@@ -220,22 +231,19 @@ pub(super) struct WindowArgs {
 ///
 /// The [`WindowArgFault`] for the first argument that cannot be used.
 pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgFault> {
-    let offset = if member.arguments.contains_key("offset") {
+    let offset = if member.written("offset").is_some() {
         member
             .nonneg_u32("offset")
             .ok_or(WindowArgFault::OffsetMalformed)?
     } else {
         0
     };
-    let y = match (member.arguments.contains_key("y"), member.nonneg_u32("y")) {
+    let y = match (member.written("y").is_some(), member.nonneg_u32("y")) {
         (_, Some(y)) => y,
         (false, None) => return Err(WindowArgFault::YAbsent),
         (true, None) => return Err(WindowArgFault::YMalformed),
     };
-    let (width, height) = match (
-        member.arguments.contains_key("size"),
-        size_value(member, "size"),
-    ) {
+    let (width, height) = match (member.written("size").is_some(), size_value(member, "size")) {
         (_, Some(size)) => size,
         (false, None) => return Err(WindowArgFault::SizeAbsent),
         (true, None) => return Err(WindowArgFault::SizeMalformed),

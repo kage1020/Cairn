@@ -149,9 +149,23 @@ pub(super) struct Canvas {
     painted: Vec<bool>,
     /// Indexed like [`Self::phases`]: `true` once that member has written a cell.
     pub(super) wrote: Vec<bool>,
-    /// `(overridden, overriding)` member pairs, in discovery order, to how many voxels the second
-    /// took from each `(before, after)` pair of palette slots.
+    /// `(overridden, overriding)` member pairs, in the order they are judged, to how many voxels
+    /// the second took from each `(before, after)` pair of palette slots.
     pub(super) conflicts: IndexMap<(u32, u32), IndexMap<(PaletteIndex, PaletteIndex), u32>>,
+    /// Indexed like [`Self::phases`]: `true` while that member's contests wait on
+    /// [`Self::settle_contests`].
+    held: Vec<bool>,
+    /// The contests a held member took part in, in the order they happened.
+    deferred: Vec<Contest>,
+}
+
+/// One cell a member wrote over another member's in the same phase.
+#[derive(Debug, Clone, Copy)]
+struct Contest {
+    overridden: u32,
+    overriding: u32,
+    before: PaletteIndex,
+    after: PaletteIndex,
 }
 
 impl Canvas {
@@ -161,10 +175,56 @@ impl Canvas {
             voxels: vec![PaletteIndex::AIR; dims.volume()],
             owners: vec![0; dims.volume()],
             wrote: vec![false; phases.len()],
+            held: vec![false; phases.len()],
             phases,
             painted: vec![false; 1],
             conflicts: IndexMap::new(),
+            deferred: Vec::new(),
         }
+    }
+
+    /// Record that a write named `slot`, for a state a member settled on in a cell it no longer
+    /// holds.
+    pub(super) fn name(&mut self, slot: PaletteIndex) {
+        let slot = usize::from(slot.0);
+        if self.painted.len() <= slot {
+            self.painted.resize(slot + 1, false);
+        }
+        self.painted[slot] = true;
+    }
+
+    /// Judge every held contest with each held member's slots mapped by `settled`, the
+    /// `(member, painted)` → slot it settled on, and stop holding them.
+    pub(super) fn settle_contests(&mut self, settled: impl Fn(u32, PaletteIndex) -> PaletteIndex) {
+        for contest in std::mem::take(&mut self.deferred) {
+            let before = settled(contest.overridden, contest.before);
+            let after = settled(contest.overriding, contest.after);
+            if before != after {
+                self.count(contest.overridden, contest.overriding, before, after);
+            }
+        }
+        self.held.fill(false);
+    }
+
+    /// Count one voxel `overriding` took from `overridden`, from slot `before` to `after`.
+    fn count(
+        &mut self,
+        overridden: u32,
+        overriding: u32,
+        before: PaletteIndex,
+        after: PaletteIndex,
+    ) {
+        *self
+            .conflicts
+            .entry((overridden, overriding))
+            .or_default()
+            .entry((before, after))
+            .or_default() += 1;
+    }
+
+    /// Whether the member's contests wait on [`Self::settle_contests`].
+    fn holds(&self, member: u32) -> bool {
+        self.held.get(member as usize).copied().unwrap_or(false)
     }
 
     /// Per voxel: `0` while unwritten, `n + 1` once member `n` of the flattened paint list did.
@@ -237,6 +297,14 @@ impl MemberCanvas<'_> {
         self.member
     }
 
+    /// Hold every contest this member's writes take part in until
+    /// [`Canvas::settle_contests`], for a member whose states are settled after it paints.
+    pub(super) fn hold_contests(&mut self) {
+        if let Some(held) = self.canvas.held.get_mut(self.member as usize) {
+            *held = true;
+        }
+    }
+
     /// Paint one voxel, claiming its palette slot only once the cell is known to exist.
     pub(super) fn paint(&mut self, pos: (u32, u32, u32), claim: impl FnOnce() -> PaletteIndex) {
         if !self.try_paint(pos, claim) {
@@ -260,30 +328,31 @@ impl MemberCanvas<'_> {
             return false;
         };
         let after = claim();
-        let slot = usize::from(after.0);
-        if canvas.painted.len() <= slot {
-            canvas.painted.resize(slot + 1, false);
-        }
-        canvas.painted[slot] = true;
+        canvas.name(after);
         if let Some(wrote) = canvas.wrote.get_mut(member as usize) {
             *wrote = true;
         }
         let before = canvas.voxels[i];
         canvas.voxels[i] = after;
         let previous = std::mem::replace(&mut canvas.owners[i], member + 1);
-        // A write that changes nothing, or a first write, is not a contest.
-        if before == after || previous == 0 {
+        // A first write is not a contest, and a same-member overwrite is a generator fault no
+        // author can move, so never a finding.
+        let Some(overridden) = previous.checked_sub(1) else {
+            return true;
+        };
+        if overridden == member || !canvas.same_phase(overridden, member) {
             return true;
         }
-        // A same-member overwrite is a generator fault no author can move, so never a finding.
-        let overridden = previous - 1;
-        if overridden != member && canvas.same_phase(overridden, member) {
-            *canvas
-                .conflicts
-                .entry((overridden, member))
-                .or_default()
-                .entry((before, after))
-                .or_default() += 1;
+        // A held slot may settle on another state, so even an unchanged one is judged later.
+        if canvas.holds(overridden) || canvas.holds(member) {
+            canvas.deferred.push(Contest {
+                overridden,
+                overriding: member,
+                before,
+                after,
+            });
+        } else if before != after {
+            canvas.count(overridden, member, before, after);
         }
         true
     }

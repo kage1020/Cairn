@@ -19,7 +19,7 @@ pub enum Face {
 }
 
 impl Face {
-    /// The four faces that look sideways, in the order a block's connection states are named.
+    /// The four sideways faces, clockwise from north.
     pub const SIDES: [Self; 4] = [Self::North, Self::East, Self::South, Self::West];
 
     /// The face named `name`, as the game names a direction.
@@ -158,6 +158,30 @@ pub enum JoinKind {
     },
 }
 
+/// The parts of a wall that the bottom of the block above it covers, which stand them tall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Covers {
+    /// Whether it covers the wall's post.
+    pub post: bool,
+    /// The sides of the wall it covers, of [`Face::SIDES`].
+    pub sides: Faces,
+}
+
+impl Covers {
+    /// The part named `name`, `post` or a side's direction, added.
+    #[must_use]
+    pub fn with(self, name: &str) -> Option<Self> {
+        if name == "post" {
+            return Some(Self { post: true, ..self });
+        }
+        let side = Face::from_name(name).filter(|face| Face::SIDES.contains(face))?;
+        Some(Self {
+            sides: self.sides.with(side),
+            ..self
+        })
+    }
+}
+
 /// What one block state is to the connection rules at the pinned target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Joins {
@@ -165,8 +189,10 @@ pub struct Joins {
     pub kind: Option<JoinKind>,
     /// The faces the state's model covers whole.
     pub sturdy: Faces,
+    /// What its bottom covers of a wall below, read when it is no connecting block.
+    pub covers: Covers,
     /// Whether a pane, fence or wall never joins it by a whole face.
-    pub exception: bool,
-    /// Whether a wall under it raises its post whatever the wall's sides.
+    pub never_joined_by_face: bool,
+    /// Whether the game's `wall_post_override` tag holds it.
     pub raises_post: bool,
 }

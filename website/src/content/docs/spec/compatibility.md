@@ -163,9 +163,9 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 **Reserved codes.** The codes a stable command raises are the ones
 [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists. The redstone pipeline's codes, which only the
 Internal `cairn synth` raises, are outside that catalog on purpose. Any other code the spec names,
-such as `E_PARITY_UNSUPPORTED` or `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
-reserved code lands with the meaning the spec states for it, where it states one, and its row
-landing is adding a code.
+such as `E_PARITY_UNSUPPORTED` or `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it
+yet. A reserved code lands with the meaning the spec states for it, where it states one, and its
+row landing is adding a code.
 
 **What a code means.** A code's severity, and the payload
 [Lint §11.2](/spec/lint/#112-machine-readable-payload) gives it, are part of what it means.
@@ -181,8 +181,8 @@ placeholder's code still means what it meant. A placeholder stands in only for w
 build yet, or what the spec reserves for a later extension. Source the spec itself refuses keeps its
 code. The placeholders today include:
 
-- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as coordinate triples,
-  decimals, `nbt={...}` values, `edit`, `@edition` and `assert latency`;
+- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as decimals,
+  `nbt={...}` values, `edit`, `@edition` and `assert latency`;
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
   `spawn`, `bed`, `lever` and `raw_block`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)

@@ -117,6 +117,17 @@ impl Cardinal {
     }
 }
 
+/// The cardinal a block faces when it faces into the struct from `side`'s wall: opposite the
+/// wall's outward normal.
+pub(super) fn inward_cardinal(side: WallSide) -> Cardinal {
+    match side {
+        WallSide::Front => Cardinal::North,
+        WallSide::Back => Cardinal::South,
+        WallSide::Left => Cardinal::East,
+        WallSide::Right => Cardinal::West,
+    }
+}
+
 /// Stair `shape` property values used by hip-roof corner cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StairShape {

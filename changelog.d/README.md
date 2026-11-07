@@ -6,7 +6,9 @@ heading conflict with one another on every merge; twenty PRs that each add their
 do.
 
 This covers the root CHANGELOG.md only. `editors/vscode/CHANGELOG.md` is the extension's own and
-is still edited by hand.
+is still edited by hand, under `## [Unreleased]`. The release renames that heading to the version
+it ships, or writes a section saying the extension did not change, since the registries show that
+file as the version's notes.
 
 ## Writing one
 

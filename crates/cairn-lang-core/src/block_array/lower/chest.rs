@@ -14,7 +14,7 @@ use crate::block_array::openings::WallSide;
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Anchor, Fixture, Refusal, fixture_cell, outside_the_array};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
-use super::members::{StructCtx, default_block_id, resolve_member_state};
+use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
 
 /// Catalog token a `chest`'s default material comes from; the pack spells it per edition.
 pub(super) const CHEST_TOKEN: &str = "chest.default";
@@ -163,7 +163,9 @@ fn place_chest(
         }
     };
     let (anchor, cell) = fixture_cell(CHEST, member, y_offset, ctx)?;
-    let id = chest_block_id(member, ctx, diagnostics)?;
+    let Some(id) = chest_block_id(member, ctx, diagnostics)? else {
+        return Ok(());
+    };
     let side = anchor.side();
     let facing = toward
         .unwrap_or(match anchor {
@@ -186,19 +188,24 @@ fn place_chest(
     }
 }
 
-/// The block a chest is built from: its `mat_slot=`, or the pack's default chest.
+/// The block a chest is built from: its `mat_slot=`, or the pack's default chest; `None` for a
+/// binding whose state literal the target refused, which builds no chest.
 fn chest_block_id(
     member: &Member,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<String, Refusal> {
-    let resolved = resolve_member_state(
+) -> Result<Option<String>, Refusal> {
+    let resolved = match resolve_member_state(
         member,
         ctx.scope,
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-    );
+    ) {
+        MemberState::Bound(state) => Some(state),
+        MemberState::Unbound => None,
+        MemberState::Refused => return Ok(None),
+    };
     geometry_material_id(
         member,
         ctx.scope,
@@ -211,6 +218,7 @@ fn chest_block_id(
         },
         diagnostics,
     )
+    .map(Some)
 }
 
 #[cfg(test)]

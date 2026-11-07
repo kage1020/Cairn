@@ -157,7 +157,7 @@ fn intended_anchor(head: &str, tail: &str) -> Option<String> {
 
 /// Read a fixture's `key=` as a non-negative integer, `0` when absent.
 fn coordinate(fixture: Fixture, member: &Member, key: &str, counts: &str) -> Result<u32, Refusal> {
-    let Some(raw) = member.arguments.get(key) else {
+    let Some(raw) = member.written(key) else {
         return Ok(0);
     };
     member.nonneg_u32(key).ok_or_else(|| {

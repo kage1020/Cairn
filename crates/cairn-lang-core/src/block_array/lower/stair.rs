@@ -12,11 +12,15 @@ use crate::block_array::args::{
     nonneg_int_or_refuse,
 };
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
-use crate::block_array::roof::{Cardinal, STAIR_BASE_ID, StairShape, shed_high_side, stair_state};
+use crate::block_array::roof::{
+    Cardinal, STAIR_BASE_ID, StairShape, inward_cardinal, shed_high_side, stair_state,
+};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
-use super::members::{StructCtx, resolve_member_state, side_name, side_of, unplaced_walls_note};
+use super::members::{
+    MemberState, StructCtx, resolve_member_state, side_name, side_of, unplaced_walls_note,
+};
 
 /// The note on a stair refused for its `kind=`, naming the one kind there is.
 const STAIR_KINDS: &str = "write `kind=stairs`, the one stair kind: a band of stairs in the \
@@ -92,13 +96,17 @@ fn draw_eave_band(
     let Some(y_world) = eave_row(member, y_offset, ctx, diagnostics) else {
         return false;
     };
-    let resolved = resolve_member_state(
+    let resolved = match resolve_member_state(
         member,
         ctx.scope,
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-    );
+    ) {
+        MemberState::Bound(state) => Some(state),
+        MemberState::Unbound => None,
+        MemberState::Refused => return false,
+    };
     let Ok(stair_id) = geometry_material_id(
         member,
         ctx.scope,
@@ -309,16 +317,6 @@ fn paint_eave_band(
         };
         let (x, z) = shift_outward(side, wx, wz);
         canvas.paint((x, y_world, z), || idx);
-    }
-}
-
-/// The cardinal opposite the wall's outward normal, for `facing=in`.
-pub(super) fn inward_cardinal(side: WallSide) -> Cardinal {
-    match side {
-        WallSide::Front => Cardinal::North,
-        WallSide::Back => Cardinal::South,
-        WallSide::Left => Cardinal::East,
-        WallSide::Right => Cardinal::West,
     }
 }
 

@@ -149,7 +149,7 @@ to compare.
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
-| `E_STATE_UNMAPPED` | A block state a member built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
@@ -481,7 +481,8 @@ behind `cairn info`'s report, the language server and a `cairn check` with no `-
 `cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
 and in a `cairn compile` whose target the file's floors refuse ([Versioning and
 Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A pinned target checks both,
-so a build that pins one reaches the limit only through states its blocks really take. A warning,
+save a literal on a block its pack records no states for, which `W_STATE_LITERAL_UNCHECKED` names,
+so the note asks a build that pins one to split the scope rather than to pin a target. A warning,
 for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
@@ -515,14 +516,14 @@ reserves no region and an actuator patch that binds no door are refused the same
 put a `chest` nowhere too, and for a plate the drop reaches past the block array as well: its `->` binding is still read, so its
 signal stays in the netlist with no plate to drive it, and the finding says so in a note.
 
-A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with
-a note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws
-nothing, or a `level` that is not placed. That member's finding, or the scope's
-`W_NO_THEME_BOUND`, says why it did not build. A member whose line is wrong too is
-`E_INVALID_MEMBER` all the same, and so is one whose line also writes what the pass does not lower
-yet, so neither hides a line's own fault. The members under a `level` that is not placed are the
-exception: `E_UNSUPPORTED_NESTING` says that level produces no blocks, and their own lines are read
-once it is placed.
+A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with a
+note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws nothing,
+or a `level` that is not placed. That member's finding, or the scope's `W_NO_THEME_BOUND`, says why
+it did not build. A member whose line is wrong too is `E_INVALID_MEMBER` all the same, and so is one
+whose line also writes what the pass does not lower yet, so neither hides a line's own fault. A
+`door`'s material is judged too, whatever refuses or defers it, so a refused material is not hidden
+either. The members under a `level` that is not placed are the exception: `E_UNSUPPORTED_NESTING`
+says that level produces no blocks, and their own lines are read once it is placed.
 
 `E_PARTIAL_BUILD` is the run-level counterpart: a finding above says a scope builds without
 something, and this says a scope the command was asked for did not build at all. A scope that
@@ -618,10 +619,12 @@ sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 char
 ≤ 3 beyond. The names are a keyword, an argument key, a `mat_slot=` name, a place, def, theme or
 port reference, an abstract token, a `pressure_plate` or `chest` side, a block id, a block state's
 property or value, and a `--target` version. The note reads ``did you mean `X`?``, with `X` written
-as the line would be (`home1.entry` for a port, `at=front.outside` for a plate or a chest); `E_UNKNOWN_ID` instead names
-the target's nearest block and carries it as `data.suggestion`
-([§11.2](#112-machine-readable-payload)), unless another version of the edition declares the ID,
-when it names that version instead.
+as the line would be (`home1.entry` for a port, `at=front.outside` for a plate or a chest, `axis=x`
+for a state). `E_UNKNOWN_ID` instead names the target's nearest block, or, when another version of
+the edition declares the ID, that version. The nearest block, and the nearest pair of
+`E_STATE_DOMAIN`, is carried as `data.suggestion` too ([§11.2](#112-machine-readable-payload)); on a
+state lowering derived, `E_STATE_DOMAIN` carries it there alone, since the source has no literal to
+correct.
 
 An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
 ...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
@@ -726,8 +729,8 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 
 `token` accompanies `catalog` and `builtin` and is absent for `authored`. `suggestion` is absent
 when no declared ID is within the typo threshold, and when another version of the edition declares
-the ID, which makes it no typo. A rename is normally past the threshold, but the two fields are
-filled by independent rules and a renamed ID near its replacement carries both.
+the ID, which makes it no typo. A rename is normally past the threshold, and a renamed ID near its
+replacement carries both only when no version of the edition declares it.
 
 `aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
 guess from a string distance; an alias is the registry pack's `aliases` component stating that two
@@ -737,18 +740,18 @@ pack's own order, and is absent when the pack names none. The rendered note prin
 counts the rest; the payload is where the whole set lives. See [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
-`since` and `until` are the versions of the edition nearest the target that do declare the ID, as
-bare version labels: `since` the first after it, where an ID a later release added first appears,
-and `until` the last before it, where an ID a later release dropped was last declared. Each is
-absent when no such version is carried, so an ID no version declares has neither ([Versioning and
-Editions](/spec/versioning-editions/#which-registry-an-unknown-id-is-unknown-to)).
+`since` and `until` are the targets of the edition nearest the pinned one that do declare the ID,
+as bare version labels: `since` the first after it and `until` the last before it. They are the
+versions the pack carries a table for, so `since` bounds the release that added an ID rather than
+naming it. Each is absent when no such target is carried, so an ID no version declares has neither
+([Versioning and Editions](/spec/versioning-editions/#which-registry-an-unknown-id-is-unknown-to)).
 
 **`E_STATE_DOMAIN`** is about one pair of one state, so a literal with two faults is two findings.
 `key` and `value` are the pair as the state carries it. `reason` is `unknown_property` when the
 block has no such property, and `valid` then lists the properties it has, or `value_outside` when
 it has the property but not the value, and `valid` lists the values the property takes; both are
 the pinned target's, in its table's order. `origin` is `literal` for a state literal and `derived`
-for a state lowering wrote itself, which is a defect in Cairn rather than in the source.
+for a state lowering wrote itself, which is a defect in Cairn or the pack rather than in the source.
 `suggestion` is the nearest of `valid` within the typo threshold, and `valid_at` lists the other
 versions of the edition whose tables take the pair, oldest first; each is absent when it is empty.
 
@@ -802,10 +805,10 @@ cause, since the palette is counted without it. A stand-in overwritten by air, o
 is still a `W_PHASE_CONFLICT`, since no pack names air. A `door`, `pressure_plate` or `chest` built
 from its default block takes the pack's door, plate or chest, so it is such a block too, and a `W_WALKWAY_BLOCKED`
 note says "a block" where a pinned check would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`,
-`E_STATE_UNMAPPED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, and
-neither is `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables. Neither is
-`E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition` alone picks that
-edition's theme variants. With neither flag, each edition's variants are lowered: a finding on a line only one edition's
+`E_STATE_UNMAPPED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, nor
+are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, and `E_PARTIAL_BUILD`,
+which counts what a build at a target loses. `--edition` alone picks that edition's theme variants.
+With neither flag, each edition's variants are lowered: a finding on a line only one edition's
 variant reads is that edition's verdict and is reported, and any other finding is reported when
 every edition raises it with the same code at the same span, once for each wording the editions give
 it. A check with `--target` lowers once, against the target, so no finding is reported twice.
