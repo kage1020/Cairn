@@ -402,17 +402,17 @@ W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 
 ## 10.7 Java / Bedrock の可搬性
 
-導出規則はエディションごとに異なります。**`intent_state` は中立で、`resolved_state` はエディション別です。** 契約は「同じ intent から、エディションごとに最も近い正しい表現へ解決する」ことであり、「同じ結果を保証する」ことではありません。
+導出規則はエディションごとに異なります。**`intent_state` は中立で、そこから解決するブロックはエディションごとに異なります。** 契約は「同じ intent から、エディションごとに最も近い正しい表現へ解決する」ことであり、「同じ結果を保証する」ことではありません。
 
 ```yaml
-intent_state: { primitive: stairs, corner: inner_left, facing: east }   # エディション中立
-resolved_state:
+intent_state: { facing: east, shape: inner_left }                       # エディション中立
+written:
   java:            { facing: east, half: bottom, shape: inner_left }
   bedrock 1.21.60: { weirdo_direction: 0, upside_down_bit: false }      # shape が無いので角がつながらない
   bedrock 1.26.60: { minecraft:corner: inner_left, weirdo_direction: 0, upside_down_bit: false }
 ```
 
-lowering は `resolved_state` を、正規の語彙 ([マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン)) で 1 度だけ記録します。その語彙のステート名は Java のものです ([ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。Bedrock の行は、Bedrock バックエンドが書き出すときに、ターゲットのバージョンに対するパックのステートマップ ([行列の畳み込み](#edition-version-行列の畳み込み)) でその記録を写した結果なので、`cairn lower` が示すのは正規の行だけです。エントリが省いたプロパティはその Java ブロックの既定値を取り、waterlogged のエントリは `.mcstructure` の 2 つ目の層に水を持ちます。
+lowering は各メンバーの `resolved_state` を、lowering するターゲットに対して記録します ([ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。ブロック ID は、テーマのエディション別の変種も含めて、そのターゲットが解決したものです。ステート名とステートの値は正規の語彙のもので、Java のものと同じです ([マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン))。Bedrock の行は、Bedrock のライターが書き出すときに、ターゲットのバージョンに対するパックのステートマップ ([行列の畳み込み](#edition-version-行列の畳み込み)) でそのステートを写した結果なので、記録には現れません。エントリが省いたプロパティはその Java ブロックの既定値を取り、waterlogged のエントリは `.mcstructure` の 2 つ目の層に水を持ちます。
 
 解決結果の違いが見た目や機能の違いになるときは、ビルドがそれを知らせます。`themed-tower` の軒の階段は `shape=outer_left` で、Bedrock 1.21.60 にはそのステートがありません。
 

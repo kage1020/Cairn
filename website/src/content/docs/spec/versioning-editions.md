@@ -786,25 +786,27 @@ produces it.
 
 ## 10.7 Java / Bedrock portability
 
-Derivation rules are edition-specific: **`intent_state` is neutral, `resolved_state` is
-per-edition**. The contract is "from the same intent, resolve the nearest legal representation per
-edition", not "guarantee the same result".
+Derivation rules are edition-specific: **`intent_state` is neutral, and the blocks it resolves to
+differ by edition**. The contract is "from the same intent, resolve the nearest legal representation
+per edition", not "guarantee the same result".
 
 ```yaml
-intent_state: { primitive: stairs, corner: inner_left, facing: east }   # edition-neutral
-resolved_state:
+intent_state: { facing: east, shape: inner_left }                       # edition-neutral
+written:
   java:            { facing: east, half: bottom, shape: inner_left }
   bedrock 1.21.60: { weirdo_direction: 0, upside_down_bit: false }      # no shape → corners don't join
   bedrock 1.26.60: { minecraft:corner: inner_left, weirdo_direction: 0, upside_down_bit: false }
 ```
 
-Lowering records `resolved_state` once, in the canonical vocabulary
-([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)), whose state names
-are Java's ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)). The
-Bedrock rows are what the Bedrock backend maps that record to as it writes, through the pack's state
-map for the target version ([Folding the matrix](#folding-the-edition-version-matrix)), so
-`cairn lower` shows only the canonical one. A property the entry leaves out takes its Java block's
-default, and a waterlogged entry holds water in the `.mcstructure`'s second layer.
+Lowering records each member's `resolved_state` for the target it lowers at
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)): its block IDs are
+the ones that target resolved, a theme's edition variant included, and its state names and values
+are the canonical vocabulary's, which are Java's
+([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)). The Bedrock rows
+are what the Bedrock writer maps those states to as it writes, through the pack's state map for the
+target version ([Folding the matrix](#folding-the-edition-version-matrix)), so the record never
+shows them. A property the entry leaves out takes its Java block's default, and a waterlogged entry
+holds water in the `.mcstructure`'s second layer.
 
 When a resolved difference becomes a visual or functional one, the build says so. `themed-tower`'s
 eave stair is `shape=outer_left`, which Bedrock 1.21.60 has no state for:
