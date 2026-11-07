@@ -194,8 +194,9 @@ The built-in packs' block tables are extracted from the game, never written by h
 `.github/scripts/extract_registry.py` reads each targetable row of an edition's
 `data_versions.json`: for Java it runs that version's server jar with `--reports` and reads
 `reports/blocks.json`, and for Bedrock it reads the release's block palette as GeyserMC ships it,
-pinned in the script by commit and SHA-256. It rewrites the edition's `blocks.json`, the targetable
-rows' integers and `latest` in `data_versions.json`, and the `extracted` record in `pack.json`.
+pinned in the script by commit and SHA-256. It rewrites the edition's `blocks.json`, each
+targetable row's `data_version` on Java or `block_version` on Bedrock and `latest` in
+`data_versions.json`, and the `extracted` record in `pack.json`.
 
 ```sh
 python3 .github/scripts/extract_registry.py java --java <path to Java 25>

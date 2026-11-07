@@ -85,9 +85,9 @@ The hand-written semantic catalog records only the points that differ.
 The built-in packs fold only within an edition so far. Each edition has a registry pack of its own,
 whose `pack.json` names its `edition`, and neither inherits from the other yet. Inside one pack the
 `blocks` component holds one version's blocks, each with the values every state property takes.
-Each later version names the version it inherits, the blocks it adds, the blocks whose states it
-changes, and the IDs it removes (Java `1.20.4` → `1.21` → `1.21.4` → `26.3`, Bedrock `1.21.0` →
-`1.21.40` → `1.21.60` → `1.26.60`):
+Each later version inherits the one listed before it and names it, with the blocks it adds, the
+blocks whose states it changes, and the IDs it removes (Java `1.20.4` → `1.21` → `1.21.4` → `26.3`,
+Bedrock `1.21.0` → `1.21.40` → `1.21.60` → `1.26.60`):
 
 ```json
 { "mc_version": "26.3", "inherits": "1.21.4",
@@ -97,7 +97,8 @@ changes, and the IDs it removes (Java `1.20.4` → `1.21` → `1.21.4` → `26.3
 
 An ID's `since` and `until`, the first and last carried version that declares it, follow from that
 chain rather than being written beside it: `pale_oak_planks` is Java's from 1.21.4 on, and `chain`
-Java's until 1.21.4. Java values are strings, as the game's reports give them; Bedrock's are
+Java's until 1.21.4. A version between the two may still lack the ID, when one diff removes it and
+a later one adds it back. Java values are strings, as the game's reports give them; Bedrock's are
 booleans, integers and strings, as its block palette types them. A `materials` entry maps a token to
 one block ID, and its `overrides` name the versions that spell it differently, as Bedrock's does for
 1.21.0:
@@ -347,12 +348,12 @@ strictest, so their intersection is never empty. A constraint needing an upper b
 
 [§10.1](#101-the-target-is-a-compile-time-parameter) makes `DataVersion` the canonical ordering key,
 and `@requires` uses it. A floor is placed in the **target edition's** version table
-(`registry-data/{java,bedrock}/data_versions.json`) and weighed against the target's own
-`DataVersion`.
+(`registry-data/{java,bedrock}/data_versions.json`) and weighed against the target's own key in
+it: its `DataVersion` on Java, and on Bedrock the integer the table packs from the release's
+numbers.
 
 That table names the **release lines** of its edition that it carries, which is a different set
-from the versions the pack can *build* for: four per edition, the ones it ships block and material
-data for. A row says which it is (`targetable`). Java's rows are its releases from `1.14` on.
+from the versions the pack can *build* for, the ones it ships block and material data for. A row says which it is (`targetable`). Java's rows are its releases from `1.14` on.
 Bedrock's are its release lines, numbered in tens (`1.21.0`, `1.21.20`, `1.21.40`), without the
 hotfixes between them. Keeping the two sets apart is what lets "inside the table's span, naming no
 row" mean "no release this table can order": a floor of `1.21.1` is a Java release the pack cannot
@@ -364,10 +365,10 @@ answers, and only the first is exact:
 
 | The floor | Placed as | Because |
 |---|---|---|
-| Names a row (a missing trailing component is zero, and a leading zero in a numeric component is padding: `1.21` is Bedrock's `1.21.0`, `1.020` is Java's `1.20`) | That row's `DataVersion` | Exact. |
-| Names a pre-release of a row (`1.21.4-rc1`) | That row's `DataVersion` | Nothing ships between a release candidate and its release, so no supported target lies between them either. |
+| Names a row (a missing trailing component is zero, and a leading zero in a numeric component is padding: `1.21` is Bedrock's `1.21.0`, `1.020` is Java's `1.20`) | That row's key | Exact. |
+| Names a pre-release of a row (`1.21.4-rc1`) | That row's key | Nothing ships between a release candidate and its release, so no supported target lies between them either. |
 | Sits below every row, or above every one | Met by every target, or by none | Reached by comparing the floor's label against the first and last rows' *labels*, while which rows those are is decided by their *keys*, so it holds exactly when the table's labels sort the same way by text as by key. The registry pack loader checks that at load time. The floor's own label must be a dotted decimal to be compared at all. |
-| Anything else: inside the table's span, naming no row | Not placed at all | It has no `DataVersion`, and there is none to give it. `E_REQUIRES_UNORDERABLE`. |
+| Anything else: inside the table's span, naming no row | Not placed at all | It has no key, and there is none to give it. `E_REQUIRES_UNORDERABLE`. |
 
 The last row is a refusal, not a guess. `@requires version>=1.21.4` against Bedrock is exactly it:
 Java's release names no Bedrock release and sits between `1.21.0` and `1.21.20`. Comparing the
@@ -387,9 +388,8 @@ of that edition or by none.
 ### A floor may name its edition
 
 Java releases run `1.20.4 / 1.21 / 1.21.4 / 26.3` and Bedrock `1.21.0 / 1.21.40 / 1.21.60 /
-1.26.60`. The two are
-different scales, and a floor written in one of them means nothing in the other. So a floor may say
-which it is written in:
+1.26.60`. The two are different scales, and a floor written in one of them means nothing in the
+other. So a floor may say which it is written in:
 
 ```
 @requires java    version>=1.21.4
@@ -520,7 +520,7 @@ struct hut size=5x5
 $ cairn info hut.crn --editions java
 registry compatibility:  1.20.4 .. latest
 edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)
+buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
 intended targets:        (none declared)
 semantic-sensitive:      (none)
 ```
@@ -696,11 +696,12 @@ unchanged by this row: these ride inside the report rather than in the `{"diagno
 document, and a report is not a refusal.
 
 The text rows say none of this. `buildable targets: Bedrock: none (1.21.0, 1.21.40, 1.21.60,
-1.26.60 all refuse)` is true for every one of the five causes. Each cause is reported on stderr as well, though
-not in the same shape: the two floor causes print a `note:` carrying the position of the line, a
-dropped scope prints a `note:` naming the scope and no position, an entry the writer cannot carry
-prints a `note:` naming the entry, and a refused lowering prints the findings themselves under the
-version, each with its own position. Only the JSON lacks them, and `reason` fills that gap.
+1.26.60 all refuse)` is true for every one of the five causes. Each cause is reported on stderr as
+well, though not in the same shape: the two floor causes print a `note:` carrying the position of
+the line, a dropped scope prints a `note:` naming the scope and no position, an entry the writer
+cannot carry prints a `note:` naming the entry, and a refused lowering prints the findings
+themselves under the version, each with its own position. Only the JSON lacks them, and `reason`
+fills that gap.
 
 A fifth line, `recommended test targets`, belongs to this axis and answers a different question
 again: which versions are worth testing against. No code path emits it yet.

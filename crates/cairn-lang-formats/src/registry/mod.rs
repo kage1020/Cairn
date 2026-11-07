@@ -20,7 +20,7 @@ pub use load::{
     PackSource, PackView, RegistryError, RegistryPack, SUPPORTED_DATA_VERSIONS_SCHEMA,
     SUPPORTED_MANIFEST_SCHEMA, builtin_pack, load_builtin_pack, load_from_dir,
 };
-pub use manifest::{ExtractedTable, Extraction, PackFiles, PackManifest};
+pub use manifest::{PackFiles, PackManifest};
 
 /// Prepends `namespace` to a component entry that does not carry one.
 pub(crate) fn namespaced(namespace: &str, block: &str) -> String {

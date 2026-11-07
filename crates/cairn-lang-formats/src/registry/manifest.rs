@@ -16,33 +16,6 @@ pub struct PackManifest {
     pub description: String,
     /// The component files.
     pub files: PackFiles,
-    /// Where the block tables were extracted from; the compiler does not read it.
-    #[serde(default)]
-    pub extracted: Option<Extraction>,
-}
-
-/// The `extracted` record `.github/scripts/extract_registry.py` writes into `pack.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct Extraction {
-    /// The tool that wrote the tables, relative to the repository.
-    pub by: String,
-    /// One row per block table, oldest first.
-    pub blocks: Vec<ExtractedTable>,
-}
-
-/// The game data one version's block table was read from.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct ExtractedTable {
-    /// The version.
-    pub mc_version: String,
-    /// The file read: a Java server jar, or a Bedrock block palette.
-    pub url: String,
-    /// The file's SHA-1, as Mojang publishes a server jar's.
-    #[serde(default)]
-    pub sha1: Option<String>,
-    /// The file's SHA-256, as a Bedrock palette is pinned.
-    #[serde(default)]
-    pub sha256: Option<String>,
 }
 
 /// The component files of a pack; all but `data_versions` are optional, so older packs still load.

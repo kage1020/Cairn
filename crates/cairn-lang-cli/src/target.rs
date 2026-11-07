@@ -59,7 +59,7 @@ impl ResolvedTarget {
     pub(crate) fn order_key(&self) -> i64 {
         i64::from(match self {
             ResolvedTarget::Java(t) => t.data_version,
-            ResolvedTarget::Bedrock(t) => t.data_version,
+            ResolvedTarget::Bedrock(t) => t.order_key,
         })
     }
 
