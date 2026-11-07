@@ -1,7 +1,7 @@
 {
-  "schema_version": 2,
-  "latest": "1.21.4",
-  "source": "DataVersion extracted from the game's own version metadata (misode/mcmeta `summary/versions`); releases only.",
+  "schema_version": 3,
+  "latest": "26.3",
+  "source": "Release list and DataVersions from the game's own version metadata (misode/mcmeta `summary/versions`); releases only. A targetable row's DataVersion is read from its server jar's `version.json` by `.github/scripts/extract_registry.py`.",
   "versions": [
     {
       "mc_version": "1.14",
@@ -281,6 +281,11 @@
       "data_version": 4903,
       "released": "2026-06-16",
       "targetable": false
+    },
+    {
+      "mc_version": "26.3",
+      "data_version": 5023,
+      "released": "2026-09-15"
     }
   ]
 }

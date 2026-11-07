@@ -131,6 +131,8 @@ mod tests {
             | C::StateLiteralUnchecked
             | C::UnknownAbstractToken
             | C::UnknownId
+            | C::StateDomain
+            | C::StateUnmapped
             | C::IncompatibleMaterial
             | C::InvalidMember
             | C::StructNoSize
@@ -221,6 +223,8 @@ mod tests {
             [
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_INVALID_MEMBER",
+                "E_STATE_DOMAIN",
+                "E_STATE_UNMAPPED",
                 "E_UNKNOWN_ABSTRACT_TOKEN",
                 "E_UNKNOWN_ID",
             ],

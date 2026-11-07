@@ -117,7 +117,7 @@ fn draw_eave_band(
 
 /// Whether the stair's `kind=` is `stairs`, refusing any other with an `E_INVALID_MEMBER`.
 fn eave_kind_is_stairs(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
-    let primary = match member.intent_state.get("kind") {
+    let primary = match member.arguments.get("kind") {
         None => "stair has no `kind=`, so nothing says what it builds".to_owned(),
         Some(raw) => match &raw.value.kind {
             ValueKind::Ident(kind) if kind == "stairs" => return true,

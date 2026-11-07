@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::{
-    AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
+    Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
     SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan, role_of,
 };
 
@@ -239,6 +239,7 @@ fn lower_member(stmt: &Statement) -> Member {
     let mut id = None;
     let mut class = None;
     let mut mat_slot = None;
+    let mut arguments = Arguments::new();
     let mut intent_state = IntentState::new();
 
     for arg in args {
@@ -248,11 +249,14 @@ fn lower_member(stmt: &Statement) -> Member {
             "mat_slot" => hoist_label(&arg.value, &mut mat_slot),
             _ => false,
         };
-        if !hoisted {
-            intent_state.insert(
-                arg.key.clone(),
-                ValueWithSpan::from_value(arg.value.clone()),
-            );
+        if hoisted {
+            continue;
+        }
+        let value = ValueWithSpan::from_value(arg.value.clone());
+        if role.state_arguments().contains(&arg.key.as_str()) {
+            intent_state.insert(arg.key.clone(), value);
+        } else {
+            arguments.insert(arg.key.clone(), value);
         }
     }
 
@@ -267,8 +271,8 @@ fn lower_member(stmt: &Statement) -> Member {
         selector: lowered_selector,
         positional: positional.clone(),
         binding: binding.clone(),
+        arguments,
         intent_state,
-        resolved_state: None,
         children: lowered_children,
         span: span.clone(),
     }
@@ -284,8 +288,8 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
         selector: None,
         positional: Vec::new(),
         binding: None,
+        arguments: Arguments::new(),
         intent_state: IntentState::new(),
-        resolved_state: None,
         children: body,
         span,
     }
@@ -302,7 +306,7 @@ fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
     map
 }
 
-/// Move an identifier or string `value` into an empty `slot`; `false` leaves it in [`IntentState`].
+/// Move an identifier or string `value` into an empty `slot`; `false` leaves it in [`Arguments`].
 fn hoist_label(value: &Value, slot: &mut Option<Label>) -> bool {
     if slot.is_some() {
         return false;

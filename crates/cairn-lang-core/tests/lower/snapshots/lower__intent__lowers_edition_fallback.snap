@@ -45,29 +45,32 @@ structs:
       - role:
           kind: Floor
         mat_slot: floor
+        arguments: {}
         intent_state: {}
       - class: outer
         role:
           kind: Walls
         mat_slot: wall
-        intent_state:
+        arguments:
           height:
             kind: Int
             value: 3
+        intent_state: {}
       - role:
           kind: Door
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
           at:
             kind: Ident
             value: center
+        intent_state: {}
       - class: display
         role:
           kind: Window
         mat_slot: floating_text
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
@@ -82,3 +85,4 @@ structs:
             value:
               w: 1
               h: 1
+        intent_state: {}

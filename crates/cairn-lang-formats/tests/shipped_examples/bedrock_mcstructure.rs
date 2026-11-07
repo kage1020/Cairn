@@ -2,30 +2,41 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
-use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
+use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag};
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 
-use crate::common::{block_palette, dropped_shape, latest, lower_example, note_fields};
+use crate::common::{block_palette, dropped_shape, latest, lower_example, note_fields, states_for};
 
 /// An example lowered as `cairn compile --edition bedrock` lowers it.
 fn lower_bedrock(example: &str) -> BlockArrayIr {
     lower_example(example, Edition::Bedrock, Some(latest(Edition::Bedrock)))
 }
 
+/// Each structure of `example` built at `mc_version`, with the notes it raised.
+fn built_at(example: &str, mc_version: &str) -> Vec<(String, Vec<ParityNote>)> {
+    let out = lower_example(example, Edition::Bedrock, Some(mc_version));
+    let target = resolve_bedrock_target(mc_version).expect("known target");
+    out.structures
+        .iter()
+        .map(|(scope, ba)| {
+            let (_root, notes) = build_mcstructure_tag(ba, &target, &states_for(&target))
+                .unwrap_or_else(|e| panic!("build `{scope}` at {mc_version}: {e}"));
+            (scope.clone(), notes)
+        })
+        .collect()
+}
+
 #[test]
 fn cottage_compiles_to_mcstructure_without_degradation() {
-    let out = lower_bedrock("cottage.crn");
-    let target = resolve_bedrock_target("latest").expect("known target");
-    let mut total_notes = 0;
-    for (scope, ba) in &out.structures {
-        let (_root, notes) =
-            build_mcstructure_tag(ba, &target).unwrap_or_else(|e| panic!("build `{scope}`: {e}"));
-        total_notes += notes.len();
+    for version in ["1.21.60", latest(Edition::Bedrock)] {
+        let built = built_at("cottage.crn", version);
+        let notes: Vec<&ParityNote> = built.iter().flat_map(|(_, notes)| notes).collect();
+        assert_eq!(
+            notes,
+            [] as [&ParityNote; 0],
+            "cottage's straight gable stairs map to Bedrock {version} losslessly"
+        );
     }
-    assert_eq!(
-        total_notes, 0,
-        "cottage's straight gable stairs should map to Bedrock losslessly"
-    );
 }
 
 #[test]
@@ -46,7 +57,7 @@ fn cottage_roof_stairs_carry_bedrock_states() {
         .find(|e| e.id.ends_with("_stairs"))
         .expect("stair present")
         .id;
-    let (root, _notes) = build_mcstructure_tag(ba, &target).expect("build");
+    let (root, _notes) = build_mcstructure_tag(ba, &target, &states_for(&target)).expect("build");
 
     // By `name`, since translation can merge Java entries into one `block_palette` entry.
     let palette = block_palette(&root);
@@ -76,20 +87,14 @@ fn cottage_roof_stairs_carry_bedrock_states() {
 }
 
 #[test]
-fn themed_tower_compiles_to_mcstructure_with_shape_degradation() {
-    let out = lower_bedrock("themed-tower.crn");
-    let target = resolve_bedrock_target("latest").expect("known target");
-    let mut built = Vec::new();
-    for (scope, ba) in &out.structures {
-        let (_root, notes) =
-            build_mcstructure_tag(ba, &target).unwrap_or_else(|e| panic!("build `{scope}`: {e}"));
-        built.push((scope.as_str(), notes));
-    }
+fn themed_tower_drops_its_corner_stair_only_where_bedrock_has_no_corner_state() {
+    let built = built_at("themed-tower.crn", "1.21.60");
     let degraded: Vec<_> = built
         .iter()
         .filter(|(_, notes)| !notes.is_empty())
-        .map(|(scope, notes)| (*scope, note_fields(notes)))
+        .map(|(scope, notes)| (scope.as_str(), note_fields(notes)))
         .collect();
+    let corner = dropped_shape("outer_left", &["1.21.60"]);
     assert_eq!(
         degraded,
         [(
@@ -97,9 +102,17 @@ fn themed_tower_compiles_to_mcstructure_with_shape_degradation() {
             vec![(
                 "minecraft:dark_oak_stairs",
                 "facing=south,half=top,shape=outer_left",
-                &dropped_shape("outer_left"),
+                &corner,
             )],
         )],
         "themed-tower's one non-straight stair palette entry",
+    );
+
+    let latest = built_at("themed-tower.crn", latest(Edition::Bedrock));
+    let notes: Vec<&ParityNote> = latest.iter().flat_map(|(_, notes)| notes).collect();
+    assert_eq!(
+        notes,
+        [] as [&ParityNote; 0],
+        "the latest version keeps the corner"
     );
 }

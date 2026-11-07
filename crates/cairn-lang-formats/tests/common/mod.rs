@@ -6,7 +6,8 @@ use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_arra
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::ParityNote;
-use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+use cairn_lang_formats::data_version::BedrockTarget;
+use cairn_lang_formats::registry::{RegistryPack, VersionStates, builtin_pack};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
 
@@ -171,9 +172,28 @@ pub fn note_fields(notes: &[ParityNote]) -> Vec<(&str, &str, &DroppedIntent)> {
         .collect()
 }
 
-/// The intent a stair drops when Bedrock has no form for its `shape=value`.
-pub fn dropped_shape(value: &str) -> DroppedIntent {
-    DroppedIntent::Shape {
+/// Why a Bedrock version without a stair `shape` state drops one, as the built-in pack words it.
+pub const NO_SHAPE: &str = "this Bedrock version has no stair `shape` state; its stairs render \
+                            straight, so corners show visual gaps";
+
+/// The intent a stair drops at `mc_versions`, which have no form for its `shape=value`.
+pub fn dropped_shape(value: &str, mc_versions: &[&str]) -> DroppedIntent {
+    DroppedIntent {
+        key: "shape".to_owned(),
         value: value.to_owned(),
+        mc_versions: mc_versions.iter().map(|v| (*v).to_owned()).collect(),
+        reason: NO_SHAPE.to_owned(),
     }
+}
+
+/// The built-in Bedrock pack's state map at `target`'s version.
+///
+/// # Panics
+///
+/// When the pack maps no states there, which its loader refuses for a targetable version.
+pub fn states_for(target: &BedrockTarget) -> VersionStates<'_> {
+    builtin_pack(Edition::Bedrock)
+        .states()
+        .at(&target.mc_version)
+        .expect("the built-in Bedrock pack maps every targetable version")
 }

@@ -215,7 +215,7 @@ fn collect_member<'a>(
         }
     }
 
-    for (key, vspan) in &m.intent_state.fields {
+    for (key, vspan) in m.written_fields() {
         let named = signal_named_by(&vspan.value);
         let Some(claim) = binding_claim(key, named) else {
             continue;
