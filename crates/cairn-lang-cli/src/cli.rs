@@ -175,10 +175,10 @@ pub(crate) enum Command {
             (`E_STATE_UNMAPPED`), and intent it can only approximate (stair `shape` before \
             1.26.60) is dropped with a `W_INTENT_DEGRADED` warning rather than silently. \
             `--target` pins the one version a block id and its states have an answer for, which \
-            is what lets the compile check them (`E_UNKNOWN_ID`, `E_STATE_UNMAPPED`); `cairn check \
-            --edition E --target V` pins the same pair to reach those two findings without \
-            building anything. Exits 0 on success, 1 on parse, lowering, or I/O failure \
-            (including an unsupported `--target` or a Bedrock state literal outside the Java \
+            is what lets the compile check them (`E_UNKNOWN_ID`, `E_STATE_DOMAIN`, \
+            `E_STATE_UNMAPPED`); `cairn check --edition E --target V` pins the same pair to reach \
+            those findings without building anything. Exits 0 on success, 1 on parse, lowering, \
+            or I/O failure (including an unsupported `--target` or a state literal outside its \
             block's states), and 2 when the source file cannot be located"
     )]
     Compile {
