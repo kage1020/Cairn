@@ -19,6 +19,7 @@ use crate::block_array::{
 
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
+use super::connections::derive_connections;
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::door::{HungDoor, hang_doors};
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
@@ -243,7 +244,7 @@ fn resolved_members(
 }
 
 /// Paint one body's members onto a fresh canvas, phase by phase in `spec/compilation` "Phase
-/// evaluation" order.
+/// evaluation" order, then set the connection states the painted blocks derive.
 ///
 /// No test pins the order: neighbouring phases write disjoint cells, so only a two-step swap shows.
 fn paint_phases(
@@ -261,6 +262,9 @@ fn paint_phases(
         if index == Phase::Openings.index() {
             hang_doors(&hung, palette, &mut canvas);
         }
+    }
+    if let Some(registry) = ctx.registry {
+        derive_connections(&mut canvas, palette, registry);
     }
     canvas
 }

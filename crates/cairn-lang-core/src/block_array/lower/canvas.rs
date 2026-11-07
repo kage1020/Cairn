@@ -112,6 +112,16 @@ impl ScopePalette {
         PaletteIndex(next)
     }
 
+    /// How many states the palette holds, air included.
+    pub(super) fn len(&self) -> usize {
+        self.palette.entries.len()
+    }
+
+    /// The state at `slot`, which must be below [`Self::len`].
+    pub(super) fn state(&self, slot: usize) -> &BlockState {
+        &self.palette.entries[slot]
+    }
+
     /// The slot every stand-in shares, once one is interned.
     pub(super) fn stand_in(&self) -> Option<PaletteIndex> {
         self.stand_in
@@ -160,6 +170,21 @@ impl Canvas {
     /// Per voxel: `0` while unwritten, `n + 1` once member `n` of the flattened paint list did.
     pub(super) fn owners(&self) -> &[u32] {
         &self.owners
+    }
+
+    /// The palette slot `pos` holds, or `None` outside the grid.
+    pub(super) fn slot_at(&self, pos: (u32, u32, u32)) -> Option<PaletteIndex> {
+        Some(self.voxels[self.dims.index(pos.0, pos.1, pos.2)?])
+    }
+
+    /// Every cell a member wrote, with the slot it holds.
+    pub(super) fn cells(&self) -> impl Iterator<Item = ((u32, u32, u32), PaletteIndex)> + '_ {
+        self.voxels
+            .iter()
+            .zip(&self.owners)
+            .enumerate()
+            .filter(|(_, (_, owner))| **owner != 0)
+            .filter_map(|(i, (slot, _))| Some((self.dims.position(i)?, *slot)))
     }
 
     /// The member of the flattened paint list that wrote `pos` last, or `None` for a cell no member

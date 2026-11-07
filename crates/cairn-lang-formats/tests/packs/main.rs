@@ -5,6 +5,7 @@
 pub mod common;
 
 mod aliases;
+mod connections;
 mod declared_elsewhere;
 mod ids_exist;
 mod state_domain;

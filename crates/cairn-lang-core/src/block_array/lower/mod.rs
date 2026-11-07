@@ -10,6 +10,7 @@ mod body;
 mod canvas;
 mod circuit;
 mod connect;
+mod connections;
 mod diag;
 mod door;
 mod geometry_material;

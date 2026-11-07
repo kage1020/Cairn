@@ -1031,6 +1031,7 @@ fn bedrock_pack(data_versions: &'static str) -> Result<RegistryPack, RegistryErr
         materials: "",
         blocks: "",
         aliases: "",
+        connections: "",
         states: None,
         sensitivity: None,
     };
@@ -1303,6 +1304,7 @@ fn a_state_map_the_binary_does_not_embed_is_refused() {
         materials: "",
         blocks: "",
         aliases: "",
+        connections: "",
         states: None,
         sensitivity: Some(NO_SENSITIVITY),
     };

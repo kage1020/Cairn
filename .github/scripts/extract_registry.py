@@ -19,9 +19,17 @@ family is checked against the release's palette. Reading a mapping takes its Jav
 `--reports`, so the Bedrock run needs Java too. A Java property no Bedrock state reads must be
 classified by hand in the pack's `sensitivity.json`.
 
+Both packs get a connection table: what each block is to the rules that join panes, fences and
+walls to their neighbours, read off the Java release each version's states follow. Which blocks
+are walls, fences and fence gates, and which raise a wall's post, are the server jar's block tags;
+a pane is a block with a pane's states that is no fence, and the blocks never joined by a face are
+those `Block.isExceptionForConnection` names. Which faces of each state are whole comes from the
+block models the release's client jar ships.
+
 The run rewrites the edition's `blocks.json`, the targetable rows' integers and `latest` in
-`data_versions.json`, Bedrock's `states.json`, and the `extracted` record in `pack.json`. With
-`--check` it writes nothing and fails when a committed file differs from what the game says.
+`data_versions.json`, Bedrock's `states.json`, both packs' `connections.json`, and the `extracted`
+record in `pack.json`. With `--check` it writes nothing and fails when a committed file differs from
+what the game says.
 
 Standard library only: it runs on a bare `ubuntu-latest` runner.
 """
@@ -30,10 +38,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import itertools
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 import zipfile
@@ -49,6 +59,7 @@ from minecraft_load import (
     read_nbt,
     server_download,
     server_jar,
+    version_meta,
     write_atomically,
 )
 
@@ -59,6 +70,7 @@ BLOCKS_SCHEMA = 2
 DATA_VERSIONS_SCHEMA = 3
 STATES_SCHEMA = 1
 SENSITIVITY_SCHEMA = 1
+CONNECTIONS_SCHEMA = 1
 
 GEYSER_PALETTE = (
     "https://raw.githubusercontent.com/GeyserMC/Geyser/{commit}/core/src/main/resources/bedrock/{file}"
@@ -532,6 +544,462 @@ def state_map_sources(tables: list[Table]) -> list[dict]:
     return sources
 
 
+# --- the connection table -----------------------------------------------------------------------
+
+# A block's faces as the game names the directions they look toward, each with the axis it is
+# perpendicular to and whether it is that axis's high side.
+FACES = {
+    "down": (1, False),
+    "up": (1, True),
+    "north": (2, False),
+    "south": (2, True),
+    "west": (0, False),
+    "east": (0, True),
+}
+# The block tags the connection rules read.
+CONNECTION_TAGS = ("walls", "fences", "wooden_fences", "fence_gates", "wall_post_override")
+# What `Block.isExceptionForConnection` names: a pane, fence or wall never joins these by a face.
+# The game tests `LeavesBlock` rather than the tag, and the tag lists every one of them.
+EXCEPTION_TAGS = ("leaves", "shulker_boxes")
+EXCEPTION_BLOCKS = ("barrier", "carved_pumpkin", "jack_o_lantern", "melon", "pumpkin")
+BOOLEAN = ["true", "false"]
+# The states each kind of connecting block holds, with the values the rules read and write.
+KIND_STATES = {
+    "pane": {side: BOOLEAN for side in ("east", "north", "south", "west")},
+    "fence": {side: BOOLEAN for side in ("east", "north", "south", "west")},
+    "wall": {
+        **{side: ["none", "low", "tall"] for side in ("east", "north", "south", "west")},
+        "up": BOOLEAN,
+    },
+    "fence_gate": {
+        "facing": ["north", "south", "west", "east"],
+        "in_wall": BOOLEAN,
+        "open": BOOLEAN,
+    },
+}
+# A pane is any block holding exactly these states that is no fence: the game has no tag for them.
+PANE_STATES = {**KIND_STATES["pane"], WATER_LAYER_STATE: BOOLEAN}
+# The states the rules read of a neighbouring fence gate, which it does not derive.
+GATE_READS = ("facing", "open")
+
+# A box of a model, `(low corner, high corner, faces it shows)`.
+Box = tuple[tuple[float, float, float], tuple[float, float, float], frozenset[str]]
+
+
+@dataclass(frozen=True)
+class Sturdy:
+    """The whole faces of a block's states, looked up from the values of `reads`."""
+
+    reads: tuple[str, ...]
+    # The `reads` values, comma-joined, to the faces whole there; one `""` key without `reads`.
+    table: tuple[tuple[str, tuple[str, ...]], ...]
+
+
+@dataclass(frozen=True)
+class Joins:
+    """What one block is to the connection rules at one release."""
+
+    # `pane`, `wall`, `fence`, `wooden_fence` or `fence_gate`; `None` for one that only has faces.
+    kind: str | None
+    exception: bool
+    # In `wall_post_override`: a wall under it raises its post.
+    raises_post: bool
+    # `None` when no state has a whole face.
+    sturdy: Sturdy | None
+    # The default state's value of each property the rules read of the block, by name.
+    defaults: tuple[tuple[str, str], ...] = ()
+
+
+def nested_jar(jar: Path) -> zipfile.ZipFile:
+    """The server jar a bundler `jar` carries, which holds the game's data."""
+    try:
+        outer = zipfile.ZipFile(jar)
+        inner = [
+            name
+            for name in outer.namelist()
+            if name.startswith("META-INF/versions/") and name.endswith(".jar")
+        ]
+        if len(inner) != 1:
+            raise Refused(f"{jar.name} bundles {len(inner)} server jars, not one")
+        return zipfile.ZipFile(io.BytesIO(outer.read(inner[0])))
+    except (OSError, zipfile.BadZipFile) as problem:
+        raise Refused(f"{jar.name} does not read: {problem}") from None
+
+
+def client_jar(version: str, cache: Path) -> Path:
+    """The client jar for `version` in `cache`, which holds the block models."""
+    download = version_meta(version, cache)["downloads"]["client"]
+    jar = cache / f"client-{version}.jar"
+    if not jar.exists() or hashlib.sha1(jar.read_bytes()).hexdigest() != download["sha1"]:
+        body = fetch(download["url"], 300)
+        if hashlib.sha1(body).hexdigest() != download["sha1"]:
+            raise Refused(f"the {version} client jar does not match the SHA-1 Mojang publishes")
+        write_atomically(jar, body)
+    return jar
+
+
+def tag_files(server: zipfile.ZipFile, tag: str) -> list[str]:
+    """The files that declare block tag `tag`: the game's own, then each feature pack's.
+
+    A feature pack's blocks exist only in a world that enables it, and so do the tags it adds them
+    to, so its entries are read with the game's.
+    """
+    # The folder is `blocks` before 1.21 and `block` from it.
+    declares = re.compile(
+        rf"data/{NAMESPACE}/(?:datapacks/[^/]+/data/{NAMESPACE}/)?tags/blocks?/{re.escape(tag)}\.json"
+    )
+    found = [name for name in server.namelist() if declares.fullmatch(name)]
+    return sorted(found, key=lambda name: ("/datapacks/" in name, name))
+
+
+def tag_members(server: zipfile.ZipFile, tag: str) -> set[str]:
+    """The bare ids block tag `tag` holds, its nested tags followed."""
+    held: set[str] = set()
+    pending, seen = [tag], set()
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        files = tag_files(server, name)
+        if not files:
+            raise Refused(f"the server declares no block tag `{name}`")
+        for path in files:
+            body = json.loads(server.read(path))
+            if body.get("replace"):
+                raise Refused(f"{path} replaces the tag rather than adding to it")
+            for entry in body["values"]:
+                entry = entry["id"] if isinstance(entry, dict) else entry
+                if entry.startswith("#"):
+                    pending.append(bare(entry[1:]))
+                else:
+                    held.add(bare(entry))
+    return held
+
+
+def turned(vector: tuple[float, float, float], x: int, y: int) -> tuple[float, float, float]:
+    """`vector` turned as a block state's `x` and `y` turn its model: first about x, then y."""
+    if x % 90 or y % 90:
+        raise Refused(f"a model is turned by x={x}, y={y}, which is no quarter turn")
+    a, b, c = vector
+    for _ in range(x // 90 % 4):
+        # A quarter turn about x takes up to north.
+        a, b, c = a, c, -b
+    for _ in range(y // 90 % 4):
+        # A quarter turn about y takes north to east.
+        a, b, c = -c, b, a
+    return (a, b, c)
+
+
+def face_toward(normal: tuple[float, float, float]) -> str:
+    """The face whose outward normal is `normal`."""
+    for face, (axis, high) in FACES.items():
+        if normal[axis] == (1 if high else -1) and sum(map(abs, normal)) == 1:
+            return face
+    raise Refused(f"{normal} is no face's normal")
+
+
+def normal_of(face: str) -> tuple[int, int, int]:
+    """The outward normal of `face`."""
+    axis, high = FACES[face]
+    return tuple((1 if high else -1) if i == axis else 0 for i in range(3))
+
+
+def model_boxes(client: zipfile.ZipFile, ref: str, cache: dict) -> list[Box]:
+    """The boxes of the model `ref` names that sit square in the block, with the faces each shows.
+
+    A model the game draws in code has none, and a box turned by an angle covers no face whole.
+    """
+    if ref in cache:
+        return cache[ref]
+    path = bare(ref if ":" in ref else f"{NAMESPACE}:{ref}")
+    if path.startswith("builtin/"):
+        cache[ref] = []
+        return []
+    try:
+        model = json.loads(client.read(f"assets/{NAMESPACE}/models/{path}.json"))
+    except KeyError:
+        raise Refused(f"the client ships no model `{ref}`") from None
+    if "elements" in model:
+        boxes = []
+        for element in model["elements"]:
+            rotation = element.get("rotation", {})
+            if any(rotation.get(key, 0) for key in ("angle", "x", "y", "z")):
+                continue
+            unknown = set(element["faces"]) - set(FACES)
+            if unknown:
+                raise Refused(f"model `{ref}` shows {sorted(unknown)}, which are no faces")
+            boxes.append(
+                (tuple(element["from"]), tuple(element["to"]), frozenset(element["faces"]))
+            )
+    elif "parent" in model:
+        boxes = model_boxes(client, model["parent"], cache)
+    else:
+        boxes = []
+    cache[ref] = boxes
+    return boxes
+
+
+def placed_boxes(boxes: list[Box], x: int, y: int) -> list[Box]:
+    """`boxes` turned about the block's centre as a state's `x` and `y` turn them."""
+    placed = []
+    for low, high, faces in boxes:
+        corners = [
+            tuple(c + 8 for c in turned(tuple(c - 8 for c in corner), x, y))
+            for corner in (low, high)
+        ]
+        placed.append(
+            (
+                tuple(min(a, b) for a, b in zip(*corners)),
+                tuple(max(a, b) for a, b in zip(*corners)),
+                frozenset(face_toward(turned(normal_of(face), x, y)) for face in faces),
+            )
+        )
+    return placed
+
+
+def covers_square(rects: list[tuple[float, float, float, float]]) -> bool:
+    """Whether `rects`, each `(u0, u1, v0, v1)`, cover the square from 0 to 16 between them."""
+    us = sorted({0, 16, *(u for r in rects for u in r[:2] if 0 < u < 16)})
+    vs = sorted({0, 16, *(v for r in rects for v in r[2:] if 0 < v < 16)})
+    return all(
+        any(r[0] <= u0 and u1 <= r[1] and r[2] <= v0 and v1 <= r[3] for r in rects)
+        for u0, u1 in zip(us, us[1:])
+        for v0, v1 in zip(vs, vs[1:])
+    )
+
+
+def whole_faces(boxes: list[Box]) -> frozenset[str]:
+    """The faces of the block that the faces `boxes` show on its boundary cover whole."""
+    whole = set()
+    for face, (axis, high) in FACES.items():
+        plane = 16 if high else 0
+        across = [i for i in range(3) if i != axis]
+        rects = [
+            (low[across[0]], top[across[0]], low[across[1]], top[across[1]])
+            for low, top, shows in boxes
+            if face in shows and (top if high else low)[axis] == plane
+        ]
+        if covers_square(rects):
+            whole.add(face)
+    return frozenset(whole)
+
+
+def condition_holds(when: dict | None, properties: dict[str, str]) -> bool:
+    """Whether a multipart `when` holds for `properties`."""
+    if when is None:
+        return True
+    if "OR" in when:
+        return any(condition_holds(term, properties) for term in when["OR"])
+    if "AND" in when:
+        return all(condition_holds(term, properties) for term in when["AND"])
+    for key, wanted in when.items():
+        wanted = wanted if isinstance(wanted, str) else json.dumps(wanted)
+        negated = wanted.startswith("!")
+        if (properties.get(key) in wanted.lstrip("!").split("|")) == negated:
+            return False
+    return True
+
+
+def state_models(blockstate: dict, properties: dict[str, str]) -> list[list[dict]]:
+    """Each set of models the game may draw `properties` with, every set one choice per part."""
+    listed = lambda models: models if isinstance(models, list) else [models]  # noqa: E731
+    if "variants" in blockstate:
+        matching = [
+            models
+            for key, models in blockstate["variants"].items()
+            if all(
+                properties.get(k) == v
+                for k, v in (pair.split("=") for pair in key.split(",") if pair)
+            )
+        ]
+        if len(matching) > 1:
+            raise Refused(f"{len(matching)} variants match the state {properties}")
+        return [[model] for model in listed(matching[0])] if matching else []
+    parts = [
+        listed(part["apply"])
+        for part in blockstate.get("multipart", [])
+        if condition_holds(part.get("when"), properties)
+    ]
+    return [list(choice) for choice in itertools.product(*parts)] if parts else []
+
+
+def state_faces(
+    client: zipfile.ZipFile, blockstate: dict, properties: dict[str, str], cache: dict
+) -> frozenset[str]:
+    """The faces of a state that are whole whichever of its models the game draws."""
+    drawn = state_models(blockstate, properties)
+    if not drawn:
+        return frozenset()
+    faces = None
+    for models in drawn:
+        boxes = [
+            box
+            for model in models
+            for box in placed_boxes(
+                model_boxes(client, model["model"], cache), model.get("x", 0), model.get("y", 0)
+            )
+        ]
+        whole = whole_faces(boxes)
+        faces = whole if faces is None else faces & whole
+    return faces
+
+
+def block_sturdy(
+    client: zipfile.ZipFile, name: str, block: dict, cache: dict
+) -> Sturdy | None:
+    """The whole faces of each state of `block`, read off its models; `None` when none has one."""
+    try:
+        blockstate = json.loads(client.read(f"assets/{NAMESPACE}/blockstates/{name}.json"))
+    except KeyError:
+        # Air and the other blocks the game never draws ship no blockstate file.
+        return None
+    rows = []
+    for state in block["states"]:
+        properties = dict(state.get("properties", {}))
+        faces = state_faces(client, blockstate, properties, cache)
+        rows.append((properties, {"faces": tuple(face for face in FACES if face in faces)}))
+    if not any(bedrock["faces"] for _, bedrock in rows):
+        return None
+    rule = decided_by(rows, sorted(block.get("properties", {})), "faces")
+    if rule is None:
+        raise Refused(f"the faces of `{name}` are no function of its states")
+    return Sturdy(rule.reads, rule.table)
+
+
+def block_kind(name: str, states: dict, tags: dict[str, set[str]]) -> str | None:
+    """Which kind of connecting block `name` is, checked against the states that kind derives."""
+    kinds = [
+        kind
+        for kind, held in (
+            ("wall", name in tags["walls"]),
+            ("fence", name in tags["fences"]),
+            ("fence_gate", name in tags["fence_gates"]),
+            ("pane", states == PANE_STATES and name not in tags["fences"]),
+        )
+        if held
+    ]
+    if len(kinds) > 1:
+        raise Refused(f"`{name}` is both {' and '.join(kinds)}")
+    if not kinds:
+        return None
+    kind = kinds[0]
+    if any(states.get(key) != values for key, values in KIND_STATES[kind].items()):
+        raise Refused(f"`{name}` is a {kind} without a {kind}'s states")
+    if kind == "fence" and name in tags["wooden_fences"]:
+        return "wooden_fence"
+    return kind
+
+
+def connection_table(
+    report: dict, server: zipfile.ZipFile, client: zipfile.ZipFile
+) -> dict[str, Joins]:
+    """What each block of a `--reports` `blocks.json` that the connection rules read is to them."""
+    tags = {tag: tag_members(server, tag) for tag in (*CONNECTION_TAGS, *EXCEPTION_TAGS)}
+    exceptions = set(EXCEPTION_BLOCKS).union(*(tags[tag] for tag in EXCEPTION_TAGS))
+    cache: dict = {}
+    table = {}
+    for identifier, block in sorted(report.items()):
+        name = bare(identifier)
+        states = {k: list(v) for k, v in block.get("properties", {}).items()}
+        kind = block_kind(name, states, tags)
+        sturdy = block_sturdy(client, name, block, cache)
+        reads = {*(sturdy.reads if sturdy else ()), *(GATE_READS if kind == "fence_gate" else ())}
+        default = next(dict(s.get("properties", {})) for s in block["states"] if s.get("default"))
+        joins = Joins(
+            kind=kind,
+            exception=name in exceptions,
+            raises_post=name in tags["wall_post_override"],
+            sturdy=sturdy,
+            defaults=tuple(sorted((key, default[key]) for key in reads)),
+        )
+        if joins != Joins(None, False, False, None):
+            table[name] = joins
+    return table
+
+
+def extract_connections(
+    releases: dict[str, str], java: str, cache: Path, work: Path
+) -> dict[str, dict[str, Joins]]:
+    """Each pack version's connection table, read off the Java release `releases` names for it."""
+    by_release: dict[str, dict[str, Joins]] = {}
+    for release in dict.fromkeys(releases.values()):
+        report = java_report(release, java, cache, work)
+        jar, _ = server_jar(release, cache)
+        with nested_jar(jar) as server, zipfile.ZipFile(client_jar(release, cache)) as client:
+            by_release[release] = connection_table(report.blocks, server, client)
+        print(f"connections from Java {release}: {len(by_release[release])} blocks", flush=True)
+    return {version: by_release[release] for version, release in releases.items()}
+
+
+def joins_json(joins: Joins, versions: list[str], ids: list[str]) -> dict:
+    """One `connections.json` row."""
+    row: dict = {"mc_versions": versions, "ids": ids}
+    if joins.kind is not None:
+        row["kind"] = joins.kind
+    if joins.exception:
+        row["exception"] = True
+    if joins.raises_post:
+        row["raises_post"] = True
+    if joins.defaults:
+        row["defaults"] = dict(joins.defaults)
+    if joins.sturdy is not None:
+        sturdy = joins.sturdy
+        if sturdy.reads:
+            row["sturdy"] = {
+                "reads": list(sturdy.reads),
+                "map": {key: list(faces) for key, faces in sturdy.table},
+            }
+        else:
+            row["sturdy"] = list(sturdy.table[0][1])
+    return row
+
+
+def connections_text(tables: dict[str, dict[str, Joins]]) -> str:
+    """`connections.json`: one row per way of joining and set of versions, with its ids."""
+    order = list(tables)
+    held: dict[tuple[Joins, str], list[str]] = {}
+    for version, table in tables.items():
+        for name, joins in table.items():
+            held.setdefault((joins, name), []).append(version)
+    rows: dict[tuple[Joins, tuple[str, ...]], list[str]] = {}
+    for (joins, name), versions in held.items():
+        rows.setdefault((joins, tuple(versions)), []).append(name)
+    ordered = sorted(
+        rows.items(),
+        key=lambda row: (order.index(row[0][1][0]), -len(row[0][1]), sorted(row[1])[0]),
+    )
+    lines = [
+        "{",
+        f'  "schema_version": {CONNECTIONS_SCHEMA},',
+        f'  "namespace": {json.dumps(NAMESPACE)},',
+        '  "rows": [',
+    ]
+    for i, ((joins, versions), ids) in enumerate(ordered):
+        row = json.dumps(joins_json(joins, list(versions), sorted(ids)), ensure_ascii=False)
+        lines.append(f"    {row}" + ("," if i < len(ordered) - 1 else ""))
+    lines += ["  ]", "}"]
+    return "\n".join(lines) + "\n"
+
+
+def connection_sources(releases: dict[str, str], cache: Path) -> list[dict]:
+    """Where each version's connection table came from, as `pack.json` records it."""
+    sources = []
+    for version, release in releases.items():
+        downloads = version_meta(release, cache)["downloads"]
+        sources.append(
+            {
+                "mc_version": version,
+                "java": release,
+                **{
+                    jar: {"url": downloads[jar]["url"], "sha1": downloads[jar]["sha1"]}
+                    for jar in ("server", "client")
+                },
+            }
+        )
+    return sources
+
+
 # --- the pack files -----------------------------------------------------------------------------
 
 
@@ -614,11 +1082,15 @@ def updated_data_versions(table: dict, edition: str, tables: list[Table]) -> dic
 
 @dataclass(frozen=True)
 class Extracted:
-    """What one edition's extraction read: its block tables, and Bedrock's state maps."""
+    """What one edition's extraction read: its block tables, Bedrock's state maps, and each
+    version's connection table."""
 
     tables: list[Table]
     # Empty for Java, whose states are the canonical vocabulary itself.
     maps: dict[str, VersionMap]
+    connections: dict[str, dict[str, Joins]]
+    # Where each Java release's jars came from.
+    connection_sources: list[dict]
 
 
 def updated_manifest(manifest: dict, extracted: Extracted) -> dict:
@@ -630,6 +1102,7 @@ def updated_manifest(manifest: dict, extracted: Extracted) -> dict:
     }
     if extracted.maps:
         record["states"] = state_map_sources(extracted.tables)
+    record["connections"] = extracted.connection_sources
     return {**manifest, "extracted": record}
 
 
@@ -638,8 +1111,11 @@ def pack_files(edition: str, extracted: Extracted) -> dict[Path, str]:
     pack = PACKS / edition
     manifest = json.loads((pack / "pack.json").read_text(encoding="utf-8"))
     versions = json.loads((pack / "data_versions.json").read_text(encoding="utf-8"))
+    if "connections" not in manifest["files"]:
+        raise Refused(f"{edition}/pack.json names no `connections` file")
     files = {
         pack / manifest["files"]["blocks"]: blocks_text(extracted.tables),
+        pack / manifest["files"]["connections"]: connections_text(extracted.connections),
         pack / manifest["files"]["data_versions"]: json_text(
             updated_data_versions(versions, edition, extracted.tables)
         ),
@@ -671,7 +1147,13 @@ def extract(edition: str, java: str, cache: Path, work: Path) -> Extracted:
             tables.append(extract_bedrock(version, cache))
         print(f"{edition} {version}: {len(tables[-1].blocks)} blocks", flush=True)
     maps = extract_state_maps(tables, java, cache, work) if edition == "bedrock" else {}
-    return Extracted(tables, maps)
+    # Bedrock's are read in the canonical vocabulary, of the release its state map follows.
+    releases = {
+        version: version if edition == "java" else BEDROCK_STATE_MAPS[version][2]
+        for version in versions
+    }
+    connections = extract_connections(releases, java, cache, work)
+    return Extracted(tables, maps, connections, connection_sources(releases, cache))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -687,7 +1169,7 @@ def main(argv: list[str] | None = None) -> int:
         "--cache",
         type=Path,
         default=Path.home() / ".cache" / "cairn-minecraft",
-        help="where the server jars, palettes and state maps are kept",
+        help="where the server and client jars, palettes and state maps are kept",
     )
     parser.add_argument(
         "--check", action="store_true", help="write nothing; fail when a file differs"

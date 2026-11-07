@@ -646,6 +646,22 @@ pub enum StateRefusal {
     },
 }
 
+impl<'a> VersionStates<'a> {
+    /// The canonical blocks `id` names here: its own Java block, or each Java block mapped onto it.
+    #[must_use]
+    pub fn java_ids<'s>(&self, id: &'s str) -> Vec<&'s str>
+    where
+        'a: 's,
+    {
+        if self.reads_as_java(id) {
+            return vec![id];
+        }
+        self.map.onto.get(id).map_or_else(Vec::new, |forms| {
+            forms.iter().map(|(java, _)| java.as_str()).collect()
+        })
+    }
+}
+
 impl VersionStates<'_> {
     /// The version this map is for.
     #[must_use]

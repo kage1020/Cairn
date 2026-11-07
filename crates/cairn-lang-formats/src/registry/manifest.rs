@@ -31,6 +31,31 @@ pub struct Extraction {
     /// One row per state map, oldest first; only a Bedrock pack has them.
     #[serde(default)]
     pub states: Vec<ExtractedStateMap>,
+    /// One row per connection table, oldest first.
+    #[serde(default)]
+    pub connections: Vec<ExtractedConnections>,
+}
+
+/// The jars one version's connection table was read from.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ExtractedConnections {
+    /// The version.
+    pub mc_version: String,
+    /// The Java release the table was read off.
+    pub java: String,
+    /// Its server jar, whose block tags the table reads.
+    pub server: ExtractedJar,
+    /// Its client jar, whose block models the table reads.
+    pub client: ExtractedJar,
+}
+
+/// One jar Mojang publishes.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ExtractedJar {
+    /// Where it was downloaded from.
+    pub url: String,
+    /// Its SHA-1, as Mojang publishes it.
+    pub sha1: String,
 }
 
 /// The mapping one version's state map was read from.
@@ -81,6 +106,9 @@ pub struct PackFiles {
     /// The `sensitivity` file.
     #[serde(default)]
     pub sensitivity: Option<String>,
+    /// The `connections` file; without it, lowering derives no connection state.
+    #[serde(default)]
+    pub connections: Option<String>,
 }
 
 #[cfg(test)]

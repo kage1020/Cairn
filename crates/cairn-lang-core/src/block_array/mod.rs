@@ -5,6 +5,7 @@
 //! inward along x and z.
 
 mod args;
+mod joins;
 mod lower;
 mod material;
 mod openings;
@@ -16,6 +17,7 @@ mod wall_column;
 use indexmap::IndexMap;
 use serde::Serialize;
 
+pub use joins::{Face, Faces, JoinKind, Joins};
 pub use lower::{BUILTIN_BLOCK_IDS, findings_without_target, lower_to_block_array};
 pub use material::{
     BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, MaterialDeferred, OutOfDomain,

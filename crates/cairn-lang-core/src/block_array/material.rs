@@ -10,6 +10,7 @@ use crate::resolve::{TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
+use super::joins::Joins;
 
 /// What the registry pack tells lowering, for one compile.
 ///
@@ -50,6 +51,13 @@ pub trait TargetRegistry {
     fn state_domain(&self, state: &BlockState) -> StateDomain {
         let _ = state;
         StateDomain::Unrecorded
+    }
+
+    /// What `state` is to the rules joining panes, fences and walls to their neighbours at the
+    /// pinned target (`spec/blockstate` "Connections"), or `None` when the registry cannot say.
+    fn joins(&self, state: &BlockState) -> Option<Joins> {
+        let _ = state;
+        None
     }
 
     /// Whether a version this registry covers may declare `id`, asked only when

@@ -368,12 +368,12 @@ def write_atomically(path: Path, data: bytes) -> None:
     os.replace(partial, path)
 
 
-def server_download(version: str, cache: Path) -> tuple[dict, int]:
-    """Mojang's `downloads.server` entry for `version`, and the Java major version it needs."""
+def version_meta(version: str, cache: Path) -> dict:
+    """Mojang's version JSON for `version`, kept in `cache`."""
     cache.mkdir(parents=True, exist_ok=True)
     meta_path = cache / f"{version}.json"
     try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        return json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         manifest = fetch_json(MANIFEST_URL)
         urls = [v["url"] for v in manifest["versions"] if v["id"] == version]
@@ -381,6 +381,12 @@ def server_download(version: str, cache: Path) -> tuple[dict, int]:
             raise Refused(f"Mojang's version manifest has no {version}") from None
         meta = fetch_json(urls[0])
         write_atomically(meta_path, json.dumps(meta).encode("utf-8"))
+        return meta
+
+
+def server_download(version: str, cache: Path) -> tuple[dict, int]:
+    """Mojang's `downloads.server` entry for `version`, and the Java major version it needs."""
+    meta = version_meta(version, cache)
     return meta["downloads"]["server"], int(meta["javaVersion"]["majorVersion"])
 
 
