@@ -1,3 +1,4 @@
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockState;
 use indexmap::IndexMap;
 use serde_json::{Value, json};
@@ -29,7 +30,7 @@ fn blocks() -> BlocksIndex {
         }]
     }))
     .expect("the fixture's blocks parse");
-    BlocksIndex::from_catalog(catalog).expect("the fixture's blocks fold")
+    BlocksIndex::from_catalog(catalog, Edition::Bedrock).expect("the fixture's blocks fold")
 }
 
 fn both() -> Value {
