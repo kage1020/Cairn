@@ -155,3 +155,56 @@ enough.
 
 **Only ID, state, and serialization differences may be absorbed.** Concept absence and
 game-behaviour differences are not.
+
+## 7.4 Raw blocks
+
+A theme binds canonical tokens, and a member is built from what its slot resolves to. Where that is
+not enough, two members name the block themselves. They are the **escape hatch**, built in the
+`raw` phase ([Compilation Model §4.1](/spec/compilation/#41-phase-evaluation)):
+
+```
+raw_block mat=minecraft:light[level=15] at=4,3,2
+raw_fill  mat=minecraft:tinted_glass from=1,2,0 to=3,3,0
+```
+
+`mat=` is a **block id**, `namespace:path` with an optional state literal touching it
+([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). A `raw_block` puts that block in the
+one cell its `at=` names. A `raw_fill` puts it in every cell of the box between `from=` and `to=`,
+two opposite corners written in either order, as a `fill`'s are
+([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)). Each is a coordinate triple measured
+from the footprint's low corner, and from the level under `level y=N`.
+
+A raw block skips the theme and the slot. No `mat_slot=` binds it, so one written on the line is
+`W_IGNORED_ARGUMENT`; no abstract token or catalog default stands in for it; and a struct with no
+theme bound still builds it. It does not skip the target. A build that pins a version checks the
+id and its states as it checks any block's: an id the target does not declare is `E_UNKNOWN_ID`,
+and a state outside the block's is `E_STATE_DOMAIN` ([Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)). On Bedrock the
+states are the canonical vocabulary, which the state map writes as a canonical token's
+([§7.2](#72-canonical-vocabulary)), so a state the map has no form for is `E_STATE_UNMAPPED`.
+
+The block is written as given. The `raw` phase runs after every other, so a raw block replaces
+whatever another member put in its cell, air included, and none of its states is derived: water
+poured before it does not waterlog it, and the connection rules neither join it to its neighbours
+nor pair it with a chest beside it, though a neighbour still joins it as it would any block
+([Blockstate Model §6.1](/spec/blockstate/#connections)). Two raw members writing one cell contest
+it in their phase, and the later line wins with `W_PHASE_CONFLICT`. A raw member does not size the
+volume. As with a `fill`, a cell outside the footprint, or above every row the struct as written
+reaches, is `E_INVALID_MEMBER`, and a cell in a row the struct reaches but does not build is
+`W_DEFERRED_MEMBER`.
+
+A `mat=` that is missing or not a block id is `E_INVALID_MEMBER`. That includes `@stone`, a
+canonical token, which a slot binds. So is an `at=`, `from=` or `to=` that is missing or not a
+triple.
+
+A raw member may stand outside an `@edition` guard. Raw ids are edition-specific by nature, and the
+check at the pinned target keeps an unguarded one honest: `minecraft:light` builds on Java and is
+`E_UNKNOWN_ID` on Bedrock, which spells the block `light_block`, and from 1.21.40 `light_block_0` …
+`light_block_15`. A file built for both editions writes an id both declare, or one branch per
+edition under `@edition` ([Versioning and Editions
+§10.7](/spec/versioning-editions/#writing-an-alternative)).
+
+`raw_repeat` and the `origin=imported` that marks what import writes belong to import
+([Ecosystem Interop §12.3](/spec/ecosystem-interop/#123-three-tiers-of-transliteration)), which
+does not exist yet. Until it does, `raw_repeat` is `E_UNKNOWN_KEYWORD` and `origin=` is
+`E_UNKNOWN_ARGUMENT`.

@@ -178,6 +178,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Raw / L1 / L2.** The three tiers of faithful transliteration on import. The compiler reaches
   L1 (spatial compression, no naming); L2 is the LLM's job (naming → `wall`, `mat_slot`,
   `theme`). See [ecosystem-interop §12.3](/spec/ecosystem-interop/#123-three-tiers-of-transliteration).
-- **`raw_fill` / `raw_block` / `raw_repeat`.** Escape-hatch primitives used by faithful
-  transliteration. Import-origin instances carry `origin=imported` so they are not treated as
-  first-class design DSL.
+- **`raw_fill` / `raw_block` / `raw_repeat`.** Escape-hatch primitives that name a block id
+  directly, skipping slot and theme; `raw_block` and `raw_fill` are built today. Faithful
+  transliteration writes them, and its instances carry `origin=imported` so they are not treated as
+  first-class design DSL. See
+  [materials-themes §7.4](/spec/materials-themes/#74-raw-blocks).

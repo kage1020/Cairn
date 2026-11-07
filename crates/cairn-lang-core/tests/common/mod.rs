@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockState, TargetRegistry, lower_to_block_array,
+    BlockArray, BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, lower_to_block_array,
 };
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
@@ -345,4 +345,78 @@ pub fn with_header(header: &str) -> String {
 /// [`PRELUDE`] plus a `def` whose body is a floor and then `row`.
 pub fn def_with(row: &str) -> String {
     format!("{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  {row}\n")
+}
+
+/// A target on which panes, chests and stairs hold water and no other block does.
+pub struct Wet;
+
+impl TargetRegistry for Wet {
+    fn lookup(&self, _token: &str) -> Option<BlockState> {
+        None
+    }
+
+    fn known_tokens(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
+        None
+    }
+
+    fn holds_water(&self, state: &BlockState) -> Option<bool> {
+        let id = state.id.strip_prefix("minecraft:")?;
+        Some(matches!(id, "glass_pane" | "chest" | "oak_stairs"))
+    }
+}
+
+/// The theme [`bin`] builds under: `wall`, `stone`, `pane` and `step`.
+pub const BIN_THEME: &str = "theme t:\n  \
+                             slot wall  -> @cobblestone\n  \
+                             slot stone -> @stone\n  \
+                             slot pane  -> @glass_pane\n  \
+                             slot step  -> @oak_stairs\n\n";
+
+/// A 5x4 struct with 2-row cobblestone walls under a flat roof one voxel past them, `members`
+/// after the roof; the overhang shifts the footprint's cells one voxel along `x` and `z`.
+pub fn bin(members: &str) -> String {
+    format!(
+        "{BIN_THEME}struct s size=5x4\n  walls mat_slot=wall height=2\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  {members}\n"
+    )
+}
+
+/// Row `y` of `array`, one string per `z`, one character per `x`: `.` air, `~` water, `#`
+/// cobblestone, `=` stone, `p` a pane, `c` a chest, `s` a stair, each upper-case when waterlogged.
+///
+/// # Panics
+///
+/// When a cell holds a block with no mark.
+pub fn layer(array: &BlockArray, y: u32) -> Vec<String> {
+    (0..array.dims.z)
+        .map(|z| {
+            (0..array.dims.x)
+                .map(|x| {
+                    let state = state_at(array, x, y, z);
+                    let wet = state.properties.get("waterlogged").map(String::as_str);
+                    let mark = match state.id.as_str() {
+                        "air" | "minecraft:air" => '.',
+                        "minecraft:water" => '~',
+                        "minecraft:cobblestone" => '#',
+                        "minecraft:stone" => '=',
+                        "minecraft:glass_pane" => 'p',
+                        "minecraft:chest" => 'c',
+                        "minecraft:oak_stairs" => 's',
+                        other => {
+                            panic!("({x}, {y}, {z}) holds `{other}`, which `layer` has no mark for")
+                        }
+                    };
+                    if wet == Some("true") {
+                        mark.to_ascii_uppercase()
+                    } else {
+                        mark
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }

@@ -4,27 +4,7 @@
 use cairn_lang_core::ast::{Item, Statement, ValueKind};
 use cairn_lang_core::parse;
 
-/// The `key=` arguments of the one member line under `struct s`, as `(key, value kind)`.
-fn member_args(member: &str) -> Vec<(String, ValueKind)> {
-    let source = format!("struct s size=5x5\n  {member}\n");
-    let module = parse(&source).unwrap_or_else(|err| panic!("{member:?}: {err}"));
-    let Item::Struct { body, .. } = &module.items[0] else {
-        panic!("expected a struct, got {:?}", module.items[0]);
-    };
-    let Statement::Generic { args, .. } = &body[0] else {
-        panic!("expected a member line, got {:?}", body[0]);
-    };
-    args.iter()
-        .map(|arg| (arg.key.clone(), arg.value.kind.clone()))
-        .collect()
-}
-
-/// The message `parse` refuses the member line with, and its 1-based column.
-fn refusal(member: &str) -> (String, u32) {
-    let source = format!("struct s size=5x5\n  {member}\n");
-    let err = parse(&source).expect_err("the member line is malformed");
-    (err.user_message(), err.position().col.get())
-}
+use crate::{member_args, member_refusal};
 
 fn coord(x: u64, y: u64, z: u64) -> ValueKind {
     ValueKind::Coord { x, y, z }
@@ -145,6 +125,6 @@ fn a_malformed_coordinate_is_refused_where_it_goes_wrong() {
             9,
         ),
     ] {
-        assert_eq!(refusal(member), (message, col), "{member:?}");
+        assert_eq!(member_refusal(member), (message, col), "{member:?}");
     }
 }

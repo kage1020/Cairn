@@ -885,8 +885,8 @@ and game-behaviour differences are not absorbed.** The cases that cannot be:
 
 ### Writing an alternative
 
-**Subject to change.** `@edition` guards, `hologram`, `raw_block` and `slot` rules that take
-arguments are not built yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+**Subject to change.** `@edition` guards, `hologram` and `slot` rules that take arguments are not
+built yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 `@edition` conditionals in the semantic layer are forbidden. When an alternative is needed, work
 down this hierarchy:
@@ -909,13 +909,15 @@ theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
 @edition bedrock { raw_block mat=minecraft:light_block_15 at=4,3,2 }
 ```
 
-The parser accepts only the snippet's `@requires` line today. `hologram` stands at top level,
-where only `theme`, `def`, `site` and `struct` open an item, so it is `E_PARSE`, and the parse ends
-there. Each later line would fail on its own as well. A `theme` takes its rules on indented lines
-under its header, so the one-line form is `E_PARSE` at `slot`, and even indented, a `slot` rule binds
-one token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. `@edition`
-is an unknown directive (`E_PARSE`), and inside a body `hologram` and `raw_block` are
-`E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is not implemented.
+The parser accepts only the snippet's `@requires` line today. `hologram` stands at top level, where
+only `theme`, `def`, `site` and `struct` open an item, so it is `E_PARSE`, and the parse ends there.
+Each later line would fail on its own as well. A `theme` takes its rules on indented lines under its
+header, so the one-line form is `E_PARSE` at `slot`, and even indented, a `slot` rule binds one
+token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. `@edition` is an
+unknown directive (`E_PARSE`), so the parser never reaches the `raw_block` inside its braces, though
+one written on its own line in a body builds ([Materials and Themes
+§7.4](/spec/materials-themes/#74-raw-blocks)). Inside a body `hologram` is `E_UNKNOWN_KEYWORD`.
+`E_PARITY_UNSUPPORTED` is not implemented.
 
 ### `@edition` pins an edition, not a version
 

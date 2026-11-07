@@ -10,6 +10,7 @@
     { "include": "#member-keyword" },
     { "include": "#string" },
     { "include": "#material-token" },
+    { "include": "#block-id" },
     { "include": "#attribute-key" },
     { "include": "#arrow" },
     { "include": "#coordinate" },
@@ -41,7 +42,7 @@
       }
     },
     "member-keyword": {
-      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|level|pressure_plate|chest|circuit|place|connect)\\b",
+      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|level|pressure_plate|chest|circuit|raw_block|raw_fill|place|connect)\\b",
       "captures": {
         "1": { "name": "keyword.other.member.cairn" }
       }
@@ -55,6 +56,10 @@
     "material-token": {
       "name": "entity.name.type.material.cairn",
       "match": "@[A-Za-z_][A-Za-z0-9_\\.]*"
+    },
+    "block-id": {
+      "name": "entity.name.type.block-id.cairn",
+      "match": "(?<==)[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*"
     },
     "attribute-key": {
       "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(=)",

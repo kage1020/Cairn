@@ -118,6 +118,16 @@ fn label_fix(key: &str, value: &Value) -> String {
             "`mat_slot=` names a slot of the bound theme, not a block: bind the block there \
              (`slot NAME -> @{token}`) and write `mat_slot=NAME`"
         ),
+        ("mat_slot", ValueKind::BlockId(id)) => {
+            let bind = id.strip_prefix("minecraft:").map_or_else(
+                || "bind a canonical token there".to_owned(),
+                |token| format!("bind its canonical token there (`slot NAME -> @{token}`)"),
+            );
+            format!(
+                "`mat_slot=` names a slot of the bound theme, not a block: {bind} and write \
+                 `mat_slot=NAME`, or place `{id}` as written with a `raw_block` or `raw_fill`"
+            )
+        }
         ("mat_slot", _) => "write the name of a slot the bound theme declares".to_owned(),
         ("use", _) => "write the name of a `def` this file declares".to_owned(),
         ("theme", _) => "write the name of a `theme` this file declares".to_owned(),

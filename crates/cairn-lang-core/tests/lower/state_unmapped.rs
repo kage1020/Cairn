@@ -144,3 +144,21 @@ fn a_walkway_whose_path_the_map_lacks_is_not_laid() {
     let laid = lowered_at(&duo("z"), &NoSidewaysLog::pinned());
     assert_eq!(laid.walkways.len(), 1, "{:?}", laid.diagnostics);
 }
+
+#[test]
+fn a_raw_block_whose_state_the_map_lacks_is_refused_at_its_line() {
+    let source = "struct s size=3x3\n  raw_block mat=minecraft:oak_log[axis=x] at=1,0,1\n";
+    let out = lowered_at(source, &NoSidewaysLog::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [(
+            DiagnosticCode::StateUnmapped,
+            "raw_block mat=minecraft:oak_log[axis=x] at=1,0,1",
+            "`minecraft:oak_log[axis=x]` has no form at test 1.0: its map has no sideways log",
+            vec![
+                "pass a `--target` whose state map carries these states, set `mat=` to a block \
+                 test 1.0 has a form for, or build for the other edition",
+            ],
+        )],
+    );
+}

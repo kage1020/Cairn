@@ -51,7 +51,9 @@ pub(super) fn diag_no_theme_bound_generic(
                 message: "a `floor` is left air and a `fill` paints none of its box; no \
                           `walls` is built or takes up rows, so no `door` or `window` is cut; a \
                           `roof` is built from its default block, and so is an eave `stair`, \
-                          `pressure_plate` or `chest` that still fits the shorter structure"
+                          `pressure_plate` or `chest` that still fits the shorter structure; a \
+                          `raw_block` or `raw_fill` needs no theme and is built where the \
+                          shorter structure still holds it"
                     .to_owned(),
             },
             DiagnosticNote {

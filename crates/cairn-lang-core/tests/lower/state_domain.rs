@@ -366,3 +366,37 @@ fn a_lowering_with_no_version_pinned_leaves_the_literal_to_one_that_pins() {
         assert!(painted(&out, "minecraft:oak_log[axis=q]"));
     }
 }
+
+#[test]
+fn a_raw_blocks_id_and_states_are_checked_as_any_blocks_are() {
+    // `spec/materials-themes` "Raw blocks".
+    let source = "struct s size=3x3\n  raw_block mat=minecraft:oak_log[axs=x] at=1,0,1\n  \
+                  raw_fill mat=minecraft:stonee from=0,0,0 to=0,0,2\n  \
+                  raw_block mat=minecraft:oak_log[axis=z] at=2,0,1\n";
+    let out = lowered_at(source, &Tables::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [
+            (
+                DiagnosticCode::StateDomain,
+                "minecraft:oak_log[axs=x]",
+                "`minecraft:oak_log` has no state `axs` at test 2.0; its states are axis",
+                vec![
+                    "did you mean `axis=x`?",
+                    "remove `axs` from the state literal, or correct it to a state test 2.0 takes",
+                ],
+            ),
+            (
+                DiagnosticCode::UnknownId,
+                "minecraft:stonee",
+                "`minecraft:stonee` is not a block in `test 2.0`",
+                vec![
+                    "no block in `test 2.0` is near enough to suggest; compile against a target \
+                     that declares `minecraft:stonee`, or pick a block this one has",
+                ],
+            ),
+        ],
+    );
+    assert!(painted(&out, "minecraft:oak_log[axis=z]"));
+    assert!(!painted(&out, "minecraft:oak_log[axs=x]"));
+}

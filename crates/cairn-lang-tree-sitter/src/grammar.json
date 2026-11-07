@@ -1340,6 +1340,10 @@
               },
               {
                 "type": "SYMBOL",
+                "name": "block_id"
+              },
+              {
+                "type": "SYMBOL",
                 "name": "_value"
               }
             ]
@@ -1353,6 +1357,30 @@
         "type": "PATTERN",
         "value": "[0-9]+,[0-9]+,[0-9]+"
       }
+    },
+    "block_id": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "TOKEN",
+          "content": {
+            "type": "PATTERN",
+            "value": "[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*"
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "state_literal"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
     },
     "material_ref": {
       "type": "CHOICE",

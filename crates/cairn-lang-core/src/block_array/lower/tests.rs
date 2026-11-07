@@ -1292,6 +1292,14 @@ const SLOT_IGNORERS: &[(&str, &str)] = &[
         "connect",
         "struct s size=3x3\n  connect a.entry to b.entry path=@gravel mat_slot=d\n",
     ),
+    (
+        "raw_block",
+        "struct s size=3x3\n  raw_block mat=minecraft:stone at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "raw_fill",
+        "struct s size=3x3\n  raw_fill mat=minecraft:stone from=0,0,0 to=1,0,1 mat_slot=d\n",
+    ),
 ];
 
 #[test]

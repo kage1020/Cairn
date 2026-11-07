@@ -43,7 +43,7 @@ E_DECOMPILE_DIFF: block IoU = 0.962 < threshold 0.985
 
 ```
 # L1: 名前を付けない。決定的
-raw_repeat id=r03 count=5 step=3,0,0: raw_fill mat=@glass_pane from=0,2,0 to=1,3,0
+raw_repeat id=r03 count=5 step=3,0,0: raw_fill mat=minecraft:glass_pane from=0,2,0 to=1,3,0
 # L2: LLM が名前を付け、意味を与える
 window id=front_windows side=front mat_slot=glass repeat=5 ...
 ```

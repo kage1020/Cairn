@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::{Member, MemberRole, Size};
+use crate::intent::{Member, MemberRole, Size, role_of};
 use crate::resolve::ScopeResolution;
 
 use crate::block_array::material::TargetRegistry;
@@ -204,7 +204,11 @@ fn state_findings<'a>(
     members.iter().flat_map(move |member| {
         member.resolved_state.iter().flat_map(move |block| {
             let outside = diag_derived_state_domain(&member.span, &block.state, registry);
-            let unmapped = diag_state_unmapped(member.span.clone(), &block.state, registry);
+            let raw = matches!(
+                role_of(&member.role),
+                MemberRole::RawBlock | MemberRole::RawFill
+            );
+            let unmapped = diag_state_unmapped(member.span.clone(), &block.state, registry, raw);
             outside.into_iter().chain(unmapped)
         })
     })
@@ -261,6 +265,10 @@ fn paint_phases(
         .filter(|(_, _, member)| matches!(member.role, MemberRole::Walls))
         .map(|&(index, _, _)| index)
         .collect();
+    let raw: Vec<u32> = by_phase[Phase::Raw.index()]
+        .iter()
+        .map(|&(index, _, _)| index)
+        .collect();
     let mut canvas = Canvas::new(ctx.dims, phases);
     let mut hung = Vec::new();
     for (index, bucket) in by_phase.into_iter().enumerate() {
@@ -275,7 +283,7 @@ fn paint_phases(
         }
     }
     if let Some(registry) = ctx.registry {
-        derive_connections(&mut canvas, palette, registry);
+        derive_connections(&mut canvas, palette, registry, &raw);
     }
     canvas
 }

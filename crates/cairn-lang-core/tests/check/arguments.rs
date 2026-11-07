@@ -381,6 +381,14 @@ const SWEEP: &[(&str, &str)] = &[
         "connect",
         "  connect id=e class=c a.entry to b.entry path=@gravel\n",
     ),
+    (
+        "raw_block",
+        "  raw_block id=r class=c mat=minecraft:stone at=1,0,1\n",
+    ),
+    (
+        "raw_fill",
+        "  raw_fill id=q class=c mat=minecraft:stone from=0,0,0 to=1,0,1\n",
+    ),
 ];
 
 fn sweep_line(keyword: &str) -> &'static str {
@@ -955,6 +963,16 @@ const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
         keyword: "connect",
         body: "def hut size=3x3:\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door id=entry side=front at=center\n\nsite v:\n  place id=a use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=4\n  connect a.entry to b.entry path=@gravel mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "raw_block",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_block mat=minecraft:stone at=1,1,1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "raw_fill",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_fill mat=minecraft:stone from=1,1,1 to=2,1,2 mat_slot=%SLOT%\n",
         why: Unread::Inapplicable,
     },
 ];

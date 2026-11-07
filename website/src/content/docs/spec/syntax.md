@@ -63,10 +63,11 @@ space on either side of a `,` inside the triple, two components alone, a fourth 
 A cell outside the footprint, or above the top row the scope as written reaches ([Compilation Model
 §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), is outside the scope. The member
 that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offset=` at or past its
-wall's length. A `fill`'s `from=` and `to=` read a triple
-([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)), and no other key does yet: `raw_block`,
-`note_block` and the entities that take one are not keywords, and a key that reads an integer or a
-label refuses a triple as it refuses any value of the wrong kind.
+wall's length. The `from=` and `to=` of a `fill`
+([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and a `raw_block`'s
+`at=` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), read a triple, and no
+other key does yet: `note_block` and the entities that take one are not keywords, and a key that
+reads an integer or a label refuses a triple as it refuses any value of the wrong kind.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
@@ -90,6 +91,17 @@ Reading a touching `[` as the literal refuses no source that could build otherwi
 comes next, `mat_slot=@a[1]` would leave a bare value on a member line that reads none, which is
 `E_UNEXPECTED_POSITIONAL`, and `mat_slot=[@a[b]]` would put a list where a label belongs, which is
 `E_TYPE_MISMATCH_LABEL`.
+
+A **block id** is a namespace and a path joined by `:` with nothing between them, `namespace:path`,
+as in `mat=minecraft:stone`, each half an identifier. It names a block as Minecraft spells it,
+rather than a meaning a theme binds, and only the `mat=` of a raw member reads one ([Materials and
+Themes §7.4](/spec/materials-themes/#74-raw-blocks)). It takes the block-state literal a canonical
+token takes, touching it, as in `minecraft:light[level=15]`. Like a triple, it is a `key=` value.
+Anywhere else the `:` keeps its own meaning, so the theme rule `slot wall -> minecraft:stone` is
+`E_PARSE`: a theme binds canonical tokens ([Materials and Themes
+§7.2](/spec/materials-themes/#72-canonical-vocabulary)). A space on either side of the `:` is
+`E_PARSE` too, and a key that reads a label, a token or an integer refuses a block id as it refuses
+any value of the wrong kind.
 
 A build that pins a version checks the literal's properties and values against the states its
 block takes there, so `@oak_log[axis=q]` is `E_STATE_DOMAIN` ([Lint](/spec/lint/)), naming `x`, `y`
@@ -194,7 +206,7 @@ means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `chest`, `circuit`. A `site` body describes a layout: `place`, `connect`. The
+`pressure_plate`, `chest`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The
 keyword table is global, so writing one in the other body parses and classifies and then reaches nothing. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
 A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose

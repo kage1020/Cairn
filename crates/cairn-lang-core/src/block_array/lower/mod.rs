@@ -8,6 +8,7 @@
 mod anchor;
 mod body;
 mod canvas;
+mod cell_box;
 mod chest;
 mod circuit;
 mod connect;
@@ -21,6 +22,7 @@ mod members;
 mod paint;
 mod phase;
 mod plate;
+mod raw;
 mod roof_fill;
 mod roof_kind;
 mod site_floor;

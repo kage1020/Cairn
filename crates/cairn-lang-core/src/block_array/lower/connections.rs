@@ -70,6 +70,8 @@ struct Joiner {
     up: Option<bool>,
     /// A chest's `type`, once settled.
     pair: Option<ChestType>,
+    /// Whether a raw member placed it, so it keeps its state and only its neighbours read it.
+    raw: bool,
 }
 
 /// What the rules read of a body: its cells' states and each palette slot's [`Joins`].
@@ -106,11 +108,13 @@ impl Grid<'_> {
 }
 
 /// Set the connection states of every pane, fence, wall, fence gate and chest on `canvas` that its
-/// state does not write, each repainted under the member that painted it.
+/// state does not write, each repainted under the member that painted it; a block a member of
+/// `raw` placed keeps its state (`spec/materials-themes` "Raw blocks").
 pub(super) fn derive_connections(
     canvas: &mut Canvas,
     palette: &mut ScopePalette,
     registry: &dyn TargetRegistry,
+    raw: &[u32],
 ) {
     let joins: Vec<Joins> = (0..palette.len())
         .map(|slot| {
@@ -123,7 +127,7 @@ pub(super) fn derive_connections(
         palette,
         joins,
     };
-    let mut joiners = gather(&grid);
+    let mut joiners = gather(&grid, raw);
     if joiners.is_empty() {
         return;
     }
@@ -148,6 +152,7 @@ pub(super) fn derive_connections(
     pair_chests(&mut joiners, &at);
     let derived: Vec<(Cell, BlockState)> = joiners
         .iter()
+        .filter(|joiner| !joiner.raw)
         .filter_map(|joiner| {
             let state = derived_state(&grid, joiner);
             (state != joiner.state).then_some((joiner.cell, state))
@@ -164,7 +169,7 @@ pub(super) fn derive_connections(
 }
 
 /// Every connecting block of the body, each with the sides it joins.
-fn gather(grid: &Grid<'_>) -> Vec<Joiner> {
+fn gather(grid: &Grid<'_>, raw: &[u32]) -> Vec<Joiner> {
     let mut joiners = Vec::new();
     for (cell, slot) in grid.canvas.cells() {
         let Some(kind) = grid.joins[usize::from(slot.0)].kind else {
@@ -183,6 +188,10 @@ fn gather(grid: &Grid<'_>) -> Vec<Joiner> {
             heights: [Height::None; 4],
             up: None,
             pair: None,
+            raw: grid
+                .canvas
+                .owner_at(cell)
+                .is_some_and(|owner| raw.contains(&owner)),
         });
     }
     joiners
@@ -317,6 +326,7 @@ fn raises_post(
 fn pair_chests(joiners: &mut [Joiner], at: &HashMap<Cell, usize>) {
     let pairs = |joiner: &Joiner| {
         matches!(joiner.kind, JoinKind::Chest { .. })
+            && !joiner.raw
             && !joiner.state.properties.contains_key("type")
     };
     // The chest beside `i` toward its `turn`ed facing that pairs with it, if any.

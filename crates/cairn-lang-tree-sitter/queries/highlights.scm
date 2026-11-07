@@ -41,6 +41,7 @@
 
 ; types / references
 (material_ref) @type
+(block_id) @type
 (attribute key: (identifier) @variable.parameter)
 ; Every segment after the first is a member; the first keeps the generic @variable.
 (signal_ref . (identifier) (identifier) @variable.member)

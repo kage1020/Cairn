@@ -47,6 +47,8 @@ impl MemberFallback {
             | MemberRole::Chest => Self::DefaultBlock,
             MemberRole::Level
             | MemberRole::Circuit
+            | MemberRole::RawBlock
+            | MemberRole::RawFill
             | MemberRole::Place
             | MemberRole::Connect
             | MemberRole::Other(_) => {
@@ -168,7 +170,9 @@ pub(super) fn check_state_literal(
     registry: Option<&dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let (ValueKind::Token(text), Some(registry)) = (&value.value.kind, registry) else {
+    let (ValueKind::Token(text) | ValueKind::BlockId(text), Some(registry)) =
+        (&value.value.kind, registry)
+    else {
         return true;
     };
     if state.properties.is_empty() || !text.contains('[') {
@@ -357,17 +361,24 @@ fn diag_state_literal_unchecked(span: Span, state: &BlockState, target: &str) ->
     }
 }
 
-/// Report `state`, built at `span`, when the pinned target's state map has no form for it.
+/// Report `state`, built at `span`, when the pinned target's state map has no form for it;
+/// `raw` when a raw member's `mat=` named it rather than a binding.
 pub(super) fn diag_state_unmapped(
     span: Span,
     state: &BlockState,
     registry: &dyn TargetRegistry,
+    raw: bool,
 ) -> Option<Diagnostic> {
     let reason = registry.unmapped_state(state)?;
     let target = registry
         .block_ids()
         .map_or_else(|| "the target".to_owned(), |ids| ids.label().to_owned());
     let states = state.properties_text();
+    let choose = if raw {
+        "set `mat=` to"
+    } else {
+        "bind the material to"
+    };
     Some(Diagnostic {
         code: DiagnosticCode::StateUnmapped,
         span,
@@ -378,8 +389,8 @@ pub(super) fn diag_state_unmapped(
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(
-                "pass a `--target` whose state map carries these states, bind the material to a \
-                 block {target} has a form for, or build for the other edition"
+                "pass a `--target` whose state map carries these states, {choose} a block \
+                 {target} has a form for, or build for the other edition"
             ),
         }],
         data: Some(DiagnosticData::StateUnmapped {

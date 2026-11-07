@@ -303,7 +303,7 @@ fn walkway_material(
                 return None;
             }
             if let Some(unmapped) = registry.and_then(|registry| {
-                diag_state_unmapped(connect.path.span.clone(), &state, registry)
+                diag_state_unmapped(connect.path.span.clone(), &state, registry, false)
             }) {
                 diagnostics.push(unmapped);
                 return None;

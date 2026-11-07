@@ -105,7 +105,9 @@ barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined
   chest that writes its `type`, as `size=single` does, pairs with none.
 
 A state the block's material or line writes is kept, and only the others are derived:
-`@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. The states are
+`@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. A raw block keeps
+every state, written or not: its neighbours read it as they read any block, and none of its own is
+derived ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). The states are
 resolved state, never intent ([§6.2](#62-intent_state-and-resolved_state)).
 
 The blocks beside are those of the same `struct` or `place` body, and nothing outside its array

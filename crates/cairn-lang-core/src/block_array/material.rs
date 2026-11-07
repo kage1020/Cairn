@@ -406,6 +406,12 @@ pub(crate) fn validated_id(
     })))
 }
 
+/// The state a block id names as written, `minecraft:light[level=15]` with its literal's
+/// properties (`spec/materials-themes` "Raw blocks").
+pub(crate) fn block_id_state(id: &str) -> BlockState {
+    canonical_to_block_state(id)
+}
+
 /// Turn a canonical token body (`oak_planks`, `minecraft:oak_log[axis=x]`) into a [`BlockState`].
 fn canonical_to_block_state(inner: &str) -> BlockState {
     let (head, properties_src) = match inner.find('[') {

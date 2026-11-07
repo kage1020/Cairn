@@ -146,7 +146,9 @@ impl MemberRole {
                 | Self::Level
                 | Self::PressurePlate
                 | Self::Chest
-                | Self::Circuit,
+                | Self::Circuit
+                | Self::RawBlock
+                | Self::RawFill,
             )
             | (BodyKind::Site, Self::Place | Self::Connect) => true,
             (BodyKind::Geometry, Self::Place | Self::Connect)
@@ -162,7 +164,9 @@ impl MemberRole {
                 | Self::Level
                 | Self::PressurePlate
                 | Self::Chest
-                | Self::Circuit,
+                | Self::Circuit
+                | Self::RawBlock
+                | Self::RawFill,
             )
             | (_, Self::Other(_)) => false,
         }
@@ -183,6 +187,8 @@ impl MemberRole {
             Self::PressurePlate => "pressure_plate",
             Self::Chest => "chest",
             Self::Circuit => "circuit",
+            Self::RawBlock => "raw_block",
+            Self::RawFill => "raw_fill",
             Self::Place => "place",
             Self::Connect => "connect",
             Self::Other(keyword) => keyword,

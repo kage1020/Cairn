@@ -2,12 +2,15 @@
 
 use std::num::NonZeroU32;
 
+use cairn_lang_core::ast::{Item, Statement, ValueKind};
 use cairn_lang_core::error::Position;
 use cairn_lang_core::lex::{TokenKind, lex};
+use cairn_lang_core::parse;
 
 #[path = "../common/mod.rs"]
 pub mod common;
 
+mod block_ids;
 mod coordinates;
 mod lex;
 mod line_positions;
@@ -35,4 +38,26 @@ fn kinds(source: &str) -> Vec<TokenKind> {
         .into_iter()
         .map(|t| t.kind)
         .collect()
+}
+
+/// The `key=` arguments of the one member line under `struct s`, as `(key, value kind)`.
+fn member_args(member: &str) -> Vec<(String, ValueKind)> {
+    let source = format!("struct s size=5x5\n  {member}\n");
+    let module = parse(&source).unwrap_or_else(|err| panic!("{member:?}: {err}"));
+    let Item::Struct { body, .. } = &module.items[0] else {
+        panic!("expected a struct, got {:?}", module.items[0]);
+    };
+    let Statement::Generic { args, .. } = &body[0] else {
+        panic!("expected a member line, got {:?}", body[0]);
+    };
+    args.iter()
+        .map(|arg| (arg.key.clone(), arg.value.kind.clone()))
+        .collect()
+}
+
+/// The message `parse` refuses the one member line under `struct s` with, and its 1-based column.
+fn member_refusal(member: &str) -> (String, u32) {
+    let source = format!("struct s size=5x5\n  {member}\n");
+    let err = parse(&source).expect_err("the member line is malformed");
+    (err.user_message(), err.position().col.get())
 }
