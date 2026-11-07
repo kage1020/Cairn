@@ -13,6 +13,7 @@ mod logic_synth;
 mod netlist;
 mod placement;
 mod placement_ir_roundtrip;
+mod primitives;
 mod routing;
 mod signal_drivers;
 mod source_order;

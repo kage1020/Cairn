@@ -1,5 +1,5 @@
-//! A `--target` version resolved to the integer its edition writes: Java's `DataVersion`, or
-//! Bedrock's block palette `version`.
+//! A `--target` version resolved to the integer its edition writes, Java's `DataVersion` or
+//! Bedrock's block palette `version`, and to its key in the edition's version order.
 
 use cairn_lang_core::Edition;
 

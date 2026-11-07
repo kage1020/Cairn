@@ -42,6 +42,18 @@ impl WallSide {
             Self::Right => (1, 0),
         }
     }
+
+    /// Unit step `(dx, dz)` along the wall toward its right end as seen from outside, the way
+    /// [`wall_local_to_grid`]'s `u` grows.
+    #[must_use]
+    pub fn along(self) -> (i32, i32) {
+        match self {
+            Self::Front => (1, 0),
+            Self::Back => (-1, 0),
+            Self::Left => (0, 1),
+            Self::Right => (0, -1),
+        }
+    }
 }
 
 /// Length of the wall along its `offset` axis, given the authored `size=WxH`.
@@ -103,16 +115,21 @@ pub(super) enum Written {
     Absent,
     /// The key carries an identifier the port does not accept.
     Ident(String),
-    /// The key carries a value of some other shape (a number, a string, …).
-    OtherShape,
+    /// The key carries an integer, a numeric offset on a door's `at=`.
+    Int(i64),
+    /// The key carries a value of some other shape, worded as [`crate::ast::Value::describe`] does.
+    OtherShape(String),
 }
 
 impl Written {
     pub(super) fn of_ident(member: &Member, key: &str) -> Self {
-        match member.intent_state.get(key).map(|v| &v.value.kind) {
-            None => Self::Absent,
-            Some(ValueKind::Ident(s)) => Self::Ident(s.clone()),
-            Some(_) => Self::OtherShape,
+        let Some(raw) = member.written(key) else {
+            return Self::Absent;
+        };
+        match &raw.value.kind {
+            ValueKind::Ident(s) => Self::Ident(s.clone()),
+            ValueKind::Int(n) => Self::Int(*n),
+            _ => Self::OtherShape(raw.value.describe()),
         }
     }
 }
@@ -122,9 +139,12 @@ pub(super) fn door_at_clause(written: &Written) -> String {
     match written {
         Written::Absent => "has no `at=`".to_owned(),
         Written::Ident(s) => format!("has `at={s}`, which is not one of center, left, right"),
-        Written::OtherShape => "has an `at=` that is not one of center, left, right (numeric \
-                                offsets are reserved)"
-            .to_owned(),
+        Written::Int(n) => format!(
+            "has `at={n}`, which is not one of center, left, right (numeric offsets are reserved)"
+        ),
+        Written::OtherShape(described) => {
+            format!("has an `at=` that is {described}, not one of center, left, right")
+        }
     }
 }
 
@@ -208,23 +228,20 @@ pub(super) struct WindowArgs {
 ///
 /// The [`WindowArgFault`] for the first argument that cannot be used.
 pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgFault> {
-    let offset = if member.intent_state.contains_key("offset") {
+    let offset = if member.arguments.contains_key("offset") {
         member
             .nonneg_u32("offset")
             .ok_or(WindowArgFault::OffsetMalformed)?
     } else {
         0
     };
-    let y = match (
-        member.intent_state.contains_key("y"),
-        member.nonneg_u32("y"),
-    ) {
+    let y = match (member.arguments.contains_key("y"), member.nonneg_u32("y")) {
         (_, Some(y)) => y,
         (false, None) => return Err(WindowArgFault::YAbsent),
         (true, None) => return Err(WindowArgFault::YMalformed),
     };
     let (width, height) = match (
-        member.intent_state.contains_key("size"),
+        member.arguments.contains_key("size"),
         size_value(member, "size"),
     ) {
         (_, Some(size)) => size,

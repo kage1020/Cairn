@@ -27,6 +27,24 @@ impl Edition {
             Self::Bedrock => "bedrock",
         }
     }
+
+    /// The capitalized name, as prose writes it.
+    #[must_use]
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Java => "Java",
+            Self::Bedrock => "Bedrock",
+        }
+    }
+
+    /// The edition this one is not.
+    #[must_use]
+    pub fn other(self) -> Self {
+        match self {
+            Self::Java => Self::Bedrock,
+            Self::Bedrock => Self::Java,
+        }
+    }
 }
 
 impl fmt::Display for Edition {

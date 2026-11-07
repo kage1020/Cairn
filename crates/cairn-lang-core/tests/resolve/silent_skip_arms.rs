@@ -466,7 +466,7 @@ fn a_refused_requirement_is_skipped_silently_by_the_floor_derivation() {
 fn a_slot_on_a_role_that_reads_none_is_skipped_silently_through_resolve() {
     let src = "theme plain:\n  slot wall -> @cobblestone\n\n\
                struct s size=5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
-               door side=front at=center mat_slot=nosuch\n";
+               circuit region=floor void=2 mat_slot=nosuch\n";
     let module = parse(src).expect("parse");
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
@@ -476,11 +476,11 @@ fn a_slot_on_a_role_that_reads_none_is_skipped_silently_through_resolve() {
         "the slot is not looked up, so no `E_UNRESOLVED_SLOT`, got: {:#?}",
         resolution.diagnostics,
     );
-    let door = src.find("door side").expect("the door is in the source");
+    let circuit = src.find("circuit").expect("the circuit is in the source");
     let binding = resolution.scopes["struct::s"]
         .members
-        .get(&door)
-        .expect("the door is resolved");
+        .get(&circuit)
+        .expect("the circuit is resolved");
     assert!(
         binding.slot_value.is_none(),
         "nothing was looked up, so nothing is bound",

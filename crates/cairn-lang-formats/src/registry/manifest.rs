@@ -32,6 +32,18 @@ pub struct PackFiles {
     /// The `aliases` file; without it, an `E_UNKNOWN_ID` offers only the typo search.
     #[serde(default)]
     pub aliases: Option<String>,
+    /// The `absent` file; without it, no block is reported as `E_PARITY_UNSUPPORTED`.
+    #[serde(default)]
+    pub absent: Option<String>,
+    /// The `states` file, named with `sensitivity` or not at all.
+    #[serde(default)]
+    pub states: Option<String>,
+    /// The `sensitivity` file.
+    #[serde(default)]
+    pub sensitivity: Option<String>,
+    /// The `connections` file; without it, lowering derives no connection state.
+    #[serde(default)]
+    pub connections: Option<String>,
 }
 
 #[cfg(test)]

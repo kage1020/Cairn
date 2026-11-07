@@ -16,11 +16,11 @@ title: "用語集"
 
 ## メンバーとブロックステート
 
-- **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。現時点では、メンバーが持つのはキーワードから分類した `role` だけで、型は持ちません。ブロックエンティティやエンティティを置くキーワードも、まだありません。
+- **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。現時点では、メンバーが持つのはキーワードから分類した `role` だけで、型は持ちません。ブロックエンティティやエンティティを置くキーワードも、まだありません。`type` は `role` の隣に並べます。
 - **`id` / `class` / `role`**: メンバーに付ける、同一性、グループ、建築上の役割のタグです。セレクタと安定したアドレスに使います。
 - **`mat_slot`**: メンバー上のマテリアルの注入ポイントです。`theme` が値を割り当てます。構造はスロットだけを持ち、どのブロックを使うかはテーマが持ちます。[マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット) を参照してください。
-- **`intent_state`**: 書き手が意図したブロックステートです。編集の差分は **ここだけ** を比べます。現時点では、メンバーの行に書いた `key=value` のうち、`id`、`class`、`mat_slot` 以外のすべてが入ります。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
-- **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。現時点では何も入らず、lowering が導出したブロックステートは、そのまま block-array に入ります。
+- **`intent_state`**: 書き手が意図したブロックステートです。メンバーのキーワードが名前を挙げるブロックステートのキー (`stair` の `facing` など) が入ります。編集の差分は **ここだけ** を比べます。行のそれ以外のキーは、メンバーの引数です。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
+- **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。lowering が各メンバーの分を正規の語彙で、組み上げる block-array の隣に記録します。`cairn lower --format json` はそれを `members` の下に出力します。
 - **上書きによる昇格 (Override-promotion)**: 意図になりうるブロックステートを書くと、そのブロックステートは `resolved_state` から `intent_state` に昇格します。仕様上のルールは「既定では導出し、意図になりうるブロックステートはどれも上書きできる」です。[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) を参照してください。
 - **アンカーと bbox (Anchor / bbox)**: どのプリミティブも、IR の中に `anchor` (基準点)、宣言上の bbox、実際の bbox、取り付ける面の 4 つを持ちます。絵画、額縁、アーチ窓のように、宣言したサイズと実際に占める AABB が食い違うプリミティブを、この 4 つで扱います。現時点では、IR はこの 4 つのどれも持っていません。[エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約) を参照してください。
 
@@ -36,7 +36,7 @@ title: "用語集"
 
 ## コンパイル
 
-- **フェーズ (Phase)**: コンパイラが各コマンドを振り分ける、順番の決まった評価の枠です。`massing → envelope → openings → fixtures → logic_synth → logic_place → logic_route → raw` の順に評価します。ソース上の順番は関係なく、意味はフェーズの順番で決まります ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。
+- **フェーズ (Phase)**: コンパイラが各コマンドを振り分ける、順番の決まった評価の枠です。`massing → envelope → openings → fixtures → fluids → logic_synth → logic_place → logic_route → raw` の順に評価します。ソース上の順番は関係なく、意味はフェーズの順番で決まります ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。
 - **フェーズ内の後勝ち (Last-wins, local)**: 同じフェーズの中では、後に書いたコマンドが先のコマンドを上書きします。プログラム全体で後勝ちにする考え方 (「ペイントモデル」) は採りません。[原則 P2](/ja/spec/principles/) を参照してください。
 - **ターゲット軸 (Target axes)**: `(edition, version)` の組です。これを知っているのはバックエンドだけで、DSL のソースには決して現れません。`--edition` は必須で、`--target` だけを指定することはできません。[コンパイルモデル §4.2](/ja/spec/compilation/#42-ターゲット軸) と [バージョンとエディション](/ja/spec/versioning-editions/) を参照してください。
 - **lowering**: スコープのメンバーを block-array IR に変換するパスです。壁、開口部、屋根、通路、マテリアルが、パレットとインデックスの配列になります。`cairn compile`、`cairn lower`、`cairn info`、`cairn check` のどれもこのパスを通ります。[アーキテクチャ §3.1](/ja/spec/architecture/#31-block-array-ir-はすべてのフォーマットに共通のピボット) を参照してください。
@@ -53,7 +53,7 @@ title: "用語集"
 ## レッドストーン
 
 - **論理セル、エディションセル、物理タイル (Logical cell / edition cell / physical tile)**: 3 段のセルライブラリです。Logic IR が論理セルを選び、エディションごとのセルライブラリがそれを物理タイルに lowering します。Java 版と Bedrock 版の違いは、このライブラリの中に閉じ込めます。[レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い) を参照してください。
-- **組み合わせ回路と順序回路 (Combinational vs sequential)**: v1 が提供するのは、決まった種類の組み合わせゲートと、厳選した順序回路のマクロ (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`) です。任意の FSM や CPU は v1 の範囲外です。現時点では、`logic` の行が受け付けるのは `and`、`or`、`not` だけで、順序回路のマクロはまだパースできません。
+- **組み合わせ回路と順序回路 (Combinational vs sequential)**: v1 が提供するのは、決まった種類の組み合わせゲートと、厳選した順序回路のマクロ (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`) です。任意の FSM や CPU は v1 の範囲外です。現時点では、`logic` の行が受け付けるのは組み合わせ回路のプリミティブ (`and`、`or`、`not`、`xor`、`nand`、`nor`、`mux`) で、順序回路のマクロはまだパースできません。
 - **真理値、レイテンシ、時相のアサーション (Truth / latency / temporal assertion)**: 3 種類の検証です。時相のアサーションは、範囲を区切った `eventually within N` だけで、完全な LTL ではありません。`assert latency` はまだパースできず (`E_PARSE`)、残りの 2 つを組み上がった回路に照らして検査するシミュレータもまだありません。[レッドストーン §14.7](/ja/spec/redstone/#147-検証) を参照してください。
 - **QC / BUD**: 疑似接続 (quasi-connectivity) と、ブロック更新検出器 (block-update-detector) の挙動です。セルライブラリはこれらを **吸収しません**。更新順序の意味論に依存する回路は、`E_NO_PORTABLE_IMPL` のコンパイルエラーになります。ただし、このコードはまだ実装していません。回路が更新順序に依存するかどうかを検査するものは、まだありません。
 
@@ -68,10 +68,11 @@ title: "用語集"
 ## エディションとバージョン
 
 - **エディション (Edition)**: `java` または `bedrock` です。コンパイル時にだけ使い、DSL の意味の層には決して現れません。[バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性) を参照してください。
+- **`@edition` ガード (`@edition` guard)**: 本体の中の行で、その下にインデントした生のメンバーを 1 つのエディションのビルドだけに残します。ソースにエディションを書く唯一の場所で、意味層を囲むことはありません。[バージョンとエディション §10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む) を参照してください。
 - **Cairn のバージョンと MC のターゲット (Cairn version vs MC target)**: **別々の軸** です。書式ではなく、フィールド、フラグ、キーワードで区別します。文章の中で紛らわしいときは、`cairn:2026.06`、`mc:1.21.4` のように書きます。[仕様書の目次](/ja/spec/) と [バージョンとエディション](/ja/spec/versioning-editions/) を参照してください。
 - **変換せずに再コンパイルする (Recompile, don't transcode)**: 言語仕様は、バージョンやエディションをまたいだ NBT の可搬性を **保証しません**。新しいバージョンを対象にするときは、NBT を変換するのではなく、DSL を再コンパイルします。[バージョンとエディション §10.2](/ja/spec/versioning-editions/#102-言語の契約-変換ではなく再コンパイル) を参照してください。
 
 ## エコシステム連携
 
 - **Raw / L1 / L2**: 取り込みで忠実に写し取るときの 3 段階です。コンパイラが担うのは L1 (空間的な圧縮。名前は付けない) までで、L2 (名前を付けて `wall`、`mat_slot`、`theme` にする) は LLM の仕事です。[エコシステム連携 §12.3](/ja/spec/ecosystem-interop/#123-写し取りの-3-段階) を参照してください。
-- **`raw_fill` / `raw_block` / `raw_repeat`**: 忠実な写し取りに使うエスケープハッチのプリミティブです。取り込みで生まれたものには `origin=imported` が付き、設計用の第一級の DSL としては扱いません。
+- **`raw_fill` / `raw_block` / `raw_repeat`**: スロットとテーマを経由せず、ブロック ID を直接名指すエスケープハッチのプリミティブです。いま組み上がるのは `raw_block` と `raw_fill` です。忠実な写し取りもこれを書き出し、取り込みで生まれたものには `origin=imported` が付いて、設計用の第一級の DSL としては扱いません ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。

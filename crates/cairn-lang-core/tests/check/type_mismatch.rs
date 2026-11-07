@@ -35,10 +35,46 @@ fn a_mat_slot_given_a_block_says_to_bind_it_in_the_theme() {
             "struct s size=1x1\n  walls mat_slot=3\n",
             "write the name of a slot the bound theme declares",
         ),
+        (
+            "struct s size=1x1\n  walls mat_slot=minecraft:oak_log[axis=x]\n",
+            "`mat_slot=` names a slot of the bound theme, not a block: bind its canonical token \
+             there (`slot NAME -> @oak_log[axis=x]`) and write `mat_slot=NAME`, or place \
+             `minecraft:oak_log[axis=x]` as written with a `raw_block` or `raw_fill`",
+        ),
+        (
+            "struct s size=1x1\n  walls mat_slot=my_mod:copper_lamp\n",
+            "`mat_slot=` names a slot of the bound theme, not a block: bind a canonical token \
+             there and write `mat_slot=NAME`, or place `my_mod:copper_lamp` as written with a \
+             `raw_block` or `raw_fill`",
+        ),
     ] {
         let found = of_code(src, DiagnosticCode::TypeMismatchLabel);
         assert_eq!(found.len(), 1, "for {src:?}, got {found:#?}");
         assert_eq!(notes(&found[0]), [note], "for {src:?}");
+    }
+}
+
+#[test]
+fn a_coordinate_on_a_label_or_size_key_is_a_type_mismatch() {
+    for (src, code, primary) in [
+        (
+            "struct s size=1x1\n  walls mat_slot=1,2,3\n",
+            DiagnosticCode::TypeMismatchLabel,
+            "`mat_slot=` expects a label (identifier or string), got coordinate",
+        ),
+        (
+            "struct s size=1,2,3\n  floor mat_slot=m\n",
+            DiagnosticCode::TypeMismatchSize,
+            "`size=` expects a `WxH` literal, got coordinate",
+        ),
+    ] {
+        let found = of_code(src, code);
+        assert_eq!(found.len(), 1, "for {src:?}, got {found:#?}");
+        assert_eq!(
+            (slice(src, &found[0]), found[0].primary.as_str()),
+            ("1,2,3", primary),
+            "for {src:?}",
+        );
     }
 }
 
@@ -87,6 +123,15 @@ fn window_size_with_proper_literal_passes() {
         diags.is_empty(),
         "`size=WxH` on body statements is legal, got {diags:#?}",
     );
+}
+
+#[test]
+fn a_chests_size_is_its_state_and_not_a_footprint() {
+    let src = "struct s size=5x5\n  chest at=inside.front offset=1 size=single\n  \
+               window side=front offset=2 y=1 size=single\n";
+    let found = of_code(src, DiagnosticCode::TypeMismatchSize);
+    let at: Vec<usize> = found.iter().map(|d| d.span.start).collect();
+    assert_eq!(at, [src.rfind("single").expect("the window's size")]);
 }
 
 #[test]

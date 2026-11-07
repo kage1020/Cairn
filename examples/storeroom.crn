@@ -1,0 +1,24 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# Chests stood against the walls.
+# Demonstrates: chest, its facing derived from the wall, pairing with the chest
+# beside it, and size=single keeping two apart.
+
+theme pantry:
+  slot floor -> @spruce_planks
+  slot wall  -> @cobblestone
+  slot roof  -> @spruce_stairs
+
+struct storeroom size=7x5
+  floor mat_slot=floor
+  walls mat_slot=wall height=3
+  door  side=front at=center
+  roof  kind=gable mat_slot=roof overhang=1
+  # Three side by side: the first two pair, and the third stands single.
+  chest id=grain at=inside.back offset=1 y=1
+  chest id=flour at=inside.back offset=2 y=1
+  chest id=salt  at=inside.back offset=3 y=1
+  # Side by side, but kept apart.
+  chest id=tools at=inside.left offset=1 y=1 size=single
+  chest id=seeds at=inside.left offset=2 y=1

@@ -206,7 +206,26 @@ fn a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
 #[test]
 fn a_level_without_a_usable_offset_is_reported() {
     // No value position reads a `-`, so `y=-3` fails in the parser.
-    for y in ["", " y=abc", " y=99999999999", " y=plain"] {
+    for (y, reason) in [
+        ("", "`level` has no `y=` offset"),
+        (
+            " y=abc",
+            "the `level`'s `y=` is identifier `abc`, not a row",
+        ),
+        (
+            " y=99999999999",
+            "the `level`'s `y=` is integer `99999999999`, not a row",
+        ),
+        (
+            " y=plain",
+            "the `level`'s `y=` is identifier `plain`, not a row",
+        ),
+        (
+            " y=1,2,3",
+            "the `level`'s `y=` is coordinate `1,2,3`, not a row",
+        ),
+    ] {
+        let advice_verb = if y.is_empty() { "add" } else { "write" };
         let src = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
              level{y}\n    walls class=outer mat_slot=wall height=3\n"
@@ -214,10 +233,20 @@ fn a_level_without_a_usable_offset_is_reported() {
         let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
         assert_eq!(
             d.primary,
-            "`level` has no `y=` offset to place its children at: the 1 member indented under it produces no blocks",
+            format!(
+                "{reason} to place its children at: the 1 member indented under it produces no \
+                 blocks"
+            ),
             "for `level{y}`",
         );
-        assert!(advice(&d).contains("y=N"), "for `level{y}`");
+        assert_eq!(
+            advice(&d),
+            format!(
+                "{advice_verb} `y=N`, where N is a non-negative integer height above the body's \
+                 floor"
+            ),
+            "for `level{y}`",
+        );
     }
 }
 
@@ -282,10 +311,26 @@ mod lowering {
 
     use cairn_lang_core::{lower, parse, resolve};
 
-    use crate::common::{PRELUDE, lowered, solid_cells};
+    use crate::common::{PRELUDE, lowered, state_at};
+
+    /// The ids in the two cells a `door side=front at=center` stands in on `struct s size=5x5`.
+    fn front_door_cells(source: &str) -> [String; 2] {
+        let built = lowered(source);
+        let array = &built.structures["struct::s"];
+        [1, 2].map(|y| state_at(array, 2, y, 4).id.clone())
+    }
+
+    /// The id of the front wall's cell beside the door, at `y=1`.
+    fn front_wall_id(source: &str) -> String {
+        state_at(&lowered(source).structures["struct::s"], 1, 1, 4)
+            .id
+            .clone()
+    }
+
+    const DOOR: [&str; 2] = ["minecraft:oak_door", "minecraft:oak_door"];
 
     #[test]
-    fn a_nested_door_cuts_no_opening() {
+    fn a_nested_door_sets_no_door_block_into_the_wall() {
         let flat = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n  \
@@ -296,32 +341,19 @@ mod lowering {
          walls class=outer mat_slot=wall height=3\n    \
          door id=d side=front at=center\n"
         );
-        let flat_solid = solid_cells(&lowered(&flat).structures["struct::s"]);
-        let nested_solid = solid_cells(&lowered(&nested).structures["struct::s"]);
-        assert!(
-            nested_solid > flat_solid,
-            "the nested door should cut nothing, so the wall stays solid: \
-         flat={flat_solid} nested={nested_solid}",
-        );
+        assert_eq!(front_door_cells(&flat), DOOR);
+        let wall = front_wall_id(&nested);
+        assert_eq!(front_door_cells(&nested), [wall.clone(), wall]);
     }
 
     #[test]
-    fn a_door_under_a_level_still_cuts_its_opening() {
-        let flat = format!(
-            "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
-         walls class=outer mat_slot=wall height=3\n  \
-         door id=d side=front at=center\n"
-        );
+    fn a_door_under_a_level_still_stands_in_its_opening() {
         let levelled = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n  \
          level y=0\n    door id=d side=front at=center\n"
         );
-        assert_eq!(
-            solid_cells(&lowered(&levelled).structures["struct::s"]),
-            solid_cells(&lowered(&flat).structures["struct::s"]),
-            "a `level` body reaches the build, so the opening is cut either way",
-        );
+        assert_eq!(front_door_cells(&levelled), DOOR);
     }
 
     #[test]

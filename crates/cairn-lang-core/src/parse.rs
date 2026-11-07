@@ -3,21 +3,62 @@
 //! A body's `requires` lines leave the body, lifted onto the `def` or `theme` that carries them.
 
 use crate::ast::{
-    Arg, DottedRef, Expr, Header, Item, MemberRequires, Module, RawRequirement, RawVersion,
-    Statement, ThemeRule, TruthRow, Value, ValueKind,
+    Arg, DottedRef, Expr, Header, Item, MemberRequires, Module, NamedOperand, RawRequirement,
+    RawVersion, Statement, ThemeRule, TruthRow, Value, ValueKind,
 };
 use crate::calver::future_version_note;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::edition::Edition;
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
 use crate::logic_library::{LogicPrimitive, Notation, infix_rank_above};
-use crate::prose::or_list;
+use crate::prose::{and_list, or_list};
+use crate::suggest::{did_you_mean, nearest_match};
 use crate::version::parse_requirement;
 use indexmap::IndexSet;
 
 /// The word that introduces a version floor, after `@` or at the start of a body line.
 const REQUIRES: &str = "requires";
+
+/// The word after `@` that opens an edition guard inside a body.
+const EDITION: &str = "edition";
+
+/// The refusal for an `@edition` guard written outside every body.
+const GUARD_OUTSIDE_A_BODY: &str = "an `@edition` guard stands inside a `struct` or `def` body, \
+     around the raw members it guards: the items of a file are edition-neutral, so move the guard \
+     into the body that places those blocks";
+
+/// The words a refusal inside a call names it by.
+struct CallWording {
+    /// The primitive's name.
+    callee: &'static str,
+    /// Its operands, in the order the library lists them.
+    names: &'static [&'static str],
+    /// The call written out, in backticks: `` `mux(sel=…, a=…, b=…)` ``.
+    shape: String,
+    /// Every operand, in backticks, as a prose list.
+    every_name: String,
+}
+
+impl CallWording {
+    fn new(primitive: LogicPrimitive, names: &'static [&'static str]) -> Self {
+        Self {
+            callee: primitive.name(),
+            names,
+            shape: format!("`{}`", primitive.call_template().unwrap_or_default()),
+            every_name: and_list(&quoted(names, "")).unwrap_or_default(),
+        }
+    }
+}
+
+/// Each of `names` with `suffix`, in backticks.
+fn quoted(names: &[&str], suffix: &str) -> Vec<String> {
+    names
+        .iter()
+        .map(|name| format!("`{name}{suffix}`"))
+        .collect()
+}
 
 /// Whether the body being parsed may carry `requires version>=X` lines, and what to say when it
 /// may not. A refusing body refuses only a line that reads as a floor.
@@ -141,6 +182,8 @@ struct Parser<'a> {
     depth: usize,
     /// Token ranges taken whole as a raw directive value, where a [`TokenKind::Unlexed`] is text.
     raw_values: Vec<std::ops::Range<usize>>,
+    /// Whether the body being parsed is an `@edition` guard's own.
+    in_guard: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -151,6 +194,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             depth: 0,
             raw_values: Vec::new(),
+            in_guard: false,
         }
     }
 
@@ -205,6 +249,12 @@ impl<'a> Parser<'a> {
             "cairn" => Directive::Cairn,
             REQUIRES => Directive::Requires,
             "intended_targets" => Directive::IntendedTargets,
+            EDITION => {
+                return Err(ParseError::Syntax {
+                    position,
+                    message: GUARD_OUTSIDE_A_BODY.into(),
+                });
+            }
             other => {
                 return Err(ParseError::Syntax {
                     position,
@@ -281,6 +331,17 @@ impl<'a> Parser<'a> {
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         let position = self.position();
         let start_byte = self.current_byte();
+        if self.peek_is(&TokenKind::At) {
+            self.advance();
+            return Err(ParseError::Syntax {
+                position,
+                message: if self.peek_is_ident(EDITION) {
+                    GUARD_OUTSIDE_A_BODY.into()
+                } else {
+                    "a file directive goes at the top of the file, before its first item".into()
+                },
+            });
+        }
         let kw = self.expect_ident()?;
         match kw.as_str() {
             "theme" => self.parse_theme_item(start_byte),
@@ -335,6 +396,9 @@ impl<'a> Parser<'a> {
         if kw == "slot" {
             let slot = self.expect_ident()?;
             self.expect(&TokenKind::Arrow)?;
+            if self.at_block_id() {
+                return Err(self.block_id_in_a_slot_row());
+            }
             let value = self.parse_value()?;
             let span = start_byte..self.last_byte();
             self.expect_newline()?;
@@ -524,6 +588,9 @@ impl<'a> Parser<'a> {
 
     /// Parse one body line; `policy` is the enclosing body's.
     fn parse_command(&mut self, policy: RequiresPolicy) -> Result<Statement, ParseError> {
+        if self.peek_is(&TokenKind::At) {
+            return self.parse_edition_guard(policy);
+        }
         let start_byte = self.current_byte();
         let keyword = self.expect_ident()?;
         match keyword.as_str() {
@@ -567,8 +634,10 @@ impl<'a> Parser<'a> {
         let span = start_byte..self.last_byte();
         self.expect_newline()?;
         // A body recurses like a list or an expression, so it goes through `nested`.
-        let (_, children) =
-            self.nested(|p| p.parse_optional_command_body(policy.for_children()))?;
+        let in_guard = std::mem::replace(&mut self.in_guard, false);
+        let children = self.nested(|p| p.parse_optional_command_body(policy.for_children()));
+        self.in_guard = in_guard;
+        let (_, children) = children?;
         Ok(Statement::Generic {
             keyword,
             selector,
@@ -580,12 +649,89 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parse an `@edition` guard and the lines indented under it; `policy` is the enclosing body's.
+    fn parse_edition_guard(&mut self, policy: RequiresPolicy) -> Result<Statement, ParseError> {
+        let position = self.position();
+        let start_byte = self.current_byte();
+        self.advance();
+        let name = self.expect_ident()?;
+        if name != EDITION {
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "`@{name}` is a file directive, which goes at the top of the file: inside a \
+                     body, `@` opens only an `@edition` guard"
+                ),
+            });
+        }
+        if self.in_guard {
+            return Err(ParseError::Syntax {
+                position,
+                message: "an `@edition` guard does not nest: the guard this one stands in already \
+                          picks the edition, so write its lines there or dedent this guard out"
+                    .into(),
+            });
+        }
+        let edition_position = self.position();
+        let edition = match self.peek().map(|t| &t.kind) {
+            Some(TokenKind::Ident(word)) => {
+                word.parse::<Edition>().map_err(|_| ParseError::Syntax {
+                    position: edition_position,
+                    message: format!(
+                        "`{word}` is not an edition: an `@edition` guard names `java` or `bedrock`"
+                    ),
+                })?
+            }
+            _ => {
+                return Err(ParseError::Syntax {
+                    position: edition_position,
+                    message: "an `@edition` guard names the edition whose build keeps its lines: \
+                              `@edition java` or `@edition bedrock`"
+                        .into(),
+                });
+            }
+        };
+        self.advance();
+        let span = start_byte..self.last_byte();
+        if let Some(next) = self.peek().filter(|t| t.kind != TokenKind::Newline) {
+            return Err(ParseError::Syntax {
+                position: next.position,
+                message: if next.kind == TokenKind::LBrace {
+                    "an `@edition` guard holds its lines indented under it, not in braces".into()
+                } else {
+                    "an `@edition` guard takes nothing after its edition: the lines it guards go \
+                     on the lines below it, one indent deeper"
+                        .into()
+                },
+            });
+        }
+        self.expect_newline()?;
+        if !self.peek_is(&TokenKind::Indent) {
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "nothing is indented under this `@edition {edition}` guard: the lines it guards \
+                     go on the lines below it, one indent deeper"
+                ),
+            });
+        }
+        let in_guard = std::mem::replace(&mut self.in_guard, true);
+        let children = self.nested(|p| p.parse_optional_command_body(policy.for_children()));
+        self.in_guard = in_guard;
+        let (_, children) = children?;
+        Ok(Statement::EditionGuard {
+            edition,
+            children,
+            span,
+        })
+    }
+
     fn parse_logic_command(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
         let lhs = self.parse_dotted_ref()?;
         self.expect(&TokenKind::Eq)?;
         let rhs = self.parse_expr()?;
         let span = start_byte..self.last_byte();
-        self.expect_operand_end(&TokenKind::Newline)?;
+        self.expect_operand_end(&[TokenKind::Newline])?;
         Ok(Statement::Logic { lhs, rhs, span })
     }
 
@@ -789,10 +935,27 @@ impl<'a> Parser<'a> {
             let operand = Box::new(operand);
             return Ok((Expr::Prefix { primitive, operand }, depth));
         }
+        if let Some((primitive, names)) = self
+            .peek_primitive()
+            .and_then(|primitive| Some((primitive, primitive.call_operands()?)))
+        {
+            self.advance();
+            let (operands, operands_depth) =
+                self.nested(|p| p.parse_call_operands(primitive, names))?;
+            let depth = operands_depth + 1;
+            self.charge_expr_depth(depth)?;
+            return Ok((
+                Expr::Call {
+                    primitive,
+                    operands,
+                },
+                depth,
+            ));
+        }
         if self.peek_is(&TokenKind::LParen) {
             self.advance();
             let inner = self.nested(|p| p.parse_expr_at(infix_rank_above(None)))?;
-            self.expect_operand_end(&TokenKind::RParen)?;
+            self.expect_operand_end(&[TokenKind::RParen])?;
             return Ok(inner);
         }
         // An infix primitive is never a signal name, so a missing operand is reported here.
@@ -817,6 +980,144 @@ impl<'a> Parser<'a> {
         Ok((Expr::Ref(dotted), 1))
     }
 
+    /// The parenthesised operands of the called `primitive`, each of `names` once and in any
+    /// order, returned in the order of `names`, and the depth of the deepest.
+    fn parse_call_operands(
+        &mut self,
+        primitive: LogicPrimitive,
+        names: &'static [&'static str],
+    ) -> Result<(Vec<NamedOperand>, usize), ParseError> {
+        let call = CallWording::new(primitive, names);
+        if !self.peek_is(&TokenKind::LParen) {
+            let (callee, shape) = (call.callee, &call.shape);
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected `(` after `{callee}`, got {found}: `{callee}` is called with its \
+                 operands named, as in {shape}"
+            )));
+        }
+        self.advance();
+        let mut values: Vec<Option<Expr>> =
+            std::iter::repeat_with(|| None).take(names.len()).collect();
+        let mut depth = 0;
+        loop {
+            let unnamed: Vec<&str> = names
+                .iter()
+                .zip(&values)
+                .filter(|(_, value)| value.is_none())
+                .map(|(name, _)| *name)
+                .collect();
+            let index = self.parse_operand_name(&call, &unnamed)?;
+            let (value, value_depth) = self.parse_expr_at(infix_rank_above(None))?;
+            values[index] = Some(value);
+            depth = depth.max(value_depth);
+            let missing: Vec<&str> = unnamed
+                .into_iter()
+                .filter(|left| *left != names[index])
+                .collect();
+            if self.expect_operand_separator(&call, &missing)? {
+                break;
+            }
+        }
+        let operands = names
+            .iter()
+            .copied()
+            .zip(values)
+            .filter_map(|(name, value)| {
+                Some(NamedOperand {
+                    name,
+                    value: value?,
+                })
+            })
+            .collect();
+        Ok((operands, depth))
+    }
+
+    /// Take `name=` for one of `unnamed`, returning its index in the call's names.
+    fn parse_operand_name(
+        &mut self,
+        call: &CallWording,
+        unnamed: &[&str],
+    ) -> Result<usize, ParseError> {
+        let (callee, shape, every_name) = (call.callee, &call.shape, &call.every_name);
+        if !self.is_at_key_eq() {
+            let expected = or_list(&quoted(unnamed, "=")).unwrap_or_default();
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected {expected}, got {found}: `{callee}` takes each operand by name, as in \
+                 {shape}"
+            )));
+        }
+        let position = self.position();
+        let name = self.expect_ident()?;
+        let Some(index) = call.names.iter().position(|known| *known == name) else {
+            let hint = nearest_match(&name, unnamed.iter().copied())
+                .map(|near| format!(" ({})", did_you_mean(near)))
+                .unwrap_or_default();
+            return Err(ParseError::Syntax {
+                position,
+                message: format!("`{callee}` has no operand `{name}`{hint}: it takes {every_name}"),
+            });
+        };
+        if !unnamed.contains(&name.as_str()) {
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "`{callee}` names `{name}` twice: it takes {every_name}, each named once"
+                ),
+            });
+        }
+        self.advance();
+        Ok(index)
+    }
+
+    /// Take what follows an operand of the call, `)` once none is `missing` and `,` before
+    /// another, returning whether the call closed.
+    fn expect_operand_separator(
+        &mut self,
+        call: &CallWording,
+        missing: &[&str],
+    ) -> Result<bool, ParseError> {
+        let (callee, shape, every_name) = (call.callee, &call.shape, &call.every_name);
+        if missing.is_empty() {
+            if self.peek_is(&TokenKind::Comma) {
+                return Err(self.syntax_here(&format!(
+                    "expected `)`, got `,`: `{callee}` takes {every_name}, and every one is \
+                     named, so the call closes here"
+                )));
+            }
+            self.expect_operand_end(&[TokenKind::RParen])?;
+            return Ok(true);
+        }
+        if self.is_at_key_eq() {
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected `,`, got {found}: the named operands of `{callee}` are separated by \
+                 commas, as in {shape}"
+            )));
+        }
+        if self.peek_is(&TokenKind::RParen) {
+            let operands = if missing.len() == 1 {
+                "operand"
+            } else {
+                "operands"
+            };
+            let missing = and_list(&quoted(missing, "")).unwrap_or_default();
+            return Err(self.syntax_here(&format!(
+                "`{callee}` is missing its {operands} {missing}: it takes {every_name}, each \
+                 named once"
+            )));
+        }
+        self.expect_operand_end(&[TokenKind::Comma, TokenKind::RParen])?;
+        Ok(false)
+    }
+
+    /// The next token as a diagnostic names it, or the end of input.
+    fn found_here(&self) -> String {
+        self.peek()
+            .map_or_else(|| "end of input".to_owned(), |token| token.kind.to_string())
+    }
+
     /// The primitive of the built-in logic library the next token names, consuming nothing.
     fn peek_primitive(&self) -> Option<LogicPrimitive> {
         match &self.peek()?.kind {
@@ -835,13 +1136,13 @@ impl<'a> Parser<'a> {
         Some(primitive)
     }
 
-    /// Take `closer` after a complete operand, or refuse what stands there with the infix
-    /// primitives that could have stood there instead.
-    fn expect_operand_end(&mut self, closer: &TokenKind) -> Result<(), ParseError> {
-        if *closer == TokenKind::Newline && self.at_eof() {
+    /// Take one of `closers` after a complete operand, or refuse what stands there with the infix
+    /// primitives and closers that could have stood there instead.
+    fn expect_operand_end(&mut self, closers: &[TokenKind]) -> Result<(), ParseError> {
+        if closers.contains(&TokenKind::Newline) && self.at_eof() {
             return Ok(());
         }
-        if self.peek_is(closer) {
+        if closers.iter().any(|closer| self.peek_is(closer)) {
             self.advance();
             return Ok(());
         }
@@ -850,7 +1151,7 @@ impl<'a> Parser<'a> {
             .filter(|primitive| primitive.infix_rank().is_some())
             .map(|primitive| format!("`{}`", primitive.name()))
             .collect();
-        expected.push(closer.to_string());
+        expected.extend(closers.iter().map(ToString::to_string));
         let expected = or_list(&expected).unwrap_or_default();
         let found = self.peek().map(|token| token.kind.clone());
         let why = self.why_not_after_operand(found.as_ref());
@@ -883,20 +1184,28 @@ impl<'a> Parser<'a> {
                 Some(TokenKind::Ident(_) | TokenKind::LParen)
             )
         };
-        let is_prefix = |word: &str| {
-            LogicPrimitive::from_name(word)
-                .is_some_and(|primitive| primitive.notation() == Notation::Prefix)
-        };
+        let notation = |word: &str| LogicPrimitive::from_name(word).map(LogicPrimitive::notation);
+        let is_prefix = |word: &str| notation(word) == Some(Notation::Prefix);
+        let is_call = |word: &str| matches!(notation(word), Some(Notation::Call { .. }));
         let between = ": two operands need an infix primitive between them".to_owned();
         match (found, bare_word_before) {
-            (Some(TokenKind::LParen), Some(callee)) => {
-                format!(": the built-in logic library has no primitive `{callee}` to call")
+            (Some(TokenKind::LParen), Some(word)) => {
+                let callable: Vec<String> = LogicPrimitive::ALL
+                    .into_iter()
+                    .filter(|primitive| primitive.call_operands().is_some())
+                    .map(|primitive| format!("`{}`", primitive.name()))
+                    .collect();
+                let callable = or_list(&callable).unwrap_or_default();
+                format!(
+                    ": the built-in logic library has no primitive `{word}` to call, and calls \
+                     only {callable}"
+                )
             }
             (Some(TokenKind::LParen), None) => between,
             (Some(TokenKind::Ident(word)), _) if is_prefix(word) && !operand_follows(1) => {
                 format!(": `{word}` goes before its operand")
             }
-            (Some(TokenKind::Ident(word)), _) if is_prefix(word) => between,
+            (Some(TokenKind::Ident(word)), _) if is_prefix(word) || is_call(word) => between,
             (Some(TokenKind::Ident(_)), Some(unknown)) => {
                 format!(": the built-in logic library has no primitive `{unknown}`")
             }
@@ -959,9 +1268,129 @@ impl<'a> Parser<'a> {
             return Err(literal);
         }
         self.expect(&TokenKind::Eq)?;
-        let value = self.parse_value()?;
+        let value = if self.at_coordinate() {
+            self.parse_coordinate()?
+        } else if self.at_block_id() {
+            self.parse_block_id()?
+        } else {
+            let value = self.parse_value()?;
+            if let ValueKind::Ident(namespace) = &value.kind {
+                self.refuse_a_spaced_block_id(namespace)?;
+            }
+            value
+        };
         let span = start_byte..self.last_byte();
         Ok(Arg { key, value, span })
+    }
+
+    /// Refuse a name and a path a space parts from the `:` between them, which no value is.
+    fn refuse_a_spaced_block_id(&self, namespace: &str) -> Result<(), ParseError> {
+        let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        let (Some(TokenKind::Colon), Some(TokenKind::Ident(path))) = (kind(0), kind(1)) else {
+            return Ok(());
+        };
+        Err(ParseError::Syntax {
+            position: self.position(),
+            message: format!(
+                "a space parts `{namespace}` and `{path}` from the `:` between them; a block id \
+                 is `namespace:path` with nothing around the `:`, as `{namespace}:{path}`"
+            ),
+        })
+    }
+
+    /// Whether the next tokens are an integer, a `,` and another component, or a `-` before the
+    /// first: only a coordinate triple puts those after `=`, since a selector's `,` precedes a key.
+    fn at_coordinate(&self) -> bool {
+        let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        let first = usize::from(matches!(kind(0), Some(TokenKind::Minus)));
+        matches!(kind(first), Some(TokenKind::Int { .. }))
+            && matches!(kind(first + 1), Some(TokenKind::Comma))
+            && (first == 1 || matches!(kind(2), Some(TokenKind::Int { .. } | TokenKind::Minus)))
+    }
+
+    /// Read a coordinate triple `X,Y,Z`, three integers joined by `,` with nothing between.
+    fn parse_coordinate(&mut self) -> Result<Value, ParseError> {
+        let start_byte = self.current_byte();
+        let start_position = self.position();
+        let mut components: Vec<u64> = Vec::with_capacity(3);
+        loop {
+            let position = self.position();
+            let Some(TokenKind::Int { lexeme }) = self.peek().map(|t| t.kind.clone()) else {
+                return Err(self.coordinate_component_refusal(position));
+            };
+            let component = lexeme
+                .parse::<i64>()
+                .map_err(|err| ParseError::InvalidInt {
+                    position,
+                    context: IntContext::IntLiteral,
+                    lexeme: lexeme.clone(),
+                    kind: *err.kind(),
+                })?;
+            components.push(component.cast_unsigned());
+            self.advance();
+            if !self.continues_coordinate() {
+                break;
+            }
+            let comma = &self.tokens[self.pos];
+            let next = &self.tokens[self.pos + 1];
+            if comma.span.start != self.last_byte() || next.span.start != comma.span.end {
+                return Err(ParseError::Syntax {
+                    position: comma.position,
+                    message: "a coordinate triple is written with nothing between its \
+                              components and the `,` joining them, as `4,3,2`"
+                        .into(),
+                });
+            }
+            self.advance();
+        }
+        if components.len() == 3 {
+            let value = ValueKind::Coord {
+                x: components[0],
+                y: components[1],
+                z: components[2],
+            };
+            return Ok(Value::new(value, start_byte..self.last_byte()));
+        }
+        let written = &self.source[start_byte..self.last_byte()];
+        let count = match components.len() {
+            2 => "two components",
+            _ => "more than three components",
+        };
+        Err(ParseError::Syntax {
+            position: start_position,
+            message: format!(
+                "the coordinate `{written}` has {count}; a coordinate triple is three, `x,y,z`, \
+                 as `4,3,2`"
+            ),
+        })
+    }
+
+    /// Whether a `,` and another component follow the component just read.
+    fn continues_coordinate(&self) -> bool {
+        let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        matches!(kind(0), Some(TokenKind::Comma))
+            && matches!(
+                kind(1),
+                Some(TokenKind::Int { .. } | TokenKind::Minus | TokenKind::Size(..))
+            )
+    }
+
+    /// The refusal for a coordinate component that is a `-` or a size rather than an integer.
+    fn coordinate_component_refusal(&self, position: Position) -> ParseError {
+        let token = &self.tokens[self.pos];
+        let message = if let TokenKind::Size(..) = token.kind {
+            let written = &self.source[token.span.clone()];
+            let rest = &written[written.find('x').unwrap_or_default()..];
+            format!(
+                "a coordinate component runs into `{rest}`: `{written}` reads as a size, and a \
+                 coordinate triple is three integers, `x,y,z`, as `4,3,2`"
+            )
+        } else {
+            "a coordinate component is never negative: a coordinate counts from the low corner \
+             of the footprint, as `0,0,0`"
+                .to_owned()
+        };
+        ParseError::Syntax { position, message }
     }
 
     /// The refusal for a key that is the `x` of a size literal with no height, as in `size=9x`,
@@ -983,6 +1412,79 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Whether the next tokens are a name and a `:` touching it, which only a block id puts after
+    /// `=`: a block header's `:` follows a name and then a space or the end of the line.
+    fn at_block_id(&self) -> bool {
+        let (Some(name), Some(colon)) = (self.tokens.get(self.pos), self.tokens.get(self.pos + 1))
+        else {
+            return false;
+        };
+        matches!(name.kind, TokenKind::Ident(_))
+            && colon.kind == TokenKind::Colon
+            && colon.span.start == name.span.end
+            && self.tokens.get(self.pos + 2).is_some_and(|path| {
+                path.span.start == colon.span.end && path.kind != TokenKind::Newline
+            })
+    }
+
+    /// The refusal of a block id a slot row binds, which binds a canonical token.
+    fn block_id_in_a_slot_row(&mut self) -> ParseError {
+        let position = self.position();
+        let id = match self.read_block_id() {
+            Ok(id) => id,
+            Err(err) => return err,
+        };
+        let repair = match id.strip_prefix("minecraft:") {
+            Some(token) => format!("write its canonical token, `@{token}`"),
+            None => "write a canonical token, as `@stone`".to_owned(),
+        };
+        ParseError::Syntax {
+            position,
+            message: format!(
+                "a slot row binds a canonical token, not the block id `{id}`; {repair}, or place \
+                 the block as written with a `raw_block` or `raw_fill`"
+            ),
+        }
+    }
+
+    /// Read a block id, `namespace:path` with its state literal if any.
+    fn parse_block_id(&mut self) -> Result<Value, ParseError> {
+        let start_byte = self.current_byte();
+        let id = self.read_block_id()?;
+        Ok(Value::new(
+            ValueKind::BlockId(id),
+            start_byte..self.last_byte(),
+        ))
+    }
+
+    /// Read a block id's text, its state literal folded in as a token's is.
+    fn read_block_id(&mut self) -> Result<String, ParseError> {
+        let mut text = self.expect_ident()?;
+        self.expect(&TokenKind::Colon)?;
+        let position = self.position();
+        let Some(TokenKind::Ident(path)) = self.peek().map(|t| t.kind.clone()) else {
+            let got = self.next_token_text();
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "a block id expected a path after `{text}:`, got {got}; a block id is \
+                     `namespace:path`, as `minecraft:stone`"
+                ),
+            });
+        };
+        self.advance();
+        text.push(':');
+        text.push_str(&path);
+        if self
+            .peek()
+            .is_some_and(|t| t.kind == TokenKind::LBracket && t.span.start == self.last_byte())
+        {
+            let literal = self.parse_state_literal(&text)?;
+            text.push_str(&literal);
+        }
+        Ok(text)
+    }
+
     /// Read an `@` token value whose `@` starts at `start_byte`, with its state literal if any.
     fn parse_token_value(&mut self, start_byte: usize) -> Result<Value, ParseError> {
         self.advance();
@@ -1000,7 +1502,7 @@ impl<'a> Parser<'a> {
                 .peek()
                 .is_some_and(|t| t.kind == TokenKind::LBracket && t.span.start == self.last_byte())
         {
-            text.push_str(&self.parse_state_literal(&text)?);
+            text.push_str(&self.parse_state_literal(&format!("@{text}"))?);
         }
         Ok(Value::new(
             ValueKind::Token(text),
@@ -1008,13 +1510,14 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    /// Read a block-state literal after `@token` as the text it folds into, spaces dropped. The
-    /// one place a malformed literal is refused: `block_array::material` reads it back leniently.
-    fn parse_state_literal(&mut self, token: &str) -> Result<String, ParseError> {
+    /// Read a block-state literal after `written`, a token or block id as written, as the text it
+    /// folds into, spaces dropped. The one place a malformed literal is refused:
+    /// `block_array::material` reads it back leniently.
+    fn parse_state_literal(&mut self, written: &str) -> Result<String, ParseError> {
         let refuse = |position, found: &str| ParseError::Syntax {
             position,
             message: format!(
-                "the state literal on `@{token}` expected {found}; a state literal is \
+                "the state literal on `{written}` expected {found}; a state literal is \
                  `[property=value]` pairs separated by `,`, as in `@oak_log[axis=x]`"
             ),
         };
@@ -1031,7 +1534,7 @@ impl<'a> Parser<'a> {
                 return Err(ParseError::Syntax {
                     position,
                     message: format!(
-                        "the state literal on `@{token}` sets `{property}` twice; a block \
+                        "the state literal on `{written}` sets `{property}` twice; a block \
                          state has one value per property"
                     ),
                 });

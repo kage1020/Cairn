@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "namespace": "minecraft",
+  "dropped_states": {
+    "age": [
+      {
+        "java": ["mangrove_propagule"],
+        "kind": "missing_state",
+        "reason": "this Bedrock version's state map grows a mangrove propagule from its `stage`, so its `age` is lost"
+      }
+    ],
+    "bottom": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works out whether scaffolding stands on the ground from the blocks below it"
+      }
+    ],
+    "copper_golem_pose": [
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock's copper golem statue has no pose state"
+      }
+    ],
+    "cracked": [
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock's decorated pot has no cracked state, so the pot shows whole"
+      }
+    ],
+    "distance": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works out how far a leaf is from a log as the world updates it"
+      }
+    ],
+    "down": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works the connection out from the neighbouring blocks"
+      }
+    ],
+    "east": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works the connection out from the neighbouring blocks"
+      }
+    ],
+    "extended": [
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock keeps a piston's extension in its block entity, which Cairn does not write, so the piston stands retracted"
+      }
+    ],
+    "facing": [
+      {
+        "java": ["moving_piston"],
+        "kind": "missing_state",
+        "reason": "Bedrock keeps a moving piston's facing in its block entity, which Cairn does not write"
+      },
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock keeps a shulker box's facing in its block entity, which Cairn does not write"
+      }
+    ],
+    "has_book": [
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock shows a lectern's book from its block entity, which Cairn does not write, so the lectern stands empty"
+      }
+    ],
+    "has_record": [
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock keeps a jukebox's record in its block entity, which Cairn does not write, so the jukebox stands empty"
+      }
+    ],
+    "instrument": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works a note block's instrument out from the block below it"
+      }
+    ],
+    "locked": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works out whether a repeater is locked from the repeaters and comparators beside it"
+      }
+    ],
+    "north": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works the connection out from the neighbouring blocks"
+      }
+    ],
+    "note": [
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock keeps a note block's note in its block entity, which Cairn does not write"
+      }
+    ],
+    "orientation": [
+      {
+        "kind": "missing_state",
+        "reason": "this Bedrock version's state map writes every jigsaw facing down"
+      }
+    ],
+    "power": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works out the signal the block gives as the world runs"
+      }
+    ],
+    "powered": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works out whether the block is powered from the redstone signal around it"
+      }
+    ],
+    "rotation": [
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock keeps a standing head's rotation in its block entity, which Cairn does not write"
+      }
+    ],
+    "shape": [
+      {
+        "kind": "missing_state",
+        "reason": "this Bedrock version has no stair `shape` state; its stairs render straight, so corners show visual gaps"
+      }
+    ],
+    "short": [
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock's piston arm has no state for the short arm a moving Java piston shows"
+      }
+    ],
+    "signal_fire": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works out whether a campfire sends up a signal from the hay bale below it"
+      }
+    ],
+    "snowy": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works out whether the block shows snow from the snow above it"
+      }
+    ],
+    "south": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works the connection out from the neighbouring blocks"
+      }
+    ],
+    "stage": [
+      {
+        "java": ["bamboo"],
+        "kind": "missing_state",
+        "reason": "Bedrock's bamboo has no state for whether it grows further, so it grows on Bedrock's own schedule"
+      },
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock's mangrove propagule has no `stage` state, so it grows on Bedrock's own schedule"
+      }
+    ],
+    "type": [
+      {
+        "java": ["moving_piston"],
+        "kind": "missing_state",
+        "reason": "Bedrock keeps whether a moving piston is sticky in its block entity, which Cairn does not write"
+      },
+      {
+        "kind": "missing_state",
+        "reason": "Bedrock pairs chests through their block entities, which Cairn does not write, so each chest stands single"
+      }
+    ],
+    "up": [
+      {
+        "java": ["vine"],
+        "kind": "missing_state",
+        "reason": "Bedrock's vine has no state for a face on the block above, so that face is not drawn"
+      },
+      {
+        "kind": "derived",
+        "reason": "Bedrock works the connection out from the neighbouring blocks"
+      }
+    ],
+    "west": [
+      {
+        "kind": "derived",
+        "reason": "Bedrock works the connection out from the neighbouring blocks"
+      }
+    ]
+  }
+}

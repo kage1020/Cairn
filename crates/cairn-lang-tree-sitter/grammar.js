@@ -6,6 +6,32 @@ function body($, lineItem, selfTerminating) {
   return seq($._indent, repeat(choice(...alternatives)), $._dedent);
 }
 
+// Every order of `items`, so a call can name each operand once in any order.
+function permutations(items) {
+  if (items.length <= 1) return [items];
+  return items.flatMap((item, i) =>
+    permutations([...items.slice(0, i), ...items.slice(i + 1)]).map(rest => [item, ...rest]));
+}
+
+// A call of `primitive` naming each of `operands` once, in any order, with commas between.
+function callOf($, primitive, operands) {
+  const orders = permutations(operands).map(order => seq(...order.flatMap((name, i) => {
+    const operand = alias($[`_${primitive}_${name}`], $.named_operand);
+    return i === 0 ? [operand] : [',', operand];
+  })));
+  return seq(primitive, '(', choice(...orders), ')');
+}
+
+// One rule per operand of `primitive`, as `name = value`. Below an identifier's precedence, a
+// name is no keyword, so error recovery still reads the same word elsewhere as an identifier.
+function namedOperands(primitive, operands) {
+  return Object.fromEntries(operands.map(name => [`_${primitive}_${name}`, $ => seq(
+    field('name', alias(token(prec(-1, name)), $.operand_name)),
+    '=',
+    field('value', $._bool_expr),
+  )]));
+}
+
 function declOf(keyword, bodyRule) {
   return $ => seq(
     keyword,
@@ -29,11 +55,11 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
-  // A named set replaces `global`, so `operand` lists `true` and `false` again. `not` needs no
-  // reserving: wherever an operand can start, the lexer already takes it as the keyword.
+  // A named set replaces `global`, so `operand` lists `true` and `false` again. `not` and `mux`
+  // need no reserving: wherever an operand can start, the lexer already takes each as a keyword.
   reserved: {
     global: _ => ['true', 'false'],
-    operand: _ => ['true', 'false', 'and', 'or'],
+    operand: _ => ['true', 'false', 'and', 'or', 'xor', 'nand', 'nor'],
   },
 
   conflicts: $ => [
@@ -72,12 +98,30 @@ module.exports = grammar({
     struct_body: $ => body(
       $,
       choice($.member_stmt, $.logic_decl, $.assert_stmt),
-      $.member_stmt_with_body,
+      choice($.member_stmt_with_body, $.edition_guard),
     ),
 
     def_body: $ => body(
       $,
       choice($.requires_stmt, $.member_stmt, $.logic_decl, $.assert_stmt),
+      choice($.member_stmt_with_body, $.edition_guard),
+    ),
+
+    // Core's check, not the grammar, refuses a line in it other than a raw member.
+    edition_guard: $ => seq(
+      '@',
+      'edition',
+      field('edition', $.edition_name),
+      $._newline,
+      field('body', $.edition_guard_body),
+    ),
+
+    edition_name: _ => choice('java', 'bedrock'),
+
+    // A guard does not nest, so its own lines leave out `edition_guard`.
+    edition_guard_body: $ => body(
+      $,
+      choice($.member_stmt, $.logic_decl, $.assert_stmt),
       $.member_stmt_with_body,
     ),
 
@@ -132,17 +176,29 @@ module.exports = grammar({
     _bool_expr: $ => choice(
       $.binary_expression,
       $.unary_expression,
+      $.call_expression,
       $.parenthesized_expression,
       reserved('operand', $.signal_ref),
       reserved('operand', $.identifier),
     ),
 
-    binary_expression: $ => choice(
-      prec.left(1, seq(field('lhs', $._bool_expr), 'or',  field('rhs', $._bool_expr))),
-      prec.left(2, seq(field('lhs', $._bool_expr), 'and', field('rhs', $._bool_expr))),
-    ),
+    // Each precedence is one above the library's rank.
+    binary_expression: $ => {
+      const infix = (precedence, word) => prec.left(precedence, seq(
+        field('lhs', $._bool_expr), word, field('rhs', $._bool_expr),
+      ));
+      return choice(
+        infix(1, 'or'), infix(1, 'nor'),
+        infix(2, 'xor'),
+        infix(3, 'and'), infix(3, 'nand'),
+      );
+    },
 
-    unary_expression: $ => prec(3, seq('not', field('operand', $._bool_expr))),
+    unary_expression: $ => prec(4, seq('not', field('operand', $._bool_expr))),
+
+    call_expression: $ => callOf($, 'mux', ['sel', 'a', 'b']),
+
+    ...namedOperands('mux', ['sel', 'a', 'b']),
 
     parenthesized_expression: $ => seq('(', $._bool_expr, ')'),
 
@@ -229,7 +285,20 @@ module.exports = grammar({
 
     attribute_list: $ => repeat1($.attribute),
 
-    attribute: $ => seq(field('key', $.identifier), '=', field('value', $._value)),
+    attribute: $ => seq(
+      field('key', $.identifier),
+      '=',
+      field('value', choice($.coordinate, $.block_id, $._value)),
+    ),
+
+    // One token, so a selector's `y=2,side=front` still reads `2` and then a separator.
+    coordinate: _ => token(/[0-9]+,[0-9]+,[0-9]+/),
+
+    // One token, so a space on either side of the `:` leaves a name and a stray `:`.
+    block_id: $ => seq(
+      token(/[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*/),
+      optional($.state_literal),
+    ),
 
     // Only an undotted token takes a state literal; a `[` after a space starts a nested list.
     material_ref: $ => choice(

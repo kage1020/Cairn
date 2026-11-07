@@ -1306,24 +1306,6 @@ fn a_budget_refusal_of_a_net_on_both_ports_of_a_merge_names_both() {
     );
 }
 
-/// Hand-built: `mux` has no surface syntax.
-#[test]
-fn a_budget_refusal_of_a_net_on_every_port_of_a_mux_names_all_three() {
-    let (ir, trees) = gate(
-        EditionCell::JavaMuxUnpinned,
-        &stairs_into_the_gate(),
-        &[
-            (PortName::Sel, LONG),
-            (PortName::A, LONG),
-            (PortName::B, LONG),
-        ],
-    );
-    assert_eq!(
-        sites_in_struct("mux", ir, &trees).err(),
-        Some(stairs_refusal("mux", "ports `sel`, `a`, and `b`")),
-    );
-}
-
 #[test]
 fn a_budget_refusal_of_a_net_on_both_ports_of_a_java_and_names_only_the_rear() {
     let (ir, trees) = gate(

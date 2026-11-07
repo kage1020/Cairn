@@ -1,0 +1,188 @@
+==================
+Edition guards in a struct body (field labels)
+==================
+
+struct lamp size=5x5
+  floor mat_slot=floor
+  @edition java
+    raw_block mat=minecraft:light at=2,1,2
+  @edition bedrock
+    raw_block mat=minecraft:light_block_15 at=2,1,2
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (identifier)))))
+      (edition_guard
+        edition: (edition_name)
+        body: (edition_guard_body
+          (member_stmt
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (block_id)))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (coordinate)))))))
+      (edition_guard
+        edition: (edition_name)
+        body: (edition_guard_body
+          (member_stmt
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (block_id)))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (coordinate))))))))))
+
+==================
+Edition guard in a def body and under a level
+==================
+
+def lamp size=3x3
+  @edition bedrock
+    raw_fill mat=minecraft:glass from=0,0,0 to=1,0,1
+
+struct s size=3x3
+  level y=1
+    @edition java
+      raw_block mat=minecraft:stone at=1,0,1
+
+---
+
+(source_file
+  (def_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (def_body
+      (edition_guard
+        (edition_name)
+        (edition_guard_body
+          (member_stmt
+            (member_keyword)
+            (command_arg_list
+              (command_arg
+                (attribute
+                  (identifier)
+                  (block_id)))
+              (command_arg
+                (attribute
+                  (identifier)
+                  (coordinate)))
+              (command_arg
+                (attribute
+                  (identifier)
+                  (coordinate)))))))))
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt_with_body
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))
+        (struct_body
+          (edition_guard
+            (edition_name)
+            (edition_guard_body
+              (member_stmt
+                (member_keyword)
+                (command_arg_list
+                  (command_arg
+                    (attribute
+                      (identifier)
+                      (block_id)))
+                  (command_arg
+                    (attribute
+                      (identifier)
+                      (coordinate))))))))))))
+
+==================
+A guard naming no edition is rejected
+:error
+==================
+
+struct s size=3x3
+  @edition pocket
+    raw_block mat=minecraft:stone at=1,0,1
+
+---
+
+==================
+A guard with nothing indented under it is rejected
+:error
+==================
+
+struct s size=3x3
+  @edition java
+  raw_block mat=minecraft:stone at=1,0,1
+
+---
+
+==================
+A guard inside a guard is rejected
+:error
+==================
+
+struct s size=3x3
+  @edition java
+    @edition bedrock
+      raw_block mat=minecraft:stone at=1,0,1
+
+---
+
+==================
+A guard at top level is rejected
+:error
+==================
+
+@edition java
+struct s size=3x3
+  floor mat_slot=f
+
+---
+
+==================
+A one-line braced guard is rejected
+:error
+==================
+
+struct s size=3x3
+  @edition java { raw_block mat=minecraft:stone at=1,0,1 }
+
+---

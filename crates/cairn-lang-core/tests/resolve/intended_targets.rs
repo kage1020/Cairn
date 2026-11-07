@@ -21,7 +21,7 @@ fn java_order() -> VersionOrder {
     ])
 }
 
-/// The three versions the built-in Java pack ships block data for.
+/// The Java versions a build in these fixtures may target.
 fn java_targetable() -> Vec<String> {
     ["1.20.4", "1.21", "1.21.4"]
         .iter()
@@ -40,7 +40,7 @@ fn bedrock_order() -> VersionOrder {
     ])
 }
 
-/// The three versions the built-in Bedrock pack ships block data for.
+/// The Bedrock versions a build in these fixtures may target.
 fn bedrock_targetable() -> Vec<String> {
     ["1.21.0", "1.21.40", "1.21.60"]
         .iter()

@@ -1,0 +1,140 @@
+---
+source: crates/cairn-lang-core/tests/lower/intent.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: reef
+    slots:
+      floor:
+        kind: Token
+        value: smooth_stone
+      wall:
+        kind: Token
+        value: cobblestone
+      glass:
+        kind: Token
+        value: glass_pane
+      bed:
+        kind: Token
+        value: sand
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: aquarium
+    size:
+      w: 7
+      h: 5
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: floor
+        arguments: {}
+        intent_state: {}
+      - role:
+          kind: Walls
+        mat_slot: wall
+        arguments:
+          height:
+            kind: Int
+            value: 4
+        intent_state: {}
+      - role:
+          kind: Window
+        mat_slot: glass
+        arguments:
+          side:
+            kind: Ident
+            value: front
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 2
+          size:
+            kind: Size
+            value:
+              w: 3
+              h: 2
+        intent_state: {}
+      - id: bed
+        role:
+          kind: Fill
+        mat_slot: bed
+        arguments:
+          from:
+            kind: Coord
+            value:
+              x: 1
+              y: 1
+              z: 1
+          to:
+            kind: Coord
+            value:
+              x: 5
+              y: 1
+              z: 3
+        intent_state: {}
+      - id: sunken
+        role:
+          kind: Chest
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - back
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 2
+        intent_state: {}
+      - id: dry
+        role:
+          kind: Chest
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - back
+          offset:
+            kind: Int
+            value: 4
+          y:
+            kind: Int
+            value: 2
+        intent_state:
+          waterlogged:
+            kind: Bool
+            value: false
+      - id: water
+        role:
+          kind: Fill
+        arguments:
+          fluid:
+            kind: Ident
+            value: water
+          from:
+            kind: Coord
+            value:
+              x: 0
+              y: 2
+              z: 0
+          to:
+            kind: Coord
+            value:
+              x: 6
+              y: 3
+              z: 4
+        intent_state: {}

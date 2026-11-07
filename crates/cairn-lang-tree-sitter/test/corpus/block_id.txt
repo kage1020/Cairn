@@ -1,0 +1,122 @@
+==================
+Block id as a key's value
+==================
+
+struct s size=5x5
+  raw_block mat=minecraft:stone at=1,0,1
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (block_id)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate))))))))
+
+==================
+Block id with a touching state literal
+==================
+
+struct s size=5x5
+  raw_block mat=minecraft:oak_stairs[facing=east, half=top] at=1,0,1
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (block_id
+                (state_literal
+                  (state_property
+                    (identifier)
+                    (identifier))
+                  (state_property
+                    (identifier)
+                    (identifier))))))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate))))))))
+
+==================
+A colon ending a header line is no block id
+==================
+
+def hut size=3x3 tag=small:
+  floor mat_slot=f
+
+---
+
+(source_file
+  (def_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer)))
+      (attribute
+        (identifier)
+        (identifier)))
+    (def_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
+
+==================
+A space after the colon is no block id
+:error
+==================
+
+struct s size=5x5
+  raw_block mat=minecraft: stone
+
+---
+
+
+
+==================
+A slot row binds no block id
+:error
+==================
+
+theme t:
+  slot wall -> minecraft:stone
+
+---
+
+

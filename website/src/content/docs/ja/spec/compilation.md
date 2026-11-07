@@ -7,21 +7,24 @@ title: "4. コンパイルモデル"
 コマンドは、順番を気にせず並べて書けます。コンパイラが各コマンドをフェーズに振り分け、フェーズを次の決まった順番で評価します。
 
 ```
-massing     floor / walls / volume
+massing     floor / walls / volume / fill
 envelope    roof / stair
 openings    door / window
-fixtures    sign / painting / frame / bed / センサー / アクチュエーター
+fixtures    sign / painting / frame / bed / chest / センサー / アクチュエーター
+fluids      fill fluid= / water
 logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
 logic_place セルの配置 → Placement IR
 logic_route Placement IR 上での配線、遅延の挿入、交差の合法化。遅延が確定
-raw         エスケープハッチ
+raw         raw_block / raw_fill (エスケープハッチ)
 ```
 
-ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`raw` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures` の 4 つで、`fixtures` に属するのは `pressure_plate` だけです。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
+`fill` は、`mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。そのため、水は、水を含めるブロックが置かれたあとで注ぎます。
+
+ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `pressure_plate` と `chest` です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
-`circuit` は配線のための領域を確保するだけで、ボクセルを書かないので、どのフェーズにも属しません。3 つの `logic_*` フェーズが `fixtures` の後にあるのは、センサーとアクチュエーターを 3D 空間に配置するまで、ポートの座標が決まらないからです ([レッドストーン](/ja/spec/redstone/))。
+`circuit` は配線のための領域を確保するだけで、ボクセルを書かないので、どのフェーズにも属しません。3 つの `logic_*` フェーズが `fixtures` の後にあるのは、センサーとアクチュエーターを 3D 空間に配置するまで、ポートの座標が決まらないからです。`fluids` の後にあるのは、水が届いた配線を押し流すからです ([レッドストーン](/ja/spec/redstone/))。
 
 後勝ちになるのは **同じフェーズの中での局所的な上書き** だけで、`raw` は常に最後に評価します。同じフェーズの中で別々のメンバーが 1 つのボクセルを取り合う場合も、同じ規則で決着し、そのことを報告します ([§4.8](#48-同一フェーズ内の衝突とパレット))。
 
@@ -139,7 +142,7 @@ Dims.y = 1 + wall_top + roof_extra
 
 `level` の中のメンバーも、この 3 つの項すべてに、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 
-**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `pressure_plate` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
+**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `pressure_plate` / `chest` / `fill` / `raw_block` / `raw_fill` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
 
 **ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof` や `slope_to=` のない `shed` は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
 
@@ -149,7 +152,7 @@ Dims.y = 1 + wall_top + roof_extra
 
 ## 4.8 同一フェーズ内の衝突とパレット
 
-フェーズが異なるメンバー同士では、フェーズの順番で決まります。`walls` を貫く `door` は massing の後の openings なので、壁に穴が開くのは狙いどおりです。同じフェーズの中で 2 つのメンバーを区別するのはソース上の順番だけで、[§4.1](#41-フェーズ評価) はこれを「同じフェーズの中での局所的な上書き」として認めています。
+フェーズが異なるメンバー同士では、フェーズの順番で決まります。`walls` にはめ込む `door` は massing の後の openings なので、壁のセルをドアが占めるのは狙いどおりです。同じフェーズの中で 2 つのメンバーを区別するのはソース上の順番だけで、[§4.1](#41-フェーズ評価) はこれを「同じフェーズの中での局所的な上書き」として認めています。
 
 この上書きは、作者が同じメンバーを書き直すことを想定したものです。たまたま敷地が重なっただけのメンバー同士は事情が違います。この場合、コンパイラは最後の書き込みを残し、両方のメンバー名と、入れ替わったボクセルの数を示す `W_PHASE_CONFLICT` を出します。ビルドの結果は変わりません。動かせる 1 行が結果を左右していることを、作者に知らせるためのものです。
 

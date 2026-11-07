@@ -1,10 +1,10 @@
 //! A [`BlockArray`] as a Bedrock `.mcstructure`. Each `block_indices` layer runs z fastest,
-//! `(x * size_y + y) * size_z + z`, unlike Java's `blocks`; the second, waterlogging layer is all
-//! `-1`, since lowering authors none.
+//! `(x * size_y + y) * size_z + z`, unlike Java's `blocks`; the second layer holds water where a
+//! waterlogged entry stands and `-1` everywhere else.
 
 use std::collections::HashMap;
 
-use cairn_lang_core::block_array::{BlockArray, PaletteIndex};
+use cairn_lang_core::block_array::{BlockArray, BlockState, PaletteIndex};
 use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
@@ -18,6 +18,7 @@ use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, list_volume};
+use crate::registry::VersionStates;
 
 /// One intent a palette entry dropped to fit Bedrock, reported as `W_INTENT_DEGRADED`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,8 +29,7 @@ pub struct ParityNote {
     /// The entry's `key=value` pairs, comma-joined, the spelling of
     /// [`DegradedEntry::states`](cairn_lang_core::resolve::DegradedEntry::states).
     pub states: String,
-    /// The intent dropped, which [`degradation_detail`](crate::bedrock_state::degradation_detail)
-    /// words.
+    /// The intent dropped, worded by its `reason`.
     pub dropped: DroppedIntent,
 }
 
@@ -137,6 +137,8 @@ pub struct McStructure<'a> {
     block_palette_len: usize,
     /// Each palette entry's `block_palette` slot; entries translation merges share one.
     slots: Vec<i32>,
+    /// Each palette entry's water layer slot, `-1` for one that is not waterlogged.
+    water: Vec<i32>,
 }
 
 /// Leaves out the grid, which can hold millions of voxels.
@@ -152,21 +154,30 @@ impl std::fmt::Debug for McStructure<'_> {
     }
 }
 
-/// Checks that `block_array` writes as a `.mcstructure` for `target`, translating its palette,
-/// with the [`ParityNote`]s the translation raised, in palette order.
+/// Checks that `block_array` writes as a `.mcstructure` for `target`, its palette translated
+/// through `states`, with the [`ParityNote`]s the translation raised, in palette order.
 ///
 /// # Errors
 ///
 /// The first fault found, as any [`BedrockStructureError`] but [`BedrockStructureError::Nbt`].
+///
+/// # Panics
+///
+/// When `states` is another version's map than `target`'s.
 pub fn prepare_mcstructure<'a>(
     block_array: &'a BlockArray,
     target: &BedrockTarget,
+    states: &VersionStates<'_>,
 ) -> Result<(McStructure<'a>, Vec<ParityNote>), BedrockStructureError> {
+    assert_eq!(
+        states.mc_version(),
+        target.mc_version,
+        "the state map must be the target version's"
+    );
     let entries = &block_array.palette.entries;
-    let mut block_palette: Vec<Compound> = Vec::with_capacity(entries.len());
-    // Keyed by id, which each compound carries as `name`: entries of two ids never merge.
-    let mut slots_by_id: HashMap<&str, Vec<i32>> = HashMap::new();
+    let mut palette = BlockPalette::with_capacity(entries.len());
     let mut slots: Vec<i32> = Vec::with_capacity(entries.len());
+    let mut waterlogged: Vec<bool> = Vec::with_capacity(entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
     for entry in entries {
         if !is_concrete_id(&entry.id) {
@@ -174,9 +185,9 @@ pub fn prepare_mcstructure<'a>(
                 id: entry.id.clone(),
             });
         }
-        let translated = translate_states(entry)?;
-        check_palette_strings(&entry.id, &translated.states)?;
-        // Named by the Java entry: several can share one Bedrock state once the intent drops.
+        let translated = translate_states(states, entry)?;
+        check_palette_strings(&translated.id, &translated.states)?;
+        // Named by the canonical entry: several can share one Bedrock state once the intent drops.
         if !translated.degraded.is_empty() {
             let states = entry.properties_text();
             notes.extend(translated.degraded.into_iter().map(|dropped| ParityNote {
@@ -185,28 +196,24 @@ pub fn prepare_mcstructure<'a>(
                 dropped,
             }));
         }
-        let compound = palette_entry(&entry.id, translated.states, target.block_version);
-        // The palette is a set (`spec/compilation` "Within-phase conflicts and the palette"):
-        // an entry whose translation folds into an earlier one takes that slot, so air stays at 0.
-        let named = slots_by_id.entry(&entry.id).or_default();
-        let earlier = named
-            .iter()
-            .copied()
-            .find(|&slot| usize::try_from(slot).is_ok_and(|slot| block_palette[slot] == compound));
-        let slot = if let Some(slot) = earlier {
-            slot
-        } else {
-            block_palette.push(compound);
-            let len = block_palette.len();
-            let slot = i32::try_from(len).map_err(|_| BedrockStructureError::ListTooLong {
-                list: "block_palette",
-                len,
-            })? - 1;
-            named.push(slot);
-            slot
-        };
-        slots.push(slot);
+        let compound = palette_entry(&translated.id, translated.states, target.block_version);
+        slots.push(palette.slot(compound)?);
+        waterlogged.push(translated.waterlogged);
     }
+    let water = if waterlogged.contains(&true) {
+        let water = translate_states(states, &BlockState::bare(WATER_ID))?;
+        let slot = palette.slot(palette_entry(&water.id, water.states, target.block_version))?;
+        waterlogged
+            .iter()
+            .map(|&wet| if wet { slot } else { -1 })
+            .collect()
+    } else {
+        vec![-1; waterlogged.len()]
+    };
+    let BlockPalette {
+        entries: block_palette,
+        ..
+    } = palette;
     let block_palette_len = block_palette.len();
     let size = dims_to_i32(&block_array.dims)?;
     let volume = list_volume(block_array)?;
@@ -221,8 +228,55 @@ pub fn prepare_mcstructure<'a>(
         palette: palette_compound(block_palette),
         block_palette_len,
         slots,
+        water,
     };
     Ok((prepared, notes))
+}
+
+/// The block a waterlogged cell's second layer holds.
+const WATER_ID: &str = "minecraft:water";
+
+/// The `block_palette` being built, a set (`spec/compilation` "Within-phase conflicts and the
+/// palette"): an entry whose translation folds into an earlier one takes that slot, so air stays
+/// at 0.
+struct BlockPalette {
+    entries: Vec<Compound>,
+    slots: HashMap<String, Vec<i32>>,
+}
+
+impl BlockPalette {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(capacity),
+            slots: HashMap::new(),
+        }
+    }
+
+    /// The slot of `compound`, added unless an earlier entry is the same block.
+    fn slot(&mut self, compound: Compound) -> Result<i32, BedrockStructureError> {
+        // Keyed by the `name` each compound carries: entries of two ids never merge.
+        let name = match compound.entries.get("name") {
+            Some(Tag::String(name)) => name.clone(),
+            _ => String::new(),
+        };
+        let named = self.slots.entry(name).or_default();
+        let entries = &self.entries;
+        if let Some(slot) = named
+            .iter()
+            .copied()
+            .find(|&slot| usize::try_from(slot).is_ok_and(|slot| entries[slot] == compound))
+        {
+            return Ok(slot);
+        }
+        self.entries.push(compound);
+        let len = self.entries.len();
+        let slot = i32::try_from(len).map_err(|_| BedrockStructureError::ListTooLong {
+            list: "block_palette",
+            len,
+        })? - 1;
+        named.push(slot);
+        Ok(slot)
+    }
 }
 
 /// Refuses the first string of a palette entry the NBT encoder could not write.
@@ -248,6 +302,26 @@ impl McStructure<'_> {
     /// The `block_palette` slot a voxel is written as.
     fn slot(&self, voxel: PaletteIndex) -> i32 {
         self.slots[usize::from(voxel.0)]
+    }
+
+    /// The water layer's slot for a voxel, `-1` for a dry one.
+    fn water_slot(&self, voxel: PaletteIndex) -> i32 {
+        self.water[usize::from(voxel.0)]
+    }
+
+    /// Each voxel's index, in the `block_indices` order: z fastest, then y, then x.
+    fn voxel_order(&self) -> impl Iterator<Item = PaletteIndex> + '_ {
+        let dims = self.block_array.dims;
+        (0..dims.x).flat_map(move |x| {
+            (0..dims.y).flat_map(move |y| {
+                (0..dims.z).map(move |z| {
+                    let i = dims
+                        .index(x, y, z)
+                        .expect("voxel coordinate in dims by construction");
+                    self.block_array.voxels[i]
+                })
+            })
+        })
     }
 
     /// Writes the structure as uncompressed little-endian NBT, encoding the voxels as it goes.
@@ -276,49 +350,30 @@ impl McStructure<'_> {
         &self,
         structure: &mut CompoundStream<'_, W>,
     ) -> Result<(), NbtIoError> {
-        let block_array = self.block_array;
         let volume = self.volume;
         structure.list("block_indices", 9, 2, |layers| {
             layers.list(3, volume, |layer0| {
-                for x in 0..block_array.dims.x {
-                    for y in 0..block_array.dims.y {
-                        for z in 0..block_array.dims.z {
-                            let i = block_array
-                                .dims
-                                .index(x, y, z)
-                                .expect("voxel coordinate in dims by construction");
-                            layer0.item(&Tag::Int(self.slot(block_array.voxels[i])))?;
-                        }
-                    }
+                for voxel in self.voxel_order() {
+                    layer0.item(&Tag::Int(self.slot(voxel)))?;
                 }
                 Ok(())
             })?;
             layers.list(3, volume, |layer1| {
-                for _ in 0..volume {
-                    layer1.item(&Tag::Int(-1))?;
+                for voxel in self.voxel_order() {
+                    layer1.item(&Tag::Int(self.water_slot(voxel)))?;
                 }
                 Ok(())
             })
         })
     }
 
-    /// The two `block_indices` layers: each voxel's `block_palette` slot, then all `-1`.
+    /// The two `block_indices` layers: each voxel's `block_palette` slot, then its water's.
     fn block_indices(&self) -> List {
-        let block_array = self.block_array;
-        let volume = self.volume;
-        let mut layer0: Vec<Tag> = Vec::with_capacity(volume);
-        for x in 0..block_array.dims.x {
-            for y in 0..block_array.dims.y {
-                for z in 0..block_array.dims.z {
-                    let i = block_array
-                        .dims
-                        .index(x, y, z)
-                        .expect("voxel coordinate in dims by construction");
-                    layer0.push(Tag::Int(self.slot(block_array.voxels[i])));
-                }
-            }
-        }
-        let layer1: Vec<Tag> = vec![Tag::Int(-1); volume];
+        let layer0: Vec<Tag> = self.voxel_order().map(|v| Tag::Int(self.slot(v))).collect();
+        let layer1: Vec<Tag> = self
+            .voxel_order()
+            .map(|v| Tag::Int(self.water_slot(v)))
+            .collect();
         // An empty layer must declare `TAG_End`, as `List::of_tags` makes it.
         List {
             element_type_id: 9,
@@ -336,11 +391,16 @@ impl McStructure<'_> {
 /// # Errors
 ///
 /// Every refusal of [`prepare_mcstructure`].
+///
+/// # Panics
+///
+/// When `states` is another version's map than `target`'s.
 pub fn build_mcstructure_tag(
     block_array: &BlockArray,
     target: &BedrockTarget,
+    states: &VersionStates<'_>,
 ) -> Result<(Compound, Vec<ParityNote>), BedrockStructureError> {
-    let (prepared, notes) = prepare_mcstructure(block_array, target)?;
+    let (prepared, notes) = prepare_mcstructure(block_array, target, states)?;
 
     let mut structure = Compound::new();
     structure.insert("block_indices", Tag::List(prepared.block_indices()));
