@@ -3,8 +3,8 @@
 //! A body's `requires` lines leave the body, lifted onto the `def` or `theme` that carries them.
 
 use crate::ast::{
-    Arg, DottedRef, Expr, Header, Item, MemberRequires, Module, RawRequirement, RawVersion,
-    Statement, ThemeRule, TruthRow, Value, ValueKind,
+    Arg, DottedRef, Expr, Header, Item, MemberRequires, Module, NamedOperand, RawRequirement,
+    RawVersion, Statement, ThemeRule, TruthRow, Value, ValueKind,
 };
 use crate::calver::future_version_note;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
@@ -13,7 +13,8 @@ use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
 use crate::logic_library::{LogicPrimitive, Notation, infix_rank_above};
-use crate::prose::or_list;
+use crate::prose::{and_list, or_list};
+use crate::suggest::{did_you_mean, nearest_match};
 use crate::version::parse_requirement;
 use indexmap::IndexSet;
 
@@ -27,6 +28,37 @@ const EDITION: &str = "edition";
 const GUARD_OUTSIDE_A_BODY: &str = "an `@edition` guard stands inside a `struct` or `def` body, \
      around the raw members it guards: the items of a file are edition-neutral, so move the guard \
      into the body that places those blocks";
+
+/// The words a refusal inside a call names it by.
+struct CallWording {
+    /// The primitive's name.
+    callee: &'static str,
+    /// Its operands, in the order the library lists them.
+    names: &'static [&'static str],
+    /// The call written out, in backticks: `` `mux(sel=…, a=…, b=…)` ``.
+    shape: String,
+    /// Every operand, in backticks, as a prose list.
+    every_name: String,
+}
+
+impl CallWording {
+    fn new(primitive: LogicPrimitive, names: &'static [&'static str]) -> Self {
+        Self {
+            callee: primitive.name(),
+            names,
+            shape: format!("`{}`", primitive.call_template().unwrap_or_default()),
+            every_name: and_list(&quoted(names, "")).unwrap_or_default(),
+        }
+    }
+}
+
+/// Each of `names` with `suffix`, in backticks.
+fn quoted(names: &[&str], suffix: &str) -> Vec<String> {
+    names
+        .iter()
+        .map(|name| format!("`{name}{suffix}`"))
+        .collect()
+}
 
 /// Whether the body being parsed may carry `requires version>=X` lines, and what to say when it
 /// may not. A refusing body refuses only a line that reads as a floor.
@@ -699,7 +731,7 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::Eq)?;
         let rhs = self.parse_expr()?;
         let span = start_byte..self.last_byte();
-        self.expect_operand_end(&TokenKind::Newline)?;
+        self.expect_operand_end(&[TokenKind::Newline])?;
         Ok(Statement::Logic { lhs, rhs, span })
     }
 
@@ -903,10 +935,27 @@ impl<'a> Parser<'a> {
             let operand = Box::new(operand);
             return Ok((Expr::Prefix { primitive, operand }, depth));
         }
+        if let Some((primitive, names)) = self
+            .peek_primitive()
+            .and_then(|primitive| Some((primitive, primitive.call_operands()?)))
+        {
+            self.advance();
+            let (operands, operands_depth) =
+                self.nested(|p| p.parse_call_operands(primitive, names))?;
+            let depth = operands_depth + 1;
+            self.charge_expr_depth(depth)?;
+            return Ok((
+                Expr::Call {
+                    primitive,
+                    operands,
+                },
+                depth,
+            ));
+        }
         if self.peek_is(&TokenKind::LParen) {
             self.advance();
             let inner = self.nested(|p| p.parse_expr_at(infix_rank_above(None)))?;
-            self.expect_operand_end(&TokenKind::RParen)?;
+            self.expect_operand_end(&[TokenKind::RParen])?;
             return Ok(inner);
         }
         // An infix primitive is never a signal name, so a missing operand is reported here.
@@ -931,6 +980,144 @@ impl<'a> Parser<'a> {
         Ok((Expr::Ref(dotted), 1))
     }
 
+    /// The parenthesised operands of the called `primitive`, each of `names` once and in any
+    /// order, returned in the order of `names`, and the depth of the deepest.
+    fn parse_call_operands(
+        &mut self,
+        primitive: LogicPrimitive,
+        names: &'static [&'static str],
+    ) -> Result<(Vec<NamedOperand>, usize), ParseError> {
+        let call = CallWording::new(primitive, names);
+        if !self.peek_is(&TokenKind::LParen) {
+            let (callee, shape) = (call.callee, &call.shape);
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected `(` after `{callee}`, got {found}: `{callee}` is called with its \
+                 operands named, as in {shape}"
+            )));
+        }
+        self.advance();
+        let mut values: Vec<Option<Expr>> =
+            std::iter::repeat_with(|| None).take(names.len()).collect();
+        let mut depth = 0;
+        loop {
+            let unnamed: Vec<&str> = names
+                .iter()
+                .zip(&values)
+                .filter(|(_, value)| value.is_none())
+                .map(|(name, _)| *name)
+                .collect();
+            let index = self.parse_operand_name(&call, &unnamed)?;
+            let (value, value_depth) = self.parse_expr_at(infix_rank_above(None))?;
+            values[index] = Some(value);
+            depth = depth.max(value_depth);
+            let missing: Vec<&str> = unnamed
+                .into_iter()
+                .filter(|left| *left != names[index])
+                .collect();
+            if self.expect_operand_separator(&call, &missing)? {
+                break;
+            }
+        }
+        let operands = names
+            .iter()
+            .copied()
+            .zip(values)
+            .filter_map(|(name, value)| {
+                Some(NamedOperand {
+                    name,
+                    value: value?,
+                })
+            })
+            .collect();
+        Ok((operands, depth))
+    }
+
+    /// Take `name=` for one of `unnamed`, returning its index in the call's names.
+    fn parse_operand_name(
+        &mut self,
+        call: &CallWording,
+        unnamed: &[&str],
+    ) -> Result<usize, ParseError> {
+        let (callee, shape, every_name) = (call.callee, &call.shape, &call.every_name);
+        if !self.is_at_key_eq() {
+            let expected = or_list(&quoted(unnamed, "=")).unwrap_or_default();
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected {expected}, got {found}: `{callee}` takes each operand by name, as in \
+                 {shape}"
+            )));
+        }
+        let position = self.position();
+        let name = self.expect_ident()?;
+        let Some(index) = call.names.iter().position(|known| *known == name) else {
+            let hint = nearest_match(&name, unnamed.iter().copied())
+                .map(|near| format!(" ({})", did_you_mean(near)))
+                .unwrap_or_default();
+            return Err(ParseError::Syntax {
+                position,
+                message: format!("`{callee}` has no operand `{name}`{hint}: it takes {every_name}"),
+            });
+        };
+        if !unnamed.contains(&name.as_str()) {
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "`{callee}` names `{name}` twice: it takes {every_name}, each named once"
+                ),
+            });
+        }
+        self.advance();
+        Ok(index)
+    }
+
+    /// Take what follows an operand of the call, `)` once none is `missing` and `,` before
+    /// another, returning whether the call closed.
+    fn expect_operand_separator(
+        &mut self,
+        call: &CallWording,
+        missing: &[&str],
+    ) -> Result<bool, ParseError> {
+        let (callee, shape, every_name) = (call.callee, &call.shape, &call.every_name);
+        if missing.is_empty() {
+            if self.peek_is(&TokenKind::Comma) {
+                return Err(self.syntax_here(&format!(
+                    "expected `)`, got `,`: `{callee}` takes {every_name}, and every one is \
+                     named, so the call closes here"
+                )));
+            }
+            self.expect_operand_end(&[TokenKind::RParen])?;
+            return Ok(true);
+        }
+        if self.is_at_key_eq() {
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected `,`, got {found}: the named operands of `{callee}` are separated by \
+                 commas, as in {shape}"
+            )));
+        }
+        if self.peek_is(&TokenKind::RParen) {
+            let operands = if missing.len() == 1 {
+                "operand"
+            } else {
+                "operands"
+            };
+            let missing = and_list(&quoted(missing, "")).unwrap_or_default();
+            return Err(self.syntax_here(&format!(
+                "`{callee}` is missing its {operands} {missing}: it takes {every_name}, each \
+                 named once"
+            )));
+        }
+        self.expect_operand_end(&[TokenKind::Comma, TokenKind::RParen])?;
+        Ok(false)
+    }
+
+    /// The next token as a diagnostic names it, or the end of input.
+    fn found_here(&self) -> String {
+        self.peek()
+            .map_or_else(|| "end of input".to_owned(), |token| token.kind.to_string())
+    }
+
     /// The primitive of the built-in logic library the next token names, consuming nothing.
     fn peek_primitive(&self) -> Option<LogicPrimitive> {
         match &self.peek()?.kind {
@@ -949,13 +1136,13 @@ impl<'a> Parser<'a> {
         Some(primitive)
     }
 
-    /// Take `closer` after a complete operand, or refuse what stands there with the infix
-    /// primitives that could have stood there instead.
-    fn expect_operand_end(&mut self, closer: &TokenKind) -> Result<(), ParseError> {
-        if *closer == TokenKind::Newline && self.at_eof() {
+    /// Take one of `closers` after a complete operand, or refuse what stands there with the infix
+    /// primitives and closers that could have stood there instead.
+    fn expect_operand_end(&mut self, closers: &[TokenKind]) -> Result<(), ParseError> {
+        if closers.contains(&TokenKind::Newline) && self.at_eof() {
             return Ok(());
         }
-        if self.peek_is(closer) {
+        if closers.iter().any(|closer| self.peek_is(closer)) {
             self.advance();
             return Ok(());
         }
@@ -964,7 +1151,7 @@ impl<'a> Parser<'a> {
             .filter(|primitive| primitive.infix_rank().is_some())
             .map(|primitive| format!("`{}`", primitive.name()))
             .collect();
-        expected.push(closer.to_string());
+        expected.extend(closers.iter().map(ToString::to_string));
         let expected = or_list(&expected).unwrap_or_default();
         let found = self.peek().map(|token| token.kind.clone());
         let why = self.why_not_after_operand(found.as_ref());
@@ -997,20 +1184,28 @@ impl<'a> Parser<'a> {
                 Some(TokenKind::Ident(_) | TokenKind::LParen)
             )
         };
-        let is_prefix = |word: &str| {
-            LogicPrimitive::from_name(word)
-                .is_some_and(|primitive| primitive.notation() == Notation::Prefix)
-        };
+        let notation = |word: &str| LogicPrimitive::from_name(word).map(LogicPrimitive::notation);
+        let is_prefix = |word: &str| notation(word) == Some(Notation::Prefix);
+        let is_call = |word: &str| matches!(notation(word), Some(Notation::Call { .. }));
         let between = ": two operands need an infix primitive between them".to_owned();
         match (found, bare_word_before) {
-            (Some(TokenKind::LParen), Some(callee)) => {
-                format!(": the built-in logic library has no primitive `{callee}` to call")
+            (Some(TokenKind::LParen), Some(word)) => {
+                let callable: Vec<String> = LogicPrimitive::ALL
+                    .into_iter()
+                    .filter(|primitive| primitive.call_operands().is_some())
+                    .map(|primitive| format!("`{}`", primitive.name()))
+                    .collect();
+                let callable = or_list(&callable).unwrap_or_default();
+                format!(
+                    ": the built-in logic library has no primitive `{word}` to call, and calls \
+                     only {callable}"
+                )
             }
             (Some(TokenKind::LParen), None) => between,
             (Some(TokenKind::Ident(word)), _) if is_prefix(word) && !operand_follows(1) => {
                 format!(": `{word}` goes before its operand")
             }
-            (Some(TokenKind::Ident(word)), _) if is_prefix(word) => between,
+            (Some(TokenKind::Ident(word)), _) if is_prefix(word) || is_call(word) => between,
             (Some(TokenKind::Ident(_)), Some(unknown)) => {
                 format!(": the built-in logic library has no primitive `{unknown}`")
             }

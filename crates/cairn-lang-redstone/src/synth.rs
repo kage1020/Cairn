@@ -10,7 +10,7 @@ use crate::logic_ir::{
     ScopedLogicIrEntry, SignalRef,
 };
 use crate::saturating_index;
-use cairn_lang_core::ast::{DottedRef, Expr, SIGNAL_HEAD, Value, ValueKind};
+use cairn_lang_core::ast::{DottedRef, Expr, NamedOperand, SIGNAL_HEAD, Value, ValueKind};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{
@@ -1270,7 +1270,10 @@ fn lower_expr_inner<'a>(
             let gate: fn(SignalRef, SignalRef) -> GateKind = match primitive {
                 LogicPrimitive::And => |a, b| GateKind::And2 { a, b },
                 LogicPrimitive::Or => |a, b| GateKind::Or2 { a, b },
-                LogicPrimitive::Not => {
+                LogicPrimitive::Xor => |a, b| GateKind::Xor2 { a, b },
+                LogicPrimitive::Nand => |a, b| GateKind::Nand2 { a, b },
+                LogicPrimitive::Nor => |a, b| GateKind::Nor2 { a, b },
+                LogicPrimitive::Not | LogicPrimitive::Mux => {
                     return Err(no_gate(
                         *primitive,
                         "between two operands",
@@ -1296,7 +1299,12 @@ fn lower_expr_inner<'a>(
                         binding_span.clone(),
                     ))
                 }
-                LogicPrimitive::And | LogicPrimitive::Or => Err(no_gate(
+                LogicPrimitive::And
+                | LogicPrimitive::Or
+                | LogicPrimitive::Xor
+                | LogicPrimitive::Nand
+                | LogicPrimitive::Nor
+                | LogicPrimitive::Mux => Err(no_gate(
                     *primitive,
                     "before one operand",
                     binding_span,
@@ -1305,6 +1313,10 @@ fn lower_expr_inner<'a>(
                 )),
             }
         }
+        Expr::Call {
+            primitive,
+            operands,
+        } => lower_call(*primitive, operands, binding_span, ir, ctx, diagnostics),
         _ => {
             let label = ctx.scope.label();
             diagnostics.push(
@@ -1325,6 +1337,63 @@ fn lower_expr_inner<'a>(
     }
 }
 
+/// Lowers a called primitive, every operand before failing.
+fn lower_call<'a>(
+    primitive: LogicPrimitive,
+    operands: &'a [NamedOperand],
+    binding_span: &Span,
+    ir: &mut LogicIr,
+    ctx: &mut LoweringCtx<'a>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<SignalRef, LoweringFailed> {
+    let lowered: Vec<(&str, Option<SignalRef>)> = operands
+        .iter()
+        .map(|operand| {
+            let signal = lower_expr(&operand.value, binding_span, ir, ctx, diagnostics);
+            (operand.name, signal.ok())
+        })
+        .collect();
+    match (primitive, lowered.as_slice()) {
+        (LogicPrimitive::Mux, &[("sel", sel), ("a", a), ("b", b)]) => {
+            let (Some(sel), Some(a), Some(b)) = (sel, a, b) else {
+                return Err(LoweringFailed);
+            };
+            let gate = GateKind::Mux { sel, a, b };
+            Ok(intern_gate(ir, ctx, gate, binding_span.clone()))
+        }
+        (LogicPrimitive::Mux, _) => {
+            let names = quoted_list(lowered.iter().map(|(name, _)| *name));
+            let as_written = if names.is_empty() {
+                "with no operand".to_owned()
+            } else {
+                format!("with the operands {names}")
+            };
+            Err(no_gate(
+                primitive,
+                &as_written,
+                binding_span,
+                ctx,
+                diagnostics,
+            ))
+        }
+        (
+            LogicPrimitive::And
+            | LogicPrimitive::Or
+            | LogicPrimitive::Not
+            | LogicPrimitive::Xor
+            | LogicPrimitive::Nand
+            | LogicPrimitive::Nor,
+            _,
+        ) => Err(no_gate(
+            primitive,
+            "called with named operands",
+            binding_span,
+            ctx,
+            diagnostics,
+        )),
+    }
+}
+
 /// Reports `primitive` written `as_written`, a notation it has no gate in, once its operands are
 /// lowered.
 fn no_gate(
@@ -1336,9 +1405,13 @@ fn no_gate(
 ) -> LoweringFailed {
     let label = ctx.scope.label();
     let name = primitive.name();
-    let written = match primitive.notation() {
-        Notation::Prefix => "before its one operand",
-        Notation::Infix { .. } => "between its two operands",
+    let written = match (primitive.notation(), primitive.call_template()) {
+        (Notation::Prefix, _) => "before its one operand".to_owned(),
+        (Notation::Infix { .. }, _) => "between its two operands".to_owned(),
+        (Notation::Call { .. }, template) => format!(
+            "with every operand named once, as in `{}`",
+            template.unwrap_or_default()
+        ),
     };
     diagnostics.push(
         Diagnostic::new(
@@ -1355,10 +1428,12 @@ fn no_gate(
 
 /// Every primitive of the built-in logic library, as a prose list of its words.
 fn library_words() -> String {
-    let words: Vec<String> = LogicPrimitive::ALL
-        .iter()
-        .map(|primitive| format!("`{}`", primitive.name()))
-        .collect();
+    quoted_list(LogicPrimitive::ALL.iter().map(|primitive| primitive.name()))
+}
+
+/// `words`, each in backticks, as a prose list joined by `and`, or empty for none.
+fn quoted_list<'w>(words: impl IntoIterator<Item = &'w str>) -> String {
+    let words: Vec<String> = words.into_iter().map(|word| format!("`{word}`")).collect();
     match words.split_last() {
         Some((last, [])) => last.clone(),
         Some((last, head)) => format!("{} and {last}", head.join(", ")),
@@ -1535,6 +1610,11 @@ fn collect_refs(expr: &Expr, out: &mut HashSet<DottedRef>) {
             collect_refs(rhs, out);
         }
         Expr::Prefix { operand, .. } => collect_refs(operand, out),
+        Expr::Call { operands, .. } => {
+            for operand in operands {
+                collect_refs(&operand.value, out);
+            }
+        }
         _ => {}
     }
 }

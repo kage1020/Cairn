@@ -586,6 +586,23 @@ pub enum Expr {
         /// The operand after it.
         rhs: Box<Expr>,
     },
+    /// A called primitive of the built-in logic library and its named operands:
+    /// `mux(sel=s, a=x, b=y)`.
+    Call {
+        /// The primitive applied.
+        primitive: LogicPrimitive,
+        /// Every operand the primitive names, in the order its notation lists them.
+        operands: Vec<NamedOperand>,
+    },
+}
+
+/// One named operand of an [`Expr::Call`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NamedOperand {
+    /// The operand's name, as the primitive's notation spells it.
+    pub name: &'static str,
+    /// The expression it takes.
+    pub value: Expr,
 }
 
 /// Head segment marking a [`DottedRef`] as a redstone signal name.

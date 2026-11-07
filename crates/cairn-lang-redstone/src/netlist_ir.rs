@@ -35,13 +35,13 @@ pub enum LogicalCell {
     Or,
     /// Single-input inverter.
     Not,
-    /// Two-input XOR. Reserved: no surface syntax produces it.
+    /// Two-input XOR.
     Xor,
-    /// Two-input NAND. Reserved, like `Xor`.
+    /// Two-input NAND.
     Nand,
-    /// Two-input NOR. Reserved, like `Xor`.
+    /// Two-input NOR.
     Nor,
-    /// Two-to-one multiplexer (`sel` picks between `a` and `b`). Reserved, like `Xor`.
+    /// Two-to-one multiplexer (`sel` picks between `a` and `b`).
     Mux,
 }
 

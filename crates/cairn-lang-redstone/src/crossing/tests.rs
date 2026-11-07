@@ -743,7 +743,7 @@ fn mux_ports_each_keep_the_coord_their_own_segment_reaches() {
         DELAYED,
     ));
     ir.cells.push(placed_cell(
-        EditionCell::JavaMuxUnpinned,
+        EditionCell::JavaTorchMux,
         CellCoord::new(18, 0, 1),
         vec![
             CellPortDriver {

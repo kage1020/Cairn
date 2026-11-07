@@ -463,10 +463,52 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  logic s.out = a.b and c.not\n",
         Accept,
     ),
+    // `mux` is a keyword where an operand may start, though a dotted name may end in it.
+    (
+        "logic_call_heads_a_dotted_name",
+        "struct s size=3x3\n  logic s.out = a.b and mux.x\n",
+        Reject,
+    ),
+    (
+        "logic_call_ends_a_dotted_name",
+        "struct s size=3x3\n  logic s.out = a.b and c.mux\n",
+        Accept,
+    ),
+    (
+        "logic_call_without_parentheses",
+        "struct s size=3x3\n  logic s.out = mux\n",
+        Reject,
+    ),
+    // An operand's name is a word only where a call names one, so a signal may be called it.
+    (
+        "logic_call_operand_names_as_signals",
+        "struct s size=3x3\n  logic s.out = mux(sel=sel.x, a=a, b=b.sel)\n",
+        Accept,
+    ),
+    (
+        "logic_call_operand_names_elsewhere",
+        "struct s size=3x3\n  walls sel=1 a=2 b=3\n",
+        Accept,
+    ),
+    (
+        "logic_call_infix_as_operand",
+        "struct s size=3x3\n  logic s.out = mux(sel=xor, a=c.d, b=e.f)\n",
+        Reject,
+    ),
+    (
+        "logic_call_spaced",
+        "struct s size=3x3\n  logic s.out = mux( sel = a.b ,a=c.d,b=e.f )\n",
+        Accept,
+    ),
+    (
+        "logic_call_space_before_parenthesis",
+        "struct s size=3x3\n  logic s.out = mux (sel=a.b, a=c.d, b=e.f)\n",
+        Accept,
+    ),
     // What the library does not hold, and two operands with no infix primitive between them.
     (
         "logic_word_the_library_lacks",
-        "struct s size=3x3\n  logic s.out = sig.a xor sig.b\n",
+        "struct s size=3x3\n  logic s.out = sig.a xnor sig.b\n",
         Reject,
     ),
     (
@@ -1518,6 +1560,11 @@ const DEPTH_DIVERGENCES: &[(&str, Shape, usize)] = &[
         nots_around_an_or_chain,
         MAX_EXPR_DEPTH + 1,
     ),
+    (
+        "mux_chain_past_the_nesting_bound",
+        nested_mux,
+        MAX_NESTING_DEPTH + 1,
+    ),
 ];
 
 /// One indented `level` block per level.
@@ -1559,6 +1606,15 @@ fn chained_not(depth: usize) -> String {
     format!(
         "struct a size=1x1\n  logic sig.out = {}sig.a\n",
         "not ".repeat(depth),
+    )
+}
+
+/// `logic sig.out = mux(sel=sig.s, b=sig.b, a=mux(… sig.a …))`.
+fn nested_mux(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}sig.a{}\n",
+        "mux(sel=sig.s, b=sig.b, a=".repeat(depth),
+        ")".repeat(depth),
     )
 }
 
@@ -1663,8 +1719,86 @@ fn library_primitives() -> impl Iterator<Item = (String, String, Verdict)> {
                     Reject,
                 ),
             ],
+            Notation::Call { operands } => {
+                let call = |named: &[&str]| {
+                    let named: Vec<String> = named
+                        .iter()
+                        .enumerate()
+                        .map(|(i, name)| format!("{name}=s.v{i}"))
+                        .collect();
+                    logic(format!("{word}({})", named.join(", ")))
+                };
+                let mut out: Vec<_> = permutations(operands)
+                    .into_iter()
+                    .map(|order| {
+                        (
+                            format!("library call `{word}` naming {order:?}"),
+                            call(&order),
+                            Accept,
+                        )
+                    })
+                    .collect();
+                for (i, left_out) in operands.iter().enumerate() {
+                    let mut named = operands.to_vec();
+                    named.remove(i);
+                    out.push((
+                        format!("library call `{word}` without `{left_out}`"),
+                        call(&named),
+                        Reject,
+                    ));
+                    named.insert(i, left_out);
+                    named.push(left_out);
+                    out.push((
+                        format!("library call `{word}` naming `{left_out}` twice"),
+                        call(&named),
+                        Reject,
+                    ));
+                }
+                let positional: Vec<String> =
+                    (0..operands.len()).map(|i| format!("s.v{i}")).collect();
+                out.extend([
+                    (
+                        format!("library call `{word}` with an operand it does not name"),
+                        call(&[operands, &["zz"]].concat()),
+                        Reject,
+                    ),
+                    (
+                        format!("library call `{word}` with a trailing comma"),
+                        call(operands).replace(")\n", ",)\n"),
+                        Reject,
+                    ),
+                    (
+                        format!("library call `{word}` with positional operands"),
+                        logic(format!("{word}({})", positional.join(", "))),
+                        Reject,
+                    ),
+                    (
+                        format!("library call `{word}` as an infix operand"),
+                        call(operands).replace(" = ", " = a.b and "),
+                        Accept,
+                    ),
+                ]);
+                out
+            }
         }
     })
+}
+
+/// Every order of `items`.
+fn permutations<'a>(items: &[&'a str]) -> Vec<Vec<&'a str>> {
+    if items.len() <= 1 {
+        return vec![items.to_vec()];
+    }
+    (0..items.len())
+        .flat_map(|i| {
+            let mut rest = items.to_vec();
+            let first = rest.remove(i);
+            permutations(&rest).into_iter().map(move |mut order| {
+                order.insert(0, first);
+                order
+            })
+        })
+        .collect()
 }
 
 #[test]
@@ -1721,6 +1855,19 @@ fn library_groupings() -> Vec<String> {
             out.push(format!("a.b {p} {r} c.d"));
         }
     }
+    let called = LogicPrimitive::ALL
+        .into_iter()
+        .filter_map(|primitive| Some((primitive.name(), primitive.call_operands()?)));
+    for (word, operands) in called {
+        for order in permutations(operands) {
+            let named: Vec<String> = order
+                .iter()
+                .zip(&infix)
+                .map(|(name, p)| format!("{name}=a.{name} {p} b.{name}"))
+                .collect();
+            out.push(format!("{word}({}) {} z.z", named.join(", "), infix[0]));
+        }
+    }
     out
 }
 
@@ -1770,6 +1917,16 @@ fn core_grouping(expr: &cairn_lang_core::ast::Expr) -> String {
         Expr::Prefix { primitive, operand } => {
             format!("({} {})", primitive.name(), core_grouping(operand))
         }
+        Expr::Call {
+            primitive,
+            operands,
+        } => {
+            let named: Vec<String> = operands
+                .iter()
+                .map(|operand| format!("{}={}", operand.name, core_grouping(&operand.value)))
+                .collect();
+            format!("({} {})", primitive.name(), named.join(" "))
+        }
         other => panic!("no grouping for {other:?}"),
     }
 }
@@ -1802,6 +1959,36 @@ fn grammar_grouping(node: tree_sitter::Node<'_>, source: &str) -> String {
             node.named_child(0).expect("a parenthesised operand"),
             source,
         ),
+        // In the order the library lists the operands, which is core's.
+        "call_expression" => {
+            let word = word(0);
+            let operands = LogicPrimitive::from_name(&word)
+                .and_then(LogicPrimitive::call_operands)
+                .expect("a called primitive of the library");
+            let mut cursor = node.walk();
+            let mut named: Vec<(usize, String)> = node
+                .named_children(&mut cursor)
+                .map(|operand| {
+                    let part = |name: &str| {
+                        operand
+                            .child_by_field_name(name)
+                            .unwrap_or_else(|| panic!("a named operand has a `{name}` field"))
+                    };
+                    let name = part("name").utf8_text(source.as_bytes()).expect("utf-8");
+                    let rank = operands
+                        .iter()
+                        .position(|known| *known == name)
+                        .expect("a name the library lists");
+                    (
+                        rank,
+                        format!("{name}={}", grammar_grouping(part("value"), source)),
+                    )
+                })
+                .collect();
+            named.sort();
+            let named: Vec<String> = named.into_iter().map(|(_, text)| text).collect();
+            format!("({word} {})", named.join(" "))
+        }
         _ => node.utf8_text(source.as_bytes()).expect("utf-8").to_owned(),
     }
 }
