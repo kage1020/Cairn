@@ -18,10 +18,11 @@ version differences, is structured. Only one-off special NBT escapes through `nb
 - **Generic fallback**: `spawn id=.. type=<entity> at=<selector> [nbt={...}]` for other mobs.
 
 None of these is a keyword yet, `spawn` included: each is `E_UNKNOWN_KEYWORD`, so no build places an
-entity, and the one block entity a build places is a `chest`, with no block-entity data ([Blockstate
-Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). The example below also
-uses syntax the parser does not accept yet: a decimal (`scale=1.5`) and an `nbt={...}` value are
-`E_PARSE` ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)).
+entity. No build writes block-entity data either: a block that has a block entity, such as the one a
+`chest` sets ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)),
+is placed with no data. The example below also uses syntax the parser does not accept yet: a decimal
+(`scale=1.5`) and an `nbt={...}` value are `E_PARSE` ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)).
 
 ```
 villager id=trader at=stall[0] profession=librarian level=master

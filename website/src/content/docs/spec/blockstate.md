@@ -31,20 +31,24 @@ on the left, one beside a window is hinged on the wall's side, and two side by s
 their outer sides, so they open as a pair. A `hinge=left` or `hinge=right`, and an `open=true` or
 `open=false`, on the door's line replace what is derived.
 
-A `chest` sets one chest block against a wall. It takes its cell as a `pressure_plate` with the same
-`at=`, `offset=` and `y=` takes its own, one voxel inside the wall for `at=inside.<side>` and one
-outside it for `at=<side>.outside`, and its line is refused or deferred wherever the plate's would
-be ([Redstone §14.2](/spec/redstone/#142-signal-binding)). Its `facing` points away from the wall it
+A `chest` sets one chest block against a wall. It takes the cell a `pressure_plate` with the same
+`at=`, `offset=` and `y=` would take: one voxel inside the wall for `at=inside.<side>` and one
+outside it for `at=<side>.outside`. Its line is refused or deferred wherever the plate's would be
+([Redstone §14.2](/spec/redstone/#142-signal-binding)). Its `facing` points away from the wall it
 stands against, into the struct from the inside and out of it from the outside. A `facing=` on its
 line turns it: `in` toward the struct's inside, `out` toward its outside, and `left` or `right`
 along the wall, as seen from outside it, so `left` is toward `offset=0`. A chest pairs with the
 chest beside it ([Connections](#connections)), and `size=single` keeps it single. Any other
-`facing=` or `size=` is `E_INVALID_MEMBER`. The chest's `mat_slot=` names its block, and a chest
-without one is built from the registry pack's `@chest.default` ([Materials and Themes
-§7.2](/spec/materials-themes/#tier-1-tokens)). The block MUST be a chest, one whose id is `chest` or
-ends in `_chest`. Any other is `E_INCOMPATIBLE_MATERIAL` ([Lint](/spec/lint/)), and the chest is
-built from `@chest.default` beside the error. A chest holds no contents ([Entities
-§8.3](/spec/entities/#83-where-the-line-is-drawn)).
+identifier for `facing=` or `size=` is `E_INVALID_MEMBER`, and a value that is no identifier, such
+as `size=2x3`, is `W_IGNORED_ARGUMENT` and read as if the key were not written. The chest's
+`mat_slot=` names its block, and a chest without one is built from the registry pack's
+`@chest.default` ([Materials and Themes §7.2](/spec/materials-themes/#tier-1-tokens)). The block
+MUST be a chest: one the registry pack's `connections` component reads as a chest, a block whose
+`type` is `single`, `left` or `right` ([Versioning and Editions
+§10.3](/spec/versioning-editions/#103-backend--data-tables)), so an ender chest is not one. Where
+the pack cannot say, a block whose id is `chest` or ends in `_chest` is taken as one. Any other is
+`E_INCOMPATIBLE_MATERIAL` ([Lint](/spec/lint/)), and the chest is built from `@chest.default` beside
+the error. A chest holds no contents ([Entities §8.3](/spec/entities/#83-where-the-line-is-drawn)).
 
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
 promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let
@@ -76,11 +80,13 @@ note_block at=2,1,2 instrument=bit note=12
 
 ### Connections
 
-Once every member of a body is painted, each glass pane, run of bars, fence, wall, fence gate and
-chest in it takes its connection states from the blocks beside it, as the game sets them when a
-block is placed. A face of a block is **sturdy** when the block's model covers it whole: a full
-block's every face, a bottom slab's bottom, an upright stair's bottom and back. Leaves, shulker
-boxes, barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined by a face.
+Once every member of a body is painted, each glass pane, run of bars, fence, wall and fence gate in
+it takes its connection states from the blocks beside it, as the game sets them when a block is
+placed. Each chest in it pairs by the rule below, which is Cairn's own: the game pairs chests in the
+order they are placed, which a build does not have. A face of a block is **sturdy** when the block's
+model covers it whole: a full block's every face, a bottom slab's bottom, an upright stair's bottom
+and back. Leaves, shulker boxes, barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are
+never joined by a face.
 
 - A pane's `north`, `east`, `south` and `west` are `true` toward a sturdy face, a pane or a wall.
 - A fence's are `true` toward a sturdy face, a fence of its own group, or a fence gate facing
@@ -104,9 +110,9 @@ boxes, barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never
 - A fence gate's `in_wall` is `true` when a wall stands beside it, across the way it faces.
 - A chest's `type` pairs it with a chest of the same block and `facing` beside it, on its own left
   or right. A row of such chests pairs two by two from its end on the chests' own left, the end
-  toward `offset=0` for a row along the inside of a wall, and an odd chest at its other end stays
-  `single`. The chest whose partner is on its own right is `left`, and its partner is `right`. A
-  chest that writes its `type`, as `size=single` does, pairs with none.
+  toward `offset=0` for a row facing into the struct from inside a wall, and an odd chest at its
+  other end stays `single`. The chest whose partner is on its own right is `left`, and its partner
+  is `right`. A chest that writes its `type`, as `size=single` does, pairs with none.
 
 A state the block's material or line writes is kept, and only the others are derived:
 `@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. The states are
