@@ -43,7 +43,7 @@ Add these when the change reaches them:
 - `crates/cairn-lang-formats/registry-data/` or `.github/scripts/extract_registry.py`: the same
   workflow's `Registry tables match the game` check reruns the extraction. Run
   `python3 .github/scripts/extract_registry.py java --check --java <Java 25>` and
-  `python3 .github/scripts/extract_registry.py bedrock --check`.
+  `python3 .github/scripts/extract_registry.py bedrock --check --java <Java 25>`.
 - A new dependency or a recently stabilised API: CI's `MSRV` job runs
   `cargo +<floor> check --workspace --locked --all-features`, where the floor is the `rust-version`
   in `Cargo.toml` with `.0` appended (`1.95` → `1.95.0`), since rustup reads `1.95` as the newest

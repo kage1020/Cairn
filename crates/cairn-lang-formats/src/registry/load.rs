@@ -20,6 +20,7 @@ use super::data_versions::{
 use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
+use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates};
 
 #[derive(Clone, Copy)]
 struct BuiltinFiles {
@@ -28,10 +29,30 @@ struct BuiltinFiles {
     materials: &'static str,
     blocks: &'static str,
     aliases: &'static str,
+    states: Option<&'static str>,
+    sensitivity: Option<&'static str>,
 }
 
 macro_rules! builtin_files {
     ($dir:literal) => {
+        builtin_files!($dir, None, None)
+    };
+    ($dir:literal, states) => {
+        builtin_files!(
+            $dir,
+            Some(include_str!(concat!(
+                "../../registry-data/",
+                $dir,
+                "/states.json"
+            ))),
+            Some(include_str!(concat!(
+                "../../registry-data/",
+                $dir,
+                "/sensitivity.json"
+            )))
+        )
+    };
+    ($dir:literal, $states:expr, $sensitivity:expr) => {
         BuiltinFiles {
             manifest: include_str!(concat!("../../registry-data/", $dir, "/pack.json")),
             data_versions: include_str!(concat!(
@@ -42,12 +63,14 @@ macro_rules! builtin_files {
             materials: include_str!(concat!("../../registry-data/", $dir, "/materials.json")),
             blocks: include_str!(concat!("../../registry-data/", $dir, "/blocks.json")),
             aliases: include_str!(concat!("../../registry-data/", $dir, "/aliases.json")),
+            states: $states,
+            sensitivity: $sensitivity,
         }
     };
 }
 
 const BUILTIN_JAVA: BuiltinFiles = builtin_files!("java");
-const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock");
+const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock", states);
 
 /// The highest manifest `schema_version` this build reads.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
@@ -73,6 +96,7 @@ pub struct RegistryPack {
     materials: MaterialsIndex,
     blocks: BlocksIndex,
     aliases: AliasIndex,
+    states: StateMapIndex,
     bytes_hash: HashHex,
     source: PackSource,
 }
@@ -86,6 +110,8 @@ pub struct PackView<'a> {
     mc_version: Option<&'a str>,
     /// The pinned version's sorted ids; `None` unpinned or without a `blocks` component.
     ids: Option<&'a [String]>,
+    /// The pinned version's state map; `None` unpinned or without a `states` component.
+    states: Option<VersionStates<'a>>,
     /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
     label: String,
 }
@@ -103,6 +129,15 @@ impl TargetRegistry for PackView<'_> {
 
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
         self.ids.map(|ids| BlockIdSet::new(&self.label, ids))
+    }
+
+    fn unmapped_state(&self, state: &BlockState) -> Option<String> {
+        // An unknown property or value is not the map's to answer: it is not the block's state.
+        match self.states?.resolve(state) {
+            Err(StateRefusal::Unmapped { reason }) => Some(reason),
+            Ok(_)
+            | Err(StateRefusal::UnknownProperty { .. } | StateRefusal::UnknownValue { .. }) => None,
+        }
     }
 
     fn aliases_for(&self, id: &str) -> Vec<String> {
@@ -228,6 +263,25 @@ pub enum RegistryError {
         #[source]
         source: BlocksError,
     },
+    /// The pack's `states` or `sensitivity` component failed to validate.
+    #[error(transparent)]
+    States {
+        /// The validation error.
+        #[from]
+        source: StatesError,
+    },
+    /// `states` has no map for a targetable version.
+    #[error("registry pack `states` has no map for the targetable [{missing}]")]
+    StatesMissVersion {
+        /// The versions, comma-joined.
+        missing: String,
+    },
+    /// A file the manifest names is not embedded in the binary.
+    #[error("registry pack names `{file}`, which the built-in pack does not embed")]
+    NotEmbedded {
+        /// The component.
+        file: &'static str,
+    },
     /// The pack's `aliases` catalog failed to validate.
     #[error("registry pack `aliases`: {source}")]
     Aliases {
@@ -325,6 +379,12 @@ impl RegistryPack {
     #[must_use]
     pub fn aliases(&self) -> &AliasIndex {
         &self.aliases
+    }
+
+    /// The state maps, empty without the components.
+    #[must_use]
+    pub fn states(&self) -> &StateMapIndex {
+        &self.states
     }
 
     /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
@@ -475,6 +535,7 @@ impl RegistryPack {
             aliases: &self.aliases,
             mc_version,
             ids,
+            states: mc_version.and_then(|version| self.states.at(version)),
             label: match mc_version {
                 Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
                 None => self.manifest.edition.as_str().to_owned(),
@@ -542,6 +603,8 @@ enum Component {
     Materials,
     Blocks,
     Aliases,
+    States,
+    Sensitivity,
 }
 
 impl Component {
@@ -552,6 +615,8 @@ impl Component {
             Component::Materials => "materials",
             Component::Blocks => "blocks",
             Component::Aliases => "aliases",
+            Component::States => "states",
+            Component::Sensitivity => "sensitivity",
         };
         RegistryError::File {
             file: file.to_owned(),
@@ -571,12 +636,16 @@ trait ComponentSource {
 
 impl ComponentSource for BuiltinFiles {
     fn read_text(&self, component: Component, _file: &str) -> Result<Cow<'_, str>, RegistryError> {
+        let embedded =
+            |text: Option<&'static str>, file| text.ok_or(RegistryError::NotEmbedded { file });
         Ok(Cow::Borrowed(match component {
             Component::Manifest => self.manifest,
             Component::DataVersions => self.data_versions,
             Component::Materials => self.materials,
             Component::Blocks => self.blocks,
             Component::Aliases => self.aliases,
+            Component::States => embedded(self.states, "states")?,
+            Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
         }))
     }
 
@@ -648,6 +717,8 @@ fn load_pack(
     validate_blocks_cover_versions(&blocks, &data_versions)?;
     validate_blocks_order(&blocks, &data_versions)?;
     validate_aliases_answerable(&aliases, &blocks)?;
+    let (states, states_text, sensitivity_text) = state_maps(source, &manifest, &blocks)?;
+    validate_states_cover_versions(&states, &data_versions)?;
 
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
@@ -657,6 +728,8 @@ fn load_pack(
         (&manifest.files.materials, &materials_text),
         (&manifest.files.blocks, &blocks_text),
         (&manifest.files.aliases, &aliases_text),
+        (&manifest.files.states, &states_text),
+        (&manifest.files.sensitivity, &sensitivity_text),
     ] {
         if let (Some(file), Some(text)) = (file, text) {
             components.push((file.as_str(), text.as_bytes()));
@@ -669,9 +742,48 @@ fn load_pack(
         materials,
         blocks,
         aliases,
+        states,
         bytes_hash,
         source: source.provenance(),
     })
+}
+
+/// A component's text, `None` when the manifest names no such component.
+type ComponentText<'s> = Option<Cow<'s, str>>;
+
+/// The state map index and the texts of its two components, which a pack names both or neither of.
+fn state_maps<'s>(
+    source: &'s impl ComponentSource,
+    manifest: &PackManifest,
+    blocks: &BlocksIndex,
+) -> Result<(StateMapIndex, ComponentText<'s>, ComponentText<'s>), RegistryError> {
+    let files = &manifest.files;
+    let (states_file, sensitivity_file) = match (&files.states, &files.sensitivity) {
+        (None, None) => return Ok((StateMapIndex::empty(), None, None)),
+        (Some(states), Some(sensitivity)) => (states, sensitivity),
+        (Some(_), None) => {
+            return Err(StatesError::Unpaired {
+                present: "states",
+                missing: "sensitivity",
+            }
+            .into());
+        }
+        (None, Some(_)) => {
+            return Err(StatesError::Unpaired {
+                present: "sensitivity",
+                missing: "states",
+            }
+            .into());
+        }
+    };
+    let states_text = source.read_text(Component::States, states_file)?;
+    let sensitivity_text = source.read_text(Component::Sensitivity, sensitivity_file)?;
+    let index = StateMapIndex::from_catalogs(
+        parse_component(&states_text, Component::States)?,
+        parse_component(&sensitivity_text, Component::Sensitivity)?,
+        blocks,
+    )?;
+    Ok((index, Some(states_text), Some(sensitivity_text)))
 }
 
 /// An optional component's index and text, or its empty index when the manifest names none.
@@ -722,6 +834,29 @@ fn validate_aliases_answerable(
         });
     }
     Ok(())
+}
+
+/// Refuses a state map that misses a targetable version, whose build would have none to write by.
+fn validate_states_cover_versions(
+    states: &StateMapIndex,
+    data_versions: &DataVersionTable,
+) -> Result<(), RegistryError> {
+    if states.is_empty() {
+        return Ok(());
+    }
+    let missing: Vec<&str> = data_versions
+        .versions
+        .iter()
+        .filter(|e| e.targetable && states.at(&e.mc_version).is_none())
+        .map(|e| e.mc_version.as_str())
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(RegistryError::StatesMissVersion {
+            missing: missing.join(", "),
+        })
+    }
 }
 
 /// Refuses a materials override naming a version `data_versions` lacks, which would never fire.

@@ -96,7 +96,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Restore the server jars and palettes
+      - name: Restore the server jars, palettes and state maps
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/cairn-minecraft
@@ -116,4 +116,8 @@ jobs:
           --cache ~/.cache/cairn-minecraft
 
       - name: Bedrock
-        run: python3 .github/scripts/extract_registry.py bedrock --check --cache ~/.cache/cairn-minecraft
+        # The state maps read the reports of the Java releases GeyserMC's mappings follow.
+        run: >-
+          python3 .github/scripts/extract_registry.py bedrock --check
+          --java "$JAVA_HOME/bin/java"
+          --cache ~/.cache/cairn-minecraft

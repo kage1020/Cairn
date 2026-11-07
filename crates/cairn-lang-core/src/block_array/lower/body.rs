@@ -24,6 +24,7 @@ use super::members::{MemberDisposition, StructCtx, flatten_members, member_dispo
 use super::paint::paint_member;
 use super::phase::Phase;
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
+use super::token_diag::diag_state_unmapped;
 use super::written::{Written, written_members};
 
 /// What every body of one run is lowered against.
@@ -147,14 +148,7 @@ pub(super) fn lower_body_to_block_array<'a>(
             contested.values().sum(),
         ));
     }
-    let cut: HashSet<Span> = flattened
-        .iter()
-        .zip(&canvas.wrote)
-        .filter(|((_, m), wrote)| {
-            **wrote && matches!(m.role, MemberRole::Door | MemberRole::Window)
-        })
-        .map(|((_, m), _)| m.span.clone())
-        .collect();
+    let cut = cut_openings(&flattened, &canvas.wrote);
     let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
     debug_assert!(
         never_painted.is_empty(),
@@ -174,12 +168,39 @@ pub(super) fn lower_body_to_block_array<'a>(
     // After the prune, so dropped entries are not sorted and the grid is renumbered once.
     array.canonicalize_palette();
     let members = resolved_members(&flattened, canvas.owners(), &array);
+    if let Some(registry) = registry {
+        diagnostics.extend(unmapped_states(&members, registry));
+    }
 
     Some(LoweredBody {
         array,
         members,
         walls: ctx.wall_column,
         cut,
+    })
+}
+
+/// The spans of the doors and windows of `flattened` that `wrote` says cut their opening.
+fn cut_openings(flattened: &[(u32, &Member)], wrote: &[bool]) -> HashSet<Span> {
+    flattened
+        .iter()
+        .zip(wrote)
+        .filter(|((_, m), wrote)| {
+            **wrote && matches!(m.role, MemberRole::Door | MemberRole::Window)
+        })
+        .map(|((_, m), _)| m.span.clone())
+        .collect()
+}
+
+/// An `E_STATE_UNMAPPED` for each state a member resolved to that `registry` has no form for.
+fn unmapped_states<'a>(
+    members: &'a [ResolvedMember],
+    registry: &'a dyn TargetRegistry,
+) -> impl Iterator<Item = Diagnostic> + 'a {
+    members.iter().flat_map(move |member| {
+        member.resolved_state.iter().filter_map(move |block| {
+            diag_state_unmapped(member.span.clone(), &block.state, registry)
+        })
     })
 }
 

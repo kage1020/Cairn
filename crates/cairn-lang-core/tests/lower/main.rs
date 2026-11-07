@@ -19,6 +19,7 @@ mod port_reads_the_wall_that_paints;
 mod port_rejection_reason;
 mod resolved_state;
 mod roof_seats_on_the_wall;
+mod state_unmapped;
 mod struct_as_written;
 mod structure_volume;
 mod the_volume_is_what_gets_painted;

@@ -7,7 +7,9 @@
     "data_versions": "data_versions.json",
     "materials": "materials.json",
     "blocks": "blocks.json",
-    "aliases": "aliases.json"
+    "aliases": "aliases.json",
+    "states": "states.json",
+    "sensitivity": "sensitivity.json"
   },
   "extracted": {
     "by": ".github/scripts/extract_registry.py",
@@ -31,6 +33,32 @@
         "mc_version": "1.26.60",
         "url": "https://raw.githubusercontent.com/GeyserMC/Geyser/fd35d5918ae8e8b6c05d91179315fa00413c1f65/core/src/main/resources/bedrock/block_palette.26_60.nbt",
         "sha256": "9d0feee0cd2edc1499bd7f7922615caee4dd268b598fca45dc396f4d0bdcdaa3"
+      }
+    ],
+    "states": [
+      {
+        "mc_version": "1.21.0",
+        "url": "https://raw.githubusercontent.com/GeyserMC/mappings/ec45f59c8590945c9226921ef7e339f510983dc1/blocks.nbt",
+        "sha256": "efab40e80405474356e6940d3bac9dd0f904b1633a36bff3312472a16ace8821",
+        "java": "1.21"
+      },
+      {
+        "mc_version": "1.21.40",
+        "url": "https://raw.githubusercontent.com/GeyserMC/mappings/830085e37e0053c9d6116bcad37cafcba83aded5/blocks.nbt",
+        "sha256": "e48d4f6b3f60a23707f9cb35ebebf000b41f665b2295d65a6692d37ab1fc0768",
+        "java": "1.21"
+      },
+      {
+        "mc_version": "1.21.60",
+        "url": "https://raw.githubusercontent.com/GeyserMC/mappings/3fcfc7bab4345b6807d7507a02e52ed4e2da8b31/blocks.nbt",
+        "sha256": "de65e6382d74e27b72e8946b39ffbd6ff8aae39e9ec6e3193a5958187be333bf",
+        "java": "1.21.5"
+      },
+      {
+        "mc_version": "1.26.60",
+        "url": "https://raw.githubusercontent.com/GeyserMC/mappings/b1934f14ad6fba5ea00ee2938e1f8cbef48e6b12/blocks.nbt",
+        "sha256": "efc9305b53fc170dd153eb417e003a61f2b17f924592892726ecffc3dce58536",
+        "java": "26.3"
       }
     ]
   }

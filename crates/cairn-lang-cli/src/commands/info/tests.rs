@@ -14,10 +14,10 @@ fn the_notes_answer_the_figure_they_sit_under() {
             },
         },
         UnsupportedEntry {
-            id: "minecraft:oak_door".to_owned(),
+            id: "minecraft:frame".to_owned(),
             reason: UnsupportedReason::StatesUnmapped {
                 states: "facing=north".to_owned(),
-                mapped: "the stair family".to_owned(),
+                detail: "no Java block maps onto `minecraft:frame` there".to_owned(),
             },
         },
     ];
@@ -30,7 +30,7 @@ fn the_notes_answer_the_figure_they_sit_under() {
                 unsupported_reason(&entries[0].reason)
             ),
             format!(
-                "  note: `minecraft:oak_door` — {}",
+                "  note: `minecraft:frame` — {}",
                 unsupported_reason(&entries[1].reason)
             ),
         ],
@@ -40,35 +40,33 @@ fn the_notes_answer_the_figure_they_sit_under() {
 
 #[test]
 fn the_degraded_notes_answer_the_figure_they_sit_under() {
+    let shape = |value: &str, mc_versions: &[&str]| DroppedIntent {
+        key: "shape".to_owned(),
+        value: value.to_owned(),
+        mc_versions: mc_versions.iter().map(|v| (*v).to_owned()).collect(),
+        reason: "stairs render straight".to_owned(),
+    };
     let entries = vec![
         DegradedEntry {
             id: "minecraft:spruce_stairs".to_owned(),
             states: "facing=north,shape=outer_left".to_owned(),
-            dropped: vec![DroppedIntent::Shape {
-                value: "outer_left".to_owned(),
-            }],
+            dropped: vec![shape("outer_left", &["1.21.0", "1.21.60"])],
         },
         // The same id again: one entry per state combination.
         DegradedEntry {
             id: "minecraft:spruce_stairs".to_owned(),
             states: "facing=south,shape=inner_right".to_owned(),
-            dropped: vec![DroppedIntent::Shape {
-                value: "inner_right".to_owned(),
-            }],
+            dropped: vec![shape("inner_right", &["1.21.60"])],
         },
     ];
     assert_eq!(
         degraded_notes(Edition::Bedrock, &entries),
         [
-            "note: what `degraded: 2` counts on bedrock:".to_owned(),
-            format!(
-                "  note: `minecraft:spruce_stairs[facing=north,shape=outer_left]` — {}",
-                degradation_detail(&entries[0].dropped[0])
-            ),
-            format!(
-                "  note: `minecraft:spruce_stairs[facing=south,shape=inner_right]` — {}",
-                degradation_detail(&entries[1].dropped[0])
-            ),
+            "note: what `degraded: 2` counts on bedrock:",
+            "  note: `minecraft:spruce_stairs[facing=north,shape=outer_left]` — stairs render \
+             straight (1.21.0, 1.21.60)",
+            "  note: `minecraft:spruce_stairs[facing=south,shape=inner_right]` — stairs render \
+             straight (1.21.60)",
         ],
     );
     assert_eq!(degraded_notes(Edition::Java, &[]), [] as [String; 0]);
@@ -92,14 +90,14 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
         .palette
         .intern(leaked);
 
-    let invalid = portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases())
+    let invalid = portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases(), pack.states())
         .expect_err("a value outside the Java domain is not a portability figure");
 
     let lines = invalid_palette_report(Edition::Bedrock, &invalid);
     assert!(
         portability_figure(
             Edition::Bedrock,
-            portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases()),
+            portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases(), pack.states()),
         )
         .is_none(),
         "a refused palette costs the edition its row rather than printing counts over it",
@@ -116,8 +114,8 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
         "the leak is quoted, not reworded",
     );
     assert!(
-        lines[2].contains("a state literal on a stair in the source")
-            && lines[2].contains("a key other than `facing` / `half` / `shape`")
+        lines[2].contains("a state literal in the source")
+            && lines[2].contains("a property the Java block does not have, or a value outside")
             && lines[2].contains("a leak in the pack or this compiler"),
         "the block names both places such a blockstate can come from, since the leak's own \
          `Fix:` addresses only the first, got: {}",
@@ -155,13 +153,12 @@ fn every_unsupported_reason_renders_the_repair_it_names() {
     );
     let unmapped = unsupported_reason(&UnsupportedReason::StatesUnmapped {
         states: "facing=north".to_owned(),
-        mapped: "the stair family".to_owned(),
+        detail: "no Java block maps onto `minecraft:frame` there".to_owned(),
     });
-    assert!(
-        unmapped.contains("facing=north")
-            && unmapped.contains("has the block")
-            && unmapped.contains("the stair family")
-            && unmapped.contains("so far"),
-        "the gap is this compiler's and it is not permanent, got: {unmapped}",
+    assert_eq!(
+        unmapped,
+        "the edition has the block, but no version's state map has a form for `facing=north`: no \
+         Java block maps onto `minecraft:frame` there — bind the slot to another block, or build \
+         for the other edition",
     );
 }

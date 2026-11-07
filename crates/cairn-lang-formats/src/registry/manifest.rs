@@ -28,6 +28,22 @@ pub struct Extraction {
     pub by: String,
     /// One row per block table, oldest first.
     pub blocks: Vec<ExtractedTable>,
+    /// One row per state map, oldest first; only a Bedrock pack has them.
+    #[serde(default)]
+    pub states: Vec<ExtractedStateMap>,
+}
+
+/// The mapping one version's state map was read from.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ExtractedStateMap {
+    /// The Bedrock version.
+    pub mc_version: String,
+    /// The URL the mappings' `blocks.nbt` was read from.
+    pub url: String,
+    /// Its SHA-256.
+    pub sha256: String,
+    /// The Java release whose states, in id order, the mapping follows.
+    pub java: String,
 }
 
 /// The game data one version's block table was read from.
@@ -59,6 +75,12 @@ pub struct PackFiles {
     /// The `aliases` file; without it, an `E_UNKNOWN_ID` offers only the typo search.
     #[serde(default)]
     pub aliases: Option<String>,
+    /// The `states` file, named with `sensitivity` or not at all.
+    #[serde(default)]
+    pub states: Option<String>,
+    /// The `sensitivity` file.
+    #[serde(default)]
+    pub sensitivity: Option<String>,
 }
 
 #[cfg(test)]

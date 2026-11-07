@@ -51,9 +51,9 @@ constraints:
 
 ### `(edition, version)` 行列の畳み込み
 
-正規トークンを主キーにし、各トークンがエディションごとの対応 (id + state_map) を持ちます。バージョンは `inherits + diffs` で畳み込みます。Java が基底で、Bedrock はそれを上書きする差分です。手書きの意味カタログには、違いのある点だけを記録します。
+正規トークンを主キーにし、各エディションがそれを写します。ブロック ID へは `materials` で写し、正規のステート、つまり Java のステートからは、ステートマップで自分のステートへ写します。Java が基底なので、Java のステートにマップは要りません。手書きの意味カタログには、違いのある点だけを記録します。
 
-現時点の組み込みパックは、エディションの中でしか畳み込みません。レジストリパックはエディションごとに独立していて、各パックの `pack.json` が自分の `edition` を示し、一方のパックがもう一方を継承することはまだありません。1 つのパックの中では、`blocks` コンポーネントが 1 つのバージョンのブロックを、各ステートのプロパティが取る値とともに持ちます。それより後の各バージョンは、継承元のバージョン、追加したブロック、ステートが変わったブロック、削除した ID を記録します (Java は `1.20.4` → `1.21` → `1.21.4` → `26.3`、Bedrock は `1.21.0` → `1.21.40` → `1.21.60` → `1.26.60`)。
+レジストリパックはエディションごとに独立していて、各パックの `pack.json` が自分の `edition` を示します。バージョンを `inherits + diffs` で畳み込むのは 1 つのパックの中だけです。2 つのパックを互いに畳み込まないのは、答える問いが違うからです。Java の表は正規の語彙そのものであり、Bedrock のステートマップはそこ *から* 変換します。Bedrock のあるバージョンのマップが読むのは、その出典が写す元の Java リリースのステートで、それは Java パックのどのバージョンとも限りません。そのため Bedrock の表を Java の表の差分としては書けません。1 つのパックの中では、`blocks` コンポーネントが 1 つのバージョンのブロックを、各ステートのプロパティが取る値とともに持ちます。それより後の各バージョンは、継承元のバージョン、追加したブロック、ステートが変わったブロック、削除した ID を記録します (Java は `1.20.4` → `1.21` → `1.21.4` → `26.3`、Bedrock は `1.21.0` → `1.21.40` → `1.21.60` → `1.26.60`)。
 
 ```json
 { "mc_version": "26.3", "inherits": "1.21.4",
@@ -68,17 +68,26 @@ ID の `since` と `until`、つまりその ID を宣言している最初と�
   "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }] }
 ```
 
-`state_map` や `sensitivity` を持つパックはまだありません。現在あるステートの変換は階段のファミリのものだけで、Bedrock のバックエンドに直接書かれています ([§10.7](#107-java--bedrock-の可搬性))。
+Bedrock のパックは、ステートマップをさらに 2 つのコンポーネントとして持ちます。`states` は、バージョンごとに 1 つ固定した GeyserMC のマッピングから生成し、パックを抽出するときと読み込むときの両方で、そのバージョンのブロックパレットと照合します。1 つの Java ブロックのステートのうち 1 つの Bedrock ブロックになるものが **ファミリ** をなし、ファミリが書き出す Bedrock の各ステートは、定数か、それを決める最少の Java プロパティを引く表のどちらかです。`ids` は行が写すペアを、Bedrock の ID で、綴りが異なるときはその後に `=` と Java の ID を続けて挙げます (`oak_double_slab=oak_slab`)。
 
-```yaml
-"@oak_stairs":
-  base: { states: { half: [bottom,top], shape: [straight,inner_left,inner_right,outer_left,outer_right] } }
-  mappings:
-    java:    { id: minecraft:oak_stairs, base: "1.13" }
-    bedrock: { id: minecraft:oak_stairs, state_map: { half=top: {upside_down_bit: true} }, dropped_states: [shape] }
-  sensitivity:
-    - { edition: bedrock, kind: missing_state, state: shape, reason: "no inner/outer stair shape" }
+```json
+{ "mc_versions": ["1.26.60"], "ids": ["acacia_stairs", "andesite_stairs", "..."],
+  "java": { "facing": ["north", "south", "west", "east"], "half": ["top", "bottom"],
+            "shape": ["straight", "inner_left", "inner_right", "outer_left", "outer_right"],
+            "waterlogged": ["true", "false"] },
+  "defaults": { "facing": "north", "half": "bottom", "shape": "straight", "waterlogged": "false" },
+  "states": {
+    "minecraft:corner": { "reads": ["shape"],
+                          "map": { "inner_left": "inner_left", "...": "...", "straight": "none" } },
+    "upside_down_bit": { "reads": ["half"], "map": { "bottom": false, "top": true } },
+    "weirdo_direction": { "reads": ["facing"],
+                          "map": { "east": 0, "north": 3, "south": 2, "west": 1 } } },
+  "dropped": [] }
 ```
+
+1.21.60 の同じ階段には `minecraft:corner` がないので、その行は `shape` を `dropped` に挙げます。`dropped` は、ファミリが複数の値を取るのに、どの Bedrock ステートも読まないプロパティです。`waterlogged` は落ちません。`.mcstructure` は水の層としてそれを持つからです。バージョンの `refused` は、GeyserMC が写す先のステートをそのバージョンのパレットが宣言していないペアを挙げます。そのバージョンでは、パックはそれらの形を持ちません。
+
+プロパティを落とすと何を失うかは GeyserMC のマッピングにはないので、`sensitivity` は手で書きます。プロパティとそれが当てはまるブロックごとに 1 行で、ブロックを挙げない行は、そのプロパティを落とすほかのすべてのブロックに当てはまります。`missing_state` は Java の既定値以外の値を失い (1.21.60 までの階段の `shape`)、`derived` は Bedrock が自分で導くので何も失いません (フェンスの接続)。行の `reason` は `W_INTENT_DEGRADED` が出力する文章です ([§10.7](#107-java--bedrock-の可搬性))。どの行も分類していない落ちるプロパティはローダーが拒否し、何も落とさない行は抽出スクリプトが拒否します。
 
 ## 10.4 Fail-loud と最小バージョン推定
 
@@ -285,17 +294,17 @@ semantic-sensitive:      (none)
 | 理由 | 直し方 |
 |---|---|
 | そのエディションに、そもそもそのブロックがない。 | マテリアルを変えるか、パックでのそのマテリアルの対応を変える。 |
-| ブロックはあるが、intent が持つステートに対する対応を Cairn が持っていない ([§10.7](#107-java--bedrock-の可搬性))。 | 今のところない。対応を追加するのは Cairn の側。 |
+| ブロックはあるが、intent が持つステートの形を、どのバージョンのステートマップも持っていない ([§10.7](#107-java--bedrock-の可搬性))。 | スロットを別のブロックに束縛するか、もう一方のエディション向けにビルドする。 |
 
 1 つ目は ID の問題、2 つ目はステートの問題です。`degraded` になりうるのは 2 つ目だけです。存在しないブロックには、失う詳細がないからです。
 
 1 つの数値の裏に 2 通りの直し方が隠れるので、数えた各エントリは理由とともに stderr に出力します。ID の問題には `E_UNKNOWN_ID` と同じ方法で、同じ 2 つの手段で答えます。`aliases` コンポーネントに行があれば、このエディションが別の名前で持っているエントリを、行き止まりとしてではなくその名前で報告します (Java での `standing_sign` は `oak_sign`)。行がなければ `did you mean` を付けます。この 2 つは択一で、順番に試すものではありません。行はどのブロックかについてのパックの言明であり、その横に距離による推測を並べると、読み手にどちらを信じるかを選ばせることになるからです。ここでもエイリアスはエディションに対して問います。サポートする *いずれかの* バージョンが宣言する綴りなら答えになります。固定したビルドなら、自分のバージョンの綴りだけを残します。`--format json` では `edition_portability[].unsupported_entries` として、数値 1 につき 1 要素、パレット順で出力します。
 
-この行は互換範囲全体について報告するので、どちらの問いもバージョンではなく *エディション* に対して発します。範囲の一部でしか有効でない ID は `unsupported` になりません。Bedrock が 1.21.40 で `stonebrick` を `stone_bricks` にリネームした件がその例です。実際にビルドするバージョンがその ID を持っているかどうかは、固定したターゲットが `E_UNKNOWN_ID` として答えます。`cairn compile --target` か、ビルドせずに同じ答えを得られる `cairn check --edition E --target V` です ([§10.4](#104-fail-loud-と最小バージョン推定))。
+この行は互換範囲全体について報告するので、どちらの問いもバージョンではなく *エディション* に対して発します。範囲の一部でしか有効でない ID は `unsupported` になりません。Bedrock が 1.21.40 で `stonebrick` を `stone_bricks` にリネームした件がその例です。実際にビルドするバージョンがその ID を持っているかどうかは、固定したターゲットが `E_UNKNOWN_ID` として答えます。`cairn compile --target` か、ビルドせずに同じ答えを得られる `cairn check --edition E --target V` です ([§10.4](#104-fail-loud-と最小バージョン推定))。ステートも同じように、そのブロックを宣言するすべてのバージョンに対して問います。`cherry_wood[axis=x]` は 3 つのバージョンが書き出せるので可搬です。1.21.40 のパレットにはその形がなく、そこに固定したビルドは `E_STATE_UNMAPPED` と答えます。
 
 #### degraded になったエントリと失われたもの
 
-`degraded` も、コマンドが名指しできるエントリを数えたもう 1 つの数値で、名指しの仕方も同じです。理由は `unsupported` ほど強くありません。degraded になる理由は 1 つ、直し方も 1 つなので、読み手が直し方を選ぶ必要はないからです。共通しているのは「N 個のうちどれなのか」という問いです。`roof-hip` は `degraded: 4` と報告します。この問いに答えるもう 1 つの場所はビルド時の `W_INTENT_DEGRADED` ですが、`cairn info` はまさにそのビルドの *前に* 読むためのコマンドです。
+`degraded` も、コマンドが名指しできるエントリを数えたもう 1 つの数値で、名指しの仕方も同じです。理由は `unsupported` ほど強くありません。エントリが degraded になるのは、あるバージョンがそのステートの 1 つを落とす場合だけで、直し方もいつも同じ、つまりそのステートを保つバージョンか、それを必要としないマテリアルなので、読み手が直し方を選ぶ必要はないからです。共通しているのは「N 個のうちどれなのか」という問いです。`roof-hip` は `degraded: 4` と報告します。この問いに答えるもう 1 つの場所はビルド時の `W_INTENT_DEGRADED` ですが、`cairn info` はまさにそのビルドの *前に* 読むためのコマンドです。
 
 数えた各エントリは stderr に出力し、`--format json` では `edition_portability[].degraded_entries` として、数値 1 につき 1 要素、パレット順で出力します。1 件は `{id, states, dropped}` です。
 
@@ -303,17 +312,17 @@ semantic-sensitive:      (none)
 |---|---|
 | `id` | パレットのエントリのブロック ID。lowering が intern したそのままの形。 |
 | `states` | エントリの `key=value` をカンマでつないだもの。`states_unmapped` の理由と同じ綴り。 |
-| `dropped` | エディションに表現のない intent ごとに 1 件の `{key, value}`。`key` は閉じた集合 (`shape`) で、新しい種類の損失は既存の `key` の変更ではなく新しい `key` として追加する。 |
+| `dropped` | いずれかのバージョンに形のない intent ごとに 1 件の `{key, value, mc_versions}`。正規のプロパティ、求めた値、それを失うバージョン (古い順)。`key` は、パックの `sensitivity` が `missing_state` と分類したプロパティ。 |
 
 カテゴリのタグを付けた 1 つのリストにはせず、2 つのリストに分けています。また ID だけでなく `states` も持たせています。degraded はブロックについての事実ではなく、*ステートの組み合わせ* についての事実だからです。1 つの ID が、詳細を失う組み合わせの数だけこのリストに現れます。`roof-hip` の 4 件は、`minecraft:spruce_stairs` の 4 通りの綴りです。ID だけをキーにしたリストでは、同じ行が 4 回出力されてしまいます。ビルド時の `W_INTENT_DEGRADED` も、構造のスコープの後に `id[states]` という同じ形で、各エントリを 1 行に 1 回ずつ名指すので、警告はそれぞれ区別でき、同じエントリについての note と対応します。
 
-`dropped` は、文ではなくプロパティと値を持ちます。`unsupported` の理由と同じ考え方で、これを読むプログラムが、どのステートが失われたかを知るために英文を解析しなくて済むようにするためです。エディションが表現 *できる* 値は損失ではないので、ここには現れません。Bedrock の階段は `straight` なので、`shape=straight` はエントリを作らずに落ちます。note と `W_INTENT_DEGRADED` が出力する文章は 1 か所で書かれています。しかもペア全体ではなく `key` ごとに書かれています。`shape` が落ちたときの文章は階段についての話だからです。intent を落とす 2 つ目のブロックファミリが現れたら、この文章を流用するのではなく、自分の `key` と文章を持ちます。
+`dropped` は、文ではなくプロパティと値を持ちます。`unsupported` の理由と同じ考え方で、これを読むプログラムが、どのステートが失われたかを知るために英文を解析しなくて済むようにするためです。エディションが表現 *できる* 値は損失ではないので、ここには現れません。落ちるプロパティでも Java の既定値なら何も失わないので、`shape=straight` はエントリを作らずに落ちます。`derived` のプロパティも同様です。note と `W_INTENT_DEGRADED` が出力する文章は `sensitivity` の行の `reason` で、ペア全体ではなく `key` とそれが当てはまるブロックごとに書かれています。`shape` が落ちたときの文章は階段についての話で、シュルカーボックスの `facing` の文章はそのブロックエンティティについての話だからです。note はそれを失うバージョンを書き添えます。ビルドは自分のターゲットをすでに示しています。
 
 #### パックが弾くべきだったブロックステートは数に入れない
 
-ステートの変換器には、ほかに 2 種類の失敗が届くことがあります。Java のドメイン外のステート値 (階段の `facing=up`) と、変換器が読まないステートキーです。どちらもエディションについての答えではありません。検証済みのレジストリパックからはどちらも生まれないので、出どころは、まだターゲットに照らして検査していないソースのステートリテラル (`W_STATE_LITERAL_UNCHECKED`、[§10.4](#104-fail-loud-と最小バージョン推定)) か、パックまたは Cairn の欠陥のどちらかです。
+ステートの変換器には、ほかに 2 種類の失敗が届くことがあります。Java のブロックにないプロパティと、そのドメイン外の値 (階段の `facing=up`) です。どちらもエディションについての答えではありません。検証済みのレジストリパックからはどちらも生まれないので、出どころは、まだターゲットに照らして検査していないソースのステートリテラル (`W_STATE_LITERAL_UNCHECKED`、[§10.4](#104-fail-loud-と最小バージョン推定)) か、パックまたは Cairn の欠陥のどちらかです。
 
-したがって、これらは `unsupported` の 3 つ目、4 つ目の理由ではありません。パレットにこうしたエントリを含むエディションについては、`cairn info` は可搬性の数値を **一切** 報告しません。数値そのものは計算できますが、通常の可搬性の数値として読まれてしまいます。`facing=up` を `unsupported: 1` と数えると、Bedrock に角の形のステートがないだけの階段と見分けがつきません。それこそ、読み手に導かせてはならない結論です。コマンドはそうしたエントリを 1 つずつ、変換器自身のメッセージとともに stderr に出力します。メッセージはソースのブロックステートの直し方を示し、続く note は、各エントリがソースのステートリテラルか、パックまたは Cairn からの漏れのどちらかであることを伝えます。そのうえで行を出さずに非ゼロで終了します。コマンドを拒否するほかの指摘と同じ振る舞いです。
+したがって、これらは `unsupported` の 3 つ目、4 つ目の理由ではありません。パレットにこうしたエントリを含むエディションについては、`cairn info` は可搬性の数値を **一切** 報告しません。数値そのものは計算できますが、通常の可搬性の数値として読まれてしまいます。`facing=up` を `unsupported: 1` と数えると、どの Bedrock バージョンにも形のないステートと見分けがつきません。それこそ、読み手に導かせてはならない結論です。コマンドはそうしたエントリを 1 つずつ、変換器自身のメッセージとともに stderr に出力します。メッセージはソースのブロックステートの直し方を示し、続く note は、各エントリがソースのステートリテラルか、パックまたは Cairn からの漏れのどちらかであることを伝えます。そのうえで行を出さずに非ゼロで終了します。コマンドを拒否するほかの指摘と同じ振る舞いです。
 
 今のところこれを観測できるのはステートの変換器だけなので、規則もステートの問いについてだけ定めています。これは、ほかの場所の検証漏れに `unsupported` と答えてよいという意味ではありません。検証済みのパックからは生まれないはずのパレットで計算した数値は、何がそれを生んだにせよ、可搬性の答えではありません。
 
@@ -323,7 +332,7 @@ semantic-sensitive:      (none)
 
 `buildable targets` はバージョン単位の答えです。指定されたエディションごとに、ターゲットを固定した lowering がエラーを出さないサポート対象のバージョンを並べ、拒否したバージョンをその横に示します。`[Vmin, Vmax]` の範囲ではなく集合にしているのは、バージョンの集合が入り組んだ 2 つの ID は、範囲では埋まってしまう隙間を残すからです。
 
-導出には、サポート対象のバージョンごとに 1 回ずつ lowering する方法を使います。`cairn compile --target` が行うのと同じ検査です。`edition portability` 行がステートを理由に `unsupported` と数えるエントリは、そのエディションのライターが書き出せないものです。コンパイルと同じく、この行もそのエディションのすべてのバージョンを拒否します。範囲全体のパレットの ID 集合の積を取る方法は **健全ではない** ので使いません。ターゲットを固定しないと、すべてのマテリアルが *既定の* 対応を取るので、ターゲットが別の綴りにするトークンが、誤った ID として比べられてしまいます。
+導出には、サポート対象のバージョンごとに 1 回ずつ lowering する方法を使います。`cairn compile --target` が行うのと同じ検査です。`edition portability` 行がステートを理由に `unsupported` と数えるエントリは、そのエディションのライターが書き出せないものです。コンパイルと同じく、この行もそのエディションのすべてのバージョンを拒否します。一部のバージョンのマップだけが持つエントリは、ほかのバージョンだけを、それらに固定した lowering の `E_STATE_UNMAPPED` で拒否します。範囲全体のパレットの ID 集合の積を取る方法は **健全ではない** ので使いません。ターゲットを固定しないと、すべてのマテリアルが *既定の* 対応を取るので、ターゲットが別の綴りにするトークンが、誤った ID として比べられてしまいます。
 
 カウンタと同じく、この行も報告するだけで拒否はしません。どのサポート対象バージョンでもビルドできないソースでも、`cairn info` は 0 で終了します。拒否するのはビルドの役目です。拒否した各バージョンの指摘はそのバージョンの下に出力するので、`E_UNKNOWN_ID` が、それを出したターゲットと切り離されて表示されることはありません。
 
@@ -398,23 +407,26 @@ W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 ```yaml
 intent_state: { primitive: stairs, corner: inner_left, facing: east }   # エディション中立
 resolved_state:
-  java:    { facing: east, half: bottom, shape: inner_left }
-  bedrock: { weirdo_direction: 0, upside_down_bit: false }              # shape が無いので角がつながらない
+  java:            { facing: east, half: bottom, shape: inner_left }
+  bedrock 1.21.60: { weirdo_direction: 0, upside_down_bit: false }      # shape が無いので角がつながらない
+  bedrock 1.26.60: { minecraft:corner: inner_left, weirdo_direction: 0, upside_down_bit: false }
 ```
 
-lowering は `resolved_state` を、正規の語彙 ([マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン)) で 1 度だけ記録します。その語彙のステート名は Java のものです ([ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。Bedrock の行は、Bedrock バックエンドが書き出すときにその記録を写した結果なので、`cairn lower` が示すのは正規の行だけです。
+lowering は `resolved_state` を、正規の語彙 ([マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン)) で 1 度だけ記録します。その語彙のステート名は Java のものです ([ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。Bedrock の行は、Bedrock バックエンドが書き出すときに、ターゲットのバージョンに対するパックのステートマップ ([行列の畳み込み](#edition-version-行列の畳み込み)) でその記録を写した結果なので、`cairn lower` が示すのは正規の行だけです。エントリが省いたプロパティはその Java ブロックの既定値を取り、waterlogged のエントリは `.mcstructure` の 2 つ目の層に水を持ちます。
 
-解決結果の違いが見た目や機能の違いになるときは、ビルドがそれを知らせます。`themed-tower` の軒の階段は `shape=outer_left` です。
+解決結果の違いが見た目や機能の違いになるときは、ビルドがそれを知らせます。`themed-tower` の軒の階段は `shape=outer_left` で、Bedrock 1.21.60 にはそのステートがありません。
 
 ```text
-$ cairn compile examples/themed-tower.crn --edition bedrock
-warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]: Bedrock has no `shape` state; its stairs render straight, so corners show visual gaps
+$ cairn compile examples/themed-tower.crn --edition bedrock --target 1.21.60
+warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]: this Bedrock version has no stair `shape` state; its stairs render straight, so corners show visual gaps
 ```
+
+ターゲットのマップが落とすのではなく、そもそも形を持たないステートは、それを作ったメンバーで `E_STATE_UNMAPPED` としてビルドを拒否します ([Lint](/ja/spec/lint/))。そのまま書き出すと、黙ってブロックの既定値になってしまうからです。
 
 トークンで吸収できるのは、ID、ステート、シリアライズの違いだけです。**概念がないことと、ゲーム挙動の違いは吸収しません。** 吸収できない代表例は次のとおりです。
 
 - display エンティティ (Bedrock にはない)
-- 階段の `shape` (Bedrock にはこのステートがない)
+- 1.26.60 より前の Bedrock での階段の `shape` (そこにはこのステートがない)
 - 防具立て (armor_stand) のポーズ
 - レッドストーン信号の伝わり方
 - アイテムコンポーネント ↔ Bedrock のアイテム NBT
