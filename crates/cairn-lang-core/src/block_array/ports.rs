@@ -13,7 +13,7 @@ use crate::intent::{DefIr, Member, MemberRole};
 
 use super::Dims;
 use super::openings::{
-    WallSide, WindowArgFault, WindowArgs, Written, door_anchor_offset, door_at_clause,
+    DOOR_HEIGHT, WallSide, WindowArgFault, WindowArgs, Written, door_anchor_offset, door_at_clause,
     read_window_args, wall_length, wall_local_to_grid,
 };
 use super::wall_column::WallColumn;
@@ -26,9 +26,6 @@ const PORT_GROUND_V: u32 = 0;
 /// `fill_door` asks about `y_offset + 1`; the two agree because no port reaches a door under a
 /// `level`.
 const DOOR_PORT_BASE_V: u32 = 1;
-
-/// Rows a door stands, from [`DOOR_PORT_BASE_V`].
-const DOOR_PORT_ROWS: u32 = 2;
 
 /// Why [`port_world_position`] placed no port, one variant per refusal in the order it asks.
 #[derive(Debug, PartialEq, Eq)]
@@ -152,7 +149,7 @@ impl PortRejection {
             Self::DoorShortCourse { walls, .. } => format!(
                 "is a door that stands at y={DOOR_PORT_BASE_V}..={}, and the wall course holding \
                  y={DOOR_PORT_BASE_V} ends there (the walls occupy {walls})",
-                DOOR_PORT_BASE_V + DOOR_PORT_ROWS - 1,
+                DOOR_PORT_BASE_V + DOOR_HEIGHT - 1,
             ),
             Self::WindowArgument { fault, .. } => format!("is a window that {}", fault.clause()),
             Self::WindowPastWall {
@@ -179,18 +176,11 @@ impl PortRejection {
                      can address (the walls occupy {walls})",
                 ),
             },
-            Self::NotCut { role, .. } => {
-                // A door whose `mat_slot=` resolves to nothing falls back to its default block.
-                let why = if *role == "window" {
-                    "the finding on its own line, or on the material its `mat_slot=` names, says why"
-                } else {
-                    "the finding on its own line says why"
-                };
-                format!(
-                    "is a {role} the openings pass did not cut, so a strip would end against \
-                     the wall — {why}",
-                )
-            }
+            Self::NotCut { role, .. } => format!(
+                "is a {role} the openings pass did not cut, so a strip would end against the \
+                 wall — the finding on its own line, or on the material its `mat_slot=` names, \
+                 says why",
+            ),
             Self::OutOfRange => "would sit outside the coordinate range a build can address — \
                                  bring its `place` closer to the origin"
                 .to_owned(),
@@ -267,7 +257,7 @@ pub(super) fn port_world_position<S: BuildHasher>(
                 member: member.span.clone(),
             });
         }
-        if !walls.contains_rows(DOOR_PORT_BASE_V, DOOR_PORT_ROWS) {
+        if !walls.contains_rows(DOOR_PORT_BASE_V, DOOR_HEIGHT) {
             return Err(PortRejection::DoorShortCourse {
                 walls: walls.clone(),
                 member: member.span.clone(),

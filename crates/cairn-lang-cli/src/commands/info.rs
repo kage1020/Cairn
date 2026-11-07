@@ -118,7 +118,7 @@ fn edition_wide_refusals(
             backticked(&dropped),
         );
     }
-    // A compile refuses these at the writer, after every source gate has passed.
+    // A pinned compile refuses these at every version, with `E_STATE_UNMAPPED` at lowering.
     let states_unmapped: Vec<String> = portability
         .into_iter()
         .flat_map(PortabilityReport::unsupported)

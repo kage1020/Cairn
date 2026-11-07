@@ -9,7 +9,7 @@ use cairn_lang_core::block_array::BlockState;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-use super::blocks::{BlocksIndex, StateValue};
+use super::blocks::{BlockStates, BlocksIndex, StateValue};
 use super::namespaced;
 
 /// The highest `states.schema_version` this build reads.
@@ -17,7 +17,7 @@ pub const SUPPORTED_STATES_SCHEMA: u32 = 1;
 /// The highest `sensitivity.schema_version` this build reads.
 pub const SUPPORTED_SENSITIVITY_SCHEMA: u32 = 1;
 
-/// The Java state the `.mcstructure` writer carries as the water layer rather than as a state.
+/// The Java state the `.mcstructure` writer carries in the water layer.
 pub const WATER_LAYER_STATE: &str = "waterlogged";
 
 /// The body of `states.json`.
@@ -31,6 +31,9 @@ pub struct StatesCatalog {
     /// Per version, the pairs whose Bedrock states that version's palette does not declare.
     #[serde(default)]
     pub refused: IndexMap<String, Vec<String>>,
+    /// The Java blocks that always stand in water, though they have no `waterlogged` state.
+    #[serde(default)]
+    pub in_water: Vec<String>,
     /// The families, each with the versions and pairs it maps.
     pub families: Vec<FamilyRow>,
 }
@@ -60,18 +63,28 @@ pub struct FamilyRow {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum RuleRow {
-    /// Looked up from the Java values of `reads`, comma-joined.
-    Lookup {
-        /// The Java properties read, in order.
-        reads: Vec<String>,
-        /// Their values, comma-joined, to the Bedrock value.
-        map: IndexMap<String, StateValue>,
-    },
+    /// Looked up from the Java values a [`LookupRow`] reads.
+    Lookup(LookupRow),
     /// The same value for every state of the family.
-    Constant {
-        /// The value.
-        value: StateValue,
-    },
+    Constant(ConstantRow),
+}
+
+/// A [`RuleRow::Lookup`]: the Bedrock value for each combination of the Java values it reads.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LookupRow {
+    /// The Java properties read, in order.
+    pub reads: Vec<String>,
+    /// Their values, comma-joined, to the Bedrock value.
+    pub map: IndexMap<String, StateValue>,
+}
+
+/// A [`RuleRow::Constant`]: one Bedrock value for every state of the family.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstantRow {
+    /// The value.
+    pub value: StateValue,
 }
 
 /// The body of `sensitivity.json`.
@@ -103,18 +116,19 @@ pub struct SensitivityRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SensitivityKind {
-    /// Bedrock has no form for it, so a value other than the Java default is lost.
+    /// Bedrock does not carry it, so a value other than the Java default is lost.
     MissingState,
     /// Bedrock works it out itself, so nothing is lost.
     Derived,
 }
 
-/// The validated state maps of a pack, empty for a pack without them.
+/// The validated state maps of a Bedrock pack.
 #[derive(Debug, Clone, Default)]
 pub struct StateMapIndex {
     families: Vec<Family>,
     by_version: IndexMap<String, VersionMap>,
     sensitivity: HashMap<String, KeyRows>,
+    in_water: HashSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,8 +155,6 @@ struct VersionMap {
     onto: HashMap<String, Vec<(String, usize)>>,
     /// Java id to each Bedrock block it maps to, with the family.
     from: HashMap<String, Vec<(String, usize)>>,
-    /// The refused pairs, `(Bedrock id, Java id)`.
-    refused: HashSet<(String, String)>,
     refused_onto: HashSet<String>,
     refused_from: HashSet<String>,
 }
@@ -207,13 +219,34 @@ pub enum StatesError {
         /// The pair, as `ids` names it.
         pair: String,
     },
-    /// A family is malformed: a rule, its defaults, or what it drops disagree with its properties.
+    /// A pair is both mapped and refused at one version.
+    #[error("registry pack `states` both maps and refuses `{pair}` at `{mc_version}`")]
+    RefusedAndMapped {
+        /// The version.
+        mc_version: String,
+        /// The pair, as `refused` names it.
+        pair: String,
+    },
+    /// A family is malformed: it maps no pair or version, a property holds no value, an int is
+    /// past `TAG_Int`, or a rule, its defaults or what it drops disagree with its properties.
     #[error("registry pack `states` family of `{pair}`: {problem}")]
     MalformedFamily {
-        /// The family's first pair.
+        /// The family's first pair, or its place in `families` when it names none.
         pair: String,
         /// What is wrong.
         problem: String,
+    },
+    /// A family leaves out a state its Bedrock block declares.
+    #[error(
+        "registry pack `states` maps onto `{id}` without writing its `{state}`, which `blocks` declares at `{mc_version}`"
+    )]
+    StateUnwritten {
+        /// The version.
+        mc_version: String,
+        /// The Bedrock id.
+        id: String,
+        /// The state.
+        state: String,
     },
     /// A family writes a Bedrock state or value its block does not declare.
     #[error(
@@ -242,6 +275,26 @@ pub enum StatesError {
         first: String,
         /// The other.
         second: String,
+    },
+    /// Two families of one Java block at one version give it different properties or defaults.
+    #[error(
+        "registry pack `states` maps `{java}` onto `{first}` and onto `{second}` at `{mc_version}` with different properties or defaults"
+    )]
+    Disagree {
+        /// The version.
+        mc_version: String,
+        /// The Java id.
+        java: String,
+        /// One Bedrock id.
+        first: String,
+        /// The other.
+        second: String,
+    },
+    /// An `in_water` block no family maps.
+    #[error("registry pack `states` puts `{java}` in water, but no family maps it")]
+    InWaterUnmapped {
+        /// The Java id.
+        java: String,
     },
     /// A dropped property `sensitivity` gives no classification for.
     #[error(
@@ -275,18 +328,11 @@ fn malformed(pair: &str, problem: String) -> StatesError {
 }
 
 impl StateMapIndex {
-    /// An index with no state map, for a pack without the components.
-    #[must_use]
-    pub fn empty() -> Self {
-        Self::default()
-    }
-
     /// Validates `states` and `sensitivity` against the pack's block tables into an index.
     ///
     /// # Errors
     ///
-    /// [`StatesError`] for an unsupported schema, a pair or value the block tables refute, a
-    /// malformed family, or a dropped property `sensitivity` does not classify once.
+    /// [`StatesError`] for the first schema, pair, family, block or dropped property that fails.
     pub fn from_catalogs(
         states: StatesCatalog,
         sensitivity: SensitivityCatalog,
@@ -319,8 +365,18 @@ impl StateMapIndex {
                 }),
             }
         };
-        for row in states.families {
-            let first = row.ids.first().cloned().unwrap_or_default();
+        for (place, row) in states.families.into_iter().enumerate() {
+            let first = row
+                .ids
+                .first()
+                .cloned()
+                .unwrap_or_else(|| format!("families[{place}]"));
+            if row.ids.is_empty() || row.mc_versions.is_empty() {
+                return Err(malformed(
+                    &first,
+                    "it maps no pair or no version".to_owned(),
+                ));
+            }
             let family = family_of(&first, row.java, row.defaults, row.states, row.dropped)?;
             let at = index.families.len();
             for version in &row.mc_versions {
@@ -344,13 +400,35 @@ impl StateMapIndex {
         }
         for (version, pairs) in states.refused {
             known(&version)?;
-            let map = index.by_version.entry(version).or_default();
+            let map = index.by_version.entry(version.clone()).or_default();
             for pair in &pairs {
+                // Unchecked against `blocks`: a pair is often refused for a Bedrock id its
+                // version's palette no longer declares.
                 let (bedrock, java) = split_pair(namespace, pair);
+                let mapped = map
+                    .onto
+                    .get(&bedrock)
+                    .is_some_and(|forms| forms.iter().any(|(seen, _)| *seen == java));
+                if mapped {
+                    return Err(StatesError::RefusedAndMapped {
+                        mc_version: version,
+                        pair: pair.clone(),
+                    });
+                }
                 map.refused_onto.insert(bedrock.clone());
                 map.refused_from.insert(java.clone());
-                map.refused.insert((bedrock, java));
             }
+        }
+        for java in &states.in_water {
+            let java = namespaced(namespace, java);
+            if !index
+                .by_version
+                .values()
+                .any(|map| map.from.contains_key(&java))
+            {
+                return Err(StatesError::InWaterUnmapped { java });
+            }
+            index.in_water.insert(java);
         }
         let order: HashMap<&str, usize> =
             blocks.versions().enumerate().map(|(i, v)| (v, i)).collect();
@@ -360,12 +438,6 @@ impl StateMapIndex {
         index.check_partitions()?;
         index.check_classified()?;
         Ok(index)
-    }
-
-    /// Whether the pack carries no state map.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.by_version.is_empty()
     }
 
     /// The map of `mc_version`, or `None` when the pack carries none for it.
@@ -383,14 +455,62 @@ impl StateMapIndex {
         self.by_version.keys().map(String::as_str)
     }
 
-    /// Refuses two families of one Java block that hold one state, which would make the family an
-    /// entry belongs to depend on the order they were read in.
+    /// The versions whose map writes `state` as a form of a block it maps, oldest first.
+    pub fn versions_writing<'a>(&'a self, state: &'a BlockState) -> impl Iterator<Item = &'a str> {
+        self.by_version.iter().filter_map(move |(version, map)| {
+            let names = map.onto.contains_key(&state.id) || map.from.contains_key(&state.id);
+            let states = VersionStates {
+                index: self,
+                mc_version: version,
+                map,
+            };
+            (names && states.resolve(state).is_ok()).then_some(version.as_str())
+        })
+    }
+
+    /// The versions, but `skip`, whose map holds `key` on the Java block `java`, at `value` when
+    /// one is given, oldest first.
+    fn versions_holding(
+        &self,
+        skip: &str,
+        java: &str,
+        key: &str,
+        value: Option<&str>,
+    ) -> Vec<&str> {
+        self.by_version
+            .iter()
+            .filter(|(version, map)| {
+                *version != skip
+                    && map.from.get(java).is_some_and(|forms| {
+                        forms.iter().any(|(_, at)| {
+                            self.families[*at].java.get(key).is_some_and(|held| {
+                                value.is_none_or(|value| held.iter().any(|h| h == value))
+                            })
+                        })
+                    })
+            })
+            .map(|(version, _)| version.as_str())
+            .collect()
+    }
+
+    /// Refuses two families of one Java block that disagree on its properties or defaults, or that
+    /// hold one state, which would make the family an entry belongs to depend on reading order.
     fn check_partitions(&self) -> Result<(), StatesError> {
         for (version, map) in &self.by_version {
             for (java, forms) in &map.from {
                 for (i, (first, a)) in forms.iter().enumerate() {
                     for (second, b) in &forms[i + 1..] {
                         let (a, b) = (&self.families[*a], &self.families[*b]);
+                        let same_keys = a.java.len() == b.java.len()
+                            && a.java.keys().all(|key| b.java.contains_key(key));
+                        if !same_keys || a.defaults != b.defaults {
+                            return Err(StatesError::Disagree {
+                                mc_version: version.clone(),
+                                java: java.clone(),
+                                first: first.clone(),
+                                second: second.clone(),
+                            });
+                        }
                         let apart = a.java.iter().any(|(key, held)| {
                             b.java
                                 .get(key)
@@ -486,8 +606,8 @@ fn family_of(
     let mut rules = Vec::with_capacity(states.len());
     for (state, rule) in states {
         let values: Vec<&StateValue> = match &rule {
-            RuleRow::Constant { value } => vec![value],
-            RuleRow::Lookup { map, .. } => map.values().collect(),
+            RuleRow::Constant(row) => vec![&row.value],
+            RuleRow::Lookup(row) => row.map.values().collect(),
         };
         if values
             .iter()
@@ -499,8 +619,8 @@ fn family_of(
             ));
         }
         let rule = match rule {
-            RuleRow::Constant { value } => Rule::Constant(value),
-            RuleRow::Lookup { reads, map } => {
+            RuleRow::Constant(ConstantRow { value }) => Rule::Constant(value),
+            RuleRow::Lookup(LookupRow { reads, map }) => {
                 let combinations = combinations(&java, &reads).ok_or_else(|| {
                     malformed(pair, format!("`{state}` reads a property it does not hold"))
                 })?;
@@ -519,6 +639,29 @@ fn family_of(
             }
         };
         rules.push((state, rule));
+    }
+    let read = |key: &str| {
+        rules.iter().any(|(_, rule)| match rule {
+            Rule::Lookup { reads, .. } => reads.iter().any(|r| r == key),
+            Rule::Constant(_) => false,
+        })
+    };
+    if let Some(key) = dropped.iter().find(|key| read(key)) {
+        return Err(malformed(
+            pair,
+            format!("it drops `{key}`, which a state reads"),
+        ));
+    }
+    let lost = java.iter().find(|(key, held)| {
+        held.len() > 1 && *key != WATER_LAYER_STATE && !read(key) && !dropped.contains(key)
+    });
+    if let Some((key, _)) = lost {
+        return Err(malformed(
+            pair,
+            format!(
+                "it holds `{key}` at several values, which no state reads and it does not drop"
+            ),
+        ));
     }
     Ok(Family {
         java,
@@ -550,23 +693,40 @@ fn combinations(java: &IndexMap<String, Vec<String>>, reads: &[String]) -> Optio
     Some(joined)
 }
 
-/// Refuses a family that writes a state or value the Bedrock block does not declare at `version`.
+/// Whether the block tables declare `bedrock` at `version`.
+fn declares(blocks: &BlocksIndex, version: &str, bedrock: &str) -> bool {
+    blocks
+        .ids_for(version)
+        .is_some_and(|ids| ids.binary_search_by(|id| id.as_str().cmp(bedrock)).is_ok())
+}
+
+/// Refuses a family that writes a state or value the Bedrock block does not declare at `version`,
+/// or leaves out a state it declares.
 fn check_palette(
     blocks: &BlocksIndex,
     version: &str,
     bedrock: &str,
     family: &Family,
 ) -> Result<(), StatesError> {
-    let declared = blocks
-        .ids_for(version)
-        .is_some_and(|ids| ids.binary_search_by(|id| id.as_str().cmp(bedrock)).is_ok());
-    if !declared {
+    if !declares(blocks, version, bedrock) {
         return Err(StatesError::UnknownBlock {
             mc_version: version.to_owned(),
             id: bedrock.to_owned(),
         });
     }
     let domains = blocks.states_of(version, bedrock);
+    let unwritten = domains
+        .into_iter()
+        .flat_map(BlockStates::properties)
+        .map(|(name, _)| name)
+        .find(|name| !family.states.iter().any(|(state, _)| state == name));
+    if let Some(state) = unwritten {
+        return Err(StatesError::StateUnwritten {
+            mc_version: version.to_owned(),
+            id: bedrock.to_owned(),
+            state: state.to_owned(),
+        });
+    }
     for (state, rule) in &family.states {
         let values: Vec<&StateValue> = match rule {
             Rule::Constant(value) => vec![value],
@@ -601,11 +761,11 @@ pub struct BedrockForm {
     /// The Bedrock id, which a state can spell as another block (`oak_slab[type=double]` is
     /// `oak_double_slab`).
     pub id: String,
-    /// Every Bedrock state of the block, by name; empty for an entry written bare.
+    /// Each Bedrock state the family writes, by name; empty for an entry written bare.
     pub states: Vec<(String, StateValue)>,
     /// Whether the cell also holds water, which the writer carries as the water layer.
     pub waterlogged: bool,
-    /// Each state the entry asks for that Bedrock has no form for.
+    /// Each state the entry asks for that Bedrock does not carry.
     pub dropped: Vec<DroppedState>,
 }
 
@@ -647,18 +807,23 @@ pub enum StateRefusal {
 }
 
 impl<'a> VersionStates<'a> {
-    /// The canonical blocks `id` names here: its own Java block, or each Java block mapped onto it.
+    /// The canonical blocks `id` with the states `given` names here: its own Java block, or each
+    /// Java block mapped onto it that takes `given`, as [`Self::resolve`] narrows them.
     #[must_use]
-    pub fn java_ids<'s>(&self, id: &'s str) -> Vec<&'s str>
+    pub fn java_ids<'s>(&self, id: &'s str, given: &IndexMap<String, String>) -> Vec<&'s str>
     where
         'a: 's,
     {
         if self.reads_as_java(id) {
             return vec![id];
         }
-        self.map.onto.get(id).map_or_else(Vec::new, |forms| {
-            forms.iter().map(|(java, _)| java.as_str()).collect()
-        })
+        let mut ids: Vec<&'s str> = Vec::new();
+        for (java, at) in self.map.onto.get(id).map_or(&[][..], Vec::as_slice) {
+            if self.index.families[*at].takes(given) && !ids.contains(&java.as_str()) {
+                ids.push(java);
+            }
+        }
+        ids
     }
 }
 
@@ -671,7 +836,7 @@ impl VersionStates<'_> {
 
     /// The Bedrock form of `state`, read as the Java block of its id or else as the one Java block
     /// mapped onto the id that holds its properties. A property left out takes that block's
-    /// default, and a bare id several blocks answer is written bare.
+    /// default, and a bare Bedrock spelling several blocks answer is written bare.
     ///
     /// # Errors
     ///
@@ -712,7 +877,7 @@ impl VersionStates<'_> {
 
     /// Whether `id` names its own Java block here rather than a Bedrock spelling others map onto.
     fn reads_as_java(&self, id: &str) -> bool {
-        self.map.refused.contains(&(id.to_owned(), id.to_owned()))
+        self.map.refused_from.contains(id)
             || self
                 .map
                 .onto
@@ -731,22 +896,32 @@ impl VersionStates<'_> {
     ) -> Result<BedrockForm, StateRefusal> {
         let forms = self.map.from.get(id).map_or(&[][..], Vec::as_slice);
         let Some(&(_, first)) = forms.first() else {
-            return bare_or(id, given, refused(id));
+            return Err(StateRefusal::Unmapped {
+                reason: refused(id),
+            });
         };
         let defaults = &self.family(first).defaults;
-        if let Some(key) = given.keys().find(|key| !defaults.contains_key(*key)) {
-            return Err(StateRefusal::UnknownProperty {
-                key: key.clone(),
-                valid: defaults.keys().cloned().collect(),
-            });
-        }
+        let unknown = given.keys().find(|key| !defaults.contains_key(*key));
         let mut full = defaults.clone();
         full.extend(given.iter().map(|(k, v)| (k.clone(), v.clone())));
-        if let Some((bedrock, at)) = forms.iter().find(|(_, at)| self.family(*at).holds(&full)) {
+        if unknown.is_none()
+            && let Some((bedrock, at)) = forms.iter().find(|(_, at)| self.family(*at).holds(&full))
+        {
             return Ok(self.form(bedrock, id, self.family(*at), &full));
         }
+        // The refused pairs may hold these states, so no family's domain can rule them out.
         if self.map.refused_from.contains(id) {
-            return bare_or(id, given, refused(id));
+            return Err(StateRefusal::Unmapped {
+                reason: refused(id),
+            });
+        }
+        if let Some(key) = unknown {
+            return Err(self.elsewhere(&[id], key, None).unwrap_or_else(|| {
+                StateRefusal::UnknownProperty {
+                    key: key.clone(),
+                    valid: defaults.keys().cloned().collect(),
+                }
+            }));
         }
         let held = |key: &str| -> Vec<String> {
             let mut values: Vec<String> = Vec::new();
@@ -761,14 +936,38 @@ impl VersionStates<'_> {
         };
         let outside = full.iter().find(|(key, value)| !held(key).contains(*value));
         Err(match outside {
-            Some((key, value)) => StateRefusal::UnknownValue {
-                key: key.clone(),
-                value: value.clone(),
-                valid: held(key),
-            },
+            Some((key, value)) => self.elsewhere(&[id], key, Some(value)).unwrap_or_else(|| {
+                StateRefusal::UnknownValue {
+                    key: key.clone(),
+                    value: value.clone(),
+                    valid: held(key),
+                }
+            }),
+            // Each value is some family's, but no family holds them together.
             None => StateRefusal::Unmapped {
-                reason: refused(id),
+                reason: format!(
+                    "no family of `{id}` there holds these states together, so the pack carries \
+                     no form for them"
+                ),
             },
+        })
+    }
+
+    /// The refusal for `key`, at `value` when one is given, which no family of the Java blocks
+    /// `java` holds at this version but some other version's map does; `None` when none does.
+    fn elsewhere(&self, java: &[&str], key: &str, value: Option<&str>) -> Option<StateRefusal> {
+        java.iter().find_map(|java| {
+            let versions = self
+                .index
+                .versions_holding(self.mc_version, java, key, value);
+            let state = value.map_or_else(|| key.to_owned(), |value| format!("{key}={value}"));
+            (!versions.is_empty()).then(|| StateRefusal::Unmapped {
+                reason: format!(
+                    "its state map there is read from a Java release whose `{java}` has no \
+                     `{state}`, which the map of {} holds",
+                    and_list(&versions)
+                ),
+            })
         })
     }
 
@@ -779,21 +978,30 @@ impl VersionStates<'_> {
     ) -> Result<BedrockForm, StateRefusal> {
         let forms = self.map.onto.get(id).map_or(&[][..], Vec::as_slice);
         if forms.is_empty() {
-            let reason = if self.map.refused_onto.contains(id) {
-                refused(id)
-            } else {
+            if self.map.refused_onto.contains(id) {
+                return Err(StateRefusal::Unmapped {
+                    reason: refused(id),
+                });
+            }
+            return bare_or(
+                id,
+                given,
                 format!(
                     "no Java block maps onto `{id}` there, so the canonical vocabulary names none \
                      of its states"
-                )
-            };
-            return bare_or(id, given, reason);
+                ),
+            );
         }
         let fitting: Vec<&(String, usize)> = forms
             .iter()
             .filter(|(_, at)| self.family(*at).takes(given))
             .collect();
         let Some(&&(ref java, at)) = fitting.first() else {
+            if self.map.refused_onto.contains(id) {
+                return Err(StateRefusal::Unmapped {
+                    reason: refused(id),
+                });
+            }
             return Err(self.not_taken(id, given, forms));
         };
         let family = self.family(at);
@@ -825,6 +1033,12 @@ impl VersionStates<'_> {
         forms: &[(String, usize)],
     ) -> StateRefusal {
         let families = || forms.iter().map(|(_, at)| self.family(*at));
+        let mut java: Vec<&str> = Vec::with_capacity(forms.len());
+        for (name, _) in forms {
+            if !java.contains(&name.as_str()) {
+                java.push(name);
+            }
+        }
         for (key, value) in given {
             let mut valid: Vec<String> = Vec::new();
             for family in families() {
@@ -843,17 +1057,21 @@ impl VersionStates<'_> {
                         }
                     }
                 }
-                return StateRefusal::UnknownProperty {
-                    key: key.clone(),
-                    valid: keys,
-                };
+                return self.elsewhere(&java, key, None).unwrap_or_else(|| {
+                    StateRefusal::UnknownProperty {
+                        key: key.clone(),
+                        valid: keys,
+                    }
+                });
             }
             if !valid.contains(value) {
-                return StateRefusal::UnknownValue {
-                    key: key.clone(),
-                    value: value.clone(),
-                    valid,
-                };
+                return self.elsewhere(&java, key, Some(value)).unwrap_or_else(|| {
+                    StateRefusal::UnknownValue {
+                        key: key.clone(),
+                        value: value.clone(),
+                        valid,
+                    }
+                });
             }
         }
         let all: Vec<&(String, usize)> = forms.iter().collect();
@@ -902,7 +1120,8 @@ impl VersionStates<'_> {
         BedrockForm {
             id: bedrock.to_owned(),
             states,
-            waterlogged: full.get(WATER_LAYER_STATE).is_some_and(|v| v == "true"),
+            waterlogged: full.get(WATER_LAYER_STATE).is_some_and(|v| v == "true")
+                || self.index.in_water.contains(java),
             dropped,
         }
     }
@@ -946,7 +1165,8 @@ impl Family {
     }
 }
 
-/// `id` written bare when the entry names no state, else the refusal `reason` gives.
+/// `id`, which no Java block's states answer for, written bare when the entry names no state,
+/// else the refusal `reason` gives.
 fn bare_or(
     id: &str,
     given: &IndexMap<String, String>,
@@ -961,6 +1181,15 @@ fn bare_or(
         })
     } else {
         Err(StateRefusal::Unmapped { reason })
+    }
+}
+
+/// `a`, `a and b`, `a, b and c`.
+fn and_list(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
     }
 }
 

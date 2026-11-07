@@ -123,7 +123,7 @@ fn every_sensor_host_is_a_keyword_the_role_table_knows() {
     );
     for host in SENSOR_HOSTS {
         assert!(
-            role_of(host).arguments().is_some(),
+            role_of(host).own_keys().is_some(),
             "`{host}` carries a `->` tail per `spec/redstone` \"Signal binding\" and is \
              not a known keyword",
         );

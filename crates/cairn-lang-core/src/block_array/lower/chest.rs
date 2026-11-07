@@ -14,7 +14,7 @@ use crate::block_array::openings::WallSide;
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Anchor, Fixture, Refusal, fixture_cell, outside_the_array};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
-use super::members::{StructCtx, default_block_id, resolve_member_state};
+use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
 use super::waterlogged::{
     WrittenWaterlogged, keep_waterlogged, read_waterlogged, waterlogged_state,
 };
@@ -152,34 +152,40 @@ fn place_chest(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Refusal> {
     let toward = match written.facing.map(|name| (name, Toward::from_ident(name))) {
-        None => None,
-        Some((_, Some(toward))) => Some(toward),
-        Some((other, None)) => {
-            return Err(Box::new(diag_invalid_member(
-                member,
-                format!("unknown chest `facing={other}`"),
-                vec![format!("`facing=` takes one of {FACINGS}")],
-            )));
-        }
+        None => Ok(None),
+        Some((_, Some(toward))) => Ok(Some(toward)),
+        Some((other, None)) => Err(Box::new(diag_invalid_member(
+            member,
+            format!("unknown chest `facing={other}`"),
+            vec![format!("`facing=` takes one of {FACINGS}")],
+        ))),
     };
     let single = match written.size {
-        None => false,
-        Some("single") => true,
-        Some(other) => {
-            return Err(Box::new(diag_invalid_member(
-                member,
-                format!("unknown chest `size={other}`"),
-                vec![
-                    "`size=` takes `single`, which keeps the chest from pairing; leave it out to \
-                     let the chest pair with the one beside it"
-                        .to_owned(),
-                ],
-            )));
+        None => Ok(false),
+        Some("single") => Ok(true),
+        Some(other) => Err(Box::new(diag_invalid_member(
+            member,
+            format!("unknown chest `size={other}`"),
+            vec![
+                "`size=` takes `single`, which keeps the chest from pairing; leave it out to let \
+                 the chest pair with the one beside it"
+                    .to_owned(),
+            ],
+        ))),
+    };
+    let (toward, single) = match (toward, single) {
+        (Ok(toward), Ok(single)) => (toward, single),
+        (Err(refusal), Ok(_)) | (Ok(_), Err(refusal)) => return Err(refusal),
+        (Err(facing), Err(size)) => {
+            diagnostics.push(*facing);
+            return Err(size);
         }
     };
     let waterlogged = waterlogged_state(member, written.waterlogged)?;
     let (anchor, cell) = fixture_cell(CHEST, member, y_offset, ctx)?;
-    let id = chest_block_id(member, ctx, diagnostics)?;
+    let Some(id) = chest_block_id(member, ctx, diagnostics)? else {
+        return Ok(());
+    };
     let side = anchor.side();
     let facing = toward
         .unwrap_or(match anchor {
@@ -203,22 +209,28 @@ fn place_chest(
     }
 }
 
-/// The block a chest is built from: its `mat_slot=`, or the pack's default chest.
+/// The block a chest is built from: its `mat_slot=`, or the pack's default chest; `None` for a
+/// binding whose state literal the target refused, which builds no chest.
 fn chest_block_id(
     member: &Member,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<String, Refusal> {
-    let resolved = resolve_member_state(
+) -> Result<Option<String>, Refusal> {
+    let resolved = match resolve_member_state(
         member,
         ctx.scope,
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-    );
+    ) {
+        MemberState::Bound(state) => Some(state),
+        MemberState::Unbound => None,
+        MemberState::Refused => return Ok(None),
+    };
     geometry_material_id(
         member,
         ctx.scope,
+        ctx.registry,
         resolved.as_ref(),
         || default_block_id(member, ctx.registry, CHEST_TOKEN, CHEST_BASE_ID),
         &GeometryMemberDescription {
@@ -228,6 +240,7 @@ fn chest_block_id(
         },
         diagnostics,
     )
+    .map(Some)
 }
 
 #[cfg(test)]

@@ -193,7 +193,6 @@ pub fn dropped_shape(value: &str, mc_versions: &[&str]) -> DroppedIntent {
 /// When the pack maps no states there, which its loader refuses for a targetable version.
 pub fn states_for(target: &BedrockTarget) -> VersionStates<'_> {
     builtin_pack(Edition::Bedrock)
-        .states()
-        .at(&target.mc_version)
+        .states_at(&target.mc_version)
         .expect("the built-in Bedrock pack maps every targetable version")
 }

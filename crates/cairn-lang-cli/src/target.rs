@@ -34,8 +34,7 @@ impl ResolvedTarget {
                 .map_err(|e| e.to_string()),
             ResolvedTarget::Bedrock(t) => {
                 let states = builtin_pack(Edition::Bedrock)
-                    .states()
-                    .at(&t.mc_version)
+                    .states_at(&t.mc_version)
                     .expect("the built-in Bedrock pack maps every targetable version");
                 prepare_mcstructure(array, t, &states)
                     .map(|(prepared, notes)| (PreparedStructure::Bedrock(prepared), notes))

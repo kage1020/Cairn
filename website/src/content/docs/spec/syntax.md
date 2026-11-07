@@ -317,18 +317,19 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the door and any `connect` walkway anchored to it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
-Numeric offsets (`at=N`) are reserved for a future extension. A door with no `at=`, or one that
-names no anchor, is `E_INVALID_MEMBER` and cuts nothing.
+The same column resolves both the door and any `connect` walkway anchored to it
+([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)). Numeric offsets (`at=N`) are
+reserved for a future extension. A door with no `at=`, or one that names no anchor, is
+`E_INVALID_MEMBER` and cuts nothing.
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
 level's base plane, and stands two rows tall: its door block takes that row and the one above it
 ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). Both rows
 MUST be inside one course of the masonry. A door whose two rows the walls as written hold in no one
 course is `E_INVALID_MEMBER` and cuts nothing, the same finding the `window` on that body earns. A
-door under a one-row course is one: the row above it is the roof's, or nothing's. A door in a course
-whose `walls` paint nothing, or beside `walls` under a `level` that is not placed, is
-`W_DEFERRED_MEMBER` instead, since the repair is on those walls or that level
+door under a one-row course is refused the same way, since the row above it belongs to the roof or
+to nothing. A door in a course whose `walls` paint nothing, or beside `walls` under a `level` that
+is not placed, is `W_DEFERRED_MEMBER` instead, since the repair is on those walls or that level
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the courses a `walls`
 paints).
 

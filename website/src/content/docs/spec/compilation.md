@@ -244,8 +244,9 @@ is `E_UNKNOWN_ID`, so no artifact ships from that shape.
 ## 4.8 Within-phase conflicts and the palette
 
 Across phases, the phase order decides: a `door` set into `walls` is massing followed by
-openings, and taking the wall's cells is the point. Inside one phase, only source order separates two members,
-which is what [§4.1](#41-phase-evaluation) grants to "local overrides within the same phase".
+openings, and taking the wall's cells is the point. Inside one phase, only source order separates
+two members, which is what [§4.1](#41-phase-evaluation) grants to "local overrides within the same
+phase".
 
 That grant is for an author restating a member. Two footprints that intersect by accident are a
 different thing, so the compiler keeps the last write and emits `W_PHASE_CONFLICT` naming both
@@ -256,6 +257,13 @@ Two cases are not conflicts:
 
 - A cell whose value does not change, as when two `walls` of one material meet over shared rows.
 - A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
+
+A `door` whose `hinge` is derived is judged by the hinge it is built with, which is settled once
+every opening is cut ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)): two doors in one opening
+conflict when the blocks they would build differ, whichever line comes first. An opening that
+takes one of a door's two cells leaves half a door, which the game removes, and the finding says
+so.
 
 **The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
 is a *set with a canonical rendering*, not a log of the writes that filled it. It lists the blocks
@@ -285,7 +293,10 @@ rows, and `resolved_ir_hash`:
   on which of their lines came first, so nothing about the artifact may either. That is the promise
   §4.1 opens with, and it is a claim about the bytes, not only about the voxels. Sorting is what
   makes it true: the palette is derived from the finished grid alone, so any permutation of the
-  source that leaves the grid alone leaves the whole `BlockArray` alone.
+  source that leaves the grid alone leaves the whole `BlockArray` alone. The body's `members`
+  record is ordered the same way, by the first cell each member owns
+  ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), so it does not
+  move either.
 
 The sort is over the resolved state, so it is stable across editions and versions in the sense that
 matters: it does not consult source spans, member ids, phases, or paint order. It is not a claim

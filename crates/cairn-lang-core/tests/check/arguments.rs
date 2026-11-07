@@ -403,7 +403,7 @@ fn the_table_and_the_sweep_agree_key_for_key() {
     for (keyword, line) in SWEEP {
         let role = role_of(keyword);
         let vocabulary = role
-            .arguments()
+            .own_keys()
             .unwrap_or_else(|| panic!("`{keyword}` is in the table, so it has a vocabulary"));
         let mut expected: Vec<&str> = vocabulary
             .iter()
@@ -419,7 +419,7 @@ fn the_table_and_the_sweep_agree_key_for_key() {
 
         assert_eq!(
             written, expected,
-            "`{keyword}`: the sweep line and `arguments()` disagree",
+            "`{keyword}`: the sweep line and `own_keys()` disagree",
         );
     }
     // So a new role cannot land without a line.
@@ -604,7 +604,7 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
     for keyword in known_keywords() {
         let role = role_of(keyword);
         let vocabulary = role
-            .arguments()
+            .own_keys()
             .unwrap_or_else(|| panic!("`{keyword}` is in the table, so it has a vocabulary"));
         for UnreadArgument { key, why } in role.unread_arguments() {
             assert!(
@@ -624,12 +624,18 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
                 "`{keyword}` lists the universal key `{key}` a second time",
             );
         }
+        for key in role.state_arguments() {
+            assert!(
+                vocabulary.contains(key) && !UNIVERSAL_ARGUMENTS.contains(key),
+                "`{keyword}` names `{key}` a blockstate key without taking it as its own",
+            );
+        }
     }
     // Otherwise the finding would quote a word the keyword does not take.
     for keyword in known_keywords() {
         let role = role_of(keyword);
         let vocabulary = role
-            .arguments()
+            .own_keys()
             .unwrap_or_else(|| panic!("`{keyword}` is in the table, so it has a vocabulary"));
         for axis in role.conditional_arguments() {
             assert!(
@@ -671,7 +677,7 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
         }
     }
     assert_eq!(
-        MemberRole::Other("torch".to_owned()).arguments(),
+        MemberRole::Other("torch".to_owned()).own_keys(),
         None,
         "an unknown keyword has no vocabulary rather than an empty one",
     );
