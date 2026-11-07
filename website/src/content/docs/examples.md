@@ -40,7 +40,7 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 | File | Shows |
 |---|---|
 | [`storeroom.crn`](https://github.com/kage1020/Cairn/blob/main/examples/storeroom.crn) | `chest` against the walls: each faces away from its wall, two side by side pair, and `size=single` keeps two apart. |
-| [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`: a sand bed painted with a material, then water poured around what stands in the tank, waterlogging the panes and a chest while `waterlogged=false` keeps another dry. |
+| [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`: a sand bed painted with a material, then water poured around what stands in the tank, waterlogging a pane divider and a chest while `waterlogged=false` keeps another dry. |
 
 ## Edge cases
 

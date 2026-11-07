@@ -8,7 +8,7 @@ fn every_actuator_key_with_a_real_host_is_in_that_host_vocabulary() {
     let mut checked = 0;
     for (key, host) in ACTUATOR_BINDINGS {
         let role = role_of(host);
-        let Some(vocabulary) = role.arguments() else {
+        let Some(vocabulary) = role.own_keys() else {
             assert!(
                 matches!(role, MemberRole::Other(_)),
                 "`{host}` classified as a role but answered no vocabulary",

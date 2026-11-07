@@ -14,7 +14,7 @@ cargo install cairn-lang-cli
 
 これで `cairn` コマンドが使えるようになります。
 
-Linux・macOS・Windows (`x86_64` と `aarch64`) 向けのビルド済みアーカイブも、各[リリース](https://github.com/kage1020/Cairn/releases)に添付しています。アーカイブには `cairn` と言語サーバー `cairn-lsp` の両方が入っています。Windows `aarch64` 版を除くすべてのアーカイブに sigstore の署名が付きます (Windows `aarch64` 向けには cosign のバイナリがないためです)。
+Linux・macOS・Windows (`x86_64` と `aarch64`) 向けのビルド済みアーカイブも、各[リリース](https://github.com/kage1020/Cairn/releases)に添付しています。アーカイブには `cairn` と言語サーバー `cairn-lsp` の両方が入っています。Windows `aarch64` 版を除くすべてのアーカイブに sigstore の署名が付きます (Windows `aarch64` 向けには cosign のバイナリがないためです)。2026.12.0 からは [VS Code 拡張](editors/vscode/)も `cairn-lang-<version>.vsix` としてリリースに添付し、同じファイルを Visual Studio Marketplace と Open VSX に公開します。
 
 リポジトリから直接ビルドする場合は `cargo build --release` を実行してください。両方のバイナリが `target/release/` に出力されます。
 

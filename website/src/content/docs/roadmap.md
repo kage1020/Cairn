@@ -79,7 +79,7 @@ than the milestone table because a monthly minor can ship without crossing a mil
 
 | Release | Scope added |
 |---|---|
-| **2026.12.0** | What M3 waits on ([Leaving draft](#leaving-draft)): the diagnostic codes settled. The built-in packs are extracted from each edition's `--reports` / registry dumps with each block's states, so `E_STATE_DOMAIN` checks a state literal against the target and `E_UNKNOWN_ID` names the version an id first appears in. A `door` places its door block, with its facing, half and hinge derived from where it stands, panes, fences and walls take their connections from the blocks beside them, a `chest` stands against a wall and pairs with the chest beside it, and `fill`, with the coordinate triples it takes (`from=1,1,1`), fills a box with a material or with water, setting `waterlogged` on the blocks the water overlaps. The `raw` escape hatch (`raw_block`, `raw_fill`) puts a block id in a cell or a box after every other member, and an `@edition` guard keeps a raw member to one edition's build. A member bound to a block only the other edition has is `E_PARITY_UNSUPPORTED`. Each release attaches the VS Code extension as a `.vsix`, and the extension is on the Marketplace. |
+| **2026.12.0** | What M3 waits on ([Leaving draft](#leaving-draft)): the diagnostic codes settled. The built-in packs are extracted from each edition's `--reports` / registry dumps with each block's states, so `E_STATE_DOMAIN` checks a state literal against the target and `E_UNKNOWN_ID` names the first target that declares an id. A `door` places its door block, with its facing, half and hinge derived from where it stands, panes, fences and walls take their connections from the blocks beside them, a `chest` stands against a wall and pairs with the chest beside it, and `fill`, with the coordinate triples it takes (`from=1,1,1`), fills a box with a material or with water, setting `waterlogged` on the blocks the water overlaps. The `raw` escape hatch (`raw_block`, `raw_fill`) puts a block id in a cell or a box after every other member, and an `@edition` guard keeps a raw member to one edition's build. A member bound to a block only the other edition has is `E_PARITY_UNSUPPORTED`. Each release attaches the VS Code extension as a `.vsix`, and the extension is on the Marketplace. |
 | **2027.1.0** | Every example compiles clean on Java and loads in Minecraft. The specification leaves draft as `2027.1`, and `.crn` syntax, the `compile` / `check` / `info` interface, the diagnostic codes and the tier-1 vocabulary turn Stable. **M3.** |
 | **2027.2.0** | Flowing water: the `water` keyword, with the `flow=` and `level=` that make it explicit. |
 | **2027.3.0** | Redstone reaches the structure file: edition legalization and lowering from the Placement IR to the block array, so `cairn compile` runs the `logic_*` phases. The rest of the combinational primitives (`xor`, `nand`, `nor`, `mux`), the remaining sensors and actuators (`lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`), and Tier 0 parts such as `repeater` placed by hand, which an `@edition` guard may then hold. |
@@ -130,8 +130,9 @@ The release strategy itself is automated:
    `vYYYY.M.N`; build binaries for Linux, macOS, and Windows on `x86_64` and `aarch64`, each target
    on a runner of its own, and attach every archive with its SHA-256 checksum to a GitHub Release,
    beside a sigstore bundle for each archive except the Windows `aarch64` one, and a signed
-   CycloneDX SBOM; publish the tree-sitter grammar to npm; and open a PR that merges `main` back
-   into `canary`.
+   CycloneDX SBOM; package the VS Code extension, attach the `.vsix` with its checksum and sigstore
+   bundle, and publish that file to the Visual Studio Marketplace and Open VSX; publish the
+   tree-sitter grammar to npm; and open a PR that merges `main` back into `canary`.
 
 Compatibility expectations across this schedule are defined separately by
 [compatibility tier](/spec/compatibility/): the lockfile format is **Stable** from 2026.11.0, where
