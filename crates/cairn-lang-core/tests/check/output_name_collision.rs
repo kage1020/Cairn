@@ -3,7 +3,7 @@
 
 use cairn_lang_core::{
     DiagnosticCode, PlaceId, PortId, Severity, SiteName, WalkwayEndpoint, WalkwayScopeKey,
-    artifact_stem,
+    walkway_artifact_stem,
 };
 
 use crate::common::{PRELUDE, codes, lowered, notes, of_code, one_of_code, slice};
@@ -84,9 +84,14 @@ fn two_walkways_whose_names_flatten_alike_collide() {
          place id=z use=one theme=plain east_of=x gap=10\n\n  \
          connect x_y.entry to z.entry path=@gravel\n  \
          connect x.y_entry to z.entry path=@gravel\n";
+    let site = SiteName::new("s").expect("a site name");
+    let end = |place: &str, port: &str| WalkwayEndpoint {
+        place: PlaceId::new(place).expect("a place id"),
+        port: PortId::new(port).expect("a port id"),
+    };
     assert_eq!(
-        artifact_stem("walkway::s::x_y.entry__z.entry"),
-        artifact_stem("walkway::s::x.y_entry__z.entry"),
+        walkway_artifact_stem(&site, &end("x_y", "entry"), &end("z", "entry")),
+        walkway_artifact_stem(&site, &end("x", "y_entry"), &end("z", "entry")),
         "the fixture's two walkways must share a name for this test to mean anything",
     );
     let found = one_of_code(source, DiagnosticCode::OutputNameCollision);
@@ -212,6 +217,16 @@ fn a_reversed_duplicate_connect_is_one_walkway() {
             "walkway::s::a.entry__b.entry",
         ],
         "lowering writes one walkway, named after the first row",
+    );
+    let stems: Vec<String> = ir.structures.keys().map(|k| ir.artifact_stem(k)).collect();
+    assert_eq!(
+        stems,
+        [
+            "s_walkway_b_entry__a_entry",
+            "a",
+            "b",
+            "s_walkway_a_entry__b_entry",
+        ],
     );
 }
 
