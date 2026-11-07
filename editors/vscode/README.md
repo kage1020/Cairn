@@ -4,7 +4,7 @@ Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside 
 
 ## Install
 
-1. Install the extension, from whichever source your editor reads:
+1. Install the extension, from whichever source your editor reads. Every Cairn release from 2026.12.0 on publishes it to all three:
    - VS Code: the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=kage1020.cairn-lang). Search the Extensions view for "Cairn", or run `code --install-extension kage1020.cairn-lang`.
    - VSCodium and other VS Code forks: [Open VSX](https://open-vsx.org/extension/kage1020/cairn-lang).
    - Offline, or pinned to one release: every [Cairn release](https://github.com/kage1020/Cairn/releases) attaches `cairn-lang-<version>.vsix` with its SHA-256 and sigstore bundle, the same file the two registries serve. Install it with `code --install-extension ./cairn-lang-<version>.vsix`.
