@@ -183,36 +183,49 @@ pub(super) fn lower_body_to_block_array<'a>(
     })
 }
 
-/// Each member of `flattened` that owns a cell of `array`, with the states its cells hold.
+/// Each member of `flattened` that owns a cell of `array`, with the states its cells hold, in the
+/// order of the first cell each owns.
 fn resolved_members(
     flattened: &[(u32, &Member)],
     owners: &[u32],
     array: &BlockArray,
 ) -> Vec<ResolvedMember> {
-    let mut built: Vec<IndexMap<PaletteIndex, ResolvedBlock>> =
-        vec![IndexMap::new(); flattened.len()];
+    debug_assert_eq!(
+        owners.len(),
+        array.voxels.len(),
+        "the canvas and the array lay out one grid",
+    );
+    // Keyed by first cell, not source line: `resolved_ir_hash` reads this order, and
+    // `spec/compilation` "Within-phase conflicts and the palette" keeps it free of line order.
+    let mut built: IndexMap<usize, IndexMap<PaletteIndex, ResolvedBlock>> = IndexMap::new();
     for (index, (&owner, &state)) in owners.iter().zip(&array.voxels).enumerate() {
-        let (Some(member), Some(cell)) = (owner.checked_sub(1), array.dims.position(index)) else {
+        let Some(member) = owner.checked_sub(1) else {
             continue;
         };
-        built[member as usize]
+        let cell = array
+            .dims
+            .position(index)
+            .expect("a voxel's index lies in the dims it was laid out by");
+        built
+            .entry(member as usize)
+            .or_default()
             .entry(state)
             .or_insert_with(|| ResolvedBlock {
                 state: array.palette.entries[usize::from(state.0)].clone(),
-                cells: Vec::new(),
+                runs: Vec::new(),
             })
-            .cells
             .push(cell);
     }
-    flattened
-        .iter()
-        .zip(built)
-        .filter(|(_, blocks)| !blocks.is_empty())
-        .map(|((_, member), blocks)| ResolvedMember {
-            role: member.role.keyword().to_owned(),
-            id: member.id.clone(),
-            resolved_state: blocks.into_values().collect(),
-            span: member.span.clone(),
+    built
+        .into_iter()
+        .map(|(member, blocks)| {
+            let (_, member) = flattened[member];
+            ResolvedMember {
+                role: member.role.keyword().to_owned(),
+                id: member.id.clone(),
+                resolved_state: blocks.into_values().collect(),
+                span: member.span.clone(),
+            }
         })
         .collect()
 }

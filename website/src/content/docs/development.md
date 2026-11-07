@@ -195,7 +195,7 @@ data generator writes no world, so it needs no `eula.txt`.
 - **No linter-ignore directives.** `#[allow(clippy::…)]`, `#[allow(dead_code)]`, and friends are not
   allowed. If a lint fires, the design is the bug. Where a lint is wrong for one item, put
   `#[expect(lint, reason = "…")]` on that item alone.
-- **Lift the spec's terms verbatim.** `IntentState`, `ResolvedState`, `MatSlot`, `CanonicalToken`,
+- **Lift the spec's terms verbatim.** `IntentState`, `MatSlot`, `CanonicalToken`,
   `BlockArrayIr`. Do not invent parallel vocabulary.
 - **`missing_docs` is a warning everywhere.** Every public item gets a `///` line, and every crate a
   `//!` block.
