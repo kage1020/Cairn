@@ -138,7 +138,7 @@ fn water_waterlogs_the_blocks_that_hold_it_and_each_stays_its_own_members() {
                 let state = &block.state;
                 (
                     format!("{}[{}]", state.id, state.properties_text()),
-                    block.cells.len(),
+                    block.cells().count(),
                 )
             })
             .collect()
@@ -155,11 +155,11 @@ fn water_waterlogs_the_blocks_that_hold_it_and_each_stays_its_own_members() {
         cells_of("chest"),
         [
             (
-                "minecraft:chest[facing=south,waterlogged=true]".to_owned(),
+                "minecraft:chest[facing=south,waterlogged=false]".to_owned(),
                 1
             ),
             (
-                "minecraft:chest[facing=south,waterlogged=false]".to_owned(),
+                "minecraft:chest[facing=south,waterlogged=true]".to_owned(),
                 1
             ),
         ],
@@ -216,7 +216,7 @@ fn a_second_water_fill_pours_only_where_the_first_left_no_block() {
         .iter()
         .filter(|member| member.role == "fill")
         .filter(|member| member.resolved_state[0].state.id == "minecraft:water")
-        .map(|member| member.resolved_state[0].cells.clone())
+        .map(|member| member.resolved_state[0].cells().collect())
         .collect();
     assert_eq!(
         poured,
@@ -263,23 +263,77 @@ fn a_material_fill_over_the_walls_contests_them_in_their_phase() {
 }
 
 #[test]
+fn walls_written_after_a_material_fill_paint_over_it_and_say_so() {
+    let fill = "fill mat_slot=stone from=0,1,0 to=0,1,3";
+    let walls = "walls mat_slot=wall height=2";
+    let src = format!("{THEME}struct s size=5x4\n  {fill}\n  {walls}\n");
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::PhaseConflict,
+            walls,
+            "`walls` overwrites 4 voxels that `fill` painted in the same phase, so which block \
+             the build keeps is decided by the order the two lines are written in",
+            vec![
+                "overwritten member declared here",
+                "If the override is deliberate this is the local-override rule of \
+                 spec/compilation \"Phase evaluation\" and the later line wins as written. If it \
+                 is not, move one of the two so their footprints do not meet.",
+                "Members in different phases may overlap freely — a `door` cut through a `walls` \
+                 is the evaluation model working — so this is only reported for two members the \
+                 same phase evaluates.",
+            ],
+        )],
+    );
+    let array = only_structure(&out);
+    let west: Vec<&str> = (0..4)
+        .map(|z| state_at(array, 0, 1, z).id.as_str())
+        .collect();
+    assert_eq!(west, ["minecraft:cobblestone"; 4]);
+}
+
+#[test]
 fn a_fill_painted_over_the_wall_beside_a_door_is_no_wall_to_its_hinge() {
     // The door is hinged toward the side with more `walls` blocks beside it.
-    let door = |fill: &str| {
-        let src = format!(
+    let walled = |fill: &str| {
+        format!(
             "{THEME}struct s size=5x3\n  walls mat_slot=wall height=3\n  \
              door side=front at=center{fill}\n"
-        );
-        let out = lowered(&src);
-        let codes: Vec<DiagnosticCode> = out.diagnostics.iter().map(|d| d.code).collect();
-        (door_at(only_structure(&out), 2, 1, 2), codes)
+        )
     };
-    let (unbroken, codes) = door("");
-    assert_eq!(codes, []);
-    assert_eq!(unbroken, oak_door("north", "left"));
-    let (beside_fill, codes) = door("\n  fill mat_slot=stone from=1,1,2 to=1,2,2");
-    assert_eq!(codes, [DiagnosticCode::PhaseConflict]);
-    assert_eq!(beside_fill, oak_door("north", "right"));
+    let src = walled("");
+    let out = lowered(&src);
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(
+        door_at(only_structure(&out), 2, 1, 2),
+        oak_door("north", "left")
+    );
+    let fill = "fill mat_slot=stone from=1,1,2 to=1,2,2";
+    let src = walled(&format!("\n  {fill}"));
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::PhaseConflict,
+            fill,
+            "`fill` overwrites 2 voxels that `walls` painted in the same phase, so which block \
+             the build keeps is decided by the order the two lines are written in",
+            vec![
+                "overwritten member declared here",
+                "If the override is deliberate this is the local-override rule of \
+                 spec/compilation \"Phase evaluation\" and the later line wins as written. If it \
+                 is not, move one of the two so their footprints do not meet.",
+                "Members in different phases may overlap freely — a `door` cut through a `walls` \
+                 is the evaluation model working — so this is only reported for two members the \
+                 same phase evaluates.",
+            ],
+        )],
+    );
+    assert_eq!(
+        door_at(only_structure(&out), 2, 1, 2),
+        oak_door("north", "right")
+    );
 }
 
 #[test]
@@ -323,6 +377,17 @@ fn a_fill_whose_line_names_no_box_or_no_fluid_it_can_pour_is_refused() {
             "fill fluid=water from=1,1,1 to=5,1,1",
             "fill `to=5,1,1` lies outside the struct's `size=5x4` footprint",
             "a corner's `x` runs from 0 to 4 and its `z` from 0 to 3",
+        ),
+        (
+            "fill fluid=water from=1,1,4 to=1,1,1",
+            "fill `from=1,1,4` lies outside the struct's `size=5x4` footprint",
+            "a corner's `x` runs from 0 to 4 and its `z` from 0 to 3",
+        ),
+        (
+            "fill fluid=water mat_slot=2 from=1,1,1 to=1,1,1",
+            "fill writes both `mat_slot=` and `fluid=`, so nothing says whether it paints a \
+             material or pours water",
+            "keep `mat_slot=` to paint the box with a material, or `fluid=` to pour water into it",
         ),
     ] {
         let src = bin(line);
@@ -383,6 +448,41 @@ fn a_fill_above_the_struct_is_refused_and_one_a_roof_may_reach_is_deferred() {
 }
 
 #[test]
+fn a_fill_above_the_struct_under_a_raised_level_names_the_rows_its_level_leaves() {
+    let within = "fill fluid=water from=1,0,1 to=1,9,1";
+    let src = bin(&format!("level y=1\n    {within}"));
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::InvalidMember,
+            within,
+            "fill `to=1,9,1` under `level y=1` (row 10) does not fit in the struct (dims.y=4)",
+            vec![
+                "a corner's `y` runs from 0 to 2 under `level y=1`, the struct's top row being 3",
+                "lower the fill's box, or raise the `walls` to reach its rows",
+            ],
+        )],
+    );
+
+    let above = "fill fluid=water from=1,0,1 to=1,0,1";
+    let src = bin(&format!("level y=5\n    {above}"));
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::InvalidMember,
+            above,
+            "fill `to=1,0,1` under `level y=5` (row 5) does not fit in the struct (dims.y=4)",
+            vec![
+                "the struct's top row is 3, below this fill's `level y=5`",
+                "lower the fill's `level`, or raise the `walls` to reach its rows",
+            ],
+        )],
+    );
+}
+
+#[test]
 fn an_unreadable_kind_pours_a_source_or_says_the_fill_is_refused_anyway() {
     let src = bin("fill fluid=water kind=2 from=1,1,1 to=1,1,1");
     let out = lowered(&src);
@@ -415,6 +515,39 @@ fn an_unreadable_kind_pours_a_source_or_says_the_fill_is_refused_anyway() {
                 vec!["this fill is not built either way — see the finding on the same line"],
             ),
         ],
+    );
+}
+
+#[test]
+fn an_unreadable_waterlogged_is_ignored_and_leaves_the_block_to_the_water() {
+    let src = bin("chest at=inside.back offset=2 y=1 waterlogged=2\n  \
+         fill fluid=water from=0,1,0 to=4,1,3");
+    let out = lowered_with(&src, &Wet);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::IgnoredArgument,
+            "2",
+            "`waterlogged=` must be `auto`, `true` or `false`, not integer `2`; the value was \
+             ignored",
+            vec![
+                "the chest holds water where a water `fill` overlaps it, as with `waterlogged=auto`"
+            ],
+        )],
+    );
+    assert_eq!(layer(only_structure(&out), 1)[2], ".#~C~#.");
+
+    let src = bin("stair kind=stairs side=front y=1 mat_slot=step waterlogged=2");
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::IgnoredArgument,
+            "2",
+            "`waterlogged=` must be `auto`, `true` or `false`, not integer `2`; the value was \
+             ignored",
+            vec!["the stair is built with the default `waterlogged=auto`"],
+        )],
     );
 }
 

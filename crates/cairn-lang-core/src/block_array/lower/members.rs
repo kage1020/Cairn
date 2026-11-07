@@ -85,22 +85,22 @@ impl Shortfall {
         }
     }
 
-    /// The note on a member deferred to a row the struct as written reaches and the struct built
+    /// The note on a member deferred to `rows` the struct as written reaches and the struct built
     /// does not, with `outcome` saying what happens to it then: "the stair is built".
-    pub(super) fn note(self, outcome: &str) -> String {
+    pub(super) fn note(self, rows: &str, outcome: &str) -> String {
         match self {
             Self {
                 walls: true,
                 roof: true,
             } => format!(
                 "a `walls` member that paints nothing and a `roof` that draws nothing keep the \
-                 struct below this row; {outcome} once both build"
+                 struct below {rows}; {outcome} once both build"
             ),
             Self { roof: true, .. } => format!(
-                "a `roof` that would rise to this row draws nothing; {outcome} once that roof draws"
+                "a `roof` that would rise to {rows} draws nothing; {outcome} once that roof draws"
             ),
             Self { .. } => format!(
-                "a `walls` member that would reach this row paints nothing; {outcome} once that \
+                "a `walls` member that would reach {rows} paints nothing; {outcome} once that \
                  member's material resolves to a block"
             ),
         }
@@ -123,9 +123,7 @@ pub(super) enum MemberDisposition {
 /// Every role is spelled out, so a new one fails the compile here instead of panicking later.
 pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
     match &member.role {
-        MemberRole::Fill if member.written("fluid").is_some() => {
-            MemberDisposition::Paints(Phase::Fluids)
-        }
+        MemberRole::Fill if member.pours_fluid() => MemberDisposition::Paints(Phase::Fluids),
         MemberRole::Floor | MemberRole::Walls | MemberRole::Fill => {
             MemberDisposition::Paints(Phase::Massing)
         }

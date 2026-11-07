@@ -1565,6 +1565,14 @@ fn abstract_token_deferral_says_what_each_member_does_instead() {
             voxels: |out| assert_eq!(block_id(struct_s(out), 1, 0, 1), BlockState::AIR_ID),
         },
         DeferralArm {
+            members: "walls mat_slot=wall height=3\n  fill mat_slot=trim from=0,1,0 to=4,1,4",
+            consequence: Some("the fill paints none of its box"),
+            voxels: |out| {
+                assert_eq!(block_id(struct_s(out), 0, 1, 0), "minecraft:cobblestone");
+                assert_eq!(block_id(struct_s(out), 1, 1, 1), BlockState::AIR_ID);
+            },
+        },
+        DeferralArm {
             members: "floor mat_slot=wall\n  \
                       walls mat_slot=trim height=3\n  \
                       window side=front offset=1 y=1 size=1x2 mat_slot=wall",

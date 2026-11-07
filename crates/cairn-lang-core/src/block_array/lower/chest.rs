@@ -173,15 +173,20 @@ fn place_chest(
             ],
         ))),
     };
-    let (toward, single) = match (toward, single) {
-        (Ok(toward), Ok(single)) => (toward, single),
-        (Err(refusal), Ok(_)) | (Ok(_), Err(refusal)) => return Err(refusal),
-        (Err(facing), Err(size)) => {
-            diagnostics.push(*facing);
-            return Err(size);
+    let waterlogged = waterlogged_state(member, written.waterlogged);
+    let (toward, single, waterlogged) = match (toward, single, waterlogged) {
+        (Ok(toward), Ok(single), Ok(waterlogged)) => (toward, single, waterlogged),
+        (toward, single, waterlogged) => {
+            let mut refusals: Vec<Refusal> = [toward.err(), single.err(), waterlogged.err()]
+                .into_iter()
+                .flatten()
+                .collect();
+            // The caller reports the one returned, after these.
+            let last = refusals.pop();
+            diagnostics.extend(refusals.into_iter().map(|refusal| *refusal));
+            return last.map_or(Ok(()), Err);
         }
     };
-    let waterlogged = waterlogged_state(member, written.waterlogged)?;
     let (anchor, cell) = fixture_cell(CHEST, member, y_offset, ctx)?;
     let Some(id) = chest_block_id(member, ctx, diagnostics)? else {
         return Ok(());

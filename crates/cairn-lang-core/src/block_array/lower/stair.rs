@@ -266,7 +266,7 @@ fn eave_row(
     } else if y_world >= ctx.dims.y {
         Some((
             past_the_struct(),
-            ctx.shortfall().note("the stair is built"),
+            ctx.shortfall().note("this row", "the stair is built"),
         ))
     } else {
         None

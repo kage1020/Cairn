@@ -17,7 +17,8 @@ pub const SUPPORTED_STATES_SCHEMA: u32 = 1;
 /// The highest `sensitivity.schema_version` this build reads.
 pub const SUPPORTED_SENSITIVITY_SCHEMA: u32 = 1;
 
-/// The Java state the `.mcstructure` writer carries in the water layer.
+/// The Java state that says a block holds water, which the `.mcstructure` writer carries as the
+/// water layer rather than as a state.
 pub const WATER_LAYER_STATE: &str = "waterlogged";
 
 /// The body of `states.json`.

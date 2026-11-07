@@ -262,9 +262,6 @@ fn resolved_members(
 /// Paint one body's members onto a fresh canvas, phase by phase in `spec/compilation` "Phase
 /// evaluation" order, then set the connection states the painted blocks derive; with the `door`
 /// members left holding one of their two cells.
-///
-/// Tests pin only that `fluids` follows the phases whose blocks it waterlogs: the others write
-/// disjoint cells, so only a two-step swap shows.
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
@@ -279,15 +276,17 @@ fn paint_phases(
         .collect();
     let mut canvas = Canvas::new(ctx.dims, phases);
     let mut hung = Vec::new();
-    for (index, bucket) in by_phase.into_iter().enumerate() {
-        if index == Phase::Fluids.index() {
-            pour_fluids(bucket, ctx, palette, &mut canvas, diagnostics);
-            continue;
-        }
-        run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
-        // A door's hinge reads the wall beside it, which a later opening in the phase may cut.
-        if index == Phase::Openings.index() {
-            hang_doors(&hung, &walls, palette, &mut canvas);
+    for (phase, bucket) in Phase::ALL.into_iter().zip(by_phase) {
+        match phase {
+            Phase::Massing | Phase::Envelope | Phase::Fixtures => {
+                run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+            }
+            Phase::Openings => {
+                run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+                // A door's hinge reads the wall beside it, which a later opening may cut.
+                hang_doors(&hung, &walls, palette, &mut canvas);
+            }
+            Phase::Fluids => pour_fluids(bucket, ctx, palette, &mut canvas, diagnostics),
         }
     }
     if let Some(registry) = ctx.registry {

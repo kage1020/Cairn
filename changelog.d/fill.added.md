@@ -13,6 +13,8 @@
   `intent_state`, as a stair already did.
 - *(core)* `TargetRegistry::holds_water` says whether a block takes `waterlogged=true` at the target.
   It defaults to `None`, under which a water fill waterlogs no block.
+- *(core)* `Member::pours_fluid` says whether a member is a `fill` that writes `fluid=`, and so pours
+  water in `fluids` instead of painting a material.
 - *(formats)* The built-in packs answer `holds_water` from each block's `waterlogged` state, a view
   with no version pinned reading a block as every version that declares it agrees. A slab written
   `type=double` holds none, and neither does a block whose states the pack does not carry. A
