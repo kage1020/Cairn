@@ -9,8 +9,8 @@ use serde_json::json;
 
 use crate::common::{PRELUDE, findings};
 
-/// A pinned target whose state map has no form for a log lying along `x`, which the maps of
-/// `mapped_at` have.
+/// A pinned target whose state map has no form for a log lying along `x`, or for a jigsaw at all,
+/// which the maps of `mapped_at` have.
 struct NoSidewaysLog {
     ids: Vec<String>,
     with_state_map: bool,
@@ -19,7 +19,7 @@ struct NoSidewaysLog {
 
 impl NoSidewaysLog {
     fn pinned() -> Self {
-        let mut ids: Vec<String> = ["cobblestone", "gravel", "oak_log", "oak_planks"]
+        let mut ids: Vec<String> = ["cobblestone", "gravel", "jigsaw", "oak_log", "oak_planks"]
             .iter()
             .map(|id| format!("minecraft:{id}"))
             .collect();
@@ -47,9 +47,14 @@ impl TargetRegistry for NoSidewaysLog {
 
     fn unmapped_state(&self, state: &BlockState) -> Option<UnmappedState> {
         let sideways = state.properties.get("axis").is_some_and(|axis| axis == "x");
-        (self.with_state_map && sideways).then(|| UnmappedState {
+        let reason = match state.id.as_str() {
+            "minecraft:jigsaw" => "its palette refuses a jigsaw",
+            _ if sideways => "its map has no sideways log",
+            _ => return None,
+        };
+        self.with_state_map.then(|| UnmappedState {
             registry: "test 1.0".to_owned(),
-            reason: "its map has no sideways log".to_owned(),
+            reason: reason.to_owned(),
             mapped_at: self.mapped_at.clone(),
         })
     }
@@ -110,6 +115,24 @@ fn a_member_building_a_state_the_map_lacks_is_refused_at_the_member() {
             "states": "axis=x",
             "registry": "test 1.0",
         }),
+    );
+}
+
+#[test]
+fn a_bare_block_the_map_refuses_is_named_without_states() {
+    let source = "theme t:\n  slot f -> @jigsaw\n\nstruct s size=3x3\n  floor mat_slot=f\n";
+    let out = lowered_at(source, &NoSidewaysLog::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [(
+            DiagnosticCode::StateUnmapped,
+            "floor mat_slot=f",
+            "`minecraft:jigsaw` has no form at test 1.0: its palette refuses a jigsaw",
+            vec![
+                "pass `--target` 0.9 or 1.1, whose state maps carry the block, bind the \
+                 material to a block test 1.0 has a form for, or build for the other edition",
+            ],
+        )],
     );
 }
 

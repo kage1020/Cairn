@@ -192,21 +192,23 @@ pub(super) fn diag_state_unmapped(
         mapped_at,
     } = registry.unmapped_state(state)?;
     let states = state.properties_text();
+    let (entry, carried) = if states.is_empty() {
+        (state.id.clone(), "the block")
+    } else {
+        (format!("{}[{states}]", state.id), "these states")
+    };
     let pinned = match mapped_at.as_slice() {
         [] => String::new(),
-        [one] => format!("pass `--target {one}`, whose state map carries these states, "),
+        [one] => format!("pass `--target {one}`, whose state map carries {carried}, "),
         [init @ .., last] => format!(
-            "pass `--target` {} or {last}, whose state maps carry these states, ",
+            "pass `--target` {} or {last}, whose state maps carry {carried}, ",
             init.join(", ")
         ),
     };
     Some(Diagnostic {
         code: DiagnosticCode::StateUnmapped,
         span,
-        primary: format!(
-            "`{id}[{states}]` has no form at {target}: {reason}",
-            id = state.id,
-        ),
+        primary: format!("`{entry}` has no form at {target}: {reason}"),
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(

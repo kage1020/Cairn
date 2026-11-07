@@ -334,10 +334,7 @@ impl StateMapIndex {
     ///
     /// # Errors
     ///
-    /// [`StatesError`] for an unsupported schema, a pair or value the block tables refute, a pair
-    /// mapped twice or both mapped and refused, a malformed family, two families of one block that
-    /// overlap or disagree, an `in_water` block no family maps, or a dropped property
-    /// `sensitivity` does not classify once.
+    /// [`StatesError`] for the first schema, pair, family, block or dropped property that fails.
     pub fn from_catalogs(
         states: StatesCatalog,
         sensitivity: SensitivityCatalog,
