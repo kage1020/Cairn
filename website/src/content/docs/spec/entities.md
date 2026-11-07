@@ -19,7 +19,7 @@ version differences, is structured. Only one-off special NBT escapes through `nb
 
 None of these is a keyword yet, `spawn` included: each is `E_UNKNOWN_KEYWORD`, so no build places
 an entity or a block entity. The example below also uses syntax the parser does not accept yet: a
-coordinate triple (`at=4,3,2`), a decimal (`scale=1.5`) and an `nbt={...}` value are `E_PARSE`
+decimal (`scale=1.5`) and an `nbt={...}` value are `E_PARSE`
 ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)).
 
 ```

@@ -412,7 +412,7 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 
 ### 代替を書くとき
 
-**変更の余地あり。** `@edition` によるガード、`hologram`、`raw_block`、引数を取る `slot` のルール、座標の組は、まだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
+**変更の余地あり。** `@edition` によるガード、`hologram`、`raw_block`、引数を取る `slot` のルールは、まだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
 
 意味層で `@edition` による条件分岐を書くことは禁止です。代替が必要なときは、次の階層を上から順に検討します。
 
