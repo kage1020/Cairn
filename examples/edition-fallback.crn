@@ -1,5 +1,6 @@
 @cairn 2026.06
 @requires version>=1.20
+@requires bedrock version>=1.21.40
 
 # Per-edition theme fallback (spec/versioning-editions "Java / Bedrock
 # portability", hierarchy #2).
@@ -17,6 +18,12 @@
 # picks `shop_bedrock`. `cairn check` (no `--edition`) unions the slot
 # names across both variants so `mat_slot=floating_text` resolves without
 # emitting `E_UNRESOLVED_SLOT` under either variant's presence.
+#
+# The lamp is the escape hatch (hierarchy #3). Java spells the light block
+# `minecraft:light[level=15]` and Bedrock `minecraft:light_block_15`, so
+# each spelling stands under its own edition's `@edition` guard, and a build
+# keeps only the guard of the edition it pins. Bedrock first spells the
+# block that way in 1.21.40, which the scoped floor above declares.
 
 theme shop_java:
   slot floor          -> @floor.stone.smooth
@@ -39,3 +46,7 @@ struct shop size=5x5
   walls  class=outer mat_slot=wall height=3
   door   side=front at=center
   window class=display side=front offset=2 y=3 size=1x1 mat_slot=floating_text
+  @edition java
+    raw_block mat=minecraft:light[level=15] at=2,2,2
+  @edition bedrock
+    raw_block mat=minecraft:light_block_15 at=2,2,2

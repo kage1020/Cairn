@@ -9,13 +9,24 @@ use crate::common::{PRELUDE, def_with, diagnose, notes, of_code, one_of_code, st
 const GEOMETRY_ROWS: &[&str] = &[
     "floor mat_slot=floor",
     "walls mat_slot=wall height=3",
+    "fill mat_slot=wall from=0,0,0 to=1,0,1",
     "door id=d side=front at=center",
     "window id=w side=front y=1 offset=1 size=1x1",
     "roof kind=flat mat_slot=wall",
     "stair kind=stairs mat_slot=wall",
     "level y=0",
     "pressure_plate id=p at=front.outside",
+    "lever id=v at=inside.front",
+    "button id=b at=inside.front",
+    "daylight id=dl at=inside.front",
+    "observer id=o at=inside.front",
+    "lamp id=lp at=inside.front",
+    "piston id=pi at=inside.front",
+    "dispenser id=ds at=inside.front",
+    "chest id=c at=inside.front",
     "circuit region=floor void=1",
+    "raw_block mat=minecraft:stone at=1,0,1",
+    "raw_fill mat=minecraft:stone from=0,0,0 to=1,0,1",
 ];
 
 const SITE_ROWS: &[&str] = &[
@@ -187,7 +198,9 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
     assert!(
         notes(&geometry).contains(
-            &"expected one of: floor, walls, door, window, roof, stair, level, pressure_plate, circuit"
+            &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, \
+             lever, button, daylight, observer, lamp, piston, dispenser, chest, circuit, raw_block, \
+             raw_fill"
         ),
         "got {:#?}",
         notes(&geometry),

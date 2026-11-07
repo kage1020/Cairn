@@ -1,6 +1,7 @@
 //! Intent IR, the first semantic layer above the surface AST: each body sorted into typed
 //! [`Member`]s with roles, and `logic` and `assert` lines split out.
 
+mod branch;
 mod keyword_table;
 mod lower;
 mod member;
@@ -23,7 +24,7 @@ pub use self::keyword_table::{
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
-    BodyKind, IntentState, Label, Member, MemberBody, ResolvedState, ValueWithSpan,
+    Arguments, BodyKind, EditionGuard, IntentState, Label, Member, MemberBody, ValueWithSpan,
 };
 pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;
@@ -223,6 +224,18 @@ pub enum AssertIr {
         #[serde(skip)]
         span: Span,
     },
+    /// `assert latency(FROM -> TO) <= N`.
+    Latency {
+        /// Signal reference the path starts at.
+        from: DottedRef,
+        /// Signal reference the path ends at.
+        to: DottedRef,
+        /// `<= N` bound in ticks.
+        bound: u32,
+        /// Byte range of the originating `assert latency(...) <= N`.
+        #[serde(skip)]
+        span: Span,
+    },
 }
 
 impl AssertIr {
@@ -230,7 +243,9 @@ impl AssertIr {
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {
-            Self::Truth { span, .. } | Self::Always { span, .. } => span,
+            Self::Truth { span, .. } | Self::Always { span, .. } | Self::Latency { span, .. } => {
+                span
+            }
         }
     }
 
@@ -246,6 +261,7 @@ impl AssertIr {
                 consequent,
                 ..
             } => vec![antecedent, consequent],
+            Self::Latency { from, to, .. } => vec![from, to],
         }
     }
 }
@@ -479,7 +495,7 @@ fn push_circuit_lines_under_level<'a>(level: &'a Member, out: &mut Vec<&'a Membe
 /// The `(label, void)` a `circuit` member declares, or its first defect.
 fn parse_circuit_region_fixture(member: &Member) -> Result<(String, u32), CircuitRegionDefect> {
     let raw_region = member
-        .intent_state
+        .arguments
         .get("region")
         .ok_or(CircuitRegionDefect::RegionMissing)?;
     let label = raw_region
@@ -492,7 +508,7 @@ fn parse_circuit_region_fixture(member: &Member) -> Result<(String, u32), Circui
         return Err(CircuitRegionDefect::RegionEmpty);
     }
     let raw_void = member
-        .intent_state
+        .arguments
         .get("void")
         .ok_or(CircuitRegionDefect::VoidMissing)?;
     let void = match &raw_void.value.kind {

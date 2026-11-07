@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::logic_ir::{ScopeKind, Scoped, ScopedEntry};
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput, PortName};
 
-/// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`]; the `*Unpinned` variants
-/// stand for the reserved cells, whose realisations are not chosen.
+/// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(strum::EnumIter))]
@@ -30,22 +29,66 @@ pub enum EditionCell {
     JavaInverterTorch,
     /// Bedrock NOT — a single inverter torch.
     BedrockInverterTorch,
-    /// Java XOR — unpinned placeholder.
-    JavaXorUnpinned,
-    /// Bedrock XOR — unpinned placeholder.
-    BedrockXorUnpinned,
-    /// Java NAND — unpinned placeholder.
-    JavaNandUnpinned,
-    /// Bedrock NAND — unpinned placeholder.
-    BedrockNandUnpinned,
-    /// Java NOR — unpinned placeholder.
-    JavaNorUnpinned,
-    /// Bedrock NOR — unpinned placeholder.
-    BedrockNorUnpinned,
-    /// Java 2:1 MUX — unpinned placeholder.
-    JavaMuxUnpinned,
-    /// Bedrock 2:1 MUX — unpinned placeholder.
-    BedrockMuxUnpinned,
+    /// Java XOR — two torch NORs feeding a common dust line, each with one operand inverted.
+    JavaTorchXor,
+    /// Bedrock XOR — two torch NORs feeding a common dust line, each with one operand inverted.
+    BedrockTorchXor,
+    /// Java NAND — two inverter torches feeding a common dust line.
+    JavaTorchNand,
+    /// Bedrock NAND — two inverter torches feeding a common dust line.
+    BedrockTorchNand,
+    /// Java NOR — one torch on a block both operands power.
+    JavaTorchNor,
+    /// Bedrock NOR — one torch on a block both operands power.
+    BedrockTorchNor,
+    /// Java 2:1 MUX — two torch NORs feeding a common dust line, one of `sel` and inverted `a`,
+    /// the other of inverted `sel` and inverted `b`.
+    JavaTorchMux,
+    /// Bedrock 2:1 MUX — two torch NORs feeding a common dust line, one of `sel` and inverted `a`,
+    /// the other of inverted `sel` and inverted `b`.
+    BedrockTorchMux,
+    /// Java DELAY — `stages` repeaters in series.
+    JavaRepeaterDelay {
+        /// Repeaters in series.
+        stages: u32,
+    },
+    /// Bedrock DELAY — `stages` repeaters in series.
+    BedrockRepeaterDelay {
+        /// Repeaters in series.
+        stages: u32,
+    },
+    /// Java PULSE — the torch NOR of inverted `a` and of `a` through `stages + 1` repeaters.
+    JavaTorchPulse {
+        /// Stages the pulse lasts at most.
+        stages: u32,
+    },
+    /// Bedrock PULSE — the torch NOR of inverted `a` and of `a` through `stages + 1` repeaters.
+    BedrockTorchPulse {
+        /// Stages the pulse lasts at most.
+        stages: u32,
+    },
+    /// Java rising-edge detector — the torch NOR of `a` inverted once and twice.
+    JavaTorchEdgeRising,
+    /// Bedrock rising-edge detector — the torch NOR of `a` inverted once and twice.
+    BedrockTorchEdgeRising,
+    /// Java falling-edge detector — the torch NOR of `a` and inverted `a`.
+    JavaTorchEdgeFalling,
+    /// Bedrock falling-edge detector — the torch NOR of `a` and inverted `a`.
+    BedrockTorchEdgeFalling,
+    /// Java LATCH — two torch NORs each powered by the other, `set` gated by a held `reset`.
+    JavaTorchLatch,
+    /// Bedrock LATCH — two torch NORs each powered by the other, `set` gated by a held `reset`.
+    BedrockTorchLatch,
+    /// Java COUNTER — `stages` flip-flops of locking repeaters in a twisted ring.
+    JavaRepeaterCounter {
+        /// Flip-flops in the ring.
+        stages: u32,
+    },
+    /// Bedrock COUNTER — `stages` flip-flops of locking repeaters in a twisted ring.
+    BedrockRepeaterCounter {
+        /// Flip-flops in the ring.
+        stages: u32,
+    },
 }
 
 impl EditionCell {
@@ -56,42 +99,98 @@ impl EditionCell {
             Self::JavaComparatorAnd
             | Self::JavaRepeaterOr
             | Self::JavaInverterTorch
-            | Self::JavaXorUnpinned
-            | Self::JavaNandUnpinned
-            | Self::JavaNorUnpinned
-            | Self::JavaMuxUnpinned => Edition::Java,
+            | Self::JavaTorchXor
+            | Self::JavaTorchNand
+            | Self::JavaTorchNor
+            | Self::JavaTorchMux
+            | Self::JavaRepeaterDelay { .. }
+            | Self::JavaTorchPulse { .. }
+            | Self::JavaTorchEdgeRising
+            | Self::JavaTorchEdgeFalling
+            | Self::JavaTorchLatch
+            | Self::JavaRepeaterCounter { .. } => Edition::Java,
             Self::BedrockTorchAnd
             | Self::BedrockTorchOr
             | Self::BedrockInverterTorch
-            | Self::BedrockXorUnpinned
-            | Self::BedrockNandUnpinned
-            | Self::BedrockNorUnpinned
-            | Self::BedrockMuxUnpinned => Edition::Bedrock,
+            | Self::BedrockTorchXor
+            | Self::BedrockTorchNand
+            | Self::BedrockTorchNor
+            | Self::BedrockTorchMux
+            | Self::BedrockRepeaterDelay { .. }
+            | Self::BedrockTorchPulse { .. }
+            | Self::BedrockTorchEdgeRising
+            | Self::BedrockTorchEdgeFalling
+            | Self::BedrockTorchLatch
+            | Self::BedrockRepeaterCounter { .. } => Edition::Bedrock,
         }
     }
 
-    /// Tick delay from input `port` to this cell's output, excluding buffer repeaters; an
-    /// `*Unpinned` cell returns a sentinel above every pinned delay.
+    /// The cell's name in `spec/redstone` "Edition differences", such as `ComparatorAND`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::JavaComparatorAnd => "ComparatorAND",
+            Self::BedrockTorchAnd => "TorchAND",
+            Self::JavaRepeaterOr => "RepeaterOR",
+            Self::BedrockTorchOr => "TorchOR",
+            Self::JavaInverterTorch | Self::BedrockInverterTorch => "InverterTorch",
+            Self::JavaTorchXor | Self::BedrockTorchXor => "TorchXOR",
+            Self::JavaTorchNand | Self::BedrockTorchNand => "TorchNAND",
+            Self::JavaTorchNor | Self::BedrockTorchNor => "TorchNOR",
+            Self::JavaTorchMux | Self::BedrockTorchMux => "TorchMUX",
+            Self::JavaRepeaterDelay { .. } | Self::BedrockRepeaterDelay { .. } => "RepeaterDelay",
+            Self::JavaTorchPulse { .. } | Self::BedrockTorchPulse { .. } => "TorchPulse",
+            Self::JavaTorchEdgeRising | Self::BedrockTorchEdgeRising => "TorchEdgeRising",
+            Self::JavaTorchEdgeFalling | Self::BedrockTorchEdgeFalling => "TorchEdgeFalling",
+            Self::JavaTorchLatch | Self::BedrockTorchLatch => "TorchLatch",
+            Self::JavaRepeaterCounter { .. } | Self::BedrockRepeaterCounter { .. } => {
+                "RepeaterCounter"
+            }
+        }
+    }
+
+    /// Tick delay from input `port` to this cell's output, or for a macro to the last change one
+    /// change at `port` makes there, excluding buffer repeaters.
     #[must_use]
     pub const fn port_delay_ticks(self, port: PortName) -> u32 {
         match self {
-            // The side operand passes the inverter before the comparator. An AND has no `sel`, so
-            // asked for one it errs on the slow side.
+            // The side operand passes the inverter before the comparator. Asked for a port an AND
+            // does not have, it errs on the slow side.
             Self::JavaComparatorAnd => match port {
                 PortName::A => 1,
-                PortName::B | PortName::Sel => 2,
+                PortName::B | PortName::Sel | PortName::Set | PortName::Reset => 2,
             },
-            Self::JavaRepeaterOr | Self::JavaInverterTorch | Self::BedrockInverterTorch => 1,
-            Self::BedrockTorchAnd => 2,
+            // A falling `reset` re-arms `set` through its two-tick hold and three torches.
+            Self::JavaTorchLatch | Self::BedrockTorchLatch => match port {
+                PortName::Set => 4,
+                PortName::A | PortName::B | PortName::Sel | PortName::Reset => 5,
+            },
+            Self::JavaRepeaterDelay { stages } | Self::BedrockRepeaterDelay { stages } => stages,
+            // The pulse ends once `a` is out of its repeaters, one more than its stages, and
+            // through the NOR.
+            Self::JavaTorchPulse { stages } | Self::BedrockTorchPulse { stages } => {
+                stages.saturating_add(2)
+            }
+            Self::JavaTorchEdgeRising
+            | Self::BedrockTorchEdgeRising
+            | Self::JavaRepeaterCounter { .. }
+            | Self::BedrockRepeaterCounter { .. } => 3,
+            Self::JavaRepeaterOr
+            | Self::JavaInverterTorch
+            | Self::BedrockInverterTorch
+            | Self::JavaTorchNand
+            | Self::BedrockTorchNand
+            | Self::JavaTorchNor
+            | Self::BedrockTorchNor => 1,
+            // The slowest path from each port passes two torches in series.
+            Self::BedrockTorchAnd
+            | Self::JavaTorchXor
+            | Self::BedrockTorchXor
+            | Self::JavaTorchMux
+            | Self::BedrockTorchMux
+            | Self::JavaTorchEdgeFalling
+            | Self::BedrockTorchEdgeFalling => 2,
             Self::BedrockTorchOr => 0,
-            Self::JavaXorUnpinned
-            | Self::JavaNandUnpinned
-            | Self::JavaNorUnpinned
-            | Self::JavaMuxUnpinned
-            | Self::BedrockXorUnpinned
-            | Self::BedrockNandUnpinned
-            | Self::BedrockNorUnpinned
-            | Self::BedrockMuxUnpinned => UNPINNED_PORT_DELAY_TICKS,
         }
     }
 
@@ -104,17 +203,28 @@ impl EditionCell {
             Self::JavaRepeaterOr
             | Self::JavaInverterTorch
             | Self::BedrockTorchAnd
-            | Self::BedrockInverterTorch => true,
-            Self::JavaComparatorAnd
-            | Self::BedrockTorchOr
-            | Self::JavaXorUnpinned
-            | Self::JavaNandUnpinned
-            | Self::JavaNorUnpinned
-            | Self::JavaMuxUnpinned
-            | Self::BedrockXorUnpinned
-            | Self::BedrockNandUnpinned
-            | Self::BedrockNorUnpinned
-            | Self::BedrockMuxUnpinned => false,
+            | Self::BedrockInverterTorch
+            | Self::JavaTorchXor
+            | Self::BedrockTorchXor
+            | Self::JavaTorchNand
+            | Self::BedrockTorchNand
+            | Self::JavaTorchNor
+            | Self::BedrockTorchNor
+            | Self::JavaTorchMux
+            | Self::BedrockTorchMux
+            | Self::JavaRepeaterDelay { .. }
+            | Self::BedrockRepeaterDelay { .. }
+            | Self::JavaTorchPulse { .. }
+            | Self::BedrockTorchPulse { .. }
+            | Self::JavaTorchEdgeRising
+            | Self::BedrockTorchEdgeRising
+            | Self::JavaTorchEdgeFalling
+            | Self::BedrockTorchEdgeFalling
+            | Self::JavaTorchLatch
+            | Self::BedrockTorchLatch
+            | Self::JavaRepeaterCounter { .. }
+            | Self::BedrockRepeaterCounter { .. } => true,
+            Self::JavaComparatorAnd | Self::BedrockTorchOr => false,
         }
     }
 
@@ -123,25 +233,16 @@ impl EditionCell {
     #[must_use]
     pub const fn port_regenerates(self, port: PortName) -> bool {
         match self {
-            // The side operand ends at the inverter. An AND has no `sel`, so asked for one it errs
-            // on the strict side.
+            // The side operand ends at the inverter. Asked for a port an AND does not have, it
+            // errs on the strict side.
             Self::JavaComparatorAnd => match port {
-                PortName::A | PortName::Sel => false,
+                PortName::A | PortName::Sel | PortName::Set | PortName::Reset => false,
                 PortName::B => true,
             },
             _ => self.regenerates(),
         }
     }
 }
-
-const UNPINNED_PORT_DELAY_TICKS: u32 = 3;
-
-// 2 is the largest pinned port delay, on both of `BedrockTorchAnd`'s ports and on the side of
-// `JavaComparatorAnd`.
-const _: () = assert!(
-    UNPINNED_PORT_DELAY_TICKS > 2,
-    "UNPINNED_PORT_DELAY_TICKS must sit strictly above every pinned port_delay_ticks value",
-);
 
 /// One cell in the DAG, tagged with its edition-specific realisation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -45,19 +45,39 @@ fn compile_scope(source: &NetlistIr, edition: Edition) -> EditionNetlistIr {
 
 fn select_edition_cell(logical: LogicalCell, edition: Edition) -> EditionCell {
     match (edition, logical) {
+        (Edition::Java, LogicalCell::Latch) => EditionCell::JavaTorchLatch,
+        (Edition::Java, LogicalCell::Delay { stages }) => EditionCell::JavaRepeaterDelay { stages },
+        (Edition::Java, LogicalCell::Pulse { stages }) => EditionCell::JavaTorchPulse { stages },
+        (Edition::Java, LogicalCell::EdgeRising) => EditionCell::JavaTorchEdgeRising,
+        (Edition::Java, LogicalCell::EdgeFalling) => EditionCell::JavaTorchEdgeFalling,
+        (Edition::Java, LogicalCell::Counter { stages }) => {
+            EditionCell::JavaRepeaterCounter { stages }
+        }
+        (Edition::Bedrock, LogicalCell::Latch) => EditionCell::BedrockTorchLatch,
+        (Edition::Bedrock, LogicalCell::Delay { stages }) => {
+            EditionCell::BedrockRepeaterDelay { stages }
+        }
+        (Edition::Bedrock, LogicalCell::Pulse { stages }) => {
+            EditionCell::BedrockTorchPulse { stages }
+        }
+        (Edition::Bedrock, LogicalCell::EdgeRising) => EditionCell::BedrockTorchEdgeRising,
+        (Edition::Bedrock, LogicalCell::EdgeFalling) => EditionCell::BedrockTorchEdgeFalling,
+        (Edition::Bedrock, LogicalCell::Counter { stages }) => {
+            EditionCell::BedrockRepeaterCounter { stages }
+        }
         (Edition::Java, LogicalCell::And) => EditionCell::JavaComparatorAnd,
         (Edition::Java, LogicalCell::Or) => EditionCell::JavaRepeaterOr,
         (Edition::Java, LogicalCell::Not) => EditionCell::JavaInverterTorch,
-        (Edition::Java, LogicalCell::Xor) => EditionCell::JavaXorUnpinned,
-        (Edition::Java, LogicalCell::Nand) => EditionCell::JavaNandUnpinned,
-        (Edition::Java, LogicalCell::Nor) => EditionCell::JavaNorUnpinned,
-        (Edition::Java, LogicalCell::Mux) => EditionCell::JavaMuxUnpinned,
+        (Edition::Java, LogicalCell::Xor) => EditionCell::JavaTorchXor,
+        (Edition::Java, LogicalCell::Nand) => EditionCell::JavaTorchNand,
+        (Edition::Java, LogicalCell::Nor) => EditionCell::JavaTorchNor,
+        (Edition::Java, LogicalCell::Mux) => EditionCell::JavaTorchMux,
         (Edition::Bedrock, LogicalCell::And) => EditionCell::BedrockTorchAnd,
         (Edition::Bedrock, LogicalCell::Or) => EditionCell::BedrockTorchOr,
         (Edition::Bedrock, LogicalCell::Not) => EditionCell::BedrockInverterTorch,
-        (Edition::Bedrock, LogicalCell::Xor) => EditionCell::BedrockXorUnpinned,
-        (Edition::Bedrock, LogicalCell::Nand) => EditionCell::BedrockNandUnpinned,
-        (Edition::Bedrock, LogicalCell::Nor) => EditionCell::BedrockNorUnpinned,
-        (Edition::Bedrock, LogicalCell::Mux) => EditionCell::BedrockMuxUnpinned,
+        (Edition::Bedrock, LogicalCell::Xor) => EditionCell::BedrockTorchXor,
+        (Edition::Bedrock, LogicalCell::Nand) => EditionCell::BedrockTorchNand,
+        (Edition::Bedrock, LogicalCell::Nor) => EditionCell::BedrockTorchNor,
+        (Edition::Bedrock, LogicalCell::Mux) => EditionCell::BedrockTorchMux,
     }
 }

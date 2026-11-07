@@ -269,3 +269,145 @@ struct s size=3x3
             (signal_ref
               (identifier)
               (identifier))))))))
+
+==================
+logic with nor, xor and nand ranks (field labels)
+==================
+
+struct s size=3x3
+  logic sig.out = sig.a nor sig.b xor sig.c nand sig.d
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (struct_body
+      (logic_decl
+        name: (signal_ref
+          (identifier)
+          (identifier))
+        value: (binary_expression
+          lhs: (signal_ref
+            (identifier)
+            (identifier))
+          rhs: (binary_expression
+            lhs: (signal_ref
+              (identifier)
+              (identifier))
+            rhs: (binary_expression
+              lhs: (signal_ref
+                (identifier)
+                (identifier))
+              rhs: (signal_ref
+                (identifier)
+                (identifier)))))))))
+
+==================
+logic with a mux call naming its operands in any order (field labels)
+==================
+
+struct s size=3x3
+  logic sig.out = mux(b=sig.y, sel=sig.s, a=not a.b)
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (struct_body
+      (logic_decl
+        name: (signal_ref
+          (identifier)
+          (identifier))
+        value: (call_expression
+          (named_operand
+            name: (operand_name)
+            value: (signal_ref
+              (identifier)
+              (identifier)))
+          (named_operand
+            name: (operand_name)
+            value: (signal_ref
+              (identifier)
+              (identifier)))
+          (named_operand
+            name: (operand_name)
+            value: (unary_expression
+              operand: (signal_ref
+                (identifier)
+                (identifier)))))))))
+
+==================
+logic with a latch call and applied macros (field labels)
+==================
+
+struct s size=3x3
+  logic sig.out = latch(reset=edge_falling(sig.r), set=pulse(sig.a or sig.b, 4))
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (struct_body
+      (logic_decl
+        name: (signal_ref
+          (identifier)
+          (identifier))
+        value: (call_expression
+          (named_operand
+            name: (operand_name)
+            value: (apply_expression
+              operand: (signal_ref
+                (identifier)
+                (identifier))))
+          (named_operand
+            name: (operand_name)
+            value: (apply_expression
+              operand: (binary_expression
+                lhs: (signal_ref
+                  (identifier)
+                  (identifier))
+                rhs: (signal_ref
+                  (identifier)
+                  (identifier)))
+              stages: (integer))))))))
+
+==================
+A counting macro needs its stage count
+:error
+==================
+
+struct s size=3x3
+  logic sig.out = delay(sig.a)
+
+---
+
+==================
+An edge detector counts no stages
+:error
+==================
+
+struct s size=3x3
+  logic sig.out = edge_rising(sig.a, 2)
+
+---

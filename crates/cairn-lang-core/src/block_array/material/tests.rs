@@ -17,6 +17,8 @@ struct FakeResolver {
     ids: Vec<String>,
     /// One alias group; empty means no alias table.
     group: Vec<String>,
+    /// The ids a later version of the edition, `2.0`, adds.
+    later: Vec<String>,
 }
 
 impl FakeResolver {
@@ -25,6 +27,7 @@ impl FakeResolver {
             entries,
             ids: Vec::new(),
             group: Vec::new(),
+            later: Vec::new(),
         }
     }
 
@@ -32,6 +35,12 @@ impl FakeResolver {
     fn pinned(mut self, ids: &[&str]) -> Self {
         self.ids = ids.iter().map(|id| (*id).to_owned()).collect();
         self.ids.sort();
+        self
+    }
+
+    /// Have version `2.0` add `ids`.
+    fn later(mut self, ids: &[&str]) -> Self {
+        self.later = ids.iter().map(|id| (*id).to_owned()).collect();
         self
     }
 
@@ -67,6 +76,17 @@ impl TargetRegistry for FakeResolver {
             .filter(|spelling| self.ids.binary_search(spelling).is_ok())
             .cloned()
             .collect()
+    }
+
+    fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
+        self.later
+            .iter()
+            .any(|later| later == id)
+            .then(|| DeclaredElsewhere {
+                edition: Edition::Java,
+                until: None,
+                since: Some("2.0".to_owned()),
+            })
     }
 }
 
@@ -156,13 +176,15 @@ fn an_authored_id_the_target_lacks_is_refused_with_its_registry_named() {
     let err = resolve_block_state(&token("oak_plank"), Some(&registry)).unwrap_err();
     assert_eq!(
         err,
-        MaterialDeferred::UnknownId(UnknownId {
+        MaterialDeferred::UnknownId(Box::new(UnknownId {
             id: "minecraft:oak_plank".into(),
             registry: "test 1.0".into(),
             origin: IdOrigin::Authored,
             suggestion: Some("minecraft:oak_planks".into()),
             aliases: Vec::new(),
-        }),
+            elsewhere: None,
+            absent: None,
+        })),
     );
 }
 
@@ -299,6 +321,30 @@ fn a_suggestion_is_still_found_inside_the_namespace_that_has_one() {
 }
 
 #[test]
+fn an_id_a_later_version_declares_is_answered_with_that_version_rather_than_a_spelling() {
+    let registry = FakeResolver::new(vec![])
+        .pinned(&["minecraft:dark_oak_planks"])
+        .later(&["minecraft:pale_oak_planks"]);
+    let err = resolve_block_state(&token("pale_oak_planks"), Some(&registry)).unwrap_err();
+    assert_eq!(
+        err,
+        MaterialDeferred::UnknownId(Box::new(UnknownId {
+            id: "minecraft:pale_oak_planks".into(),
+            registry: "test 1.0".into(),
+            origin: IdOrigin::Authored,
+            suggestion: None,
+            aliases: Vec::new(),
+            elsewhere: Some(DeclaredElsewhere {
+                edition: Edition::Java,
+                until: None,
+                since: Some("2.0".into()),
+            }),
+            absent: None,
+        })),
+    );
+}
+
+#[test]
 fn an_authored_id_the_target_declares_passes() {
     let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light"]);
     let bs = resolve_block_state(&token("light"), Some(&registry)).unwrap();
@@ -319,7 +365,7 @@ fn a_catalog_mapping_onto_a_missing_id_names_the_token_that_reached_it() {
     let err = resolve_block_state(&token("floor.stone.smooth"), Some(&registry)).unwrap_err();
     assert_eq!(
         err,
-        MaterialDeferred::UnknownId(UnknownId {
+        MaterialDeferred::UnknownId(Box::new(UnknownId {
             id: "minecraft:stone_bricks".into(),
             registry: "test 1.0".into(),
             origin: IdOrigin::Catalog {
@@ -327,7 +373,9 @@ fn a_catalog_mapping_onto_a_missing_id_names_the_token_that_reached_it() {
             },
             suggestion: Some("minecraft:stonebrick".into()),
             aliases: Vec::new(),
-        }),
+            elsewhere: None,
+            absent: None,
+        })),
     );
 }
 

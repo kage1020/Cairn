@@ -14,6 +14,26 @@ pub enum LogicPrimitive {
     Or,
     /// `not a`.
     Not,
+    /// `a xor b`.
+    Xor,
+    /// `a nand b`.
+    Nand,
+    /// `a nor b`.
+    Nor,
+    /// `mux(sel=s, a=x, b=y)`: `a` while `sel` is off, `b` while it is on.
+    Mux,
+    /// `latch(set=s, reset=r)`: on from a `set` until a `reset`, which wins over it.
+    Latch,
+    /// `delay(x, n)`: `x`, `n` stages later.
+    Delay,
+    /// `pulse(x, n)`: on for at most the first `n` stages of each time `x` is on.
+    Pulse,
+    /// `edge_rising(x)`: on for one stage each time `x` turns on.
+    EdgeRising,
+    /// `edge_falling(x)`: on for one stage each time `x` turns off.
+    EdgeFalling,
+    /// `counter(x, n)`: toggling every `n` times `x` turns on.
+    Counter,
 }
 
 /// How a [`LogicPrimitive`] is written in an expression.
@@ -26,11 +46,36 @@ pub enum Notation {
         /// How tightly it binds: a higher rank groups first, and one rank groups left to right.
         rank: u8,
     },
+    /// Called with every operand named once, in any order: `mux(sel=s, a=x, b=y)`.
+    Call {
+        /// The operands' names, in the order the primitive's IRs take them.
+        operands: &'static [&'static str],
+    },
+    /// Applied to one operand by position, and to a stage count after it when `counted`:
+    /// `edge_rising(x)`, `pulse(x, 4)`.
+    Apply {
+        /// Whether a stage count of at least 1 follows the operand.
+        counted: bool,
+    },
 }
 
 impl LogicPrimitive {
     /// Every primitive the library holds.
-    pub const ALL: [Self; 3] = [Self::And, Self::Or, Self::Not];
+    pub const ALL: [Self; 13] = [
+        Self::And,
+        Self::Or,
+        Self::Not,
+        Self::Xor,
+        Self::Nand,
+        Self::Nor,
+        Self::Mux,
+        Self::Latch,
+        Self::Delay,
+        Self::Pulse,
+        Self::EdgeRising,
+        Self::EdgeFalling,
+        Self::Counter,
+    ];
 
     /// The word that names the primitive in source.
     #[must_use]
@@ -39,6 +84,16 @@ impl LogicPrimitive {
             Self::And => "and",
             Self::Or => "or",
             Self::Not => "not",
+            Self::Xor => "xor",
+            Self::Nand => "nand",
+            Self::Nor => "nor",
+            Self::Mux => "mux",
+            Self::Latch => "latch",
+            Self::Delay => "delay",
+            Self::Pulse => "pulse",
+            Self::EdgeRising => "edge_rising",
+            Self::EdgeFalling => "edge_falling",
+            Self::Counter => "counter",
         }
     }
 
@@ -46,9 +101,18 @@ impl LogicPrimitive {
     #[must_use]
     pub const fn notation(self) -> Notation {
         match self {
-            Self::And => Notation::Infix { rank: 1 },
-            Self::Or => Notation::Infix { rank: 0 },
+            Self::Or | Self::Nor => Notation::Infix { rank: 0 },
+            Self::Xor => Notation::Infix { rank: 1 },
+            Self::And | Self::Nand => Notation::Infix { rank: 2 },
             Self::Not => Notation::Prefix,
+            Self::Mux => Notation::Call {
+                operands: &["sel", "a", "b"],
+            },
+            Self::Latch => Notation::Call {
+                operands: &["set", "reset"],
+            },
+            Self::EdgeRising | Self::EdgeFalling => Notation::Apply { counted: false },
+            Self::Delay | Self::Pulse | Self::Counter => Notation::Apply { counted: true },
         }
     }
 
@@ -60,13 +124,49 @@ impl LogicPrimitive {
             .find(|primitive| primitive.name() == name)
     }
 
-    /// The rank of an infix primitive, or `None` for a prefix one.
+    /// The rank of an infix primitive, or `None` for one written otherwise.
     #[must_use]
     pub const fn infix_rank(self) -> Option<u8> {
         match self.notation() {
             Notation::Infix { rank } => Some(rank),
-            Notation::Prefix => None,
+            Notation::Prefix | Notation::Call { .. } | Notation::Apply { .. } => None,
         }
+    }
+
+    /// The operands a called primitive names, or `None` for one written otherwise.
+    #[must_use]
+    pub const fn call_operands(self) -> Option<&'static [&'static str]> {
+        match self.notation() {
+            Notation::Call { operands } => Some(operands),
+            Notation::Prefix | Notation::Infix { .. } | Notation::Apply { .. } => None,
+        }
+    }
+
+    /// Whether an applied primitive takes a stage count, or `None` for one written otherwise.
+    #[must_use]
+    pub const fn applied_counted(self) -> Option<bool> {
+        match self.notation() {
+            Notation::Apply { counted } => Some(counted),
+            Notation::Prefix | Notation::Infix { .. } | Notation::Call { .. } => None,
+        }
+    }
+
+    /// A primitive written with parentheses, called or applied, with a placeholder for each
+    /// operand, such as `mux(sel=…, a=…, b=…)` or `delay(…, N)`, or `None` for one written
+    /// otherwise.
+    #[must_use]
+    pub fn parenthesised_template(self) -> Option<String> {
+        let operands = match self.notation() {
+            Notation::Call { operands } => operands
+                .iter()
+                .map(|operand| format!("{operand}=…"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            Notation::Apply { counted: false } => "…".to_owned(),
+            Notation::Apply { counted: true } => "…, N".to_owned(),
+            Notation::Prefix | Notation::Infix { .. } => return None,
+        };
+        Some(format!("{}({operands})", self.name()))
     }
 }
 
@@ -111,9 +211,36 @@ mod tests {
     }
 
     #[test]
+    fn only_a_called_or_applied_primitive_has_a_parenthesised_template() {
+        assert_eq!(
+            LogicPrimitive::iter()
+                .filter_map(|primitive| Some((
+                    primitive.name(),
+                    primitive.parenthesised_template()?
+                )))
+                .collect::<Vec<_>>(),
+            [
+                ("mux", "mux(sel=…, a=…, b=…)".to_owned()),
+                ("latch", "latch(set=…, reset=…)".to_owned()),
+                ("delay", "delay(…, N)".to_owned()),
+                ("pulse", "pulse(…, N)".to_owned()),
+                ("edge_rising", "edge_rising(…)".to_owned()),
+                ("edge_falling", "edge_falling(…)".to_owned()),
+                ("counter", "counter(…, N)".to_owned()),
+            ],
+        );
+    }
+
+    #[test]
     fn the_ranks_climb_through_the_ones_the_library_holds() {
-        assert_eq!(infix_rank_above(None), Some(0));
-        assert_eq!(infix_rank_above(Some(0)), Some(1));
-        assert_eq!(infix_rank_above(Some(1)), None);
+        assert_eq!(
+            [
+                infix_rank_above(None),
+                infix_rank_above(Some(0)),
+                infix_rank_above(Some(1)),
+                infix_rank_above(Some(2)),
+            ],
+            [Some(0), Some(1), Some(2), None],
+        );
     }
 }

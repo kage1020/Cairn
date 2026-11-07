@@ -16,7 +16,7 @@ pub enum DiagnosticCode {
     LogicMultipleDrivers,
     /// The `logic` bindings form a cycle.
     LogicCycle,
-    /// A `logic` binding uses an expression form the combinational lowering has no gate for.
+    /// A `logic` binding uses an expression form the logic lowering has no gate for.
     LogicUnsupportedPrimitive,
     /// A `logic` binding nothing reads.
     LogicUnusedSignal,
@@ -41,6 +41,8 @@ pub enum DiagnosticCode {
     LogicUnresolvedPatch,
     /// A component carries a second binding under an actuator key it already has.
     LogicDuplicateBinding,
+    /// An `assert` the circuit does not meet.
+    SimAssertionFailed,
 }
 
 impl DiagnosticCode {
@@ -63,6 +65,7 @@ impl DiagnosticCode {
             Self::LogicUnknownBindingKey => "E_LOGIC_UNKNOWN_BINDING_KEY",
             Self::LogicUnresolvedPatch => "E_LOGIC_UNRESOLVED_PATCH",
             Self::LogicDuplicateBinding => "E_LOGIC_DUPLICATE_BINDING",
+            Self::SimAssertionFailed => "E_SIM_ASSERTION_FAILED",
         }
     }
 
@@ -82,7 +85,8 @@ impl DiagnosticCode {
             | Self::LogicInvalidSignal
             | Self::LogicUnknownBindingKey
             | Self::LogicUnresolvedPatch
-            | Self::LogicDuplicateBinding => Severity::Error,
+            | Self::LogicDuplicateBinding
+            | Self::SimAssertionFailed => Severity::Error,
             Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
         }
     }

@@ -41,7 +41,11 @@ fn every_code_renders_its_documented_string() {
             "E_MISSING_MATERIAL",
             "E_MISSING_PATH_MATERIAL",
             "E_OUTPUT_NAME_COLLISION",
+            "E_PARITY_UNSUPPORTED",
             "E_PARSE",
+            "E_SEMANTIC_IN_EDITION_GUARD",
+            "E_STATE_DOMAIN",
+            "E_STATE_UNMAPPED",
             "E_THEME_SELECTOR_UNMATCHED",
             "E_THEME_VARIANT_MISSING",
             "E_TRUTH_TABLE_CONFLICT",
@@ -116,7 +120,11 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "E_MISSING_MATERIAL",
             "E_MISSING_PATH_MATERIAL",
             "E_OUTPUT_NAME_COLLISION",
+            "E_PARITY_UNSUPPORTED",
             "E_PARSE",
+            "E_SEMANTIC_IN_EDITION_GUARD",
+            "E_STATE_DOMAIN",
+            "E_STATE_UNMAPPED",
             "E_THEME_VARIANT_MISSING",
             "E_TRUTH_TABLE_CONFLICT",
             "E_TRUTH_TABLE_DUPLICATE_INPUT",
@@ -192,6 +200,9 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
         token: None,
         suggestion: None,
         aliases: Vec::new(),
+        since: None,
+        until: None,
+        declared_by: None,
     })
     .expect("serialise payload");
     assert_eq!(
@@ -211,6 +222,9 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
         token: Some("floor.stone.smooth".to_owned()),
         suggestion: Some("minecraft:stonebrick".to_owned()),
         aliases: vec!["minecraft:stonebrick".to_owned()],
+        since: Some("1.21.40".to_owned()),
+        until: None,
+        declared_by: None,
     })
     .expect("serialise payload");
     assert_eq!(
@@ -223,6 +237,7 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
             "token": "floor.stone.smooth",
             "suggestion": "minecraft:stonebrick",
             "aliases": ["minecraft:stonebrick"],
+            "since": "1.21.40",
         }),
     );
 }

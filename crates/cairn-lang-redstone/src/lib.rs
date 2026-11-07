@@ -19,6 +19,7 @@ pub(crate) mod routing_geometry;
 pub mod synth;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
+pub mod verify;
 
 pub use crossing::{CrossingOutput, compile_crossing};
 pub use delay::{
@@ -48,6 +49,7 @@ pub use placement_ir::{
 };
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
+pub use verify::verify_latency;
 
 pub(crate) fn saturating_index(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)

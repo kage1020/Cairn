@@ -186,3 +186,24 @@ fn a_dump_of_a_scope_with_no_cells_reads_back_equal() {
         );
     }
 }
+
+#[test]
+fn a_dump_of_every_macro_cell_reads_back_equal() {
+    let source = "theme t:\n  slot wall -> @oak_planks\n\n\
+                  struct chain size=17x7\n  floor mat_slot=wall\n  \
+                  door id=d side=front at=center\n  \
+                  lever id=l1 at=inside.back offset=1 y=1 -> sig.a\n  \
+                  lever id=l2 at=inside.back offset=2 y=1 -> sig.b\n  \
+                  logic sig.d = delay(sig.a, 2)\n  logic sig.p = pulse(sig.d, 3)\n  \
+                  logic sig.r = edge_rising(sig.p)\n  logic sig.f = edge_falling(sig.r)\n  \
+                  logic sig.l = latch(set=sig.f, reset=sig.b)\n  \
+                  logic sig.c = counter(sig.l, 2)\n  door[id=d] opened_by=sig.c\n  \
+                  circuit region=floor void=2\n";
+    for edition in [Edition::Java, Edition::Bedrock] {
+        for (stage, ir) in every_stage(source, edition) {
+            let label = format!("every macro {edition:?} --stage {}", stage.as_str());
+            assert_eq!(census(&ir).cells, 6, "{label}");
+            assert_dump_round_trips(&label, stage, &ir);
+        }
+    }
+}

@@ -4,8 +4,11 @@
 
 use indexmap::IndexMap;
 
-use crate::ast::{Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind};
+use crate::ast::{
+    Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind, guarded_lines,
+};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
+use crate::edition::Edition;
 use crate::error::Span;
 use crate::intent::{IntentModule, MemberRole, SelectorRule, ThemeIr, role_of};
 use crate::prose::{and_list, selector_text};
@@ -282,7 +285,7 @@ fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
 /// A `struct` / `def` body's own members hold at most one `circuit` line, malformed ones counted.
 fn check_circuit_lines(body: &[Statement], sink: &mut DiagnosticSink) {
     let mut first: Option<&Span> = None;
-    for stmt in body {
+    for (_, stmt) in guarded_lines(body) {
         let Statement::Generic { keyword, span, .. } = stmt else {
             continue;
         };
@@ -321,11 +324,21 @@ enum PlaceIdOwner {
 struct FirstId {
     span: Span,
     owned_by_resolver: bool,
+    /// The edition of the guard the declaring line stands under.
+    guard: Option<Edition>,
 }
 
+impl FirstId {
+    /// Whether one build reads both this line and one under `guard`.
+    fn shares_a_build_with(&self, guard: Option<Edition>) -> bool {
+        self.guard.is_none() || guard.is_none() || self.guard == guard
+    }
+}
+
+/// Two lines under guards for different editions never build together, so they may share an id.
 fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut DiagnosticSink) {
-    let mut seen_ids: IndexMap<String, FirstId> = IndexMap::new();
-    for stmt in body {
+    let mut seen_ids: IndexMap<String, Vec<FirstId>> = IndexMap::new();
+    for (guard, stmt) in guarded_lines(body) {
         if let Statement::Generic {
             keyword,
             args,
@@ -341,7 +354,10 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
             if let Some((id, id_span)) = extract_id(stmt) {
                 let owned_by_resolver = place_ids == PlaceIdOwner::Resolver
                     && matches!(role_of(keyword), MemberRole::Place);
-                if let Some(first) = seen_ids.get(&id) {
+                let first = seen_ids
+                    .get(&id)
+                    .and_then(|firsts| firsts.iter().find(|f| f.shares_a_build_with(guard)));
+                if let Some(first) = first {
                     if !(owned_by_resolver && first.owned_by_resolver) {
                         sink.push(Diagnostic {
                             code: DiagnosticCode::DuplicateId,
@@ -360,13 +376,11 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
                         });
                     }
                 } else {
-                    seen_ids.insert(
-                        id,
-                        FirstId {
-                            span: id_span,
-                            owned_by_resolver,
-                        },
-                    );
+                    seen_ids.entry(id).or_default().push(FirstId {
+                        span: id_span,
+                        owned_by_resolver,
+                        guard,
+                    });
                 }
             }
             check_body(children, PlaceIdOwner::ThisPass, sink);

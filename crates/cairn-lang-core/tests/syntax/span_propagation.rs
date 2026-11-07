@@ -94,14 +94,21 @@ fn member_span_mirrors_the_originating_statement_span() {
 }
 
 #[test]
-fn intent_state_entries_carry_value_level_spans() {
-    let src = "struct s size=1x1\n  walls height=4\n";
+fn argument_and_intent_state_entries_carry_value_level_spans() {
+    let src = "struct s size=3x3\n  walls height=4\n  stair kind=stairs side=front half=top\n";
     let module = parse(src).expect("parse");
     let ir = lower(&module);
-    let member = &ir.structs[0].members[0];
-    let height = member
-        .intent_state
+    let [walls, stair] = &ir.structs[0].members[..] else {
+        panic!("two members");
+    };
+    let height = walls
+        .arguments
         .get("height")
         .expect("`height=` survives lowering");
     assert_eq!(&src[height.span.clone()], "4");
+    let half = stair
+        .intent_state
+        .get("half")
+        .expect("`half=` survives lowering");
+    assert_eq!(&src[half.span.clone()], "top");
 }

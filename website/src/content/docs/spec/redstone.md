@@ -34,22 +34,47 @@ In Verilog terms, v1 allows the `assign` equivalent and no clocked assignment:
 
 **The built-in logic library.** Each entry is a primitive's name and its notation. A prefix
 primitive stands before its one operand. An infix primitive stands between its two, and its rank
-says how tightly it binds: a higher rank groups first, and one rank groups left to right. The parser
-takes an expression's shape from the library, so a prefix or infix primitive the library gains needs
-no new syntax. The library holds three primitives today:
+says how tightly it binds: a higher rank groups first, and one rank groups left to right. A called
+primitive takes its operands in parentheses after its name, each named once as `name=expression`,
+in any order, with a comma between two and none after the last. An applied primitive takes its one
+operand in parentheses after its name, by position, and one that counts stages takes a stage count
+after the operand and a comma, a whole number of at least 1. The parser takes an expression's shape
+from the library, so a primitive the library gains in one of these notations needs no new syntax.
+The library holds thirteen primitives:
 
 | Primitive | Notation |
 |---|---|
-| `or` | infix, rank 0 |
-| `and` | infix, rank 1 |
+| `or`, `nor` | infix, rank 0 |
+| `xor` | infix, rank 1 |
+| `and`, `nand` | infix, rank 2 |
 | `not` | prefix |
+| `mux` | called, `mux(sel=…, a=…, b=…)` |
+| `latch` | called, `latch(set=…, reset=…)` |
+| `edge_rising`, `edge_falling` | applied, `edge_rising(…)` |
+| `delay`, `pulse`, `counter` | applied with a stage count, `delay(…, N)` |
 
-A prefix primitive binds tighter than any infix one, so `sig.a or sig.b and not sig.c` reads as
-`sig.a or (sig.b and (not sig.c))`. Parentheses group as written.
+The ranks follow the usual order of the bitwise operators, `and` before `xor` before `or`, and each
+negated form takes the rank of the primitive it negates. A prefix primitive binds tighter than any
+infix one, so `sig.a or sig.b and not sig.c` reads as `sig.a or (sig.b and (not sig.c))`, and
+`sig.a nor sig.b xor sig.c nand sig.d` as `sig.a nor (sig.b xor (sig.c nand sig.d))`. Parentheses
+group as written. A call is one operand, as a signal is, so `not mux(sel=sig.s, a=sig.x, b=sig.y)
+and sig.z` reads as `(not mux(…)) and sig.z`, and each operand inside it is a whole expression. So
+is an application, so `delay(sig.a and sig.b, 2)` delays the `and`.
 
-The other primitives and macros above are not in the library yet. Written before an operand or
-between two, or called, each is `E_PARSE`, and the message names the primitives that could stand
-there: `sig.a xor sig.b` stops at `xor`, and a macro call such as `pulse(sig.ring, 4)` at its `(`.
+`mux` is `a` while `sel` is off and `b` while it is on. A call that passes an operand by position,
+leaves one out, names one twice or names one the primitive does not take is `E_PARSE`, and the
+message names the operands still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`,
+expecting `a=` or `b=`.
+
+An applied primitive refuses the reverse, a named operand: `pulse(in=sig.x, 4)` stops at `in`. A
+stage count is `E_PARSE` where it is wrong: missing, as `delay(sig.x)` stops at `)` expecting `,`;
+given to a primitive that counts none, as `edge_rising(sig.x, 2)` stops at `,`; or below 1, as
+`pulse(sig.x, 0)` stops at `0`. What each macro computes is the time model's
+([§14.4](#144-time-model)).
+
+A word the library does not hold is `E_PARSE` where it stands, and the message names what could
+stand there: `sig.a xnor sig.b` stops at `xnor`, and `toggle(sig.x)` at its `(`, naming the
+primitives the library calls.
 
 ## 14.2 Signal binding
 
@@ -58,17 +83,17 @@ Sensors emit signals and actuators consume them. Both are physical members
 
 ```
 # sensor → signal
-lever      id=sw   side=front offset=2 y=1 -> sig.power
-button     id=bt   side=front               -> sig.ring
-daylight   id=dl   at=..                     -> sig.day
-observer   id=ob   at=.. facing=down         -> sig.tick
-pressure_plate id=pp at=front.outside offset=0 y=0 -> sig.step
+lever          id=sw at=inside.front offset=2 y=1 -> sig.power
+button         id=bt at=front.outside offset=5 y=1 -> sig.ring
+daylight       id=dl at=back.outside offset=3 y=0 -> sig.day
+observer       id=ob at=inside.left offset=2 y=1 facing=down -> sig.tick
+pressure_plate id=pp at=front.outside offset=1 y=0 -> sig.step
 
 # actuator ← signal
-lamp       id=l1   at=..  lit_by=sig.lamps
-piston     id=p1   at=..  powered_by=sig.mem facing=up sticky=true
-door       id=d1   ..     opened_by=sig.power
-dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
+lamp      id=l1 at=inside.back offset=3 y=2 lit_by=sig.lamps
+piston    id=p1 at=inside.right offset=2 y=1 powered_by=sig.mem facing=up sticky=true
+door      id=d1 side=front at=center opened_by=sig.power
+dispenser id=ds at=front.outside offset=6 y=1 fired_by=sig.pulse facing=out
 ```
 
 That pairing is normative. A `-> sig.X` tail belongs to a sensor, and each actuator key belongs to
@@ -85,8 +110,11 @@ to. The synth pipeline's `E_LOGIC_MISPLACED_BINDING`, which names that component
 only where a `theme` selector has made the key one that member reads
 ([Lint](/spec/lint/#113-error-vs-warning)).
 
-Of the components above, only `door` and `pressure_plate` are accepted today. `lit_by=`,
-`powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
+**Every component but `door` is anchored as a plate is.** A `lever`, `button`, `daylight`,
+`observer`, `lamp`, `piston` or `dispenser` is one block set by a wall, written with the same `at=`,
+`offset=` and `y=` as a `pressure_plate`. The rules below are stated for the plate and hold for each
+of them alike: each is placed, refused or deferred wherever a plate would be, and its finding names
+it.
 
 **Where an `at=<side>.outside` plate may sit.** The plate takes the wall cell at `offset=` and sits
 one voxel outward from it, in the ring a roof's `overhang=` adds around the walls
@@ -114,9 +142,41 @@ instead, because the repair is on that member: a row that `walls` painting nothi
 nothing or `walls` under a `level` that is not placed would have reached, or an `at=<side>.outside`
 beside a `roof` with an `overhang=` that draws nothing ([Lint](/spec/lint/#lowering)). The plate's
 own line is judged first, so a line that puts it nowhere is the error even when such a member is
-missing too. Either way the plate's `->` binding is still read, since synthesis reads the member
-line and not the voxels, so the signal stays in the netlist with no plate to drive it, and the
-finding says so.
+missing too. Either way the component's binding, its `->` tail or its actuator key, is still read,
+since synthesis reads the member line and not the voxels, so the signal stays in the netlist with no
+component behind it, and the finding says so.
+
+**How a component is turned.** A `lever` or `button` hangs on the face of the wall cell its anchor
+names (`face=wall`), looking away from that wall: into the struct from `inside.<side>`, out of it
+from `<side>.outside`. An `observer`, `piston` or `dispenser` looks away from its wall too unless
+its `facing=` turns it: `in` and `out` are into and out of the struct, `left` and `right` run along
+the wall toward and away from `offset=0`, and `up` and `down` are vertical. That is the way its
+front looks: the cell an observer watches, the way a piston pushes and the way a dispenser fires.
+Any other word, a compass direction among them, is `E_INVALID_MEMBER`, and the component is not
+placed. The message lists the words, and for a compass direction it names the word that turns the
+component that way from its wall, since a compass direction would mean a different thing on each
+wall. A `daylight` and a `lamp` look no way and take no `facing=`.
+
+`sticky=true` builds a `piston` as a sticky piston, and `sticky=false` or no `sticky=` as a plain
+one. A `facing=` that is not a word, or a `sticky=` that is not `true` or `false`, is
+`W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), and the component is built
+as if it were not written.
+
+Each component is built as it stands unpowered: a lever off, a button unpressed, a lamp unlit, a
+piston retracted and a dispenser not triggered. The circuit powers it in the world, so none of
+those states is written on its line, and `facing=` is the one state promoted to intent
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)).
+
+**What a component is built from.** A `button` reads `mat_slot=`, and the slot must bind a button:
+any other block is `E_INCOMPATIBLE_MATERIAL`, and the button is built from `@button.default` instead.
+With no `mat_slot=` it is built from `@button.default`. Every other component has one block to be
+built from, its tier-1 token ([Materials and Themes](/spec/materials-themes/#tier-1-tokens)), and a
+`mat_slot=` on it is `W_IGNORED_ARGUMENT`.
+
+**What a lever or button hangs on is not checked.** It is written against whatever the wall cell
+holds, and the build does not ask whether that block is one the game lets it hang on. Where no
+`walls` paints that cell, or paints it with a block whose face cannot hold one, the game drops the
+lever or button as soon as a block update reaches it.
 
 **Signal names.** Sensors emit into the `sig.` namespace and actuators read from it, so a name
 outside it can never be read, whether on the left of a `logic` line, in a sensor's `->` tail, or as
@@ -138,17 +198,21 @@ which names the brackets, whatever the value.
 
 **A selector line binds the member its brackets pick.** `door[id=front] opened_by=sig.power` binds
 the door declared as `door id=front ...` in the same scope, at the top level or directly under a
-`level`. The `id=` has to name exactly one such door, written without brackets. The patch is a line
-of its own, before or after the door it binds, at the top level or directly under a `level`,
-wherever that door is. A patch whose selector has no `id=`, or whose id no door carries or two doors
-carry, is `E_LOGIC_UNRESOLVED_PATCH`: it acts on no door, so a port for it would have no component
-behind it. The door patch is the only binding a selector line carries, so a `->` tail on
-`pressure_plate[id=p]` is `E_MISPLACED_BINDING`, as it is on a member that is not a sensor.
+`level`, and `lamp[id=l1] lit_by=`, `piston[id=p1] powered_by=` and `dispenser[id=ds] fired_by=`
+bind a lamp, piston and dispenser the same way. The `id=` has to name exactly one component of the
+patch's keyword, written without brackets. The patch is a line of its own, before or after the
+component it binds, at the top level or directly under a `level`, wherever that component is. A
+patch whose selector has no `id=`, or whose id no component of its keyword carries or two carry, is
+`E_LOGIC_UNRESOLVED_PATCH`: it acts on no component, so a port for it would have no component behind
+it. An actuator patch is the only binding a selector line carries, so a `->` tail on
+`pressure_plate[id=p]` or `lever[id=sw]` is `E_MISPLACED_BINDING`, as it is on a member that is not
+a sensor.
 
-**An actuator takes one binding per key.** A door carries one `opened_by=`, whether it is written on
-the door's own line, through a patch, or on both. A second is `E_LOGIC_DUPLICATE_BINDING`: two
-bindings would be two wires into one door, a wired OR the logic layer never states. Signals are
-combined there instead: write `logic sig.open = sig.a or sig.x` and bind the door to `sig.open`.
+**An actuator takes one binding per key.** A door carries one `opened_by=`, a lamp one `lit_by=`, a
+piston one `powered_by=` and a dispenser one `fired_by=`, whether it is written on the component's
+own line, through a patch, or on both. A second is `E_LOGIC_DUPLICATE_BINDING`: two bindings would
+be two wires into one component, a wired OR the logic layer never states. Signals are combined there
+instead: write `logic sig.open = sig.a or sig.x` and bind the door to `sig.open`.
 
 A `sig.` value under a key the member reads that is not one of the four actuator keys is
 `E_LOGIC_UNKNOWN_BINDING_KEY`, raised by the synth pipeline, as in `walls height=sig.power`. The
@@ -170,24 +234,46 @@ logic sig.sel   = mux(sel=sig.s, a=sig.x, b=sig.y)
 ```
 
 The expression contains no time arithmetic. The `4` in `pulse(sig.ring, 4)` is a **stage count**,
-not a tick value. Of these lines only the first parses today; the macro calls are `E_PARSE`
-([§14.1](#141-two-tiers-and-the-v1-boundary)).
+not a tick value.
+
+A macro is one node, and a `latch` or `counter` keeps the feedback it holds its state by inside its
+own cell ([§14.6](#146-edition-differences)), so the graph stays acyclic and placement keeps its
+topological order. A signal that reads itself back is still `E_LOGIC_CYCLE`, through a macro or not:
+`logic sig.q = latch(set=sig.a, reset=sig.q)` is a cycle the author wrote.
 
 ## 14.4 Time model
 
 In v1 only the macros carry time: `delay`, `pulse`, `edge_rising`, `edge_falling`, `latch`, and
-`counter`. `delay(3)` is a cell macro that lowers to three repeaters internally; no macro is parsed
-yet ([§14.1](#141-two-tiers-and-the-v1-boundary)). There is no tick operator to write.
+`counter`. There is no tick operator to write. A macro's count is of the stages its cell is built
+from, never of ticks: `delay(sig.x, 3)` lowers to three repeaters in series. A stage is one repeater
+at its shortest setting, which takes one tick on both editions, and what a macro adds to a path is
+its Edition Cell's ticks, counted as every cell's are ([§14.6](#146-edition-differences)).
+
+| Macro | Its output |
+|---|---|
+| `delay(x, n)` | `x`, `n` stages later |
+| `pulse(x, n)` | on for the first `n` stages of each time `x` turns on, or until `x` turns off if that is sooner |
+| `edge_rising(x)` | on for one stage each time `x` turns on |
+| `edge_falling(x)` | on for one stage each time `x` turns off |
+| `latch(set=s, reset=r)` | turns on while `s` is on and `r` is off, turns off while `r` is on, and holds while both are off |
+| `counter(x, n)` | turns on the `n`-th time `x` turns on and off the `2n`-th, toggling every `n` times, so `counter(x, 1)` is a toggle |
+
+`reset` wins: a `latch` whose `set` and `reset` are both on is off, and stays off when they turn off
+together. A `latch` and a `counter` start off, as every macro does when the structure is built: the
+tile tier writes each cell in the state it settles to with its operands off.
 
 **Delay is carried in neither the Logic IR nor the Netlist IR. It is determined for the first time
 in the Placement IR** ([§14.8](#148-connection-to-the-ir-and-phases)). `and` is logically
 zero-delay, but the tick count is known only after cell selection (`and → ComparatorAND` on Java)
-and the actual post-placement wire length.
+and the actual post-placement wire length. A macro's stage count is carried in both, as part of
+which cell it is, and its ticks are not.
 
 A cell takes each operand on an input port of its own: `a` and `b` on a two-input cell, `a` on
-`not`, and on `mux` the `sel`, `a` and `b` its arguments name. A cell's delay is counted per input
-port, as the ticks from that port to the cell's output, since one input can pass through more of a
-cell than another. A signal's delay through a cell is the delay of the port it enters by.
+`not` and on each applied macro, and on `mux` and `latch` the operands their calls name. A cell's
+delay is counted per input port, as the ticks from that port to the cell's output, since one input
+can pass through more of a cell than another. A signal's delay through a cell is the delay of the
+port it enters by. One change at a macro's port can change its output more than once, as a `pulse`
+turns on and then off, so a macro's port counts the ticks to the last change it makes there.
 
 A number appears as ticks only in verification assertions ([§14.7](#147-verification)). You never do
 tick arithmetic inside a logic expression.
@@ -220,9 +306,9 @@ The internal algorithm runs five stages:
    = 2`. Neither pad column carries a pad on the cell row, so an end cell that stands beside a pad
    column keeps the coordinate beside it there as a free neighbour. A cell body is a block, so a net
    reaches it through a neighbouring coordinate; a two-input gate has three distinct nets touching
-   it (its two drivers and its own output) and therefore needs three free neighbours. Packed against
-   each other the cells in the middle of a row have two, at any region size, so a row spaced like
-   this is what makes a short-free wiring possible at all.
+   it (its two drivers and its own output) and therefore needs three free neighbours, and a `mux`,
+   with three drivers, four. Packed against each other the cells in the middle of a row have two, at
+   any region size, so a row spaced like this is what makes a short-free wiring possible at all.
 
    The row also stands one row in from the near edge of the region. In a scope with cells the I/O
    pads step along `z` from `0`, skipping the cell row; a scope with no cells has no cell row, and
@@ -232,7 +318,8 @@ The internal algorithm runs five stages:
    actuator-pad column, no pad touches a cell at any width the row check accepts. Dust reads the
    dust in the coordinate beside it, so a lane of free coordinates carries one net however long it
    is; a cell against the edge has one lane, and the three nets touching a two-input gate cannot
-   share it. One row in gives every cell a lane on each side. That costs one row for the whole
+   share it. One row in gives every cell a lane on each side, so with the clear columns either side
+   of it each cell has the four free neighbours a `mux` needs. That costs one row for the whole
    netlist rather than one per cell, so unlike the column spacing it does not grow with the cell
    count.
 
@@ -411,9 +498,58 @@ would still pass a rear input at 15 through.
 The `ComparatorAND` takes port `a` at its rear and inverts `b` onto its side. Counted per port
 ([§14.4](#144-time-model)), a signal entering by `a` passes the comparator alone, 1 tick, and one
 entering by `b` passes the inverter and then the comparator, 2 ticks. Which operand of `and` or `or`
-the netlist puts on `a` is not specified; `assert latency` ([§14.7](#147-verification)), not the
-order written, pins a path's ticks through a `ComparatorAND`. `assert latency` is not parsed yet,
-so nothing pins them today.
+the netlist puts on `a` is not specified, so the order written does not bound a path's ticks
+through a `ComparatorAND`; `assert latency` ([§14.7](#147-verification)) does, counting the port the
+operand lands on.
+
+Every logical cell has one realisation per edition. A port's ticks count the slowest path from it
+to the output, or for a macro the last change it makes there ([§14.4](#144-time-model)), and a cell
+either restores strength, so the wire into each of its ports ends there, or passes on what one of
+its inputs carries ([§14.5](#145-place-and-route)):
+
+| Logical cell | Java | Bedrock | Ticks per port | Strength |
+|---|---|---|---|---|
+| AND | `ComparatorAND` | `TorchAND`, two torches inverting an OR | Java `a` 1, `b` 2; Bedrock 2 | Java passes its rear on; Bedrock restores |
+| OR | `RepeaterOR`, two repeaters onto a common line | `TorchOR`, a dust merge | Java 1; Bedrock 0 | Java restores; Bedrock passes its strongest input on |
+| NOT | `InverterTorch` | `InverterTorch` | 1 | restores |
+| NAND | `TorchNAND`, two inverter torches onto a common line | the same | 1 | restores |
+| NOR | `TorchNOR`, one torch on a block both operands power | the same | 1 | restores |
+| XOR | `TorchXOR`, the torch NORs of `not a` and `b` and of `a` and `not b`, onto a common line | the same | 2 | restores |
+| MUX | `TorchMUX`, the torch NORs of `sel` and `not a` and of `not sel` and `not b`, onto a common line | the same | 2 | restores |
+| DELAY `n` | `RepeaterDelay`, `n` repeaters in series | the same | `n` | restores |
+| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through `n + 1` repeaters | the same | `n + 2` | restores |
+| EDGE_RISING | `TorchEdgeRising`, the torch NOR of `not a` and `not not a` | the same | 3 | restores |
+| EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and `not a` | the same | 2 | restores |
+| LATCH | `TorchLatch`, two torch NORs each powered by the other | the same | `set` 4, `reset` 5 | restores |
+| COUNTER `n` | `RepeaterCounter`, `n` flip-flops of locking repeaters in a twisted ring | the same | 3 | restores |
+
+An operand of `xor` reaches one of its NORs straight and the other through an inverter, so its
+output settles once the inverted path has, two torches after the operand changes. Each port of
+`mux` likewise passes an inverter and a NOR on its slowest path, `sel` on the NOR that takes it
+inverted.
+
+A macro's cell is built of torches and repeaters alone, the same on both editions, and holds its
+feedback inside itself:
+
+- **`TorchPulse`** turns on once `not a` has turned off and off once `a` comes out of its `n + 1`
+  repeaters, one more than `n` to match the inverter, so it is on for `n` ticks. Its port counts to
+  that turning off: the repeaters and the NOR, `n + 2` ticks.
+- **`TorchEdgeRising`** has the same shape with two inverters for the repeaters, so it is on for one
+  tick, and its port counts the two inverters and the NOR. **`TorchEdgeFalling`** turns on once `a`
+  has turned off and off once `not a` has turned on: one tick on, two to the last change.
+- **`TorchLatch`**: the output torch is the NOR of `reset` and the second torch, and the second
+  torch is the NOR of the output and of `set` gated by `reset`, which is the torch NOR of `not set`
+  and of `reset` held on two ticks past its fall by a repeater beside it. A `set` turns the output
+  on through four torches: `not set`, the gate, the second torch and the output. A `reset` turns it
+  off through the output torch alone, and its fall, while `set` is on, turns it back on five ticks
+  later, through the repeater and those three torches after it. The hold is what makes `reset` win:
+  while `reset` is on or has just fallen, `set` reaches nothing.
+- **`RepeaterCounter`**: each stage is a master–slave flip-flop of two repeaters, the master locked
+  while `a` is on and the slave while it is off. Each stage feeds the next and the last feeds the
+  first through an inverter, a twisted ring of `n` stages that steps through `2n` states from all
+  off, so its last stage, the output, changes every `n` times `a` turns on. The slave's lock lifts
+  two ticks after `a` turns on and its repeater passes the master on a tick later, three ticks in
+  all, and the master locks at two ticks, before any stage it reads from can change.
 
 The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as a
 tile that conducts to neither **another net's** coordinate below it nor another net's coordinates
@@ -451,8 +587,8 @@ edition-correct circuit instead. That is the biggest reason to describe logic ra
 
 ## 14.7 Verification
 
-Declare the intent, then simulate the synthesized circuit per tick, headless, and check it. There
-are three assertion kinds:
+Declare the intent, then check the synthesized circuit against it, per target edition. There are
+three assertion kinds:
 
 ```
 # combinational: truth table
@@ -465,23 +601,51 @@ assert latency(sig.in -> sig.out) <= 4
 assert always(sig.button -> eventually sig.door_open within 8)
 ```
 
-Of the three, only `truth` and `always` are parsed today, and nothing simulates the circuit
-yet. `assert latency(...)` is `E_PARSE` at `latency`. A truth table's rows are checked
-([Lint](/spec/lint/#truth-tables)), and the synth pipeline refuses either kind naming a signal
-nothing in its scope drives (`E_LOGIC_UNBOUND_SIGNAL`), but neither is checked against the circuit:
-a truth table its logic contradicts still synthesizes. The loop below and `E_SIM_ASSERTION_FAILED`
-do not exist yet.
+The synth pipeline refuses an assertion of any kind that names a signal nothing in its scope
+drives (`E_LOGIC_UNBOUND_SIGNAL`), and a truth table's rows are checked against each other
+([Lint](/spec/lint/#truth-tables)).
 
-The self-correction loop (P5) is **synth → sim → diff → patch**, and verification runs per target
-edition. The patch targets place-and-route hints, repeaters, and buffers only. **The Logic IR is
-never rewritten**, because self-correction that auto-modifies logic is dangerous.
+`assert latency(<from> -> <to>) <= N` bounds the ticks a change at `<from>` takes to reach where
+`<to>` is read. It takes `<=` and a whole number of ticks, and no other comparison, which is
+`E_PARSE` at the comparison: place-and-route only adds ticks to a path, so an upper bound is the one
+a layout can break. The ticks are counted per target edition on the legalized Placement IR
+([§14.8](#148-connection-to-the-ir-and-phases)), where delay is first determined. A path starts at
+what drives `<from>`, a sensor's pad or a cell's output, and runs through cells to `<to>`. Each cell
+it enters costs the ticks of the port it enters by ([§14.4](#144-time-model)), each buffer repeater
+on the routed wire it runs along costs a tick ([§14.5](#145-place-and-route)), and dust costs
+none. Where an actuator reads `<to>`, the path runs on to the actuator's pad, over the repeaters on
+that wire, to the slowest of them where several do; where none does, it ends at the output of the
+cell that drives `<to>`. The bound holds the slowest path: where a change at `<from>` reaches one
+cell by two ports, the slower port counts.
+
+A bound the slowest path exceeds is `E_SIM_ASSERTION_FAILED` on that edition: one source can meet
+a bound on Bedrock, where an OR is a dust merge, and miss it on Java, where it is two repeaters. The
+finding gives the ticks it measured and, in a note each, the cells the path enters, the port it
+enters each by, and the repeaters on each wire. A `<to>` that does not depend on `<from>` fails on
+every edition, since no path carries a change from one to the other, and synth refuses it with the
+same code before an edition is chosen. Place-and-route does not read a bound, so it is met in the
+source: relaxed, or met by a path through fewer cells or along a wire with fewer repeaters.
+`cairn synth --experimental-logic-synth --stage crossing` checks every bound after crossing
+legalization and prints no IR when one fails.
 
 ```text
-E_SIM_ASSERTION_FAILED edition=bedrock:
-  assert latency(sig.in -> sig.out) <= 4, but measured 6 (2 buffer repeaters on the routed path).
-  Patch target: placement hint / route. (logic is never auto-modified)
-  Suggested: relax to <=6, enlarge circuit void to shorten routes, or pin cell placement.
+E_SIM_ASSERTION_FAILED line 13:
+  struct=reach: `assert latency(sig.a -> sig.c) <= 1` fails on bedrock: its slowest path from
+  sig.a to sig.c takes 2 ticks, 2 in buffer repeaters on the routed wire
+  note: the path enters cell #0 (`TorchOR`) by port `a`: 0 ticks through the cell
+  note: then the pad of the actuator reading sig.c: 2 buffer repeaters on the wire to it
+  note: the wire carries 2 buffer repeaters, one wherever it runs past 15 blocks of dust, so a
+  smaller `circuit` region, which puts the pads nearer what drives them, needs fewer
+  note: Fix: relax the bound to `<= 2`, or shorten the path; the logic is never rewritten to
+  meet a bound
 ```
+
+Nothing simulates the circuit yet, so `truth` and `always` are not checked against it: a truth
+table its logic contradicts still synthesizes. The self-correction loop (P5) is
+**synth → sim → diff → patch**, run per target edition. The patch targets place-and-route hints,
+repeaters, and buffers only. **The Logic IR is never rewritten**, because self-correction that
+auto-modifies logic is dangerous. The loop does not exist yet: a bound that fails is reported, and
+nothing patches the layout to meet it.
 
 ## 14.8 Connection to the IR and phases
 
@@ -491,7 +655,7 @@ them:
 ```
 Intent IR           logic declarations / circuit region / signal binding
    ↓ logic_synth
-Logic IR            logical expressions, dependency DAG. Edition-neutral, zero delay
+Logic IR            logical expressions, dependency DAG. Edition-neutral, no ticks
    ↓
 Netlist IR          cells and nets. Logical Cell selection. Still no delay
    ↓

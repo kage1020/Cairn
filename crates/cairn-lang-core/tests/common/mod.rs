@@ -3,11 +3,13 @@
 use std::ops::Range;
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, lower_to_block_array,
+};
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
-pub const SHIPPED_EXAMPLES: usize = 12;
+pub const SHIPPED_EXAMPLES: usize = 15;
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
@@ -180,6 +182,17 @@ pub fn lowered(source: &str) -> BlockArrayIr {
     lower_to_block_array(&ir, &resolution, None)
 }
 
+/// `source` lowered to the block-array IR against `registry`; only that pass's diagnostics.
+///
+/// # Panics
+///
+/// When `source` does not parse.
+pub fn lowered_with(source: &str, registry: &dyn TargetRegistry) -> BlockArrayIr {
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
+    let ir = lower(&module);
+    lower_to_block_array(&ir, &resolve(&ir, None), Some(registry))
+}
+
 /// [`lowered`], with the resolver's diagnostics ahead of the block-array pass's.
 ///
 /// # Panics
@@ -250,6 +263,55 @@ pub fn state_at(array: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
     &array.palette.entries[array.voxels[i].0 as usize]
 }
 
+/// The door standing with its lower half at `(x, y, z)` of `array`, as `id[properties]` per half.
+///
+/// # Panics
+///
+/// When either cell is outside `array`.
+pub fn door_at(array: &BlockArray, x: u32, y: u32, z: u32) -> [String; 2] {
+    [y, y + 1].map(|y| {
+        let state = state_at(array, x, y, z);
+        format!("{}[{}]", state.id, state.properties_text())
+    })
+}
+
+/// The two halves of a closed oak door facing `facing`, hinged on `hinge`, as [`door_at`] reads.
+pub fn oak_door(facing: &str, hinge: &str) -> [String; 2] {
+    ["lower", "upper"].map(|half| {
+        format!("minecraft:oak_door[facing={facing},half={half},hinge={hinge},open=false]")
+    })
+}
+
+/// Each chest of `array`, by its cell, as `id[properties]`, in `(x, y, z)` order.
+pub fn chests(array: &BlockArray) -> Vec<((u32, u32, u32), String)> {
+    blocks_where(array, |id| id.ends_with("chest"))
+}
+
+/// Each cell of `array` whose block id `keep` accepts, as `id[properties]` (or a bare `id`), in
+/// `(x, y, z)` order.
+pub fn blocks_where(
+    array: &BlockArray,
+    keep: impl Fn(&str) -> bool,
+) -> Vec<((u32, u32, u32), String)> {
+    let mut found = Vec::new();
+    for x in 0..array.dims.x {
+        for y in 0..array.dims.y {
+            for z in 0..array.dims.z {
+                let state = state_at(array, x, y, z);
+                if keep(&state.id) {
+                    let written = if state.properties.is_empty() {
+                        state.id.clone()
+                    } else {
+                        format!("{}[{}]", state.id, state.properties_text())
+                    };
+                    found.push(((x, y, z), written));
+                }
+            }
+        }
+    }
+    found
+}
+
 /// The single structure `ir` holds.
 ///
 /// # Panics
@@ -294,4 +356,78 @@ pub fn with_header(header: &str) -> String {
 /// [`PRELUDE`] plus a `def` whose body is a floor and then `row`.
 pub fn def_with(row: &str) -> String {
     format!("{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  {row}\n")
+}
+
+/// A target on which panes, chests and stairs hold water and no other block does.
+pub struct Wet;
+
+impl TargetRegistry for Wet {
+    fn lookup(&self, _token: &str) -> Option<BlockState> {
+        None
+    }
+
+    fn known_tokens(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
+        None
+    }
+
+    fn holds_water(&self, state: &BlockState) -> Option<bool> {
+        let id = state.id.strip_prefix("minecraft:")?;
+        Some(matches!(id, "glass_pane" | "chest" | "oak_stairs"))
+    }
+}
+
+/// The theme [`bin`] builds under: `wall`, `stone`, `pane` and `step`.
+pub const BIN_THEME: &str = "theme t:\n  \
+                             slot wall  -> @cobblestone\n  \
+                             slot stone -> @stone\n  \
+                             slot pane  -> @glass_pane\n  \
+                             slot step  -> @oak_stairs\n\n";
+
+/// A 5x4 struct with 2-row cobblestone walls under a flat roof one voxel past them, `members`
+/// after the roof; the overhang shifts the footprint's cells one voxel along `x` and `z`.
+pub fn bin(members: &str) -> String {
+    format!(
+        "{BIN_THEME}struct s size=5x4\n  walls mat_slot=wall height=2\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  {members}\n"
+    )
+}
+
+/// Row `y` of `array`, one string per `z`, one character per `x`: `.` air, `~` water, `#`
+/// cobblestone, `=` stone, `p` a pane, `c` a chest, `s` a stair, each upper-case when waterlogged.
+///
+/// # Panics
+///
+/// When a cell holds a block with no mark.
+pub fn layer(array: &BlockArray, y: u32) -> Vec<String> {
+    (0..array.dims.z)
+        .map(|z| {
+            (0..array.dims.x)
+                .map(|x| {
+                    let state = state_at(array, x, y, z);
+                    let wet = state.properties.get("waterlogged").map(String::as_str);
+                    let mark = match state.id.as_str() {
+                        "air" | "minecraft:air" => '.',
+                        "minecraft:water" => '~',
+                        "minecraft:cobblestone" => '#',
+                        "minecraft:stone" => '=',
+                        "minecraft:glass_pane" => 'p',
+                        "minecraft:chest" => 'c',
+                        "minecraft:oak_stairs" => 's',
+                        other => {
+                            panic!("({x}, {y}, {z}) holds `{other}`, which `layer` has no mark for")
+                        }
+                    };
+                    if wet == Some("true") {
+                        mark.to_ascii_uppercase()
+                    } else {
+                        mark
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }

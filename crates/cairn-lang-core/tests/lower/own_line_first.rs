@@ -30,7 +30,8 @@ fn a_door_above_every_course_is_refused_beside_walls_that_paint_nothing() {
             "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)",
             vec![
                 "a door opens one row above the base of its `level`, or of the body outside one; \
-                 move it under a `level` whose walls hold that row, or add walls there"
+                 move it under a `level` whose walls hold that row and the one above, or add \
+                 walls there"
             ],
         )],
     );

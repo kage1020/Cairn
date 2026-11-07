@@ -42,7 +42,7 @@ theme medieval:
 
 テーマが割り当てるのは、生のブロック ID ではなく **正規トークン** です。`(edition, version)` ごとに ID、ステート名、ステートの値、シリアライズの形式を解決するのはバックエンドです ([バージョンとエディション](/ja/spec/versioning-editions/))。LLM は、`pillar_axis` も、リトルエンディアンの NBT も、Bedrock の `weirdo_direction` も知る必要がありません。
 
-現時点のバックエンドが解決する範囲は、これより狭くなっています。正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせるだけなので ([§7.3](#73-バージョンとエディションをまたぐ対応付け))、`@water_cauldron` はどの Bedrock のバージョンでも `E_UNKNOWN_ID` になります。また、Bedrock への書き出しでステートを変換できるのは階段の系統だけで、`@oak_log[axis=x]` は Java 向けにはコンパイルできても、Bedrock 向けには拒否されます。
+現時点のバックエンドが解決する範囲は、これより狭くなっています。正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせるだけなので ([§7.3](#73-バージョンとエディションをまたぐ対応付け))、`@water_cauldron` はどの Bedrock のバージョンでも `E_UNKNOWN_ID` になります。ステートはそのトークンの Java ブロックが取るもので、Bedrock のライターはターゲットのバージョンに対するパックのステートマップでそれを写します。`@oak_log[axis=x]` はどの Bedrock のバージョンでも `pillar_axis=x` として書き出しますが、`@cherry_wood[axis=x]` は、マップにその形がない 1.21.40 では `E_STATE_UNMAPPED` になります。
 
 トークンには 2 つの種類があります。
 
@@ -71,7 +71,17 @@ theme exact_oak:
 | `@wood.dark`、`@wood.light`、`@wood.warm`、`@wood.cool` | 色味で選ぶ板材 |
 | `@roof.dark_wood`、`@roof.light_wood`、`@roof.warm_wood`、`@roof.cool_wood` | 色味で選ぶ屋根の階段 |
 | `@sign.oak`、`@sign.oak_wall` | 立てた看板と壁の看板 |
+| `@door.default` | `mat_slot=` で割り当てていない `door` が置くドアのブロック |
+| `@chest.default` | `mat_slot=` で割り当てていない `chest` が置くチェストのブロック |
 | `@pressure_plate.default` | `mat_slot=` で割り当てていない `pressure_plate` が置くブロック |
+| `@lever.default` | `lever` が壁に掛けるレバー |
+| `@button.default` | `mat_slot=` で割り当てていない `button` が壁に掛けるボタン |
+| `@daylight.default` | `daylight` が置く日照センサー |
+| `@observer.default` | `observer` が置くオブザーバー |
+| `@lamp.default` | `lamp` が置くレッドストーンランプ |
+| `@piston.default` | `piston` が置くピストン |
+| `@piston.sticky` | `sticky=true` の `piston` が置く粘着ピストン |
+| `@dispenser.default` | `dispenser` が置くディスペンサー |
 
 tier-1 のトークンが解決するブロックは **tier-2** で、Evolving です。ターゲットごとにカタログで決まり、リリースによって変わることがあります。カタログにトークンを足しても何も壊れません。トークンの名前を変えたり廃止したりするのは Stable な面の破壊的変更なので、非推奨期間のあいだは古いトークンも `W_DEPRECATED` 付きで解決し続けます。正規ブロックトークンは tier-1 でも tier-2 でもありません。[§7.3](#73-バージョンとエディションをまたぐ対応付け) の対応付けを通じてブロックを指す名前で、ターゲットが受け付ける名前はそのレジストリパックで決まり、[互換性ティア](/ja/spec/compatibility/#evolving)で Evolving と定めています。
 
@@ -87,6 +97,27 @@ tier-1 のトークンが解決するブロックは **tier-2** で、Evolving �
 | 新規追加 | `@cherry_planks` | `requires >=` で下限を指定する必要があります。 |
 | 削除 | ターゲットのバージョンに存在しない | ハードエラーにして、代わりの候補を示します。 |
 
-現時点で書いたとおりに動くのは、最後の行だけです。 正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせます ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。改名は自動では解決されず `E_UNKNOWN_ID` になり、そのターゲットでの綴りをレジストリパックの `aliases` から注記で示します (Bedrock で `@dirt_path` と書くと `minecraft:grass_path` を示します)。改名をまたいで解決できるのは抽象トークンだけで、カタログのエントリの `overrides` を通じて解決します ([§7.2](#72-正規トークン))。分割も区別しません。`@cauldron[fluid=water]` は `minecraft:cauldron[fluid=water]` のまま書き出し、`W_STATE_LITERAL_UNCHECKED` を出します。統合された id も、ほかの id と同じくターゲットごとに照らし合わせるだけです。新しいブロックから下限を推定することもありません。`@requires` のない `@pale_oak_planks` は Java 1.21.4 では問題なく通り、このブロックを持たないターゲットでは `E_UNKNOWN_ID` になります。削除された id は `E_UNKNOWN_ID` になり、近いブロックがそのターゲットにあれば、それを示します。
+現時点で書いたとおりに動くのは、最後の行だけです。 正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせます ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。改名は自動では解決されず `E_UNKNOWN_ID` になり、そのターゲットでの綴りをレジストリパックの `aliases` から注記で示します (Bedrock で `@dirt_path` と書くと `minecraft:grass_path` を示します)。改名をまたいで解決できるのは抽象トークンだけで、カタログのエントリの `overrides` を通じて解決します ([§7.2](#72-正規トークン))。分割も区別しません。`@cauldron[fluid=water]` は `minecraft:cauldron` にないステートを名指すので、固定したターゲットは `water_cauldron` として読まずに `E_STATE_DOMAIN` として拒否します。統合された id も、ほかの id と同じくターゲットごとに照らし合わせるだけです。新しいブロックから下限を推定することもありません。`@requires` のない `@pale_oak_planks` は Java 1.21.4 では問題なく通り、このブロックを持たないターゲットでは `E_UNKNOWN_ID` になって、初めて現れるバージョンとして 1.21.4 を示します。削除された id は `E_UNKNOWN_ID` になり、それを最後に宣言していたバージョンを示します。どのバージョンも宣言していない id なら、近いブロックがそのターゲットにあれば、それを示します。
 
 **吸収できるのは、ID、ステート、シリアライズの違いだけです。** 概念そのものがない場合や、ゲームの挙動の違いは吸収しません。
+
+## 7.4 生のブロック
+
+テーマは正規トークンを割り当て、メンバーはスロットの解決先から作られます。それで足りないところでは、2 つのメンバーがブロックそのものを名指します。これが **エスケープハッチ** で、`raw` フェーズで組み上げます ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。
+
+```
+raw_block mat=minecraft:light[level=15] at=4,3,2
+raw_fill  mat=minecraft:tinted_glass from=1,2,0 to=3,3,0
+```
+
+`mat=` は **ブロック ID** で、`namespace:path` の形をとり、接して続くステートリテラルを付けられます ([構文 §5.1.1](/ja/spec/syntax/#511-リテラルと区切り))。`raw_block` は、`at=` が指す 1 つのセルにそのブロックを置きます。`raw_fill` は、`from=` と `to=` のあいだの箱のすべてのセルに置きます。`fill` と同じく、2 つは向かい合う角で、どちらを先に書いてもかまいません ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。どれも座標の組で、外形の低い側の角から、`level y=N` の下ではその `level` から測ります。
+
+生のブロックは、テーマとスロットを経由しません。`mat_slot=` が割り当てることはないので、行に書いた `mat_slot=` は `W_IGNORED_ARGUMENT` になります。抽象トークンやカタログの既定値が代わりに入ることもなく、テーマが割り当てられていない struct でも組み上げます。ターゲットは経由します。バージョンを固定したビルドは、ほかのブロックと同じように ID とステートを照らし合わせます。ターゲットが宣言していない ID は `E_UNKNOWN_ID` に、ブロックのステートにないステートは `E_STATE_DOMAIN` になります ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。Bedrock では、ステートは正規の語彙で、正規トークンと同じくステートマップで書き出すので ([§7.2](#72-正規トークン))、マップに形がないステートは `E_STATE_UNMAPPED` になります。
+
+ブロックは書いたとおりに書き出します。`raw` フェーズはほかのどのフェーズよりも後に走るので、生のブロックは、ほかのメンバーがそのセルに置いたもの (空気も含む) を置き換えます。どのステートも導出しません。先に注いだ水が水浸しにすることはなく、つながりの規則が隣とつなぐことも、隣のチェストと連結することもありません。ただし、隣のブロックは、ほかのブロックと同じように生のブロックへつながります ([ブロックステート §6.1](/ja/spec/blockstate/#つながり))。2 つの生のメンバーが 1 つのセルに書くと、同じフェーズで競合し、後の行が `W_PHASE_CONFLICT` とともに勝ちます。生のメンバーは体積を決めません。`fill` と同じく、外形の外にあるセルや、書かれたとおりの struct が届くどの段よりも上にあるセルは `E_INVALID_MEMBER` に、struct が届くが建たない段にあるセルは `W_DEFERRED_MEMBER` になります。
+
+`mat=` がないか、ブロック ID でなければ `E_INVALID_MEMBER` です。スロットが割り当てる正規トークンの `@stone` もこれにあたります。`at=`、`from=`、`to=` がないか座標の組でない場合も同じです。
+
+生のメンバーは `@edition` のガードの外に書いてかまいません。生の ID はもともとエディション固有で、ガードのないものも、固定したターゲットでの照合が正しさを保ちます。`minecraft:light` は Java では組み上がり、このブロックを `light_block`、1.21.40 からは `light_block_0` … `light_block_15` と綴る Bedrock では `E_UNKNOWN_ID` になります。両方のエディション向けにビルドするファイルは、両方が宣言する ID を書くか、`@edition` の下にエディションごとの分岐を 1 つずつ書きます ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#代替を書くとき))。
+
+`raw_repeat` と、取り込みが書き出したものに付く `origin=imported` は、取り込みの側のものです ([エコシステム連携 §12.3](/ja/spec/ecosystem-interop/#123-写し取りの-3-段階))。取り込みはまだありません。それまでは、`raw_repeat` は `E_UNKNOWN_KEYWORD`、`origin=` は `E_UNKNOWN_ARGUMENT` です。

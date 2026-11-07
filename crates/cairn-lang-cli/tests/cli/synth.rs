@@ -7,7 +7,7 @@ use std::process::Output;
 use cairn_lang_core::{Edition, IntentModule, lower, parse};
 use cairn_lang_redstone::{
     Diagnostic, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
-    compile_placement, compile_routing, synthesize,
+    compile_placement, compile_routing, synthesize, verify_latency,
 };
 use serde_json::Value;
 
@@ -349,7 +349,8 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
     let delay = compile_delay(&routing.scoped);
     let delayed = findings(&mut so_far, &delay.diagnostics);
     let crossing = compile_crossing(&delay.scoped);
-    let crossed = findings(&mut so_far, &crossing.diagnostics);
+    findings(&mut so_far, &crossing.diagnostics);
+    let crossed = findings(&mut so_far, &verify_latency(ir, &crossing.scoped));
     vec![
         Dump {
             stage: "logic",
@@ -398,7 +399,7 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
 
 #[test]
 fn every_stage_prints_the_ir_the_redstone_passes_build() {
-    for example in ["redstone-door.crn", "crossbar.crn"] {
+    for example in ["redstone-door.crn", "crossbar.crn", "control-room.crn"] {
         let path = examples_dir().join(example);
         let source = fs::read_to_string(&path).expect("read example");
         let ir = lower(&parse(&source).expect("the example parses"));
@@ -446,7 +447,7 @@ fn stage_placement_missing_region_exits_one() {
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.open = sig.a or sig.b\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.open\n";
+        door id=d side=front at=center opened_by=sig.open\n";
     std::fs::write(&path, source).expect("write missing-region fixture");
     let out = cairn(
         "synth",
@@ -461,13 +462,7 @@ fn stage_placement_missing_region_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &stderr,
-        &[
-            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
-            (11, 3, "error", "E_NO_CIRCUIT_REGION"),
-        ],
-    );
+    assert_stream(&stderr, &[(11, 3, "error", "E_NO_CIRCUIT_REGION")]);
 }
 
 #[test]
@@ -483,7 +478,7 @@ fn stage_placement_congestion_exits_one() {
         logic sig.and_ab   = sig.a and sig.b\n  \
         logic sig.or_ab    = sig.a or sig.b\n  \
         logic sig.combined = sig.and_ab and sig.or_ab\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.combined\n  \
+        door id=d side=front at=center opened_by=sig.combined\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
     let out = cairn(
@@ -499,13 +494,7 @@ fn stage_placement_congestion_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &stderr,
-        &[
-            (14, 43, "warning", "W_IGNORED_ARGUMENT"),
-            (15, 3, "error", "E_ROUTE_CONGESTION"),
-        ],
-    );
+    assert_stream(&stderr, &[(15, 3, "error", "E_ROUTE_CONGESTION")]);
 }
 
 #[test]
@@ -519,7 +508,7 @@ fn stage_route_congestion_exits_one() {
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         logic sig.c0 = not sig.a\n  \
         logic sig.c1 = sig.c0 and sig.a\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.c1\n  \
+        door id=d side=front at=center opened_by=sig.c1\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
     let out = cairn(
@@ -535,13 +524,7 @@ fn stage_route_congestion_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &stderr,
-        &[
-            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
-            (13, 3, "error", "E_ROUTE_CONGESTION"),
-        ],
-    );
+    assert_stream(&stderr, &[(13, 3, "error", "E_ROUTE_CONGESTION")]);
     assert!(
         stderr.contains("routed netlist for struct `pack`"),
         "primary should name the routing origin and failed scope, got: {stderr}",
@@ -559,7 +542,7 @@ fn stage_delay_inherits_upstream_congestion_failure() {
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         logic sig.c0 = not sig.a\n  \
         logic sig.c1 = sig.c0 and sig.a\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.c1\n  \
+        door id=d side=front at=center opened_by=sig.c1\n  \
         circuit region=floor void=1\n";
     std::fs::write(&path, source).expect("write congestion fixture");
     let out = cairn(
@@ -575,13 +558,7 @@ fn stage_delay_inherits_upstream_congestion_failure() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &stderr,
-        &[
-            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
-            (13, 3, "error", "E_ROUTE_CONGESTION"),
-        ],
-    );
+    assert_stream(&stderr, &[(13, 3, "error", "E_ROUTE_CONGESTION")]);
 }
 
 #[test]
@@ -596,7 +573,7 @@ fn stage_delay_attenuation_limit_exits_one() {
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.out = sig.a or sig.b\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
+        door id=d side=front at=center opened_by=sig.out\n  \
         circuit region=floor void=3\n";
     std::fs::write(&path, source).expect("write attenuation fixture");
     let out = cairn(
@@ -612,13 +589,7 @@ fn stage_delay_attenuation_limit_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &stderr,
-        &[
-            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
-            (13, 3, "error", "E_ATTENUATION_LIMIT"),
-        ],
-    );
+    assert_stream(&stderr, &[(13, 3, "error", "E_ATTENUATION_LIMIT")]);
     assert!(
         stderr.contains("placed netlist for struct `wide_pack`"),
         "primary should name the stage that refused and the failed scope, got: {stderr}",
@@ -715,7 +686,7 @@ fn stage_crossing_inherits_upstream_attenuation_failure() {
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.out = sig.a or sig.b\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
+        door id=d side=front at=center opened_by=sig.out\n  \
         circuit region=floor void=3\n";
     std::fs::write(&path, source).expect("write attenuation fixture");
     let out = cairn(
@@ -731,13 +702,7 @@ fn stage_crossing_inherits_upstream_attenuation_failure() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &stderr,
-        &[
-            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
-            (13, 3, "error", "E_ATTENUATION_LIMIT"),
-        ],
-    );
+    assert_stream(&stderr, &[(13, 3, "error", "E_ATTENUATION_LIMIT")]);
 }
 
 #[test]
@@ -778,14 +743,7 @@ struct crossbar size=4x4
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &stderr,
-        &[
-            (7, 48, "warning", "W_IGNORED_ARGUMENT"),
-            (8, 48, "warning", "W_IGNORED_ARGUMENT"),
-            (18, 3, "error", "E_ROUTE_CONGESTION"),
-        ],
-    );
+    assert_stream(&stderr, &[(18, 3, "error", "E_ROUTE_CONGESTION")]);
     // `placed`, not `routed`: routing refuses the scope before the crossing pass runs.
     assert!(
         stderr.contains("placed netlist for struct `crossbar`")
@@ -799,5 +757,48 @@ struct crossbar size=4x4
         out.stdout.is_empty(),
         "a refused scope must not reach stdout as a legalized IR dump, got: {}",
         String::from_utf8_lossy(&out.stdout),
+    );
+}
+
+#[test]
+fn stage_crossing_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let door = fs::read_to_string(examples_dir().join("redstone-door.crn")).expect("read example");
+    let tight = door.replace(
+        "assert latency(sig.step -> sig.open) <= 1",
+        "assert latency(sig.step -> sig.open) <= 0",
+    );
+    assert_ne!(
+        tight, door,
+        "the example carries the bound this test tightens"
+    );
+    let path = write_source(dir.path(), "tight.crn", &tight);
+    let run = |edition: &str| {
+        cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                "crossing",
+                "--edition",
+                edition,
+                path.to_str().unwrap(),
+            ],
+        )
+    };
+
+    // A `RepeaterOR` takes a tick on Java; a `TorchOR` is a dust merge and takes none.
+    let java = run("java");
+    assert_eq!(java.status.code(), Some(1));
+    let stderr = String::from_utf8(java.stderr).expect("utf-8");
+    assert_stream(&stderr, &[(32, 3, "error", "E_SIM_ASSERTION_FAILED")]);
+    assert!(java.stdout.is_empty(), "a failed bound prints no dump");
+
+    let bedrock = run("bedrock");
+    assert_eq!(
+        bedrock.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&bedrock.stderr)
     );
 }

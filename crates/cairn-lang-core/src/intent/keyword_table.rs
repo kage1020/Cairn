@@ -6,13 +6,24 @@ use serde::Serialize;
 pub const KNOWN_KEYWORDS: &[&str] = &[
     "floor",
     "walls",
+    "fill",
     "door",
     "window",
     "roof",
     "stair",
     "level",
     "pressure_plate",
+    "lever",
+    "button",
+    "daylight",
+    "observer",
+    "lamp",
+    "piston",
+    "dispenser",
+    "chest",
     "circuit",
+    "raw_block",
+    "raw_fill",
     "place",
     "connect",
 ];
@@ -21,7 +32,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
 pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 
 /// Keywords that may carry a `-> value` sensor tail (`spec/redstone` "Signal binding").
-pub const SENSOR_HOSTS: &[&str] = &["pressure_plate"];
+pub const SENSOR_HOSTS: &[&str] = &["lever", "button", "daylight", "observer", "pressure_plate"];
 
 /// Each actuator argument key of `spec/redstone` "Signal binding", paired with the component
 /// keyword that carries it.
@@ -40,6 +51,8 @@ pub enum MemberRole {
     Floor,
     /// `walls` command.
     Walls,
+    /// `fill` command.
+    Fill,
     /// `door` command.
     Door,
     /// `window` command.
@@ -50,10 +63,30 @@ pub enum MemberRole {
     Stair,
     /// `level` grouping block.
     Level,
-    /// `pressure_plate` fixture.
+    /// `pressure_plate` sensor.
     PressurePlate,
+    /// `lever` sensor.
+    Lever,
+    /// `button` sensor.
+    Button,
+    /// `daylight` sensor, a daylight detector.
+    Daylight,
+    /// `observer` sensor.
+    Observer,
+    /// `lamp` actuator, a redstone lamp.
+    Lamp,
+    /// `piston` actuator.
+    Piston,
+    /// `dispenser` actuator.
+    Dispenser,
+    /// `chest` fixture.
+    Chest,
     /// `circuit` redstone region marker.
     Circuit,
+    /// `raw_block` escape hatch: one block id in one cell.
+    RawBlock,
+    /// `raw_fill` escape hatch: one block id in every cell of a box.
+    RawFill,
     /// `place` site placement.
     Place,
     /// `connect` site topology edge.
@@ -154,6 +187,22 @@ pub struct UnreadArgument {
 }
 
 impl MemberRole {
+    /// The actuator key this role reads its signal from, as `opened_by` on a `door`, or `None`
+    /// for a role that is no actuator.
+    #[must_use]
+    pub fn actuator_key(&self) -> Option<&'static str> {
+        ACTUATOR_BINDINGS
+            .iter()
+            .find(|(_, host)| *host == self.keyword())
+            .map(|(key, _)| *key)
+    }
+
+    /// Whether this is an escape-hatch role, the only kind an `@edition` guard holds.
+    #[must_use]
+    pub fn is_raw(&self) -> bool {
+        matches!(self, Self::RawBlock | Self::RawFill)
+    }
+
     /// The `key=` arguments this role's vocabulary holds, in spec order, including spec'd keys
     /// nothing reads yet; `None` for an unknown keyword.
     #[must_use]
@@ -161,7 +210,8 @@ impl MemberRole {
         Some(match self {
             Self::Floor => &[],
             Self::Walls => &["height"],
-            Self::Door => &["side", "at", "opened_by"],
+            Self::Fill => &["from", "to", "fluid", "kind"],
+            Self::Door => &["side", "at", "opened_by", "hinge", "open"],
             Self::Window => &[
                 "side", "y", "offset", "size", "sym", "repeat", "step", "shape", "anchor",
             ],
@@ -176,14 +226,52 @@ impl MemberRole {
                 "waterlogged",
             ],
             Self::Level => &["y"],
-            Self::PressurePlate => &["at", "offset", "y"],
+            Self::PressurePlate | Self::Lever | Self::Button | Self::Daylight => {
+                &["at", "offset", "y"]
+            }
+            Self::Observer => &["at", "offset", "y", "facing"],
+            Self::Lamp => &["at", "offset", "y", "lit_by"],
+            Self::Piston => &["at", "offset", "y", "powered_by", "facing", "sticky"],
+            Self::Dispenser => &["at", "offset", "y", "fired_by", "facing"],
+            Self::Chest => &["at", "offset", "y", "facing", "size", "waterlogged"],
             Self::Circuit => &["region", "void"],
+            Self::RawBlock => &["mat", "at"],
+            Self::RawFill => &["mat", "from", "to"],
             // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
             // fix this set.
             Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
             Self::Connect => &["path"],
             Self::Other(_) => return None,
         })
+    }
+
+    /// The keys of [`Self::arguments`] that name a blockstate of the block this role places, which
+    /// an author writes as intent (`spec/blockstate` "Derive by default, promote on override").
+    #[must_use]
+    pub fn state_arguments(&self) -> &'static [&'static str] {
+        match self {
+            Self::Stair => &["half", "facing", "shape", "waterlogged"],
+            Self::Door => &["hinge", "open"],
+            Self::Chest => &["facing", "size", "waterlogged"],
+            Self::Observer | Self::Piston | Self::Dispenser => &["facing"],
+            Self::Floor
+            | Self::Walls
+            | Self::Fill
+            | Self::Window
+            | Self::Roof
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Lever
+            | Self::Button
+            | Self::Daylight
+            | Self::Lamp
+            | Self::Circuit
+            | Self::RawBlock
+            | Self::RawFill
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => &[],
+        }
     }
 
     /// Keys in [`Self::accepted_arguments`] that no pass reads on this role, with the reason; a
@@ -213,21 +301,31 @@ impl MemberRole {
                     why: Unread::Unreached,
                 },
             ],
-            // The door block itself is not placed yet; this entry goes when it is.
-            Self::Door => &[UnreadArgument {
-                key: "mat_slot",
-                why: Unread::Unreached,
-            }],
-            // From `spec/blockstate` "`waterlogged`"; the entry goes when stair lowering reads it.
-            Self::Stair => &[UnreadArgument {
-                key: "waterlogged",
-                why: Unread::Unreached,
-            }],
-            Self::Level | Self::Circuit | Self::Place | Self::Connect => &[UnreadArgument {
+            // A component with one block to be built from has no material to choose.
+            Self::Level
+            | Self::Lever
+            | Self::Daylight
+            | Self::Observer
+            | Self::Lamp
+            | Self::Piston
+            | Self::Dispenser
+            | Self::Circuit
+            | Self::RawBlock
+            | Self::RawFill
+            | Self::Place
+            | Self::Connect => &[UnreadArgument {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
             }],
-            Self::Floor | Self::Walls | Self::PressurePlate | Self::Other(_) => &[],
+            Self::Floor
+            | Self::Walls
+            | Self::Fill
+            | Self::Door
+            | Self::Stair
+            | Self::PressurePlate
+            | Self::Button
+            | Self::Chest
+            | Self::Other(_) => &[],
         }
     }
 
@@ -270,8 +368,21 @@ impl MemberRole {
                 selector: "kind",
                 arms: &[SelectorArm {
                     value: SelectorValue::Ident("stairs"),
-                    reads: &["side", "half", "facing", "shape", "y"],
+                    reads: &["side", "half", "facing", "shape", "y", "waterlogged"],
                 }],
+            }],
+            Self::Fill => &[SelectorAxis {
+                selector: "fluid",
+                arms: &[
+                    SelectorArm {
+                        value: SelectorValue::Ident("water"),
+                        reads: &["kind"],
+                    },
+                    SelectorArm {
+                        value: SelectorValue::Absent,
+                        reads: &[],
+                    },
+                ],
             }],
             // `east_of=` / `north_of=` beside `at=` are already `E_INVALID_PLACE_ORIGIN`.
             Self::Place => &[SelectorAxis {
@@ -293,7 +404,17 @@ impl MemberRole {
             | Self::Window
             | Self::Level
             | Self::PressurePlate
+            | Self::Lever
+            | Self::Button
+            | Self::Daylight
+            | Self::Observer
+            | Self::Lamp
+            | Self::Piston
+            | Self::Dispenser
+            | Self::Chest
             | Self::Circuit
+            | Self::RawBlock
+            | Self::RawFill
             | Self::Connect
             | Self::Other(_) => &[],
         }
@@ -321,13 +442,24 @@ pub fn role_of(keyword: &str) -> MemberRole {
     match keyword {
         "floor" => MemberRole::Floor,
         "walls" => MemberRole::Walls,
+        "fill" => MemberRole::Fill,
         "door" => MemberRole::Door,
         "window" => MemberRole::Window,
         "roof" => MemberRole::Roof,
         "stair" => MemberRole::Stair,
         "level" => MemberRole::Level,
         "pressure_plate" => MemberRole::PressurePlate,
+        "lever" => MemberRole::Lever,
+        "button" => MemberRole::Button,
+        "daylight" => MemberRole::Daylight,
+        "observer" => MemberRole::Observer,
+        "lamp" => MemberRole::Lamp,
+        "piston" => MemberRole::Piston,
+        "dispenser" => MemberRole::Dispenser,
+        "chest" => MemberRole::Chest,
         "circuit" => MemberRole::Circuit,
+        "raw_block" => MemberRole::RawBlock,
+        "raw_fill" => MemberRole::RawFill,
         "place" => MemberRole::Place,
         "connect" => MemberRole::Connect,
         other => MemberRole::Other(other.to_owned()),
