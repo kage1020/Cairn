@@ -134,17 +134,17 @@ pub(super) fn recognize_actuator_patch(
             return;
         }
     };
-    let unknown_intent_keys: Vec<&str> = member
+    let unknown_keys: Vec<&str> = member
         .written_fields()
         .map(|(written, _)| written)
         .filter(|written| *written != key)
         .collect();
-    if !unknown_intent_keys.is_empty() {
+    if !unknown_keys.is_empty() {
         diagnostics.push(diag_invalid_member(
             member,
             format!(
                 "{keyword} actuator patch takes only `{key}=sig.<name>`; unknown attribute(s): {}",
-                unknown_intent_keys.join(", "),
+                unknown_keys.join(", "),
             ),
             vec![format!(
                 "move these onto the {keyword}'s own line, or drop them"

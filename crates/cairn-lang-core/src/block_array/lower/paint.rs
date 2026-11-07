@@ -60,8 +60,8 @@ pub(super) fn paint_member(
             };
             fill_walls(ctx, height, y_offset, idx, canvas);
         }
-        // `flatten_members` drops a `roof` at a non-zero offset, so this is the struct's plane.
         MemberRole::Fill => fill_material(member, y_offset, ctx, palette, canvas, diagnostics),
+        // `flatten_members` drops a `roof` at a non-zero offset, so this is the struct's plane.
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Door => {

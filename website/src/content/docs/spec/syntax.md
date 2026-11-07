@@ -215,18 +215,19 @@ An `@edition` guard indents the lines under it too, but it is not a member and g
 lines stand in the body around it, and it holds only raw members ([Versioning and Editions
 §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
 
-[Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what `y=N`
-means to each grouped member.
+[Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what
+`y=N` means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`,
-`chest`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The
-keyword table is global, so writing one in the other body parses and classifies and then reaches nothing. That is
-`E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
-A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
-reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
-`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+`pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
+`circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The
+keyword table is global, so writing one in the other body parses and classifies and then reaches
+nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented
+under it along. A `level` groups the other members of a `struct` / `def` body, but not a `circuit`
+line, whose reservation spans the whole scope: a `circuit` line under a `level` reaches nothing
+either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
@@ -336,18 +337,19 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the door and any `connect` walkway anchored to it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
-Numeric offsets (`at=N`) are reserved for a future extension. A door with no `at=`, or one that
-names no anchor, is `E_INVALID_MEMBER` and cuts nothing.
+The same column resolves both the door and any `connect` walkway anchored to it
+([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)). Numeric offsets (`at=N`) are
+reserved for a future extension. A door with no `at=`, or one that names no anchor, is
+`E_INVALID_MEMBER` and cuts nothing.
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
 level's base plane, and stands two rows tall: its door block takes that row and the one above it
 ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). Both rows
 MUST be inside one course of the masonry. A door whose two rows the walls as written hold in no one
 course is `E_INVALID_MEMBER` and cuts nothing, the same finding the `window` on that body earns. A
-door under a one-row course is one: the row above it is the roof's, or nothing's. A door in a course
-whose `walls` paint nothing, or beside `walls` under a `level` that is not placed, is
-`W_DEFERRED_MEMBER` instead, since the repair is on those walls or that level
+door under a one-row course is refused the same way, since the row above it belongs to the roof or
+to nothing. A door in a course whose `walls` paint nothing, or beside `walls` under a `level` that
+is not placed, is `W_DEFERRED_MEMBER` instead, since the repair is on those walls or that level
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the courses a `walls`
 paints).
 

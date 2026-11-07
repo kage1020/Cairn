@@ -15,7 +15,7 @@ use super::fixture::{
     Fixture, Refusal, Toward, fixture_cell, outside_the_array, with_binding_note, written_facing,
 };
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
-use super::members::{StructCtx, default_block_id, resolve_member_state};
+use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
 
 /// A block the pack spells per edition: its catalog token, and the Java id used without a pack
 /// (`spec/versioning-editions` "Backend = data tables").
@@ -282,16 +282,21 @@ fn place(
     let id = match component.material {
         None => fallback()?,
         Some(family) => {
-            let resolved = resolve_member_state(
+            let resolved = match resolve_member_state(
                 member,
                 ctx.scope,
                 ctx.registry,
                 diagnostics,
                 ctx.theme_missing,
-            );
+            ) {
+                MemberState::Bound(state) => Some(state),
+                MemberState::Unbound => None,
+                MemberState::Refused => return Ok(()),
+            };
             geometry_material_id(
                 member,
                 ctx.scope,
+                ctx.registry,
                 resolved.as_ref(),
                 fallback,
                 &GeometryMemberDescription {

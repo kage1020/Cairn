@@ -18,9 +18,9 @@ use super::stair::shift_outward;
 /// A one-cell member set against a wall, as its findings name it.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Fixture {
-    /// Its keyword: `pressure_plate`.
+    /// Its keyword, such as `pressure_plate`.
     pub(super) keyword: &'static str,
-    /// What a note calls it: `plate`.
+    /// What a note calls it, such as `plate`.
     pub(super) noun: &'static str,
 }
 
@@ -307,7 +307,7 @@ fn intended_anchor(head: &str, tail: &str) -> Option<String> {
 
 /// Read a fixture's `key=` as a non-negative integer, `0` when absent.
 fn coordinate(fixture: Fixture, member: &Member, key: &str, counts: &str) -> Result<u32, Refusal> {
-    let Some(raw) = member.arguments.get(key) else {
+    let Some(raw) = member.written(key) else {
         return Ok(0);
     };
     member.nonneg_u32(key).ok_or_else(|| {
@@ -444,7 +444,7 @@ fn displaced(
     } else if y_world >= ctx.dims.y {
         Some((
             row_past_the_struct(fixture, row, ctx),
-            ctx.shortfall().note(&fits),
+            ctx.shortfall().note("this row", &fits),
         ))
     } else if outside && ctx.overhang == 0 {
         // An overhang a roof is written with and does not draw is the roof's to repair.
