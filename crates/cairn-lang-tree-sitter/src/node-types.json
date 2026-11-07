@@ -8,6 +8,10 @@
       "required": true,
       "types": [
         {
+          "type": "latency_form",
+          "named": true
+        },
+        {
           "type": "temporal_form",
           "named": true
         },
@@ -441,6 +445,50 @@
     "type": "integer",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "latency_form",
+    "named": true,
+    "fields": {
+      "bound": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
+      "from": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "signal_ref",
+            "named": true
+          }
+        ]
+      },
+      "to": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "signal_ref",
+            "named": true
+          }
+        ]
+      }
+    }
   },
   {
     "type": "logic_decl",
@@ -1421,6 +1469,10 @@
     "named": false
   },
   {
+    "type": "<=",
+    "named": false
+  },
+  {
     "type": "=",
     "named": false
   },
@@ -1507,6 +1559,10 @@
   },
   {
     "type": "java",
+    "named": false
+  },
+  {
+    "type": "latency",
     "named": false
   },
   {

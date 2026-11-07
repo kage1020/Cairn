@@ -8,7 +8,7 @@ title: "11. Lint と制約検証"
 
 この節は診断コードのカタログです。安定したコマンドが出しうるコードには、必ずここに行があります。安定したコマンドが行のないコードを出すなら、それはカタログ外のコードではなく、この節の不備です。ほかの章が名前を挙げていて、まだどのコマンドも出さないコード (たとえば `E_REQUIRES_CONFLICT`) は、予約済みのコードです ([互換性ティア §C.3](/ja/spec/compatibility/#c3-破壊的変更の告知方法))。コードの規則が別の章にある場合は、行にコードの意味を書き、規則はその章へリンクします。コードを手にした読者が探すのはこの行で、振る舞いを定義しているのは各章だからです。
 
-レッドストーンのパイプラインが出すコードは、すべてこの約束の対象外です。`E_LOGIC_*` / `W_LOGIC_*` のほか、`E_NO_CIRCUIT_REGION`、`E_ROUTE_CONGESTION`、`E_ATTENUATION_LIMIT`、`W_ROUTE_CROSS_LAYER_CLEARANCE` がこれにあたります。これらに到達できるのは `cairn synth --experimental-logic-synth` だけで、この機能はまるごと Internal ティア ([互換性](/ja/spec/compatibility/)) です。文字列について何も保証していないので、ここに行を置くと、存在しない契約を書くことになります。規則に関わるものは [レッドストーンと論理](/ja/spec/redstone/) で個別に挙げています。
+レッドストーンのパイプラインが出すコードは、すべてこの約束の対象外です。`E_LOGIC_*` / `W_LOGIC_*` のほか、`E_NO_CIRCUIT_REGION`、`E_ROUTE_CONGESTION`、`E_ATTENUATION_LIMIT`、`W_ROUTE_CROSS_LAYER_CLEARANCE`、`E_SIM_ASSERTION_FAILED` がこれにあたります。これらに到達できるのは `cairn synth --experimental-logic-synth` だけで、この機能はまるごと Internal ティア ([互換性](/ja/spec/compatibility/)) です。文字列について何も保証していないので、ここに行を置くと、存在しない契約を書くことになります。規則に関わるものは [レッドストーンと論理](/ja/spec/redstone/) で個別に挙げています。
 
 ### 重複
 
@@ -252,10 +252,10 @@ title: "11. Lint と制約検証"
 | **fluid** | 水源、流れ、`waterlogged` が整合しているか。 |
 | **version_caps / parity** | ステートやエンティティのスキーマがターゲットで使えるか ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
 | **edit_stability** | `intent_state` の変更が、無関係なメンバーの `resolved_state` に波及しないか。 |
-| **redstone** | 宣言した真理値表と時相アサーションに対する、tick 単位のシミュレーション。タイミングの衝突、QC への依存、配線の混雑 ([レッドストーン](/ja/spec/redstone/))。 |
+| **redstone** | 宣言した真理値表と時相アサーションに対する、tick 単位のシミュレーション。レイテンシの上限、タイミングの衝突、QC への依存、配線の混雑 ([レッドストーン](/ja/spec/redstone/))。 |
 | **AABB 干渉** | 重なった場合は、優先度に従って統合するか拒否する。境界のブロックステートの再解決は IR 層が担う。 |
 
-このうち attachment、entity_aabb、support、fluid、edit_stability、AABB の干渉は計画中で、現時点ではどのコマンドも検査しません。本体が重なる 2 つの `place` 行も報告しません。幾何は一部だけ守られます。自分の行の指定で struct の外に出る door、window、軒の stair、chest、センサー、アクチュエーターは描かずに `E_INVALID_MEMBER` として報告し、建たなかったメンバーのせいでだけ外に出るものは `W_DEFERRED_MEMBER` として報告します。version_caps / parity は、専用のコードを通じて一部だけ実行します。`E_VERSION_CAP` は `--target` を `@requires` の下限と照らし合わせ、`E_UNKNOWN_ID` は固定したターゲットが宣言していないブロック ID を、`E_PARITY_UNSUPPORTED` はもう一方のエディションにしかない意味メンバーのブロックを、`E_STATE_DOMAIN` はそこでブロックが取らないステートを、`E_STATE_UNMAPPED` はそのステートマップに形のないブロックステートを拒否し、`W_INTENT_DEGRADED` はバージョンが表せないものを示します。一方、エンティティのスキーマは検査しません。redstone の行も一部だけです。真理値表のコードが表そのものの整合性を検査するだけで、回路のシミュレーションは行いません。配線の混雑は `E_ROUTE_CONGESTION` ですが、これに到達できるのは Internal ティアの `cairn synth --experimental-logic-synth` だけです。
+このうち attachment、entity_aabb、support、fluid、edit_stability、AABB の干渉は計画中で、現時点ではどのコマンドも検査しません。本体が重なる 2 つの `place` 行も報告しません。幾何は一部だけ守られます。自分の行の指定で struct の外に出る door、window、軒の stair、chest、センサー、アクチュエーターは描かずに `E_INVALID_MEMBER` として報告し、建たなかったメンバーのせいでだけ外に出るものは `W_DEFERRED_MEMBER` として報告します。version_caps / parity は、専用のコードを通じて一部だけ実行します。`E_VERSION_CAP` は `--target` を `@requires` の下限と照らし合わせ、`E_UNKNOWN_ID` は固定したターゲットが宣言していないブロック ID を、`E_PARITY_UNSUPPORTED` はもう一方のエディションにしかない意味メンバーのブロックを、`E_STATE_DOMAIN` はそこでブロックが取らないステートを、`E_STATE_UNMAPPED` はそのステートマップに形のないブロックステートを拒否し、`W_INTENT_DEGRADED` はバージョンが表せないものを示します。一方、エンティティのスキーマは検査しません。redstone の行も一部だけです。真理値表のコードが表そのものの整合性を検査するだけで、回路のシミュレーションは行いません。配置した回路が守れないレイテンシの上限 (`E_SIM_ASSERTION_FAILED`) と配線の混雑 (`E_ROUTE_CONGESTION`) に到達できるのは、Internal ティアの `cairn synth --experimental-logic-synth` だけです。
 
 ### did you mean
 

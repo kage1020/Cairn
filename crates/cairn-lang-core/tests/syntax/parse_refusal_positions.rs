@@ -58,7 +58,41 @@ fn a_bad_truth_output_is_reported_at_the_output() {
 fn a_misspelled_assert_form_is_reported_at_the_form() {
     assert_eq!(
         refusal("struct s size=3x3\n  assert truht(a -> b) { 0 -> 1 }\n"),
-        "2:10: expected `truth` or `always` after `assert`, got `truht`",
+        "2:10: expected `truth`, `always` or `latency` after `assert`, got `truht`",
+    );
+}
+
+// -- latency bounds -------------------------------------------------------
+
+#[test]
+fn a_latency_bound_is_written_with_less_or_equal() {
+    let takes = "a latency assertion bounds its slowest path from above, as `<= N` ticks";
+    for (comparison, got) in [
+        (">= 4", "`>=`"),
+        ("< 4", "`<`"),
+        ("> 4", "`>`"),
+        ("= 4", "`=`"),
+        ("4", "integer `4`"),
+        ("", "end of line"),
+    ] {
+        let source = format!("struct s size=3x3\n  assert latency(a -> b) {comparison}\n");
+        assert_eq!(
+            refusal(&source),
+            format!("2:26: expected `<=` after `latency(...)`, got {got}: {takes}"),
+            "{source:?}",
+        );
+    }
+}
+
+#[test]
+fn a_latency_bound_is_a_whole_number_of_ticks() {
+    assert_eq!(
+        refusal("struct s size=3x3\n  assert latency(a -> b) <= -1\n"),
+        "2:29: expected integer literal, got `-`",
+    );
+    assert_eq!(
+        refusal("struct s size=3x3\n  assert latency(a -> b) <= 4 ticks\n"),
+        "2:31: expected end of line, got identifier `ticks`",
     );
 }
 

@@ -191,6 +191,14 @@ items:
             output: true
           - inputs: "11"
             output: true
+      - kind: AssertLatency
+        from:
+          - sig
+          - step
+        to:
+          - sig
+          - open
+        bound: 1
       - kind: AssertAlways
         antecedent:
           - sig

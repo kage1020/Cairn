@@ -742,9 +742,12 @@ impl<'a> Parser<'a> {
         match head.as_str() {
             "truth" => self.parse_assert_truth(start_byte),
             "always" => self.parse_assert_always(start_byte),
+            "latency" => self.parse_assert_latency(start_byte),
             other => Err(ParseError::Syntax {
                 position,
-                message: format!("expected `truth` or `always` after `assert`, got `{other}`"),
+                message: format!(
+                    "expected `truth`, `always` or `latency` after `assert`, got `{other}`"
+                ),
             }),
         }
     }
@@ -882,6 +885,41 @@ impl<'a> Parser<'a> {
             antecedent,
             consequent,
             within,
+            span,
+        })
+    }
+
+    fn parse_assert_latency(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
+        self.expect(&TokenKind::LParen)?;
+        let from = self.parse_dotted_ref()?;
+        self.expect(&TokenKind::Arrow)?;
+        let to = self.parse_dotted_ref()?;
+        self.expect(&TokenKind::RParen)?;
+        if !self.peek_is(&TokenKind::LessEq) {
+            let found = self.next_token_text();
+            return Err(self.syntax_here(&format!(
+                "expected `<=` after `latency(...)`, got {found}: a latency assertion bounds its \
+                 slowest path from above, as `<= N` ticks"
+            )));
+        }
+        self.advance();
+        let bound_pos = self.position();
+        let bound_lex = self.expect_int_lexeme()?;
+        let bound: u32 =
+            bound_lex
+                .parse()
+                .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
+                    position: bound_pos,
+                    context: IntContext::LatencyBound,
+                    lexeme: bound_lex.clone(),
+                    kind: *err.kind(),
+                })?;
+        let span = start_byte..self.last_byte();
+        self.expect_newline()?;
+        Ok(Statement::AssertLatency {
+            from,
+            to,
+            bound,
             span,
         })
     }

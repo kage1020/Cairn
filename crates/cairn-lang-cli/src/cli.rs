@@ -389,14 +389,17 @@ pub(crate) enum SynthStage {
             repeater can stand on"
     )]
     Delay,
-    /// Legalized Placement IR: crossing legalization, filling each cell's `buffer_coords`.
+    /// Legalized Placement IR: crossing legalization, filling each cell's `buffer_coords`, then
+    /// latency verification.
     #[value(
         help = "Legalized Placement IR: crossing legalization over the delayed Placement IR \
             against `--edition`. Stage 4 of the pipeline `spec/redstone` \"Place-and-route\" lays \
             out. Materialises the coord of every implicit buffer repeater the delay pass counted \
             into every cell's `buffer_coords`, one entry per driver segment that passes through it \
             — so a block serving several segments is named once per segment and a consumer \
-            counting blocks deduplicates by coord"
+            counting blocks deduplicates by coord. Then checks each `assert latency` against the \
+            legalized circuit, refusing with `E_SIM_ASSERTION_FAILED` one whose slowest path \
+            takes more ticks than its bound"
     )]
     Crossing,
 }

@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::num::NonZeroU32;
 
 use cairn_lang_core::ast::ValueKind;
-use cairn_lang_core::intent::{MemberRole, SemanticLevel};
+use cairn_lang_core::intent::{AssertIr, MemberRole, SemanticLevel};
 use cairn_lang_core::{lower, parse};
 
 use crate::common::examples;
@@ -196,13 +196,39 @@ struct gate size=3x3
     pressure_plate id=plate at=front.outside -> sig.step
     logic sig.open = sig.step
     assert always(sig.step -> eventually sig.open within 2)
+    assert latency(sig.step -> sig.open) <= 3
 ";
     let ir = lower_source(src);
     let level = &ir.structs[0].members[0];
     assert!(matches!(level.role, MemberRole::Level));
     assert_eq!(level.children.members.len(), 1);
     assert_eq!(level.children.logic.len(), 1);
-    assert_eq!(level.children.asserts.len(), 1);
+    let spans: Vec<&str> = level
+        .children
+        .asserts
+        .iter()
+        .map(|a| &src[a.span().clone()])
+        .collect();
+    assert_eq!(
+        spans,
+        [
+            "assert always(sig.step -> eventually sig.open within 2)",
+            "assert latency(sig.step -> sig.open) <= 3",
+        ],
+    );
+    let AssertIr::Latency {
+        from, to, bound, ..
+    } = &level.children.asserts[1]
+    else {
+        panic!(
+            "expected a latency bound, got {:?}",
+            level.children.asserts[1]
+        );
+    };
+    assert_eq!(
+        (from.to_string(), to.to_string(), *bound),
+        ("sig.step".to_owned(), "sig.open".to_owned(), 3),
+    );
 }
 
 #[test]

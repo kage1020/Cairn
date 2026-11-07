@@ -201,7 +201,7 @@ Logical Cell → Edition Cell → Physical Tile
 
 Java の `ComparatorAND` は減算モードのコンパレーターで、一方のオペランドを反転し、最大強度で側面に入れます。そのオペランドがオンの間は側面が 0 を読み、コンパレーターは後ろの入力が運ぶ強度を出力します。オフの間は側面が 15 を読み、後ろの入力が何を運んでいても出力は 0 です。どちらのオペランドもネットリストが運ぶとおりにセルに届くので、反転はセル自身が行い、そのうえで AND を計算するのが減算モードです。比較モードでは、側面が 15 を読んでいる間も、強度 15 の後ろの入力がそのまま通ってしまいます。
 
-`ComparatorAND` は、ポート `a` を後ろの入力にし、`b` を反転して側面に入れます。ポートごとに数えると ([§14.4](#144-時間モデル))、`a` から入る信号はコンパレーターだけを通るので 1 tick、`b` から入る信号は反転とコンパレーターを順に通るので 2 tick です。`and` や `or` のオペランドのうち、どちらをネットリストが `a` に置くかは規定しません。`ComparatorAND` を通る経路の tick 数を押さえるには、書く順序ではなく `assert latency` ([§14.7](#147-検証)) を使います。ただし `assert latency` はまだ構文解析されないので、現在はこの tick 数を押さえる手段がありません。
+`ComparatorAND` は、ポート `a` を後ろの入力にし、`b` を反転して側面に入れます。ポートごとに数えると ([§14.4](#144-時間モデル))、`a` から入る信号はコンパレーターだけを通るので 1 tick、`b` から入る信号は反転とコンパレーターを順に通るので 2 tick です。`and` や `or` のオペランドのうち、どちらをネットリストが `a` に置くかは規定しません。そのため、`ComparatorAND` を通る経路の tick 数に上限を設けるのは書く順序ではなく `assert latency` ([§14.7](#147-検証)) で、オペランドが実際に入ったポートで数えます。
 
 どの論理セルにも、エディションごとに 1 つの実現があります。ポートの tick 数は、そのポートから出力までのいちばん遅い経路で数えます。セルは強度を回復するか (そのときは各ポートへの配線がそこで終わります)、入力の 1 つが運ぶ強度をそのまま渡すかのどちらかです ([§14.5](#145-配置配線-place-and-route))。
 
@@ -237,7 +237,7 @@ E_NO_PORTABLE_IMPL line 15:
 
 ## 14.7 検証
 
-意図を宣言し、合成した回路を tick 単位でヘッドレスにシミュレーションして照合します。アサーションは 3 種類です。
+意図を宣言し、合成した回路をターゲットのエディションごとに照合します。アサーションは 3 種類です。
 
 ```
 # 組み合わせ: 真理値表
@@ -250,16 +250,25 @@ assert latency(sig.in -> sig.out) <= 4
 assert always(sig.button -> eventually sig.door_open within 8)
 ```
 
-このうち現在構文解析できるのは `truth` と `always` だけで、回路をシミュレーションする仕組みもまだありません。 `assert latency(...)` は `latency` の位置で `E_PARSE` になります。真理値表は行を検査し ([Lint](/ja/spec/lint/#真理値表))、どちらのアサーションも、スコープ内で何も駆動していない信号を挙げれば synth パイプラインが `E_LOGIC_UNBOUND_SIGNAL` で拒否します。しかし、どちらも回路とは照合しないので、論理と矛盾する真理値表があっても合成はそのまま通ります。下の自己修正のループと `E_SIM_ASSERTION_FAILED` も、まだ存在しません。
+どの種類のアサーションも、スコープ内で何も駆動していない信号を挙げれば、synth パイプラインが `E_LOGIC_UNBOUND_SIGNAL` で拒否します。真理値表は、行どうしを照らし合わせて検査します ([Lint](/ja/spec/lint/#真理値表))。
 
-自己修正のループ (P5) は **synth → sim → diff → patch** で、検証はターゲットのエディションごとに走ります。パッチが変更するのは、配置配線のヒント、リピーター、バッファだけです。**Logic IR は決して書き換えません。** 論理を自動で書き換える自己修正は危険だからです。
+`assert latency(<from> -> <to>) <= N` は、`<from>` の変化が `<to>` を読む場所に届くまでの tick 数に上限を設けます。書けるのは `<=` と tick の整数だけで、ほかの比較はその位置で `E_PARSE` になります。配置配線は経路に tick を足すだけなので、レイアウトが破りうるのは上限だからです。tick は、遅延が初めて決まる合法化済みの Placement IR ([§14.8](#148-ir-とフェーズの関係)) で、ターゲットのエディションごとに数えます。経路は `<from>` を駆動するもの (センサーのパッドかセルの出力) から始まり、セルを通って `<to>` に至ります。入るセルごとに、入ったポートの tick 数 ([§14.4](#144-時間モデル)) を、通る配線上のバッファリピーターごとに 1 tick ([§14.5](#145-配置配線-place-and-route)) を数え、ダストは数えません。`<to>` を読むアクチュエーターがあれば、経路はその配線上のリピーターを通ってアクチュエーターのパッドまで続き、複数あれば最も遅いものまでを数えます。なければ、`<to>` を駆動するセルの出力で終わります。上限が押さえるのは最も遅い経路です。`<from>` の変化が 1 つのセルに 2 つのポートから届くなら、遅いほうのポートで数えます。
+
+最も遅い経路が上限を超えると、そのエディションで `E_SIM_ASSERTION_FAILED` になります。そのため、OR がダストの合流である Bedrock では守れる上限を、OR がリピーター 2 つである Java では守れない、ということが同じソースで起こります。この診断は、数えた tick 数を示し、経路が入るセルとそのポート、各配線上のリピーターをそれぞれ注記で挙げます。`<to>` が `<from>` にまったく依存しないなら、一方の変化をもう一方に運ぶ経路がないので、どのエディションでも守れません。これは、エディションを選ぶ前に synth が同じコードで拒否します。配置配線は上限を読まないので、上限はソースの側で守ります。上限を緩めるか、通るセルが少ない経路や、リピーターが少ない配線で守れるようにします。`cairn synth --experimental-logic-synth --stage crossing` は、交差の合法化のあとですべての上限を検査し、1 つでも守れなければ IR を出力しません。
 
 ```text
-E_SIM_ASSERTION_FAILED edition=bedrock:
-  assert latency(sig.in -> sig.out) <= 4, but measured 6 (2 buffer repeaters on the routed path).
-  Patch target: placement hint / route. (logic is never auto-modified)
-  Suggested: relax to <=6, enlarge circuit void to shorten routes, or pin cell placement.
+E_SIM_ASSERTION_FAILED line 13:
+  struct=reach: `assert latency(sig.a -> sig.c) <= 1` fails on bedrock: its slowest path from
+  sig.a to sig.c takes 2 ticks, 2 in buffer repeaters on the routed wire
+  note: the path enters cell #0 (`TorchOR`) by port `a`: 0 ticks through the cell
+  note: then the pad of the actuator reading sig.c: 2 buffer repeaters on the wire to it
+  note: the wire carries 2 buffer repeaters, one wherever it runs past 15 blocks of dust, so a
+  smaller `circuit` region, which puts the pads nearer what drives them, needs fewer
+  note: Fix: relax the bound to `<= 2`, or shorten the path; the logic is never rewritten to
+  meet a bound
 ```
+
+回路をシミュレーションする仕組みはまだないので、`truth` と `always` は回路と照合しません。論理と矛盾する真理値表があっても、合成はそのまま通ります。自己修正のループ (P5) は **synth → sim → diff → patch** で、ターゲットのエディションごとに走ります。パッチが変更するのは、配置配線のヒント、リピーター、バッファだけです。**Logic IR は決して書き換えません。** 論理を自動で書き換える自己修正は危険だからです。このループはまだ存在しません。守れない上限は報告するだけで、それを守るようにレイアウトを直すものはありません。
 
 ## 14.8 IR とフェーズの関係
 

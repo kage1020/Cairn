@@ -37,7 +37,7 @@ do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change))
 
 No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
 parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
-`within` bound of an `assert`. A decimal such as `scale=1.5` ([Entities](/spec/entities/)) is
+`within` bound of an `assert always` and the `<=` bound of an `assert latency`. A decimal such as `scale=1.5` ([Entities](/spec/entities/)) is
 therefore `E_PARSE` too until the parser reads one.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
@@ -231,8 +231,9 @@ reservation spans the whole scope: a `circuit` line under a `level` reaches noth
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
 `cairn check` checks a truth table ([Literals and separators](#511-literals-and-separators)), and
-redstone synthesis resolves the signals it names (`E_LOGIC_UNBOUND_SIGNAL`). Nothing verifies it
-against a built circuit yet.
+redstone synthesis resolves the signals it names (`E_LOGIC_UNBOUND_SIGNAL`). A latency bound is
+checked against the placed circuit ([Redstone §14.7](/spec/redstone/#147-verification)); nothing
+checks a truth table or a temporal assertion against a built circuit yet.
 
 **Top-level names are scoped per kind.** `theme` / `def` / `struct` / `site` are four namespaces, so
 one name may appear once in each. Declaring it twice within one kind is `E_DUPLICATE_ITEM`. For

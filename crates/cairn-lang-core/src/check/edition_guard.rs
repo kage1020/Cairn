@@ -36,7 +36,8 @@ fn walk(body: &[Statement], sink: &mut DiagnosticSink) {
             Statement::Generic { children, .. } => walk(children, sink),
             Statement::Logic { .. }
             | Statement::AssertTruth { .. }
-            | Statement::AssertAlways { .. } => {}
+            | Statement::AssertAlways { .. }
+            | Statement::AssertLatency { .. } => {}
         }
     }
 }
@@ -51,9 +52,9 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
             _ => format!("a `{keyword}`"),
         },
         Statement::Logic { .. } => "a `logic` line".to_owned(),
-        Statement::AssertTruth { .. } | Statement::AssertAlways { .. } => {
-            "an `assert` line".to_owned()
-        }
+        Statement::AssertTruth { .. }
+        | Statement::AssertAlways { .. }
+        | Statement::AssertLatency { .. } => "an `assert` line".to_owned(),
         // The parser refuses a guard in a guard.
         Statement::EditionGuard { .. } => return,
     };

@@ -66,7 +66,8 @@ fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
 fn a_logic_or_assert_line_under_a_guard_is_refused() {
     let source = struct_with(
         "  @edition bedrock\n    logic sig.a = sig.b\n    \
-         assert always(sig.a -> eventually sig.b within 4)\n",
+         assert always(sig.a -> eventually sig.b within 4)\n    \
+         assert latency(sig.b -> sig.a) <= 2\n",
     );
     let found = diagnose(&source);
     let refused: Vec<(&str, &str)> = found
@@ -83,6 +84,11 @@ fn a_logic_or_assert_line_under_a_guard_is_refused() {
             ),
             (
                 "assert always(sig.a -> eventually sig.b within 4)",
+                "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
+                 members: the semantic layer is edition-neutral",
+            ),
+            (
+                "assert latency(sig.b -> sig.a) <= 2",
                 "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
                  members: the semantic layer is edition-neutral",
             ),

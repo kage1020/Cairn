@@ -6,7 +6,7 @@
 #  - sensor → signal → actuator binding
 #  - the closed-set logic vocabulary (no tick arithmetic in the language core)
 #  - a circuit region for place-and-route
-#  - bounded temporal assertion
+#  - a latency bound and a bounded temporal assertion
 
 theme entry:
   slot wall -> @oak_planks
@@ -27,6 +27,7 @@ struct gatehouse size=7x5
 
   circuit region=floor void=2
 
-  # spec/redstone "Verification": truth + bounded eventually
+  # spec/redstone "Verification": truth, latency and bounded eventually
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
+  assert latency(sig.step -> sig.open) <= 1
   assert always(sig.step -> eventually sig.open within 2)

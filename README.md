@@ -93,7 +93,7 @@ semantic-sensitive:      (none)
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
 
-**Experimental.** `cairn synth --experimental-logic-synth` takes a `logic` graph through synthesis, netlist construction, edition selection, placement, routing, delay insertion, and crossing legalization, printing each stage as JSON. Redstone does not reach compiled artifacts yet, and the output shape is free to change.
+**Experimental.** `cairn synth --experimental-logic-synth` takes a `logic` graph through synthesis, netlist construction, edition selection, placement, routing, delay insertion, and crossing legalization, printing each stage as JSON, and checks each `assert latency` against the circuit it lays out. Redstone does not reach compiled artifacts yet, and the output shape is free to change.
 
 **Not yet.**
 
@@ -101,7 +101,7 @@ semantic-sensitive:      (none)
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
 - `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
 - `.litematic` and `.schem` writers, and importing existing schematics.
-- Redstone in compiled output, gates and sequential macros beyond `and` / `or` / `not`, `assert latency`, and the tick simulator that verifies a circuit.
+- Redstone in compiled output, the sequential macros, and the tick simulator that verifies a circuit.
 - The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas

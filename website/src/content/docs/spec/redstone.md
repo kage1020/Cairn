@@ -464,9 +464,9 @@ would still pass a rear input at 15 through.
 The `ComparatorAND` takes port `a` at its rear and inverts `b` onto its side. Counted per port
 ([§14.4](#144-time-model)), a signal entering by `a` passes the comparator alone, 1 tick, and one
 entering by `b` passes the inverter and then the comparator, 2 ticks. Which operand of `and` or `or`
-the netlist puts on `a` is not specified; `assert latency` ([§14.7](#147-verification)), not the
-order written, pins a path's ticks through a `ComparatorAND`. `assert latency` is not parsed yet,
-so nothing pins them today.
+the netlist puts on `a` is not specified, so the order written does not bound a path's ticks
+through a `ComparatorAND`; `assert latency` ([§14.7](#147-verification)) does, counting the port the
+operand lands on.
 
 Every logical cell has one realisation per edition. A port's ticks count the slowest path from it
 to the output, and a cell either restores strength, so the wire into each of its ports ends there,
@@ -523,8 +523,8 @@ edition-correct circuit instead. That is the biggest reason to describe logic ra
 
 ## 14.7 Verification
 
-Declare the intent, then simulate the synthesized circuit per tick, headless, and check it. There
-are three assertion kinds:
+Declare the intent, then check the synthesized circuit against it, per target edition. There are
+three assertion kinds:
 
 ```
 # combinational: truth table
@@ -537,23 +537,51 @@ assert latency(sig.in -> sig.out) <= 4
 assert always(sig.button -> eventually sig.door_open within 8)
 ```
 
-Of the three, only `truth` and `always` are parsed today, and nothing simulates the circuit
-yet. `assert latency(...)` is `E_PARSE` at `latency`. A truth table's rows are checked
-([Lint](/spec/lint/#truth-tables)), and the synth pipeline refuses either kind naming a signal
-nothing in its scope drives (`E_LOGIC_UNBOUND_SIGNAL`), but neither is checked against the circuit:
-a truth table its logic contradicts still synthesizes. The loop below and `E_SIM_ASSERTION_FAILED`
-do not exist yet.
+The synth pipeline refuses an assertion of any kind that names a signal nothing in its scope
+drives (`E_LOGIC_UNBOUND_SIGNAL`), and a truth table's rows are checked against each other
+([Lint](/spec/lint/#truth-tables)).
 
-The self-correction loop (P5) is **synth → sim → diff → patch**, and verification runs per target
-edition. The patch targets place-and-route hints, repeaters, and buffers only. **The Logic IR is
-never rewritten**, because self-correction that auto-modifies logic is dangerous.
+`assert latency(<from> -> <to>) <= N` bounds the ticks a change at `<from>` takes to reach where
+`<to>` is read. It takes `<=` and a whole number of ticks, and no other comparison, which is
+`E_PARSE` at the comparison: place-and-route only adds ticks to a path, so an upper bound is the one
+a layout can break. The ticks are counted per target edition on the legalized Placement IR
+([§14.8](#148-connection-to-the-ir-and-phases)), where delay is first determined. A path starts at
+what drives `<from>`, a sensor's pad or a cell's output, and runs through cells to `<to>`. Each cell
+it enters costs the ticks of the port it enters by ([§14.4](#144-time-model)), each buffer repeater
+on the routed wire it runs along costs a tick ([§14.5](#145-place-and-route)), and dust costs
+none. Where an actuator reads `<to>`, the path runs on to the actuator's pad, over the repeaters on
+that wire, to the slowest of them where several do; where none does, it ends at the output of the
+cell that drives `<to>`. The bound holds the slowest path: where a change at `<from>` reaches one
+cell by two ports, the slower port counts.
+
+A bound the slowest path exceeds is `E_SIM_ASSERTION_FAILED` on that edition: one source can meet
+a bound on Bedrock, where an OR is a dust merge, and miss it on Java, where it is two repeaters. The
+finding gives the ticks it measured and, in a note each, the cells the path enters, the port it
+enters each by, and the repeaters on each wire. A `<to>` that does not depend on `<from>` fails on
+every edition, since no path carries a change from one to the other, and synth refuses it with the
+same code before an edition is chosen. Place-and-route does not read a bound, so it is met in the
+source: relaxed, or met by a path through fewer cells or along a wire with fewer repeaters.
+`cairn synth --experimental-logic-synth --stage crossing` checks every bound after crossing
+legalization and prints no IR when one fails.
 
 ```text
-E_SIM_ASSERTION_FAILED edition=bedrock:
-  assert latency(sig.in -> sig.out) <= 4, but measured 6 (2 buffer repeaters on the routed path).
-  Patch target: placement hint / route. (logic is never auto-modified)
-  Suggested: relax to <=6, enlarge circuit void to shorten routes, or pin cell placement.
+E_SIM_ASSERTION_FAILED line 13:
+  struct=reach: `assert latency(sig.a -> sig.c) <= 1` fails on bedrock: its slowest path from
+  sig.a to sig.c takes 2 ticks, 2 in buffer repeaters on the routed wire
+  note: the path enters cell #0 (`TorchOR`) by port `a`: 0 ticks through the cell
+  note: then the pad of the actuator reading sig.c: 2 buffer repeaters on the wire to it
+  note: the wire carries 2 buffer repeaters, one wherever it runs past 15 blocks of dust, so a
+  smaller `circuit` region, which puts the pads nearer what drives them, needs fewer
+  note: Fix: relax the bound to `<= 2`, or shorten the path; the logic is never rewritten to
+  meet a bound
 ```
+
+Nothing simulates the circuit yet, so `truth` and `always` are not checked against it: a truth
+table its logic contradicts still synthesizes. The self-correction loop (P5) is
+**synth → sim → diff → patch**, run per target edition. The patch targets place-and-route hints,
+repeaters, and buffers only. **The Logic IR is never rewritten**, because self-correction that
+auto-modifies logic is dangerous. The loop does not exist yet: a bound that fails is reported, and
+nothing patches the layout to meet it.
 
 ## 14.8 Connection to the IR and phases
 
