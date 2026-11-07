@@ -20,7 +20,7 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `java_structure::build_structure_tag` | `BlockArray` → `Compound` (Java vanilla shape). One compound per voxel, so for inspecting a structure rather than writing a large one. |
 | `java_structure::write_structure_gzip` | Check and gzip-write in one call, streaming. A refused array leaves the writer untouched. |
 | `java_structure::write_compound_gzip` | Gzip-write an already-built root under the empty root name vanilla expects. |
-| `java_structure::output_filename` | `struct::cottage` + `OutputExt::Nbt` → `cottage.nbt`; `OutputExt::Mcstructure` → `cottage.mcstructure`. |
+| `java_structure::output_filename` | The stem `cottage` (`BlockArrayIr::artifact_stem` of `struct::cottage`) + `OutputExt::Nbt` → `cottage.nbt`; `OutputExt::Mcstructure` → `cottage.mcstructure`. |
 | `java_structure::OutputExt` | `Nbt` / `Mcstructure`. The only way to name an output extension, so no caller ends up with `.nbt.nbt`. |
 | `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `PaletteIndexOutOfRange`, `DimensionOverflow`, `VolumeOverflow`, `ListTooLong`, `VoxelCountMismatch`, `UnencodablePaletteString`. `#[non_exhaustive]`. |
 | `java_structure::Compound` | [`cairn-lang-nbt`](../cairn-lang-nbt/README.md)'s tag compound, passed through so building a tag tree needs one dependency rather than two. |
