@@ -18,18 +18,18 @@ from the side it sits on, and its `half` and `shape` are what its line writes, o
 below are not derived yet, so `cairn lower examples/cottage.crn` writes a bare
 `minecraft:glass_pane`.
 
-A `door` sets a door block two rows tall into the opening it cuts
-([Syntax §5.4](/spec/syntax/#54-selectors)): `half=lower` on the row it opens at and `half=upper`
-on the row above. Its `facing` points into the struct, so the closed door sits on the outer face of
-its wall and swings inward, and it is built closed, `open=false`. Its `hinge` is read from the
-wall beside it once every opening is cut. Left and right are as seen from outside, so a door's
-left is toward `at=left`. Each side counts the rows of the door's two at which the column beside it
-still holds a block of a `walls` member, and a side has a door when another door's lower half
-stands beside the door's lower half. The hinge is on the right when the door has a door on its left
-and none on its right, or more wall on its right than on its left, and on the left otherwise: a
-door in an unbroken wall is hinged on the left, one beside a window is hinged on the wall's side,
-and two side by side are hinged on their outer sides, so they open as a pair. A `hinge=left` or
-`hinge=right`, and an `open=true` or `open=false`, on the door's line replace what is derived.
+A `door` sets a door block two rows tall into the opening it cuts ([Syntax
+§5.4](/spec/syntax/#54-selectors)): `half=lower` on the row it opens at and `half=upper` on the row
+above. Its `facing` points into the struct, so the closed door sits on the outer face of its wall
+and swings inward, and it is built closed, `open=false`. Its `hinge` is read from the wall beside it
+once every opening is cut. Left and right are as seen from outside, so a door's left is toward
+`at=left`. For each side, count the door's two rows at which the cell beside it still holds a block
+of a `walls` member; a side has a door when another door's lower half stands beside the door's lower
+half. The hinge is on the right when the door has a door on its left and none on its right, or more
+wall on its right than on its left, and on the left otherwise: a door in an unbroken wall is hinged
+on the left, one beside a window is hinged on the wall's side, and two side by side are hinged on
+their outer sides, so they open as a pair. A `hinge=left` or `hinge=right`, and an `open=true` or
+`open=false`, on the door's line replace what is derived.
 
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
 promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let

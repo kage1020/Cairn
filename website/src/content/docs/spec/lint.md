@@ -513,14 +513,14 @@ reserves no region and an actuator patch that binds no door are refused the same
 for a plate the drop reaches past the block array as well: its `->` binding is still read, so its
 signal stays in the netlist with no plate to drive it, and the finding says so in a note.
 
-A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with
-a note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws
-nothing, or a `level` that is not placed. That member's finding, or the scope's
-`W_NO_THEME_BOUND`, says why it did not build. A member whose line is wrong too is
-`E_INVALID_MEMBER` all the same, and so is one whose line also writes what the pass does not lower
-yet, so neither hides a line's own fault. The members under a `level` that is not placed are the
-exception: `E_UNSUPPORTED_NESTING` says that level produces no blocks, and their own lines are read
-once it is placed.
+A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with a
+note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws nothing,
+or a `level` that is not placed. That member's finding, or the scope's `W_NO_THEME_BOUND`, says why
+it did not build. A member whose line is wrong too is `E_INVALID_MEMBER` all the same, and so is one
+whose line also writes what the pass does not lower yet, so neither hides a line's own fault. A
+`door`'s material is judged too, whatever refuses or defers it, so a refused material is not hidden
+either. The members under a `level` that is not placed are the exception: `E_UNSUPPORTED_NESTING`
+says that level produces no blocks, and their own lines are read once it is placed.
 
 `E_PARTIAL_BUILD` is the run-level counterpart: a finding above says a scope builds without
 something, and this says a scope the command was asked for did not build at all. A scope that
