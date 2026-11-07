@@ -213,8 +213,8 @@ fn a_member_beside_walls_under_a_level_with_no_y_waits_on_that_level() {
                 "door has no wall to cut into: every `walls` member on this struct sits under a \
                  `level` that is not placed",
                 vec![
-                    "a `level` that is not placed holds a `walls` member that may reach the row \
-                     the door opens at; the door is cut once that `level` is placed",
+                    "a `level` that is not placed holds a `walls` member that may reach the rows \
+                     the door stands in; the door is set once that `level` is placed",
                 ],
             ),
             (
@@ -295,7 +295,7 @@ fn an_opening_beside_walls_with_no_positive_height_is_offered_one() {
                  `height=`",
                 vec![
                     "give the `walls` a positive `height=`, or add a `walls` member whose course \
-                     holds the row the door opens at",
+                     holds the two rows the door stands in",
                 ],
             ),
             (

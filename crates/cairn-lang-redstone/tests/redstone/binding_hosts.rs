@@ -92,7 +92,7 @@ fn an_actuator_argument_that_names_no_signal_is_refused() {
         ("[a,b]", "a list"),
     ] {
         let out = synth_source(&gate_source(&format!(
-            "  door id=d side=front at=center mat_slot=wall opened_by={value}\n",
+            "  door id=d side=front at=center opened_by={value}\n",
         )));
         assert_eq!(
             codes(&out),
@@ -119,7 +119,7 @@ fn an_actuator_argument_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_
 #[test]
 fn a_binding_inside_the_selector_is_refused_and_counts_as_wired() {
     let out = synth_source(&gate_source(concat!(
-        "  door id=front side=front at=center mat_slot=wall\n",
+        "  door id=front side=front at=center\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front,opened_by=sig.a]\n",
     )));
@@ -140,7 +140,7 @@ fn a_binding_inside_the_selector_is_refused_and_counts_as_wired() {
 #[test]
 fn a_bracketed_pair_is_answered_by_the_fault_that_survives_unbracketing() {
     let wrong_host = synth_source(&gate_source(concat!(
-        "  door id=front side=front at=center mat_slot=wall\n",
+        "  door id=front side=front at=center\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front,lit_by=sig.a]\n",
     )));
@@ -154,7 +154,7 @@ fn a_bracketed_pair_is_answered_by_the_fault_that_survives_unbracketing() {
     );
 
     let typo = synth_source(&gate_source(concat!(
-        "  door id=front side=front at=center mat_slot=wall\n",
+        "  door id=front side=front at=center\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front,oepend_by=sig.a]\n",
     )));
@@ -172,7 +172,7 @@ fn a_bracketed_pair_is_answered_by_the_fault_that_survives_unbracketing() {
 #[test]
 fn a_signal_under_the_one_key_the_brackets_read_is_not_blamed_on_the_brackets() {
     let out = synth_source(&gate_source(concat!(
-        "  door id=front side=front at=center mat_slot=wall\n",
+        "  door id=front side=front at=center\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=sig.a]\n",
     )));
@@ -189,7 +189,7 @@ fn a_signal_under_the_one_key_the_brackets_read_is_not_blamed_on_the_brackets() 
 #[test]
 fn a_selector_binding_with_no_name_leaves_the_signal_unconsumed() {
     let out = synth_source(&gate_source(concat!(
-        "  door id=front side=front at=center mat_slot=wall\n",
+        "  door id=front side=front at=center\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front,opened_by=a]\n",
     )));
@@ -221,7 +221,7 @@ fn a_selector_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
 #[test]
 fn a_selector_that_binds_nothing_is_left_alone() {
     let out = synth_source(&gate_source(concat!(
-        "  door id=front side=front at=center mat_slot=wall\n",
+        "  door id=front side=front at=center\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front] opened_by=sig.a\n",
     )));
@@ -234,7 +234,7 @@ fn a_selector_that_binds_nothing_is_left_alone() {
 fn a_malformed_value_and_the_signal_it_leaves_unconsumed_are_both_reported() {
     let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
-        "  door id=d side=front at=center mat_slot=wall opened_by=a\n",
+        "  door id=d side=front at=center opened_by=a\n",
     )));
     assert_eq!(
         codes(&out),

@@ -13,7 +13,7 @@ use cairn_lang_formats::portability::{
 };
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
-use crate::common::{examples, lower_source, note_fields, supported_versions};
+use crate::common::{admitted_versions, examples, lower_source, note_fields, states_for};
 
 /// Every structure's extent, keyed by scope.
 fn extents(ir: &BlockArrayIr) -> BTreeMap<&str, (u32, u32, u32)> {
@@ -47,14 +47,16 @@ fn report_for(
 ) -> PortabilityReport {
     match edition {
         Edition::Java => portability_for_java(ir, pack.blocks(), pack.aliases()),
-        Edition::Bedrock => portability_for_bedrock(ir, pack.blocks(), pack.aliases())
-            .unwrap_or_else(|invalid| {
-                panic!(
-                    "{name} leaked a blockstate the pack was expected to refuse on \
+        Edition::Bedrock => {
+            portability_for_bedrock(ir, pack.blocks(), pack.aliases(), pack.states())
+                .unwrap_or_else(|invalid| {
+                    panic!(
+                        "{name} leaked a blockstate the pack was expected to refuse on \
                      {edition}: {:?}",
-                    invalid.leaks(),
-                )
-            }),
+                        invalid.leaks(),
+                    )
+                })
+        }
     }
 }
 
@@ -87,8 +89,8 @@ fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
         for (edition, pack) in editions() {
             let unpinned = lower_source(source, edition, None);
             let reported = report_for(edition, pack, &unpinned, name).counts().total();
-            for version in supported_versions(pack) {
-                let built = lower_source(source, edition, Some(version));
+            for version in admitted_versions(pack, source, edition) {
+                let built = lower_source(source, edition, Some(&version));
                 assert!(
                     built.diagnostics.is_empty(),
                     "{name} does not build for {edition} {version}: {:?}",
@@ -133,9 +135,9 @@ fn the_build_notes_each_degraded_entry_by_the_fields_info_names_it_with() {
             roof_hip = Some(from_info.len());
         }
 
-        for version in supported_versions(pack) {
-            let target = resolve_bedrock_target(version).expect("a targetable version resolves");
-            let built = lower_source(source, Edition::Bedrock, Some(version));
+        for version in admitted_versions(pack, source, Edition::Bedrock) {
+            let target = resolve_bedrock_target(&version).expect("a targetable version resolves");
+            let built = lower_source(source, Edition::Bedrock, Some(&version));
             assert!(
                 built.diagnostics.is_empty(),
                 "{name} does not build for bedrock {version}: {:?}",
@@ -143,16 +145,27 @@ fn the_build_notes_each_degraded_entry_by_the_fields_info_names_it_with() {
             );
             let mut notes = Vec::new();
             for (scope, array) in &built.structures {
-                let (_, raised) = prepare_mcstructure(array, &target).unwrap_or_else(|err| {
-                    panic!("{name}: `{scope}` is refused for bedrock {version}: {err}")
-                });
+                let (_, raised) = prepare_mcstructure(array, &target, &states_for(&target))
+                    .unwrap_or_else(|err| {
+                        panic!("{name}: `{scope}` is refused for bedrock {version}: {err}")
+                    });
                 notes.extend(raised);
             }
-            assert_eq!(
-                note_fields(&notes),
-                from_info,
-                "{name} on bedrock {version}"
-            );
+            let at_version: Vec<DroppedIntent> = from_info
+                .iter()
+                .filter(|(_, _, dropped)| dropped.mc_versions.contains(&version))
+                .map(|(_, _, dropped)| DroppedIntent {
+                    mc_versions: vec![version.clone()],
+                    ..(*dropped).clone()
+                })
+                .collect();
+            let expected: Vec<(&str, &str, &DroppedIntent)> = from_info
+                .iter()
+                .filter(|(_, _, dropped)| dropped.mc_versions.contains(&version))
+                .zip(&at_version)
+                .map(|((id, states, _), dropped)| (*id, *states, dropped))
+                .collect();
+            assert_eq!(note_fields(&notes), expected, "{name} on bedrock {version}");
         }
     }
     assert_eq!(

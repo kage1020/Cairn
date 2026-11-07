@@ -7,11 +7,13 @@ pub(super) enum Phase {
     Envelope,
     Openings,
     Fixtures,
+    Fluids,
+    Raw,
 }
 
 impl Phase {
     /// How many phases paint: one past the highest [`Self::index`].
-    pub(super) const COUNT: usize = 4;
+    pub(super) const COUNT: usize = 6;
 
     /// This phase's position in `spec/compilation` "Phase evaluation" order, from `0`.
     pub(super) const fn index(self) -> usize {
@@ -20,6 +22,8 @@ impl Phase {
             Self::Envelope => 1,
             Self::Openings => 2,
             Self::Fixtures => 3,
+            Self::Fluids => 4,
+            Self::Raw => 5,
         }
     }
 }

@@ -728,7 +728,7 @@ fn every_plate_left_unplaced_says_its_signal_still_reaches_the_netlist() {
         (
             state_literal,
             "pressure_plate at=inside.front offset=2 mat_slot=p",
-            vec![(DiagnosticCode::StateLiteralUnchecked, literal)],
+            vec![],
             DiagnosticCode::DeferredMember,
         ),
     ] {

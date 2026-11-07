@@ -39,10 +39,10 @@ fn a_slot_read_from_a_nested_member_counts_as_reading_one() {
 fn a_slot_named_on_a_role_that_reads_none_does_not_count_as_reading_one() {
     let src = [
         "theme shop_bedrock:",
-        "  slot door -> @dark_oak_door",
+        "  slot floor -> @dark_oak_planks",
         "",
         "struct s size=7x5",
-        "  door side=front at=center mat_slot=door",
+        "  circuit region=floor void=2 mat_slot=floor",
         "",
     ]
     .join("\n");
@@ -50,7 +50,7 @@ fn a_slot_named_on_a_role_that_reads_none_does_not_count_as_reading_one() {
     let intent = lower(&module);
     assert!(
         !any_member_reads_a_slot(&intent),
-        "the door's `mat_slot=` is not a read",
+        "the circuit's `mat_slot=` is not a read",
     );
     let r = resolve(&intent, Some(Edition::Java));
     assert!(

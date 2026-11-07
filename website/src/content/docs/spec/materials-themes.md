@@ -76,8 +76,10 @@ little-endian NBT, or Bedrock's `weirdo_direction`.
 
 The backend resolves less than that today. A canonical token is written as `minecraft:<token>` and
 checked against the pinned target ([§7.3](#73-mappings-across-version-and-edition)), so
-`@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version, and the Bedrock writer maps the states
-of the stair family alone: `@oak_log[axis=x]` compiles for Java and is refused for Bedrock.
+`@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version. Its states are the ones the token's
+Java block takes, and the Bedrock writer maps them through the pack's state map for the target
+version: `@oak_log[axis=x]` is written as `pillar_axis=x` on every Bedrock version, while
+`@cherry_wood[axis=x]` is `E_STATE_UNMAPPED` at 1.21.40, whose map has no form for it.
 
 Tokens come in two kinds:
 
@@ -112,6 +114,8 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@wood.dark`, `@wood.light`, `@wood.warm`, `@wood.cool` | Planks, by tone |
 | `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
 | `@sign.oak`, `@sign.oak_wall` | A standing sign and a wall sign |
+| `@door.default` | The door block a `door` places when no `mat_slot=` binds one |
+| `@chest.default` | The chest block a `chest` places when no `mat_slot=` binds one |
 | `@pressure_plate.default` | The block a `pressure_plate` places when no `mat_slot=` binds one |
 
 The block a tier-1 token resolves to is **tier-2**, which is Evolving: it is the catalog's answer
@@ -135,17 +139,72 @@ A canonical token absorbs five patterns. The resolution table's structure is in
 | New | `@cherry_planks` | Needs a `requires >=` floor. |
 | Deleted | Absent in the target version | Hard error plus alternatives. |
 
-Today only the last row holds as written. A canonical token is written as `minecraft:<token>`
-and checked against the pinned target
-([Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)).
-A rename is `E_UNKNOWN_ID`, with a note naming the target's spelling from the registry pack's
-`aliases` (`@dirt_path` on Bedrock is answered with `minecraft:grass_path`); only an abstract token
-resolves across a rename, through its catalog entry's `overrides`
-([§7.2](#72-canonical-vocabulary)). A split is not separated: `@cauldron[fluid=water]` is written
-as `minecraft:cauldron[fluid=water]` with `W_STATE_LITERAL_UNCHECKED`. A merged id is checked per
-target like any other. No floor is inferred for a new block: `@pale_oak_planks` with no `@requires`
-checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it. A deleted id is
-`E_UNKNOWN_ID`, naming the nearest block the target has when one is near enough.
+Today only the last row holds as written. A canonical token is written as `minecraft:<token>` and
+checked against the pinned target ([Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)). A rename is
+`E_UNKNOWN_ID`, with a note naming the target's spelling from the registry pack's `aliases`
+(`@dirt_path` on Bedrock is answered with `minecraft:grass_path`); only an abstract token resolves
+across a rename, through its catalog entry's `overrides` ([§7.2](#72-canonical-vocabulary)). A split
+is not separated: `@cauldron[fluid=water]` names a state `minecraft:cauldron` does not have, so a
+pinned target refuses it as `E_STATE_DOMAIN` rather than reading it as `water_cauldron`. A merged id
+is checked per target like any other. No floor is inferred for a new block: `@pale_oak_planks` with
+no `@requires` checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it, naming
+1.21.4 as the version it first appears in. A deleted id is `E_UNKNOWN_ID`, naming the last version
+that declares it; an id no version declares names the nearest block the target has when one is near
+enough.
 
 **Only ID, state, and serialization differences may be absorbed.** Concept absence and
 game-behaviour differences are not.
+
+## 7.4 Raw blocks
+
+A theme binds canonical tokens, and a member is built from what its slot resolves to. Where that is
+not enough, two members name the block themselves. They are the **escape hatch**, built in the
+`raw` phase ([Compilation Model §4.1](/spec/compilation/#41-phase-evaluation)):
+
+```
+raw_block mat=minecraft:light[level=15] at=4,3,2
+raw_fill  mat=minecraft:tinted_glass from=1,2,0 to=3,3,0
+```
+
+`mat=` is a **block id**, `namespace:path` with an optional state literal touching it
+([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). A `raw_block` puts that block in the
+one cell its `at=` names. A `raw_fill` puts it in every cell of the box between `from=` and `to=`,
+two opposite corners written in either order, as a `fill`'s are
+([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)). Each is a coordinate triple measured
+from the footprint's low corner, and from the level under `level y=N`.
+
+A raw block skips the theme and the slot. No `mat_slot=` binds it, so one written on the line is
+`W_IGNORED_ARGUMENT`; no abstract token or catalog default stands in for it; and a struct with no
+theme bound still builds it. It does not skip the target. A build that pins a version checks the
+id and its states as it checks any block's: an id the target does not declare is `E_UNKNOWN_ID`,
+and a state outside the block's is `E_STATE_DOMAIN` ([Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)). On Bedrock the
+states are the canonical vocabulary, which the state map writes as a canonical token's
+([§7.2](#72-canonical-vocabulary)), so a state the map has no form for is `E_STATE_UNMAPPED`.
+
+The block is written as given. The `raw` phase runs after every other, so a raw block replaces
+whatever another member put in its cell, air included, and none of its states is derived: water
+poured before it does not waterlog it, and the connection rules neither join it to its neighbours
+nor pair it with a chest beside it, though a neighbour still joins it as it would any block
+([Blockstate Model §6.1](/spec/blockstate/#connections)). Two raw members writing one cell contest
+it in their phase, and the later line wins with `W_PHASE_CONFLICT`. A raw member does not size the
+volume. As with a `fill`, a cell outside the footprint, or above every row the struct as written
+reaches, is `E_INVALID_MEMBER`, and a cell in a row the struct reaches but does not build is
+`W_DEFERRED_MEMBER`.
+
+A `mat=` that is missing or not a block id is `E_INVALID_MEMBER`. That includes `@stone`, a
+canonical token, which a slot binds. So is an `at=`, `from=` or `to=` that is missing or not a
+triple.
+
+A raw member may stand outside an `@edition` guard. Raw ids are edition-specific by nature, and the
+check at the pinned target keeps an unguarded one honest: `minecraft:light` builds on Java and is
+`E_UNKNOWN_ID` on Bedrock, which spells the block `light_block`, and from 1.21.40 `light_block_0` …
+`light_block_15`. A file built for both editions writes an id both declare, or one branch per
+edition under `@edition` ([Versioning and Editions
+§10.7](/spec/versioning-editions/#writing-an-alternative)).
+
+`raw_repeat` and the `origin=imported` that marks what import writes belong to import
+([Ecosystem Interop §12.3](/spec/ecosystem-interop/#123-three-tiers-of-transliteration)), which
+does not exist yet. Until it does, `raw_repeat` is `E_UNKNOWN_KEYWORD` and `origin=` is
+`E_UNKNOWN_ARGUMENT`.

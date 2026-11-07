@@ -50,7 +50,7 @@ pub(super) fn read_or_ignore<'m, T>(
     read: impl FnOnce(&'m ValueKind) -> Option<T>,
     expected: &'static str,
 ) -> Result<Option<T>, UnreadArgument> {
-    let Some(raw) = member.intent_state.get(key) else {
+    let Some(raw) = member.written(key) else {
         return Ok(None);
     };
     match read(&raw.value.kind) {
@@ -121,7 +121,7 @@ pub(super) fn nonneg_int_or_refuse(
     key: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> NonNegRead {
-    let Some(raw) = member.intent_state.get(key) else {
+    let Some(raw) = member.written(key) else {
         return NonNegRead::Absent;
     };
     if let Some(v) = member.nonneg_u32(key) {
@@ -141,7 +141,7 @@ pub(super) fn nonneg_int_or_refuse(
 }
 
 pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
-    let raw = member.intent_state.get(key)?;
+    let raw = member.written(key)?;
     match &raw.value.kind {
         ValueKind::Size { w, h } => Some((w.get(), h.get())),
         _ => None,
@@ -149,11 +149,14 @@ pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
 }
 
 /// The note [`diag_deferred_member_reason`] gives, listing the roles lowering draws.
-const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls, door, window, \
-     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
-     (at=<side>.outside|inside.<side>), and level y=N grouping, and recognises circuit \
-     region=<label> void=<N> (u32, N>=1) plus door[id=<name>] opened_by=sig.<name> actuator \
-     patches; other roles will be added as their lowering rules are spec'd";
+const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls, fill \
+     (from=x,y,z to=x,y,z with mat_slot= or fluid=water), door, window, \
+     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate and chest \
+     (at=<side>.outside|inside.<side>), raw_block (mat=<namespace:path> at=x,y,z) and \
+     raw_fill (mat=<namespace:path> from=x,y,z to=x,y,z), and level y=N grouping, and \
+     recognises circuit region=<label> void=<N> (u32, N>=1) plus door[id=<name>] \
+     opened_by=sig.<name> actuator patches; other roles will be added as their lowering rules \
+     are spec'd";
 
 /// The `W_DEFERRED_MEMBER` for a member lowering does not draw, with `reason` as its primary and
 /// the note listing the roles lowering draws.

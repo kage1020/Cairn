@@ -52,6 +52,15 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     // Warnings go to stderr as text in every format.
     let lines = LineStarts::new(&source);
     report_diagnostics(file, &source, &lines, &block_ir.diagnostics);
+    let guarded = ir.guarded_members().len();
+    if guarded > 0 {
+        eprintln!(
+            "note: no edition is pinned here, so the {guarded} {} under `@edition` guards {} \
+             left out; `cairn compile --edition E` builds the ones E's guards hold",
+            if guarded == 1 { "member" } else { "members" },
+            if guarded == 1 { "is" } else { "are" },
+        );
+    }
 
     match format {
         LowerFormat::Ascii => {

@@ -5,23 +5,28 @@ use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{MemberRole, ValueWithSpan};
-use crate::suggest::{candidate_list, did_you_mean_note};
+use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
-use crate::block_array::material::{IdOrigin, UnknownId};
+use crate::block_array::material::{
+    DeclaredElsewhere, DomainFault, IdOrigin, OutOfDomain, StateDomain, TargetRegistry, UnknownId,
+};
 
 /// What becomes of a member whose `mat_slot=` resolves to no material.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MemberFallback {
     /// A `floor`: `fill_floor` is not reached, so its cells stay air.
     Air,
+    /// A `fill`: it paints none of its box, which keeps what the other members paint there.
+    Unpainted,
     /// A `walls`: it paints no row and claims none in the volume, so a cut into it is refused.
     Absent,
     /// A `window`: [`fill_window`] refuses it, so the wall stays and a port on it is refused.
     ///
     /// [`fill_window`]: super::window::fill_window
     WallStays,
-    /// A `roof`, an eave `stair` or a `pressure_plate`: built from its default block.
+    /// A `roof`, an eave `stair`, a `door`, a `pressure_plate` or a `chest`: built from its
+    /// default block.
     DefaultBlock,
 }
 
@@ -32,12 +37,18 @@ impl MemberFallback {
     pub(super) fn for_role(role: &MemberRole) -> Self {
         match role {
             MemberRole::Floor => Self::Air,
+            MemberRole::Fill => Self::Unpainted,
             MemberRole::Walls => Self::Absent,
             MemberRole::Window => Self::WallStays,
-            MemberRole::Roof | MemberRole::Stair | MemberRole::PressurePlate => Self::DefaultBlock,
-            MemberRole::Door
-            | MemberRole::Level
+            MemberRole::Roof
+            | MemberRole::Stair
+            | MemberRole::Door
+            | MemberRole::PressurePlate
+            | MemberRole::Chest => Self::DefaultBlock,
+            MemberRole::Level
             | MemberRole::Circuit
+            | MemberRole::RawBlock
+            | MemberRole::RawFill
             | MemberRole::Place
             | MemberRole::Connect
             | MemberRole::Other(_) => {
@@ -72,6 +83,7 @@ impl TokenSite {
         match self {
             Self::WalkwayPath => "the walkway falls back to air",
             Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
+            Self::MemberSlot(MemberFallback::Unpainted) => "the fill paints none of its box",
             Self::MemberSlot(MemberFallback::Absent) => {
                 "the walls are not built and take up no rows, so a door or window cut into them \
                  is refused"
@@ -149,25 +161,194 @@ pub(super) fn diag_unknown_abstract_token(
     }
 }
 
-/// Warn that a state literal reaches the output unchecked, when `value` carries one.
-pub(super) fn diag_state_literal_unchecked(
+/// Check the state literal `value` carries against the pinned target, reporting each pair outside
+/// its block's states, or the literal as unchecked where the target records none; `false` when a
+/// pair is outside, so the binding builds nothing.
+pub(super) fn check_state_literal(
     value: &ValueWithSpan,
     state: &BlockState,
-) -> Option<Diagnostic> {
-    let ValueKind::Token(text) = &value.value.kind else {
-        return None;
+    registry: Option<&dyn TargetRegistry>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let (ValueKind::Token(text) | ValueKind::BlockId(text), Some(registry)) =
+        (&value.value.kind, registry)
+    else {
+        return true;
     };
     if state.properties.is_empty() || !text.contains('[') {
-        return None;
+        return true;
     }
+    match registry.state_domain(state) {
+        StateDomain::Unpinned => true,
+        StateDomain::Unrecorded => {
+            diagnostics.push(diag_state_literal_unchecked(
+                value.span.clone(),
+                state,
+                &target_label(registry),
+            ));
+            true
+        }
+        StateDomain::Checked(faults) => {
+            let target = target_label(registry);
+            diagnostics.extend(faults.iter().map(|fault| {
+                diag_state_domain(
+                    value.span.clone(),
+                    &state.id,
+                    fault,
+                    &target,
+                    StateOrigin::Literal,
+                )
+            }));
+            faults.is_empty()
+        }
+    }
+}
+
+/// Report each pair of `state`, which lowering built for the member at `span`, outside its
+/// block's states at the pinned target.
+pub(super) fn diag_derived_state_domain(
+    span: &Span,
+    state: &BlockState,
+    registry: &dyn TargetRegistry,
+) -> Vec<Diagnostic> {
+    let StateDomain::Checked(faults) = registry.state_domain(state) else {
+        return Vec::new();
+    };
+    let target = target_label(registry);
+    faults
+        .iter()
+        .map(|fault| {
+            diag_state_domain(
+                span.clone(),
+                &state.id,
+                fault,
+                &target,
+                StateOrigin::Derived,
+            )
+        })
+        .collect()
+}
+
+/// How the pinned target reads in a finding.
+fn target_label(registry: &dyn TargetRegistry) -> String {
+    registry
+        .block_ids()
+        .map_or_else(|| "the target".to_owned(), |ids| ids.label().to_owned())
+}
+
+/// Who wrote a state an `E_STATE_DOMAIN` is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StateOrigin {
+    /// A state literal in the source.
+    Literal,
+    /// Lowering, for the member's geometry.
+    Derived,
+}
+
+impl StateOrigin {
+    fn kind(self) -> &'static str {
+        match self {
+            Self::Literal => "literal",
+            Self::Derived => "derived",
+        }
+    }
+}
+
+/// One pair of a state on block `id` that `target` does not take.
+fn diag_state_domain(
+    span: Span,
+    id: &str,
+    fault: &OutOfDomain,
+    target: &str,
+    origin: StateOrigin,
+) -> Diagnostic {
+    let OutOfDomain {
+        key,
+        value,
+        fault: kind,
+        valid_at,
+    } = fault;
+    let valid = kind.valid();
+    let listed = valid.join(", ");
+    let (primary, suggestion) = match kind {
+        DomainFault::UnknownProperty { .. } => {
+            let takes = if valid.is_empty() {
+                "it takes no state".to_owned()
+            } else {
+                format!("its states are {listed}")
+            };
+            (
+                format!("`{id}` has no state `{key}` at {target}; {takes}"),
+                nearest_match(key, valid.iter().map(String::as_str))
+                    .map(|near| (near.to_owned(), format!("{near}={value}"))),
+            )
+        }
+        DomainFault::ValueOutside { .. } => (
+            format!("`{id}` takes no `{key}={value}` at {target}; `{key}` takes {listed}"),
+            nearest_match(value, valid.iter().map(String::as_str))
+                .map(|near| (near.to_owned(), format!("{key}={near}"))),
+        ),
+    };
+    let mut notes = Vec::with_capacity(2);
+    notes.extend(suggestion.as_ref().map(|(_, pair)| did_you_mean_note(pair)));
+    let elsewhere = (!valid_at.is_empty())
+        .then(|| format!("`{key}={value}` is valid at {}", valid_at.join(", ")));
+    let fix = match (origin, elsewhere, kind) {
+        (StateOrigin::Derived, elsewhere, _) => format!(
+            "{}lowering derived this state for the member, so this is a compiler bug; bind the \
+             member's material to another block until it is fixed",
+            elsewhere.map_or_else(String::new, |at| format!("{at}, but ")),
+        ),
+        (StateOrigin::Literal, Some(at), _) => format!(
+            "{at}: pass {} as `--target`, or correct the state literal to a state {target} takes",
+            if valid_at.len() == 1 {
+                "that version"
+            } else {
+                "one of them"
+            },
+        ),
+        (StateOrigin::Literal, None, DomainFault::UnknownProperty { .. }) => format!(
+            "remove `{key}` from the state literal, or correct it to a state {target} takes"
+        ),
+        (StateOrigin::Literal, None, DomainFault::ValueOutside { .. }) => format!(
+            "correct the state literal to a value {target} takes, or leave `{key}` out for the \
+             block's default"
+        ),
+    };
+    notes.push(DiagnosticNote {
+        span: None,
+        message: fix,
+    });
+    Diagnostic {
+        code: DiagnosticCode::StateDomain,
+        span,
+        primary,
+        notes,
+        data: Some(DiagnosticData::StateDomain {
+            id: id.to_owned(),
+            key: key.clone(),
+            value: value.clone(),
+            registry: target.to_owned(),
+            reason: kind.kind(),
+            valid: valid.to_vec(),
+            origin: origin.kind(),
+            suggestion: suggestion.map(|(near, _)| near),
+            valid_at: valid_at.clone(),
+        }),
+    }
+}
+
+/// Warn that a state literal reaches the output unchecked, since `target` records no states for
+/// its block.
+fn diag_state_literal_unchecked(span: Span, state: &BlockState, target: &str) -> Diagnostic {
     let pairs = state.properties_text();
-    Some(Diagnostic {
+    Diagnostic {
         code: DiagnosticCode::StateLiteralUnchecked,
-        span: value.span.clone(),
+        span,
         primary: format!(
-            "`{id}` is written with `{pairs}` unchecked: nothing checks a state literal's \
-             properties or values against the target yet",
-            id = state.id,
+            "`{id}` is written with `{pairs}` unchecked: {target}'s registry pack records no \
+             states for the block",
+            id = state.id
         ),
         notes: vec![DiagnosticNote {
             span: None,
@@ -177,6 +358,46 @@ pub(super) fn diag_state_literal_unchecked(
                 .to_owned(),
         }],
         data: None,
+    }
+}
+
+/// Report `state`, built at `span`, when the pinned target's state map has no form for it;
+/// `raw` when a raw member's `mat=` named it rather than a binding.
+pub(super) fn diag_state_unmapped(
+    span: Span,
+    state: &BlockState,
+    registry: &dyn TargetRegistry,
+    raw: bool,
+) -> Option<Diagnostic> {
+    let reason = registry.unmapped_state(state)?;
+    let target = registry
+        .block_ids()
+        .map_or_else(|| "the target".to_owned(), |ids| ids.label().to_owned());
+    let states = state.properties_text();
+    let choose = if raw {
+        "set `mat=` to"
+    } else {
+        "bind the material to"
+    };
+    Some(Diagnostic {
+        code: DiagnosticCode::StateUnmapped,
+        span,
+        primary: format!(
+            "`{id}[{states}]` has no form at {target}: {reason}",
+            id = state.id,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "pass a `--target` whose state map carries these states, {choose} a block \
+                 {target} has a form for, or build for the other edition"
+            ),
+        }],
+        data: Some(DiagnosticData::StateUnmapped {
+            id: state.id.clone(),
+            states,
+            registry: target,
+        }),
     })
 }
 
@@ -188,8 +409,9 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         origin,
         suggestion,
         aliases,
+        elsewhere,
     } = unknown;
-    let mut notes = Vec::with_capacity(2);
+    let mut notes = Vec::with_capacity(3);
     match origin {
         IdOrigin::Authored => {}
         IdOrigin::Catalog { token } => notes.push(DiagnosticNote {
@@ -205,22 +427,32 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             ),
         }),
     }
-    // One note, the alias table winning it; the payload carries both answers.
-    notes.push(DiagnosticNote {
-        span: None,
-        message: match (aliases.as_slice(), suggestion) {
-            ([], None) => format!(
-                "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
-            ),
-            ([], Some(candidate)) => {
-                format!("`{registry}` spells the nearest block `{candidate}`")
-            }
-            (spellings, _) => format!(
-                "`{registry}` spells this block {}, per the registry pack's alias table",
-                candidate_list(spellings),
-            ),
-        },
-    });
+    let versions = elsewhere
+        .as_ref()
+        .and_then(|elsewhere| version_note(id, registry, elsewhere));
+    // The alias table wins the candidate note; the payload carries every answer.
+    let candidate = match (aliases.as_slice(), &versions, suggestion) {
+        ([], Some(_), _) => None,
+        ([], None, None) => Some(format!(
+            "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
+        )),
+        ([], None, Some(candidate)) => Some(format!(
+            "`{registry}` spells the nearest block `{candidate}`"
+        )),
+        (spellings, ..) => Some(format!(
+            "`{registry}` spells this block {}, per the registry pack's alias table",
+            candidate_list(spellings),
+        )),
+    };
+    notes.extend(
+        candidate
+            .into_iter()
+            .chain(versions)
+            .map(|message| DiagnosticNote {
+                span: None,
+                message,
+            }),
+    );
     Diagnostic {
         code: DiagnosticCode::UnknownId,
         span,
@@ -233,6 +465,30 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             token: origin.token().map(str::to_owned),
             suggestion: suggestion.clone(),
             aliases: aliases.clone(),
+            since: elsewhere.as_ref().and_then(|e| e.since.clone()),
+            until: elsewhere.as_ref().and_then(|e| e.until.clone()),
         }),
     }
+}
+
+/// Which versions of the edition build `id`, which `registry` does not declare, and how to pick
+/// one; `None` when `elsewhere` names none.
+fn version_note(id: &str, registry: &str, elsewhere: &DeclaredElsewhere) -> Option<String> {
+    let edition = elsewhere.edition.as_str();
+    Some(match (&elsewhere.until, &elsewhere.since) {
+        (None, Some(since)) => format!(
+            "`{id}` first appears in {edition} {since}: build with `--target {since}` or a later \
+             version, or declare `@requires {edition} version>={since}` so a target without it \
+             is refused at the floor"
+        ),
+        (Some(until), None) => format!(
+            "`{id}` was last declared in {edition} {until}: build with `--target {until}` or an \
+             earlier version, or pick a block `{registry}` has"
+        ),
+        (Some(until), Some(since)) => format!(
+            "`{id}` is declared in {edition} {until} and again from {since}: build with one of \
+             them as `--target`, or pick a block `{registry}` has"
+        ),
+        (None, None) => return None,
+    })
 }

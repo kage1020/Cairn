@@ -6,21 +6,26 @@ use crate::intent::{Member, MemberRole};
 use crate::block_array::PaletteIndex;
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::door::carve_door;
+use super::chest::fill_chest;
+use super::door::{HungDoor, fill_door};
+use super::fill::fill_material;
 use super::members::{StructCtx, palette_index_for};
 use super::plate::fill_pressure_plate;
+use super::raw::fill_raw;
 use super::roof_fill::fill_roof;
 use super::sizing::wall_height;
 use super::stair::fill_stair;
 use super::window::fill_window;
 
-/// Paint one member of the paint set with the generator its role names.
+/// Paint one member of the paint set with the generator its role names; a `door` that stands is
+/// added to `hung`.
 pub(super) fn paint_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
+    hung: &mut Vec<HungDoor>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
@@ -55,12 +60,19 @@ pub(super) fn paint_member(
             fill_walls(ctx, height, y_offset, idx, canvas);
         }
         // `flatten_members` drops a `roof` at a non-zero offset, so this is the struct's plane.
+        MemberRole::Fill => fill_material(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
-        MemberRole::Door => carve_door(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::Door => {
+            fill_door(member, y_offset, ctx, palette, canvas, hung, diagnostics);
+        }
         MemberRole::Window => fill_window(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::PressurePlate => {
             fill_pressure_plate(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::RawBlock | MemberRole::RawFill => {
+            fill_raw(member, y_offset, ctx, palette, canvas, diagnostics);
         }
         MemberRole::Level
         | MemberRole::Circuit

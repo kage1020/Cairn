@@ -1,5 +1,7 @@
 //! Painting an eave `stair` member.
 
+use std::convert::Infallible;
+
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
@@ -13,8 +15,11 @@ use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 use crate::block_array::roof::{Cardinal, STAIR_BASE_ID, StairShape, shed_high_side, stair_state};
 
 use super::canvas::{MemberCanvas, ScopePalette};
+use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{StructCtx, resolve_member_state, side_name, side_of, unplaced_walls_note};
-use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
+use super::waterlogged::{
+    WrittenWaterlogged, keep_waterlogged, read_waterlogged, waterlogged_state,
+};
 
 /// The note on a stair refused for its `kind=`, naming the one kind there is.
 const STAIR_KINDS: &str = "write `kind=stairs`, the one stair kind: a band of stairs in the \
@@ -37,14 +42,22 @@ pub(super) fn fill_stair(
             None
         })
     };
+    let facing = ident("facing", "`out` or `in`", "out");
+    let half = ident("half", "`top` or `bottom`", "top");
+    let shape = ident(
+        "shape",
+        "`straight`, `outer_left`, or `outer_right`",
+        "straight",
+    );
+    let waterlogged = read_waterlogged(member).unwrap_or_else(|argument| {
+        unread.push((argument, "auto"));
+        None
+    });
     let states = EaveStates {
-        facing: ident("facing", "`out` or `in`", "out"),
-        half: ident("half", "`top` or `bottom`", "top"),
-        shape: ident(
-            "shape",
-            "`straight`, `outer_left`, or `outer_right`",
-            "straight",
-        ),
+        facing,
+        half,
+        shape,
+        waterlogged,
     };
     let built = draw_eave_band(member, states, y_offset, ctx, palette, canvas, diagnostics);
     for (argument, default) in unread {
@@ -60,12 +73,13 @@ pub(super) fn fill_stair(
     }
 }
 
-/// The eave's `facing`, `half` and `shape` identifiers; `None` takes the default.
+/// The eave's `facing`, `half`, `shape` and `waterlogged` as written; `None` takes the default.
 #[derive(Debug, Clone, Copy)]
 struct EaveStates<'m> {
     facing: Option<&'m str>,
     half: Option<&'m str>,
     shape: Option<&'m str>,
+    waterlogged: Option<WrittenWaterlogged<'m>>,
 }
 
 /// [`fill_stair`]'s refusals and paint; whether the band was drawn.
@@ -87,6 +101,13 @@ fn draw_eave_band(
     let Some((facing, half, shape)) = states.block_states(member, side, diagnostics) else {
         return false;
     };
+    let waterlogged = match waterlogged_state(member, states.waterlogged) {
+        Ok(kept) => kept,
+        Err(refusal) => {
+            diagnostics.push(*refusal);
+            return false;
+        }
+    };
     let Some(y_world) = eave_row(member, y_offset, ctx, diagnostics) else {
         return false;
     };
@@ -97,27 +118,29 @@ fn draw_eave_band(
         diagnostics,
         ctx.theme_missing,
     );
-    let stair_id = geometry_material_id(
+    let Ok(stair_id) = geometry_material_id(
         member,
         ctx.scope,
         resolved.as_ref(),
-        STAIR_BASE_ID,
+        || Ok::<_, Infallible>(STAIR_BASE_ID.to_owned()),
         &GeometryMemberDescription {
             subject: "eave `stair`".to_owned(),
             states_from: "its own arguments",
             // `eave_kind_is_stairs` has refused any other `kind=`.
-            requires_stair: true,
+            requires: Some(Family::Stair),
         },
         diagnostics,
     );
-    let idx = palette.intern(stair_state(stair_id, facing, half, shape));
+    let mut state = stair_state(&stair_id, facing, half, shape);
+    keep_waterlogged(&mut state.properties, waterlogged);
+    let idx = palette.intern(state);
     paint_eave_band(side, y_world, idx, ctx, canvas);
     true
 }
 
 /// Whether the stair's `kind=` is `stairs`, refusing any other with an `E_INVALID_MEMBER`.
 fn eave_kind_is_stairs(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
-    let primary = match member.intent_state.get("kind") {
+    let primary = match member.arguments.get("kind") {
         None => "stair has no `kind=`, so nothing says what it builds".to_owned(),
         Some(raw) => match &raw.value.kind {
             ValueKind::Ident(kind) if kind == "stairs" => return true,
@@ -311,7 +334,7 @@ fn paint_eave_band(
 }
 
 /// The cardinal opposite the wall's outward normal, for `facing=in`.
-fn inward_cardinal(side: WallSide) -> Cardinal {
+pub(super) fn inward_cardinal(side: WallSide) -> Cardinal {
     match side {
         WallSide::Front => Cardinal::North,
         WallSide::Back => Cardinal::South,

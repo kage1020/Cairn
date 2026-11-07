@@ -17,7 +17,8 @@ pub struct VersionOrder {
 struct VersionRow {
     /// Human-facing label, e.g. `"1.21.4"`.
     label: String,
-    /// Java's `DataVersion` or Bedrock's block-palette `version`; compared only within one table.
+    /// The row's key: Java's `DataVersion`, or the key a Bedrock table gives its row; compared
+    /// only within one table.
     key: i64,
 }
 

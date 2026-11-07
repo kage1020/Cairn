@@ -38,6 +38,25 @@ fn redstone_door_palette_contains_oak_pressure_plate() {
     );
 }
 
+/// Bedrock spells the oak door `wooden_door`, so lowering must take the door id from the pack.
+#[test]
+fn the_bedrock_pack_sets_the_bedrock_door_on_every_supported_target() {
+    for version in supported_versions(builtin_pack(Edition::Bedrock)) {
+        let out = lower_example("redstone-door.crn", Edition::Bedrock, Some(version));
+        let ba = out.structures.get("struct::gatehouse").unwrap();
+        assert_eq!(
+            id_at(ba, 4, 1, 5),
+            Some("minecraft:wooden_door"),
+            "bedrock {version}"
+        );
+        assert_eq!(
+            id_at(ba, 4, 2, 5),
+            Some("minecraft:wooden_door"),
+            "bedrock {version}"
+        );
+    }
+}
+
 /// Bedrock has no `oak_pressure_plate`, so lowering must take the plate id from the pack.
 #[test]
 fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
@@ -60,10 +79,10 @@ fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
 fn redstone_door_plates_sit_on_either_side_of_the_door() {
     let out = lower_redstone_door();
     let ba = out.structures.get("struct::gatehouse").unwrap();
-    // The door's opening is (4, 1..=2, 5), in the front wall at z=5.
+    // The door stands in (4, 1..=2, 5), in the front wall at z=5.
     for (cell, id) in [
         ((4, 0, 6), "minecraft:oak_pressure_plate"),
-        ((4, 1, 5), "minecraft:air"),
+        ((4, 1, 5), "minecraft:oak_door"),
         ((4, 1, 4), "minecraft:oak_pressure_plate"),
         ((4, 0, 4), "minecraft:oak_planks"),
     ] {
