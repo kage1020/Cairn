@@ -101,6 +101,9 @@ pub enum DiagnosticCode {
     StateLiteralUnchecked,
     /// A `mat_slot=` resolved to a block id the pinned target does not declare.
     UnknownId,
+    /// A semantic member's `mat_slot=` or `connect … path=` resolved to a block only the other edition has
+    /// (`spec/versioning-editions` "A block only the other edition has").
+    ParityUnsupported,
     /// A member built a block state the pinned target's state map has no form for.
     StateUnmapped,
     /// A block state's property or value its block does not take at the pinned target.
@@ -216,6 +219,7 @@ impl DiagnosticCode {
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
             Self::StateLiteralUnchecked => "W_STATE_LITERAL_UNCHECKED",
             Self::UnknownId => "E_UNKNOWN_ID",
+            Self::ParityUnsupported => "E_PARITY_UNSUPPORTED",
             Self::StateUnmapped => "E_STATE_UNMAPPED",
             Self::StateDomain => "E_STATE_DOMAIN",
             Self::IncompatibleMaterial => "E_INCOMPATIBLE_MATERIAL",
@@ -280,6 +284,7 @@ impl DiagnosticCode {
             | Self::UnknownSlotTarget
             | Self::UnknownAbstractToken
             | Self::UnknownId
+            | Self::ParityUnsupported
             | Self::StateUnmapped
             | Self::StateDomain
             | Self::IncompatibleMaterial
@@ -403,6 +408,21 @@ pub enum DiagnosticData {
         /// The last version of the edition before the target that declares the id.
         #[serde(skip_serializing_if = "Option::is_none")]
         until: Option<String>,
+        /// The other edition, when the id is a block only it has, as
+        /// [`crate::edition::Edition::as_str`] spells it.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        declared_by: Option<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::ParityUnsupported`].
+    ParityUnsupported {
+        /// The fully namespaced id of the block.
+        id: String,
+        /// The target that cannot build it, as `"<edition> <version>"`.
+        registry: String,
+        /// The edition that has the block, as [`crate::edition::Edition::as_str`] spells it.
+        declared_by: String,
+        /// What the block is and why the target's edition has none, from the registry pack.
+        reason: String,
     },
     /// Companion payload for [`DiagnosticCode::StateUnmapped`].
     StateUnmapped {

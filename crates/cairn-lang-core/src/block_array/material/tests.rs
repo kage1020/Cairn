@@ -183,6 +183,7 @@ fn an_authored_id_the_target_lacks_is_refused_with_its_registry_named() {
             suggestion: Some("minecraft:oak_planks".into()),
             aliases: Vec::new(),
             elsewhere: None,
+            absent: None,
         })),
     );
 }
@@ -338,6 +339,7 @@ fn an_id_a_later_version_declares_is_answered_with_that_version_rather_than_a_sp
                 until: None,
                 since: Some("2.0".into()),
             }),
+            absent: None,
         })),
     );
 }
@@ -372,6 +374,7 @@ fn a_catalog_mapping_onto_a_missing_id_names_the_token_that_reached_it() {
             suggestion: Some("minecraft:stonebrick".into()),
             aliases: Vec::new(),
             elsewhere: None,
+            absent: None,
         })),
     );
 }

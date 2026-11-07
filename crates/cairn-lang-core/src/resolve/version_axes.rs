@@ -212,6 +212,11 @@ pub enum UnsupportedReason {
         /// The ids this edition declares for the same block, from the registry pack's alias table.
         aliases: Vec<String>,
     },
+    /// The block is the other edition's, and this edition has no counterpart for it under any id.
+    NoCounterpart {
+        /// What the block is and why this edition has none, as the registry pack words it.
+        detail: String,
+    },
     /// The edition has the block, but no version's state map has a form for these states.
     StatesUnmapped {
         /// The entry's `key=value` pairs, comma-joined.

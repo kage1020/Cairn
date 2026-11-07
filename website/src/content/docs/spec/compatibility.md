@@ -163,8 +163,7 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 **Reserved codes.** The codes a stable command raises are the ones
 [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists. The redstone pipeline's codes, which only the
 Internal `cairn synth` raises, are outside that catalog on purpose. Any other code the spec names,
-such as `E_PARITY_UNSUPPORTED` or `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
-reserved code lands with the meaning the spec states for it, where it states one, and its row
+such as `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A reserved code lands with the meaning the spec states for it, where it states one, and its row
 landing is adding a code.
 
 **What a code means.** A code's severity, and the payload

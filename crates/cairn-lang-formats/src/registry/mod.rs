@@ -1,6 +1,8 @@
-//! Registry packs: the JSON files of `DataVersion`s, materials, block ids, aliases, state maps and
-//! connection tables a compile depends on, hashed into the lockfile so a build is reproducible.
+//! Registry packs: the JSON files of `DataVersion`s, materials, block ids, aliases, absences, state
+//! maps and connection tables a compile depends on, hashed into the lockfile so a build is
+//! reproducible.
 
+pub mod absent;
 pub mod aliases;
 pub mod blocks;
 pub mod connections;
@@ -11,6 +13,7 @@ pub mod manifest;
 pub mod materials;
 pub mod states;
 
+pub use absent::{AbsentCatalog, AbsentEntry, AbsentError, AbsentIndex, SUPPORTED_ABSENT_SCHEMA};
 pub use aliases::{AliasCatalog, AliasError, AliasGroup, AliasIndex, SUPPORTED_ALIASES_SCHEMA};
 pub use blocks::{
     BlockEntries, BlockStates, BlocksBase, BlocksCatalog, BlocksDiff, BlocksError, BlocksIndex,

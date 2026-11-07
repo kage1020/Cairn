@@ -90,14 +90,26 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
         .palette
         .intern(leaked);
 
-    let invalid = portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases(), pack.states())
-        .expect_err("a value outside the Java domain is not a portability figure");
+    let invalid = portability_for_bedrock(
+        &block_ir,
+        pack.blocks(),
+        pack.aliases(),
+        pack.absent(),
+        pack.states(),
+    )
+    .expect_err("a value outside the Java domain is not a portability figure");
 
     let lines = invalid_palette_report(Edition::Bedrock, &invalid);
     assert!(
         portability_figure(
             Edition::Bedrock,
-            portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases(), pack.states()),
+            portability_for_bedrock(
+                &block_ir,
+                pack.blocks(),
+                pack.aliases(),
+                pack.absent(),
+                pack.states()
+            ),
         )
         .is_none(),
         "a refused palette costs the edition its row rather than printing counts over it",
@@ -160,6 +172,16 @@ fn every_unsupported_reason_renders_the_repair_it_names() {
         unmapped,
         "the edition has the block, but no version's state map has a form for `facing=north`: no \
          Java block maps onto `minecraft:frame` there — bind the slot to another block, or build \
+         for the other edition",
+    );
+    let foreign = unsupported_reason(&UnsupportedReason::NoCounterpart {
+        detail: "the border block, which Bedrock uses to wall players in; Java has no such block"
+            .to_owned(),
+    });
+    assert_eq!(
+        foreign,
+        "only the other edition has the block: the border block, which Bedrock uses to wall \
+         players in; Java has no such block — bind the slot to a block this edition has, or build \
          for the other edition",
     );
 }

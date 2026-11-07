@@ -1031,6 +1031,7 @@ fn bedrock_pack(data_versions: &'static str) -> Result<RegistryPack, RegistryErr
         materials: "",
         blocks: "",
         aliases: "",
+        absent: "",
         connections: "",
         states: None,
         sensitivity: None,
@@ -1322,6 +1323,7 @@ fn a_state_map_the_binary_does_not_embed_is_refused() {
         materials: "",
         blocks: "",
         aliases: "",
+        absent: "",
         connections: "",
         states: None,
         sensitivity: Some(NO_SENSITIVITY),
@@ -1394,4 +1396,121 @@ fn a_block_table_without_states_leaves_a_declared_blocks_state_unrecorded() {
         pinned.state_domain(&undeclared),
         StateDomain::Checked(Vec::new())
     );
+}
+
+/// Writes [`write_pack_with_aliases`]'s pack with an `absent` component holding `absent_json`.
+fn write_pack_with_absent(tmp: &Path, absent_json: &str) {
+    write_pack_with_aliases(tmp, good_data_versions(), good_blocks(), good_aliases());
+    std::fs::write(
+        tmp.join("pack.json"),
+        r#"{
+            "schema_version": 1,
+            "edition": "java",
+            "name": "test",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "materials": "materials.json",
+                "blocks": "blocks.json",
+                "aliases": "aliases.json",
+                "absent": "absent.json"
+            }
+        }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(tmp.join("absent.json"), absent_json).expect("write absent");
+}
+
+/// An `absent` catalog of one entry listing `ids`, a JSON array body.
+fn one_absence(ids: &str) -> String {
+    format!(
+        r#"{{ "schema_version": 1, "namespace": "minecraft",
+              "entries": [{{ "ids": [{ids}], "reason": "it is Bedrock's" }}] }}"#
+    )
+}
+
+#[test]
+fn an_absent_block_is_answered_with_the_edition_that_has_it_and_why() {
+    let pack = load_from_dir_or_die("absent", |dir| {
+        write_pack_with_absent(dir, &one_absence(r#""border_block""#));
+    });
+    let view = pack.view(Some("1.21.4"));
+    assert_eq!(
+        [
+            view.absent_concept("minecraft:border_block"),
+            view.absent_concept("minecraft:stone"),
+        ],
+        [
+            Some(AbsentConcept {
+                declared_by: Edition::Bedrock,
+                reason: "it is Bedrock's".to_owned(),
+            }),
+            None,
+        ],
+    );
+}
+
+#[test]
+fn an_absent_block_the_edition_declares_under_any_spelling_is_refused() {
+    let cases = [
+        (r#""pale_oak_planks""#, "minecraft:pale_oak_planks"),
+        (r#""paleoak_planks""#, "minecraft:paleoak_planks"),
+    ];
+    for (ids, id) in cases {
+        let err = load_from_dir_err("absent-declared", |dir| {
+            write_pack_with_absent(dir, &one_absence(ids));
+        });
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "registry pack `absent` lists `{id}`, but `blocks` declares \
+                 `minecraft:pale_oak_planks` at `1.21.4`"
+            ),
+        );
+    }
+}
+
+#[test]
+fn a_malformed_absent_catalog_is_refused_with_its_own_error() {
+    let err = load_from_dir_err("absent-bad", |dir| {
+        write_pack_with_absent(
+            dir,
+            r#"{ "schema_version": 1, "namespace": "minecraft", "entries": [] }"#,
+        );
+    });
+    assert!(
+        matches!(
+            err,
+            RegistryError::Absent {
+                source: AbsentError::NoEntries
+            }
+        ),
+        "expected the catalog error to surface intact, got {err:?}",
+    );
+}
+
+#[test]
+fn the_absent_bytes_reach_the_pack_hash() {
+    let one = load_from_dir_or_die("absent-hash-one", |dir| {
+        write_pack_with_absent(dir, &one_absence(r#""border_block""#));
+    });
+    let other = load_from_dir_or_die("absent-hash-other", |dir| {
+        write_pack_with_absent(dir, &one_absence(r#""allow""#));
+    });
+    assert_ne!(one.bytes_hash(), other.bytes_hash());
+}
+
+#[test]
+fn every_builtin_absence_is_a_block_the_other_builtin_pack_declares() {
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let absent = load_builtin_pack(edition).expect("builtin pack");
+        let other = load_builtin_pack(edition.other()).expect("builtin pack");
+        let undeclared: Vec<&str> = absent
+            .absent()
+            .ids()
+            .filter(|id| other.blocks().declared_by_some_version(id) != Some(true))
+            .collect();
+        assert!(!absent.absent().is_empty(), "{edition} lists no absence");
+        assert_eq!(undeclared, [] as [&str; 0], "{edition}'s absences");
+    }
 }

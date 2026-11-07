@@ -19,6 +19,7 @@ mod no_theme_bound;
 mod own_line_first;
 mod palette_capacity;
 mod palette_is_referenced;
+mod parity_unsupported;
 mod phase_order;
 mod port_reads_the_wall_that_paints;
 mod port_rejection_reason;

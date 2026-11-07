@@ -46,6 +46,13 @@ pub trait TargetRegistry {
         None
     }
 
+    /// The other edition's block `id` names, when the pinned target's edition has no counterpart
+    /// for it; asked only for an id the target does not declare.
+    fn absent_concept(&self, id: &str) -> Option<AbsentConcept> {
+        let _ = id;
+        None
+    }
+
     /// What the pinned target's tables say about `state`'s properties
     /// (`spec/versioning-editions` "A state is checked against its block's states at the target").
     fn state_domain(&self, state: &BlockState) -> StateDomain {
@@ -271,6 +278,18 @@ pub struct UnknownId {
     pub aliases: Vec<String>,
     /// The edition's versions nearest the target that do declare the id.
     pub elsewhere: Option<DeclaredElsewhere>,
+    /// Set when the id names a block only the other edition has.
+    pub absent: Option<AbsentConcept>,
+}
+
+/// A block of one edition that the other has no counterpart for
+/// (`spec/versioning-editions` "A block only the other edition has").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbsentConcept {
+    /// The edition that has the block.
+    pub declared_by: Edition,
+    /// What the block is and why the other edition has none, as the registry pack words it.
+    pub reason: String,
 }
 
 /// The versions of the pinned edition nearest the target that declare an id it does not
@@ -390,16 +409,17 @@ pub(crate) fn validated_id(
         return Ok(state);
     }
     // Both can be filled: a rename has aliases, a typo a suggestion, and one id can be both. An id
-    // another version declares is no typo, so the nearest spelling would only mislead.
+    // another version or edition declares is no typo, so the nearest spelling would only mislead.
     let aliases = registry.aliases_for(&state.id);
     let elsewhere = registry.declared_elsewhere(&state.id);
+    let absent = registry.absent_concept(&state.id);
     Err(MaterialDeferred::UnknownId(Box::new(UnknownId {
-        suggestion: elsewhere
-            .is_none()
+        suggestion: (elsewhere.is_none() && absent.is_none())
             .then(|| nearest_namespaced_id(&state.id, ids.iter()))
             .flatten(),
         aliases,
         elsewhere,
+        absent,
         registry: ids.label().to_owned(),
         origin: origin.clone(),
         id: state.id,

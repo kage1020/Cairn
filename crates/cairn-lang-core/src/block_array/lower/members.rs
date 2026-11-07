@@ -18,7 +18,7 @@ use super::canvas::ScopePalette;
 use super::phase::Phase;
 use super::roof_kind::roof_line_refused;
 use super::token_diag::{
-    MemberFallback, TokenSite, check_state_literal, diag_abstract_token,
+    MemberFallback, TokenSite, check_state_literal, diag_abstract_token, diag_undeclared_material,
     diag_unknown_abstract_token, diag_unknown_id,
 };
 use super::written::Written;
@@ -286,7 +286,7 @@ pub(super) fn resolve_member_state(
             None
         }
         Err(MaterialDeferred::UnknownId(unknown)) => {
-            diagnostics.push(diag_unknown_id(slot_value.span.clone(), &unknown));
+            diagnostics.push(diag_undeclared_material(slot_value.span.clone(), &unknown));
             None
         }
         Err(MaterialDeferred::AlreadyDiagnosed) => {

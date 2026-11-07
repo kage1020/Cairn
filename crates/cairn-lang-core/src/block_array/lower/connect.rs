@@ -24,7 +24,7 @@ use crate::block_array::{BlockArray, BlockState, Dims, Footprint, Placement, Wal
 use super::site_floor::{FloorExtent, FloorPlan, PlacedBody};
 use super::token_diag::{
     TokenSite, check_state_literal, diag_abstract_token, diag_state_unmapped,
-    diag_unknown_abstract_token, diag_unknown_id,
+    diag_undeclared_material, diag_unknown_abstract_token,
 };
 
 /// A world cell, `(x, y, z)`.
@@ -328,7 +328,10 @@ fn walkway_material(
             None
         }
         Err(MaterialDeferred::UnknownId(unknown)) => {
-            diagnostics.push(diag_unknown_id(connect.path.span.clone(), &unknown));
+            diagnostics.push(diag_undeclared_material(
+                connect.path.span.clone(),
+                &unknown,
+            ));
             None
         }
         Err(MaterialDeferred::AlreadyDiagnosed) => {

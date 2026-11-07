@@ -9,7 +9,8 @@ use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
 use crate::block_array::material::{
-    DeclaredElsewhere, DomainFault, IdOrigin, OutOfDomain, StateDomain, TargetRegistry, UnknownId,
+    AbsentConcept, DeclaredElsewhere, DomainFault, IdOrigin, OutOfDomain, StateDomain,
+    TargetRegistry, UnknownId,
 };
 
 /// What becomes of a member whose `mat_slot=` resolves to no material.
@@ -401,6 +402,54 @@ pub(super) fn diag_state_unmapped(
     })
 }
 
+/// Report a block id a `mat_slot=` reached that the compile's target does not declare:
+/// `E_PARITY_UNSUPPORTED` when the author named a block only the other edition has.
+pub(super) fn diag_undeclared_material(span: Span, unknown: &UnknownId) -> Diagnostic {
+    match (&unknown.origin, &unknown.absent) {
+        (IdOrigin::Authored, Some(absent)) => diag_parity_unsupported(span, unknown, absent),
+        _ => diag_unknown_id(span, unknown),
+    }
+}
+
+/// Report a semantic member's block that only `absent.declared_by` has, with the per-edition
+/// theme and the guarded raw member that build it instead
+/// (`spec/versioning-editions` "Writing an alternative").
+fn diag_parity_unsupported(span: Span, unknown: &UnknownId, absent: &AbsentConcept) -> Diagnostic {
+    let UnknownId { id, registry, .. } = unknown;
+    let has = absent.declared_by;
+    let lacks = has.other();
+    Diagnostic {
+        code: DiagnosticCode::ParityUnsupported,
+        span,
+        primary: format!(
+            "`{id}` is a block only {} has, so `{registry}` cannot build it",
+            has.title()
+        ),
+        notes: vec![
+            DiagnosticNote {
+                span: None,
+                message: absent.reason.clone(),
+            },
+            DiagnosticNote {
+                span: None,
+                message: format!(
+                    "the semantic layer is edition-neutral: bind this slot from a `theme NAME_{has}` \
+                     and give `theme NAME_{lacks}` a block {} has, or place the block with a \
+                     `raw_block` under `@edition {has}`, which only a {} build keeps",
+                    lacks.title(),
+                    has.title(),
+                ),
+            },
+        ],
+        data: Some(DiagnosticData::ParityUnsupported {
+            id: id.clone(),
+            registry: registry.clone(),
+            declared_by: has.as_str().to_owned(),
+            reason: absent.reason.clone(),
+        }),
+    }
+}
+
 /// Report a block id the compile's target does not declare, worded for who chose the id.
 pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
     let UnknownId {
@@ -410,6 +459,7 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         suggestion,
         aliases,
         elsewhere,
+        absent,
     } = unknown;
     let mut notes = Vec::with_capacity(3);
     match origin {
@@ -432,6 +482,7 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         .and_then(|elsewhere| version_note(id, registry, elsewhere));
     // The alias table wins the candidate note; the payload carries every answer.
     let candidate = match (aliases.as_slice(), &versions, suggestion) {
+        _ if absent.is_some() => None,
         ([], Some(_), _) => None,
         ([], None, None) => Some(format!(
             "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
@@ -444,10 +495,23 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             candidate_list(spellings),
         )),
     };
+    // A raw member's id reaches here; a semantic member's is `E_PARITY_UNSUPPORTED` instead.
+    let guard = match (origin, absent) {
+        (IdOrigin::Authored, Some(absent)) => Some(format!(
+            "`{id}` is a block only {} has: {}; put this line under `@edition {}`, so that only a \
+             {} build keeps it",
+            absent.declared_by.title(),
+            absent.reason,
+            absent.declared_by,
+            absent.declared_by.title(),
+        )),
+        _ => None,
+    };
     notes.extend(
         candidate
             .into_iter()
             .chain(versions)
+            .chain(guard)
             .map(|message| DiagnosticNote {
                 span: None,
                 message,
@@ -467,6 +531,9 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             aliases: aliases.clone(),
             since: elsewhere.as_ref().and_then(|e| e.since.clone()),
             until: elsewhere.as_ref().and_then(|e| e.until.clone()),
+            declared_by: absent
+                .as_ref()
+                .map(|absent| absent.declared_by.as_str().to_owned()),
         }),
     }
 }

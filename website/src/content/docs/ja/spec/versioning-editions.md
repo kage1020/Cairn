@@ -105,8 +105,6 @@ Bedrock のパックは、ステートマップをさらに 2 つのコンポー
 
 未知の ID、ドメイン外のステート、パリティの欠落はハードエラーです。黙って置き換えることも、暗黙に落とすことも禁止します。エラーは、ターゲットで有効な候補の閉じた集合、最小バージョン、修正案を返します。モデルを自分の記憶ではなく、レジストリ由来の候補へ引き戻すためです。
 
-下の `E_PARITY_UNSUPPORTED` は未実装です ([§10.7](#代替を書くとき))。
-
 ```text
 E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
   First appears in 1.21.4. Fix: --target 1.21.4, or @requires java version>=1.21.4
@@ -117,8 +115,9 @@ E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
 E_STATE_DOMAIN line 18: minecraft:creaking_heart has no state `active` at java 26.3. Valid: axis, creaking_heart_state, natural.
   `active=true` is valid at 1.21.4. Fix: --target 1.21.4, or correct the state literal
 
-E_PARITY_UNSUPPORTED line 8: text_display is Java-only (since 1.19.4); Bedrock has no display entity.
-  Suggested: sign side=front text="Inn", or slot+theme fallback, or @edition java guard
+E_PARITY_UNSUPPORTED line 2: minecraft:border_block is a block only Bedrock has, so java 26.3 cannot build it.
+  Bedrock uses it to wall players in; Java has no such block.
+  Fix: bind the slot from theme NAME_bedrock and give NAME_java a Java block, or raw_block under @edition bedrock
 ```
 
 ### ステートはターゲットでのブロックのステートと照らし合わせる
@@ -320,7 +319,7 @@ semantic-sensitive:      (none)
 
 1 つ目は ID の問題、2 つ目はステートの問題です。`degraded` になりうるのは 2 つ目だけです。存在しないブロックには、失う詳細がないからです。
 
-1 つの数値の裏に 2 通りの直し方が隠れるので、数えた各エントリは理由とともに stderr に出力します。ID の問題には `E_UNKNOWN_ID` と同じ方法で、同じ 2 つの手段で答えます。`aliases` コンポーネントに行があれば、このエディションが別の名前で持っているエントリを、行き止まりとしてではなくその名前で報告します (Java での `standing_sign` は `oak_sign`)。行がなければ `did you mean` を付けます。この 2 つは択一で、順番に試すものではありません。行はどのブロックかについてのパックの言明であり、その横に距離による推測を並べると、読み手にどちらを信じるかを選ばせることになるからです。ここでもエイリアスはエディションに対して問います。サポートする *いずれかの* バージョンが宣言する綴りなら答えになります。固定したビルドなら、自分のバージョンの綴りだけを残します。`--format json` では `edition_portability[].unsupported_entries` として、数値 1 につき 1 要素、パレット順で出力します。
+1 つの数値の裏に 2 通りの直し方が隠れるので、数えた各エントリは理由とともに stderr に出力します。ID の問題には `E_UNKNOWN_ID` と同じ方法で、同じ 2 つの手段で答えます。`aliases` コンポーネントに行があれば、このエディションが別の名前で持っているエントリを、行き止まりとしてではなくその名前で報告します (Java での `standing_sign` は `oak_sign`)。行がなければ `did you mean` を付けます。この 2 つは択一で、順番に試すものではありません。行はどのブロックかについてのパックの言明であり、その横に距離による推測を並べると、読み手にどちらを信じるかを選ばせることになるからです。そのエディションの `absent` コンポーネントが挙げるエントリには、その行の理由で答え、どちらの手段も使いません。もう一方のエディションのブロックなので、直し方はこのエディションが持つブロックにするか、もう一方向けにビルドするかです ([§10.7](#もう一方のエディションにしかないブロック))。JSON の `reason` は `no_counterpart` で、その文を `detail` に入れます。ここでもエイリアスはエディションに対して問います。サポートする *いずれかの* バージョンが宣言する綴りなら答えになります。固定したビルドなら、自分のバージョンの綴りだけを残します。`--format json` では `edition_portability[].unsupported_entries` として、数値 1 につき 1 要素、パレット順で出力します。
 
 この行は互換範囲全体について報告するので、どちらの問いもバージョンではなく *エディション* に対して発します。範囲の一部でしか有効でない ID は `unsupported` になりません。Bedrock が 1.21.40 で `stonebrick` を `stone_bricks` にリネームした件がその例です。実際にビルドするバージョンがその ID を持っているかどうかは、固定したターゲットが `E_UNKNOWN_ID` として答えます。`cairn compile --target` か、ビルドせずに同じ答えを得られる `cairn check --edition E --target V` です ([§10.4](#104-fail-loud-と最小バージョン推定))。ステートも同じように、そのブロックを宣言するすべてのバージョンに対して問います。`cherry_wood[axis=x]` は 3 つのバージョンが書き出せるので可搬です。1.21.40 のパレットにはその形がなく、そこに固定したビルドは `E_STATE_UNMAPPED` と答えます。
 
@@ -447,12 +446,28 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 
 トークンで吸収できるのは、ID、ステート、シリアライズの違いだけです。**概念がないことと、ゲーム挙動の違いは吸収しません。** 吸収できない代表例は次のとおりです。
 
+- 一方のエディションにしかないブロック ([下記](#もう一方のエディションにしかないブロック))
 - display エンティティ (Bedrock にはない)
 - 1.26.60 より前の Bedrock での階段の `shape` (そこにはこのステートがない)
 - 防具立て (armor_stand) のポーズ
 - レッドストーン信号の伝わり方
 - アイテムコンポーネント ↔ Bedrock のアイテム NBT
 - 光源ブロック (light) の内部挙動
+
+### もう一方のエディションにしかないブロック
+
+一方のエディションのブロックには、もう一方にどの ID でも対応物がないものがあります。Bedrock のワールド構築用ブロック (`allow`、`deny`、`border_block`)、Education Edition のブロックと化学、Java ではエンティティとしてしか置けない額縁のブロック、それに Java のテストフレームワークのブロック (`test_block`、`test_instance_block`) です。これはリネームではありません。リネームには `aliases` が答えます ([§10.4](#未知の-id-はどのレジストリに照らして未知なのか))。しかもブロックの表だけでは、リネームと見分けられません。Java の `snow_block` は Bedrock の `snow` で、Java の `comparator` は Bedrock の `powered_comparator` と `unpowered_comparator` なので、2 つの表の差分を取ると 3 つとも欠けているように見えます。そこで各パックは、自分にないもう一方のエディションのブロックを `absent` コンポーネントに手で書き、行ごとに診断が出力する文を添えます。
+
+```json
+{ "ids": ["border_block"],
+  "reason": "the border block, which Bedrock uses to wall players in; Java has no such block" }
+```
+
+ローダーは、パック自身の `blocks` がいずれかのバージョンで宣言している `absent` の ID を拒否します。その綴りでも、`aliases` の同じグループの別の綴りでも同じです。そのエディションがそのブロックを持っていることになるからです。
+
+意味メンバーの `mat_slot=` がそうしたブロックに解決されたとき、また `connect … path=` がそうなったときは、それを欠くエディションの固定したターゲットで、トークンの位置に `E_PARITY_UNSUPPORTED` を出します ([Lint](/ja/spec/lint/))。タイプミスではないので、最も近い ID は示しません。ノートは、パックの理由と、[下記](#代替を書くとき)の階層を 1 段ずつ下りた 2 つの手を示します。各エディションが持つブロックにスロットを束縛するエディション別テーマか、もう一方のエディションの `@edition` ガードの下の `raw_block` です。そうしたブロックを名指す `raw_block` や `raw_fill` は `E_UNKNOWN_ID` です。生の ID はもともとエディション固有だからで、そのかわり、その行を残すガードをノートが示します。パック自身の対応が行き着いた ID も `E_UNKNOWN_ID` のままです。直すのはパックの対応で、ソースの行ではないからです。
+
+`E_UNKNOWN_ID` と同じく、この指摘には固定したターゲットが必要です ([§10.4](#未知の-id-はどのレジストリに照らして未知なのか))。`cairn info` の `edition portability` の行は、そのエディションの `absent` が挙げるエントリに同じ理由で答えます ([§10.5](#edition-portability-の行))。
 
 ### 代替を書くとき
 
@@ -478,7 +493,7 @@ struct shop size=9x7
     raw_block mat=minecraft:light_block_15 at=4,3,2
 ```
 
-このスニペットのうち、現時点でパースできるのは `@requires` の行と `struct` のヘッダ、それに 2 つのガードとその中身です。`theme` のルールはヘッダの下にインデントして書くので、1 行の形は `slot` の位置で `E_PARSE` になり、パースはそこで終わります。インデントしても、`slot` のルールが割り当てるのは 1 つのトークンで、その後には何も書けないので、`scale=2.0` と `glowing=true` は `E_PARSE` になります。本体の中に書いた `hologram` は `E_UNKNOWN_KEYWORD` です。`E_PARITY_UNSUPPORTED` も未実装です。例の `edition-fallback` は、いま使える段を組み上げています。エディション別のテーマと、ガードの下の光源ブロックです。
+このスニペットのうち、現時点でパースできるのは `@requires` の行と `struct` のヘッダ、それに 2 つのガードとその中身です。`theme` のルールはヘッダの下にインデントして書くので、1 行の形は `slot` の位置で `E_PARSE` になり、パースはそこで終わります。インデントしても、`slot` のルールが割り当てるのは 1 つのトークンで、その後には何も書けないので、`scale=2.0` と `glowing=true` は `E_PARSE` になります。本体の中に書いた `hologram` は `E_UNKNOWN_KEYWORD` です。`E_PARITY_UNSUPPORTED` は、メンバーをもう一方のエディションにしかないブロックに束縛したときに出ます ([上記](#もう一方のエディションにしかないブロック))。例の `edition-fallback` は、いま使える段を組み上げています。エディション別のテーマと、ガードの下の光源ブロックです。
 
 ### `@edition` ガードはエスケープハッチを囲む
 

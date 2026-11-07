@@ -41,6 +41,7 @@ fn every_code_renders_its_documented_string() {
             "E_MISSING_MATERIAL",
             "E_MISSING_PATH_MATERIAL",
             "E_OUTPUT_NAME_COLLISION",
+            "E_PARITY_UNSUPPORTED",
             "E_PARSE",
             "E_SEMANTIC_IN_EDITION_GUARD",
             "E_STATE_DOMAIN",
@@ -119,6 +120,7 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "E_MISSING_MATERIAL",
             "E_MISSING_PATH_MATERIAL",
             "E_OUTPUT_NAME_COLLISION",
+            "E_PARITY_UNSUPPORTED",
             "E_PARSE",
             "E_SEMANTIC_IN_EDITION_GUARD",
             "E_STATE_DOMAIN",
@@ -200,6 +202,7 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
         aliases: Vec::new(),
         since: None,
         until: None,
+        declared_by: None,
     })
     .expect("serialise payload");
     assert_eq!(
@@ -221,6 +224,7 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
         aliases: vec!["minecraft:stonebrick".to_owned()],
         since: Some("1.21.40".to_owned()),
         until: None,
+        declared_by: None,
     })
     .expect("serialise payload");
     assert_eq!(
