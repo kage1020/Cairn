@@ -81,8 +81,9 @@ const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock", states);
 
 /// The highest manifest `schema_version` this build reads.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
-/// The highest `data_versions.schema_version` this build reads; version 2 adds `targetable`, and
-/// version 3 `block_version`.
+/// The highest `data_versions.schema_version` this build reads. Version 2 adds `targetable` and
+/// version 3 `block_version`, which every targetable Bedrock row needs, so a Bedrock table only
+/// loads from version 3.
 pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 3;
 
 /// Where a [`RegistryPack`] came from, for diagnostics.
@@ -384,20 +385,22 @@ pub enum RegistryError {
         /// Which rows disagree, and about what.
         reason: String,
     },
-    /// A targetable Bedrock row lacks `block_version`, or a Java row carries one.
+    /// A targetable Bedrock row lacks `block_version`.
     #[error(
-        "registry pack `data_versions` row `{mc_version}`: {}",
-        if *edition == Edition::Bedrock {
-            "a targetable Bedrock row needs the `block_version` its structures write"
-        } else {
-            "a Java row writes its `data_version` and takes no `block_version`"
-        }
+        "registry pack `data_versions` row `{mc_version}` is a targetable Bedrock row and needs the `block_version` its structures write"
+    )]
+    BlockVersionMissing {
+        /// The row.
+        mc_version: String,
+    },
+    /// A row no structure is written for carries a `block_version`: a Java row, or a Bedrock row
+    /// `--target` cannot name.
+    #[error(
+        "registry pack `data_versions` row `{mc_version}` gives a `block_version`, which only a targetable Bedrock row writes"
     )]
     BlockVersionMisplaced {
         /// The row.
         mc_version: String,
-        /// The pack's edition.
-        edition: Edition,
     },
     /// The manifest's edition is not the one the pack was loaded as.
     #[error("registry pack edition `{got:?}` does not match expected `{expected:?}`")]
@@ -662,7 +665,7 @@ impl RegistryPack {
         let row = self.resolve_target_row(Edition::Bedrock, requested)?;
         Ok(BedrockTarget {
             mc_version: row.mc_version.clone(),
-            data_version: row.data_version,
+            order_key: row.data_version,
             block_version: row
                 .block_version
                 .expect("a targetable Bedrock row's block_version is validated at load time"),
@@ -912,7 +915,7 @@ fn load_pack(
         source,
         Component::Blocks,
         manifest.files.blocks.as_deref(),
-        BlocksIndex::from_catalog,
+        |catalog| BlocksIndex::from_catalog(catalog, expected_edition),
         BlocksIndex::empty,
     )?;
     let (aliases, aliases_text) = optional_component(
@@ -1192,9 +1195,7 @@ fn validate_blocks_order(
     };
     let mut previous: Option<(&str, i32)> = None;
     for version in blocks.versions() {
-        let Some(this) = key(version) else {
-            continue;
-        };
+        let this = key(version).expect("`validate_blocks_cover_versions` refused a table it lacks");
         if let Some((follows, before)) = previous
             && this <= before
         {
@@ -1254,19 +1255,18 @@ fn validate_data_versions(table: &DataVersionTable, edition: Edition) -> Result<
 }
 
 /// Requires a `block_version` on each targetable Bedrock row, the integer its structures write,
-/// and refuses one on a Java row, which writes its `DataVersion`.
+/// and refuses one on any other row, which nothing writes.
 fn validate_block_versions(
     table: &DataVersionTable,
     edition: Edition,
 ) -> Result<(), RegistryError> {
     for entry in &table.versions {
-        let required = edition == Edition::Bedrock && entry.targetable;
-        let refused = edition == Edition::Java && entry.block_version.is_some();
-        if refused || (required && entry.block_version.is_none()) {
-            return Err(RegistryError::BlockVersionMisplaced {
-                mc_version: entry.mc_version.clone(),
-                edition,
-            });
+        let written = edition == Edition::Bedrock && entry.targetable;
+        let mc_version = entry.mc_version.clone();
+        match (written, entry.block_version) {
+            (true, None) => return Err(RegistryError::BlockVersionMissing { mc_version }),
+            (false, Some(_)) => return Err(RegistryError::BlockVersionMisplaced { mc_version }),
+            (true, Some(_)) | (false, None) => {}
         }
     }
     Ok(())

@@ -758,7 +758,7 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
     };
     let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
     // The block-state version each release's palette carries, whose revision is not the client
-    // build's, and which 1.26.60 shares with 1.21.60 because no state changed form between them.
+    // build's, and which 1.26.60 shares with 1.21.60.
     let expected = [
         ("1.21.0", version(1, 21, 0, 3)),
         ("1.21.40", version(1, 21, 40, 1)),
@@ -794,7 +794,7 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
     }
     let latest = pack.resolve_bedrock_target("latest").expect("latest");
     assert_eq!(latest.mc_version, "1.26.60");
-    assert_eq!(latest.data_version, version(1, 26, 60, 0));
+    assert_eq!(latest.order_key, version(1, 26, 60, 0));
 }
 
 #[test]
@@ -1054,10 +1054,7 @@ fn two_bedrock_releases_sharing_a_block_version_keep_their_own_keys() {
     let old = pack.resolve_bedrock_target("1.21.60").expect("1.21.60");
     let new = pack.resolve_bedrock_target("1.26.60").expect("1.26.60");
     assert_eq!(old.block_version, new.block_version);
-    assert_eq!(
-        (old.data_version, new.data_version),
-        (18_168_832, 18_496_512)
-    );
+    assert_eq!((old.order_key, new.order_key), (18_168_832, 18_496_512));
 }
 
 #[test]
@@ -1073,11 +1070,32 @@ fn a_targetable_bedrock_row_without_a_block_version_is_refused() {
     }"#,
     )
     .expect_err("no block_version");
-    assert!(matches!(
-        err,
-        RegistryError::BlockVersionMisplaced { ref mc_version, edition: Edition::Bedrock }
-            if mc_version == "1.21.60"
-    ));
+    assert_eq!(
+        err.to_string(),
+        "registry pack `data_versions` row `1.21.60` is a targetable Bedrock row and needs the \
+         `block_version` its structures write",
+    );
+}
+
+#[test]
+fn a_bedrock_row_no_target_names_takes_no_block_version() {
+    let err = bedrock_pack(
+        r#"{
+        "schema_version": 3,
+        "latest": "1.21.60",
+        "versions": [
+            { "mc_version": "1.21.50", "data_version": 18166272, "block_version": 18166273,
+              "targetable": false },
+            { "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168865 }
+        ]
+    }"#,
+    )
+    .expect_err("block_version on a row no target names");
+    assert_eq!(
+        err.to_string(),
+        "registry pack `data_versions` row `1.21.50` gives a `block_version`, which only a \
+         targetable Bedrock row writes",
+    );
 }
 
 #[test]
@@ -1095,11 +1113,11 @@ fn a_java_row_with_a_block_version_is_refused() {
     }"#,
     );
     let err = load_from_dir(dir.path()).expect_err("block_version on Java");
-    assert!(matches!(
-        err,
-        RegistryError::BlockVersionMisplaced { ref mc_version, edition: Edition::Java }
-            if mc_version == "1.21.4"
-    ));
+    assert_eq!(
+        err.to_string(),
+        "registry pack `data_versions` row `1.21.4` gives a `block_version`, which only a \
+         targetable Bedrock row writes",
+    );
 }
 
 #[test]
@@ -1120,11 +1138,11 @@ fn block_tables_resolved_newest_first_are_refused() {
     }"#,
     );
     let err = load_from_dir(dir.path()).expect_err("newest first");
-    assert!(matches!(
-        err,
-        RegistryError::BlocksOutOfOrder { ref version, ref follows }
-            if version == "1.20.4" && follows == "1.21.4"
-    ));
+    assert_eq!(
+        err.to_string(),
+        "registry pack `blocks` resolves `1.20.4` after `1.21.4`, which `data_versions` orders \
+         after it; list the tables oldest first",
+    );
 }
 
 /// A pack whose `blocks` declares an `oak_log` with a pillar axis at both versions.
