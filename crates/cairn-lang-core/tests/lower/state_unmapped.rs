@@ -28,9 +28,9 @@ impl NoSidewaysLog {
             "oak_log",
             "oak_planks",
         ]
-            .iter()
-            .map(|id| format!("minecraft:{id}"))
-            .collect();
+        .iter()
+        .map(|id| format!("minecraft:{id}"))
+        .collect();
         ids.sort();
         Self {
             ids,

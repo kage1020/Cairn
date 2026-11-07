@@ -312,6 +312,31 @@ fn a_pressure_plate_whose_material_is_outside_its_block_is_not_placed() {
 }
 
 #[test]
+fn a_door_whose_material_is_outside_its_block_is_not_set_in_the_wall() {
+    let walled = "theme t:\n  slot wall -> @cobblestone\n  slot d -> @oak_door[hinge=up]\n\n\
+                  struct s size=3x5\n  walls mat_slot=wall height=3\n";
+    let source = format!("{walled}  door side=front at=center mat_slot=d\n");
+    let out = lowered_at(&source, &Tables::pinned());
+    assert_eq!(
+        findings(&source, &out),
+        [(
+            DiagnosticCode::StateDomain,
+            "@oak_door[hinge=up]",
+            "`minecraft:oak_door` takes no `hinge=up` at test 2.0; `hinge` takes left, right",
+            vec![
+                "correct the state literal to a value test 2.0 takes, or leave `hinge` out for \
+                 the block's default",
+            ],
+        )],
+    );
+    assert_eq!(
+        only_structure(&out),
+        only_structure(&lowered_at(walled, &Tables::pinned())),
+        "no default door stands in the wall",
+    );
+}
+
+#[test]
 fn a_value_outside_the_property_names_the_values_it_takes() {
     let source = floored("@oak_log[axis=q]");
     let out = lowered_at(&source, &Tables::pinned());

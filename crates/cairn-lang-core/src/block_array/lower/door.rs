@@ -7,14 +7,15 @@ use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
-use crate::block_array::BlockState;
 use crate::block_array::args::{
-    UnreadArgument, diag_deferred_member_noted, diag_invalid_member, ident_or_ignore,
-    read_or_ignore,
+    UnreadArgument, diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member,
+    ident_or_ignore, read_or_ignore,
 };
 use crate::block_array::openings::{
-    WallSide, door_anchor_offset, door_at_refusal, wall_length, wall_local_to_grid,
+    DOOR_HEIGHT, WallSide, door_anchor_offset, door_at_refusal, wall_length, wall_local_to_grid,
 };
+use crate::block_array::roof::inward_cardinal;
+use crate::block_array::{BlockState, PaletteIndex};
 
 use super::canvas::{Canvas, MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
@@ -23,7 +24,6 @@ use super::members::{
     side_of, unplaced_walls_note,
 };
 use super::phase::Phase;
-use super::stair::inward_cardinal;
 
 /// Catalog token a `door`'s default material comes from; the pack spells it per edition.
 pub(super) const DOOR_TOKEN: &str = "door.default";
@@ -31,9 +31,6 @@ pub(super) const DOOR_TOKEN: &str = "door.default";
 /// Door id used when the pack cannot supply one: the Java spelling, Java being the base edition
 /// (`spec/versioning-editions` "Backend = data tables").
 pub(super) const DOOR_BASE_ID: &str = "minecraft:oak_door";
-
-/// Rows a door block stands, from the row it opens at.
-const DOOR_HEIGHT: u32 = 2;
 
 /// The side of a door its hinge is on, as seen from outside the wall.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +40,14 @@ enum Hinge {
 }
 
 impl Hinge {
+    /// Every hinge, in the order a note lists them.
+    const ALL: [Self; 2] = [Self::Left, Self::Right];
+
+    /// The hinge a `hinge=` identifier names, or `None`.
+    fn from_ident(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|hinge| hinge.as_str() == name)
+    }
+
     /// The value of the block's `hinge` state.
     fn as_str(self) -> &'static str {
         match self {
@@ -52,7 +57,8 @@ impl Hinge {
     }
 }
 
-/// A door block a `door` member stood in its opening, for [`hang_doors`] to settle its hinge.
+/// A door block a `door` member stood in its opening, which [`hang_doors`] hinges or counts as a
+/// neighbour.
 pub(super) struct HungDoor {
     /// The member's index in the flattened paint list.
     member: u32,
@@ -63,6 +69,8 @@ pub(super) struct HungDoor {
     /// `hinge=` as the line writes it, or `None` when it is derived.
     hinge: Option<Hinge>,
     open: bool,
+    /// The slots [`fill_door`] painted its halves with, lower first.
+    painted: [PaletteIndex; 2],
 }
 
 impl HungDoor {
@@ -133,21 +141,30 @@ pub(super) fn fill_door(
     };
     let door = stand_door(member, canvas.member(), written, y_offset, ctx, diagnostics);
     let built = door.is_some();
-    if let Some(door) = door {
-        for (half, pos) in door.cells() {
-            let state = door.state(half, door.hinge.unwrap_or(Hinge::Left));
-            canvas.paint(pos, || palette.intern(state));
+    if let Some(mut door) = door {
+        if door.hinge.is_none() {
+            canvas.hold_contests();
         }
+        // A derived door stands hinged on the left until `hang_doors` settles it.
+        let hinge = door.hinge.unwrap_or(Hinge::Left);
+        let mut painted = [PaletteIndex::AIR; 2];
+        for (slot, (half, pos)) in painted.iter_mut().zip(door.cells()) {
+            canvas.paint(pos, || {
+                *slot = palette.intern(door.state(half, hinge));
+                *slot
+            });
+        }
+        door.painted = painted;
         hung.push(door);
     }
     for (argument, consequence) in unread {
-        diagnostics.push(argument.report(if built {
-            consequence
-        } else {
-            "this door is not built either way — see the finding on the same line"
-        }));
+        diagnostics.push(argument.report(if built { consequence } else { NOT_BUILT }));
     }
 }
+
+/// The consequence an unread state of a door that is not built reports.
+const NOT_BUILT: &str = "this door is not built either way — see the finding on the same line, or \
+                         on the material its `mat_slot=` names";
 
 /// The `hinge=` and `open=` a door's line writes, read before anything can refuse it.
 #[derive(Debug, Clone, Copy)]
@@ -157,7 +174,10 @@ struct WrittenStates<'m> {
 }
 
 /// The door [`fill_door`] stands for the member at `index` of the flattened paint list, or `None`
-/// after the finding that refuses it.
+/// after the findings that refuse it.
+///
+/// Every argument and the material are judged whatever else refuses the door, so one build reports
+/// each fault of its own; the course is judged only for a line with none.
 fn stand_door(
     member: &Member,
     index: u32,
@@ -166,42 +186,45 @@ fn stand_door(
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<HungDoor> {
-    let side = side_of(member, diagnostics)?;
-    let len = wall_length(side, ctx.interior_w, ctx.interior_h);
-    // Asked before the wall, so an `at=` typo is reported even when the walls are wrong too.
-    let at = match door_anchor_offset(member, len) {
-        Ok(at) => at,
-        Err(written) => {
+    let side = side_of(member, diagnostics);
+    let at = side.and_then(|side| {
+        door_anchor_offset(member, wall_length(side, ctx.interior_w, ctx.interior_h))
+            .map_err(|written| {
+                diagnostics.push(diag_invalid_member(
+                    member,
+                    door_at_refusal(&written),
+                    Vec::new(),
+                ));
+            })
+            .ok()
+    });
+    let hinge = written.hinge.map(|name| {
+        Hinge::from_ident(name).ok_or_else(|| {
+            let hinges: Vec<&str> = Hinge::ALL.map(Hinge::as_str).into();
             diagnostics.push(diag_invalid_member(
                 member,
-                door_at_refusal(&written),
-                Vec::new(),
+                format!("unknown door `hinge={name}`"),
+                vec![format!("`hinge=` takes one of {}", hinges.join(", "))],
             ));
-            return None;
-        }
-    };
-    let hinge = match written.hinge {
-        None => None,
-        Some("left") => Some(Hinge::Left),
-        Some("right") => Some(Hinge::Right),
-        Some(other) => {
-            diagnostics.push(diag_invalid_member(
-                member,
-                format!("unknown door `hinge={other}`"),
-                vec!["`hinge=` takes one of left, right".to_owned()],
-            ));
-            return None;
-        }
+        })
+    });
+    let line = match (side, at, hinge.transpose()) {
+        (Some(side), Some(at), Ok(hinge)) => Some((side, at, hinge)),
+        _ => None,
     };
     // Judged against the course holding the door's rows, never the tallest wall row.
     let base_row = y_offset.saturating_add(1);
-    if !ctx.wall_column.contains_rows(base_row, DOOR_HEIGHT) {
+    let in_course = line.is_some() && ctx.wall_column.contains_rows(base_row, DOOR_HEIGHT);
+    if line.is_some() && !in_course {
         diagnostics.push(door_course_refusal(member, base_row, ctx));
-        return None;
     }
     let id = door_block_id(member, ctx, diagnostics)
         .map_err(|refusal| diagnostics.push(*refusal))
-        .ok()??;
+        .ok()
+        .flatten();
+    let (Some((side, at, hinge)), true, Some(id)) = (line, in_course, id) else {
+        return None;
+    };
     let Some(lower) = wall_local_to_grid(
         side,
         at,
@@ -219,6 +242,10 @@ fn stand_door(
              `wall_local_to_grid`",
             side_name(side),
         );
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "door resolved to cells outside the struct's block array",
+        ));
         return None;
     };
     Some(HungDoor {
@@ -228,11 +255,16 @@ fn stand_door(
         id,
         hinge,
         open: written.open,
+        painted: [PaletteIndex::AIR; 2],
     })
 }
 
 /// The block a door is built from: its `mat_slot=`, or the pack's default door; `None` for a
 /// binding whose state literal the target refused, which builds no door.
+///
+/// # Errors
+///
+/// The `E_UNKNOWN_ID` for a default door the target does not declare.
 fn door_block_id(
     member: &Member,
     ctx: &StructCtx<'_>,
@@ -265,29 +297,47 @@ fn door_block_id(
 }
 
 /// Settle the hinge of each door in `hung` whose line writes none, from the wall beside it now
-/// that every opening is cut.
+/// that every opening is cut, then judge the contests its cells took part in.
 pub(super) fn hang_doors(hung: &[HungDoor], palette: &mut ScopePalette, canvas: &mut Canvas) {
-    let settled: Vec<(&HungDoor, Hinge)> = hung
+    let derived: Vec<(&HungDoor, Hinge)> = hung
         .iter()
         .filter(|door| door.hinge.is_none())
         .map(|door| (door, derived_hinge(door, hung, canvas)))
         .collect();
-    for (door, hinge) in settled {
-        // `fill_door` stood every door hinged on the left.
-        if hinge == Hinge::Left {
-            continue;
-        }
-        for (half, pos) in door.cells() {
+    let mut settled: Vec<(u32, PaletteIndex, PaletteIndex)> = Vec::new();
+    for (door, hinge) in derived {
+        for ((half, pos), painted) in door.cells().into_iter().zip(door.painted) {
+            let slot = palette.intern(door.state(half, hinge));
             // A cell a later opening took is that opening's.
-            if canvas.owner_at(pos) != Some(door.member) {
-                continue;
+            if canvas.owner_at(pos) == Some(door.member) {
+                canvas.for_member(door.member).paint(pos, || slot);
+            } else {
+                canvas.name(slot);
             }
-            let state = door.state(half, hinge);
-            canvas
-                .for_member(door.member)
-                .paint(pos, || palette.intern(state));
+            settled.push((door.member, painted, slot));
         }
     }
+    canvas.settle_contests(|member, slot| {
+        settled
+            .iter()
+            .find(|&&(door, painted, _)| door == member && painted == slot)
+            .map_or(slot, |&(_, _, settled)| settled)
+    });
+}
+
+/// The members of `hung` that hold one of their door's two cells, a later opening having taken
+/// the other.
+pub(super) fn split_doors(hung: &[HungDoor], canvas: &Canvas) -> Vec<u32> {
+    hung.iter()
+        .filter(|door| {
+            door.cells()
+                .into_iter()
+                .filter(|&(_, pos)| canvas.owner_at(pos) == Some(door.member))
+                .count()
+                == 1
+        })
+        .map(|door| door.member)
+        .collect()
 }
 
 /// The hinge `spec/blockstate` "Derive by default, promote on override" gives `door`: on the right

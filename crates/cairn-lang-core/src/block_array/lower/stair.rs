@@ -12,7 +12,9 @@ use crate::block_array::args::{
     nonneg_int_or_refuse,
 };
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
-use crate::block_array::roof::{Cardinal, STAIR_BASE_ID, StairShape, shed_high_side, stair_state};
+use crate::block_array::roof::{
+    Cardinal, STAIR_BASE_ID, StairShape, inward_cardinal, shed_high_side, stair_state,
+};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
@@ -315,16 +317,6 @@ fn paint_eave_band(
         };
         let (x, z) = shift_outward(side, wx, wz);
         canvas.paint((x, y_world, z), || idx);
-    }
-}
-
-/// The cardinal opposite the wall's outward normal, for `facing=in`.
-pub(super) fn inward_cardinal(side: WallSide) -> Cardinal {
-    match side {
-        WallSide::Front => Cardinal::North,
-        WallSide::Back => Cardinal::South,
-        WallSide::Left => Cardinal::East,
-        WallSide::Right => Cardinal::West,
     }
 }
 

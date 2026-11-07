@@ -6,6 +6,9 @@ use crate::intent::Member;
 use super::Dims;
 use super::args::size_value;
 
+/// Rows a door block stands, from the row it opens at.
+pub(super) const DOOR_HEIGHT: u32 = 2;
+
 /// A struct wall, named as seen from outside (`spec/syntax` "Selectors").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WallSide {

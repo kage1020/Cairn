@@ -53,6 +53,127 @@ fn two_doors_side_by_side_are_hinged_on_their_outer_jambs() {
 }
 
 #[test]
+fn three_doors_in_a_row_hinge_the_end_one_away_from_its_neighbour() {
+    let src = format!(
+        "{THEME}struct s size=3x5\n  walls mat_slot=wall height=3\n  \
+         door side=front at=left\n  door side=front at=center\n  door side=front at=right\n"
+    );
+    let out = lowered(&src);
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    // The middle door has a door on both sides, so neither neighbour moves its hinge.
+    for (x, hinge) in [(0, "left"), (1, "left"), (2, "right")] {
+        assert_eq!(door_at(ba, x, 1, 4), oak_door("north", hinge), "x={x}");
+    }
+}
+
+#[test]
+fn a_door_at_a_wall_end_is_hinged_on_the_jamb_with_wall_on_every_side() {
+    // `size=9x7` puts the back wall at z=0, the left at x=0 and the right at x=8; each wall's
+    // left end is the one on the left as seen from outside.
+    for (side, left_end, right_end, facing) in [
+        ("front", (0, 6), (8, 6), "north"),
+        ("back", (8, 0), (0, 0), "south"),
+        ("left", (0, 0), (0, 6), "east"),
+        ("right", (8, 6), (8, 0), "west"),
+    ] {
+        for (at, (x, z), hinge) in [("left", left_end, "right"), ("right", right_end, "left")] {
+            let out = lowered(&hut(&format!("door side={side} at={at}")));
+            assert_eq!(out.diagnostics, [], "{side} {at}");
+            assert_eq!(
+                door_at(only_structure(&out), x, 1, z),
+                oak_door(facing, hinge),
+                "{side} {at}",
+            );
+        }
+    }
+}
+
+#[test]
+fn a_written_right_hinge_is_built_where_the_wall_gives_left() {
+    let out = lowered(&hut("door side=front at=center hinge=right"));
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(front_door(&out, 4), oak_door("north", "right"));
+}
+
+/// The `W_PHASE_CONFLICT` the line `overriding` raises over an earlier one, with the note on a
+/// door it splits when there is one.
+fn phase_conflict<'a>(
+    overriding: &'a str,
+    primary: &'a str,
+    split: Option<&'a str>,
+) -> Finding<'a> {
+    let mut notes = vec!["overwritten member declared here"];
+    notes.extend(split);
+    notes.extend([
+        "If the override is deliberate this is the local-override rule of spec/compilation \
+         \"Phase evaluation\" and the later line wins as written. If it is not, move one of the \
+         two so their footprints do not meet.",
+        "Members in different phases may overlap freely — a `door` cut through a `walls` is the \
+         evaluation model working — so this is only reported for two members the same phase \
+         evaluates.",
+    ]);
+    (DiagnosticCode::PhaseConflict, overriding, primary, notes)
+}
+
+#[test]
+fn two_doors_in_one_opening_contest_the_hinge_each_would_build() {
+    let derived = "door side=front at=left";
+    let over_derived = "`door` overwrites 2 voxels that `door` painted in the same phase, so which \
+                        block the build keeps is decided by the order the two lines are written in";
+    // At this corner the derived hinge is `right`, so a written `left` differs from it either way.
+    for (first, second, hinge) in [
+        ("door side=front at=left hinge=left", derived, "right"),
+        (derived, "door side=front at=left hinge=left", "left"),
+    ] {
+        let src = hut(&format!("{first}\n  {second}"));
+        let out = lowered(&src);
+        assert_eq!(
+            findings(&src, &out),
+            [phase_conflict(second, over_derived, None)],
+            "{first} / {second}",
+        );
+        assert_eq!(
+            front_door(&out, 0),
+            oak_door("north", hinge),
+            "{first} / {second}"
+        );
+    }
+    // A written `right` builds what the derived door would have.
+    let src = hut(&format!("{derived}\n  door side=front at=left hinge=right"));
+    let out = lowered(&src);
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(front_door(&out, 0), oak_door("north", "right"));
+}
+
+#[test]
+fn a_window_over_half_a_door_leaves_the_other_half_and_says_so() {
+    let window = "window side=front offset=0 y=2 size=1x1 mat_slot=glass";
+    let src = hut(&format!("door side=front at=left\n  {window}"));
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [phase_conflict(
+            window,
+            "`window` overwrites 1 voxel that `door` painted in the same phase, so which block \
+             the build keeps is decided by the order the two lines are written in",
+            Some(
+                "the `door` is left with one of its two blocks, and the game removes a door \
+                 block whose other half is missing"
+            ),
+        )],
+    );
+    let ba = only_structure(&out);
+    assert_eq!(
+        door_at(ba, 0, 1, 6),
+        [
+            oak_door("north", "right")[0].clone(),
+            "minecraft:glass_pane[]".to_owned(),
+        ],
+    );
+}
+
+#[test]
 fn a_door_faces_into_the_struct_from_every_side() {
     // `size=9x7` puts the back wall at z=0, the left at x=0 and the right at x=8.
     for (side, (x, z), facing) in [
@@ -178,7 +299,10 @@ fn an_open_that_is_no_boolean_is_ignored_and_the_door_built_closed() {
                 "unknown door `hinge=up`",
                 vec!["`hinge=` takes one of left, right"],
             ),
-            open_yes("this door is not built either way — see the finding on the same line"),
+            open_yes(
+                "this door is not built either way — see the finding on the same line, or on \
+                 the material its `mat_slot=` names"
+            ),
         ],
     );
 }
@@ -218,4 +342,59 @@ fn a_door_bound_outside_the_door_family_is_refused_and_built_from_the_default_do
         "door",
     );
     assert_eq!(front_door(&out, 4), oak_door("north", "left"));
+}
+
+#[test]
+fn a_material_outside_the_door_family_is_reported_beside_a_refused_or_deferred_course() {
+    let line = "door side=front at=center mat_slot=plank";
+    let material: Finding<'_> = (
+        DiagnosticCode::IncompatibleMaterial,
+        "@oak_planks",
+        "door derives `facing` / `half` / `hinge` from where it stands and `minecraft:oak_planks` \
+         is not a door, so those states have nowhere to go",
+        vec![
+            "bind the slot to a `*_door` material — the registry pack's `door.default` resolves \
+             to one",
+            "reached through `mat_slot=plank`, so every member reading that slot has it too",
+        ],
+    );
+    let src = format!("{THEME}struct s size=9x7\n  walls mat_slot=wall height=1\n  {line}\n");
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [
+            material.clone(),
+            (
+                DiagnosticCode::InvalidMember,
+                line,
+                "door stands at y=1..=2, and the wall course holding y=1 ends there (the walls \
+                 occupy y=1..=1)",
+                vec![
+                    "a door block is two rows tall; raise the `walls` so their course holds the \
+                     row above the one the door opens at",
+                ],
+            ),
+        ],
+    );
+
+    let src = format!(
+        "{THEME}struct s size=9x7\n  {line}\n\n  level id=up\n    walls mat_slot=wall height=4\n"
+    );
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [
+            material,
+            (
+                DiagnosticCode::DeferredMember,
+                line,
+                "door has no wall to cut into: every `walls` member on this struct sits under a \
+                 `level` that is not placed",
+                vec![
+                    "a `level` that is not placed holds a `walls` member that may reach the rows \
+                     the door stands in; the door is set once that `level` is placed",
+                ],
+            ),
+        ],
+    );
 }

@@ -4016,7 +4016,7 @@ fn window_carve_stops_at_the_top_of_the_wall_not_the_top_of_the_volume() {
 }
 
 #[test]
-fn a_door_whose_level_sits_at_or_above_the_wall_it_would_carve_is_refused() {
+fn a_door_whose_level_sits_at_or_above_the_wall_it_would_stand_in_is_refused() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n"
