@@ -175,18 +175,44 @@ The job fails when:
   file and the cell.
 - The data generator logs an exception. It still exits 0 then, so the job reads its log.
 
-To run it locally, with Java 21 and network access to Mojang:
+To run it locally, with Java 25 and network access to Mojang:
 
 ```sh
 cargo build -p cairn-lang-cli
 python3 .github/scripts/minecraft_load.py --cairn ./target/debug/cairn --target 1.21.4
 ```
 
-Leave out `--target` to check every shipped version. 1.21 and later need Java 21, so when the
-`java` on the `PATH` is older, pass a newer one with `--java <path>`. The script downloads each
-server jar from Mojang, checks it against the SHA-1 Mojang publishes, and keeps it under
+Leave out `--target` to check every shipped version. 26.3 needs Java 25 and 1.21 needs Java 21, so
+when the `java` on the `PATH` is older, pass a newer one with `--java <path>`. The script downloads
+each server jar from Mojang, checks it against the SHA-1 Mojang publishes, and keeps it under
 `~/.cache/cairn-minecraft`. The jars are used under the Minecraft EULA and are never committed. The
 data generator writes no world, so it needs no `eula.txt`.
+
+### The registry tables
+
+The built-in packs' block tables are extracted from the game, never written by hand.
+`.github/scripts/extract_registry.py` reads each targetable row of an edition's
+`data_versions.json`: for Java it runs that version's server jar with `--reports` and reads
+`reports/blocks.json`, and for Bedrock it reads the release's block palette as GeyserMC ships it,
+pinned in the script by commit and SHA-256. For Bedrock it also derives `states.json`, the state
+maps, from GeyserMC's Java-to-Bedrock mappings, pinned the same way, and reads the `--reports` of
+the Java release each mapping follows to name its states, so the Bedrock run needs Java 25 as well.
+It rewrites the edition's `blocks.json`, each targetable row's `data_version` on Java or
+`block_version` on Bedrock and `latest` in `data_versions.json`, Bedrock's `states.json`, and the
+`extracted` record in `pack.json`.
+
+```sh
+python3 .github/scripts/extract_registry.py java --java <path to Java 25>
+python3 .github/scripts/extract_registry.py bedrock --java <path to Java 25>
+```
+
+With `--check` it writes nothing and fails when a committed file differs from what the game says,
+which is the `Minecraft` workflow's `Registry tables match the game` check. To add a target, add its
+row to `data_versions.json` (and, for Bedrock, the pins of its palette and its state map to the
+script), run the extraction, and rerun the load check above. A Java property a state map drops
+needs a row in Bedrock's hand-written `sensitivity.json`, saying what dropping it costs, and the
+run refuses until it has one. The pack hash moves with every table, so the `builtin_*_pack_hash`
+snapshots in `cairn-lang-formats` move too.
 
 ## Conventions for Rust code
 

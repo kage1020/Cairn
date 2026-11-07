@@ -157,6 +157,25 @@ impl Canvas {
         }
     }
 
+    /// Per voxel: `0` while unwritten, `n + 1` once member `n` of the flattened paint list did.
+    pub(super) fn owners(&self) -> &[u32] {
+        &self.owners
+    }
+
+    /// The member of the flattened paint list that wrote `pos` last, or `None` for a cell no member
+    /// wrote or one outside the grid.
+    pub(super) fn owner_at(&self, pos: (u32, u32, u32)) -> Option<u32> {
+        let i = self.dims.index(pos.0, pos.1, pos.2)?;
+        self.owners[i].checked_sub(1)
+    }
+
+    /// Whether the member that wrote `pos` last runs in `phase`.
+    pub(super) fn written_in(&self, pos: (u32, u32, u32), phase: Phase) -> bool {
+        self.owner_at(pos)
+            .and_then(|owner| self.phases.get(owner as usize).copied().flatten())
+            == Some(phase)
+    }
+
     /// Borrow the canvas as the member at `index` of the flattened paint list sees it.
     pub(super) fn for_member(&mut self, index: u32) -> MemberCanvas<'_> {
         debug_assert!(
@@ -188,6 +207,11 @@ pub(super) struct MemberCanvas<'a> {
 }
 
 impl MemberCanvas<'_> {
+    /// The index in the flattened paint list of the member this canvas files writes under.
+    pub(super) fn member(&self) -> u32 {
+        self.member
+    }
+
     /// Paint one voxel, claiming its palette slot only once the cell is known to exist.
     pub(super) fn paint(&mut self, pos: (u32, u32, u32), claim: impl FnOnce() -> PaletteIndex) {
         if !self.try_paint(pos, claim) {

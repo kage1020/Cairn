@@ -76,8 +76,10 @@ little-endian NBT, or Bedrock's `weirdo_direction`.
 
 The backend resolves less than that today. A canonical token is written as `minecraft:<token>` and
 checked against the pinned target ([§7.3](#73-mappings-across-version-and-edition)), so
-`@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version, and the Bedrock writer maps the states
-of the stair family alone: `@oak_log[axis=x]` compiles for Java and is refused for Bedrock.
+`@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version. Its states are the ones the token's
+Java block takes, and the Bedrock writer maps them through the pack's state map for the target
+version: `@oak_log[axis=x]` is written as `pillar_axis=x` on every Bedrock version, while
+`@cherry_wood[axis=x]` is `E_STATE_UNMAPPED` at 1.21.40, whose map has no form for it.
 
 Tokens come in two kinds:
 
@@ -112,6 +114,7 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@wood.dark`, `@wood.light`, `@wood.warm`, `@wood.cool` | Planks, by tone |
 | `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
 | `@sign.oak`, `@sign.oak_wall` | A standing sign and a wall sign |
+| `@door.default` | The door block a `door` places when no `mat_slot=` binds one |
 | `@pressure_plate.default` | The block a `pressure_plate` places when no `mat_slot=` binds one |
 
 The block a tier-1 token resolves to is **tier-2**, which is Evolving: it is the catalog's answer
@@ -135,17 +138,19 @@ A canonical token absorbs five patterns. The resolution table's structure is in
 | New | `@cherry_planks` | Needs a `requires >=` floor. |
 | Deleted | Absent in the target version | Hard error plus alternatives. |
 
-Today only the last row holds as written. A canonical token is written as `minecraft:<token>`
-and checked against the pinned target
-([Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)).
-A rename is `E_UNKNOWN_ID`, with a note naming the target's spelling from the registry pack's
-`aliases` (`@dirt_path` on Bedrock is answered with `minecraft:grass_path`); only an abstract token
-resolves across a rename, through its catalog entry's `overrides`
-([§7.2](#72-canonical-vocabulary)). A split is not separated: `@cauldron[fluid=water]` is written
-as `minecraft:cauldron[fluid=water]` with `W_STATE_LITERAL_UNCHECKED`. A merged id is checked per
-target like any other. No floor is inferred for a new block: `@pale_oak_planks` with no `@requires`
-checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it. A deleted id is
-`E_UNKNOWN_ID`, naming the nearest block the target has when one is near enough.
+Today only the last row holds as written. A canonical token is written as `minecraft:<token>` and
+checked against the pinned target ([Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)). A rename is
+`E_UNKNOWN_ID`, with a note naming the target's spelling from the registry pack's `aliases`
+(`@dirt_path` on Bedrock is answered with `minecraft:grass_path`); only an abstract token resolves
+across a rename, through its catalog entry's `overrides` ([§7.2](#72-canonical-vocabulary)). A split
+is not separated: `@cauldron[fluid=water]` names a state `minecraft:cauldron` does not have, so a
+pinned target refuses it as `E_STATE_DOMAIN` rather than reading it as `water_cauldron`. A merged id
+is checked per target like any other. No floor is inferred for a new block: `@pale_oak_planks` with
+no `@requires` checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it, naming
+1.21.4 as the version it first appears in. A deleted id is `E_UNKNOWN_ID`, naming the last version
+that declares it; an id no version declares names the nearest block the target has when one is near
+enough.
 
 **Only ID, state, and serialization differences may be absorbed.** Concept absence and
 game-behaviour differences are not.

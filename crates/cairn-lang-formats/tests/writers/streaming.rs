@@ -7,14 +7,20 @@ use cairn_lang_formats::bedrock_structure::{
     BedrockStructureError, ParityNote, build_mcstructure_tag, prepare_mcstructure,
     write_mcstructure,
 };
-use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_target};
+use cairn_lang_formats::data_version::{
+    BedrockTarget, resolve_bedrock_target, resolve_java_target,
+};
 use cairn_lang_formats::java_structure::{
     JavaStructureError, build_structure_tag, prepare_structure, write_compound_gzip,
     write_structure_gzip,
 };
 use cairn_lang_nbt::NbtIoError;
 
-use crate::common::{block_palette, examples, latest, lower_source};
+use cairn_lang_formats::registry::builtin_pack;
+
+use crate::common::{
+    block_palette, examples, latest, lower_source, states_for, supported_versions,
+};
 
 /// Asserts two encodings match, reporting the first offset where they differ.
 fn assert_same_bytes(label: &str, what: &str, actual: &[u8], expected: &[u8]) {
@@ -34,9 +40,17 @@ fn assert_same_bytes(label: &str, what: &str, actual: &[u8], expected: &[u8]) {
     );
 }
 
-/// Asserts both Java write paths agree with the tree for `array`.
+/// Asserts both Java write paths agree with the tree for `array`, at a target on each side of the
+/// `DataVersion` that renames a palette entry's keys.
 fn assert_java_streams_the_tree(label: &str, array: &BlockArray) {
-    let target = resolve_java_target("latest").expect("latest");
+    for mc_version in ["1.21.4", "26.3"] {
+        let label = format!("{label} at {mc_version}");
+        assert_java_target_streams_the_tree(&label, array, mc_version);
+    }
+}
+
+fn assert_java_target_streams_the_tree(label: &str, array: &BlockArray, mc_version: &str) {
+    let target = resolve_java_target(mc_version).expect("a shipped target");
     let mut tree = Vec::new();
     write_compound_gzip(
         &mut tree,
@@ -54,14 +68,22 @@ fn assert_java_streams_the_tree(label: &str, array: &BlockArray) {
     assert_same_bytes(label, "write_structure_gzip", &one_step, &tree);
 }
 
-/// Asserts the Bedrock write path agrees with the tree and its `block_palette` is a set, returning
-/// the parity notes and how many palette entries translation merged.
-fn assert_bedrock_streams_the_tree(label: &str, array: &BlockArray) -> (Vec<ParityNote>, usize) {
-    let target = resolve_bedrock_target("latest").expect("latest");
-    let (root, _) = build_mcstructure_tag(array, &target).expect("build");
+fn latest_bedrock() -> BedrockTarget {
+    resolve_bedrock_target("latest").expect("latest")
+}
+
+/// Asserts the Bedrock write path at `target` agrees with the tree and its `block_palette` is a
+/// set, returning the parity notes and how many palette entries translation merged.
+fn assert_bedrock_streams_the_tree(
+    label: &str,
+    array: &BlockArray,
+    target: &BedrockTarget,
+) -> (Vec<ParityNote>, usize) {
+    let states = states_for(target);
+    let (root, _) = build_mcstructure_tag(array, target, &states).expect("build");
     let mut tree = Vec::new();
     write_mcstructure(&mut tree, &root).expect("tree write");
-    let (prepared, notes) = prepare_mcstructure(array, &target).expect("prepare");
+    let (prepared, notes) = prepare_mcstructure(array, target, &states).expect("prepare");
     let mut streamed = Vec::new();
     prepared.write(&mut streamed).expect("stream write");
     assert_same_bytes(label, "streamed .mcstructure", &streamed, &tree);
@@ -77,38 +99,41 @@ fn assert_bedrock_streams_the_tree(label: &str, array: &BlockArray) -> (Vec<Pari
 
 #[test]
 fn every_shipped_structure_streams_the_bytes_its_tree_writes() {
-    for edition in [Edition::Java, Edition::Bedrock] {
-        let mut compared = 0;
-        let mut notes = 0;
-        let mut merged = 0;
-        for (name, source) in examples() {
-            let ir = lower_source(&source, edition, Some(latest(edition)));
-            for (scope, array) in &ir.structures {
-                let label = format!("{name} {scope} ({edition:?})");
-                match edition {
-                    Edition::Java => assert_java_streams_the_tree(&label, array),
-                    Edition::Bedrock => {
-                        let (raised, folded) = assert_bedrock_streams_the_tree(&label, array);
-                        notes += raised.len();
-                        merged += folded;
-                    }
-                }
-                compared += 1;
-            }
-        }
-        assert!(compared > 0, "{edition:?}: the examples lowered to nothing");
-        // `themed-tower` raises a note, and `roof-hip` folds two corner stairs into one block.
-        if matches!(edition, Edition::Bedrock) {
-            assert!(
-                notes > 0,
-                "no shipped example raised a parity note on Bedrock"
-            );
-            assert!(
-                merged > 0,
-                "no shipped example merged two palette entries on Bedrock"
-            );
+    let examples = examples();
+    let mut compared = 0;
+    for (name, source) in &examples {
+        let ir = lower_source(source, Edition::Java, Some(latest(Edition::Java)));
+        for (scope, array) in &ir.structures {
+            assert_java_streams_the_tree(&format!("{name} {scope} (java)"), array);
+            compared += 1;
         }
     }
+    assert!(compared > 0, "java: the examples lowered to nothing");
+
+    let mut notes = 0;
+    let mut merged = 0;
+    for version in supported_versions(builtin_pack(Edition::Bedrock)) {
+        let target = resolve_bedrock_target(version).expect("a targetable version resolves");
+        for (name, source) in &examples {
+            let ir = lower_source(source, Edition::Bedrock, Some(version));
+            for (scope, array) in &ir.structures {
+                let label = format!("{name} {scope} (bedrock {version})");
+                let (raised, folded) = assert_bedrock_streams_the_tree(&label, array, &target);
+                notes += raised.len();
+                merged += folded;
+            }
+        }
+    }
+    // At a version without a stair corner state, `themed-tower` raises a note and `roof-hip`
+    // folds two corner stairs into one block.
+    assert!(
+        notes > 0,
+        "no shipped example raised a parity note on Bedrock"
+    );
+    assert!(
+        merged > 0,
+        "no shipped example merged two palette entries on Bedrock"
+    );
 }
 
 /// A 2×3×4 array that a loop nested in the wrong order writes differently.
@@ -143,7 +168,7 @@ fn asymmetric_array() -> BlockArray {
 fn an_asymmetric_array_streams_the_bytes_its_tree_writes() {
     let array = asymmetric_array();
     assert_java_streams_the_tree("asymmetric", &array);
-    assert_bedrock_streams_the_tree("asymmetric", &array);
+    assert_bedrock_streams_the_tree("asymmetric", &array, &latest_bedrock());
 }
 
 #[test]
@@ -159,7 +184,7 @@ fn an_empty_array_streams_the_bytes_its_tree_writes() {
         };
         let label = format!("empty {}x{}x{}", dims.x, dims.y, dims.z);
         assert_java_streams_the_tree(&label, &array);
-        assert_bedrock_streams_the_tree(&label, &array);
+        assert_bedrock_streams_the_tree(&label, &array, &latest_bedrock());
     }
 }
 
@@ -203,7 +228,8 @@ fn a_voxel_count_past_the_list_limit_is_refused_before_a_byte_is_written() {
     assert!(written.is_empty(), "java wrote {} bytes", written.len());
 
     let bedrock = resolve_bedrock_target("latest").expect("latest");
-    let err = prepare_mcstructure(&array, &bedrock).expect_err("bedrock prepare");
+    let err =
+        prepare_mcstructure(&array, &bedrock, &states_for(&bedrock)).expect_err("bedrock prepare");
     assert!(
         matches!(
             err,
@@ -323,11 +349,11 @@ fn a_grid_that_disagrees_with_its_dims_is_refused_by_every_builder_before_a_byte
         let bedrock_refusals = [
             (
                 "prepare_mcstructure",
-                prepare_mcstructure(&array, &bedrock).err(),
+                prepare_mcstructure(&array, &bedrock, &states_for(&bedrock)).err(),
             ),
             (
                 "build_mcstructure_tag",
-                build_mcstructure_tag(&array, &bedrock).err(),
+                build_mcstructure_tag(&array, &bedrock, &states_for(&bedrock)).err(),
             ),
         ];
         for (builder, err) in bedrock_refusals {
@@ -363,8 +389,9 @@ fn a_palette_string_the_encoder_refuses_is_named_with_its_entry() {
         ),
         "java: got {err:?}",
     );
-    let err = prepare_mcstructure(&array, &resolve_bedrock_target("latest").expect("latest"))
-        .expect_err("bedrock prepare");
+    let bedrock = resolve_bedrock_target("latest").expect("latest");
+    let err =
+        prepare_mcstructure(&array, &bedrock, &states_for(&bedrock)).expect_err("bedrock prepare");
     assert!(
         matches!(
             &err,

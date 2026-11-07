@@ -577,13 +577,13 @@ fn targetable_rows_are_the_buildable_ones_in_data_version_order() {
         .into_iter()
         .map(|e| e.mc_version.as_str())
         .collect();
-    assert_eq!(java, ["1.20.4", "1.21", "1.21.4"]);
+    assert_eq!(java, ["1.20.4", "1.21", "1.21.4", "26.3"]);
     let bedrock: Vec<&str> = builtin_pack(Edition::Bedrock)
         .targetable()
         .into_iter()
         .map(|e| e.mc_version.as_str())
         .collect();
-    assert_eq!(bedrock, ["1.21.0", "1.21.40", "1.21.60"]);
+    assert_eq!(bedrock, ["1.21.0", "1.21.40", "1.21.60", "1.26.60"]);
 }
 
 #[test]
@@ -757,12 +757,13 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         (major << 24) | (minor << 16) | (patch << 8) | revision
     };
     let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
-    // The block-state version each release writes (PocketMine-MP's
-    // `BlockStateData::CURRENT_VERSION`), whose revision is not the client build's.
+    // The block-state version each release's palette carries, whose revision is not the client
+    // build's, and which 1.26.60 shares with 1.21.60.
     let expected = [
         ("1.21.0", version(1, 21, 0, 3)),
         ("1.21.40", version(1, 21, 40, 1)),
         ("1.21.60", version(1, 21, 60, 33)),
+        ("1.26.60", version(1, 21, 60, 33)),
     ];
     let targetable: Vec<&str> = pack
         .data_versions()
@@ -772,14 +773,19 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         .map(|row| row.mc_version.as_str())
         .collect();
     assert_eq!(targetable, expected.map(|(mc_version, _)| mc_version));
-    // This pack gives ordering rows revision 0, though the schema does not require it.
-    for row in pack
-        .data_versions()
-        .versions
-        .iter()
-        .filter(|r| !r.targetable)
-    {
-        assert_eq!(row.data_version & 0xFF, 0, "{}", row.mc_version);
+    // This pack keys every row by its own release number, though the schema does not require it.
+    for row in &pack.data_versions().versions {
+        let parts: Vec<i32> = row
+            .mc_version
+            .split('.')
+            .map(|part| part.parse().expect("a numeric Bedrock label"))
+            .collect();
+        assert_eq!(
+            row.data_version,
+            version(parts[0], parts[1], parts[2], 0),
+            "{}",
+            row.mc_version
+        );
     }
     for (mc_version, block_version) in expected {
         let t = pack.resolve_bedrock_target(mc_version).expect(mc_version);
@@ -787,8 +793,8 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         assert_eq!(t.block_version, block_version, "{mc_version}");
     }
     let latest = pack.resolve_bedrock_target("latest").expect("latest");
-    assert_eq!(latest.mc_version, pack.data_versions().latest);
-    assert_eq!(latest.block_version, version(1, 21, 60, 33));
+    assert_eq!(latest.mc_version, "1.26.60");
+    assert_eq!(latest.order_key, version(1, 26, 60, 0));
 }
 
 #[test]
@@ -1010,4 +1016,380 @@ fn malformed_manifest_json_is_error() {
 fn pack_hash_snapshot() {
     let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     insta::assert_snapshot!("builtin_java_pack_hash", pack.bytes_hash().as_str());
+}
+
+fn bedrock_pack(data_versions: &'static str) -> Result<RegistryPack, RegistryError> {
+    let files = BuiltinFiles {
+        manifest: r#"{
+            "schema_version": 1,
+            "edition": "bedrock",
+            "name": "test",
+            "description": "test",
+            "files": { "data_versions": "data_versions.json" }
+        }"#,
+        data_versions,
+        materials: "",
+        blocks: "",
+        aliases: "",
+        states: None,
+        sensitivity: None,
+    };
+    load_pack(&files, Edition::Bedrock)
+}
+
+#[test]
+fn two_bedrock_releases_sharing_a_block_version_keep_their_own_keys() {
+    let pack = bedrock_pack(
+        r#"{
+        "schema_version": 3,
+        "latest": "1.26.60",
+        "versions": [
+            { "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168865 },
+            { "mc_version": "1.26.60", "data_version": 18496512, "block_version": 18168865 }
+        ]
+    }"#,
+    )
+    .expect("pack");
+    let old = pack.resolve_bedrock_target("1.21.60").expect("1.21.60");
+    let new = pack.resolve_bedrock_target("1.26.60").expect("1.26.60");
+    assert_eq!(old.block_version, new.block_version);
+    assert_eq!((old.order_key, new.order_key), (18_168_832, 18_496_512));
+}
+
+#[test]
+fn a_targetable_bedrock_row_without_a_block_version_is_refused() {
+    let err = bedrock_pack(
+        r#"{
+        "schema_version": 3,
+        "latest": "1.21.60",
+        "versions": [
+            { "mc_version": "1.21.50", "data_version": 18166272, "targetable": false },
+            { "mc_version": "1.21.60", "data_version": 18168832 }
+        ]
+    }"#,
+    )
+    .expect_err("no block_version");
+    assert_eq!(
+        err.to_string(),
+        "registry pack `data_versions` row `1.21.60` is a targetable Bedrock row and needs the \
+         `block_version` its structures write",
+    );
+}
+
+#[test]
+fn a_bedrock_row_no_target_names_takes_no_block_version() {
+    let err = bedrock_pack(
+        r#"{
+        "schema_version": 3,
+        "latest": "1.21.60",
+        "versions": [
+            { "mc_version": "1.21.50", "data_version": 18166272, "block_version": 18166273,
+              "targetable": false },
+            { "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168865 }
+        ]
+    }"#,
+    )
+    .expect_err("block_version on a row no target names");
+    assert_eq!(
+        err.to_string(),
+        "registry pack `data_versions` row `1.21.50` gives a `block_version`, which only a \
+         targetable Bedrock row writes",
+    );
+}
+
+#[test]
+fn a_java_row_with_a_block_version_is_refused() {
+    let dir = pack_dir();
+    write_pack(
+        dir.path(),
+        good_manifest(),
+        r#"{
+        "schema_version": 3,
+        "latest": "1.21.4",
+        "versions": [
+            { "mc_version": "1.21.4", "data_version": 4189, "block_version": 4189 }
+        ]
+    }"#,
+    );
+    let err = load_from_dir(dir.path()).expect_err("block_version on Java");
+    assert_eq!(
+        err.to_string(),
+        "registry pack `data_versions` row `1.21.4` gives a `block_version`, which only a \
+         targetable Bedrock row writes",
+    );
+}
+
+#[test]
+fn block_tables_resolved_newest_first_are_refused() {
+    let dir = pack_dir();
+    write_full_pack(
+        dir.path(),
+        manifest_with_blocks(),
+        good_data_versions(),
+        r#"{ "schema_version": 1, "namespace": "minecraft", "entries": [] }"#,
+        r#"{
+        "schema_version": 1,
+        "namespace": "minecraft",
+        "base": { "mc_version": "1.21.4", "blocks": ["oak_planks", "pale_oak_planks"] },
+        "diffs": [
+            { "mc_version": "1.20.4", "inherits": "1.21.4", "removed": ["pale_oak_planks"] }
+        ]
+    }"#,
+    );
+    let err = load_from_dir(dir.path()).expect_err("newest first");
+    assert_eq!(
+        err.to_string(),
+        "registry pack `blocks` resolves `1.20.4` after `1.21.4`, which `data_versions` orders \
+         after it; list the tables oldest first",
+    );
+}
+
+/// A pack whose `blocks` declares an `oak_log` with a pillar axis at both versions.
+fn write_pack_with_states(tmp: &Path, files: &str, states_json: &str, sensitivity_json: &str) {
+    write_full_pack(
+        tmp,
+        &format!(
+            r#"{{
+            "schema_version": 1,
+            "edition": "bedrock",
+            "name": "test",
+            "description": "test",
+            "files": {{
+                "data_versions": "data_versions.json",
+                "materials": "materials.json",
+                "blocks": "blocks.json"{files}
+            }}
+        }}"#
+        ),
+        r#"{
+        "schema_version": 3,
+        "latest": "1.21.60",
+        "versions": [
+            { "mc_version": "1.21.50", "data_version": 18166272, "block_version": 18166272 },
+            { "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168832 }
+        ]
+    }"#,
+        &one_material(r#"{ "token": "a.b", "block": "oak_log" }"#),
+        r#"{
+        "schema_version": 2,
+        "namespace": "minecraft",
+        "base": { "mc_version": "1.21.50", "blocks": {
+            "oak_log": { "pillar_axis": ["x", "y", "z"] }, "oak_planks": {}
+        } },
+        "diffs": [{ "mc_version": "1.21.60", "inherits": "1.21.50" }]
+    }"#,
+    );
+    std::fs::write(tmp.join("states.json"), states_json).expect("write states");
+    std::fs::write(tmp.join("sensitivity.json"), sensitivity_json).expect("write sensitivity");
+}
+
+const BOTH_STATE_FILES: &str = r#", "states": "states.json", "sensitivity": "sensitivity.json""#;
+
+fn log_states(mc_versions: &str) -> String {
+    format!(
+        r#"{{
+        "schema_version": 1,
+        "namespace": "minecraft",
+        "families": [{{
+            "mc_versions": {mc_versions}, "ids": ["oak_log"],
+            "java": {{ "axis": ["x", "y", "z"] }}, "defaults": {{ "axis": "y" }},
+            "states": {{ "pillar_axis": {{ "reads": ["axis"], "map": {{ "x": "x", "y": "y", "z": "z" }} }} }}
+        }}]
+    }}"#
+    )
+}
+
+const NO_SENSITIVITY: &str =
+    r#"{ "schema_version": 1, "namespace": "minecraft", "dropped_states": {} }"#;
+
+/// The Bedrock pack `write` lays out in a fresh directory.
+fn bedrock_dir(write: impl FnOnce(&Path)) -> Result<RegistryPack, RegistryError> {
+    let dir = pack_dir();
+    write(dir.path());
+    load_pack(&PackDir(dir.path()), Edition::Bedrock)
+}
+
+fn log(pairs: &[(&str, &str)]) -> BlockState {
+    BlockState {
+        id: "minecraft:oak_log".to_owned(),
+        properties: pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+    }
+}
+
+#[test]
+fn a_pinned_view_refuses_only_the_states_its_map_has_no_form_for() {
+    let pack = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            BOTH_STATE_FILES,
+            &log_states(r#"["1.21.50", "1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+    })
+    .expect("pack");
+    assert_eq!(
+        pack.states().versions().collect::<Vec<_>>(),
+        ["1.21.50", "1.21.60"]
+    );
+    let pinned = pack.view(Some("1.21.60"));
+    assert_eq!(pinned.unmapped_state(&log(&[("axis", "x")])), None);
+    assert_eq!(pinned.unmapped_state(&log(&[("axis", "w")])), None);
+    let planks = BlockState {
+        id: "minecraft:oak_planks".to_owned(),
+        properties: [("axis".to_owned(), "x".to_owned())].into_iter().collect(),
+    };
+    assert_eq!(
+        pinned.unmapped_state(&planks).as_deref(),
+        Some(
+            "no Java block maps onto `minecraft:oak_planks` there, so the canonical vocabulary \
+             names none of its states"
+        ),
+    );
+    assert_eq!(pack.view(None).unmapped_state(&planks), None);
+}
+
+#[test]
+fn a_state_map_needs_both_of_its_components() {
+    for (files, present, missing) in [
+        (r#", "states": "states.json""#, "states", "sensitivity"),
+        (
+            r#", "sensitivity": "sensitivity.json""#,
+            "sensitivity",
+            "states",
+        ),
+    ] {
+        let err = bedrock_dir(|dir| {
+            write_pack_with_states(
+                dir,
+                files,
+                &log_states(r#"["1.21.50", "1.21.60"]"#),
+                NO_SENSITIVITY,
+            );
+        })
+        .expect_err("one component alone");
+        assert!(
+            matches!(
+                err,
+                RegistryError::States {
+                    source: StatesError::Unpaired { present: p, missing: m }
+                } if p == present && m == missing
+            ),
+            "{present} alone: {err}",
+        );
+    }
+}
+
+#[test]
+fn a_state_map_missing_a_targetable_version_is_refused() {
+    let err = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            BOTH_STATE_FILES,
+            &log_states(r#"["1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+    })
+    .expect_err("a version unmapped");
+    assert!(
+        matches!(err, RegistryError::StatesMissVersion { ref missing } if missing == "1.21.50"),
+        "{err}",
+    );
+}
+
+#[test]
+fn a_state_map_the_binary_does_not_embed_is_refused() {
+    let files = BuiltinFiles {
+        manifest: r#"{
+            "schema_version": 1,
+            "edition": "bedrock",
+            "name": "test",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "states": "states.json",
+                "sensitivity": "sensitivity.json"
+            }
+        }"#,
+        data_versions: r#"{
+            "schema_version": 3,
+            "latest": "1.21.60",
+            "versions": [{ "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168832 }]
+        }"#,
+        materials: "",
+        blocks: "",
+        aliases: "",
+        states: None,
+        sensitivity: Some(NO_SENSITIVITY),
+    };
+    let err = load_pack(&files, Edition::Bedrock).expect_err("states not embedded");
+    assert!(
+        matches!(err, RegistryError::NotEmbedded { file: "states" }),
+        "{err}",
+    );
+}
+
+#[test]
+fn the_state_map_is_part_of_the_pack_hash() {
+    let hash = |reason: &str| {
+        let sensitivity = format!(
+            r#"{{ "schema_version": 1, "namespace": "minecraft", "dropped_states": {{
+                "shape": [{{ "kind": "missing_state", "reason": "{reason}" }}] }} }}"#
+        );
+        bedrock_dir(|dir| {
+            write_pack_with_states(
+                dir,
+                BOTH_STATE_FILES,
+                &log_states(r#"["1.21.50", "1.21.60"]"#),
+                &sensitivity,
+            );
+        })
+        .expect("pack")
+        .bytes_hash()
+        .clone()
+    };
+    assert_ne!(hash("one wording"), hash("another wording"));
+}
+
+#[test]
+fn the_builtin_bedrock_pack_maps_every_targetable_version() {
+    let pack = builtin_pack(Edition::Bedrock);
+    let targetable: Vec<&str> = pack
+        .data_versions
+        .versions
+        .iter()
+        .filter(|e| e.targetable)
+        .map(|e| e.mc_version.as_str())
+        .collect();
+    assert_eq!(pack.states().versions().collect::<Vec<_>>(), targetable);
+    assert!(builtin_pack(Edition::Java).states().is_empty());
+}
+
+#[test]
+fn a_block_table_without_states_leaves_a_declared_blocks_state_unrecorded() {
+    let pack = load_from_dir_or_die("ids-only", |dir| {
+        write_full_pack(
+            dir,
+            manifest_with_blocks(),
+            good_data_versions(),
+            &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+            good_blocks(),
+        );
+    });
+    let pinned = pack.view(Some("1.21.4"));
+    let planks = BlockState {
+        id: "minecraft:oak_planks".to_owned(),
+        properties: [("axis".to_owned(), "x".to_owned())].into_iter().collect(),
+    };
+    assert_eq!(pinned.state_domain(&planks), StateDomain::Unrecorded);
+    let undeclared = BlockState {
+        id: "minecraft:dirt".to_owned(),
+        ..planks
+    };
+    assert_eq!(
+        pinned.state_domain(&undeclared),
+        StateDomain::Checked(Vec::new())
+    );
 }

@@ -3,6 +3,7 @@
 
 use indexmap::IndexMap;
 
+use crate::Edition;
 use crate::ast::ValueKind;
 use crate::intent::ValueWithSpan;
 use crate::resolve::{TokenKind, classify_token};
@@ -27,6 +28,28 @@ pub trait TargetRegistry {
     fn aliases_for(&self, id: &str) -> Vec<String> {
         let _ = id;
         Vec::new()
+    }
+
+    /// Why the pinned target's state map has no form for `state`, as a clause, or `None` when it
+    /// has one or the registry keeps no state map
+    /// (`spec/versioning-editions` "The `edition portability` row").
+    fn unmapped_state(&self, state: &BlockState) -> Option<String> {
+        let _ = state;
+        None
+    }
+
+    /// The nearest versions of the pinned target's edition on either side of it that declare
+    /// `id`, asked only for an id the target does not declare; `None` when no other does.
+    fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
+        let _ = id;
+        None
+    }
+
+    /// What the pinned target's tables say about `state`'s properties
+    /// (`spec/versioning-editions` "A state is checked against its block's states at the target").
+    fn state_domain(&self, state: &BlockState) -> StateDomain {
+        let _ = state;
+        StateDomain::Unrecorded
     }
 
     /// Whether a version this registry covers may declare `id`, asked only when
@@ -61,6 +84,70 @@ impl TargetRegistry for NoTarget<'_> {
 
     fn may_declare(&self, id: &str) -> bool {
         id.starts_with(STAND_IN_MARK) || (self.declared)(id)
+    }
+
+    fn state_domain(&self, _state: &BlockState) -> StateDomain {
+        StateDomain::Unpinned
+    }
+}
+
+/// What a registry's tables say about one block state's properties at the pinned target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StateDomain {
+    /// No version is pinned, so a build that pins one answers.
+    Unpinned,
+    /// The pinned target's pack records no states for the block.
+    Unrecorded,
+    /// Each property or value outside the block's states at the target, in the state's order;
+    /// empty when there is none.
+    Checked(Vec<OutOfDomain>),
+}
+
+/// One property or value of a block state that its block does not take at the pinned target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutOfDomain {
+    /// The property.
+    pub key: String,
+    /// The value the state gives it.
+    pub value: String,
+    /// Whether the block lacks the property or only the value, with what it takes instead.
+    pub fault: DomainFault,
+    /// The edition's other versions whose tables take `key=value` on the block, oldest first.
+    pub valid_at: Vec<String>,
+}
+
+/// How a pair falls outside its block's states.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DomainFault {
+    /// The block has no such property.
+    UnknownProperty {
+        /// The properties it has, in its table's order.
+        properties: Vec<String>,
+    },
+    /// The block has the property, but it takes no such value.
+    ValueOutside {
+        /// The values it takes, in its table's order.
+        values: Vec<String>,
+    },
+}
+
+impl DomainFault {
+    /// Stable wire name for the diagnostic payload.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::UnknownProperty { .. } => "unknown_property",
+            Self::ValueOutside { .. } => "value_outside",
+        }
+    }
+
+    /// The properties or values the target takes instead.
+    #[must_use]
+    pub fn valid(&self) -> &[String] {
+        match self {
+            Self::UnknownProperty { properties } => properties,
+            Self::ValueOutside { values } => values,
+        }
     }
 }
 
@@ -151,7 +238,7 @@ pub enum MaterialDeferred {
     /// Not a `@TOKEN` at all; the resolver already reported `E_UNKNOWN_SLOT_TARGET`.
     AlreadyDiagnosed,
     /// An undeclared id (`spec/versioning-editions` "Fail-loud and minimum-version inference").
-    UnknownId(UnknownId),
+    UnknownId(Box<UnknownId>),
 }
 
 /// An id that resolved cleanly but does not exist in the pinned target.
@@ -167,6 +254,20 @@ pub struct UnknownId {
     pub suggestion: Option<String>,
     /// The ids this target declares for the same block, from the registry's alias table.
     pub aliases: Vec<String>,
+    /// The edition's versions nearest the target that do declare the id.
+    pub elsewhere: Option<DeclaredElsewhere>,
+}
+
+/// The versions of the pinned edition nearest the target that declare an id it does not
+/// (`spec/versioning-editions` "Which registry an unknown ID is unknown to").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredElsewhere {
+    /// The edition, which a floor that needs the id names.
+    pub edition: Edition,
+    /// The last version before the target that declares the id, where a removed id was last.
+    pub until: Option<String>,
+    /// The first version after the target that declares the id, where a new id first appears.
+    pub since: Option<String>,
 }
 
 /// Who chose the id that turned out not to exist.
@@ -273,15 +374,21 @@ pub(crate) fn validated_id(
     if ids.contains(&state.id) {
         return Ok(state);
     }
-    // Both can be filled: a rename has aliases, a typo a suggestion, and one id can be both.
+    // Both can be filled: a rename has aliases, a typo a suggestion, and one id can be both. An id
+    // another version declares is no typo, so the nearest spelling would only mislead.
     let aliases = registry.aliases_for(&state.id);
-    Err(MaterialDeferred::UnknownId(UnknownId {
-        suggestion: nearest_namespaced_id(&state.id, ids.iter()),
+    let elsewhere = registry.declared_elsewhere(&state.id);
+    Err(MaterialDeferred::UnknownId(Box::new(UnknownId {
+        suggestion: elsewhere
+            .is_none()
+            .then(|| nearest_namespaced_id(&state.id, ids.iter()))
+            .flatten(),
         aliases,
+        elsewhere,
         registry: ids.label().to_owned(),
         origin: origin.clone(),
         id: state.id,
-    }))
+    })))
 }
 
 /// Turn a canonical token body (`oak_planks`, `minecraft:oak_log[axis=x]`) into a [`BlockState`].

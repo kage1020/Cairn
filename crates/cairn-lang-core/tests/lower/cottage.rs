@@ -3,7 +3,7 @@
 
 use cairn_lang_core::check::DiagnosticCode;
 
-use crate::common::{lowered, read_example};
+use crate::common::{door_at, lowered, oak_door, read_example};
 
 #[test]
 fn cottage_lowers_to_overhang_inflated_volume() {
@@ -88,14 +88,12 @@ fn cottage_wall_ring_at_y1_has_perimeter_minus_door() {
 }
 
 #[test]
-fn cottage_door_carves_front_opening() {
+fn cottage_door_stands_in_the_front_wall_facing_in() {
     let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
-    // Front wall at z = overhang + size.h - 1 = 7. Center x = 1 + 4 = 5.
-    let i1 = ba.dims.index(5, 1, 7).unwrap();
-    let i2 = ba.dims.index(5, 2, 7).unwrap();
-    assert_eq!(ba.voxels[i1].0, 0, "door y=1 should be air");
-    assert_eq!(ba.voxels[i2].0, 0, "door y=2 should be air");
+    // Front wall at z = overhang + size.h - 1 = 7. Center x = 1 + 4 = 5. A window is beside the
+    // upper half on both sides, so the wall either side is one row and the hinge tie goes left.
+    assert_eq!(door_at(ba, 5, 1, 7), oak_door("north", "left"));
 }
 
 #[test]

@@ -236,8 +236,8 @@ is `E_UNKNOWN_ID`, so no artifact ships from that shape.
 
 ## 4.8 Within-phase conflicts and the palette
 
-Across phases, the phase order decides: a `door` cut through `walls` is massing followed by
-openings, and the hole is the point. Inside one phase, only source order separates two members,
+Across phases, the phase order decides: a `door` set into `walls` is massing followed by
+openings, and taking the wall's cells is the point. Inside one phase, only source order separates two members,
 which is what [§4.1](#41-phase-evaluation) grants to "local overrides within the same phase".
 
 That grant is for an author restating a member. Two footprints that intersect by accident are a

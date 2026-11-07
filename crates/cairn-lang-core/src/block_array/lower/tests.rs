@@ -1,9 +1,10 @@
 use super::anchor::{PlaceAnchor, PlacementCorner, PlacementOutOfRange};
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::connect::edge_pushers;
+use super::door::{DOOR_BASE_ID, DOOR_TOKEN};
+use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
-use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
 use super::site_floor::FloorExtent;
 use super::*;
 use crate::ast::ValueKind;
@@ -158,13 +159,17 @@ fn a_body_with_no_row_0_is_not_a_silent_skip() {
 }
 
 #[test]
-fn the_redirectable_plate_id_is_not_in_that_list() {
-    assert!(
-        !BUILTIN_BLOCK_IDS.contains(&PRESSURE_PLATE_BASE_ID),
-        "BUILTIN_BLOCK_IDS promises every target declares its entries, and no Bedrock \
-         target declares `{PRESSURE_PLATE_BASE_ID}`; the plate is covered by the pack \
-         tests around `{PRESSURE_PLATE_TOKEN}` instead",
-    );
+fn the_redirectable_member_defaults_are_not_in_that_list() {
+    for (id, token) in [
+        (PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN),
+        (DOOR_BASE_ID, DOOR_TOKEN),
+    ] {
+        assert!(
+            !BUILTIN_BLOCK_IDS.contains(&id),
+            "BUILTIN_BLOCK_IDS promises every target declares its entries, and no Bedrock \
+             target declares `{id}`; it is covered by the pack tests around `{token}` instead",
+        );
+    }
 }
 use crate::{lower, parse, resolve};
 
@@ -629,6 +634,7 @@ fn unknown_id_payload(out: &BlockArrayIr) -> UnknownIdPayload {
             token,
             suggestion,
             aliases,
+            ..
         }) => UnknownIdPayload {
             id,
             registry,
@@ -711,6 +717,44 @@ fn a_member_default_from_the_pack_is_checked_like_any_other_id() {
             .map(|d| d.primary.as_str())
             .collect::<Vec<_>>(),
     );
+}
+
+#[test]
+fn a_door_with_no_mat_slot_is_built_from_the_door_the_pack_maps_its_token_to() {
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=center\n"
+    );
+    let pack = FakeResolver {
+        entries: vec![(DOOR_TOKEN, "spruce_door")],
+    };
+    let out = lowered_with_resolver(src, &pack);
+    assert_eq!(out.diagnostics, []);
+    let ba = out.structures.get("struct::s").unwrap();
+    assert_eq!(
+        door_at(ba, 4, 1, 6),
+        ["lower", "upper"].map(|half| format!(
+            "minecraft:spruce_door[facing=north,half={half},hinge=left,open=false]"
+        )),
+    );
+}
+
+#[test]
+fn a_door_default_the_target_lacks_is_refused_and_leaves_the_wall_whole() {
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=center\n"
+    );
+    let no_row = PinnedRegistry::new(vec![], &["minecraft:cobblestone", "minecraft:wooden_door"]);
+    let out = lowered_with_resolver(src, &no_row);
+    let payload = unknown_id_payload(&out);
+    assert_eq!(payload.id, DOOR_BASE_ID);
+    assert_eq!(payload.origin, "builtin");
+    assert_eq!(payload.token.as_deref(), Some(DOOR_TOKEN));
+    let ba = out.structures.get("struct::s").unwrap();
+    for y in 1..=2 {
+        assert_eq!(block_id(ba, 4, y, 6), "minecraft:cobblestone", "y={y}");
+    }
 }
 
 #[test]
@@ -1097,11 +1141,18 @@ fn actuator_patch_does_not_repaint_the_door_voxels() {
     );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
-    assert_eq!(block_id(ba, 2, 2, 4), BlockState::AIR_ID);
+    assert_eq!(door_at(ba, 2, 1, 4), oak_door("north", "left"));
     assert_eq!(block_id(ba, 0, 1, 4), "minecraft:cobblestone");
     let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, vec![BlockState::AIR_ID, "minecraft:cobblestone"]);
+    assert_eq!(
+        ids,
+        vec![
+            BlockState::AIR_ID,
+            "minecraft:cobblestone",
+            "minecraft:oak_door",
+            "minecraft:oak_door",
+        ],
+    );
 }
 
 #[test]
@@ -1208,15 +1259,15 @@ const SLOT_READERS: &[(&str, &str)] = &[
         "pressure_plate",
         "struct s size=3x3\n  pressure_plate at=inside.front offset=1 mat_slot=p\n",
     ),
+    (
+        "door",
+        "struct s size=3x3\n  door id=front side=front at=center mat_slot=d\n",
+    ),
 ];
 
 /// A themeless struct per keyword whose role reads no `mat_slot=`, `mat_slot=d` on its member;
 /// a misplaced `place` or `connect` still reaches the list the gate reads.
 const SLOT_IGNORERS: &[(&str, &str)] = &[
-    (
-        "door",
-        "struct s size=3x3\n  door id=front side=front at=center mat_slot=d\n",
-    ),
     (
         "level",
         "struct s size=3x3\n  level y=0 mat_slot=d\n    roof kind=flat\n",
@@ -1614,8 +1665,7 @@ fn phase_order_independent_of_source_order() {
     );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
-    assert_eq!(block_id(ba, 2, 2, 4), BlockState::AIR_ID);
+    assert_eq!(door_at(ba, 2, 1, 4), oak_door("north", "left"));
     assert_eq!(block_id(ba, 0, 1, 0), "minecraft:cobblestone");
 }
 
@@ -1929,15 +1979,15 @@ fn the_family_is_reported_before_the_properties_it_makes_moot() {
     let resolution = resolve(&ir, None);
     let scope = resolution.scopes.get("struct::s").expect("scope");
     let mut diagnostics = Vec::new();
-    let id = geometry_material_id(
+    let Ok(id) = geometry_material_id(
         member,
         Some(scope),
         Some(&state),
-        STAIR_BASE_ID,
+        || Ok::<_, std::convert::Infallible>(STAIR_BASE_ID.to_owned()),
         &GeometryMemberDescription {
             subject: "`gable` roof".to_owned(),
             states_from: "the geometry",
-            requires_stair: true,
+            requires: Some(Family::Stair),
         },
         &mut diagnostics,
     );
@@ -1985,46 +2035,59 @@ fn gable_roof_places_stairs_with_facing() {
     assert_eq!(apex.properties.get("facing").unwrap(), "south");
 }
 
+/// The two cells of a door standing at `(x, y, z)`, lower then upper, each as `id[states]`.
+fn door_at(ba: &BlockArray, x: u32, y: u32, z: u32) -> [String; 2] {
+    [y, y + 1].map(|y| {
+        let state = block_state_at(ba, x, y, z);
+        format!("{}[{}]", state.id, state.properties_text())
+    })
+}
+
+/// The two halves of a closed oak door facing `facing`, hinged on `hinge`.
+fn oak_door(facing: &str, hinge: &str) -> [String; 2] {
+    ["lower", "upper"].map(|half| {
+        format!("minecraft:oak_door[facing={facing},half={half},hinge={hinge},open=false]")
+    })
+}
+
 #[test]
-fn door_carves_opening_through_front_wall() {
+fn a_door_stands_its_block_in_the_opening_it_cuts_through_the_front_wall() {
     let src = theme_t!(
         "w",
         "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=center\n"
     );
     let out = lowered(src);
+    assert_eq!(out.diagnostics, []);
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(block_id(ba, 4, 1, 6), BlockState::AIR_ID);
-    assert_eq!(block_id(ba, 4, 2, 6), BlockState::AIR_ID);
+    assert_eq!(door_at(ba, 4, 1, 6), oak_door("north", "left"));
     assert_eq!(block_id(ba, 3, 1, 6), "minecraft:cobblestone");
     assert_eq!(block_id(ba, 4, 3, 6), "minecraft:cobblestone");
 }
 
 #[test]
-fn door_at_left_carves_first_column_of_front_wall() {
+fn a_door_at_the_left_corner_is_hinged_on_the_wall_to_its_right() {
     let src = theme_t!(
         "w",
         "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=left\n"
     );
     let out = lowered(src);
+    assert_eq!(out.diagnostics, []);
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(block_id(ba, 0, 1, 6), BlockState::AIR_ID);
-    assert_eq!(block_id(ba, 0, 2, 6), BlockState::AIR_ID);
+    assert_eq!(door_at(ba, 0, 1, 6), oak_door("north", "right"));
     assert_eq!(block_id(ba, 4, 1, 6), "minecraft:cobblestone");
-    assert_eq!(deferred_count(&out), 0);
 }
 
 #[test]
-fn door_at_right_carves_last_column_of_front_wall() {
+fn a_door_at_the_right_corner_is_hinged_on_the_wall_to_its_left() {
     let src = theme_t!(
         "w",
         "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=right\n"
     );
     let out = lowered(src);
+    assert_eq!(out.diagnostics, []);
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(block_id(ba, 8, 1, 6), BlockState::AIR_ID);
-    assert_eq!(block_id(ba, 8, 2, 6), BlockState::AIR_ID);
+    assert_eq!(door_at(ba, 8, 1, 6), oak_door("north", "left"));
     assert_eq!(block_id(ba, 4, 1, 6), "minecraft:cobblestone");
-    assert_eq!(deferred_count(&out), 0);
 }
 
 #[test]
@@ -2363,7 +2426,7 @@ fn at_center_picks_right_of_centre_on_even_width_walls() {
     );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert_eq!(block_id(ba, 4, 1, 4), BlockState::AIR_ID);
+    assert_eq!(door_at(ba, 4, 1, 4), oak_door("north", "left"));
     assert_eq!(block_id(ba, 3, 1, 4), "minecraft:cobblestone");
 }
 
@@ -3925,7 +3988,7 @@ fn a_door_whose_level_sits_at_or_above_the_wall_it_would_carve_is_refused() {
         "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)",
         &[
             "a door opens one row above the base of its `level`, or of the body outside one; move it \
-             under a `level` whose walls hold that row, or add walls there",
+             under a `level` whose walls hold that row and the one above, or add walls there",
         ],
     );
 }

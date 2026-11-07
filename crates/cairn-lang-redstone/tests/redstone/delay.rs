@@ -97,7 +97,7 @@ struct sim size=7x5
   logic sig.or_ab    = sig.a or sig.b
   logic sig.combined = sig.and_ab and sig.or_ab
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=d side=front at=center opened_by=sig.combined
 
   circuit region=floor void=3
 ";
@@ -156,7 +156,7 @@ struct wide_pack size=300x5
 
   logic sig.out = sig.a or sig.b
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.out
+  door id=d side=front at=center opened_by=sig.out
 
   circuit region=floor void=3
 
@@ -168,7 +168,7 @@ struct narrow_pack size=20x5
 
   logic sig.out = sig.a or sig.b
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.out
+  door id=d side=front at=center opened_by=sig.out
 
   circuit region=floor void=3
 ";
@@ -276,7 +276,7 @@ struct chain size=40x5
   logic sig.c14 = sig.c13 and sig.b
   logic sig.c15 = sig.c14 and sig.b
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.c15
+  door id=d side=front at=center opened_by=sig.c15
 
   circuit region=floor void=4
 ";
@@ -337,7 +337,7 @@ struct band size=5x5
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.out = sig.a and sig.b
-  door id=d side=front at=center mat_slot=wall opened_by=sig.out
+  door id=d side=front at=center opened_by=sig.out
   circuit region=floor void=2
 ";
     let routed = routed_from_source(source, Edition::Bedrock);
@@ -368,7 +368,7 @@ fn max_attenuation_segment_boundary_at_256_is_inclusive() {
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.out = sig.a or sig.b\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
+        door id=d side=front at=center opened_by=sig.out\n  \
         circuit region=floor void=3\n";
     let routed = routed_from_source(at_cap_source, Edition::Java);
     let delayed = compile_delay(&routed);
@@ -395,7 +395,7 @@ fn max_attenuation_segment_boundary_at_257_is_exclusive() {
         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
         pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
         logic sig.out = sig.a or sig.b\n  \
-        door id=d side=front at=center mat_slot=wall opened_by=sig.out\n  \
+        door id=d side=front at=center opened_by=sig.out\n  \
         circuit region=floor void=3\n";
     let routing = compile_routing(&placement_from_source(over_cap_source, Edition::Java));
     assert_eq!(
@@ -509,7 +509,7 @@ struct inv size=5x5
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   logic sig.na = not sig.a
-  door id=d side=front at=center mat_slot=wall opened_by=sig.na
+  door id=d side=front at=center opened_by=sig.na
   circuit region=floor void=2
 ";
     let java = compile_delay(&routed_from_source(source, Edition::Java));
@@ -554,7 +554,7 @@ struct alpha size=7x5
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
-  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  door id=d side=front at=center opened_by=sig.open
   circuit region=floor void=2
 
 struct wide_pack size=300x5
@@ -562,7 +562,7 @@ struct wide_pack size=300x5
   pressure_plate id=r at=front.outside offset=0 y=0 -> sig.c
   pressure_plate id=s at=inside.front  offset=1 y=0 -> sig.d
   logic sig.out = sig.c or sig.d
-  door id=e side=front at=center mat_slot=wall opened_by=sig.out
+  door id=e side=front at=center opened_by=sig.out
   circuit region=floor void=3
 ";
     let routing = compile_routing(&placement_from_source(source, Edition::Java));

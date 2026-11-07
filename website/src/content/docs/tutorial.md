@@ -56,8 +56,9 @@ in the wall. The compiler sorts commands into fixed phases before evaluating the
 lines in whatever order reads best.
 
 **Blockstate is derived.** Nobody writes `facing`, `half`, or `shape` for the roof's stairs. The
-compiler works them out from where each stair sits on the roof. The door's facing and the pane's
-connections are to be derived the same way; for now the `door` only cuts its opening.
+compiler works them out from where each stair sits on the roof. The door is set the same way: it
+faces into the cottage, and its hinge is read from the wall on either side of it. The pane's
+connections are to be derived too; for now each pane is written bare.
 
 ## 2. Abstract materials and levels
 

@@ -155,7 +155,8 @@ pub struct EditionPortability {
     pub edition: Edition,
     /// Palette entries that compile straight through.
     pub portable: u32,
-    /// Palette entries that compile but lose detail (e.g. stair `shape` on Bedrock).
+    /// Palette entries that compile but lose detail at some version (a stair `shape` on Bedrock
+    /// 1.21.60).
     pub degraded: u32,
     /// Palette entries with no representable form on this edition.
     pub unsupported: u32,
@@ -178,13 +179,16 @@ pub struct DegradedEntry {
 
 /// One piece of intent an edition cannot represent, as pieces rather than a sentence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "key", rename_all = "snake_case")]
-pub enum DroppedIntent {
-    /// A stair `shape` the edition has no state for.
-    Shape {
-        /// The value asked for and not written (`outer_left`).
-        value: String,
-    },
+pub struct DroppedIntent {
+    /// The canonical state the edition has no form for (`shape`).
+    pub key: String,
+    /// The value asked for and not written (`outer_left`).
+    pub value: String,
+    /// The versions of the edition that drop it, in table order.
+    pub mc_versions: Vec<String>,
+    /// Why it is lost, as the registry pack words it; a consumer reads `key` instead.
+    #[serde(skip)]
+    pub reason: String,
 }
 
 /// One palette entry an edition has no form for, and why.
@@ -208,12 +212,12 @@ pub enum UnsupportedReason {
         /// The ids this edition declares for the same block, from the registry pack's alias table.
         aliases: Vec<String>,
     },
-    /// The edition has the block, but this compiler's backend maps none of these states.
+    /// The edition has the block, but no version's state map has a form for these states.
     StatesUnmapped {
         /// The entry's `key=value` pairs, comma-joined.
         states: String,
-        /// The families the backend does map, as the message lists them.
-        mapped: String,
+        /// Why, as the newest version's state map says it.
+        detail: String,
     },
 }
 

@@ -5,10 +5,14 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
+use cairn_lang_core::block_array::{
+    BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, OutOfDomain, StateDomain,
+    TargetRegistry,
+};
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{VersionOrder, compare_versions};
 use cairn_lang_core::suggest::nearest_match;
+use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
@@ -20,6 +24,7 @@ use super::data_versions::{
 use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
+use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates};
 
 #[derive(Clone, Copy)]
 struct BuiltinFiles {
@@ -28,10 +33,30 @@ struct BuiltinFiles {
     materials: &'static str,
     blocks: &'static str,
     aliases: &'static str,
+    states: Option<&'static str>,
+    sensitivity: Option<&'static str>,
 }
 
 macro_rules! builtin_files {
     ($dir:literal) => {
+        builtin_files!($dir, None, None)
+    };
+    ($dir:literal, states) => {
+        builtin_files!(
+            $dir,
+            Some(include_str!(concat!(
+                "../../registry-data/",
+                $dir,
+                "/states.json"
+            ))),
+            Some(include_str!(concat!(
+                "../../registry-data/",
+                $dir,
+                "/sensitivity.json"
+            )))
+        )
+    };
+    ($dir:literal, $states:expr, $sensitivity:expr) => {
         BuiltinFiles {
             manifest: include_str!(concat!("../../registry-data/", $dir, "/pack.json")),
             data_versions: include_str!(concat!(
@@ -42,17 +67,21 @@ macro_rules! builtin_files {
             materials: include_str!(concat!("../../registry-data/", $dir, "/materials.json")),
             blocks: include_str!(concat!("../../registry-data/", $dir, "/blocks.json")),
             aliases: include_str!(concat!("../../registry-data/", $dir, "/aliases.json")),
+            states: $states,
+            sensitivity: $sensitivity,
         }
     };
 }
 
 const BUILTIN_JAVA: BuiltinFiles = builtin_files!("java");
-const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock");
+const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock", states);
 
 /// The highest manifest `schema_version` this build reads.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
-/// The highest `data_versions.schema_version` this build reads; version 2 adds `targetable`.
-pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 2;
+/// The highest `data_versions.schema_version` this build reads. Version 2 adds `targetable` and
+/// version 3 `block_version`, which every targetable Bedrock row needs, so a Bedrock table only
+/// loads from version 3.
+pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 3;
 
 /// Where a [`RegistryPack`] came from, for diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +101,7 @@ pub struct RegistryPack {
     materials: MaterialsIndex,
     blocks: BlocksIndex,
     aliases: AliasIndex,
+    states: StateMapIndex,
     bytes_hash: HashHex,
     source: PackSource,
 }
@@ -79,12 +109,17 @@ pub struct RegistryPack {
 /// A registry pack seen through the one version a compile pinned, whose ids it checks against.
 #[derive(Debug, Clone)]
 pub struct PackView<'a> {
+    edition: Edition,
     materials: &'a MaterialsIndex,
+    blocks: &'a BlocksIndex,
+    state_maps: &'a StateMapIndex,
     /// Edition-wide; `ids` narrows a group to the spellings this target declares.
     aliases: &'a AliasIndex,
     mc_version: Option<&'a str>,
     /// The pinned version's sorted ids; `None` unpinned or without a `blocks` component.
     ids: Option<&'a [String]>,
+    /// The pinned version's state map; `None` unpinned or without a `states` component.
+    states: Option<VersionStates<'a>>,
     /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
     label: String,
 }
@@ -104,6 +139,71 @@ impl TargetRegistry for PackView<'_> {
         self.ids.map(|ids| BlockIdSet::new(&self.label, ids))
     }
 
+    fn unmapped_state(&self, state: &BlockState) -> Option<String> {
+        // An unknown property or value is not the map's to answer: it is not the block's state.
+        match self.states?.resolve(state) {
+            Err(StateRefusal::Unmapped { reason }) => Some(reason),
+            Ok(_)
+            | Err(StateRefusal::UnknownProperty { .. } | StateRefusal::UnknownValue { .. }) => None,
+        }
+    }
+
+    fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
+        let pinned = self.mc_version?;
+        let versions: Vec<&str> = self.blocks.versions().collect();
+        let at = versions.iter().position(|version| *version == pinned)?;
+        let declares = |version: &&&str| {
+            self.blocks
+                .ids_for(version)
+                .is_some_and(|ids| contains(ids, id))
+        };
+        let until = versions[..at].iter().rev().find(declares);
+        let since = versions[at + 1..].iter().find(declares);
+        (until.is_some() || since.is_some()).then(|| DeclaredElsewhere {
+            edition: self.edition,
+            until: until.map(|version| (*version).to_owned()),
+            since: since.map(|version| (*version).to_owned()),
+        })
+    }
+
+    fn state_domain(&self, state: &BlockState) -> StateDomain {
+        let Some(version) = self.mc_version else {
+            return StateDomain::Unpinned;
+        };
+        let id = state.id.as_str();
+        let recorded = match self.edition {
+            // An id the target does not declare is `E_UNKNOWN_ID`'s to answer.
+            Edition::Java => self.ids.is_some_and(|ids| {
+                !contains(ids, id) || self.blocks.states_of(version, id).is_some()
+            }),
+            Edition::Bedrock => self.states.is_some(),
+        };
+        if !recorded {
+            return StateDomain::Unrecorded;
+        }
+        let Some(domain) = self.domain_at(version, id) else {
+            return StateDomain::Checked(Vec::new());
+        };
+        let outside = state.properties.iter().filter_map(|(key, value)| {
+            let fault = match domain.get(key) {
+                None => DomainFault::UnknownProperty {
+                    properties: domain.keys().cloned().collect(),
+                },
+                Some(values) if !values.contains(value) => DomainFault::ValueOutside {
+                    values: values.clone(),
+                },
+                Some(_) => return None,
+            };
+            Some(OutOfDomain {
+                key: key.clone(),
+                value: value.clone(),
+                fault,
+                valid_at: self.valid_at(version, id, key, value),
+            })
+        });
+        StateDomain::Checked(outside.collect())
+    }
+
     fn aliases_for(&self, id: &str) -> Vec<String> {
         // Unfiltered, a group would suggest spellings from other versions and editions.
         let Some(ids) = self.ids else {
@@ -112,13 +212,57 @@ impl TargetRegistry for PackView<'_> {
         self.aliases
             .spellings_of(id)
             .iter()
-            .filter(|spelling| {
-                ids.binary_search_by(|known| known.as_str().cmp(spelling.as_str()))
-                    .is_ok()
-            })
+            .filter(|spelling| contains(ids, spelling))
             .cloned()
             .collect()
     }
+}
+
+/// A block's canonical states at one version: each property with the values it takes.
+type Domain = IndexMap<String, Vec<String>>;
+
+impl PackView<'_> {
+    /// The canonical states `id` takes at `version`, or `None` when the tables give it none to
+    /// check against there.
+    fn domain_at(&self, version: &str, id: &str) -> Option<Domain> {
+        match self.edition {
+            Edition::Java => self.blocks.states_of(version, id).map(|states| {
+                states
+                    .properties()
+                    .map(|(property, values)| {
+                        let values = values.iter().map(ToString::to_string).collect();
+                        (property.to_owned(), values)
+                    })
+                    .collect()
+            }),
+            Edition::Bedrock => self.state_maps.at(version)?.canonical_domain(id),
+        }
+    }
+
+    /// The edition's versions other than `pinned` whose tables take `key=value` on `id`.
+    fn valid_at(&self, pinned: &str, id: &str, key: &str, value: &str) -> Vec<String> {
+        let versions: Vec<&str> = match self.edition {
+            Edition::Java => self.blocks.versions().collect(),
+            Edition::Bedrock => self.state_maps.versions().collect(),
+        };
+        versions
+            .into_iter()
+            .filter(|version| *version != pinned)
+            .filter(|version| {
+                self.domain_at(version, id).is_some_and(|domain| {
+                    domain
+                        .get(key)
+                        .is_some_and(|values| values.iter().any(|held| held == value))
+                })
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+/// Whether the sorted `ids` hold `id`.
+fn contains(ids: &[String], id: &str) -> bool {
+    ids.binary_search_by(|known| known.as_str().cmp(id)).is_ok()
 }
 
 /// A registry pack that could not be read or failed validation.
@@ -180,6 +324,23 @@ pub enum RegistryError {
         /// Which rows disagree, and about what.
         reason: String,
     },
+    /// A targetable Bedrock row lacks `block_version`.
+    #[error(
+        "registry pack `data_versions` row `{mc_version}` is a targetable Bedrock row and needs the `block_version` its structures write"
+    )]
+    BlockVersionMissing {
+        /// The row.
+        mc_version: String,
+    },
+    /// A row no structure is written for carries a `block_version`: a Java row, or a Bedrock row
+    /// `--target` cannot name.
+    #[error(
+        "registry pack `data_versions` row `{mc_version}` gives a `block_version`, which only a targetable Bedrock row writes"
+    )]
+    BlockVersionMisplaced {
+        /// The row.
+        mc_version: String,
+    },
     /// The manifest's edition is not the one the pack was loaded as.
     #[error("registry pack edition `{got:?}` does not match expected `{expected:?}`")]
     EditionMismatch {
@@ -212,6 +373,25 @@ pub enum RegistryError {
         #[source]
         source: BlocksError,
     },
+    /// The pack's `states` or `sensitivity` component failed to validate.
+    #[error(transparent)]
+    States {
+        /// The validation error.
+        #[from]
+        source: StatesError,
+    },
+    /// `states` has no map for a targetable version.
+    #[error("registry pack `states` has no map for the targetable [{missing}]")]
+    StatesMissVersion {
+        /// The versions, comma-joined.
+        missing: String,
+    },
+    /// A file the manifest names is not embedded in the binary.
+    #[error("registry pack names `{file}`, which the built-in pack does not embed")]
+    NotEmbedded {
+        /// The component.
+        file: &'static str,
+    },
     /// The pack's `aliases` catalog failed to validate.
     #[error("registry pack `aliases`: {source}")]
     Aliases {
@@ -226,6 +406,16 @@ pub enum RegistryError {
     AliasGroupUnanswerable {
         /// The group's spellings, comma-joined.
         spellings: String,
+    },
+    /// `blocks` resolves a version after a newer one.
+    #[error(
+        "registry pack `blocks` resolves `{version}` after `{follows}`, which `data_versions` orders after it; list the tables oldest first"
+    )]
+    BlocksOutOfOrder {
+        /// The version resolved too late.
+        version: String,
+        /// The newer version resolved before it.
+        follows: String,
     },
     /// `blocks` lacks a table for a targetable version, or has one for a version not in the table.
     #[error(
@@ -257,15 +447,17 @@ impl From<AliasError> for RegistryError {
     }
 }
 
-/// The targetable row `mc_version` names, as the row spells it. `1.21.0` names `1.21`
-/// (`spec/versioning-editions` "The target is a compile-time parameter").
-fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
+/// The targetable row `mc_version` names: `1.21.0` names `1.21` (`spec/versioning-editions`
+/// "The target is a compile-time parameter").
+fn targetable_row_for<'a>(
+    table: &'a DataVersionTable,
+    mc_version: &str,
+) -> Option<&'a DataVersionEntry> {
     table
         .versions
         .iter()
         .filter(|e| e.targetable)
         .find(|e| compare_versions(&e.mc_version, mc_version).is_eq())
-        .map(|e| (e.mc_version.clone(), e.data_version))
 }
 
 impl RegistryPack {
@@ -299,6 +491,12 @@ impl RegistryPack {
         &self.aliases
     }
 
+    /// The state maps, empty without the components.
+    #[must_use]
+    pub fn states(&self) -> &StateMapIndex {
+        &self.states
+    }
+
     /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
     #[must_use]
     pub fn bytes_hash(&self) -> &HashHex {
@@ -311,7 +509,7 @@ impl RegistryPack {
         &self.source
     }
 
-    /// The `(mc_version, data_version)` row `requested` names, `"latest"` included.
+    /// The targetable row `requested` names, `"latest"` included.
     ///
     /// # Panics
     ///
@@ -320,7 +518,7 @@ impl RegistryPack {
         &self,
         edition: Edition,
         requested: &str,
-    ) -> Result<(String, i32), UnsupportedTarget> {
+    ) -> Result<&DataVersionEntry, UnsupportedTarget> {
         assert_eq!(
             self.manifest.edition, edition,
             "{edition:?} target resolution against a non-{edition:?} pack is a caller bug",
@@ -349,10 +547,10 @@ impl RegistryPack {
     ///
     /// When the pack is not a Java pack.
     pub fn resolve_java_target(&self, requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
-        let (mc_version, data_version) = self.resolve_target_row(Edition::Java, requested)?;
+        let row = self.resolve_target_row(Edition::Java, requested)?;
         Ok(JavaTarget {
-            mc_version,
-            data_version,
+            mc_version: row.mc_version.clone(),
+            data_version: row.data_version,
         })
     }
 
@@ -369,10 +567,13 @@ impl RegistryPack {
         &self,
         requested: &str,
     ) -> Result<BedrockTarget, UnsupportedTarget> {
-        let (mc_version, block_version) = self.resolve_target_row(Edition::Bedrock, requested)?;
+        let row = self.resolve_target_row(Edition::Bedrock, requested)?;
         Ok(BedrockTarget {
-            mc_version,
-            block_version,
+            mc_version: row.mc_version.clone(),
+            order_key: row.data_version,
+            block_version: row
+                .block_version
+                .expect("a targetable Bedrock row's block_version is validated at load time"),
         })
     }
 
@@ -440,10 +641,14 @@ impl RegistryPack {
             ids
         });
         PackView {
+            edition: self.manifest.edition,
             materials: &self.materials,
+            blocks: &self.blocks,
+            state_maps: &self.states,
             aliases: &self.aliases,
             mc_version,
             ids,
+            states: mc_version.and_then(|version| self.states.at(version)),
             label: match mc_version {
                 Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
                 None => self.manifest.edition.as_str().to_owned(),
@@ -511,6 +716,8 @@ enum Component {
     Materials,
     Blocks,
     Aliases,
+    States,
+    Sensitivity,
 }
 
 impl Component {
@@ -521,6 +728,8 @@ impl Component {
             Component::Materials => "materials",
             Component::Blocks => "blocks",
             Component::Aliases => "aliases",
+            Component::States => "states",
+            Component::Sensitivity => "sensitivity",
         };
         RegistryError::File {
             file: file.to_owned(),
@@ -540,12 +749,16 @@ trait ComponentSource {
 
 impl ComponentSource for BuiltinFiles {
     fn read_text(&self, component: Component, _file: &str) -> Result<Cow<'_, str>, RegistryError> {
+        let embedded =
+            |text: Option<&'static str>, file| text.ok_or(RegistryError::NotEmbedded { file });
         Ok(Cow::Borrowed(match component {
             Component::Manifest => self.manifest,
             Component::DataVersions => self.data_versions,
             Component::Materials => self.materials,
             Component::Blocks => self.blocks,
             Component::Aliases => self.aliases,
+            Component::States => embedded(self.states, "states")?,
+            Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
         }))
     }
 
@@ -590,7 +803,7 @@ fn load_pack(
         source.read_text(Component::DataVersions, &manifest.files.data_versions)?;
     let data_versions: DataVersionTable =
         parse_component(&data_versions_text, Component::DataVersions)?;
-    validate_data_versions(&data_versions)?;
+    validate_data_versions(&data_versions, expected_edition)?;
 
     let (materials, materials_text) = optional_component(
         source,
@@ -603,7 +816,7 @@ fn load_pack(
         source,
         Component::Blocks,
         manifest.files.blocks.as_deref(),
-        BlocksIndex::from_catalog,
+        |catalog| BlocksIndex::from_catalog(catalog, expected_edition),
         BlocksIndex::empty,
     )?;
     let (aliases, aliases_text) = optional_component(
@@ -615,7 +828,10 @@ fn load_pack(
     )?;
     validate_material_overrides(&materials, &data_versions)?;
     validate_blocks_cover_versions(&blocks, &data_versions)?;
+    validate_blocks_order(&blocks, &data_versions)?;
     validate_aliases_answerable(&aliases, &blocks)?;
+    let (states, states_text, sensitivity_text) = state_maps(source, &manifest, &blocks)?;
+    validate_states_cover_versions(&states, &data_versions)?;
 
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
@@ -625,6 +841,8 @@ fn load_pack(
         (&manifest.files.materials, &materials_text),
         (&manifest.files.blocks, &blocks_text),
         (&manifest.files.aliases, &aliases_text),
+        (&manifest.files.states, &states_text),
+        (&manifest.files.sensitivity, &sensitivity_text),
     ] {
         if let (Some(file), Some(text)) = (file, text) {
             components.push((file.as_str(), text.as_bytes()));
@@ -637,9 +855,48 @@ fn load_pack(
         materials,
         blocks,
         aliases,
+        states,
         bytes_hash,
         source: source.provenance(),
     })
+}
+
+/// A component's text, `None` when the manifest names no such component.
+type ComponentText<'s> = Option<Cow<'s, str>>;
+
+/// The state map index and the texts of its two components, which a pack names both or neither of.
+fn state_maps<'s>(
+    source: &'s impl ComponentSource,
+    manifest: &PackManifest,
+    blocks: &BlocksIndex,
+) -> Result<(StateMapIndex, ComponentText<'s>, ComponentText<'s>), RegistryError> {
+    let files = &manifest.files;
+    let (states_file, sensitivity_file) = match (&files.states, &files.sensitivity) {
+        (None, None) => return Ok((StateMapIndex::empty(), None, None)),
+        (Some(states), Some(sensitivity)) => (states, sensitivity),
+        (Some(_), None) => {
+            return Err(StatesError::Unpaired {
+                present: "states",
+                missing: "sensitivity",
+            }
+            .into());
+        }
+        (None, Some(_)) => {
+            return Err(StatesError::Unpaired {
+                present: "sensitivity",
+                missing: "states",
+            }
+            .into());
+        }
+    };
+    let states_text = source.read_text(Component::States, states_file)?;
+    let sensitivity_text = source.read_text(Component::Sensitivity, sensitivity_file)?;
+    let index = StateMapIndex::from_catalogs(
+        parse_component(&states_text, Component::States)?,
+        parse_component(&sensitivity_text, Component::Sensitivity)?,
+        blocks,
+    )?;
+    Ok((index, Some(states_text), Some(sensitivity_text)))
 }
 
 /// An optional component's index and text, or its empty index when the manifest names none.
@@ -690,6 +947,29 @@ fn validate_aliases_answerable(
         });
     }
     Ok(())
+}
+
+/// Refuses a state map that misses a targetable version, whose build would have none to write by.
+fn validate_states_cover_versions(
+    states: &StateMapIndex,
+    data_versions: &DataVersionTable,
+) -> Result<(), RegistryError> {
+    if states.is_empty() {
+        return Ok(());
+    }
+    let missing: Vec<&str> = data_versions
+        .versions
+        .iter()
+        .filter(|e| e.targetable && states.at(&e.mc_version).is_none())
+        .map(|e| e.mc_version.as_str())
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(RegistryError::StatesMissVersion {
+            missing: missing.join(", "),
+        })
+    }
 }
 
 /// Refuses a materials override naming a version `data_versions` lacks, which would never fire.
@@ -745,6 +1025,35 @@ fn validate_blocks_cover_versions(
     })
 }
 
+/// Requires `blocks` to resolve its versions oldest first, so its first and last tables to declare
+/// an id are the versions it first and last appears in.
+fn validate_blocks_order(
+    blocks: &BlocksIndex,
+    data_versions: &DataVersionTable,
+) -> Result<(), RegistryError> {
+    let key = |version: &str| {
+        data_versions
+            .versions
+            .iter()
+            .find(|e| e.mc_version == version)
+            .map(|e| e.data_version)
+    };
+    let mut previous: Option<(&str, i32)> = None;
+    for version in blocks.versions() {
+        let this = key(version).expect("`validate_blocks_cover_versions` refused a table it lacks");
+        if let Some((follows, before)) = previous
+            && this <= before
+        {
+            return Err(RegistryError::BlocksOutOfOrder {
+                version: version.to_owned(),
+                follows: follows.to_owned(),
+            });
+        }
+        previous = Some((version, this));
+    }
+    Ok(())
+}
+
 fn validate_manifest(manifest: &PackManifest, expected: Edition) -> Result<(), RegistryError> {
     if manifest.schema_version > SUPPORTED_MANIFEST_SCHEMA {
         return Err(RegistryError::UnsupportedSchemaVersion {
@@ -762,7 +1071,7 @@ fn validate_manifest(manifest: &PackManifest, expected: Edition) -> Result<(), R
     Ok(())
 }
 
-fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError> {
+fn validate_data_versions(table: &DataVersionTable, edition: Edition) -> Result<(), RegistryError> {
     if table.schema_version > SUPPORTED_DATA_VERSIONS_SCHEMA {
         return Err(RegistryError::UnsupportedSchemaVersion {
             kind: "data_versions",
@@ -785,7 +1094,26 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
     if !table.versions.iter().any(|e| e.targetable) {
         return Err(RegistryError::NoTargetableVersion);
     }
+    validate_block_versions(table, edition)?;
     validate_version_order(table)?;
+    Ok(())
+}
+
+/// Requires a `block_version` on each targetable Bedrock row, the integer its structures write,
+/// and refuses one on any other row, which nothing writes.
+fn validate_block_versions(
+    table: &DataVersionTable,
+    edition: Edition,
+) -> Result<(), RegistryError> {
+    for entry in &table.versions {
+        let written = edition == Edition::Bedrock && entry.targetable;
+        let mc_version = entry.mc_version.clone();
+        match (written, entry.block_version) {
+            (true, None) => return Err(RegistryError::BlockVersionMissing { mc_version }),
+            (false, Some(_)) => return Err(RegistryError::BlockVersionMisplaced { mc_version }),
+            (true, Some(_)) | (false, None) => {}
+        }
+    }
     Ok(())
 }
 

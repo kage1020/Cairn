@@ -5,7 +5,7 @@ use cairn_lang_core::ast::{Item, Statement, ThemeRule, Value, ValueKind};
 use cairn_lang_core::block_array::{BlockState, resolve_block_state};
 use cairn_lang_core::intent::ValueWithSpan;
 use cairn_lang_core::lock::hash_resolved_ir;
-use cairn_lang_core::{DiagnosticCode, parse};
+use cairn_lang_core::parse;
 
 use crate::common::{diagnose, lowered, only_structure};
 
@@ -170,39 +170,8 @@ fn a_well_formed_literal_is_clean_through_check() {
     for target in ["@oak_log[axis=x]", "@oak_stairs[half=top, facing=north]"] {
         let source = floored(target);
         assert_eq!(diagnose(&source), [], "{target:?}");
-        let codes: Vec<_> = lowered(&source)
-            .diagnostics
-            .iter()
-            .map(|d| d.code)
-            .collect();
-        assert_eq!(codes, [DiagnosticCode::StateLiteralUnchecked], "{target:?}");
+        assert_eq!(lowered(&source).diagnostics, [], "{target:?}");
     }
-}
-
-#[test]
-fn an_unchecked_literal_is_announced_on_its_value() {
-    let source = floored("@oak_log[axis=q]");
-    let ir = lowered(&source);
-    let found: Vec<_> = ir
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::StateLiteralUnchecked)
-        .collect();
-    assert_eq!(found.len(), 1, "{:?}", ir.diagnostics);
-    assert_eq!(&source[found[0].span.clone()], "@oak_log[axis=q]");
-    assert!(
-        found[0]
-            .primary
-            .contains("`minecraft:oak_log` is written with `axis=q`"),
-        "{}",
-        found[0].primary,
-    );
-    assert!(
-        lowered(&floored("@oak_log"))
-            .diagnostics
-            .iter()
-            .all(|d| d.code != DiagnosticCode::StateLiteralUnchecked),
-    );
 }
 
 #[test]
@@ -383,14 +352,4 @@ fn a_walkway_path_carries_its_literal_into_the_walkway_palette() {
         ir.structures.keys().collect::<Vec<_>>()
     );
     assert!(holding[0].contains("walkway"), "{holding:?}");
-    let unchecked: Vec<_> = ir
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::StateLiteralUnchecked)
-        .collect();
-    assert_eq!(unchecked.len(), 1, "{:?}", ir.diagnostics);
-    assert_eq!(
-        &source[unchecked[0].span.clone()],
-        "@gravel[waterlogged=true]"
-    );
 }

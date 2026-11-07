@@ -1,177 +1,142 @@
-//! Java blockstate properties to Bedrock `states`, for the stair family only
-//! (`spec/versioning-editions` "Java / Bedrock portability"). A non-`straight` stair `shape` has
-//! no Bedrock state and drops with a degradation note; another block with properties is refused.
+//! A palette entry's Bedrock block and `states`, through the registry pack's state map for the
+//! target version (`spec/versioning-editions` "Java / Bedrock portability"). The entry's
+//! properties are the canonical vocabulary's; a state the version has no form for drops with a
+//! degradation note, and one the map cannot place is refused.
 
-use cairn_lang_core::block_array::{BlockState, is_stair};
+use cairn_lang_core::block_array::BlockState;
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
-use indexmap::IndexMap;
 use thiserror::Error;
 
-/// One palette entry's Bedrock `states`, and the intents it had to drop.
+use crate::registry::{BedrockForm, StateRefusal, StateValue, VersionStates};
+
+/// One palette entry as Bedrock writes it, and the intents it had to drop.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StateTranslation {
-    /// The typed Bedrock states, empty for a bare block.
+    /// The Bedrock id, which a state can spell as another block (`oak_slab[type=double]` is
+    /// `oak_double_slab`).
+    pub id: String,
+    /// The typed Bedrock states, empty for an entry written bare.
     pub states: Compound,
-    /// One entry per intent Bedrock cannot express; [`degradation_detail`] words it.
+    /// Whether the cell also holds water, which the `.mcstructure` carries as its second layer.
+    pub waterlogged: bool,
+    /// One entry per intent Bedrock cannot express, each worded by its `reason`.
     pub degraded: Vec<DroppedIntent>,
 }
 
-/// A Java property the Bedrock backend cannot map.
+/// A palette entry the Bedrock backend cannot write.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BedrockStateError {
-    /// A block outside the mapped families carries properties.
+    /// The version's state map has no form for the entry's states.
     #[error(
-        "block `{id}[{properties}]` carries blockstate properties the Bedrock backend cannot map \
-         (only {mapped} is mapped so far). Valid: a bare block id (e.g. \
-         `minecraft:oak_planks`), or a `*_stairs` block. Fix: bind the member's mat_slot to a \
-         property-free material, or compile with `--edition java`"
+        "block `{id}[{properties}]` has no form at bedrock {mc_version}: {reason}. Fix: pass a \
+         `--target` whose state map carries these states, bind the member's material to another \
+         block, or compile with `--edition java`"
     )]
-    UnmappableBlock {
+    Unmapped {
         /// The block id.
         id: String,
         /// The entry's `key=value` pairs, comma-joined.
         properties: String,
-        /// The families this backend maps.
-        mapped: &'static str,
+        /// The version.
+        mc_version: String,
+        /// Why, as the state map says it.
+        reason: String,
     },
-    /// A stair property value outside the Java domain, such as `facing=up`.
+    /// A property the Java block does not have.
     #[error(
-        "stair `{id}` has `{key}={value}`, which is not a valid Java `{key}`. Valid `{key}`: \
+        "block `{id}` carries blockstate `{key}`, which the Java block does not have. Valid: \
+         {valid}. Fix: remove it from the source blockstate; `--edition java` would write it \
+         unchanged, since Java has no such state either"
+    )]
+    UnknownProperty {
+        /// The block id.
+        id: String,
+        /// The property.
+        key: String,
+        /// The block's properties, comma-joined.
+        valid: String,
+    },
+    /// A value outside the Java property's domain, such as a stair's `facing=up`.
+    #[error(
+        "block `{id}` has `{key}={value}`, which is not a valid Java `{key}`. Valid `{key}`: \
          {valid}. Fix: correct the source blockstate to one of those; `--edition java` would \
          write the same value unchanged, since Java has no such `{key}` either"
     )]
-    UnknownStairState {
+    UnknownValue {
         /// The block id.
         id: String,
-        /// The key, `facing` or `half`.
-        key: &'static str,
+        /// The property.
+        key: String,
         /// The value.
         value: String,
-        /// The valid values, comma-joined.
-        valid: &'static str,
-    },
-    /// A stair key this backend does not handle, refused so mapping it later changes no output.
-    #[error(
-        "stair `{id}` carries unknown blockstate `{key}`. Handled: {handled}. Fix: remove it \
-         from the source blockstate, or compile with `--edition java`"
-    )]
-    UnknownStairKey {
-        /// The block id.
-        id: String,
-        /// The key.
-        key: String,
-        /// The keys this backend handles, comma-joined.
-        handled: &'static str,
+        /// The values the property takes, comma-joined.
+        valid: String,
     },
 }
 
-const FACING_VALID: &str = "east, west, south, north";
-
-const MAPPED_FAMILIES: &str = "the stair family";
-
-/// The keys [`translate_stair`] matches, in its order.
-const STAIR_KEYS_HANDLED: &str = "facing, half, shape";
-
-/// The Bedrock `states` for a Java palette entry whose id is concrete.
+/// How `state`, whose id is concrete, is written at `map`'s version.
 ///
 /// # Errors
 ///
-/// [`BedrockStateError`] for a non-stair block with properties, or a stair state it cannot map.
-pub fn translate_states(state: &BlockState) -> Result<StateTranslation, BedrockStateError> {
-    let (id, properties) = (state.id.as_str(), &state.properties);
-    if properties.is_empty() {
-        return Ok(StateTranslation {
-            states: Compound::new(),
-            degraded: Vec::new(),
-        });
-    }
-
-    if is_stair(id) {
-        translate_stair(id, properties)
-    } else {
-        Err(BedrockStateError::UnmappableBlock {
-            id: id.to_owned(),
-            properties: state.properties_text(),
-            mapped: MAPPED_FAMILIES,
-        })
-    }
-}
-
-/// What dropping one intent costs, worded per `key`: the value shows in the entry's `states`.
-#[must_use]
-pub fn degradation_detail(dropped: &DroppedIntent) -> String {
-    match dropped {
-        DroppedIntent::Shape { .. } => {
-            "Bedrock has no `shape` state; its stairs render straight, so corners show visual gaps"
-                .to_owned()
-        }
-    }
-}
-
-fn translate_stair(
-    id: &str,
-    properties: &IndexMap<String, String>,
+/// [`BedrockStateError`] when the map has no form for the states, or they are not the block's.
+pub fn translate_states(
+    map: &VersionStates<'_>,
+    state: &BlockState,
 ) -> Result<StateTranslation, BedrockStateError> {
-    let mut states = Compound::new();
-    let mut degraded = Vec::new();
-
-    for (key, value) in properties {
-        match key.as_str() {
-            "facing" => {
-                states.insert("weirdo_direction", Tag::Int(weirdo_direction(id, value)?));
-            }
-            "half" => {
-                states.insert("upside_down_bit", Tag::Byte(upside_down_bit(id, value)?));
-            }
-            "shape" => {
-                // No Bedrock `shape` state; `straight` is its default.
-                if value != "straight" {
-                    degraded.push(DroppedIntent::Shape {
-                        value: value.clone(),
-                    });
-                }
-            }
-            other => {
-                return Err(BedrockStateError::UnknownStairKey {
-                    id: id.to_owned(),
-                    key: other.to_owned(),
-                    handled: STAIR_KEYS_HANDLED,
-                });
-            }
-        }
+    let BedrockForm {
+        id,
+        states,
+        waterlogged,
+        dropped,
+    } = map.resolve(state).map_err(|refusal| match refusal {
+        StateRefusal::Unmapped { reason } => BedrockStateError::Unmapped {
+            id: state.id.clone(),
+            properties: state.properties_text(),
+            mc_version: map.mc_version().to_owned(),
+            reason,
+        },
+        StateRefusal::UnknownProperty { key, valid } => BedrockStateError::UnknownProperty {
+            id: state.id.clone(),
+            key,
+            valid: valid.join(", "),
+        },
+        StateRefusal::UnknownValue { key, value, valid } => BedrockStateError::UnknownValue {
+            id: state.id.clone(),
+            key,
+            value,
+            valid: valid.join(", "),
+        },
+    })?;
+    let mut compound = Compound::new();
+    for (name, value) in states {
+        compound.insert(name, tag(value));
     }
-
-    Ok(StateTranslation { states, degraded })
+    Ok(StateTranslation {
+        id,
+        states: compound,
+        waterlogged,
+        degraded: dropped
+            .into_iter()
+            .map(|dropped| DroppedIntent {
+                key: dropped.key,
+                value: dropped.value,
+                mc_versions: vec![map.mc_version().to_owned()],
+                reason: dropped.reason,
+            })
+            .collect(),
+    })
 }
 
-/// Java `facing` to `weirdo_direction`, as Bedrock 1.21.60's stair states number them.
-fn weirdo_direction(id: &str, facing: &str) -> Result<i32, BedrockStateError> {
-    match facing {
-        "east" => Ok(0),
-        "west" => Ok(1),
-        "south" => Ok(2),
-        "north" => Ok(3),
-        other => Err(BedrockStateError::UnknownStairState {
-            id: id.to_owned(),
-            key: "facing",
-            value: other.to_owned(),
-            valid: FACING_VALID,
-        }),
-    }
-}
-
-fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
-    match half {
-        "top" => Ok(1),
-        "bottom" => Ok(0),
-        other => Err(BedrockStateError::UnknownStairState {
-            id: id.to_owned(),
-            key: "half",
-            value: other.to_owned(),
-            valid: "top, bottom",
-        }),
+/// A palette value as its NBT tag: Bedrock's booleans are bytes.
+fn tag(value: StateValue) -> Tag {
+    match value {
+        StateValue::Bool(value) => Tag::Byte(i8::from(value)),
+        StateValue::Int(value) => Tag::Int(
+            i32::try_from(value).expect("the loader refuses a state map int past `TAG_Int`"),
+        ),
+        StateValue::Str(value) => Tag::String(value),
     }
 }
 
