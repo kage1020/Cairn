@@ -8,10 +8,6 @@ fn artifact_stem_names_each_scope_kind() {
     assert_eq!(artifact_stem("struct::deep::room"), "deep::room");
     assert_eq!(artifact_stem("塔"), "塔");
     assert_eq!(artifact_stem(""), "");
-    assert_eq!(
-        artifact_stem("walkway::hamlet::home1.entry__home2.entry"),
-        "walkway::hamlet::home1.entry__home2.entry",
-    );
 }
 
 #[test]

@@ -304,7 +304,9 @@ impl OutputExt {
     }
 }
 
-/// The file name of one structure, such as `"cottage.nbt"` for the stem `"cottage"`.
+/// The file name of one structure from the stem
+/// [`BlockArrayIr::artifact_stem`](cairn_lang_core::block_array::BlockArrayIr::artifact_stem)
+/// gives, such as `"cottage.nbt"` for `"cottage"`.
 #[must_use]
 pub fn output_filename(stem: &str, ext: OutputExt) -> String {
     format!("{stem}.{}", ext.as_str())

@@ -218,6 +218,16 @@ fn a_reversed_duplicate_connect_is_one_walkway() {
         ],
         "lowering writes one walkway, named after the first row",
     );
+    let stems: Vec<String> = ir.structures.keys().map(|k| ir.artifact_stem(k)).collect();
+    assert_eq!(
+        stems,
+        [
+            "s_walkway_b_entry__a_entry",
+            "a",
+            "b",
+            "s_walkway_a_entry__b_entry",
+        ],
+    );
 }
 
 #[test]

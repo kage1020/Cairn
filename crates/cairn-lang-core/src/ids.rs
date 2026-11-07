@@ -584,7 +584,7 @@ impl fmt::Display for WalkwayEndpoint {
 /// The file name, without extension, a `struct::` or `site::` scope key is written to
 /// (`spec/components-editing-sites` "Output naming"); any other key comes back as is.
 #[must_use]
-pub fn artifact_stem(source_scope: &str) -> String {
+pub(crate) fn artifact_stem(source_scope: &str) -> String {
     source_scope
         .strip_prefix("struct::")
         .or_else(|| {
@@ -597,7 +597,7 @@ pub fn artifact_stem(source_scope: &str) -> String {
 }
 
 /// The file name, without extension, the walkway from `from` to `to` in `site` is written to
-/// (`spec/components-editing-sites` "Output naming").
+/// (`spec/components-editing-sites` "Ports and `connect`").
 #[must_use]
 pub fn walkway_artifact_stem(
     site: &SiteName,

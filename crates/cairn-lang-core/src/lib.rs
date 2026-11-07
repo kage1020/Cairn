@@ -30,7 +30,7 @@ pub use edition::{Edition, UnknownEdition};
 pub use error::{LexError, ParseError, Position, Span};
 pub use ids::{
     EndpointSegmentRole, IdError, KeyConstructError, KeyParseError, KeySegmentRole, PlaceId,
-    PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem, walkway_artifact_stem,
+    PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey, walkway_artifact_stem,
 };
 pub use intent::{
     CircuitRegion, CircuitRegionDefect, IntentModule, Member, MemberRole, RejectedCircuitRegion,
