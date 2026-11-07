@@ -200,11 +200,14 @@ takes `waterlogged=true` and stays its own member's ([§6.2](#62-intent_state-an
 Any other block is left as it was painted, so water fills only around what stands in the box.
 
 A block is waterloggable when the target's registry pack gives it a `waterlogged` state that takes
-`true`. A lowering with no version pinned reads a block as every version of the edition that
-declares it agrees, as [Connections](#connections) do, and without a pack no block is waterloggable.
-The derived `waterlogged` is resolved state, never intent. A Bedrock backend holds the water of a
-waterlogged block in the structure's second layer
-([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
+`true` and its state leaves room for water. A slab written `type=double` fills its cell and is not
+waterloggable, as the game never puts water in one. A block whose states the pack does not carry,
+such as a Bedrock block with no Java counterpart, is not waterloggable either, and water leaves it
+as it was painted. A lowering with no version pinned reads a block as every version of the edition
+that declares it agrees, as [Connections](#connections) do, and without a pack no block is
+waterloggable. The derived `waterlogged` is resolved state, never intent. A Bedrock backend holds
+the water of a waterlogged block in the structure's second layer ([Versioning and Editions
+§10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
 
 `water` is the one fluid and `kind=source` the one kind, which a fill with no `kind=` pours too. A
 `fill` that writes both `mat_slot=` and `fluid=`, another fluid or kind, a `from=` or `to=` that is

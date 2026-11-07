@@ -75,8 +75,8 @@ pub trait TargetRegistry {
         None
     }
 
-    /// Whether `state`'s block takes `waterlogged=true` at the pinned target, so water overlapping
-    /// it waterlogs it (`spec/blockstate` "`waterlogged`"), or `None` when the registry cannot say.
+    /// Whether `state` can hold water at the pinned target, so water overlapping it waterlogs it
+    /// (`spec/blockstate` "`waterlogged`"), or `None` when the registry cannot say.
     fn holds_water(&self, state: &BlockState) -> Option<bool> {
         let _ = state;
         None

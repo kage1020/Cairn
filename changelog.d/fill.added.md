@@ -14,6 +14,8 @@
 - *(core)* `TargetRegistry::holds_water` says whether a block takes `waterlogged=true` at the target.
   It defaults to `None`, under which a water fill waterlogs no block.
 - *(formats)* The built-in packs answer `holds_water` from each block's `waterlogged` state, a view
-  with no version pinned reading a block as every version that declares it agrees. A Bedrock build
-  holds a waterlogged block's water in the structure's second layer.
-- `examples/aquarium.crn` paints a sand bed and pours water around the panes and chests of a tank.
+  with no version pinned reading a block as every version that declares it agrees. A slab written
+  `type=double` holds none, and neither does a block whose states the pack does not carry. A
+  Bedrock build holds a waterlogged block's water in the structure's second layer.
+- `examples/aquarium.crn` paints a sand bed and pours water around a pane divider and the chests of
+  a tank.

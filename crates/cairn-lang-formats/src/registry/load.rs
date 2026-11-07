@@ -27,6 +27,10 @@ use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
 use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates, WATER_LAYER_STATE};
 
+/// The state of a slab that fills its cell, which the game never lets hold water although its
+/// block takes `waterlogged=true`.
+const DOUBLE_SLAB: (&str, &str) = ("type", "double");
+
 #[derive(Clone, Copy)]
 struct BuiltinFiles {
     manifest: &'static str,
@@ -250,12 +254,18 @@ impl TargetRegistry for PackView<'_> {
     }
 
     fn holds_water(&self, state: &BlockState) -> Option<bool> {
+        let (key, filled) = DOUBLE_SLAB;
+        let fills_its_cell = state
+            .properties
+            .get(key)
+            .is_some_and(|value| value == filled);
         let holds_at = |version: &str| {
             let domain = self.domain_at(version, &state.id)?;
             Some(
-                domain
-                    .get(WATER_LAYER_STATE)
-                    .is_some_and(|values| values.iter().any(|value| value == "true")),
+                !fills_its_cell
+                    && domain
+                        .get(WATER_LAYER_STATE)
+                        .is_some_and(|values| values.iter().any(|value| value == "true")),
             )
         };
         if let Some(version) = self.mc_version {
