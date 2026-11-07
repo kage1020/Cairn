@@ -80,7 +80,7 @@ fn an_unsatisfiable_floor_says_so_instead_of_suggesting_a_target() {
         "should say the floor cannot be met: {stderr}",
     );
     assert!(
-        stderr.contains("1.20.4, 1.21, 1.21.4"),
+        stderr.contains("satisfies it: 1.20.4, 1.21, 1.21.4, 26.3, latest\n"),
         "should list what the pack does support: {stderr}",
     );
     assert!(
@@ -221,13 +221,14 @@ fn latest_is_held_to_the_floor_like_any_other_target() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
-        stderr.contains("target 1.21.4"),
+        stderr.contains("target 26.3"),
         "the refusal should name the version `latest` resolved to: {stderr}",
     );
 }
 
 // -- the two editions ------------------------------------------------------
-// Bedrock numbers its releases `1.21.0 / 1.21.40 / 1.21.60`, Java `1.20.4 / 1.21 / 1.21.4`.
+// Bedrock numbers its releases `1.21.0 / 1.21.40 / 1.21.60 / 1.26.60`, Java
+// `1.20.4 / 1.21 / 1.21.4 / 26.3`.
 
 #[test]
 fn a_bedrock_target_is_held_to_the_floor_too() {
@@ -241,12 +242,32 @@ fn a_bedrock_target_is_held_to_the_floor_too() {
         "the candidates have to be the target edition's: {stderr}",
     );
     assert!(
-        stderr.contains("1.21.0, 1.21.40, 1.21.60"),
+        stderr.contains("satisfies it: 1.21.0, 1.21.40, 1.21.60, 1.26.60, latest\n"),
         "should list Bedrock's releases: {stderr}",
     );
     assert!(
         !stderr.contains("1.20.4"),
         "1.20.4 is a Java release and does not exist here: {stderr}",
+    );
+}
+
+/// `1.26.60` writes the block-state version `1.21.60` does, and is still the later release.
+#[test]
+fn bedrock_releases_sharing_a_block_state_version_are_ordered_by_release() {
+    let fixture = Fixture::new(&format!("@requires version>=1.26.0\n{BUILD}"));
+    let out = compile_as(&fixture, "bedrock", "1.26.60");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let below = compile_as(&fixture, "bedrock", "1.21.60");
+    assert_eq!(below.status.code(), Some(1));
+    let stderr = String::from_utf8(below.stderr).expect("utf-8");
+    assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
+    assert!(
+        stderr.contains("valid bedrock targets: 1.26.60\n"),
+        "{stderr}",
     );
 }
 
@@ -428,11 +449,11 @@ fn an_orderable_but_unbuildable_release_is_not_offered_as_a_target() {
     let fixture = Fixture::new(&format!("@requires version>=1.21.11\n{BUILD}"));
     let stderr = String::from_utf8(compile_as(&fixture, "java", "1.21.4").stderr).expect("utf-8");
     assert!(
-        stderr.contains("no supported java target satisfies it"),
-        "{stderr}",
+        stderr.contains("valid java targets: 26.3\n  fix: --target 26.3, or lower"),
+        "the first buildable release above the floor is offered: {stderr}",
     );
     assert!(
-        !stderr.contains("--target 1.21.11") && !stderr.contains("--target 26."),
+        !stderr.contains("--target 1.21.11"),
         "a release the pack cannot build for is not a target: {stderr}",
     );
 }

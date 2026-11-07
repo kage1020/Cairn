@@ -12,7 +12,6 @@ use cairn_lang_core::resolve::{
 };
 use cairn_lang_core::suggest::{candidate_list, did_you_mean};
 use cairn_lang_core::{Diagnostic, Edition, Module, Resolution, Severity, lower};
-use cairn_lang_formats::bedrock_state::degradation_detail;
 use cairn_lang_formats::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
 };
@@ -205,7 +204,9 @@ fn edition_rows(
                 pack.blocks(),
                 pack.aliases(),
             )),
-            Edition::Bedrock => portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases()),
+            Edition::Bedrock => {
+                portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases(), pack.states())
+            }
         };
         // A refused palette does not end the walk: the scope and version notes below still print.
         let portability = portability_figure(edition, portability);
@@ -295,7 +296,11 @@ fn degraded_notes(edition: Edition, entries: &[DegradedEntry]) -> Vec<String> {
         edition.as_str(),
     )];
     notes.extend(entries.iter().map(|entry| {
-        let detail: Vec<String> = entry.dropped.iter().map(degradation_detail).collect();
+        let detail: Vec<String> = entry
+            .dropped
+            .iter()
+            .map(|dropped| format!("{} ({})", dropped.reason, dropped.mc_versions.join(", ")))
+            .collect();
         format!(
             "  note: `{}` — {}",
             palette_entry_name(&entry.id, &entry.states),
@@ -339,11 +344,11 @@ fn invalid_palette_report(edition: Edition, invalid: &InvalidPalette) -> Vec<Str
             .map(|leak| format!("  error: {leak}")),
     );
     lines.push(
-        "  note: a validated pack cannot produce these, so each is either a state literal on a \
-         stair in the source — a `facing` or `half` value outside the Java domain, or a key \
-         other than `facing` / `half` / `shape`, which nothing checks against the target yet — \
-         or a leak in the pack or this compiler. The figure is withheld rather than counting a \
-         validation gap as ordinary portability"
+        "  note: a validated pack cannot produce these, so each is either a state literal in the \
+         source — a property the Java block does not have, or a value outside its domain, which \
+         `E_STATE_DOMAIN` refuses at a pinned target but these figures' range-wide lowering does \
+         not check — or a leak in the pack or this compiler. The figure is withheld rather than \
+         counting a validation gap as ordinary portability"
             .to_owned(),
     );
     lines
@@ -368,11 +373,9 @@ fn unsupported_reason(reason: &UnsupportedReason) -> String {
                 ),
             }
         }
-        // The backend, not the edition, lacks these states; the message must not blame the edition.
-        UnsupportedReason::StatesUnmapped { states, mapped } => format!(
-            "the edition has the block; this compiler maps states for {mapped} so far, so \
-             `{states}` has no form here yet — bind the slot to a property-free material, or \
-             build for the other edition"
+        UnsupportedReason::StatesUnmapped { states, detail } => format!(
+            "the edition has the block, but no version's state map has a form for `{states}`: \
+             {detail} — bind the slot to another block, or build for the other edition"
         ),
     }
 }

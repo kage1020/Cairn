@@ -60,7 +60,7 @@ pub(super) fn resolve_site_placements(
 
         // Recorded before any refusal of the row, so its `def` does not also earn `W_UNUSED_DEF`.
         let use_target = member
-            .intent_state
+            .arguments
             .get("use")
             .and_then(|v| v.value.as_label_str());
         let use_def = use_target.and_then(|name| defs.iter().find(|d| d.name == name));
@@ -92,7 +92,7 @@ pub(super) fn resolve_site_placements(
         }
 
         let theme_target = member
-            .intent_state
+            .arguments
             .get("theme")
             .and_then(|v| v.value.as_label_str());
 
@@ -145,9 +145,9 @@ fn validate_place_origin(
     refused_place_ids: &IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let at = member.intent_state.get("at");
-    let east_of = member.intent_state.get("east_of");
-    let north_of = member.intent_state.get("north_of");
+    let at = member.arguments.get("at");
+    let east_of = member.arguments.get("east_of");
+    let north_of = member.arguments.get("north_of");
     let selector_count = usize::from(at.is_some())
         + usize::from(east_of.is_some())
         + usize::from(north_of.is_some());
@@ -347,7 +347,7 @@ const REQUIRED_PLACE_KEYS: &[(&str, &str)] = &[
 
 /// Whether the row carries `key=` at all; a hoisted `id=` lives on [`Member::id`].
 fn member_declares(member: &Member, key: &str) -> bool {
-    member.intent_state.contains_key(key) || (key == "id" && member.id.is_some())
+    member.arguments.contains_key(key) || (key == "id" && member.id.is_some())
 }
 
 /// The finding for a `place` row missing a required key, or `None` when it declares all three.

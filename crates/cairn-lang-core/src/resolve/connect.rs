@@ -54,7 +54,7 @@ pub(super) fn resolve_connect_row(
         all_ports_valid = false;
     }
 
-    let path = member.intent_state.get("path").cloned();
+    let path = member.arguments.get("path").cloned();
     let Some(path) = path else {
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::MissingPathMaterial,

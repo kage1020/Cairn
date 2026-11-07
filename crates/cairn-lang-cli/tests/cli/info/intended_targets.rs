@@ -79,7 +79,7 @@ fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
         &[(1, 1, "warning", "W_INTENDED_TARGET_UNSUPPORTED")],
     );
     assert!(
-        stderr.contains("java builds against 1.20.4, 1.21, 1.21.4"),
+        stderr.contains("java builds against 1.20.4, 1.21, 1.21.4, 26.3\n"),
         "the closed set of candidates is part of the message: {stderr}",
     );
 }

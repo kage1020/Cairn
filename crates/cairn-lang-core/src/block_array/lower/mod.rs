@@ -8,20 +8,28 @@
 mod anchor;
 mod body;
 mod canvas;
+mod cell_box;
+mod chest;
 mod circuit;
 mod connect;
+mod connections;
 mod diag;
 mod door;
+mod fill;
+mod fixture;
+mod geometry_material;
 mod members;
 mod paint;
 mod phase;
 mod plate;
+mod raw;
 mod roof_fill;
 mod roof_kind;
 mod site_floor;
 mod sizing;
 mod stair;
 mod token_diag;
+mod waterlogged;
 mod window;
 mod without_target;
 mod written;
@@ -38,7 +46,9 @@ use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 use super::args::diag_deferred_member_reason;
 use super::material::TargetRegistry;
 use super::roof::{FLAT_BASE_ID, STAIR_BASE_ID};
-use super::{BlockArray, BlockArrayIr, BlockState, PALETTE_CAPACITY, Placement, Walkway};
+use super::{
+    BlockArray, BlockArrayIr, BlockState, PALETTE_CAPACITY, Placement, ResolvedMember, Walkway,
+};
 
 use anchor::{GapOutcome, report_unread_gap, resolve_place_anchor};
 use body::{BodyDescriptor, BodyInputs, LoweredBody, lower_body_to_block_array};
@@ -72,7 +82,7 @@ fn lower_to_block_array_within(
     registry: Option<&dyn TargetRegistry>,
     palette_capacity: usize,
 ) -> BlockArrayIr {
-    let mut structures: IndexMap<String, BlockArray> = IndexMap::new();
+    let mut built = BuiltBodies::default();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let bodies = BodyInputs {
         registry,
@@ -80,12 +90,11 @@ fn lower_to_block_array_within(
     };
 
     for s in &intent.structs {
-        let key = format!("struct::{}", s.name);
-        let scope = resolution.scopes.get(&key);
+        let scope = resolution.scopes.get(&format!("struct::{}", s.name));
         // A `None` is diagnosed, unless its palette is one only a target's pack can size.
-        if let Some(ba) = lower_struct(s, scope, bodies, &mut diagnostics) {
+        if let Some(lowered) = lower_struct(s, scope, bodies, &mut diagnostics) {
             // First write wins on a duplicate name, as `resolution.scopes` bound the first body.
-            structures.entry(key).or_insert(ba);
+            built.keep_first(lowered.array, lowered.members);
         }
     }
 
@@ -97,11 +106,15 @@ fn lower_to_block_array_within(
             &intent.defs,
             resolution,
             bodies,
-            &mut structures,
+            &mut built,
             &mut placed,
             &mut diagnostics,
         );
     }
+    let BuiltBodies {
+        mut structures,
+        members,
+    } = built;
     // After every site, so the collision set covers every floor tile a strip might cross.
     let floor = collect_floor_cells(&structures, &placed);
     lower_connects(
@@ -131,6 +144,7 @@ fn lower_to_block_array_within(
             .map(|(key, body)| (key, body.placement))
             .collect(),
         walkways,
+        members,
         diagnostics,
     }
 }
@@ -140,12 +154,12 @@ fn lower_struct<'a>(
     scope: Option<&'a ScopeResolution>,
     bodies: BodyInputs<'a>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<BlockArray> {
+) -> Option<LoweredBody> {
     let Some(size) = s.size.as_ref() else {
         diagnostics.push(diag_struct_no_size(s));
         return None;
     };
-    let lowered = lower_body_to_block_array(
+    lower_body_to_block_array(
         BodyDescriptor {
             kind: VoxelSource::Struct,
             scope_label: &s.name,
@@ -157,8 +171,7 @@ fn lower_struct<'a>(
         scope,
         bodies,
         diagnostics,
-    )?;
-    Some(lowered.array)
+    )
 }
 
 /// Lower every `place` in `site` into a [`BlockArray`] and a [`Placement`], keyed
@@ -168,7 +181,7 @@ fn lower_site<'a>(
     defs: &[DefIr],
     resolution: &'a Resolution,
     bodies: BodyInputs<'a>,
-    structures: &mut IndexMap<String, BlockArray>,
+    built: &mut BuiltBodies,
     placed: &mut IndexMap<String, PlacedBody>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -202,11 +215,11 @@ fn lower_site<'a>(
         };
 
         let use_name = member
-            .intent_state
+            .arguments
             .get("use")
             .and_then(|v| v.value.as_label_str());
         let theme_name = member
-            .intent_state
+            .arguments
             .get("theme")
             .and_then(|v| v.value.as_label_str());
         let (Some(use_name), Some(theme_name)) = (use_name, theme_name) else {
@@ -245,12 +258,12 @@ fn lower_site<'a>(
             report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
-        let Some(LoweredBody { array, walls, cut }) = body else {
+        let Some(lowered) = body else {
             // Refused for its extent or palette: diagnosed unless only a pack can size the palette.
             report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
-        let dims = array.dims;
+        let dims = lowered.array.dims;
         // `north_of` needs this body's own depth.
         let origin = match anchor.origin(dims) {
             Ok(origin) => origin,
@@ -261,12 +274,12 @@ fn lower_site<'a>(
             }
         };
         report_unread_gap(gap_unread, GapOutcome::Placed, diagnostics);
-        // First write wins, as above; `placed` and `structures` must agree on the winner.
+        // First write wins, as above; `placed` and `built` must agree on the winner.
         placed
-            .entry(array.source_scope.clone())
+            .entry(lowered.array.source_scope.clone())
             .or_insert(PlacedBody {
-                walls,
-                cut,
+                walls: lowered.walls,
+                cut: lowered.cut,
                 placement: Placement {
                     site: placement_site,
                     place_id: placement_id,
@@ -280,9 +293,25 @@ fn lower_site<'a>(
                     dims,
                 },
             });
-        structures
-            .entry(array.source_scope.clone())
-            .or_insert(array);
+        built.keep_first(lowered.array, lowered.members);
+    }
+}
+
+/// The arrays the struct and place bodies lowered to, and the members that built each.
+#[derive(Default)]
+struct BuiltBodies {
+    structures: IndexMap<String, BlockArray>,
+    members: IndexMap<String, Vec<ResolvedMember>>,
+}
+
+impl BuiltBodies {
+    /// Keep `array` under its scope key, unless an earlier body holds the key.
+    fn keep_first(&mut self, array: BlockArray, members: Vec<ResolvedMember>) {
+        if self.structures.contains_key(&array.source_scope) {
+            return;
+        }
+        self.members.insert(array.source_scope.clone(), members);
+        self.structures.insert(array.source_scope.clone(), array);
     }
 }
 

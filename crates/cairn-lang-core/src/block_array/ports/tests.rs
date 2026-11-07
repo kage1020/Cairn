@@ -536,7 +536,12 @@ fn port_world_position_door_refuses_when_the_walls_start_above_the_doorway() {
     let both_storeys = WallColumn::from_walls([(0, 3), (6, 4)]);
     assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &both_storeys).is_ok());
     let one_row = WallColumn::from_walls([(0, 1)]);
-    assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &one_row).is_ok());
+    assert!(matches!(
+        port_at((0, 0, 0), dims, def, &pid("entry"), &one_row),
+        Err(PortRejection::DoorShortCourse { .. }),
+    ));
+    let two_rows = WallColumn::from_walls([(0, 2)]);
+    assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &two_rows).is_ok());
 }
 
 #[test]
@@ -597,7 +602,7 @@ fn port_world_position_refuses_a_non_cardinal_side_with_what_was_written() {
             "e"
         ),
         Err(PortRejection::Side {
-            written: Written::OtherShape,
+            written: Written::Int(3),
             ..
         }),
     ));
@@ -805,6 +810,10 @@ fn every_rejection() -> Vec<PortRejection> {
             walls: WallColumn::default(),
             member: 0..0,
         },
+        PortRejection::DoorShortCourse {
+            walls: WallColumn::default(),
+            member: 0..0,
+        },
         PortRejection::WindowArgument {
             fault: WindowArgFault::YAbsent,
             member: 0..0,
@@ -867,6 +876,10 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
                 member: span.clone(),
             }]
         }
+        PortRejection::DoorShortCourse { .. } => vec![PortRejection::DoorShortCourse {
+            walls: WallColumn::from_walls([(0, 1)]),
+            member: span.clone(),
+        }],
         PortRejection::WindowArgument { .. } => [
             WindowArgFault::OffsetMalformed,
             WindowArgFault::YAbsent,
@@ -909,11 +922,12 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
     }
 }
 
-fn written_samples(ident: &str) -> [Written; 3] {
+fn written_samples(ident: &str) -> [Written; 4] {
     [
         Written::Absent,
         Written::Ident(ident.to_owned()),
-        Written::OtherShape,
+        Written::Int(3),
+        Written::OtherShape("coordinate `1,2,3`".to_owned()),
     ]
 }
 
@@ -928,13 +942,16 @@ fn every_rejection_note_renders_in_full() {
         ("`a.p` is a `floor`, and only a `door` or a `window` can anchor a port — declare the port on a door or window instead".to_owned(), true),
         (format!("`a.p` has no `side=` (expected one of front, back, left, right){OWN}"), true),
         (format!("`a.p` has `side=frnt`, which is not one of front, back, left, right{OWN}"), true),
-        (format!("`a.p` has a `side=` that is not one of front, back, left, right{OWN}"), true),
+        (format!("`a.p` has `side=3`, which is not one of front, back, left, right{OWN}"), true),
+        (format!("`a.p` has a `side=` that is coordinate `1,2,3`, not one of front, back, left, right{OWN}"), true),
         ("`a.p` belongs to a `def` with no `size=`, so its walls have no length".to_owned(), false),
         (format!("`a.p` is a door that has no `at=`{OWN}"), true),
         (format!("`a.p` is a door that has `at=middle`, which is not one of center, left, right{OWN}"), true),
-        (format!("`a.p` is a door that has an `at=` that is not one of center, left, right (numeric offsets are reserved){OWN}"), true),
+        (format!("`a.p` is a door that has `at=3`, which is not one of center, left, right (numeric offsets are reserved){OWN}"), true),
+        (format!("`a.p` is a door that has an `at=` that is coordinate `1,2,3`, not one of center, left, right{OWN}"), true),
         (format!("`a.p` is a door with no wall to open: {NO_WALLS}{OWN}"), true),
         (format!("`a.p` is a door that opens at y=1, the row above the floor slab, which is not inside any wall course (the walls occupy y=7..=10){OWN}"), true),
+        (format!("`a.p` is a door that stands at y=1..=2, and the wall course holding y=1 ends there (the walls occupy y=1..=1){OWN}"), true),
         (format!("`a.p` is a window that has an `offset=` that is not a non-negative integer that fits in u32{OWN}"), true),
         (format!("`a.p` is a window that has no `y=`{OWN}"), true),
         (format!("`a.p` is a window that has a `y=` that is not a non-negative integer that fits in u32{OWN}"), true),

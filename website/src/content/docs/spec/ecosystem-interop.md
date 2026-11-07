@@ -53,7 +53,7 @@ Naming is the boundary between transliteration and lift.
 
 ```
 # L1: no naming, deterministic
-raw_repeat id=r03 count=5 step=3,0,0: raw_fill mat=@glass_pane from=0,2,0 to=1,3,0
+raw_repeat id=r03 count=5 step=3,0,0: raw_fill mat=minecraft:glass_pane from=0,2,0 to=1,3,0
 # L2: the LLM names it and gives it meaning
 window id=front_windows side=front mat_slot=glass repeat=5 ...
 ```

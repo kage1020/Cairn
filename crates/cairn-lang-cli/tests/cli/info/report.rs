@@ -209,9 +209,11 @@ fn a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
         .lines()
         .find(|line| line.starts_with("buildable targets:"))
         .expect("the row is printed");
-    assert!(
-        row.contains("Java: 1.21.4") && row.contains("Bedrock: none"),
-        "the floor is Java's newest release and no Bedrock release: {row}",
+    assert_eq!(
+        row,
+        "buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   Bedrock: none \
+         (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)",
+        "the floor is a Java release and no Bedrock release",
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -238,9 +240,11 @@ fn a_scoped_floor_is_weighed_only_against_its_own_edition() {
         .lines()
         .find(|line| line.starts_with("buildable targets:"))
         .expect("the row is printed");
-    assert!(
-        row.contains("Java: 1.21.4") && row.contains("Bedrock: 1.21.0, 1.21.40, 1.21.60"),
-        "a Java-scoped floor says nothing about Bedrock: {row}",
+    assert_eq!(
+        row,
+        "buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   \
+         Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60",
+        "a Java-scoped floor says nothing about Bedrock",
     );
     let json = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     let parsed: serde_json::Value =
@@ -409,7 +413,7 @@ fn a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
         "a floor Bedrock does not inherit must not set the row's edge: {stdout}",
     );
     assert!(
-        stdout.contains("buildable targets:       Bedrock: 1.21.0, 1.21.40, 1.21.60"),
+        stdout.contains("buildable targets:       Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60\n"),
         "and the per-edition row refuses nothing, so the two agree: {stdout}",
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -439,7 +443,7 @@ fn the_declared_range_is_not_an_answer_about_which_versions_build() {
         "the declared floor is the row's lower edge: {stdout}",
     );
     assert!(
-        stdout.contains("buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)"),
+        stdout.contains("buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)"),
         "and the derived row names what actually builds: {stdout}",
     );
 
@@ -455,8 +459,8 @@ fn the_declared_range_is_not_an_answer_about_which_versions_build() {
     );
     assert!(
         stdout.contains(
-            "buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)   \
-             Bedrock: 1.21.60 (1.21.0, 1.21.40 refuse)"
+            "buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   \
+             Bedrock: 1.21.60, 1.26.60 (1.21.0, 1.21.40 refuse)"
         ),
         "four of the six supported versions refuse it, on both editions: {stdout}",
     );

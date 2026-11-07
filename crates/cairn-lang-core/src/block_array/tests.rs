@@ -69,6 +69,18 @@ fn dims_index_rejects_out_of_bounds() {
 }
 
 #[test]
+fn dims_position_inverts_index_over_the_whole_volume() {
+    let d = Dims { x: 3, y: 2, z: 4 };
+    for i in 0..d.volume() {
+        let (x, y, z) = d
+            .position(i)
+            .expect("an index inside the volume has a cell");
+        assert_eq!(d.index(x, y, z), Some(i));
+    }
+    assert_eq!(d.position(d.volume()), None);
+}
+
+#[test]
 fn palette_seeds_air_at_index_zero() {
     let p = Palette::new_with_air();
     assert_eq!(p.entries.len(), 1);

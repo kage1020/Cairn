@@ -843,6 +843,151 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("string_unterminated", "theme t:\n  slot a -> \"x\n", Reject),
+    // -- coordinate triples ---------------------------------------------
+    (
+        "coordinate_triple",
+        "struct s size=5x5\n  fill from=1,1,1 to=3,2,3\n",
+        Accept,
+    ),
+    (
+        "coordinate_in_a_header",
+        "struct s size=5x5 at=0,0,0\n  floor a=1\n",
+        Accept,
+    ),
+    // A selector's `,` after an integer is a separator unless another component follows it.
+    (
+        "coordinate_in_a_selector_beside_a_separator",
+        "struct s size=5x5\n  door[y=2,side=front, at=1,2,3, id=d] opened_by=sig.a\n",
+        Accept,
+    ),
+    (
+        "coordinate_in_a_theme_selector",
+        "theme t:\n  window[at=1,2,3] -> mat_slot=g\n",
+        Accept,
+    ),
+    // A list's commas separate its items, so three integers in a list stay three.
+    (
+        "integers_in_a_list_are_no_coordinate",
+        "struct s size=5x5\n  floor tags=[1,2,3]\n",
+        Accept,
+    ),
+    (
+        "coordinate_spaced",
+        "struct s size=5x5\n  fill from=1, 1, 1\n",
+        Reject,
+    ),
+    (
+        "coordinate_space_before_a_comma",
+        "struct s size=5x5\n  fill from=1 ,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_two_components",
+        "struct s size=5x5\n  fill from=1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_four_components",
+        "struct s size=5x5\n  fill from=1,1,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_negative_component",
+        "struct s size=5x5\n  fill from=1,-1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_negative_first_component",
+        "struct s size=5x5\n  fill from=-1,2,3\n",
+        Reject,
+    ),
+    (
+        "two_selector_integers_before_a_key",
+        "struct s size=5x5\n  door[y=1,2,side=front]\n",
+        Reject,
+    ),
+    (
+        "integers_in_a_state_literal_are_no_coordinate",
+        "theme t:\n  slot a -> @oak_stairs[facing=1,2,3]\n",
+        Reject,
+    ),
+    (
+        "coordinate_trailing_comma",
+        "struct s size=5x5\n  fill from=1,1,1,\n",
+        Reject,
+    ),
+    (
+        "coordinate_as_a_positional",
+        "struct s size=5x5\n  fill 1,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_as_a_binding",
+        "struct s size=5x5\n  lever -> 1,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_beside_a_binding",
+        "struct s size=5x5\n  lever -> sig.a at=1,2,3\n",
+        Accept,
+    ),
+    // -- block ids --------------------------------------------------------
+    (
+        "block_id",
+        "struct s size=5x5\n  raw_block mat=minecraft:stone at=1,0,1\n",
+        Accept,
+    ),
+    (
+        "block_id_with_a_state_literal",
+        "struct s size=5x5\n  raw_block mat=minecraft:light[level=15] at=1,0,1\n",
+        Accept,
+    ),
+    (
+        "block_id_in_a_theme_selector",
+        "theme t:\n  window[mat=minecraft:glass] -> frame=minecraft:stone\n",
+        Accept,
+    ),
+    // A `:` ending a header line opens the body, so the name before it is no namespace.
+    (
+        "header_colon_after_a_value",
+        "def hut size=3x3 tag=small:\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "block_id_space_after_the_colon",
+        "struct s size=5x5\n  raw_block mat=minecraft: stone\n",
+        Reject,
+    ),
+    (
+        "block_id_space_before_the_colon",
+        "struct s size=5x5\n  raw_block mat=minecraft :stone\n",
+        Reject,
+    ),
+    (
+        "block_id_integer_path",
+        "struct s size=5x5\n  raw_block mat=minecraft:1\n",
+        Reject,
+    ),
+    (
+        "block_id_two_colons",
+        "struct s size=5x5\n  raw_block mat=minecraft:stone:x\n",
+        Reject,
+    ),
+    (
+        "block_id_malformed_state_literal",
+        "struct s size=5x5\n  raw_block mat=minecraft:light[level=]\n",
+        Reject,
+    ),
+    (
+        "block_id_as_a_positional",
+        "struct s size=5x5\n  raw_block minecraft:stone\n",
+        Reject,
+    ),
+    (
+        "block_id_in_a_slot_row",
+        "theme t:\n  slot wall -> minecraft:stone\n",
+        Reject,
+    ),
     // -- indentation ----------------------------------------------------
     (
         "dedent_two_levels",
@@ -1184,6 +1329,11 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
     ),
+    (
+        "coordinate_component_out_of_range",
+        "struct s size=3x3\n  fill from=99999999999999999999,1,1\n",
+        Accept,
+    ),
     // -- a size literal that runs into a word --------------------------
     // Ending the literal before the tail needs negative lookahead, which tree-sitter rejects.
     (
@@ -1194,6 +1344,12 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "size_running_into_a_word",
         "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
+        Accept,
+    ),
+    // The grammar's coordinate ends at `3` and reads `x4` as a positional word.
+    (
+        "coordinate_running_into_a_size",
+        "struct s size=3x3\n  fill from=1,2,3x4\n",
         Accept,
     ),
     // -- a truth row of the wrong width --------------------------------
