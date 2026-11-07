@@ -160,6 +160,10 @@ fn a_pair_an_older_version_takes_names_that_version() {
     let pinned = cairn("check", &[src, "--edition", "java", "--target", "26.3"]);
     let stderr = stderr_of(&pinned);
     assert_eq!(pinned.status.code(), Some(1), "{stderr}");
+    assert_stream(
+        &stderr,
+        &[(2, 13, "error", "E_STATE_DOMAIN"), PARTIAL_BUILD],
+    );
     assert!(
         stderr.contains(
             "`minecraft:creaking_heart` has no state `active` at java 26.3; its states are axis, \
@@ -172,6 +176,161 @@ fn a_pair_an_older_version_takes_names_that_version() {
 
     let older = cairn("check", &[src, "--edition", "java", "--target", "1.21.4"]);
     assert_eq!(older.status.code(), Some(0), "{}", stderr_of(&older));
+    assert_stream(&stderr_of(&older), &[]);
+}
+
+/// The refusal `cairn check --target` adds after a scope that did not lower.
+const PARTIAL_BUILD: (u64, u64, &str, &str) = (0, 0, "error", "E_PARTIAL_BUILD");
+
+/// The primaries of `stderr`'s `E_STATE_DOMAIN` findings, in report order.
+fn state_domain_primaries(stderr: &str) -> Vec<&str> {
+    stderr
+        .lines()
+        .filter_map(|line| line.split_once(": error[E_STATE_DOMAIN]: ").map(|(_, p)| p))
+        .collect()
+}
+
+#[test]
+fn a_pair_several_versions_take_offers_one_of_them() {
+    let tmp = TempDir::new().expect("tempdir");
+    let src = floored(tmp.path(), "@trial_spawner[ominous=true]");
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.20.4",
+        ],
+    );
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert_stream(
+        &stderr,
+        &[(2, 13, "error", "E_STATE_DOMAIN"), PARTIAL_BUILD],
+    );
+    assert!(
+        stderr.contains(
+            "`minecraft:trial_spawner` has no state `ominous` at java 1.20.4; its states are \
+             trial_spawner_state\n  \
+             note: `ominous=true` is valid at 1.21, 1.21.4, 26.3: pass one of them as \
+             `--target`, or correct the state literal to a state java 1.20.4 takes\n"
+        ),
+        "{stderr}",
+    );
+}
+
+#[test]
+fn each_pair_outside_is_its_own_finding_in_the_states_order() {
+    let tmp = TempDir::new().expect("tempdir");
+    let src = floored(tmp.path(), "@oak_log[lit=true,axis=q]");
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert_stream(
+        &stderr,
+        &[
+            (2, 13, "error", "E_STATE_DOMAIN"),
+            (2, 13, "error", "E_STATE_DOMAIN"),
+            PARTIAL_BUILD,
+        ],
+    );
+    assert_eq!(
+        state_domain_primaries(&stderr),
+        [
+            "`minecraft:oak_log` takes no `axis=q` at java 1.21.4; `axis` takes x, y, z",
+            "`minecraft:oak_log` has no state `lit` at java 1.21.4; its states are axis",
+        ],
+    );
+}
+
+#[test]
+fn bedrock_checks_a_literal_against_the_canonical_states_its_map_reads() {
+    let tmp = TempDir::new().expect("tempdir");
+    let src = floored(tmp.path(), "@oak_stairs[facing=up]");
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            "1.21.60",
+        ],
+    );
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert_stream(
+        &stderr,
+        &[(2, 13, "error", "E_STATE_DOMAIN"), PARTIAL_BUILD],
+    );
+    assert!(
+        stderr.contains(
+            "`minecraft:oak_stairs` takes no `facing=up` at bedrock 1.21.60; `facing` takes \
+             north, south, west, east\n  \
+             note: correct the state literal to a value bedrock 1.21.60 takes, or leave \
+             `facing` out for the block's default\n"
+        ),
+        "{stderr}",
+    );
+}
+
+#[test]
+fn a_bedrock_value_only_a_later_versions_map_reads_names_that_version() {
+    let tmp = TempDir::new().expect("tempdir");
+    let src = floored(tmp.path(), "@noteblock[instrument=trumpet]");
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            "1.21.60",
+        ],
+    );
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert_stream(
+        &stderr,
+        &[(2, 13, "error", "E_STATE_DOMAIN"), PARTIAL_BUILD],
+    );
+    assert!(
+        stderr.contains(
+            "\n  note: `instrument=trumpet` is valid at 1.26.60: pass that version as \
+             `--target`, or correct the state literal to a value bedrock 1.21.60 takes\n"
+        ),
+        "{stderr}",
+    );
+}
+
+#[test]
+fn a_bedrock_block_no_java_block_maps_onto_is_left_to_its_state_map() {
+    let tmp = TempDir::new().expect("tempdir");
+    let src = floored(tmp.path(), "@frame[facing=north]");
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            "1.21.60",
+        ],
+    );
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert_stream(&stderr, &[(5, 3, "error", "E_STATE_UNMAPPED")]);
 }
 
 #[test]
