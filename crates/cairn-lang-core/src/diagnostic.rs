@@ -55,6 +55,8 @@ pub enum DiagnosticCode {
     /// A known statement keyword whose enclosing body has no reader for it, or a `circuit` line
     /// under a `level`.
     MisplacedMember,
+    /// A line under an `@edition` guard that is not a raw member.
+    SemanticInEditionGuard,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// A key outside the vocabulary of the member's role, or of a `struct` / `def` header.
@@ -192,6 +194,7 @@ impl DiagnosticCode {
             Self::DuplicateCircuit => "E_DUPLICATE_CIRCUIT",
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
+            Self::SemanticInEditionGuard => "E_SEMANTIC_IN_EDITION_GUARD",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
             Self::MisplacedBinding => "E_MISPLACED_BINDING",
@@ -264,6 +267,7 @@ impl DiagnosticCode {
             | Self::DuplicateId
             | Self::DuplicateCircuit
             | Self::MisplacedMember
+            | Self::SemanticInEditionGuard
             | Self::UnknownKeyword
             | Self::UnknownArgument
             | Self::MisplacedBinding

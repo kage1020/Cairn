@@ -8,6 +8,7 @@ use crate::ast::{
 };
 use crate::calver::future_version_note;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::edition::Edition;
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
@@ -18,6 +19,14 @@ use indexmap::IndexSet;
 
 /// The word that introduces a version floor, after `@` or at the start of a body line.
 const REQUIRES: &str = "requires";
+
+/// The word after `@` that opens an edition guard inside a body.
+const EDITION: &str = "edition";
+
+/// The refusal for an `@edition` guard written outside every body.
+const GUARD_OUTSIDE_A_BODY: &str = "an `@edition` guard stands inside a `struct` or `def` body, \
+     around the raw members it guards: the items of a file are edition-neutral, so move the guard \
+     into the body that places those blocks";
 
 /// Whether the body being parsed may carry `requires version>=X` lines, and what to say when it
 /// may not. A refusing body refuses only a line that reads as a floor.
@@ -141,6 +150,8 @@ struct Parser<'a> {
     depth: usize,
     /// Token ranges taken whole as a raw directive value, where a [`TokenKind::Unlexed`] is text.
     raw_values: Vec<std::ops::Range<usize>>,
+    /// Whether the body being parsed is an `@edition` guard's own.
+    in_guard: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -151,6 +162,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             depth: 0,
             raw_values: Vec::new(),
+            in_guard: false,
         }
     }
 
@@ -205,6 +217,12 @@ impl<'a> Parser<'a> {
             "cairn" => Directive::Cairn,
             REQUIRES => Directive::Requires,
             "intended_targets" => Directive::IntendedTargets,
+            EDITION => {
+                return Err(ParseError::Syntax {
+                    position,
+                    message: GUARD_OUTSIDE_A_BODY.into(),
+                });
+            }
             other => {
                 return Err(ParseError::Syntax {
                     position,
@@ -281,6 +299,17 @@ impl<'a> Parser<'a> {
     fn parse_item(&mut self) -> Result<Item, ParseError> {
         let position = self.position();
         let start_byte = self.current_byte();
+        if self.peek_is(&TokenKind::At) {
+            self.advance();
+            return Err(ParseError::Syntax {
+                position,
+                message: if self.peek_is_ident(EDITION) {
+                    GUARD_OUTSIDE_A_BODY.into()
+                } else {
+                    "a file directive goes at the top of the file, before its first item".into()
+                },
+            });
+        }
         let kw = self.expect_ident()?;
         match kw.as_str() {
             "theme" => self.parse_theme_item(start_byte),
@@ -527,6 +556,9 @@ impl<'a> Parser<'a> {
 
     /// Parse one body line; `policy` is the enclosing body's.
     fn parse_command(&mut self, policy: RequiresPolicy) -> Result<Statement, ParseError> {
+        if self.peek_is(&TokenKind::At) {
+            return self.parse_edition_guard(policy);
+        }
         let start_byte = self.current_byte();
         let keyword = self.expect_ident()?;
         match keyword.as_str() {
@@ -570,14 +602,93 @@ impl<'a> Parser<'a> {
         let span = start_byte..self.last_byte();
         self.expect_newline()?;
         // A body recurses like a list or an expression, so it goes through `nested`.
-        let (_, children) =
-            self.nested(|p| p.parse_optional_command_body(policy.for_children()))?;
+        let in_guard = std::mem::replace(&mut self.in_guard, false);
+        let children = self.nested(|p| p.parse_optional_command_body(policy.for_children()));
+        self.in_guard = in_guard;
+        let (_, children) = children?;
         Ok(Statement::Generic {
             keyword,
             selector,
             positional,
             args,
             binding,
+            children,
+            span,
+        })
+    }
+
+    /// Parse an `@edition` guard and the lines indented under it; `policy` is the enclosing body's.
+    fn parse_edition_guard(&mut self, policy: RequiresPolicy) -> Result<Statement, ParseError> {
+        let position = self.position();
+        let start_byte = self.current_byte();
+        self.advance();
+        let name = self.expect_ident()?;
+        if name != EDITION {
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "`@{name}` is a file directive, which goes at the top of the file: inside a \
+                     body, `@` opens only an `@edition` guard"
+                ),
+            });
+        }
+        if self.in_guard {
+            return Err(ParseError::Syntax {
+                position,
+                message: "an `@edition` guard does not nest: the guard this one stands in already \
+                          picks the edition, so write its lines there or dedent this guard out"
+                    .into(),
+            });
+        }
+        let edition_position = self.position();
+        let edition = match self.peek().map(|t| &t.kind) {
+            Some(TokenKind::Ident(word)) => {
+                word.parse::<Edition>().map_err(|_| ParseError::Syntax {
+                    position: edition_position,
+                    message: format!(
+                        "`{word}` is not an edition: an `@edition` guard names `java` or `bedrock`"
+                    ),
+                })?
+            }
+            _ => {
+                return Err(ParseError::Syntax {
+                    position: edition_position,
+                    message: "an `@edition` guard names the edition whose build keeps its lines: \
+                              `@edition java` or `@edition bedrock`"
+                        .into(),
+                });
+            }
+        };
+        self.advance();
+        let span = start_byte..self.last_byte();
+        if let Some(next) = self.peek().filter(|t| t.kind != TokenKind::Newline) {
+            return Err(ParseError::Syntax {
+                position: next.position,
+                message: if next.kind == TokenKind::LBrace {
+                    "an `@edition` guard holds its lines indented under it, not in braces".into()
+                } else {
+                    "an `@edition` guard takes nothing after its edition: the lines it guards go \
+                     on the lines below it, one indent deeper"
+                        .into()
+                },
+            });
+        }
+        self.expect_newline()?;
+        if !self.peek_is(&TokenKind::Indent) {
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "nothing is indented under this `@edition {edition}` guard: the lines it guards \
+                     go on the lines below it, one indent deeper"
+                ),
+            });
+        }
+        let in_guard = std::mem::replace(&mut self.in_guard, true);
+        let children = self.nested(|p| p.parse_optional_command_body(policy.for_children()));
+        self.in_guard = in_guard;
+        let (_, children) = children?;
+        Ok(Statement::EditionGuard {
+            edition,
             children,
             span,
         })

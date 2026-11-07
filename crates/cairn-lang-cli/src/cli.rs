@@ -151,7 +151,9 @@ pub(crate) enum Command {
     #[command(
         long_about = "Lower a .crn source file all the way to the block-array IR and print the \
             result. A debugging surface for the universal voxel pivot; `cairn compile` writes the \
-            same IR out as `.nbt` or `.mcstructure` files, per edition. Lowering warnings \
+            same IR out as `.nbt` or `.mcstructure` files, per edition. No edition is pinned \
+            here, so a member under an `@edition` guard is left out, and a note says how many \
+            were. Lowering warnings \
             (deferred members, themeless scopes, abstract tokens) print to stderr but do not \
             affect the exit code. Exits 0 on success, 1 on a parse failure, on any \
             `Error`-severity diagnostic (`E_UNKNOWN_ABSTRACT_TOKEN` among them; `E_UNKNOWN_ID` is \

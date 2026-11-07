@@ -71,6 +71,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
+| `E_SEMANTIC_IN_EDITION_GUARD` | A line under an `@edition` guard that is not a raw member: any other member, a `logic` line or an `assert` line ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
 | `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal, on any line but a `chest`'s, where `size=` is a blockstate ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). |
 | `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
@@ -92,6 +93,11 @@ line writes none.
 
 `E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, and a `site`
 body is a flat list. Reported once per dropped subtree, at its root.
+
+`E_SEMANTIC_IN_EDITION_GUARD`: the semantic layer is edition-neutral, so a guard holds only the
+escape hatch. Reported once at the outermost refused line, with a note at the guard, and anything
+indented under that line goes with it. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD`
+instead, offered `raw_block` and `raw_fill`.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
 `theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.
@@ -812,8 +818,9 @@ note says "a block" where a pinned check would name it. `E_UNKNOWN_ID`, `E_STATE
 `E_STATE_UNMAPPED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, and
 neither is `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables. Neither is
 `E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition` alone picks that
-edition's theme variants. With neither flag, each edition's variants are lowered: a finding on a line only one edition's
-variant reads is that edition's verdict and is reported, and any other finding is reported when
+edition's theme variants and keeps its `@edition` guards. With neither flag, each edition's variants are lowered, with that
+edition's guards: a finding on a line only one edition's variant reads, or on a line under a guard, is that edition's
+verdict and is reported, and any other finding is reported when
 every edition raises it with the same code at the same span, once for each wording the editions give
 it. A check with `--target` lowers once, against the target, so no finding is reported twice.
 

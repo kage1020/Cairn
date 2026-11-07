@@ -1,6 +1,7 @@
 //! Intent IR, the first semantic layer above the surface AST: each body sorted into typed
 //! [`Member`]s with roles, and `logic` and `assert` lines split out.
 
+mod branch;
 mod keyword_table;
 mod lower;
 mod member;
@@ -23,7 +24,7 @@ pub use self::keyword_table::{
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
-    Arguments, BodyKind, IntentState, Label, Member, MemberBody, ValueWithSpan,
+    Arguments, BodyKind, EditionGuard, IntentState, Label, Member, MemberBody, ValueWithSpan,
 };
 pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;

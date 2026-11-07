@@ -63,7 +63,8 @@ pub use without_target::findings_without_target;
 /// Each must exist on every supported target; a pack-side test holds them to that.
 pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT_BASE_ID];
 
-/// Lower `intent`'s structs, placements and walkways into block arrays.
+/// Lower `intent`'s structs, placements and walkways into block arrays, keeping the members of the
+/// `@edition` guards for `resolution`'s edition and none without one.
 ///
 /// Without a `registry`, an abstract token is a `W_ABSTRACT_TOKEN_DEFERRED` warning.
 #[must_use]
@@ -82,6 +83,8 @@ fn lower_to_block_array_within(
     registry: Option<&dyn TargetRegistry>,
     palette_capacity: usize,
 ) -> BlockArrayIr {
+    let branch = intent.branch_for(resolution.edition);
+    let intent = branch.as_ref();
     let mut built = BuiltBodies::default();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let bodies = BodyInputs {

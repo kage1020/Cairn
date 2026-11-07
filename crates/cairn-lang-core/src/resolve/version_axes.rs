@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement};
+use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement, guarded_lines};
 use crate::diagnostic::RenderedDiagnostic;
 use crate::edition::Edition;
 use crate::error::{Position, Span};
@@ -437,7 +437,7 @@ impl<'a> InstantiatedParts<'a> {
         declared_themes: &[&'a str],
         scope: FloorScope,
     ) {
-        for statement in body {
+        for (_, statement) in guarded_lines(body) {
             let Statement::Generic {
                 keyword,
                 args,

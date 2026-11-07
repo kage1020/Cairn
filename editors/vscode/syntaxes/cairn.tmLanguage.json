@@ -5,6 +5,7 @@
   "patterns": [
     { "include": "#comment" },
     { "include": "#directive" },
+    { "include": "#edition-guard" },
     { "include": "#top-level" },
     { "include": "#slot-binding" },
     { "include": "#member-keyword" },
@@ -26,6 +27,14 @@
       "match": "^\\s*(@cairn|@requires|@intended_targets)\\b",
       "captures": {
         "1": { "name": "keyword.control.directive.cairn" }
+      }
+    },
+    "edition-guard": {
+      "name": "meta.edition-guard.cairn",
+      "match": "^\\s*(@edition)\\b(?:\\s+(java|bedrock)\\b)?",
+      "captures": {
+        "1": { "name": "keyword.control.directive.cairn" },
+        "2": { "name": "constant.language.edition.cairn" }
       }
     },
     "top-level": {

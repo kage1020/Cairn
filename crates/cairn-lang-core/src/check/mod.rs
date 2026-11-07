@@ -7,6 +7,7 @@ mod binding;
 mod cairn_version;
 mod connect_arity;
 mod duplicate;
+mod edition_guard;
 mod intended_targets;
 mod keyword_allowlist;
 mod material;
@@ -40,6 +41,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     let mut sink = DiagnosticSink::new();
     cairn_version::run(module, &mut sink);
     duplicate::run(module, ir, &mut sink);
+    edition_guard::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(module, ir, &mut sink);
     binding::run(ir, &mut sink);
@@ -89,6 +91,7 @@ mod tests {
             | C::DuplicateCircuit
             | C::UnsupportedNesting
             | C::MisplacedMember
+            | C::SemanticInEditionGuard
             | C::UnknownKeyword
             | C::UnknownArgument
             | C::MisplacedBinding
@@ -190,6 +193,7 @@ mod tests {
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
+                "E_SEMANTIC_IN_EDITION_GUARD",
                 "E_TRUTH_TABLE_CONFLICT",
                 "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",

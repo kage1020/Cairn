@@ -2,7 +2,7 @@
 //! non-`WxH` one. It walks the surface AST, where a value lowering hoisted still has its type and
 //! span.
 
-use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
+use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind, guarded_lines};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::role_of;
 
@@ -43,7 +43,7 @@ fn check_theme_rule(rule: &ThemeRule, sink: &mut DiagnosticSink) {
 }
 
 fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
-    for stmt in body {
+    for (_, stmt) in guarded_lines(body) {
         if let Statement::Generic {
             keyword,
             args,

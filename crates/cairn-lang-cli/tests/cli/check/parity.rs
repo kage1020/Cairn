@@ -110,6 +110,12 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  walls class=outer height=3\n"),
     ),
     (
+        "E_SEMANTIC_IN_EDITION_GUARD",
+        Source::WithPrologue(
+            "struct s size=5x5\n  @edition java\n    walls class=outer mat_slot=wall height=3\n",
+        ),
+    ),
+    (
         "E_MISPLACED_BINDING",
         Source::WithPrologue(
             "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n",

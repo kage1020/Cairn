@@ -456,7 +456,7 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 
 ### 代替を書くとき
 
-**変更の余地あり。** `@edition` によるガード、`hologram`、引数を取る `slot` のルールは、まだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
+**変更の余地あり。** `hologram` と、引数を取る `slot` のルールは、まだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
 
 意味層で `@edition` による条件分岐を書くことは禁止です。代替が必要なときは、次の階層を上から順に検討します。
 
@@ -467,19 +467,34 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 ```
 @requires bedrock version>=1.21.40   # 下の Bedrock 分岐は平坦化後の ID で書いている
 
-hologram id=shop_sign text="Weapon" mat_slot=floating_text   # 意味層は常に中立
 theme shop_java:    slot floating_text -> text_display scale=2.0
 theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock のフォールバック
 
-@edition java    { raw_block mat=minecraft:light[level=15] at=4,3,2 }
-@edition bedrock { raw_block mat=minecraft:light_block_15 at=4,3,2 }
+struct shop size=9x7
+  hologram id=shop_sign text="Weapon" mat_slot=floating_text   # 意味層は常に中立
+  @edition java
+    raw_block mat=minecraft:light[level=15] at=4,3,2
+  @edition bedrock
+    raw_block mat=minecraft:light_block_15 at=4,3,2
 ```
 
-現時点のパーサがこのスニペットで受け付けるのは、`@requires` の行だけです。`hologram` はトップレベルにありますが、トップレベルで項目を始められるのは `theme`、`def`、`site`、`struct` だけなので `E_PARSE` になり、パースはそこで終わります。後続の行も、それぞれ単独で失敗します。`theme` のルールはヘッダの下にインデントして書くので、1 行の形は `slot` の位置で `E_PARSE` です。インデントしても、`slot` のルールが割り当てるのは 1 つのトークンで、その後には何も書けないので、`scale=2.0` と `glowing=true` は `E_PARSE` になります。`@edition` は未知のディレクティブ (`E_PARSE`) なので、パーサはその波かっこの中の `raw_block` まで届きません。本体の中に 1 行として書いた `raw_block` は組み上がります ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。本体の中に書いた `hologram` は `E_UNKNOWN_KEYWORD` です。`E_PARITY_UNSUPPORTED` も未実装です。
+このスニペットのうち、現時点でパースできるのは `@requires` の行と `struct` のヘッダ、それに 2 つのガードとその中身です。`theme` のルールはヘッダの下にインデントして書くので、1 行の形は `slot` の位置で `E_PARSE` になり、パースはそこで終わります。インデントしても、`slot` のルールが割り当てるのは 1 つのトークンで、その後には何も書けないので、`scale=2.0` と `glowing=true` は `E_PARSE` になります。本体の中に書いた `hologram` は `E_UNKNOWN_KEYWORD` です。`E_PARITY_UNSUPPORTED` も未実装です。例の `edition-fallback` は、いま使える段を組み上げています。エディション別のテーマと、ガードの下の光源ブロックです。
+
+### `@edition` ガードはエスケープハッチを囲む
+
+ガードはそれだけで 1 行を占めます。`@edition` に `java` か `bedrock` を続け、その後には何も書きません。ガードする行は、その下に 1 段深くインデントして書きます。ガードを置けるのは `struct`、`def`、`site` の本体の中と、そこにあるメンバーの本体の中です。ファイルディレクティブと同じ記号で始まりますが、ディレクティブではありません。ファイルの項目はエディションに中立なので、トップレベルのガードは `E_PARSE` です。`theme` の本体の中のガードも同じで、そこでは `NAME_java` と `NAME_bedrock` のバリアントが違いを表します ([後述](#バリアントはソースではなくビルドが選ぶ))。エディションを書かないガード、ほかの語を書いたガード、エディションの後に何かを続けたガード、行を波かっこで囲んだガード、下に何もインデントしていないガードも `E_PARSE` です。ガードは入れ子にできません。外側のガードがすでにエディションを決めているので、ガードの中のガードは `E_PARSE` です。
+
+ガードはスコープを作りません。その行は、ガードが立つ位置に書いたものとして読みます。そのため `level` の下のガードにある行は、その `level` の `y=` を受け継ぎます。また、ガードの外で受ける検査は、ガードの中でもすべて受けます。ガードが加えるのは、その行を残すビルドのエディションだけです。
+
+ガードの中に書けるのはエスケープハッチの層です。つまり `raw_block` と `raw_fill` ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))、そして [レッドストーン §14.1](/ja/spec/redstone/#141-2-つの層と-v1-の範囲) の Tier 0 の部品です。Tier 0 の部品はまだキーワードではないので、ガードの中でもほかの場所と同じく `E_UNKNOWN_KEYWORD` になります。それ以外のメンバー、`logic` の行、`assert` の行は `E_SEMANTIC_IN_EDITION_GUARD` です ([リント](/ja/spec/lint/))。報告は最も外側の該当行で 1 回だけ行い、その下にインデントした行もまとめて扱います。`site` の本体にある生のメンバーは、ガードの有無にかかわらず `E_MISPLACED_MEMBER` です。
+
+エディションを固定したビルドは、そのエディションのガードの中の行を残し、もう一方のエディションの行を捨てます。`cairn compile --edition java` はスニペットの `minecraft:light` を組み上げ、`light_block_15` は読みません。エディションを固定しない lowering は、どちらも残しません。`cairn lower` はエディションに中立な中間表現を出力するので、ガードの中の行をすべて省き、省いた数を注記で示します。
+
+別々のエディションのガードの中にある 2 つの行は一緒にビルドされることがないので、同じ `id=` を持てます。ガードの中の行とガードの外の行、あるいは同じエディションのガードの中にある 2 つの行は、どちらもそのエディションでビルドされるので `E_DUPLICATE_ID` です。
+
+エディションを固定しない `cairn check` は、両方の分岐を検査します。各エディションの lowering はそのエディションのガードを残し、ガードの中の行の所見はそのエディションの判定として報告します。1 つのエディションのテーマバリアントだけが読む行と同じ扱いです ([リント §11.3](/ja/spec/lint/#113-エラーと警告の区分))。`cairn info` の移植性とビルド可能ターゲットの行 ([§10.5](#105-どのバージョン向けかの答えは-3-つある)) はもともとエディションごとなので、それぞれ自分のエディションの分岐だけを数え、もう一方の分岐は数えません。
 
 ### `@edition` はエディションを固定し、バージョンは固定しない
-
-**変更の余地あり。** `@edition` によるガードは、まだパースできません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。この節が前提とするそれ以外のもの、つまりバージョン単位の ID の照合、`aliases` による答え、`E_VERSION_CAP`、`E_INTENDED_TARGET_CAP` は現在の挙動です。
 
 ガードが決めるのは、どちらの分岐をビルドするかだけです。分岐の中の ID は、やはりコンパイルが固定した 1 つの `(edition, version)` と照合するので ([§10.4](#104-fail-loud-と最小バージョン推定))、エディションが自分のサポート範囲の中でブロックの綴りを変えている場合、分岐を選ぶのは `@edition bedrock` で、綴りを決めるのはファイルの下限です。
 

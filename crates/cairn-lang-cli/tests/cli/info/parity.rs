@@ -447,17 +447,32 @@ fn a_warning_at_every_version_leaves_every_target_buildable() {
     );
 }
 
+/// `(example, edition, targets)`: the targets an example's own `@requires` refuses.
+const REFUSED_AT_A_FLOOR: &[(&str, &str, &[&str])] =
+    &[("edition-fallback.crn", "bedrock", &["1.21.0"])];
+
 #[test]
-fn every_example_lists_every_supported_target() {
+fn every_example_lists_every_supported_target_its_floors_admit() {
     for path in crn_examples() {
-        let name = path.display();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("utf-8 name");
         let axes = info_json_at(&path, "java,bedrock");
         for edition in ["java", "bedrock"] {
             let entry = buildable_entry(&axes, edition);
+            let refused: &[&str] = REFUSED_AT_A_FLOOR
+                .iter()
+                .find(|(example, at, _)| *example == name && *at == edition)
+                .map_or(&[], |(_, _, refused)| refused);
+            let expected: Vec<String> = strings(entry, "considered")
+                .into_iter()
+                .filter(|target| !refused.contains(&target.as_str()))
+                .collect();
             assert_eq!(
                 strings(entry, "buildable"),
-                strings(entry, "considered"),
-                "{name} on {edition} should build on every supported target",
+                expected,
+                "{name} on {edition} should build on every supported target its floors admit",
             );
         }
     }

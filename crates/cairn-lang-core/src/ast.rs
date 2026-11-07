@@ -6,6 +6,7 @@ use std::num::NonZeroU32;
 
 use serde::Serialize;
 
+use crate::edition::Edition;
 use crate::error::Span;
 use crate::logic_library::LogicPrimitive;
 
@@ -375,19 +376,44 @@ pub enum Statement {
         #[serde(skip)]
         span: Span,
     },
+    /// `@edition java` or `@edition bedrock`, holding the lines indented under it
+    /// (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
+    EditionGuard {
+        /// The edition whose build keeps the guarded lines.
+        edition: Edition,
+        /// Statements indented under the guard.
+        children: Vec<Statement>,
+        /// Byte range of the `@edition` line itself, without its children.
+        #[serde(skip)]
+        span: Span,
+    },
 }
 
 impl Statement {
-    /// Byte range covered by this statement; for `Generic`, the keyword line alone.
+    /// Byte range covered by this statement; for `Generic` and `EditionGuard`, the first line alone.
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {
             Self::Generic { span, .. }
             | Self::Logic { span, .. }
             | Self::AssertTruth { span, .. }
-            | Self::AssertAlways { span, .. } => span,
+            | Self::AssertAlways { span, .. }
+            | Self::EditionGuard { span, .. } => span,
         }
     }
+}
+
+/// Each line of `body`, an `@edition` guard's own in the guard's place, with the edition of the
+/// guard it stands under.
+pub(crate) fn guarded_lines(body: &[Statement]) -> Vec<(Option<Edition>, &Statement)> {
+    body.iter()
+        .flat_map(|statement| match statement {
+            Statement::EditionGuard {
+                edition, children, ..
+            } => children.iter().map(|line| (Some(*edition), line)).collect(),
+            line => vec![(None, line)],
+        })
+        .collect()
 }
 
 /// A `key=value` pair as it appears in an argument list.

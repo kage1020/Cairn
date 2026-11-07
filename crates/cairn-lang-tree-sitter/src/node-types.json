@@ -248,6 +248,10 @@
           "named": true
         },
         {
+          "type": "edition_guard",
+          "named": true
+        },
+        {
           "type": "logic_decl",
           "named": true
         },
@@ -334,6 +338,64 @@
   },
   {
     "type": "directive_name",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "edition_guard",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "edition_guard_body",
+            "named": true
+          }
+        ]
+      },
+      "edition": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "edition_name",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "edition_guard_body",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "assert_stmt",
+          "named": true
+        },
+        {
+          "type": "logic_decl",
+          "named": true
+        },
+        {
+          "type": "member_stmt",
+          "named": true
+        },
+        {
+          "type": "member_stmt_with_body",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "edition_name",
     "named": true,
     "fields": {}
   },
@@ -942,6 +1004,10 @@
           "named": true
         },
         {
+          "type": "edition_guard",
+          "named": true
+        },
+        {
           "type": "logic_decl",
           "named": true
         },
@@ -1302,6 +1368,10 @@
     "named": false
   },
   {
+    "type": "bedrock",
+    "named": false
+  },
+  {
     "type": "bit",
     "named": true
   },
@@ -1335,6 +1405,10 @@
     "named": true
   },
   {
+    "type": "edition",
+    "named": false
+  },
+  {
     "type": "eventually",
     "named": false
   },
@@ -1348,6 +1422,10 @@
   },
   {
     "type": "intended_targets",
+    "named": false
+  },
+  {
+    "type": "java",
     "named": false
   },
   {

@@ -5,8 +5,9 @@ use indexmap::IndexMap;
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::{
-    Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
-    SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan, role_of,
+    Arguments, AssertIr, DefIr, EditionGuard, IntentModule, IntentState, Label, LogicBinding,
+    Member, MemberBody, SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr,
+    ValueWithSpan, role_of,
 };
 
 /// Lower a parsed [`Module`] into its [`IntentModule`] form, at [`SemanticLevel::Grouped`].
@@ -215,6 +216,23 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             within: *within,
             span: span.clone(),
         }),
+        // The guard's own lines join the body it stands in; `check` refuses any but raw members.
+        Statement::EditionGuard {
+            edition,
+            children,
+            span,
+        } => {
+            let first = out.members.len();
+            for child in children {
+                push_statement(child, out);
+            }
+            for member in &mut out.members[first..] {
+                member.edition_guard.get_or_insert_with(|| EditionGuard {
+                    edition: *edition,
+                    span: span.clone(),
+                });
+            }
+        }
     }
 }
 
@@ -274,6 +292,7 @@ fn lower_member(stmt: &Statement) -> Member {
         arguments,
         intent_state,
         children: lowered_children,
+        edition_guard: None,
         span: span.clone(),
     }
 }
@@ -291,6 +310,7 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
         arguments: Arguments::new(),
         intent_state: IntentState::new(),
         children: body,
+        edition_guard: None,
         span,
     }
 }

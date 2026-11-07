@@ -21,6 +21,8 @@
 
 ; directives
 (directive_name) @keyword.directive
+(edition_guard "@" @keyword.directive "edition" @keyword.directive)
+(edition_name) @constant.builtin
 ; One opaque run to end of line, which the reference parser does not read either.
 (directive_literal) @string.special
 

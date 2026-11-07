@@ -166,6 +166,12 @@ pub struct UnreadArgument {
 }
 
 impl MemberRole {
+    /// Whether this is an escape-hatch role, the only kind an `@edition` guard holds.
+    #[must_use]
+    pub fn is_raw(&self) -> bool {
+        matches!(self, Self::RawBlock | Self::RawFill)
+    }
+
     /// The `key=` arguments this role's vocabulary holds, in spec order, including spec'd keys
     /// nothing reads yet; `None` for an unknown keyword.
     #[must_use]

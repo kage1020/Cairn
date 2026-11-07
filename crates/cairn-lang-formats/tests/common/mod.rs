@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_core::resolve::{DroppedIntent, declared_version_floors, versions_satisfying};
 use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::ParityNote;
 use cairn_lang_formats::data_version::BedrockTarget;
@@ -109,6 +109,25 @@ pub fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
     pack.targetable()
         .into_iter()
         .map(|e| e.mc_version.as_str())
+        .collect()
+}
+
+/// The versions `pack` targets that `source`'s floors for `edition` admit, the rest being ones a
+/// pinned build refuses at the floor.
+///
+/// # Panics
+///
+/// When `source` does not parse.
+pub fn admitted_versions(pack: &RegistryPack, source: &str, edition: Edition) -> Vec<String> {
+    let module = parse(source).unwrap_or_else(|err| panic!("source does not parse: {err}"));
+    let floors = declared_version_floors(&module, edition);
+    let considered: Vec<String> = supported_versions(pack)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    versions_satisfying(&pack.version_order(), &floors, &considered)
+        .into_iter()
+        .map(str::to_owned)
         .collect()
 }
 
