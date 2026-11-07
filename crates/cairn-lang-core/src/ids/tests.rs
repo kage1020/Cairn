@@ -4,12 +4,26 @@ use super::*;
 fn artifact_stem_names_each_scope_kind() {
     assert_eq!(artifact_stem("struct::cottage"), "cottage");
     assert_eq!(artifact_stem("site::hamlet::home1"), "home1");
+    assert_eq!(artifact_stem("cottage"), "cottage");
+    assert_eq!(artifact_stem("struct::deep::room"), "deep::room");
+    assert_eq!(artifact_stem("塔"), "塔");
+    assert_eq!(artifact_stem(""), "");
+}
+
+#[test]
+fn walkway_artifact_stem_joins_site_places_and_ports() {
+    let end = |place: &str, port: &str| WalkwayEndpoint {
+        place: PlaceId::new(place).unwrap(),
+        port: PortId::new(port).unwrap(),
+    };
     assert_eq!(
-        artifact_stem("walkway::hamlet::home1.entry__home2.entry"),
+        walkway_artifact_stem(
+            &SiteName::new("hamlet").unwrap(),
+            &end("home1", "entry"),
+            &end("home2", "entry"),
+        ),
         "hamlet_walkway_home1_entry__home2_entry",
     );
-    assert_eq!(artifact_stem("cottage"), "cottage");
-    assert_eq!(artifact_stem("walkway::no_site"), "walkway::no_site");
 }
 
 #[test]
