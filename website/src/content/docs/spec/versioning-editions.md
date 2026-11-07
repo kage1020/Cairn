@@ -194,7 +194,8 @@ the block has when it has no such property, and the other versions whose tables 
 domain that changed between releases is the likeliest cause of a literal that is valid somewhere,
 and the repair is then a target rather than an edit. Lowering checks the states it derives as well
 (a stair's `facing`, `half` and `shape`), at the member, so a derivation the target's block cannot
-hold is refused rather than written; that is a defect in Cairn, and the finding says so.
+hold is refused rather than written; that is a defect in Cairn or the pack's table, and the finding
+says so.
 
 A literal on a block the pinned target's pack records no states for is written as given, with
 `W_STATE_LITERAL_UNCHECKED` ([Lint](/spec/lint/)) so that it is said rather than silent. Both

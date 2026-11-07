@@ -477,7 +477,8 @@ behind `cairn info`'s report, the language server and a `cairn check` with no `-
 `cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
 and in a `cairn compile` whose target the file's floors refuse ([Versioning and
 Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A pinned target checks both,
-so a build that pins one reaches the limit only through states its blocks really take. A warning,
+save a literal on a block its pack records no states for, which `W_STATE_LITERAL_UNCHECKED` names,
+so the note asks a build that pins one to split the scope rather than to pin a target. A warning,
 for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
@@ -614,9 +615,10 @@ sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 char
 ≤ 3 beyond. The names are a keyword, an argument key, a `mat_slot=` name, a place, def, theme or
 port reference, an abstract token, a `pressure_plate` side, a block id, a block state's property or
 value, and a `--target` version. The note reads ``did you mean `X`?``, with `X` written as the line
-would be (`home1.entry` for a port, `at=front.outside` for a plate); `E_UNKNOWN_ID` instead names
-the target's nearest block and carries it as `data.suggestion`
-([§11.2](#112-machine-readable-payload)).
+would be (`home1.entry` for a port, `at=front.outside` for a plate, `axis=x` for a state).
+`E_UNKNOWN_ID` instead names the target's nearest block, and it and `E_STATE_DOMAIN` carry the
+candidate as `data.suggestion` ([§11.2](#112-machine-readable-payload)); `E_STATE_DOMAIN` on a
+state lowering derived carries it there alone, since the source has no literal to correct.
 
 An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
 ...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
@@ -736,7 +738,7 @@ counts the rest; the payload is where the whole set lives. See [Versioning and E
 block has no such property, and `valid` then lists the properties it has, or `value_outside` when
 it has the property but not the value, and `valid` lists the values the property takes; both are
 the pinned target's, in its table's order. `origin` is `literal` for a state literal and `derived`
-for a state lowering wrote itself, which is a defect in Cairn rather than in the source.
+for a state lowering wrote itself, which is a defect in Cairn or the pack rather than in the source.
 `suggestion` is the nearest of `valid` within the typo threshold, and `valid_at` lists the other
 versions of the edition whose tables take the pair, oldest first; each is absent when it is empty.
 
@@ -790,9 +792,9 @@ cause, since the palette is counted without it. A stand-in overwritten by air, o
 is still a `W_PHASE_CONFLICT`, since no pack names air. A `pressure_plate` built from its default
 block takes the pack's plate, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a
 block" where a pinned check would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED` and
-`E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, and neither is
-`W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables. Neither is `E_PARTIAL_BUILD`,
-which counts what a build at a target loses. `--edition` alone picks that edition's theme variants.
+`E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, nor are
+`W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, and `E_PARTIAL_BUILD`, which
+counts what a build at a target loses. `--edition` alone picks that edition's theme variants.
 With neither flag, each edition's variants are lowered: a finding on a line only one edition's
 variant reads is that edition's verdict and is reported, and any other finding is reported when
 every edition raises it with the same code at the same span, once for each wording the editions give
