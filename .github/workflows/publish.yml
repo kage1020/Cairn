@@ -260,3 +260,152 @@ jobs:
             cairn-sbom.cdx.json \
             cairn-sbom.cdx.json.sigstore \
             --clobber
+
+  vsix:
+    name: VS Code extension
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    outputs:
+      file: ${{ steps.package.outputs.file }}
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag }}
+
+      # release.yml brings the manifest to the release version; a mismatch would publish another.
+      - name: Ensure package.json matches the tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          declared=$(jq -er '.version' package.json)
+          if [ "$declared" != "$VERSION" ]; then
+            echo "package.json declares $declared but the tag says $VERSION" >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: editors/vscode/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+
+      - name: Package
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          pnpm run package
+          file="cairn-lang-${VERSION}.vsix"
+          if [ ! -f "$file" ]; then
+            echo "vsce package did not write $file" >&2
+            exit 1
+          fi
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign .vsix
+        shell: bash
+        env:
+          FILE: ${{ steps.package.outputs.file }}
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes --bundle "${FILE}.sigstore" "$FILE"
+
+      - name: Compute SHA-256
+        shell: bash
+        env:
+          FILE: ${{ steps.package.outputs.file }}
+        run: |
+          set -euo pipefail
+          sha256sum "$FILE" | awk '{print $1}' > "$FILE.sha256"
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          FILE: ${{ steps.package.outputs.file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "cairn-lang-cli-$TAG" \
+              --notes "Release binaries and SBOM are attached by the Publish workflow." \
+              || gh release view "$TAG" >/dev/null 2>&1
+          fi
+          gh release upload "$TAG" "$FILE" "$FILE.sha256" "$FILE.sigstore" --clobber
+
+  # The registries take the `.vsix` the release carries, so all three serve the same file.
+  vsix-registries:
+    name: ${{ matrix.registry }}
+    needs: [validate-tag, vsix]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - registry: Visual Studio Marketplace
+            cli: vsce
+            secret: VSCE_PAT
+          - registry: Open VSX
+            cli: ovsx
+            secret: OVSX_PAT
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag }}
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: editors/vscode/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download the release's .vsix
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          FILE: ${{ needs.vsix.outputs.file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --pattern "$FILE" --pattern "$FILE.sha256" --dir "$RUNNER_TEMP"
+          echo "$(cat "$RUNNER_TEMP/$FILE.sha256")  $RUNNER_TEMP/$FILE" | sha256sum --check
+
+      # Each CLI reads its token from the variable named after the secret.
+      - name: Publish
+        env:
+          REGISTRY: ${{ matrix.registry }}
+          CLI: ${{ matrix.cli }}
+          SECRET_NAME: ${{ matrix.secret }}
+          TOKEN: ${{ secrets[matrix.secret] }}
+          FILE: ${{ needs.vsix.outputs.file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then
+            echo "::error::The repository secret $SECRET_NAME is not set, so $FILE was not published to $REGISTRY. Add it and re-run this job."
+            exit 1
+          fi
+          export "$SECRET_NAME=$TOKEN"
+          pnpm exec "$CLI" publish --packagePath "$RUNNER_TEMP/$FILE" --skip-duplicate
