@@ -16,6 +16,13 @@ const GEOMETRY_ROWS: &[&str] = &[
     "stair kind=stairs mat_slot=wall",
     "level y=0",
     "pressure_plate id=p at=front.outside",
+    "lever id=v at=inside.front",
+    "button id=b at=inside.front",
+    "daylight id=dl at=inside.front",
+    "observer id=o at=inside.front",
+    "lamp id=lp at=inside.front",
+    "piston id=pi at=inside.front",
+    "dispenser id=ds at=inside.front",
     "chest id=c at=inside.front",
     "circuit region=floor void=1",
     "raw_block mat=minecraft:stone at=1,0,1",
@@ -191,7 +198,9 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
     assert!(
         notes(&geometry).contains(
-            &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, chest, circuit, raw_block, raw_fill"
+            &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, \
+             lever, button, daylight, observer, lamp, piston, dispenser, chest, circuit, raw_block, \
+             raw_fill"
         ),
         "got {:#?}",
         notes(&geometry),

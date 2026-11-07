@@ -13,6 +13,13 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "stair",
     "level",
     "pressure_plate",
+    "lever",
+    "button",
+    "daylight",
+    "observer",
+    "lamp",
+    "piston",
+    "dispenser",
     "chest",
     "circuit",
     "raw_block",
@@ -25,7 +32,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
 pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 
 /// Keywords that may carry a `-> value` sensor tail (`spec/redstone` "Signal binding").
-pub const SENSOR_HOSTS: &[&str] = &["pressure_plate"];
+pub const SENSOR_HOSTS: &[&str] = &["lever", "button", "daylight", "observer", "pressure_plate"];
 
 /// Each actuator argument key of `spec/redstone` "Signal binding", paired with the component
 /// keyword that carries it.
@@ -56,8 +63,22 @@ pub enum MemberRole {
     Stair,
     /// `level` grouping block.
     Level,
-    /// `pressure_plate` fixture.
+    /// `pressure_plate` sensor.
     PressurePlate,
+    /// `lever` sensor.
+    Lever,
+    /// `button` sensor.
+    Button,
+    /// `daylight` sensor, a daylight detector.
+    Daylight,
+    /// `observer` sensor.
+    Observer,
+    /// `lamp` actuator, a redstone lamp.
+    Lamp,
+    /// `piston` actuator.
+    Piston,
+    /// `dispenser` actuator.
+    Dispenser,
     /// `chest` fixture.
     Chest,
     /// `circuit` redstone region marker.
@@ -166,6 +187,16 @@ pub struct UnreadArgument {
 }
 
 impl MemberRole {
+    /// The actuator key this role reads its signal from, as `opened_by` on a `door`, or `None`
+    /// for a role that is no actuator.
+    #[must_use]
+    pub fn actuator_key(&self) -> Option<&'static str> {
+        ACTUATOR_BINDINGS
+            .iter()
+            .find(|(_, host)| *host == self.keyword())
+            .map(|(key, _)| *key)
+    }
+
     /// Whether this is an escape-hatch role, the only kind an `@edition` guard holds.
     #[must_use]
     pub fn is_raw(&self) -> bool {
@@ -195,7 +226,13 @@ impl MemberRole {
                 "waterlogged",
             ],
             Self::Level => &["y"],
-            Self::PressurePlate => &["at", "offset", "y"],
+            Self::PressurePlate | Self::Lever | Self::Button | Self::Daylight => {
+                &["at", "offset", "y"]
+            }
+            Self::Observer => &["at", "offset", "y", "facing"],
+            Self::Lamp => &["at", "offset", "y", "lit_by"],
+            Self::Piston => &["at", "offset", "y", "powered_by", "facing", "sticky"],
+            Self::Dispenser => &["at", "offset", "y", "fired_by", "facing"],
             Self::Chest => &["at", "offset", "y", "facing", "size", "waterlogged"],
             Self::Circuit => &["region", "void"],
             Self::RawBlock => &["mat", "at"],
@@ -216,6 +253,7 @@ impl MemberRole {
             Self::Stair => &["half", "facing", "shape", "waterlogged"],
             Self::Door => &["hinge", "open"],
             Self::Chest => &["facing", "size", "waterlogged"],
+            Self::Observer | Self::Piston | Self::Dispenser => &["facing"],
             Self::Floor
             | Self::Walls
             | Self::Fill
@@ -223,6 +261,10 @@ impl MemberRole {
             | Self::Roof
             | Self::Level
             | Self::PressurePlate
+            | Self::Lever
+            | Self::Button
+            | Self::Daylight
+            | Self::Lamp
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
@@ -259,7 +301,14 @@ impl MemberRole {
                     why: Unread::Unreached,
                 },
             ],
+            // A component with one block to be built from has no material to choose.
             Self::Level
+            | Self::Lever
+            | Self::Daylight
+            | Self::Observer
+            | Self::Lamp
+            | Self::Piston
+            | Self::Dispenser
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
@@ -274,6 +323,7 @@ impl MemberRole {
             | Self::Door
             | Self::Stair
             | Self::PressurePlate
+            | Self::Button
             | Self::Chest
             | Self::Other(_) => &[],
         }
@@ -354,6 +404,13 @@ impl MemberRole {
             | Self::Window
             | Self::Level
             | Self::PressurePlate
+            | Self::Lever
+            | Self::Button
+            | Self::Daylight
+            | Self::Observer
+            | Self::Lamp
+            | Self::Piston
+            | Self::Dispenser
             | Self::Chest
             | Self::Circuit
             | Self::RawBlock
@@ -392,6 +449,13 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "stair" => MemberRole::Stair,
         "level" => MemberRole::Level,
         "pressure_plate" => MemberRole::PressurePlate,
+        "lever" => MemberRole::Lever,
+        "button" => MemberRole::Button,
+        "daylight" => MemberRole::Daylight,
+        "observer" => MemberRole::Observer,
+        "lamp" => MemberRole::Lamp,
+        "piston" => MemberRole::Piston,
+        "dispenser" => MemberRole::Dispenser,
         "chest" => MemberRole::Chest,
         "circuit" => MemberRole::Circuit,
         "raw_block" => MemberRole::RawBlock,

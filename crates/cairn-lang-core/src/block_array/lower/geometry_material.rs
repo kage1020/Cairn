@@ -20,6 +20,8 @@ pub(super) enum Family {
     Door,
     /// The `chest` and `*_chest` blocks a `chest` sets against a wall.
     Chest,
+    /// The `*_button` blocks a `button` hangs on a wall.
+    Button,
 }
 
 /// The path of `id`, without its namespace.
@@ -30,6 +32,11 @@ fn path_of(id: &str) -> &str {
 /// Whether `id` names a door block: its path ends in `_door`.
 fn is_door(id: &str) -> bool {
     path_of(id).ends_with("_door")
+}
+
+/// Whether `id` names a button block: its path ends in `_button`.
+fn is_button(id: &str) -> bool {
+    path_of(id).ends_with("_button")
 }
 
 /// Whether `id` names a chest block: its path is `chest` or ends in `_chest`.
@@ -45,6 +52,7 @@ impl Family {
             Self::Stair => is_stair(id),
             Self::Door => is_door(id),
             Self::Chest => is_chest(id),
+            Self::Button => is_button(id),
         }
     }
 
@@ -54,6 +62,7 @@ impl Family {
             Self::Stair => "stair",
             Self::Door => "door",
             Self::Chest => "chest",
+            Self::Button => "button",
         }
     }
 
@@ -63,6 +72,7 @@ impl Family {
             Self::Stair => "`facing` / `half` / `shape`",
             Self::Door => "`facing` / `half` / `hinge`",
             Self::Chest => "`facing` / `type`",
+            Self::Button => "`face` / `facing`",
         }
     }
 
@@ -79,6 +89,10 @@ impl Family {
             }
             Self::Chest => {
                 "bind the slot to a chest material — the registry pack's `chest.default` \
+                 resolves to one"
+            }
+            Self::Button => {
+                "bind the slot to a `*_button` material — the registry pack's `button.default` \
                  resolves to one"
             }
         }

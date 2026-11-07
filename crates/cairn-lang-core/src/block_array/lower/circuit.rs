@@ -1,7 +1,7 @@
-//! The members block-array lowering checks but does not paint: a
-//! `circuit` region and a door's actuator patch.
+//! The members block-array lowering checks but does not paint: a `circuit` region and an
+//! actuator patch.
 
-use crate::ast::{SIGNAL_HEAD, ValueKind};
+use crate::ast::{SIGNAL_HEAD, Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticNote};
 use crate::intent::{Member, MemberRole, PatchTargetError, actuator_patch_target};
 
@@ -64,19 +64,28 @@ pub(super) fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Di
 /// The selector attributes an actuator patch reads.
 const ACTUATOR_PATCH_SELECTOR_KEYS: &[&str] = &["id"];
 
-/// The intent-state keys an actuator patch reads.
-const ACTUATOR_PATCH_INTENT_KEYS: &[&str] = &["opened_by"];
-
-/// Whether a `door` line is an actuator patch: the selector form `door[…]`, which binds a signal
-/// to a door declared elsewhere (`spec/redstone` "Signal binding").
-pub(super) fn is_actuator_patch(member: &Member) -> bool {
-    matches!(member.role, MemberRole::Door) && member.selector.is_some()
+/// What the signal an actuator reads does to it, completing "the signal that … the lamp" and "no
+/// lamp is built for it to …".
+fn what_the_signal_does(role: &MemberRole) -> (&'static str, &'static str) {
+    match role {
+        MemberRole::Door => ("opens", "open"),
+        MemberRole::Lamp => ("lights", "light"),
+        MemberRole::Piston => ("powers", "power"),
+        MemberRole::Dispenser => ("fires", "fire"),
+        other => unreachable!("`{}` reads no signal, so it has no patch", other.keyword()),
+    }
 }
 
-/// Check a `door[id=X] opened_by=sig.Y` actuator patch's shape without emitting voxels.
+/// Whether a line is an actuator patch: the selector form of an actuator, such as `door[…]`,
+/// which binds a signal to an actuator declared elsewhere (`spec/redstone` "Signal binding").
+pub(super) fn is_actuator_patch(member: &Member) -> bool {
+    member.role.actuator_key().is_some() && member.selector.is_some()
+}
+
+/// Check an actuator patch's shape, as `door[id=X] opened_by=sig.Y`, without emitting voxels.
 ///
-/// The `id=` must name exactly one physical `door` in `written`, each member with its level's
-/// offset, `None` under a `level` that is not placed.
+/// The `id=` must name exactly one physical member of the patch's keyword in `written`, each
+/// member with its level's offset, `None` under a `level` that is not placed.
 pub(super) fn recognize_actuator_patch(
     member: &Member,
     written: &[(Option<u32>, &Member)],
@@ -87,10 +96,12 @@ pub(super) fn recognize_actuator_patch(
         "recognize_actuator_patch called on a member without a selector; \
          is_actuator_patch invariant broken",
     );
-    let Some(selector) = member.selector.as_ref() else {
+    let (Some(selector), Some(key)) = (member.selector.as_ref(), member.role.actuator_key()) else {
         return;
     };
-    // Only keys a `door` accepts; `check::arguments` reports the rest (`E_UNKNOWN_ARGUMENT`).
+    let keyword = member.role.keyword();
+    let (does, to_do) = what_the_signal_does(&member.role);
+    // Only keys the keyword accepts; `check::arguments` reports the rest (`E_UNKNOWN_ARGUMENT`).
     let vocabulary = member.role.accepted_arguments().unwrap_or_default();
     let unknown_selector_keys: Vec<&str> = selector
         .keys()
@@ -101,16 +112,16 @@ pub(super) fn recognize_actuator_patch(
         diagnostics.push(diag_invalid_member(
             member,
             format!(
-                "door actuator patch `[selector]` accepts only `id=<label>`; unknown attribute(s): {}",
+                "{keyword} actuator patch `[selector]` accepts only `id=<label>`; unknown attribute(s): {}",
                 unknown_selector_keys.join(", "),
             ),
             Vec::new(),
         ));
         return;
     }
-    // The redstone front end picks the door through this too, so the two agree.
-    let door = match actuator_patch_target(member, written.iter().map(|&(_, m)| m)) {
-        Ok(door) => door,
+    // The redstone front end picks the actuator through this too, so the two agree.
+    let actuator = match actuator_patch_target(member, written.iter().map(|&(_, m)| m)) {
+        Ok(actuator) => actuator,
         Err(reason) => {
             let mut diagnostic = diag_invalid_member(member, reason.to_string(), Vec::new());
             if let Some(fix) = patch_target_fix(&reason) {
@@ -125,57 +136,69 @@ pub(super) fn recognize_actuator_patch(
     };
     let unknown_intent_keys: Vec<&str> = member
         .written_fields()
-        .map(|(key, _)| key)
-        .filter(|k| !ACTUATOR_PATCH_INTENT_KEYS.contains(k))
+        .map(|(written, _)| written)
+        .filter(|written| *written != key)
         .collect();
     if !unknown_intent_keys.is_empty() {
         diagnostics.push(diag_invalid_member(
             member,
             format!(
-                "door actuator patch takes only `opened_by=sig.<name>`; unknown attribute(s): {}",
+                "{keyword} actuator patch takes only `{key}=sig.<name>`; unknown attribute(s): {}",
                 unknown_intent_keys.join(", "),
             ),
-            vec!["move these onto the door's own line, or drop them".to_owned()],
+            vec![format!(
+                "move these onto the {keyword}'s own line, or drop them"
+            )],
         ));
         return;
     }
-    let Some(opened_by) = member.arguments.get("opened_by") else {
+    let Some(bound) = member.arguments.get(key) else {
         diagnostics.push(diag_invalid_member(
             member,
-            "door actuator patch has no `opened_by=`, so it binds no signal to the door".to_owned(),
-            vec!["write `opened_by=sig.<name>`, the signal that opens the door".to_owned()],
+            format!(
+                "{keyword} actuator patch has no `{key}=`, so it binds no signal to the {keyword}"
+            ),
+            vec![format!(
+                "write `{key}=sig.<name>`, the signal that {does} the {keyword}"
+            )],
         ));
         return;
     };
-    let fault = match &opened_by.value.kind {
-        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD && dotref.tail().len() == 1 => {
-            None
-        }
-        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD => Some(format!(
-            "door actuator patch `opened_by=` must be a two-segment signal reference `sig.<name>`, got `{dotref}`",
-        )),
-        ValueKind::DotRef(dotref) => Some(format!(
-            "door actuator patch `opened_by=` must be a signal reference `sig.<name>` (head must be `sig`), got `{dotref}`",
-        )),
-        _ => Some(format!(
-            "door actuator patch `opened_by=` must be a signal reference `sig.<name>`, got {}",
-            opened_by.value.kind_name(),
-        )),
-    };
-    if let Some(primary) = fault {
+    if let Some(primary) = not_a_signal(keyword, key, &bound.value) {
         diagnostics.push(diag_invalid_member(member, primary, Vec::new()));
         return;
     }
     let unplaced = written
         .iter()
-        .any(|&(y_offset, m)| y_offset.is_none() && std::ptr::eq(m, door));
+        .any(|&(y_offset, m)| y_offset.is_none() && std::ptr::eq(m, actuator));
     if unplaced {
         diagnostics.push(diag_deferred_member_noted(
             member,
-            "door actuator patch binds a `door` under a `level` that is not placed, so no door is \
-             built for it to open",
-            "the door is built once that `level` is placed",
+            &format!(
+                "{keyword} actuator patch binds a `{keyword}` under a `level` that is not placed, \
+                 so no {keyword} is built for it to {to_do}"
+            ),
+            &format!("the {keyword} is built once that `level` is placed"),
         ));
+    }
+}
+
+/// Why an actuator patch's `key=` value names no signal, or `None` when it names one.
+fn not_a_signal(keyword: &str, key: &str, value: &Value) -> Option<String> {
+    match &value.kind {
+        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD && dotref.tail().len() == 1 => {
+            None
+        }
+        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD => Some(format!(
+            "{keyword} actuator patch `{key}=` must be a two-segment signal reference `sig.<name>`, got `{dotref}`",
+        )),
+        ValueKind::DotRef(dotref) => Some(format!(
+            "{keyword} actuator patch `{key}=` must be a signal reference `sig.<name>` (head must be `sig`), got `{dotref}`",
+        )),
+        _ => Some(format!(
+            "{keyword} actuator patch `{key}=` must be a signal reference `sig.<name>`, got {}",
+            value.kind_name(),
+        )),
     }
 }
 

@@ -15,7 +15,7 @@ use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
-    SiteIr, StructIr, ValueWithSpan, actuator_patch_target, known_keywords,
+    SiteIr, StructIr, ValueWithSpan, actuator_patch_target,
 };
 use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
 use cairn_lang_core::suggest::{did_you_mean, nearest_match};
@@ -152,7 +152,7 @@ struct PendingSensor {
 /// One accepted actuator binding, filed under the component it drives.
 #[derive(Debug)]
 struct BoundActuator<'a> {
-    /// The member the binding drives: itself, or the door a patch picks.
+    /// The member the binding drives: itself, or the actuator a patch picks.
     host: &'a Member,
     key: &'a str,
     driver_name: &'a DottedRef,
@@ -344,7 +344,7 @@ fn patch_candidates(members: &[Member]) -> Vec<&Member> {
     out
 }
 
-/// The member an actuator binding on `m` drives: `m`, or the door its brackets pick.
+/// The member an actuator binding on `m` drives: `m`, or the actuator its brackets pick.
 fn actuator_host<'a>(
     m: &'a Member,
     candidates: &[&'a Member],
@@ -574,7 +574,6 @@ fn diag_misplaced_actuator(
     vspan: &ValueWithSpan,
     scope: ScopeRef<'_>,
 ) -> Diagnostic {
-    let known = known_keywords().contains(&host);
     Diagnostic::new(
         DiagnosticCode::LogicMisplacedBinding,
         vspan.span.clone(),
@@ -586,18 +585,12 @@ fn diag_misplaced_actuator(
         ),
     )
     .with_note(member.span.clone(), "declared here")
-    .with_footer(if known {
-        format!("Fix: move the `{key}=` argument onto the `{host}` it drives.")
-    } else {
-        format!(
-            "Fix: `{host}` is not a keyword the surface accepts yet, so `{key}=` has no \
-             member it can sit on. Drive a `door` with `opened_by=` instead, or drop the \
-             argument until `{host}` lands.",
-        )
-    })
+    .with_footer(format!(
+        "Fix: move the `{key}=` argument onto the `{host}` it drives."
+    ))
 }
 
-/// An actuator patch whose selector picks no single door, anchored on its `id=` when it has one.
+/// An actuator patch whose selector picks no single actuator, anchored on its `id=` when it has one.
 fn diag_unresolved_patch(
     member: &Member,
     key: &str,

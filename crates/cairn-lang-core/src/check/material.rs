@@ -46,6 +46,7 @@ enum WithoutAMaterial {
     PaintsNothing,
     Carves,
     PaintsAFallback,
+    IsOneBlock,
     NamesItsMaterialElsewhere,
     PutsNothingDown,
 }
@@ -64,7 +65,15 @@ fn without_a_material(member: &Member) -> WithoutAMaterial {
         | MemberRole::Stair
         | MemberRole::Door
         | MemberRole::PressurePlate
+        | MemberRole::Button
         | MemberRole::Chest => WithoutAMaterial::PaintsAFallback,
+        // Each has one block to be built from, and `mat_slot=` chooses nothing.
+        MemberRole::Lever
+        | MemberRole::Daylight
+        | MemberRole::Observer
+        | MemberRole::Lamp
+        | MemberRole::Piston
+        | MemberRole::Dispenser => WithoutAMaterial::IsOneBlock,
         // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`, and `mat=`, whose absence is
         // `E_INVALID_MEMBER`.
         MemberRole::Connect | MemberRole::RawBlock | MemberRole::RawFill => {

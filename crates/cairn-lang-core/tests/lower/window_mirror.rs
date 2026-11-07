@@ -148,12 +148,13 @@ fn a_window_deferred_outright_carries_the_generic_deferral_note() {
         [
             "block-array lowering currently voxelises floor, walls, fill (from=x,y,z to=x,y,z \
              with mat_slot= or fluid=water), door, window, roof \
-             (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate and chest \
+             (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate, lever, button, \
+             daylight, observer, lamp, piston, dispenser and chest \
              (at=<side>.outside|inside.<side>), raw_block (mat=<namespace:path> at=x,y,z) and \
              raw_fill (mat=<namespace:path> from=x,y,z to=x,y,z), and level y=N grouping, and \
-             recognises circuit region=<label> void=<N> (u32, N>=1) plus door[id=<name>] \
-             opened_by=sig.<name> actuator patches; other roles will be added as their lowering \
-             rules are spec'd"
+             recognises circuit region=<label> void=<N> (u32, N>=1) plus actuator patches such \
+             as door[id=<name>] opened_by=sig.<name>; other roles will be added as their \
+             lowering rules are spec'd"
         ],
     );
 }

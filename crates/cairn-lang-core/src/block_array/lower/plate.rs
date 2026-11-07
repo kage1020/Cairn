@@ -1,13 +1,13 @@
 //! Placing a `pressure_plate` member.
 
-use crate::diagnostic::{Diagnostic, DiagnosticNote};
+use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::diag_deferred_member_reason;
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::fixture::{Fixture, Refusal, fixture_cell, outside_the_array};
+use super::fixture::{Fixture, Refusal, fixture_cell, outside_the_array, with_binding_note};
 use super::members::{StructCtx, default_block_id, resolve_member_state};
 
 /// Catalog token a `pressure_plate`'s default material comes from; the pack spells it per edition.
@@ -23,23 +23,6 @@ const PLATE: Fixture = Fixture {
     noun: "plate",
 };
 
-/// The note on every plate left unplaced that carries a `->` binding.
-const BINDING_STILL_READ: &str =
-    "its signal binding still reaches the netlist, with no plate placed to drive it";
-
-/// `refusal`, with [`BINDING_STILL_READ`] after its notes when the plate has a `->` binding.
-fn with_binding_note(member: &Member, refusal: Refusal) -> Diagnostic {
-    let mut refusal = *refusal;
-    // Synthesis reads the binding off the member line, never the block array.
-    if member.binding.is_some() {
-        refusal.notes.push(DiagnosticNote {
-            span: None,
-            message: BINDING_STILL_READ.to_owned(),
-        });
-    }
-    refusal
-}
-
 /// Paint a `pressure_plate` fixture as a single plate voxel.
 pub(super) fn fill_pressure_plate(
     member: &Member,
@@ -50,7 +33,7 @@ pub(super) fn fill_pressure_plate(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Err(refusal) = place_plate(member, y_offset, ctx, palette, canvas, diagnostics) {
-        diagnostics.push(with_binding_note(member, refusal));
+        diagnostics.push(with_binding_note(PLATE, member, refusal));
     }
 }
 

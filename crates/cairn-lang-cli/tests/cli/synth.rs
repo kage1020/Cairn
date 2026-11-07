@@ -398,7 +398,7 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
 
 #[test]
 fn every_stage_prints_the_ir_the_redstone_passes_build() {
-    for example in ["redstone-door.crn", "crossbar.crn"] {
+    for example in ["redstone-door.crn", "crossbar.crn", "control-room.crn"] {
         let path = examples_dir().join(example);
         let source = fs::read_to_string(&path).expect("read example");
         let ir = lower(&parse(&source).expect("the example parses"));

@@ -5,15 +5,15 @@ title: "6. Blockstate Model"
 ## 6.1 Derive by default, promote on override
 
 **Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape`, a
-door's `hinge` and `open`, and a chest's `facing` and `size` are built. The others and the `beam`
-and `note_block` keywords are not
+door's `hinge` and `open`, a chest's `facing` and `size`, and an observer's, piston's and
+dispenser's `facing` are built. The others and the `beam` and `note_block` keywords are not
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
-Of these, stair geometry, door and chest orientation, pane, fence and wall connections, and chest
-pairing are derived today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they
+Of these, stair geometry, the orientation of doors, chests and redstone components, pane, fence and
+wall connections, and chest pairing are derived today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they
 sit. An eave `stair` gets only its cardinal `facing`, from the side it sits on, and its `half` and
 `shape` are what its line writes, or `top` and `straight`. Connections and pairs are set once every
 member is painted ([Connections](#connections)), and `waterlogged` where a water `fill` overlaps a
@@ -46,6 +46,13 @@ without one is built from the registry pack's `@chest.default`
 whose id is `chest` or ends in `_chest`. Any other is `E_INCOMPATIBLE_MATERIAL`
 ([Lint](/spec/lint/)), and the chest is built from `@chest.default` beside the error. A chest holds
 no contents ([Entities §8.3](/spec/entities/#83-where-the-line-is-drawn)).
+
+A `lever`, `button`, `daylight`, `observer`, `lamp`, `piston` or `dispenser` takes its cell as a
+chest does ([Redstone §14.2](/spec/redstone/#142-signal-binding)). A lever or button hangs on the
+wall: `face=wall`, and a `facing` away from the wall, which nothing on its line overrides. An
+observer, piston or dispenser faces away from the wall unless a `facing=` on its line turns it,
+with `up` and `down` beside a chest's four words. Each is built unpowered, so its `powered`,
+`lit`, `extended` or `triggered` is never written.
 
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
 promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let

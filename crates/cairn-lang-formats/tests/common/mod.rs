@@ -20,7 +20,7 @@ pub fn examples_dir() -> PathBuf {
 }
 
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
-pub const SHIPPED_EXAMPLES: usize = 14;
+pub const SHIPPED_EXAMPLES: usize = 15;
 
 /// Every `.crn` under `examples/`, as `(file name, source)` sorted by name, refusing any set but
 /// the shipped one, since a sweep over nothing passes.

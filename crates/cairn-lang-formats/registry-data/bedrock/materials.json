@@ -30,6 +30,14 @@
     { "token": "sign.oak_wall", "block": "wall_sign" },
     { "token": "door.default", "block": "wooden_door" },
     { "token": "chest.default", "block": "chest" },
-    { "token": "pressure_plate.default", "block": "wooden_pressure_plate" }
+    { "token": "pressure_plate.default", "block": "wooden_pressure_plate" },
+    { "token": "lever.default", "block": "lever" },
+    { "token": "button.default", "block": "wooden_button" },
+    { "token": "daylight.default", "block": "daylight_detector" },
+    { "token": "observer.default", "block": "observer" },
+    { "token": "lamp.default", "block": "redstone_lamp" },
+    { "token": "piston.default", "block": "piston" },
+    { "token": "piston.sticky", "block": "sticky_piston" },
+    { "token": "dispenser.default", "block": "dispenser" }
   ]
 }

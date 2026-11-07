@@ -101,7 +101,7 @@ tree-sitter の文法は、2 つの点で既知の例外です。1 つ目に、�
 
 `y=N` がまとめられた各メンバーにとって何を意味するかは、[コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出) で定めています。
 
-**本体がどのキーワードを受け付けるか** も、同じ区別に従います。`struct` / `def` の本体は 1 棟の建物の形を記述します (`floor`、`walls`、`fill`、`door`、`window`、`roof`、`stair`、`level`、`pressure_plate`、`chest`、`circuit`、`raw_block`、`raw_fill`)。`site` の本体は配置を記述します (`place`、`connect`)。キーワードの表はグローバルなので、一方のキーワードをもう一方の本体に書いても、パースも分類も通ってしまい、そのうえでどこにも使われません。これが `E_MISPLACED_MEMBER` で、問題の行で 1 回だけ報告し、その下にインデントした行もまとめて捨てます。`level` は `struct` / `def` の本体のほかのメンバーをまとめますが、スコープ全体にわたって領域を確保する `circuit` 行はまとめません。`level` の下に書いた `circuit` 行もどこにも使われず、その行で `E_MISPLACED_MEMBER` になります ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。
+**本体がどのキーワードを受け付けるか** も、同じ区別に従います。`struct` / `def` の本体は 1 棟の建物の形を記述します (`floor`、`walls`、`fill`、`door`、`window`、`roof`、`stair`、`level`、`pressure_plate`、`lever`、`button`、`daylight`、`observer`、`lamp`、`piston`、`dispenser`、`chest`、`circuit`、`raw_block`、`raw_fill`)。`site` の本体は配置を記述します (`place`、`connect`)。キーワードの表はグローバルなので、一方のキーワードをもう一方の本体に書いても、パースも分類も通ってしまい、そのうえでどこにも使われません。これが `E_MISPLACED_MEMBER` で、問題の行で 1 回だけ報告し、その下にインデントした行もまとめて捨てます。`level` は `struct` / `def` の本体のほかのメンバーをまとめますが、スコープ全体にわたって領域を確保する `circuit` 行はまとめません。`level` の下に書いた `circuit` 行もどこにも使われず、その行で `E_MISPLACED_MEMBER` になります ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。
 
 `logic` と `assert` の行はメンバーではないので、この規則は適用されません。`logic` の行は、どちらの本体にあってもレッドストーンの合成が読みます。`assert` の行については、それ自身の形と、名指す信号を検査します。真理値表は `cairn check` が検査し ([リテラルと区切り](#511-リテラルと区切り))、名指す信号はレッドストーンの合成が解決します (`E_LOGIC_UNBOUND_SIGNAL`)。組み上がった回路に照らして `assert` を検証するものは、まだありません。
 

@@ -369,6 +369,34 @@ const SWEEP: &[(&str, &str)] = &[
         "  pressure_plate id=p class=c mat_slot=m at=front.outside offset=0 y=0\n",
     ),
     (
+        "lever",
+        "  lever id=v class=c at=inside.front offset=1 y=1\n",
+    ),
+    (
+        "button",
+        "  button id=b class=c mat_slot=m at=inside.front offset=2 y=1\n",
+    ),
+    (
+        "daylight",
+        "  daylight id=dl class=c at=inside.back offset=1 y=1\n",
+    ),
+    (
+        "observer",
+        "  observer id=o class=c at=inside.back offset=2 y=1 facing=up\n",
+    ),
+    (
+        "lamp",
+        "  lamp id=lp class=c at=inside.left offset=1 y=1 lit_by=sig.a\n",
+    ),
+    (
+        "piston",
+        "  piston id=pi class=c at=inside.left offset=2 y=1 powered_by=sig.a facing=in sticky=true\n",
+    ),
+    (
+        "dispenser",
+        "  dispenser id=ds class=c at=inside.right offset=1 y=1 fired_by=sig.a facing=out\n",
+    ),
+    (
         "chest",
         "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single waterlogged=false\n",
     ),
@@ -946,6 +974,36 @@ impl UnreadSlot {
 
 const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
+        keyword: "lever",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  lever at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "daylight",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  daylight at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "observer",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  observer at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "lamp",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  lamp at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "piston",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  piston at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "dispenser",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  dispenser at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
         keyword: "level",
         body: "struct s size=7x5\n  floor mat_slot=wall\n  level y=0 mat_slot=%SLOT%\n    walls mat_slot=wall height=3\n",
         why: Unread::Inapplicable,
@@ -1160,7 +1218,7 @@ fn an_actuator_key_on_a_member_that_does_not_read_it_names_its_component() {
         ),
         (
             "window side=front y=1 offset=1 size=1x1 powered_by=sig.a",
-            "`powered_by=` binds a signal to a `piston`, which is not a keyword yet",
+            "`powered_by=` binds a signal to a `piston`, so it belongs on a `piston` line",
         ),
     ] {
         let src = format!("struct s size=5x5\n  {line}\n");

@@ -71,17 +71,17 @@ Sensors emit signals and actuators consume them. Both are physical members
 
 ```
 # sensor → signal
-lever      id=sw   side=front offset=2 y=1 -> sig.power
-button     id=bt   side=front               -> sig.ring
-daylight   id=dl   at=..                     -> sig.day
-observer   id=ob   at=.. facing=down         -> sig.tick
-pressure_plate id=pp at=front.outside offset=0 y=0 -> sig.step
+lever          id=sw at=inside.front offset=2 y=1 -> sig.power
+button         id=bt at=front.outside offset=5 y=1 -> sig.ring
+daylight       id=dl at=back.outside offset=3 y=0 -> sig.day
+observer       id=ob at=inside.left offset=2 y=1 facing=down -> sig.tick
+pressure_plate id=pp at=front.outside offset=1 y=0 -> sig.step
 
 # actuator ← signal
-lamp       id=l1   at=..  lit_by=sig.lamps
-piston     id=p1   at=..  powered_by=sig.mem facing=up sticky=true
-door       id=d1   ..     opened_by=sig.power
-dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
+lamp      id=l1 at=inside.back offset=3 y=2 lit_by=sig.lamps
+piston    id=p1 at=inside.right offset=2 y=1 powered_by=sig.mem facing=up sticky=true
+door      id=d1 side=front at=center opened_by=sig.power
+dispenser id=ds at=front.outside offset=6 y=1 fired_by=sig.pulse facing=out
 ```
 
 That pairing is normative. A `-> sig.X` tail belongs to a sensor, and each actuator key belongs to
@@ -98,8 +98,11 @@ to. The synth pipeline's `E_LOGIC_MISPLACED_BINDING`, which names that component
 only where a `theme` selector has made the key one that member reads
 ([Lint](/spec/lint/#113-error-vs-warning)).
 
-Of the components above, only `door` and `pressure_plate` are accepted today. `lit_by=`,
-`powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
+**Every component but `door` is anchored as a plate is.** A `lever`, `button`, `daylight`,
+`observer`, `lamp`, `piston` or `dispenser` is one block set by a wall, written with the same `at=`,
+`offset=` and `y=` as a `pressure_plate`. The rules below are stated for the plate and hold for each
+of them alike: each is placed, refused or deferred wherever a plate would be, and its finding names
+it.
 
 **Where an `at=<side>.outside` plate may sit.** The plate takes the wall cell at `offset=` and sits
 one voxel outward from it, in the ring a roof's `overhang=` adds around the walls
@@ -127,9 +130,41 @@ instead, because the repair is on that member: a row that `walls` painting nothi
 nothing or `walls` under a `level` that is not placed would have reached, or an `at=<side>.outside`
 beside a `roof` with an `overhang=` that draws nothing ([Lint](/spec/lint/#lowering)). The plate's
 own line is judged first, so a line that puts it nowhere is the error even when such a member is
-missing too. Either way the plate's `->` binding is still read, since synthesis reads the member
-line and not the voxels, so the signal stays in the netlist with no plate to drive it, and the
-finding says so.
+missing too. Either way the component's binding, its `->` tail or its actuator key, is still read,
+since synthesis reads the member line and not the voxels, so the signal stays in the netlist with no
+component behind it, and the finding says so.
+
+**How a component is turned.** A `lever` or `button` hangs on the face of the wall cell its anchor
+names (`face=wall`), looking away from that wall: into the struct from `inside.<side>`, out of it
+from `<side>.outside`. An `observer`, `piston` or `dispenser` looks away from its wall too unless
+its `facing=` turns it: `in` and `out` are into and out of the struct, `left` and `right` run along
+the wall toward and away from `offset=0`, and `up` and `down` are vertical. That is the way its
+front looks: the cell an observer watches, the way a piston pushes and the way a dispenser fires.
+Any other word, a compass direction among them, is `E_INVALID_MEMBER`, and the component is not
+placed. The message lists the words, and for a compass direction it names the word that turns the
+component that way from its wall, since a compass direction would mean a different thing on each
+wall. A `daylight` and a `lamp` look no way and take no `facing=`.
+
+`sticky=true` builds a `piston` as a sticky piston, and `sticky=false` or no `sticky=` as a plain
+one. A `facing=` that is not a word, or a `sticky=` that is not `true` or `false`, is
+`W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), and the component is built
+as if it were not written.
+
+Each component is built as it stands unpowered: a lever off, a button unpressed, a lamp unlit, a
+piston retracted and a dispenser not triggered. The circuit powers it in the world, so none of
+those states is written on its line, and `facing=` is the one state promoted to intent
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)).
+
+**What a component is built from.** A `button` reads `mat_slot=`, and the slot must bind a button:
+any other block is `E_INCOMPATIBLE_MATERIAL`, and the button is built from `@button.default` instead.
+With no `mat_slot=` it is built from `@button.default`. Every other component has one block to be
+built from, its tier-1 token ([Materials and Themes](/spec/materials-themes/#tier-1-tokens)), and a
+`mat_slot=` on it is `W_IGNORED_ARGUMENT`.
+
+**What a lever or button hangs on is not checked.** It is written against whatever the wall cell
+holds, and the build does not ask whether that block is one the game lets it hang on. Where no
+`walls` paints that cell, or paints it with a block whose face cannot hold one, the game drops the
+lever or button as soon as a block update reaches it.
 
 **Signal names.** Sensors emit into the `sig.` namespace and actuators read from it, so a name
 outside it can never be read, whether on the left of a `logic` line, in a sensor's `->` tail, or as
@@ -151,17 +186,21 @@ which names the brackets, whatever the value.
 
 **A selector line binds the member its brackets pick.** `door[id=front] opened_by=sig.power` binds
 the door declared as `door id=front ...` in the same scope, at the top level or directly under a
-`level`. The `id=` has to name exactly one such door, written without brackets. The patch is a line
-of its own, before or after the door it binds, at the top level or directly under a `level`,
-wherever that door is. A patch whose selector has no `id=`, or whose id no door carries or two doors
-carry, is `E_LOGIC_UNRESOLVED_PATCH`: it acts on no door, so a port for it would have no component
-behind it. The door patch is the only binding a selector line carries, so a `->` tail on
-`pressure_plate[id=p]` is `E_MISPLACED_BINDING`, as it is on a member that is not a sensor.
+`level`, and `lamp[id=l1] lit_by=`, `piston[id=p1] powered_by=` and `dispenser[id=ds] fired_by=`
+bind a lamp, piston and dispenser the same way. The `id=` has to name exactly one component of the
+patch's keyword, written without brackets. The patch is a line of its own, before or after the
+component it binds, at the top level or directly under a `level`, wherever that component is. A
+patch whose selector has no `id=`, or whose id no component of its keyword carries or two carry, is
+`E_LOGIC_UNRESOLVED_PATCH`: it acts on no component, so a port for it would have no component behind
+it. An actuator patch is the only binding a selector line carries, so a `->` tail on
+`pressure_plate[id=p]` or `lever[id=sw]` is `E_MISPLACED_BINDING`, as it is on a member that is not
+a sensor.
 
-**An actuator takes one binding per key.** A door carries one `opened_by=`, whether it is written on
-the door's own line, through a patch, or on both. A second is `E_LOGIC_DUPLICATE_BINDING`: two
-bindings would be two wires into one door, a wired OR the logic layer never states. Signals are
-combined there instead: write `logic sig.open = sig.a or sig.x` and bind the door to `sig.open`.
+**An actuator takes one binding per key.** A door carries one `opened_by=`, a lamp one `lit_by=`, a
+piston one `powered_by=` and a dispenser one `fired_by=`, whether it is written on the component's
+own line, through a patch, or on both. A second is `E_LOGIC_DUPLICATE_BINDING`: two bindings would
+be two wires into one component, a wired OR the logic layer never states. Signals are combined there
+instead: write `logic sig.open = sig.a or sig.x` and bind the door to `sig.open`.
 
 A `sig.` value under a key the member reads that is not one of the four actuator keys is
 `E_LOGIC_UNKNOWN_BINDING_KEY`, raised by the synth pipeline, as in `walls height=sig.power`. The

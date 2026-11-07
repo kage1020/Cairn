@@ -117,6 +117,14 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@door.default` | The door block a `door` places when no `mat_slot=` binds one |
 | `@chest.default` | The chest block a `chest` places when no `mat_slot=` binds one |
 | `@pressure_plate.default` | The block a `pressure_plate` places when no `mat_slot=` binds one |
+| `@lever.default` | The lever a `lever` hangs on its wall |
+| `@button.default` | The button a `button` hangs on its wall when no `mat_slot=` binds one |
+| `@daylight.default` | The daylight detector a `daylight` sets |
+| `@observer.default` | The observer an `observer` sets |
+| `@lamp.default` | The redstone lamp a `lamp` sets |
+| `@piston.default` | The piston a `piston` sets |
+| `@piston.sticky` | The sticky piston a `piston` with `sticky=true` sets |
+| `@dispenser.default` | The dispenser a `dispenser` sets |
 
 The block a tier-1 token resolves to is **tier-2**, which is Evolving: it is the catalog's answer
 for the target, and a release may change it. Adding a token to the catalogs breaks nothing.

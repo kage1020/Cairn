@@ -5,6 +5,7 @@ mod common;
 mod actuator_patch_targets;
 mod actuator_schema;
 mod binding_hosts;
+mod components;
 mod crossing;
 mod delay;
 mod edition_netlist;

@@ -1,28 +1,19 @@
 //! `synth`'s `ACTUATOR_BINDINGS` agrees with `core`'s per-role argument vocabularies.
 
-use cairn_lang_core::intent::{MemberRole, role_of};
+use cairn_lang_core::intent::role_of;
 use cairn_lang_redstone::synth::ACTUATOR_BINDINGS;
 
 #[test]
-fn every_actuator_key_with_a_real_host_is_in_that_host_vocabulary() {
-    let mut checked = 0;
+fn every_actuator_key_is_in_its_host_vocabulary() {
     for (key, host) in ACTUATOR_BINDINGS {
         let role = role_of(host);
-        let Some(vocabulary) = role.arguments() else {
-            assert!(
-                matches!(role, MemberRole::Other(_)),
-                "`{host}` classified as a role but answered no vocabulary",
-            );
-            continue;
-        };
+        let vocabulary = role
+            .arguments()
+            .unwrap_or_else(|| panic!("`{host}` is no keyword, so `{key}=` has nowhere to sit"));
         assert!(
             vocabulary.contains(key),
             "`{host}` vocabulary lacks `{key}`",
         );
-        checked += 1;
+        assert_eq!(role.actuator_key(), Some(*key), "`{host}`");
     }
-    assert_eq!(
-        checked, 1,
-        "expected exactly one actuator host with a vocabulary",
-    );
 }

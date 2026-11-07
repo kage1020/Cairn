@@ -67,6 +67,14 @@ fn both_packs_declare_the_tokens_that_redirect_the_member_defaults() {
         ("pressure_plate.default", "plate"),
         ("door.default", "door"),
         ("chest.default", "chest"),
+        ("lever.default", "lever"),
+        ("button.default", "button"),
+        ("daylight.default", "daylight detector"),
+        ("observer.default", "observer"),
+        ("lamp.default", "lamp"),
+        ("piston.default", "piston"),
+        ("piston.sticky", "sticky piston"),
+        ("dispenser.default", "dispenser"),
     ] {
         for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
             for version in supported_versions(pack) {
@@ -103,6 +111,7 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
         ("sign.oak_wall", "minecraft:wall_sign"),
         ("pressure_plate.default", "minecraft:wooden_pressure_plate"),
         ("door.default", "minecraft:wooden_door"),
+        ("button.default", "minecraft:wooden_button"),
     ] {
         assert_eq!(
             bedrock.materials().lookup_id(token),
@@ -117,6 +126,7 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
         ("sign.oak_wall", "minecraft:oak_wall_sign"),
         ("pressure_plate.default", "minecraft:oak_pressure_plate"),
         ("door.default", "minecraft:oak_door"),
+        ("button.default", "minecraft:oak_button"),
     ] {
         assert_eq!(
             java.materials().lookup_id(token),

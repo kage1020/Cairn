@@ -220,7 +220,8 @@ means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `chest`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The
+`pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`,
+`chest`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The
 keyword table is global, so writing one in the other body parses and classifies and then reaches nothing. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
 A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose

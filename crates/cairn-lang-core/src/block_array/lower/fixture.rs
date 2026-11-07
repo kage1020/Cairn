@@ -1,5 +1,5 @@
-//! Where a one-cell member set against a wall, a `pressure_plate` or a `chest`, stands
-//! (`spec/redstone` "Signal binding").
+//! Where a one-cell member set against a wall, a `pressure_plate`, another sensor or actuator, or
+//! a `chest`, stands and which way it looks (`spec/redstone` "Signal binding").
 
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticNote};
@@ -9,6 +9,7 @@ use crate::suggest::{did_you_mean, nearest_match};
 use crate::block_array::args::{
     diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member,
 };
+use crate::block_array::joins::Face;
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 
 use super::members::{StructCtx, side_name, unplaced_walls_note};
@@ -21,6 +22,155 @@ pub(super) struct Fixture {
     pub(super) keyword: &'static str,
     /// What a note calls it: `plate`.
     pub(super) noun: &'static str,
+}
+
+/// `refusal`, with a note after its notes when the member carries a signal binding, which
+/// synthesis reads off the member line whether or not the fixture is placed.
+pub(super) fn with_binding_note(fixture: Fixture, member: &Member, refusal: Refusal) -> Diagnostic {
+    let mut refusal = *refusal;
+    let noun = fixture.noun;
+    let binding = if member.binding.is_some() {
+        Some(format!(
+            "its signal binding still reaches the netlist, with no {noun} placed to drive it"
+        ))
+    } else {
+        member
+            .role
+            .actuator_key()
+            .filter(|key| member.arguments.contains_key(*key))
+            .map(|key| {
+                format!(
+                    "its `{key}=` binding still reaches the netlist, with no {noun} placed for it \
+                     to drive"
+                )
+            })
+    };
+    refusal.notes.extend(binding.map(|message| DiagnosticNote {
+        span: None,
+        message,
+    }));
+    refusal
+}
+
+/// Which way a fixture's front looks, relative to the wall it stands by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Toward {
+    /// Straight up.
+    Up,
+    /// Straight down.
+    Down,
+    /// Into the struct.
+    In,
+    /// Out of the struct.
+    Out,
+    /// Along the wall toward `offset=0`.
+    Left,
+    /// Along the wall away from `offset=0`.
+    Right,
+}
+
+impl Toward {
+    /// The four ways that stay level, in the order a finding lists them.
+    pub(super) const LEVEL: [Self; 4] = [Self::In, Self::Out, Self::Left, Self::Right];
+
+    /// Every way, in the order a finding lists them.
+    pub(super) const ALL: [Self; 6] = [
+        Self::Up,
+        Self::Down,
+        Self::In,
+        Self::Out,
+        Self::Left,
+        Self::Right,
+    ];
+
+    /// The way `name` spells.
+    fn from_ident(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|toward| toward.name() == name)
+    }
+
+    /// The word `facing=` spells this way with.
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::In => "in",
+            Self::Out => "out",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    /// Away from the wall `anchor` stands by: into the struct from inside it, out from outside.
+    pub(super) fn away_from_the_wall(anchor: Anchor) -> Self {
+        match anchor {
+            Anchor::Inside(_) => Self::In,
+            Anchor::Outside(_) => Self::Out,
+        }
+    }
+
+    /// The face a fixture by `side` looks toward.
+    pub(super) fn face(self, side: WallSide) -> Face {
+        // The wall's outward normal, and the way its `offset=` grows.
+        let (out, right) = match side {
+            WallSide::Front => (Face::South, Face::East),
+            WallSide::Back => (Face::North, Face::West),
+            WallSide::Left => (Face::West, Face::South),
+            WallSide::Right => (Face::East, Face::North),
+        };
+        match self {
+            Self::Up => Face::Up,
+            Self::Down => Face::Down,
+            Self::In => out.opposite(),
+            Self::Out => out,
+            Self::Left => right.opposite(),
+            Self::Right => right,
+        }
+    }
+}
+
+/// The way a fixture's `facing=` names among `accepted`, `None` when it writes none, or the
+/// refusal of a word outside them.
+pub(super) fn written_facing(
+    fixture: Fixture,
+    member: &Member,
+    written: Option<&str>,
+    accepted: &[Toward],
+) -> Result<Option<Toward>, Refusal> {
+    let Some(word) = written else {
+        return Ok(None);
+    };
+    if let Some(toward) = Toward::from_ident(word).filter(|toward| accepted.contains(toward)) {
+        return Ok(Some(toward));
+    }
+    let names: Vec<&str> = accepted.iter().map(|toward| toward.name()).collect();
+    let mut notes = vec![format!("`facing=` takes one of {}", names.join(", "))];
+    // A compass word is what the game writes; the line names a way from its own wall instead.
+    if let Some(compass) = Face::from_name(word).filter(|face| Face::SIDES.contains(face)) {
+        let side = anchor_of(fixture, member).ok().map(Anchor::side);
+        let meant = side.and_then(|side| {
+            accepted
+                .iter()
+                .find(|toward| toward.face(side) == compass)
+                .map(|toward| (side, toward.name()))
+        });
+        notes.push(match meant {
+            Some((side, toward)) => format!(
+                "`facing=` names a way from the wall the {} stands by, and `{word}` from the {} \
+                 wall is `facing={toward}`",
+                fixture.noun,
+                side_name(side),
+            ),
+            None => format!(
+                "`facing=` names a way from the wall the {} stands by, not a compass direction",
+                fixture.noun,
+            ),
+        });
+    }
+    Err(Box::new(diag_invalid_member(
+        member,
+        format!("unknown {} `facing={word}`", fixture.keyword),
+        notes,
+    )))
 }
 
 /// The note on an `at=` that names no anchor, saying what one is.
@@ -611,4 +761,36 @@ fn inside_refusal(
             format!("grow {}{use_offset}{outside}", thin_growth(&thin)),
         ],
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Toward;
+    use crate::block_array::joins::Face;
+    use crate::block_array::openings::WallSide;
+
+    /// `out` is each wall's outward normal, `right` the way its `offset=` grows, and `up` and
+    /// `down` the same from every wall.
+    #[test]
+    fn a_fixture_turns_by_the_walls_own_axes() {
+        for side in [
+            WallSide::Front,
+            WallSide::Back,
+            WallSide::Left,
+            WallSide::Right,
+        ] {
+            let flat = |toward: Toward| {
+                let (dx, _, dz) = toward.face(side).step();
+                (dx, dz)
+            };
+            assert_eq!(flat(Toward::Out), side.outward_normal(), "{side:?}");
+            assert_eq!(flat(Toward::Right), side.along(), "{side:?}");
+            let (dx, dz) = side.outward_normal();
+            assert_eq!(flat(Toward::In), (-dx, -dz), "{side:?}");
+            let (dx, dz) = side.along();
+            assert_eq!(flat(Toward::Left), (-dx, -dz), "{side:?}");
+            assert_eq!(Toward::Up.face(side), Face::Up, "{side:?}");
+            assert_eq!(Toward::Down.face(side), Face::Down, "{side:?}");
+        }
+    }
 }

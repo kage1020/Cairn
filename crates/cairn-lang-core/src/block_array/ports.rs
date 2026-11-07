@@ -226,6 +226,13 @@ pub(super) fn port_world_position<S: BuildHasher>(
         | MemberRole::Stair
         | MemberRole::Level
         | MemberRole::PressurePlate
+        | MemberRole::Lever
+        | MemberRole::Button
+        | MemberRole::Daylight
+        | MemberRole::Observer
+        | MemberRole::Lamp
+        | MemberRole::Piston
+        | MemberRole::Dispenser
         | MemberRole::Chest
         | MemberRole::Circuit
         | MemberRole::RawBlock

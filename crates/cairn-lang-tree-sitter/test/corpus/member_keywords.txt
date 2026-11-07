@@ -11,6 +11,13 @@ struct s size=9x7
   roof kind=gable overhang=1
   stair id=up from=0 to=1
   pressure_plate id=plate at=front.outside
+  lever id=sw at=inside.front offset=2 -> sig.power
+  button id=bt at=front.outside offset=5
+  daylight id=dl at=back.outside offset=3
+  observer id=ob at=inside.left offset=2 facing=down
+  lamp id=l1 at=inside.back offset=3 lit_by=sig.lamps
+  piston id=p1 at=inside.right offset=2 sticky=true
+  dispenser id=ds at=front.outside offset=6 fired_by=sig.pulse
   chest id=store at=inside.back offset=2 size=single
   circuit id=main region=floor
   place kind=lamp at=center
@@ -122,6 +129,148 @@ struct s size=9x7
             (attribute
               (identifier)
               (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))
+        (signal_ref
+          (identifier)
+          (identifier)))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (boolean)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
           (command_arg
             (attribute
               (identifier)

@@ -7,6 +7,7 @@ use crate::block_array::PaletteIndex;
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::chest::fill_chest;
+use super::component::fill_component;
 use super::door::{HungDoor, fill_door};
 use super::fill::fill_material;
 use super::members::{StructCtx, palette_index_for};
@@ -69,6 +70,15 @@ pub(super) fn paint_member(
         MemberRole::Window => fill_window(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::PressurePlate => {
             fill_pressure_plate(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Lever
+        | MemberRole::Button
+        | MemberRole::Daylight
+        | MemberRole::Observer
+        | MemberRole::Lamp
+        | MemberRole::Piston
+        | MemberRole::Dispenser => {
+            fill_component(member, y_offset, ctx, palette, canvas, diagnostics);
         }
         MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::RawBlock | MemberRole::RawFill => {

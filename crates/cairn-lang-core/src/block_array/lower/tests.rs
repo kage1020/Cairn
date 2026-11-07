@@ -1268,6 +1268,10 @@ const SLOT_READERS: &[(&str, &str)] = &[
         "struct s size=3x3\n  door id=front side=front at=center mat_slot=d\n",
     ),
     (
+        "button",
+        "struct s size=3x3\n  button at=inside.front offset=1 mat_slot=b\n",
+    ),
+    (
         "chest",
         "struct s size=3x3\n  chest at=inside.front offset=1 mat_slot=c\n",
     ),
@@ -1276,6 +1280,30 @@ const SLOT_READERS: &[(&str, &str)] = &[
 /// A themeless struct per keyword whose role reads no `mat_slot=`, `mat_slot=d` on its member;
 /// a misplaced `place` or `connect` still reaches the list the gate reads.
 const SLOT_IGNORERS: &[(&str, &str)] = &[
+    (
+        "lever",
+        "struct s size=3x3\n  lever at=inside.front offset=1 mat_slot=d\n",
+    ),
+    (
+        "daylight",
+        "struct s size=3x3\n  daylight at=inside.front offset=1 mat_slot=d\n",
+    ),
+    (
+        "observer",
+        "struct s size=3x3\n  observer at=inside.front offset=1 mat_slot=d\n",
+    ),
+    (
+        "lamp",
+        "struct s size=3x3\n  lamp at=inside.front offset=1 mat_slot=d\n",
+    ),
+    (
+        "piston",
+        "struct s size=3x3\n  piston at=inside.front offset=1 mat_slot=d\n",
+    ),
+    (
+        "dispenser",
+        "struct s size=3x3\n  dispenser at=inside.front offset=1 mat_slot=d\n",
+    ),
     (
         "level",
         "struct s size=3x3\n  level y=0 mat_slot=d\n    roof kind=flat\n",
