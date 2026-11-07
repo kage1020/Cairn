@@ -206,7 +206,26 @@ fn a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
 #[test]
 fn a_level_without_a_usable_offset_is_reported() {
     // No value position reads a `-`, so `y=-3` fails in the parser.
-    for y in ["", " y=abc", " y=99999999999", " y=plain"] {
+    for (y, reason) in [
+        ("", "`level` has no `y=` offset"),
+        (
+            " y=abc",
+            "the `level`'s `y=` is identifier `abc`, not a row",
+        ),
+        (
+            " y=99999999999",
+            "the `level`'s `y=` is integer `99999999999`, not a row",
+        ),
+        (
+            " y=plain",
+            "the `level`'s `y=` is identifier `plain`, not a row",
+        ),
+        (
+            " y=1,2,3",
+            "the `level`'s `y=` is coordinate `1,2,3`, not a row",
+        ),
+    ] {
+        let advice_verb = if y.is_empty() { "add" } else { "write" };
         let src = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
              level{y}\n    walls class=outer mat_slot=wall height=3\n"
@@ -214,10 +233,20 @@ fn a_level_without_a_usable_offset_is_reported() {
         let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
         assert_eq!(
             d.primary,
-            "`level` has no `y=` offset to place its children at: the 1 member indented under it produces no blocks",
+            format!(
+                "{reason} to place its children at: the 1 member indented under it produces no \
+                 blocks"
+            ),
             "for `level{y}`",
         );
-        assert!(advice(&d).contains("y=N"), "for `level{y}`");
+        assert_eq!(
+            advice(&d),
+            format!(
+                "{advice_verb} `y=N`, where N is a non-negative integer height above the body's \
+                 floor"
+            ),
+            "for `level{y}`",
+        );
     }
 }
 

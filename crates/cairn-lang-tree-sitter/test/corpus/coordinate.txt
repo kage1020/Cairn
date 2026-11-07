@@ -158,3 +158,59 @@ struct s size=5x5
   fill from=1,-1,1
 
 ---
+
+==================
+Coordinate triple in a header
+==================
+
+struct s size=5x5 at=0,0,0
+  floor a=1
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer)))
+      (attribute
+        (identifier)
+        (coordinate)))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))))))
+
+==================
+Coordinate triple in a theme selector
+==================
+
+theme t:
+  window[at=1,2,3] -> mat_slot=g
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (selector_rule
+        (selector
+          (identifier)
+          (selector_filter
+            (filter_list
+              (attribute
+                (identifier)
+                (coordinate)))))
+        (attribute_list
+          (attribute
+            (identifier)
+            (identifier)))))))

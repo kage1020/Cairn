@@ -90,10 +90,20 @@ fn report(
             geometry_primary("a `level` inside another `level` does not group members", count, subject),
             "flatten the two levels into one, or give this level's members their own `level y=N` in the enclosing body".to_owned(),
         ),
-        (Loss::LevelWithoutOffset, _) => (
-            geometry_primary("`level` has no `y=` offset to place its children at", count, subject),
-            "add `y=N`, where N is a non-negative integer height above the body's floor".to_owned(),
-        ),
+        (Loss::LevelWithoutOffset, _) => match member.intent_state.get("y") {
+            Some(raw) => (
+                geometry_primary(
+                    &format!("the `level`'s `y=` is {}, not a row to place its children at", raw.value.describe()),
+                    count,
+                    subject,
+                ),
+                "write `y=N`, where N is a non-negative integer height above the body's floor".to_owned(),
+            ),
+            None => (
+                geometry_primary("`level` has no `y=` offset to place its children at", count, subject),
+                "add `y=N`, where N is a non-negative integer height above the body's floor".to_owned(),
+            ),
+        },
     };
     let mut notes = vec![
         DiagnosticNote {

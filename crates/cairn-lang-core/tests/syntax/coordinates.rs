@@ -39,6 +39,10 @@ fn three_integers_joined_by_commas_are_one_coordinate() {
             ("to".to_owned(), coord(3, 20, 0)),
         ],
     );
+    assert_eq!(
+        member_args("fill from=9223372036854775807,0,0"),
+        [("from".to_owned(), coord(9_223_372_036_854_775_807, 0, 0))],
+    );
 }
 
 #[test]
@@ -132,17 +136,39 @@ fn a_malformed_coordinate_is_refused_where_it_goes_wrong() {
             "invalid integer literal `99999999999999999999`: value out of range".to_owned(),
             13,
         ),
-        // The comma after a whole triple ends it, and a bare one is no value.
+        (
+            "fill from=-1,2,3",
+            "a coordinate component is never negative: a coordinate counts from the low corner \
+             of the footprint, as `0,0,0`"
+                .to_owned(),
+            13,
+        ),
+        (
+            "fill from=1,2,3x4",
+            "a coordinate component runs into `x4`: `3x4` reads as a size, and a coordinate triple \
+             is three integers, `x,y,z`, as `4,3,2`"
+                .to_owned(),
+            17,
+        ),
+        (
+            "fill from=9223372036854775808,0,0",
+            "invalid integer literal `9223372036854775808`: value out of range".to_owned(),
+            13,
+        ),
         (
             "fill from=1,1,1,",
             "unexpected `,` in value position".to_owned(),
             18,
         ),
-        // Only a `key=` value is read as one: a bare value or a binding takes one integer.
         (
             "fill 1,1,1",
             "unexpected `,` in value position".to_owned(),
             9,
+        ),
+        (
+            "lever -> 1,1,1",
+            "unexpected `,` in value position".to_owned(),
+            13,
         ),
     ] {
         assert_eq!(refusal(member), (message, col), "{member:?}");

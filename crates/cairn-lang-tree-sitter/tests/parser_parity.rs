@@ -897,6 +897,21 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     (
+        "coordinate_negative_first_component",
+        "struct s size=5x5\n  fill from=-1,2,3\n",
+        Reject,
+    ),
+    (
+        "two_selector_integers_before_a_key",
+        "struct s size=5x5\n  door[y=1,2,side=front]\n",
+        Reject,
+    ),
+    (
+        "integers_in_a_state_literal_are_no_coordinate",
+        "theme t:\n  slot a -> @oak_stairs[facing=1,2,3]\n",
+        Reject,
+    ),
+    (
         "coordinate_trailing_comma",
         "struct s size=5x5\n  fill from=1,1,1,\n",
         Reject,
@@ -910,6 +925,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "coordinate_as_a_binding",
         "struct s size=5x5\n  lever -> 1,1,1\n",
         Reject,
+    ),
+    (
+        "coordinate_beside_a_binding",
+        "struct s size=5x5\n  lever -> sig.a at=1,2,3\n",
+        Accept,
     ),
     // -- indentation ----------------------------------------------------
     (
@@ -1267,6 +1287,12 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "size_running_into_a_word",
         "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
+        Accept,
+    ),
+    // The grammar's coordinate ends at `3` and reads `x4` as a positional word.
+    (
+        "coordinate_running_into_a_size",
+        "struct s size=3x3\n  fill from=1,2,3x4\n",
         Accept,
     ),
     // -- a truth row of the wrong width --------------------------------

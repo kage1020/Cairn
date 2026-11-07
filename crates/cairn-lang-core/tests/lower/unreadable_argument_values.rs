@@ -46,6 +46,7 @@ fn an_unreadable_sym_draws_the_unmirrored_window_and_says_so() {
         ("yes", "identifier `yes`"),
         ("\"true\"", "string `\"true\"`"),
         ("1", "integer `1`"),
+        ("1,2,3", "coordinate `1,2,3`"),
     ] {
         let source = window(&format!(" sym={written}"));
         let ir = lowered(&source);
