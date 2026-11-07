@@ -109,7 +109,7 @@ pub(super) enum Written {
 
 impl Written {
     pub(super) fn of_ident(member: &Member, key: &str) -> Self {
-        match member.intent_state.get(key).map(|v| &v.value.kind) {
+        match member.written(key).map(|v| &v.value.kind) {
             None => Self::Absent,
             Some(ValueKind::Ident(s)) => Self::Ident(s.clone()),
             Some(_) => Self::OtherShape,
@@ -208,23 +208,20 @@ pub(super) struct WindowArgs {
 ///
 /// The [`WindowArgFault`] for the first argument that cannot be used.
 pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgFault> {
-    let offset = if member.intent_state.contains_key("offset") {
+    let offset = if member.arguments.contains_key("offset") {
         member
             .nonneg_u32("offset")
             .ok_or(WindowArgFault::OffsetMalformed)?
     } else {
         0
     };
-    let y = match (
-        member.intent_state.contains_key("y"),
-        member.nonneg_u32("y"),
-    ) {
+    let y = match (member.arguments.contains_key("y"), member.nonneg_u32("y")) {
         (_, Some(y)) => y,
         (false, None) => return Err(WindowArgFault::YAbsent),
         (true, None) => return Err(WindowArgFault::YMalformed),
     };
     let (width, height) = match (
-        member.intent_state.contains_key("size"),
+        member.arguments.contains_key("size"),
         size_value(member, "size"),
     ) {
         (_, Some(size)) => size,

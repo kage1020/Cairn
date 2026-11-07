@@ -394,6 +394,8 @@ resolved_state:
   bedrock: { weirdo_direction: 0, upside_down_bit: false }              # shape が無いので角がつながらない
 ```
 
+lowering は `resolved_state` を、正規の語彙 ([マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン)) で 1 度だけ記録します。その語彙のステート名は Java のものです ([ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。Bedrock の行は、Bedrock バックエンドが書き出すときにその記録を写した結果なので、`cairn lower` が示すのは正規の行だけです。
+
 解決結果の違いが見た目や機能の違いになるときは、ビルドがそれを知らせます。`themed-tower` の軒の階段は `shape=outer_left` です。
 
 ```text

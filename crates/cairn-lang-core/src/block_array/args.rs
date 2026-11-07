@@ -50,7 +50,7 @@ pub(super) fn read_or_ignore<'m, T>(
     read: impl FnOnce(&'m ValueKind) -> Option<T>,
     expected: &'static str,
 ) -> Result<Option<T>, UnreadArgument> {
-    let Some(raw) = member.intent_state.get(key) else {
+    let Some(raw) = member.written(key) else {
         return Ok(None);
     };
     match read(&raw.value.kind) {
@@ -121,7 +121,7 @@ pub(super) fn nonneg_int_or_refuse(
     key: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> NonNegRead {
-    let Some(raw) = member.intent_state.get(key) else {
+    let Some(raw) = member.written(key) else {
         return NonNegRead::Absent;
     };
     if let Some(v) = member.nonneg_u32(key) {
@@ -141,7 +141,7 @@ pub(super) fn nonneg_int_or_refuse(
 }
 
 pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
-    let raw = member.intent_state.get(key)?;
+    let raw = member.written(key)?;
     match &raw.value.kind {
         ValueKind::Size { w, h } => Some((w.get(), h.get())),
         _ => None,
