@@ -235,9 +235,10 @@ which is Stable ([Compatibility Tiers](/spec/compatibility/)), so it stays as wr
 from the `severity` field rather than from the first letter.
 
 `E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: no `mat_slot=` pointing at a slot bound to
-something other than a material token resolves. A `floor` that names it is left air; a `walls` that
-names it is not built and takes up no rows, so a `door` or `window` cut into it is deferred; a
-`window` that names it is not cut, so its wall stays; and a `roof`, eave `stair`, `door`,
+something other than a material token resolves. A `floor` that names it is left air; a `fill` that
+names it paints none of its box; a `walls` that names it is not built and takes up no rows, so a
+`door` or `window` cut into it is deferred; a `window` that names it is not cut, so its wall stays;
+and a `roof`, eave `stair`, `door`,
 `pressure_plate` or `chest` that names it is built from its default block. Were it a warning, a
 theme whose slots are all mistyped would still build at exit 0 every scope that keeps something to
 draw, such as a `roof`: shorter than asked, with no floor and no walls, and only default blocks,
@@ -251,9 +252,10 @@ repairs, which is why they are different codes: the same division `E_INCOMPLETE_
 absence is not reported, and its name is not looked up, so a label written there is
 `W_IGNORED_ARGUMENT` whatever slot it names ([§11.3](#113-error-vs-warning)).
 
-`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and `walls`
-reach the palette through the applied theme's slot map and have no default block, so a bare one
-contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
+`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor`, `walls`
+and a `fill` with no `fluid=` reach the palette through the applied theme's slot map and have no
+default block, so a bare one contributes no voxel. A `fill` with a `fluid=` pours that fluid and is
+not reported. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
 reported; that is how a narrow slit is punched through a wall without choosing a species for it. A
 `roof`, `stair`, `door`, `pressure_plate` or `chest` paints a default block and is not reported
 either.
@@ -291,16 +293,16 @@ without a pack. A front end with no target (the language server, or a `cairn che
 `--target`) raises neither, and leaves the token to the pack of the target that builds it
 ([§11.3](#113-error-vs-warning)).
 
-The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave
-`stair`, `door`, `pressure_plate` or `chest` is built from its default block. A `walls` is not built and
-takes up no rows, so a `door` or `window` cut into it is deferred. A `window` is not cut, so its
+The warning says how the member degrades. A `floor` leaves its cells air, a `fill` paints none of
+its box, and a `roof`, eave `stair`, `door`, `pressure_plate` or `chest` is built from its default
+block. A `walls` is not built and takes up no rows, so a `door` or `window` cut into it is deferred. A `window` is not cut, so its
 wall stays, and a port on it is refused with it
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
 all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
 or takes up rows, so no `door` or `window` is cut and the structure is shorter than asked. A `floor`
-leaves its cells air, and a `roof` is still built from its default block, as is an eave `stair`,
+leaves its cells air, a `fill` with a `mat_slot=` paints none of its box, and a `roof` is still built from its default block, as is an eave `stair`,
 `pressure_plate` or `chest` that still fits the shorter structure; one set higher than it reaches is
 deferred.
 It is judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported,
@@ -504,16 +506,18 @@ is not a non-negative integer, `walls` with no positive `height=`), a value outs
 takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair` whose `half=` is an
 identifier other than `top` or `bottom`), or arguments that put it outside its struct as written: a
 `window` past the end of its wall, a `door` or `window` whose rows no course of the walls holds, an
-eave `stair` above the struct or on one where no `roof` has an `overhang=` of at least 1. The struct
-as written is every member at the size its line asks for, whether or not it builds: a `roof` that
-draws nothing still rises and overhangs as its line says, and an unreadable value counts as the
-default its `W_IGNORED_ARGUMENT` puts in its place. A `roof` whose `kind=` or `slope_to=` does not
-read may rise as far as any roof on its footprint, and `walls` under a `level` that is not placed
-may hold any row, so a member only they could hold is deferred to them. A `circuit` line that
-reserves no region and an actuator patch that binds no door are refused the same way. [Redstone
-§14.2](/spec/redstone/#142-signal-binding) lists the lines that put a `pressure_plate` nowhere, which
-put a `chest` nowhere too, and for a plate the drop reaches past the block array as well: its `->` binding is still read, so its
-signal stays in the netlist with no plate to drive it, and the finding says so in a note.
+eave `stair` above the struct or on one where no `roof` has an `overhang=` of at least 1, or a
+`fill` with a corner outside the struct ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member at the
+size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
+overhangs as its line says, and an unreadable value counts as the default its `W_IGNORED_ARGUMENT`
+puts in its place. A `roof` whose `kind=` or `slope_to=` does not read may rise as far as any roof
+on its footprint, and `walls` under a `level` that is not placed may hold any row, so a member only
+they could hold is deferred to them. A `circuit` line that reserves no region and an actuator patch
+that binds no door are refused the same way. [Redstone §14.2](/spec/redstone/#142-signal-binding)
+lists the lines that put a `pressure_plate` nowhere, which put a `chest` nowhere too, and for a
+plate the drop reaches past the block array as well: its `->` binding is still read, so its signal
+stays in the netlist with no plate to drive it, and the finding says so in a note.
 
 A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with
 a note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws
@@ -872,27 +876,26 @@ printed before the warning.
 the vocabulary whose value the pass cannot read is dropped and a default put in its place, or, where
 the key itself decides whether the member is built at all, the member is left out instead under
 `W_DEFERRED_MEMBER` (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
-[§5.4](/spec/syntax/#54-selectors)).
-An **unread key**: a `key=` the keyword accepts and nothing reads where it is written, carried into
-the IR and never consulted. It comes in two kinds. An *unreached* key is one this specification
-defines that no pass reads yet. `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a
-header's `class=` and a `stair`'s `waterlogged=` are those keys today. Every `key=value` on the
-right of a `theme` selector row whose keyword the compiler knows is one too, reported on the binding
-whatever its key or value, since no pass lowers a selector's bindings yet
-([Materials and Themes](/spec/materials-themes/)). An
-*inapplicable* key is one every member accepts, on a keyword that puts down nothing it would be read
-for; `mat_slot=` on a `level`, `circuit`, `place` or `connect` is that key today. A `mat_slot=` of
-either kind is not looked up in the theme, so a slot name the theme does not declare is this warning
-rather than `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one
-the keyword reads only under some ways of writing a sibling argument, on a member that writes it
-another way. The boundary is the keyword: a spec-defined key on a keyword the compiler knows is
-reported this way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its
-arguments are not judged at all. All three make the build differ from the source. The rule forbids
-*silent* substitution, and all three are announced. For an unreached key the gap is the compiler's
-rather than the source's, which is why it is not a refusal. An inapplicable key is no gap at all:
-the key is one every member accepts and its value changes nothing in the build, so the warning asks
-for its removal, where a refusal would make a key every member accepts one that some refuse. Whether
-autofix is offered is up to the implementation.
+[§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
+reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
+*unreached* key is one this specification defines that no pass reads yet. `window shape=` /
+`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today. Every
+`key=value` on the right of a `theme` selector row whose keyword the compiler knows is one too,
+reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
+([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
+accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
+`circuit`, `place` or `connect` is that key today. A `mat_slot=` of either kind is not looked up in
+the theme, so a slot name the theme does not declare is this warning rather than
+`E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword
+reads only under some ways of writing a sibling argument, on a member that writes it another way.
+The boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this
+way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are
+not judged at all. All three make the build differ from the source. The rule forbids *silent*
+substitution, and all three are announced. For an unreached key the gap is the compiler's rather
+than the source's, which is why it is not a refusal. An inapplicable key is no gap at all: the key
+is one every member accepts and its value changes nothing in the build, so the warning asks for its
+removal, where a refusal would make a key every member accepts one that some refuse. Whether autofix
+is offered is up to the implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong wherever
 the member ends up, so it is a repair of its own, and holding the finding back until a refusal on

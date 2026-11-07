@@ -63,9 +63,10 @@ space on either side of a `,` inside the triple, two components alone, a fourth 
 A cell outside the footprint, or above the top row the scope as written reaches ([Compilation Model
 §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), is outside the scope. The member
 that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offset=` at or past its
-wall's length. No member reads a triple yet: `fill`, `raw_block`, `note_block` and the entities
-that take one are not keywords, and a key that reads an integer or a label refuses a triple as it
-refuses any value of the wrong kind.
+wall's length. A `fill`'s `from=` and `to=` read a triple
+([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)), and no other key does yet: `raw_block`,
+`note_block` and the entities that take one are not keywords, and a key that reads an integer or a
+label refuses a triple as it refuses any value of the wrong kind.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
@@ -192,9 +193,9 @@ under it belongs to no construct.
 means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
-building's geometry: `floor`, `walls`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `chest`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
-is global, so writing one in the other body parses and classifies and then reaches nothing. That is
+building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
+`pressure_plate`, `chest`, `circuit`. A `site` body describes a layout: `place`, `connect`. The
+keyword table is global, so writing one in the other body parses and classifies and then reaches nothing. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
 A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
 reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is

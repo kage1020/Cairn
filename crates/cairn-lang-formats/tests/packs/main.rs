@@ -10,3 +10,4 @@ mod declared_elsewhere;
 mod ids_exist;
 mod state_domain;
 mod states;
+mod waterlogged;

@@ -344,6 +344,10 @@ const SWEEP: &[(&str, &str)] = &[
     ("floor", "  floor id=f class=c mat_slot=m\n"),
     ("walls", "  walls id=w class=outer mat_slot=m height=3\n"),
     (
+        "fill",
+        "  fill id=f class=c mat_slot=m from=1,1,1 to=2,1,2\n  fill id=g fluid=water kind=source from=1,1,1 to=2,2,2\n",
+    ),
+    (
         "door",
         "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a hinge=left open=false\n",
     ),
@@ -357,7 +361,7 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "stair",
-        "  stair id=s class=c mat_slot=m kind=stairs side=front half=top facing=out shape=straight y=0\n",
+        "  stair id=s class=c mat_slot=m kind=stairs side=front half=top facing=out shape=straight y=0 waterlogged=false\n",
     ),
     ("level", "  level id=l class=c y=0\n"),
     (
@@ -366,7 +370,7 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "chest",
-        "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single\n",
+        "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single waterlogged=false\n",
     ),
     ("circuit", "  circuit id=c class=c region=r void=2\n"),
     (
@@ -495,8 +499,7 @@ fn a_stair_reads_the_height_it_is_written_at() {
 
 #[test]
 fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // Each is written on a known keyword in `spec/entities` "Anchor conventions" or the prose of
-    // `spec/blockstate` "`waterlogged`".
+    // Each is written on a known keyword in `spec/entities` "Anchor conventions".
     let rows = [
         ("window side=front y=2 offset=4 size=3x3", "shape", "arch"),
         (
@@ -506,7 +509,6 @@ fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() 
         ),
         ("roof kind=gable", "footprint", "struct"),
         ("roof kind=gable", "bounds", "expand"),
-        ("stair kind=stairs side=front", "waterlogged", "false"),
     ];
     for (line, key, value) in rows {
         let keyword = keyword_of(line);
@@ -544,11 +546,14 @@ fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() 
 }
 
 #[test]
-fn a_state_override_on_a_member_that_lays_many_blocks_is_refused() {
-    // `spec/blockstate` "`waterlogged`" takes the key on a member that places one block.
+fn waterlogged_on_a_member_with_no_one_block_to_hold_water_is_refused() {
+    // `spec/blockstate` "`waterlogged`" takes the key only on a line naming one block that holds it.
     for line in [
+        "door side=front at=center waterlogged=false",
+        "pressure_plate at=front.outside offset=0 y=0 waterlogged=false",
         "roof kind=gable waterlogged=false",
         "window side=front y=2 offset=4 size=3x3 waterlogged=false",
+        "fill fluid=water from=0,0,0 to=1,0,1 waterlogged=false",
     ] {
         let src = format!("struct s size=9x9\n  {line}\n");
         let d = exactly_one(diagnose(&src));

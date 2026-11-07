@@ -216,6 +216,7 @@ pub(super) fn port_world_position<S: BuildHasher>(
         // No `_` arm, so a new `MemberRole` has to be classified here.
         MemberRole::Floor
         | MemberRole::Walls
+        | MemberRole::Fill
         | MemberRole::Roof
         | MemberRole::Stair
         | MemberRole::Level

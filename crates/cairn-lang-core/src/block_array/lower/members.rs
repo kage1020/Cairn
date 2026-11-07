@@ -121,9 +121,14 @@ pub(super) enum MemberDisposition {
 /// Where a member's role puts it, per `spec/compilation` "Phase evaluation".
 ///
 /// Every role is spelled out, so a new one fails the compile here instead of panicking later.
-pub(super) fn member_disposition(role: &MemberRole) -> MemberDisposition {
-    match role {
-        MemberRole::Floor | MemberRole::Walls => MemberDisposition::Paints(Phase::Massing),
+pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
+    match &member.role {
+        MemberRole::Fill if member.written("fluid").is_some() => {
+            MemberDisposition::Paints(Phase::Fluids)
+        }
+        MemberRole::Floor | MemberRole::Walls | MemberRole::Fill => {
+            MemberDisposition::Paints(Phase::Massing)
+        }
         MemberRole::Roof | MemberRole::Stair => MemberDisposition::Paints(Phase::Envelope),
         MemberRole::Door | MemberRole::Window => MemberDisposition::Paints(Phase::Openings),
         MemberRole::PressurePlate | MemberRole::Chest => MemberDisposition::Paints(Phase::Fixtures),
@@ -222,6 +227,7 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         MemberRole::Roof => Some("level-scoped `roof` is not yet supported"),
         // A level-scoped `circuit` region is not shifted: its recogniser takes no `y_offset`.
         MemberRole::Walls
+        | MemberRole::Fill
         | MemberRole::Door
         | MemberRole::Window
         | MemberRole::Stair

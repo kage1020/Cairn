@@ -1,5 +1,5 @@
-//! `E_MISSING_MATERIAL`: a `floor` or `walls` with no `mat_slot=` paints nothing, so it is an
-//! error at the member; a present but unusable `mat_slot=` is another code's finding.
+//! `E_MISSING_MATERIAL`: a `floor`, `walls` or material `fill` with no `mat_slot=` paints nothing,
+//! so it is an error at the member; a present but unusable `mat_slot=` is another code's finding.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -222,6 +222,9 @@ site x:\n  floor\n"
 const PAINTERS: &[(&str, &str, &str)] = &[
     ("floor", "floor id=extra", ""),
     ("walls", "walls class=inner height=2", ""),
+    ("fill", "fill from=1,1,1 to=1,1,1", ""),
+    // A pour names its fluid instead of a material.
+    ("fill", "fill fluid=water from=1,1,1 to=1,1,1", ""),
     ("door", "door id=d side=front at=center", ""),
     (
         "window",
@@ -315,6 +318,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         match role {
             MemberRole::Floor
             | MemberRole::Walls
+            | MemberRole::Fill
             | MemberRole::Door
             | MemberRole::Window
             | MemberRole::Roof
@@ -333,6 +337,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
     let roles = [
         MemberRole::Floor,
         MemberRole::Walls,
+        MemberRole::Fill,
         MemberRole::Door,
         MemberRole::Window,
         MemberRole::Roof,

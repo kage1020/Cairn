@@ -15,6 +15,9 @@ use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Anchor, Fixture, Refusal, fixture_cell, outside_the_array};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{StructCtx, default_block_id, resolve_member_state};
+use super::waterlogged::{
+    WrittenWaterlogged, keep_waterlogged, read_waterlogged, waterlogged_state,
+};
 
 /// Catalog token a `chest`'s default material comes from; the pack spells it per edition.
 pub(super) const CHEST_TOKEN: &str = "chest.default";
@@ -74,11 +77,13 @@ impl Toward {
     }
 }
 
-/// The `facing=` and `size=` a chest's line writes, read before anything can refuse it.
+/// The `facing=`, `size=` and `waterlogged=` a chest's line writes, read before anything can
+/// refuse it.
 #[derive(Debug, Clone, Copy)]
 struct WrittenStates<'m> {
     facing: Option<&'m str>,
     size: Option<&'m str>,
+    waterlogged: Option<WrittenWaterlogged<'m>>,
 }
 
 /// Stand a `chest`'s chest block against its wall, facing away from it unless its line turns it.
@@ -98,17 +103,27 @@ pub(super) fn fill_chest(
             None
         })
     };
+    let facing = read(
+        "facing",
+        "`in`, `out`, `left` or `right`",
+        "the chest faces away from the wall it stands by",
+    );
+    let size = read(
+        "size",
+        "`single`",
+        "the chest pairs with the chest beside it, as it does without `size=`",
+    );
+    let waterlogged = read_waterlogged(member).unwrap_or_else(|argument| {
+        unread.push((
+            argument,
+            "the chest holds water where a water `fill` overlaps it, as with `waterlogged=auto`",
+        ));
+        None
+    });
     let written = WrittenStates {
-        facing: read(
-            "facing",
-            "`in`, `out`, `left` or `right`",
-            "the chest faces away from the wall it stands by",
-        ),
-        size: read(
-            "size",
-            "`single`",
-            "the chest pairs with the chest beside it, as it does without `size=`",
-        ),
+        facing,
+        size,
+        waterlogged,
     };
     let built = match place_chest(member, written, y_offset, ctx, palette, canvas, diagnostics) {
         Ok(()) => true,
@@ -162,6 +177,7 @@ fn place_chest(
             )));
         }
     };
+    let waterlogged = waterlogged_state(member, written.waterlogged)?;
     let (anchor, cell) = fixture_cell(CHEST, member, y_offset, ctx)?;
     let id = chest_block_id(member, ctx, diagnostics)?;
     let side = anchor.side();
@@ -177,6 +193,7 @@ fn place_chest(
     if single {
         properties.insert("type".to_owned(), "single".to_owned());
     }
+    keep_waterlogged(&mut properties, waterlogged);
     let state = BlockState { id, properties };
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {

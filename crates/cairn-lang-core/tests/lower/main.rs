@@ -10,6 +10,7 @@ mod connections;
 mod cottage;
 mod door_block;
 mod door_wall_fit;
+mod fill;
 mod intent;
 mod l_walkway;
 mod level_scoped_members;

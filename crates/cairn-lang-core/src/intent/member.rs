@@ -138,6 +138,7 @@ impl MemberRole {
                 BodyKind::Geometry,
                 Self::Floor
                 | Self::Walls
+                | Self::Fill
                 | Self::Door
                 | Self::Window
                 | Self::Roof
@@ -153,6 +154,7 @@ impl MemberRole {
                 BodyKind::Site,
                 Self::Floor
                 | Self::Walls
+                | Self::Fill
                 | Self::Door
                 | Self::Window
                 | Self::Roof
@@ -172,6 +174,7 @@ impl MemberRole {
         match self {
             Self::Floor => "floor",
             Self::Walls => "walls",
+            Self::Fill => "fill",
             Self::Door => "door",
             Self::Window => "window",
             Self::Roof => "roof",

@@ -1245,6 +1245,10 @@ const SLOT_READERS: &[(&str, &str)] = &[
     ("floor", "struct s size=3x3\n  floor mat_slot=f\n"),
     ("walls", "struct s size=3x3\n  walls mat_slot=w height=2\n"),
     (
+        "fill",
+        "struct s size=3x3\n  fill from=0,0,0 to=2,0,2 mat_slot=f\n",
+    ),
+    (
         "window",
         "struct s size=5x5\n  window side=front y=1 offset=1 size=1x1 mat_slot=g\n",
     ),

@@ -8,6 +8,7 @@ use crate::block_array::PaletteIndex;
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::chest::fill_chest;
 use super::door::{HungDoor, fill_door};
+use super::fill::fill_material;
 use super::members::{StructCtx, palette_index_for};
 use super::plate::fill_pressure_plate;
 use super::roof_fill::fill_roof;
@@ -58,6 +59,7 @@ pub(super) fn paint_member(
             fill_walls(ctx, height, y_offset, idx, canvas);
         }
         // `flatten_members` drops a `roof` at a non-zero offset, so this is the struct's plane.
+        MemberRole::Fill => fill_material(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Door => {
