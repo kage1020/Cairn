@@ -134,7 +134,7 @@ pub(super) fn resolve_place_anchor(
     placed: &IndexMap<String, PlacedBody>,
     site_name: &str,
 ) -> (Option<PlaceAnchor>, Option<UnreadArgument>) {
-    if let Some(value) = member.intent_state.get("at")
+    if let Some(value) = member.arguments.get("at")
         && matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
     {
         return (Some(PlaceAnchor::WorldOrigin), None);
@@ -153,7 +153,7 @@ pub(super) fn resolve_place_anchor(
     };
     let prior = |key: &str| {
         member
-            .intent_state
+            .arguments
             .get(key)
             .and_then(|v| v.value.as_label_str())
             .and_then(|target| placed.get(&place_scope_key(site_name, target)))

@@ -307,7 +307,7 @@ pub(crate) fn floor_refusing_target<'a>(
     {
         return Some(FloorRefusal::Unplaceable(floor));
     }
-    let target_key = i64::from(target.version_int());
+    let target_key = target.order_key();
     floors
         .iter()
         .find(|floor| order.verdict(&floor.version, target_key) == FloorVerdict::Below)

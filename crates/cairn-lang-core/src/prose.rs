@@ -60,7 +60,9 @@ fn value_text(value: &Value) -> String {
         ValueKind::Bool(flag) => flag.to_string(),
         ValueKind::Int(number) => number.to_string(),
         ValueKind::Size { w, h } => format!("{w}x{h}"),
+        ValueKind::Coord { x, y, z } => format!("{x},{y},{z}"),
         ValueKind::Token(token) => format!("@{token}"),
+        ValueKind::BlockId(id) => id.clone(),
         ValueKind::DotRef(reference) => reference.to_string(),
         ValueKind::Str(text) => format!("\"{text}\""),
         ValueKind::List(items) => {

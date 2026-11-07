@@ -345,7 +345,7 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
     let src = site(&format!("{WALLS}  door id=p side=front at=3\n"), 6);
     let out = lowered(&src);
     let clause =
-        "has an `at=` that is not one of center, left, right (numeric offsets are reserved)";
+        "has `at=3`, which is not one of center, left, right (numeric offsets are reserved)";
     let notes = skip_notes(&src, &out);
     assert_eq!(notes.len(), 1, "{notes:#?}");
     assert_eq!(

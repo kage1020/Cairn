@@ -15,9 +15,6 @@ const WINDOW: &str = "  walls mat_slot=wall height=4\n  window side=front y=1 of
 
 const ROOF: &str = "  walls mat_slot=wall height=3\n  roof kind=gable mat_slot=roof %ARGUMENT%\n";
 
-/// An eave band, with the walls and overhanging roof a `stair` needs.
-const STAIR: &str = "  walls mat_slot=wall height=3\n  roof kind=gable mat_slot=roof overhang=1\n  stair kind=stairs mat_slot=roof side=front %ARGUMENT%\n";
-
 /// One fixture per unreached key, other than `mat_slot`, which `unread_mat_slot.rs` covers.
 struct Fixture {
     keyword: &'static str,
@@ -53,13 +50,6 @@ const FIXTURES: &[Fixture] = &[
         unreached: "bounds=expand",
         read: "overhang=1",
         body: ROOF,
-    },
-    // `false` is the state the stair is built in, so the fixture writes the other value.
-    Fixture {
-        keyword: "stair",
-        unreached: "waterlogged=true",
-        read: "half=bottom",
-        body: STAIR,
     },
 ];
 

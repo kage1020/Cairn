@@ -37,7 +37,15 @@
         "required": true,
         "types": [
           {
+            "type": "block_id",
+            "named": true
+          },
+          {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "coordinate",
             "named": true
           },
           {
@@ -146,6 +154,21 @@
     }
   },
   {
+    "type": "block_id",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "state_literal",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "boolean",
     "named": true,
     "fields": {}
@@ -222,6 +245,10 @@
       "types": [
         {
           "type": "assert_stmt",
+          "named": true
+        },
+        {
+          "type": "edition_guard",
           "named": true
         },
         {
@@ -311,6 +338,64 @@
   },
   {
     "type": "directive_name",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "edition_guard",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "edition_guard_body",
+            "named": true
+          }
+        ]
+      },
+      "edition": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "edition_name",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "edition_guard_body",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "assert_stmt",
+          "named": true
+        },
+        {
+          "type": "logic_decl",
+          "named": true
+        },
+        {
+          "type": "member_stmt",
+          "named": true
+        },
+        {
+          "type": "member_stmt_with_body",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "edition_name",
     "named": true,
     "fields": {}
   },
@@ -919,6 +1004,10 @@
           "named": true
         },
         {
+          "type": "edition_guard",
+          "named": true
+        },
+        {
           "type": "logic_decl",
           "named": true
         },
@@ -1279,6 +1368,10 @@
     "named": false
   },
   {
+    "type": "bedrock",
+    "named": false
+  },
+  {
     "type": "bit",
     "named": true
   },
@@ -1296,6 +1389,10 @@
     "extra": true
   },
   {
+    "type": "coordinate",
+    "named": true
+  },
+  {
     "type": "def",
     "named": false
   },
@@ -1306,6 +1403,10 @@
   {
     "type": "dont_care",
     "named": true
+  },
+  {
+    "type": "edition",
+    "named": false
   },
   {
     "type": "eventually",
@@ -1321,6 +1422,10 @@
   },
   {
     "type": "intended_targets",
+    "named": false
+  },
+  {
+    "type": "java",
     "named": false
   },
   {

@@ -1,0 +1,24 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# A glass-fronted tank on a sand bed, filled with water.
+# Demonstrates: fill painting a box with a material, fill pouring water around
+# what stands in its box, the panes and chest the water waterlogs, and
+# waterlogged=false keeping a chest dry.
+
+theme reef:
+  slot floor -> @smooth_stone
+  slot wall  -> @cobblestone
+  slot glass -> @glass_pane
+  slot bed   -> @sand
+
+struct aquarium size=7x5
+  floor  mat_slot=floor
+  walls  mat_slot=wall height=4
+  window side=front offset=2 y=2 size=3x2 mat_slot=glass
+  fill   id=bed mat_slot=bed from=1,1,1 to=5,1,3
+  chest  id=sunken at=inside.back offset=2 y=2
+  # An air pocket: the water around it leaves this chest dry.
+  chest  id=dry at=inside.back offset=4 y=2 waterlogged=false
+  # Over the whole footprint, so the panes in the front wall hold water too.
+  fill   id=water fluid=water from=0,2,0 to=6,3,4

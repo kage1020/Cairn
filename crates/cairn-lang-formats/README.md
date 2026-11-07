@@ -1,12 +1,12 @@
 # cairn-lang-formats
 
-Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids a given `(edition, version)` actually has.
+Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has.
 
 Each format is a serializer or deserializer around the **block-array IR**, which the specification names as the universal pivot ([architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/)). Adding a format means adding a backend here — the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
 
 ## Status
 
-Java vanilla `.nbt` and Bedrock `.mcstructure` writers ship, and so do the built-in registry packs behind `cairn info` and every id check. The Bedrock writer translates blockstate properties into Bedrock's `states` vocabulary for the families [`bedrock_state`](src/bedrock_state.rs) covers; a property outside that vocabulary is a hard error (`BedrockStructureError::State`), and intent Bedrock can only approximate (stair `shape`) is dropped with a `W_INTENT_DEGRADED` parity note rather than in silence.
+Java vanilla `.nbt` and Bedrock `.mcstructure` writers ship, and so do the built-in registry packs behind `cairn info` and every id check. The Bedrock writer translates each palette entry's canonical blockstate, which is Java's, into the target version's Bedrock block and `states` through the built-in pack's state map ([`bedrock_state`](src/bedrock_state.rs)). A state the map has no form for, or one the Java block does not have, is a hard error (`BedrockStructureError::State`); intent a version can only approximate (stair `shape` before 1.26.60) is dropped with a `W_INTENT_DEGRADED` parity note rather than in silence; and `waterlogged` becomes the structure's water layer.
 
 Litematica `.litematic` and WorldEdit `.schem` are still to land, and no reverse-direction (file → IR) backend ships yet.
 
@@ -24,23 +24,23 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `java_structure::OutputExt` | `Nbt` / `Mcstructure`. The only way to name an output extension, so no caller ends up with `.nbt.nbt`. |
 | `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `PaletteIndexOutOfRange`, `DimensionOverflow`, `VolumeOverflow`, `ListTooLong`, `VoxelCountMismatch`, `UnencodablePaletteString`. `#[non_exhaustive]`. |
 | `java_structure::Compound` | [`cairn-lang-nbt`](../cairn-lang-nbt/README.md)'s tag compound, passed through so building a tag tree needs one dependency rather than two. |
-| `bedrock_structure::prepare_mcstructure` / `bedrock_structure::McStructure` | Check a `BlockArray` against the Bedrock backend and the NBT encoder and translate its palette, returning the parity notes alongside; `McStructure::write` then writes the `.mcstructure`, encoding both `block_indices` layers from the grid as it goes, and can fail only on I/O. |
+| `bedrock_structure::prepare_mcstructure` / `bedrock_structure::McStructure` | Check a `BlockArray` against the Bedrock backend and the NBT encoder and translate its palette through the target version's state map, returning the parity notes alongside; `McStructure::write` then writes the `.mcstructure`, encoding both `block_indices` layers from the grid as it goes, and can fail only on I/O. |
 | `bedrock_structure::build_mcstructure_tag` | `BlockArray` → `(Compound, Vec<ParityNote>)` (Bedrock `.mcstructure` shape). Both per-voxel layers as tags, so for inspecting a structure rather than writing a large one. |
 | `bedrock_structure::write_mcstructure` | Uncompressed little-endian write of a built root. |
-| `bedrock_structure::ParityNote` | One intent a palette entry dropped to fit Bedrock: the entry's `id` and `states`, spelled as `portability::PortabilityReport::degraded`'s entries spell them, and the `dropped` intent, which `bedrock_state::degradation_detail` words. The caller surfaces it as `W_INTENT_DEGRADED`; the serializer has no source span, so attributing the note to a structure scope is the caller's job. `#[non_exhaustive]`. |
+| `bedrock_structure::ParityNote` | One intent a palette entry dropped to fit Bedrock: the entry's `id` and `states`, spelled as `portability::PortabilityReport::degraded`'s entries spell them, and the `dropped` intent, worded by the pack's `sensitivity` row for it. The caller surfaces it as `W_INTENT_DEGRADED`; the serializer has no source span, so attributing the note to a structure scope is the caller's job. `#[non_exhaustive]`. |
 | `bedrock_structure::BedrockStructureError` | `Nbt`, `AbstractPaletteEntry`, `State`, `PaletteIndexOutOfRange`, `DimensionOverflow`, `VolumeOverflow`, `ListTooLong`, `VoxelCountMismatch`, `UnencodablePaletteString`. `#[non_exhaustive]`. |
-| `bedrock_state::translate_states` | One Java blockstate → the Bedrock `states` compound, or the reason it cannot be one. |
-| `bedrock_state::StateTranslation` | A successful translation: the typed `states` compound, plus one entry per piece of intent Bedrock cannot express. Empty `degraded` means lossless. |
-| `bedrock_state::BedrockStateError` | `UnmappableBlock`, `UnknownStairState`, `UnknownStairKey` — each carrying the what-is-wrong / what-is-valid / suggested-fix triple the lint loop reads. |
+| `bedrock_state::translate_states` | One canonical blockstate → its Bedrock block at one version's state map, or the reason it cannot be one. |
+| `bedrock_state::StateTranslation` | A successful translation: the Bedrock id, the typed `states` compound, whether the cell holds water, and one entry per piece of intent the version cannot express. Empty `degraded` means lossless. |
+| `bedrock_state::BedrockStateError` | `Unmapped`, `UnknownProperty`, `UnknownValue` — each carrying the what-is-wrong / what-is-valid / suggested-fix triple the lint loop reads. |
 | `data_version::JavaTarget` / `data_version::resolve_java_target` | `--target <mc_version>` → `(mc_version, DataVersion)`. |
-| `data_version::BedrockTarget` / `data_version::resolve_bedrock_target` | `--target <mc_version>` → `(mc_version, block_version)`. |
+| `data_version::BedrockTarget` / `data_version::resolve_bedrock_target` | `--target <mc_version>` → `(mc_version, order_key, block_version)`: the release's key in Bedrock's version order, and the block-state version its structures carry, which several releases can share. |
 | `data_version::UnsupportedTarget` | A `--target` no version table matched: which edition was consulted, the value given, the nearest candidate when one is close enough to suggest, and the supported list. |
 | `portability::portability_for_java` | `PortabilityReport` for Java: how many palette entries are portable, degraded, or unsupported, and which. |
 | `portability::portability_for_bedrock` | The same for Bedrock, or `InvalidPalette` when the palette carries states the pack should have refused. |
 | `portability::PortabilityReport` | The counts and both entry lists, kept together so the figure and the list can never describe different palettes. Fields are private for that reason. |
 | `portability::PortabilityCounts` | `portable` / `degraded` / `unsupported`, as `u32` palette-entry counts. |
 | `portability::InvalidPalette` | Returned instead of counts when the palette is not one a build could have produced. Carries every refusal, unreworded, because they are one bug's symptoms. |
-| `registry::builtin_pack` | The block, alias, material, and data-version tables for one edition, built in and parsed once per process. |
+| `registry::builtin_pack` | The block, alias, absence, material, connection, and data-version tables for one edition, and Bedrock's state maps, built in and parsed once per process. |
 | `registry::load_builtin_pack` | The same pack as a `Result`, for a caller that wants the parse error rather than the panic. |
 | `registry::load_from_dir` | The same tables from an external pack directory. Loads it as a Java pack; there is no Bedrock equivalent yet. |
 | `registry::RegistryPack` | A loaded and validated pack. Its fields are private and read through accessors, so a pack cannot be built without passing the validators or changed after. |
@@ -51,7 +51,14 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 
 ## Registry packs
 
-A pack is the closed vocabulary every id-level answer comes from: which blocks exist in a version, which name a renamed block goes by there, and which canonical token an abstract material resolves to. `registry-data/<edition>/pack.json` holds the built-in pair, and `load_from_dir` takes an external one. Each table carries a `schema_version` the loader refuses to read past, so a pack written for a newer Cairn fails loudly instead of being half-understood.
+A pack is the closed vocabulary every id-level answer comes from: which blocks exist in a version and the values each of their states takes, which name a renamed block goes by there, and which canonical token an abstract material resolves to. The Bedrock pack also carries its state maps: `states.json`, how each version writes the canonical states, and the hand-written `sensitivity.json`, what dropping a state no Bedrock state reads costs. Both carry `connections.json`, what each block is to the rules that join panes, fences and walls to their neighbours, and the hand-written `absent.json`, the other edition's blocks this one has no counterpart for, each with the reason `E_PARITY_UNSUPPORTED` prints. `registry-data/<edition>/pack.json` holds the built-in pair, and `load_from_dir` takes an external one. Each table carries a `schema_version` the loader refuses to read past, so a pack written for a newer Cairn fails loudly instead of being half-understood.
+
+The block tables are extracted from the game, and so is the integer each targetable row of a version table writes, Java's `data_version` and Bedrock's `block_version`: Java's from the server jar's `--reports`, Bedrock's from the block palette GeyserMC ships for the release, pinned by commit and SHA-256. Bedrock's state maps come from GeyserMC's Java-to-Bedrock mappings, pinned the same way, read against the `--reports` of the Java release each one follows. Both editions' connection tables are read off the block tags of that Java release's server jar and the block models of its client jar. `pack.json` records the file each table came from, under an `extracted` key the compiler does not read. To regenerate an edition's tables, or check the committed ones with `--check`:
+
+```sh
+python3 .github/scripts/extract_registry.py java --java <a Java 25 or later>
+python3 .github/scripts/extract_registry.py bedrock --java <a Java 25 or later>
+```
 
 Because the tables are closed, a suggestion cannot name a block that does not exist in the target — the "valid candidates" half of a diagnostic is looked up, never generated ([principles P3](https://cairn.kage1020.com/spec/principles/)).
 

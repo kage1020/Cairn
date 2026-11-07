@@ -72,12 +72,30 @@ module.exports = grammar({
     struct_body: $ => body(
       $,
       choice($.member_stmt, $.logic_decl, $.assert_stmt),
-      $.member_stmt_with_body,
+      choice($.member_stmt_with_body, $.edition_guard),
     ),
 
     def_body: $ => body(
       $,
       choice($.requires_stmt, $.member_stmt, $.logic_decl, $.assert_stmt),
+      choice($.member_stmt_with_body, $.edition_guard),
+    ),
+
+    // Core's check, not the grammar, refuses a line in it other than a raw member.
+    edition_guard: $ => seq(
+      '@',
+      'edition',
+      field('edition', $.edition_name),
+      $._newline,
+      field('body', $.edition_guard_body),
+    ),
+
+    edition_name: _ => choice('java', 'bedrock'),
+
+    // A guard does not nest, so its own lines leave out `edition_guard`.
+    edition_guard_body: $ => body(
+      $,
+      choice($.member_stmt, $.logic_decl, $.assert_stmt),
       $.member_stmt_with_body,
     ),
 
@@ -229,7 +247,20 @@ module.exports = grammar({
 
     attribute_list: $ => repeat1($.attribute),
 
-    attribute: $ => seq(field('key', $.identifier), '=', field('value', $._value)),
+    attribute: $ => seq(
+      field('key', $.identifier),
+      '=',
+      field('value', choice($.coordinate, $.block_id, $._value)),
+    ),
+
+    // One token, so a selector's `y=2,side=front` still reads `2` and then a separator.
+    coordinate: _ => token(/[0-9]+,[0-9]+,[0-9]+/),
+
+    // One token, so a space on either side of the `:` leaves a name and a stray `:`.
+    block_id: $ => seq(
+      token(/[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*/),
+      optional($.state_literal),
+    ),
 
     // Only an undotted token takes a state literal; a `[` after a space starts a nested list.
     material_ref: $ => choice(
