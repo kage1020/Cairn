@@ -199,9 +199,10 @@ maps, from GeyserMC's Java-to-Bedrock mappings, pinned the same way, and reads t
 the Java release each mapping follows to name its states, so the Bedrock run needs Java 25 as well.
 For both editions it derives `connections.json`, what each block is to the rules that join panes,
 fences and walls, from the block tags in that Java release's server jar and the block models in its
-client jar, which it downloads beside the server jar. It rewrites the edition's `blocks.json`, the
-targetable rows' integers and `latest` in `data_versions.json`, Bedrock's `states.json`,
-`connections.json`, and the `extracted` record in `pack.json`.
+client jar, which it downloads beside the server jar. It rewrites the edition's `blocks.json`, each
+targetable row's `data_version` on Java or `block_version` on Bedrock and `latest` in
+`data_versions.json`, Bedrock's `states.json`, `connections.json`, and the `extracted` record in
+`pack.json`.
 
 ```sh
 python3 .github/scripts/extract_registry.py java --java <path to Java 25>
