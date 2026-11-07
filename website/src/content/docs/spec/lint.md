@@ -660,10 +660,9 @@ was, and what the build lost, is said only on stderr.
 One `info` refusal is a run-level refusal of the same kind: a palette carrying a blockstate a
 registry pack was expected to refuse costs that edition its portability row, and names no span in
 the source. Such a blockstate is either a leak in the pack or the compiler, which the author cannot
-repair, or a state literal on a stair in the source (a `facing` or `half` value outside the Java
-domain such as `@oak_stairs[facing=up]`, or a key other than `facing` / `half` / `shape`), which
-nothing checks against the target until `E_STATE_DOMAIN` is implemented. The refusal names both. A
-literal on any other block is counted `unsupported` instead. It reads as prose on stderr in both
+repair, or a state literal in the source (a property the Java block does not have, or a value
+outside its domain such as `@oak_stairs[facing=up]`), which nothing checks against the target until
+`E_STATE_DOMAIN` is implemented. The refusal names both. It reads as prose on stderr in both
 formats. The document is still written, since the promise is one document per input, not one element
 per refusal, so a run refused by nothing else writes `{"diagnostics": []}` and says the rest with
 its exit code.
