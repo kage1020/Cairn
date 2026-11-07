@@ -68,10 +68,10 @@ comes next, `mat_slot=@a[1]` would leave a bare value on a member line that read
 `E_UNEXPECTED_POSITIONAL`, and `mat_slot=[@a[b]]` would put a list where a label belongs, which is
 `E_TYPE_MISMATCH_LABEL`.
 
-The literal's properties and values are not yet checked against the target: `E_STATE_DOMAIN`
-([Versioning and Editions](/spec/versioning-editions/)) is not implemented, so a Java build writes
-`@oak_log[axis=q]` as written. Each literal the build reads earns a `W_STATE_LITERAL_UNCHECKED`
-([Lint](/spec/lint/)) on the token, so that is said rather than silent.
+A build that pins a version checks the literal's properties and values against the states its
+block takes there, so `@oak_log[axis=q]` is `E_STATE_DOMAIN` ([Lint](/spec/lint/)), naming `x`, `y`
+and `z` ([Versioning and
+Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)).
 
 Besides that literal, the one place a comma carries meaning is the input list of
 `assert truth(...)`, where it separates the signals whose count the row width is checked against. A

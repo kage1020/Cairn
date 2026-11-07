@@ -16,7 +16,7 @@ use super::canvas::ScopePalette;
 use super::phase::Phase;
 use super::roof_kind::roof_line_refused;
 use super::token_diag::{
-    MemberFallback, TokenSite, diag_abstract_token, diag_state_literal_unchecked,
+    MemberFallback, TokenSite, check_state_literal, diag_abstract_token,
     diag_unknown_abstract_token, diag_unknown_id,
 };
 use super::written::Written;
@@ -254,8 +254,7 @@ pub(super) fn resolve_member_state(
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
         Ok(state) => {
-            diagnostics.extend(diag_state_literal_unchecked(slot_value, &state));
-            Some(state)
+            check_state_literal(slot_value, &state, registry, diagnostics).then_some(state)
         }
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(

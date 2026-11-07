@@ -153,12 +153,8 @@ dropping are forbidden. An error returns the closed set of candidates valid in t
 minimum version, and a suggested fix. That sends the model back to registry-derived candidates
 rather than to its memory.
 
-Out-of-domain states are not yet enforced: `E_STATE_DOMAIN` below is not implemented, although the
-packs carry each block's states ([§10.3](#103-backend--data-tables)). Until it is, a state literal
-([Syntax](/spec/syntax/)) is written as given, and every one earns `W_STATE_LITERAL_UNCHECKED`
-([Lint](/spec/lint/)) instead. `E_PARITY_UNSUPPORTED` below is not implemented either
-([§10.7](#writing-an-alternative)). Nor does an error name a minimum version yet, although the
-tables say which version first declares an ID
+`E_PARITY_UNSUPPORTED` below is not implemented ([§10.7](#writing-an-alternative)). Nor does an
+error name a minimum version yet, although the tables say which version first declares an ID
 ([below](#which-registry-an-unknown-id-is-unknown-to)).
 
 ```text
@@ -168,12 +164,36 @@ E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
 E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
   Valid java targets: 1.21.4. Fix: --target 1.21.4, or lower the @requires floor
 
-E_STATE_DOMAIN line 18: wall north=true invalid for 1.21.4. Valid: none, low, tall (changed from boolean in 1.16).
-  Suggested DSL: wall_segment id=yard_wall connect_north=low
+E_STATE_DOMAIN line 18: minecraft:creaking_heart has no state `active` at java 26.3. Valid: axis, creaking_heart_state, natural.
+  `active=true` is valid at 1.21.4. Fix: --target 1.21.4, or correct the state literal
 
 E_PARITY_UNSUPPORTED line 8: text_display is Java-only (since 1.19.4); Bedrock has no display entity.
   Suggested: sign side=front text="Inn", or slot+theme fallback, or @edition java guard
 ```
+
+### A state is checked against its block's states at the target
+
+Every property and value of a block state a member resolves to is checked against the states its
+block takes at the pinned version, and one outside them is `E_STATE_DOMAIN` ([Lint](/spec/lint/)).
+On Java those are the `blocks` table's. On Bedrock they are the canonical vocabulary the version's
+state map reads ([Folding the matrix](#folding-the-edition-version-matrix)), since a palette entry
+carries Java's states until the writer maps them; an ID no Java block maps onto there, or one whose
+states the version's palette refuses, has none, and a state on it is `E_STATE_UNMAPPED` instead. The
+check runs where the ID check runs and nowhere else
+([below](#which-registry-an-unknown-id-is-unknown-to)): a lowering with no version pinned leaves
+both to a build that pins one.
+
+A state literal ([Syntax](/spec/syntax/)) is checked at its token, and the member or walkway that
+binds it is not built. The finding names the pair, the values the property takes, or the properties
+the block has when it has no such property, and the other versions whose tables take the pair: a
+domain that changed between releases is the likeliest cause of a literal that is valid somewhere,
+and the repair is then a target rather than an edit. Lowering checks the states it derives as well
+(a stair's `facing`, `half` and `shape`), at the member, so a derivation the target's block cannot
+hold is refused rather than written; that is a defect in Cairn, and the finding says so.
+
+A literal on a block the pinned target's pack records no states for is written as given, with
+`W_STATE_LITERAL_UNCHECKED` ([Lint](/spec/lint/)) so that it is said rather than silent. Both
+built-in packs record every block's states, so only an external pack can leave one unrecorded.
 
 ### Which registry an unknown ID is unknown to
 
@@ -640,8 +660,9 @@ block entity. The note adds the versions that lose it; the build names its own t
 Two further failures can reach the state translator: a property the Java block does not have, and a
 value outside its domain (`facing=up` on a stair). Neither is an answer about the edition. No
 validated registry pack produces either, so each comes from a state literal in the source, which
-nothing checks against the target yet (`W_STATE_LITERAL_UNCHECKED`,
-[§10.4](#104-fail-loud-and-minimum-version-inference)), or from a defect in the pack or in Cairn.
+`E_STATE_DOMAIN` refuses at every pinned target but the range-wide lowering this row reads does not
+check ([§10.4](#a-state-is-checked-against-its-blocks-states-at-the-target)), or from a defect in
+the pack or in Cairn.
 
 So they are not a third and fourth reason for `unsupported`. `cairn info` reports **no** portability
 figures for an edition whose palette carries one. The counts would still be computable, and they

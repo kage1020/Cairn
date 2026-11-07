@@ -18,7 +18,8 @@ use serde::Serialize;
 
 pub use lower::{BUILTIN_BLOCK_IDS, findings_without_target, lower_to_block_array};
 pub use material::{
-    BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
+    BlockIdSet, DomainFault, IdOrigin, MaterialDeferred, OutOfDomain, StateDomain, TargetRegistry,
+    UnknownId, resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.

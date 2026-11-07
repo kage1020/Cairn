@@ -163,7 +163,7 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 **Reserved codes.** The codes a stable command raises are the ones
 [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists. The redstone pipeline's codes, which only the
 Internal `cairn synth` raises, are outside that catalog on purpose. Any other code the spec names,
-such as `E_STATE_DOMAIN` or `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
+such as `E_PARITY_UNSUPPORTED` or `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
 reserved code lands with the meaning the spec states for it, where it states one, and its row
 landing is adding a code.
 
@@ -189,7 +189,6 @@ code. The placeholders today include:
   lists, a theme selector's bindings among them;
 - `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which
   [§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) reserves for a later extension;
-- `W_STATE_LITERAL_UNCHECKED`, until `E_STATE_DOMAIN` checks a state literal against the target;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet
   ([Lint](/spec/lint/#lowering)), such as a member whose keyword lowering does not handle yet, a
   `floor` or `roof` under a raised `level`, and a `window` with `repeat=` above 1 and `sym=true`.

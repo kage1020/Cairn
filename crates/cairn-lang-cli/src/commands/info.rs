@@ -346,8 +346,9 @@ fn invalid_palette_report(edition: Edition, invalid: &InvalidPalette) -> Vec<Str
     lines.push(
         "  note: a validated pack cannot produce these, so each is either a state literal in the \
          source — a property the Java block does not have, or a value outside its domain, which \
-         nothing checks against the target — or a leak in the pack or this compiler. The \
-         figure is withheld rather than counting a validation gap as ordinary portability"
+         `E_STATE_DOMAIN` refuses at a pinned target but these figures' range-wide lowering does \
+         not check — or a leak in the pack or this compiler. The figure is withheld rather than \
+         counting a validation gap as ordinary portability"
             .to_owned(),
     );
     lines

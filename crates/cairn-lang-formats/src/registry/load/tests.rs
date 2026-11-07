@@ -1348,3 +1348,30 @@ fn the_builtin_bedrock_pack_maps_every_targetable_version() {
     assert_eq!(pack.states().versions().collect::<Vec<_>>(), targetable);
     assert!(builtin_pack(Edition::Java).states().is_empty());
 }
+
+#[test]
+fn a_block_table_without_states_leaves_a_declared_blocks_state_unrecorded() {
+    let pack = load_from_dir_or_die("ids-only", |dir| {
+        write_full_pack(
+            dir,
+            manifest_with_blocks(),
+            good_data_versions(),
+            &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+            good_blocks(),
+        );
+    });
+    let pinned = pack.view(Some("1.21.4"));
+    let planks = BlockState {
+        id: "minecraft:oak_planks".to_owned(),
+        properties: [("axis".to_owned(), "x".to_owned())].into_iter().collect(),
+    };
+    assert_eq!(pinned.state_domain(&planks), StateDomain::Unrecorded);
+    let undeclared = BlockState {
+        id: "minecraft:dirt".to_owned(),
+        ..planks
+    };
+    assert_eq!(
+        pinned.state_domain(&undeclared),
+        StateDomain::Checked(Vec::new())
+    );
+}
