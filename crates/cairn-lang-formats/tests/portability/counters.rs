@@ -1,5 +1,6 @@
 //! The portability counters over hand-built palettes and block tables.
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex,
 };
@@ -66,7 +67,7 @@ fn table() -> BlocksIndex {
     }}"#
     ))
     .expect("test catalog parses as JSON");
-    BlocksIndex::from_catalog(catalog).expect("test catalog folds")
+    BlocksIndex::from_catalog(catalog, Edition::Bedrock).expect("test catalog folds")
 }
 
 /// Stairs that drop their `shape` but at 1.2, and a door 1.0's palette refuses.
@@ -582,7 +583,7 @@ fn table_with_oak_sign() -> BlocksIndex {
     }"#,
     )
     .expect("test catalog parses as JSON");
-    BlocksIndex::from_catalog(catalog).expect("test catalog folds")
+    BlocksIndex::from_catalog(catalog, Edition::Bedrock).expect("test catalog folds")
 }
 
 #[test]
