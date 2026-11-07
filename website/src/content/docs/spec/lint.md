@@ -10,7 +10,7 @@ shape is what feeds the loop in [Evaluation Framework](/spec/evaluation/).
 
 This section is the catalog: every code a stable command can raise has a row here, and a code a
 stable command raises with no row is a bug in this section rather than a code outside it. A code
-another chapter names that no command raises yet, such as `E_STATE_DOMAIN`, is a reserved code
+another chapter names that no command raises yet, such as `E_REQUIRES_CONFLICT`, is a reserved code
 ([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Where a code's
 rule belongs to another chapter, the row states what the code means and links there for the rule.
 The row is what a reader with a code in hand needs to find, and the chapter is where the behaviour
@@ -149,6 +149,8 @@ to compare.
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
+| `E_STATE_UNMAPPED` | A block state a member built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
@@ -163,35 +165,36 @@ to compare.
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
-| `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
+| `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since the pinned target's pack records no states for its block to check it against ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
-| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned edition has no form for, such as a stair's `shape` on Bedrock; one line per entry ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned version has no form for, such as a stair's `shape` on Bedrock before 1.26.60, in the words of the pack's `sensitivity`; one line per entry ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
 | `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members the previous lock's `member_version_sensitivity` lists, as ones that may resolve differently at the new target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). No lock the compiler writes lists any yet, since no constraint catalog ships, so a build over one does not raise it today. |
 
 The last three are `cairn compile`'s alone: they are about the artifact and the lock it writes, so
 they carry no span and no other command raises them.
 
-`E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which `cairn
-compile`, `cairn lower`, `cairn info` and `cairn check` all run, as does the language server.
-`E_UNKNOWN_ID` further needs a pinned target, so three commands raise it: `cairn compile --target`,
-`cairn check --edition E --target V`, and `cairn info`, which lowers once per supported version for
-its `buildable targets` row and prints each refusing version's findings under `note: <edition>
-<version> refuses this source`, exiting 0 all the same ([Versioning and
+`E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED` and `E_INCOMPATIBLE_MATERIAL` are raised during
+block-array lowering, which `cairn compile`, `cairn lower`, `cairn info` and `cairn check` all run,
+as does the language server. `E_UNKNOWN_ID`, `E_STATE_DOMAIN` and `E_STATE_UNMAPPED` further need a
+pinned target, so three commands raise them: `cairn compile --target`, `cairn check --edition E
+--target V`, and `cairn info`, which lowers once per supported version for its `buildable targets`
+row and prints each refusing version's findings under `note: <edition> <version> refuses this
+source`, exiting 0 all the same ([Versioning and
 Editions](/spec/versioning-editions/#the-buildable-targets-row)). `lower` lowers against no version,
 as does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
 check` with no `--target`, and the language server, lower with no target at all, so they raise
 `E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
-`E_UNKNOWN_ID` ([§11.3](#113-error-vs-warning)).
+`E_UNKNOWN_ID`, `E_STATE_DOMAIN` or `E_STATE_UNMAPPED` ([§11.3](#113-error-vs-warning)).
 
-`W_STATE_LITERAL_UNCHECKED` is raised by the same lowering, on every state literal it reads from a
-theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info`, `cairn check`
-with or without `--target`, and the language server report it under either edition. It stands in
-for `E_STATE_DOMAIN`: until the compiler holds a table of each block's states, a property the block
-lacks or a value outside its domain is written into the structure file unchanged, and the warning
-is what keeps that from being silent.
+`W_STATE_LITERAL_UNCHECKED` is raised by the same lowering at a pinned target, in place of the
+`E_STATE_DOMAIN` check, on a state literal it reads from a theme slot or a `connect … path=` whose
+block the target's pack records no states for. A property the block lacks or a value outside its
+domain would then be written into a Java structure file unchanged, and the warning is what keeps
+that from being silent. Both built-in packs record every block's states, so no command raises it
+with them.
 
 `cairn check --target` exists so a CI job can gate on the check command and still see the
 lowering-stage findings a compile would refuse on. Without it, an id the target does not declare
@@ -211,7 +214,8 @@ lowers, with no target, and reports only the findings every target that reads th
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
-family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)).
+family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)), or a `door` bound
+outside the door family ([Syntax §5.4](/spec/syntax/#54-selectors)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
@@ -220,7 +224,7 @@ theme, the lockfile records the bound theme for the placement, and the theme's f
 is bound ([Versioning and Editions](/spec/versioning-editions/#a-part-may-declare-its-own-floor)).
 A module that names such a theme in no `place`, and whose `struct` and `def` members read no
 `mat_slot=` from it, is not reported: the build is byte-identical with or without the pin. A
-`mat_slot=` on a keyword that reads none, such as a `door`'s, is not such a read
+`mat_slot=` on a keyword that reads none, such as a `level`'s, is not such a read
 ([§11.3](#113-error-vs-warning)).
 
 `E_THEME_SELECTOR_UNMATCHED` is a warning despite its prefix. A rule that matches nothing overrides
@@ -232,11 +236,11 @@ from the `severity` field rather than from the first letter.
 `E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: no `mat_slot=` pointing at a slot bound to
 something other than a material token resolves. A `floor` that names it is left air; a `walls` that
 names it is not built and takes up no rows, so a `door` or `window` cut into it is deferred; a
-`window` that names it is not cut, so its wall stays; and a `roof`, eave `stair` or `pressure_plate`
-that names it is built from its default block. Were it a warning, a theme whose slots are all
-mistyped would still build at exit 0 every scope that keeps something to draw, such as a `roof`:
-shorter than asked, with no floor and no walls, and only default blocks, less any eave `stair` or
-`pressure_plate` set higher than the shorter structure reaches.
+`window` that names it is not cut, so its wall stays; and a `roof`, eave `stair`, `door` or
+`pressure_plate` that names it is built from its default block. Were it a warning, a theme whose
+slots are all mistyped would still build at exit 0 every scope that keeps something to draw, such
+as a `roof`: shorter than asked, with no floor and no walls, and only default blocks, less any eave
+`stair` or `pressure_plate` set higher than the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member earns
 both: the key is absent for the first and present-but-unusable for the second. They have different
@@ -250,10 +254,9 @@ absence is not reported, and its name is not looked up, so a label written there
 reach the palette through the applied theme's slot map and have no default block, so a bare one
 contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
 reported; that is how a narrow slit is punched through a wall without choosing a species for it. A
-`door` carves its opening and reads no material, since its own block is not placed yet. A `roof`,
-`stair` or `pressure_plate` paints a default block and is not reported either. `cairn check` raises
-it, before any lowering, and it needs no theme: a module that declares none is still told which of
-its members name no material.
+`roof`, `stair`, `door` or `pressure_plate` paints a default block and is not reported either.
+`cairn check` raises it, before any lowering, and it needs no theme: a module that declares none is
+still told which of its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
 resolved once as its own scope and once again for every `place` that instantiates it, and each of
@@ -286,10 +289,11 @@ without a pack. A front end with no target (the language server, or a `cairn che
 `--target`) raises neither, and leaves the token to the pack of the target that builds it
 ([§11.3](#113-error-vs-warning)).
 
-The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
-or `pressure_plate` is built from its default block. A `walls` is not built and takes up no rows, so
-a `door` or `window` cut into it is deferred. A `window` is not cut, so its wall stays, and a port on
-it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
+The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave
+`stair`, `door` or `pressure_plate` is built from its default block. A `walls` is not built and
+takes up no rows, so a `door` or `window` cut into it is deferred. A `window` is not cut, so its
+wall stays, and a port on it is refused with it
+([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
 all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
@@ -298,7 +302,7 @@ leaves its cells air, and a `roof` is still built from its default block, as is 
 `pressure_plate` that still fits the shorter structure; one set higher than it reaches is deferred.
 It is judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported,
 whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a
-`door`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
+`level`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
 ([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
 nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
 is `E_UNSUPPORTED_NESTING`.
@@ -468,15 +472,14 @@ the build is unaffected.
 `W_PALETTE_TOO_LARGE` is the same kind of limit on what a scope paints rather than where. Every
 state a member writes counts, including one a later member covers, so the limit is on the states
 written rather than the states the finished scope keeps. A vanilla registry has far fewer states, so
-a source reaches it only through block ids or state-literal properties no pinned target checks.
-Block ids go unchecked wherever lowering runs with no version pinned: in `cairn lower`, the
-range-wide lowering behind `cairn info`'s report, the language server and a `cairn check` with no
-`--target`, in a `cairn compile` or `cairn check --edition E --target V` naming a version the
-edition does not ship, and in a `cairn compile` whose target the file's floors refuse ([Versioning
-and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state literal's
-properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says ([Materials and
-targets](#materials-and-targets)), so every command that lowers can reach the limit, `cairn compile`
-with a target that resolves among them. A warning, for the reason above.
+a source reaches it only through block ids or state literals no pinned target checks. Both go
+unchecked wherever lowering runs with no version pinned: in `cairn lower`, the range-wide lowering
+behind `cairn info`'s report, the language server and a `cairn check` with no `--target`, in a
+`cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
+and in a `cairn compile` whose target the file's floors refuse ([Versioning and
+Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A pinned target checks both,
+so a build that pins one reaches the limit only through states its blocks really take. A warning,
+for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it. In a struct body it covers three
@@ -598,21 +601,24 @@ holds only in part: a door, window, eave stair or pressure plate its own line pu
 struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
 keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
 `E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
-pinned target does not declare, and `W_INTENT_DEGRADED` names what an edition cannot carry, while a
-state literal goes unchecked (`W_STATE_LITERAL_UNCHECKED`) and no entity schema is checked. The
-redstone row runs only in part as well: the truth-table codes check a table against itself, nothing
-simulates the circuit, and routing congestion is `E_ROUTE_CONGESTION`, which only the Internal-tier
-`cairn synth --experimental-logic-synth` reaches.
+pinned target does not declare, `E_STATE_DOMAIN` a state its block does not take there,
+`E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
+version cannot carry, while no entity schema is checked. The redstone row runs only in part as well:
+the truth-table codes check a table against itself, nothing simulates the circuit, and routing
+congestion is `E_ROUTE_CONGESTION`, which only the Internal-tier `cairn synth
+--experimental-logic-synth` reaches.
 
 ### "did you mean"
 
 A diagnostic that rejects a name against a closed vocabulary attaches the nearest candidate when one
 sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2 for 4–6, and
 ≤ 3 beyond. The names are a keyword, an argument key, a `mat_slot=` name, a place, def, theme or
-port reference, an abstract token, a `pressure_plate` side, a block id, and a `--target` version.
-The note reads ``did you mean `X`?``, with `X` written as the line would be (`home1.entry` for a
-port, `at=front.outside` for a plate); `E_UNKNOWN_ID` instead names the target's nearest block and
-carries it as `data.suggestion` ([§11.2](#112-machine-readable-payload)).
+port reference, an abstract token, a `pressure_plate` side, a block id, a block state's property or
+value, and a `--target` version. The note reads ``did you mean `X`?``, with `X` written as the line
+would be (`home1.entry` for a port, `at=front.outside` for a plate); `E_UNKNOWN_ID` instead names
+the target's nearest block and carries it as `data.suggestion`
+([§11.2](#112-machine-readable-payload)), unless another version of the edition declares the ID,
+when it names that version instead.
 
 An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
 ...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
@@ -657,13 +663,12 @@ was, and what the build lost, is said only on stderr.
 One `info` refusal is a run-level refusal of the same kind: a palette carrying a blockstate a
 registry pack was expected to refuse costs that edition its portability row, and names no span in
 the source. Such a blockstate is either a leak in the pack or the compiler, which the author cannot
-repair, or a state literal on a stair in the source (a `facing` or `half` value outside the Java
-domain such as `@oak_stairs[facing=up]`, or a key other than `facing` / `half` / `shape`), which
-nothing checks against the target until `E_STATE_DOMAIN` is implemented. The refusal names both. A
-literal on any other block is counted `unsupported` instead. It reads as prose on stderr in both
-formats. The document is still written, since the promise is one document per input, not one element
-per refusal, so a run refused by nothing else writes `{"diagnostics": []}` and says the rest with
-its exit code.
+repair, or a state literal in the source (a property the Java block does not have, or a value
+outside its domain such as `@oak_stairs[facing=up]`), which `E_STATE_DOMAIN` refuses at every pinned
+target but the range-wide lowering behind the row does not check. The refusal names both. It reads
+as prose on stderr in both formats. The document is still written, since the promise is one document
+per input, not one element per refusal, so a run refused by nothing else writes `{"diagnostics":
+[]}` and says the rest with its exit code.
 
 `parse`'s product is the AST and `lower`'s is the block-array IR. A dump is not a report, so a
 failure is not the dump with a hole in it: each writes the same `{"diagnostics": [ ... ]}` document
@@ -697,7 +702,9 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 |---|---|
 | `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. Present when cells were dropped; absent when the walkway was past the router's cap and not laid. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
-| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`. See below. |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"?, "since"?, "until"? }`. See below. |
+| `E_STATE_DOMAIN` | `{ "kind": "state_domain", "id", "key", "value", "registry", "reason", "valid", "origin", "suggestion"?, "valid_at"? }`. See below. |
+| `E_STATE_UNMAPPED` | `{ "kind": "state_unmapped", "id", "states", "registry" }`. The block ID, its `key=value` pairs comma-joined, and the target whose state map has no form for them, as `"<edition> <version>"`. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`. The keys the row does not declare. Never empty. |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unknown_edition_scope`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `prerelease_not_a_tag`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
@@ -715,8 +722,9 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 | `builtin` | The pack declares no row for a member default, so the compiler's own ID was used. | The pack, which has to grow the row. |
 
 `token` accompanies `catalog` and `builtin` and is absent for `authored`. `suggestion` is absent
-when no declared ID is within the typo threshold. A rename is normally past it, but the two fields
-are filled by independent rules and a renamed ID near its replacement carries both.
+when no declared ID is within the typo threshold, and when another version of the edition declares
+the ID, which makes it no typo. A rename is normally past the threshold, but the two fields are
+filled by independent rules and a renamed ID near its replacement carries both.
 
 `aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
 guess from a string distance; an alias is the registry pack's `aliases` component stating that two
@@ -726,10 +734,25 @@ pack's own order, and is absent when the pack names none. The rendered note prin
 counts the rest; the payload is where the whole set lives. See [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
+`since` and `until` are the versions of the edition nearest the target that do declare the ID, as
+bare version labels: `since` the first after it, where an ID a later release added first appears,
+and `until` the last before it, where an ID a later release dropped was last declared. Each is
+absent when no such version is carried, so an ID no version declares has neither ([Versioning and
+Editions](/spec/versioning-editions/#which-registry-an-unknown-id-is-unknown-to)).
+
+**`E_STATE_DOMAIN`** is about one pair of one state, so a literal with two faults is two findings.
+`key` and `value` are the pair as the state carries it. `reason` is `unknown_property` when the
+block has no such property, and `valid` then lists the properties it has, or `value_outside` when
+it has the property but not the value, and `valid` lists the values the property takes; both are
+the pinned target's, in its table's order. `origin` is `literal` for a state literal and `derived`
+for a state lowering wrote itself, which is a defect in Cairn rather than in the source.
+`suggestion` is the nearest of `valid` within the typo threshold, and `valid_at` lists the other
+versions of the edition whose tables take the pair, oldest first; each is absent when it is empty.
+
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
-mapping is what to correct rather than the source line. `required` is named rather than implied so
-that adding a second family later is a new value here, not a new code.
+mapping is what to correct rather than the source line. `required` is `stair` or `door`, named
+rather than implied so that a further family is a new value here, not a new code.
 
 `W_TRUTH_TABLE_PARTIAL.missing` is a **sample** rather than the set: twenty inputs have a million
 combinations. Take the count from `2^inputs - covered`, never from `missing.len()`. `inputs` is
@@ -773,15 +796,16 @@ shipped version declares, are not deferred: each stands in for the block a targe
 it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no
 `W_PHASE_CONFLICT` between it and another block, and no `W_PALETTE_TOO_LARGE` that only it could
 cause, since the palette is counted without it. A stand-in overwritten by air, or air by a stand-in,
-is still a `W_PHASE_CONFLICT`, since no pack names air. A `pressure_plate` built from its default
-block takes the pack's plate, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a
-block" where a pinned check would name it. `E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN` are the
-pack's verdicts and are not raised. Neither is `E_PARTIAL_BUILD`, which counts what a build at a
-target loses. `--edition` alone picks that edition's theme variants. With neither flag, each
-edition's variants are lowered: a finding on a line only one edition's variant reads is that
-edition's verdict and is reported, and any other finding is reported when every edition raises it
-with the same code at the same span, once for each wording the editions give it. A check with
-`--target` lowers once, against the target, so no finding is reported twice.
+is still a `W_PHASE_CONFLICT`, since no pack names air. A `door` or `pressure_plate` built from its
+default block takes the pack's door or plate, so it is such a block too, and a `W_WALKWAY_BLOCKED`
+note says "a block" where a pinned check would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`,
+`E_STATE_UNMAPPED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, and
+neither is `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables. Neither is
+`E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition` alone picks that
+edition's theme variants. With neither flag, each edition's variants are lowered: a finding on a line only one edition's
+variant reads is that edition's verdict and is reported, and any other finding is reported when
+every edition raises it with the same code at the same span, once for each wording the editions give
+it. A check with `--target` lowers once, against the target, so no finding is reported twice.
 
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a
@@ -849,10 +873,10 @@ the key itself decides whether the member is built at all, the member is left ou
 An **unread key**: a `key=` the keyword accepts and nothing reads where it is written, carried into
 the IR and never consulted. It comes in two kinds. An *unreached* key is one this specification
 defines that no pass reads yet. `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a
-header's `class=`, a `door`'s `mat_slot=`, which waits on the door block itself, and a `stair`'s
-`waterlogged=` are those keys today. Every `key=value` on the right of a `theme` selector row whose
-keyword the compiler knows is one too, reported on the binding whatever its key or value, since no
-pass lowers a selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). An
+header's `class=` and a `stair`'s `waterlogged=` are those keys today. Every `key=value` on the
+right of a `theme` selector row whose keyword the compiler knows is one too, reported on the binding
+whatever its key or value, since no pass lowers a selector's bindings yet
+([Materials and Themes](/spec/materials-themes/)). An
 *inapplicable* key is one every member accepts, on a keyword that puts down nothing it would be read
 for; `mat_slot=` on a `level`, `circuit`, `place` or `connect` is that key today. A `mat_slot=` of
 either kind is not looked up in the theme, so a slot name the theme does not declare is this warning

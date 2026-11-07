@@ -58,7 +58,7 @@ const LABEL_ATTRS: [(&str, LabelField); 3] = [
     }),
 ];
 
-/// The accessor for `key`, or `None` for a key that stays in [`crate::intent::IntentState`].
+/// The accessor for `key`, or `None` for a key [`Member::written`] answers for.
 fn label_attr(key: &str) -> Option<LabelField> {
     LABEL_ATTRS
         .iter()
@@ -69,8 +69,7 @@ fn label_attr(key: &str) -> Option<LabelField> {
 fn member_attr_matches(member: &Member, key: &str, expected: &Value) -> bool {
     let Some(field) = label_attr(key) else {
         return member
-            .intent_state
-            .get(key)
+            .written(key)
             .is_some_and(|actual| actual.value.kind == expected.kind);
     };
     field(member).is_some_and(|actual| value_eq_label(expected, actual))

@@ -23,10 +23,6 @@ const HUT: &str = "def hut size=3x3:\n  floor mat_slot=wall\n  walls mat_slot=wa
 /// The body after [`THEME`] for each keyword under test, with [`SLOT`] where the name goes.
 const FIXTURES: &[(&str, &str)] = &[
     (
-        "door",
-        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door side=front at=center mat_slot=%SLOT%\n",
-    ),
-    (
         "level",
         "struct s size=7x5\n  floor mat_slot=wall\n  level y=0 mat_slot=%SLOT%\n    walls mat_slot=wall height=3\n",
     ),

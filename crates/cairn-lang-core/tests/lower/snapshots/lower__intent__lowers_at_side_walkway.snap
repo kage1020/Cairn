@@ -29,43 +29,47 @@ defs:
         role:
           kind: Floor
         mat_slot: floor
+        arguments: {}
         intent_state: {}
       - id: walls
         class: outer
         role:
           kind: Walls
         mat_slot: wall
-        intent_state:
+        arguments:
           height:
             kind: Int
             value: 3
+        intent_state: {}
       - id: east_corner
         role:
           kind: Door
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
           at:
             kind: Ident
             value: right
+        intent_state: {}
       - id: west_corner
         role:
           kind: Door
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
           at:
             kind: Ident
             value: left
+        intent_state: {}
 sites:
   - name: duo
     placements:
       - id: west
         role:
           kind: Place
-        intent_state:
+        arguments:
           use:
             kind: Ident
             value: cottage
@@ -75,10 +79,11 @@ sites:
           at:
             kind: Ident
             value: origin
+        intent_state: {}
       - id: east
         role:
           kind: Place
-        intent_state:
+        arguments:
           use:
             kind: Ident
             value: cottage
@@ -91,6 +96,7 @@ sites:
           gap:
             kind: Int
             value: 5
+        intent_state: {}
       - role:
           kind: Connect
         positional:
@@ -104,8 +110,9 @@ sites:
             value:
               - east
               - west_corner
-        intent_state:
+        arguments:
           path:
             kind: Token
             value: gravel
+        intent_state: {}
 structs: []

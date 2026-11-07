@@ -9,13 +9,13 @@ use crate::block_array::BlockState;
 use crate::block_array::args::{
     diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member,
 };
-use crate::block_array::material::{IdOrigin, MaterialDeferred, TargetRegistry, validated_id};
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::members::{StructCtx, resolve_member_state, side_name, unplaced_walls_note};
+use super::members::{
+    StructCtx, default_block_id, resolve_member_state, side_name, unplaced_walls_note,
+};
 use super::stair::shift_outward;
-use super::token_diag::diag_unknown_id;
 
 /// Catalog token a `pressure_plate`'s default material comes from; the pack spells it per edition.
 pub(super) const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
@@ -95,7 +95,7 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, Refusal> {
             vec![ANCHOR_FORMS.to_owned()],
         ))
     };
-    let Some(raw) = member.intent_state.get("at") else {
+    let Some(raw) = member.arguments.get("at") else {
         return Err(refuse(
             "pressure_plate has no `at=`, so nothing says which wall it sits by".to_owned(),
         ));
@@ -220,7 +220,7 @@ fn place_plate(
 
 /// Read a plate's `key=` as a non-negative integer, `0` when absent.
 fn plate_coordinate(member: &Member, key: &str, counts: &str) -> Result<u32, Refusal> {
-    let Some(raw) = member.intent_state.get(key) else {
+    let Some(raw) = member.arguments.get(key) else {
         return Ok(0);
     };
     member.nonneg_u32(key).ok_or_else(|| {
@@ -644,46 +644,11 @@ fn plate_id_for_member(
     }
     match resolved {
         Some(state) => Ok(state.id),
-        None => pack_plate_default(member, ctx.registry),
-    }
-}
-
-/// The pack's pressure plate id, or [`PRESSURE_PLATE_BASE_ID`], checked against the target; the
-/// `E_UNKNOWN_ID` for an id the target lacks.
-fn pack_plate_default(
-    member: &Member,
-    registry: Option<&dyn TargetRegistry>,
-) -> Result<String, Refusal> {
-    let (state, origin) = match registry.and_then(|r| r.lookup(PRESSURE_PLATE_TOKEN)) {
-        Some(state) => (
-            state,
-            IdOrigin::Catalog {
-                token: PRESSURE_PLATE_TOKEN.to_owned(),
-            },
+        None => default_block_id(
+            member,
+            ctx.registry,
+            PRESSURE_PLATE_TOKEN,
+            PRESSURE_PLATE_BASE_ID,
         ),
-        None => (
-            BlockState::bare(PRESSURE_PLATE_BASE_ID),
-            IdOrigin::Builtin {
-                token: PRESSURE_PLATE_TOKEN,
-            },
-        ),
-    };
-    match validated_id(state, registry, &origin) {
-        Ok(state) => Ok(state.id),
-        Err(MaterialDeferred::UnknownId(unknown)) => {
-            Err(Box::new(diag_unknown_id(member.span.clone(), &unknown)))
-        }
-        // INVARIANT(validated-id-refuses-one-way): `validated_id` answers the state or `UnknownId`.
-        Err(other) => {
-            debug_assert!(
-                false,
-                "validated_id returned {other:?} for the pressure plate default, \
-                 which resolves no mat_slot= value",
-            );
-            Err(Box::new(diag_deferred_member_reason(
-                member,
-                "pressure_plate default resolved to no block id",
-            )))
-        }
     }
 }

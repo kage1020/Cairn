@@ -78,7 +78,7 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4   Bedrock: 1.21.0, 1.21.40, 1.21.60
+buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
 ```
@@ -87,7 +87,7 @@ semantic-sensitive:      (none)
 
 - `cairn parse` / `check` / `info` / `lower` / `compile`
 - 1 つのソースから Java の `.nbt` と Bedrock の `.mcstructure` を出力
-- メンバー: 床、壁、ドアの開口、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、感圧板、`level` による階ごとのまとまり
+- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、感圧板、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
@@ -98,7 +98,7 @@ semantic-sensitive:      (none)
 **未実装の機能。**
 
 - テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
-- 屋根と階段以外のブロックステートの導出。`door` は開口を切り抜くだけでドアのブロックは置かず、板ガラスやフェンスの接続や水没状態も導出しません。
+- 階段とドア、つながり以外のブロックステートの導出。チェストの連結や水没状態は導出しません。
 - `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
 - `.litematic` と `.schem` の書き出し、既存の schematic の読み込み
 - コンパイル成果物へのレッドストーン出力、`and` / `or` / `not` 以外のゲートと順序マクロ、`assert latency`、回路を検証するティックシミュレータ

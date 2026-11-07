@@ -7,7 +7,9 @@ use crate::resolve::ScopeResolution;
 use crate::block_array::args::{
     diag_deferred_member_reason, diag_invalid_member, member_or_slot_span,
 };
-use crate::block_array::material::{MaterialDeferred, TargetRegistry, resolve_block_state};
+use crate::block_array::material::{
+    IdOrigin, MaterialDeferred, TargetRegistry, resolve_block_state, validated_id,
+};
 use crate::block_array::openings::WallSide;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{BlockState, Dims, PaletteIndex};
@@ -16,7 +18,7 @@ use super::canvas::ScopePalette;
 use super::phase::Phase;
 use super::roof_kind::roof_line_refused;
 use super::token_diag::{
-    MemberFallback, TokenSite, diag_abstract_token, diag_state_literal_unchecked,
+    MemberFallback, TokenSite, check_state_literal, diag_abstract_token,
     diag_unknown_abstract_token, diag_unknown_id,
 };
 use super::written::Written;
@@ -157,7 +159,7 @@ const LEVEL_Y_FORM: &str = "write `level y=N`, where `N` is a non-negative integ
 
 /// The `E_INVALID_MEMBER` on a `level` whose `y=` is missing or not a non-negative integer.
 fn level_offset_refusal(level: &Member) -> Diagnostic {
-    let primary = match level.intent_state.get("y") {
+    let primary = match level.arguments.get("y") {
         Some(raw) => format!(
             "level `y=` must be a non-negative integer that fits in u32, not {}",
             raw.value.describe(),
@@ -254,8 +256,7 @@ pub(super) fn resolve_member_state(
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
         Ok(state) => {
-            diagnostics.extend(diag_state_literal_unchecked(slot_value, &state));
-            Some(state)
+            check_state_literal(slot_value, &state, registry, diagnostics).then_some(state)
         }
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(
@@ -281,6 +282,48 @@ pub(super) fn resolve_member_state(
         Err(MaterialDeferred::AlreadyDiagnosed) => {
             // INVARIANT(upstream-diagnosed): `check_slot_targets` reports `E_UNKNOWN_SLOT_TARGET`.
             None
+        }
+    }
+}
+
+/// The block a member is built from when no `mat_slot=` binds one: the pack's `token`, or
+/// `base_id` when no pack declares it, checked against the target.
+///
+/// # Errors
+///
+/// The `E_UNKNOWN_ID` for an id the target does not declare.
+pub(super) fn default_block_id(
+    member: &Member,
+    registry: Option<&dyn TargetRegistry>,
+    token: &'static str,
+    base_id: &'static str,
+) -> Result<String, Box<Diagnostic>> {
+    let (state, origin) = match registry.and_then(|r| r.lookup(token)) {
+        Some(state) => (
+            state,
+            IdOrigin::Catalog {
+                token: token.to_owned(),
+            },
+        ),
+        None => (BlockState::bare(base_id), IdOrigin::Builtin { token }),
+    };
+    match validated_id(state, registry, &origin) {
+        Ok(state) => Ok(state.id),
+        Err(MaterialDeferred::UnknownId(unknown)) => {
+            Err(Box::new(diag_unknown_id(member.span.clone(), &unknown)))
+        }
+        // INVARIANT(validated-id-refuses-one-way): `validated_id` answers the state or `UnknownId`.
+        Err(other) => {
+            let keyword = member.role.keyword();
+            debug_assert!(
+                false,
+                "validated_id returned {other:?} for the `{keyword}` default, which resolves no \
+                 mat_slot= value",
+            );
+            Err(Box::new(diag_deferred_member_reason(
+                member,
+                &format!("{keyword} default resolved to no block id"),
+            )))
         }
     }
 }
@@ -318,7 +361,7 @@ pub(super) fn member_will_paint(
 
 pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
     let Some(raw) = member.ident_value("side") else {
-        let reason = match member.intent_state.get("side") {
+        let reason = match member.arguments.get("side") {
             Some(written) => format!(
                 "`side=` must be one of front, back, left, right, not {}",
                 written.value.describe(),

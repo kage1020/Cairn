@@ -170,14 +170,16 @@ pub(crate) enum Command {
         long_about = "Compile a .crn source file to its edition+version-pinned structure artifact \
             set and write a lockfile next to the source. `--edition java` writes gzip `.nbt` \
             structures; `--edition bedrock` writes uncompressed `.mcstructure` files, translating \
-            the blockstate families it knows into Bedrock `states`; a property it cannot translate \
-            is a hard error, and intent it can only approximate (stair `shape`) is dropped with a \
-            `W_INTENT_DEGRADED` warning rather than silently. `--target` pins the one version a \
-            block id has an answer for, which is what lets the compile check them \
-            (`E_UNKNOWN_ID`); `cairn check --edition E --target V` pins the same pair to reach the \
-            same finding without building anything. Exits 0 on success, 1 on parse, lowering, or \
-            I/O failure (including an unsupported `--target` or a Bedrock property with no \
-            `states` translation), and 2 when the source file cannot be located"
+            each blockstate into the target version's Bedrock `states` through the registry \
+            pack's state map; a state the map has no form for is a hard error \
+            (`E_STATE_UNMAPPED`), and intent it can only approximate (stair `shape` before \
+            1.26.60) is dropped with a `W_INTENT_DEGRADED` warning rather than silently. \
+            `--target` pins the one version a block id and its states have an answer for, which \
+            is what lets the compile check them (`E_UNKNOWN_ID`, `E_STATE_UNMAPPED`); `cairn check \
+            --edition E --target V` pins the same pair to reach the same findings without building \
+            anything. Exits 0 on success, 1 on parse, lowering, or I/O failure (including an \
+            unsupported `--target` or a Bedrock property the Java block does not have), and 2 \
+            when the source file cannot be located"
     )]
     Compile {
         /// Path to the .crn file to compile.

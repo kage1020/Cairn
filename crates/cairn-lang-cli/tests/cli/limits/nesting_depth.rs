@@ -225,7 +225,6 @@ fn a_reverse_declared_logic_chain_is_refused_not_aborted() {
     assert_stream(
         &stderr,
         &[
-            (10, 48, "warning", "W_IGNORED_ARGUMENT"),
             (14, 3, "error", "E_LOGIC_NESTING_TOO_DEEP"),
             (143, 3, "error", "E_LOGIC_NESTING_TOO_DEEP"),
             (272, 3, "error", "E_LOGIC_NESTING_TOO_DEEP"),

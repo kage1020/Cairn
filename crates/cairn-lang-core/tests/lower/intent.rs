@@ -83,20 +83,59 @@ fn id_class_and_mat_slot_hoist_into_typed_fields() {
         "\"wall\"",
         "the span is the value as written, carried from the hoist itself",
     );
-    assert!(
-        !member.intent_state.fields.contains_key("id")
-            && !member.intent_state.fields.contains_key("class")
-            && !member.intent_state.fields.contains_key("mat_slot"),
-        "hoisted keys must not also remain in intent_state"
+    let arguments: Vec<&str> = member.arguments.keys().map(String::as_str).collect();
+    assert_eq!(
+        arguments,
+        ["height"],
+        "hoisted keys must not also stay arguments"
     );
     assert!(
-        member.intent_state.fields.contains_key("height"),
-        "non-hoisted keys must remain in intent_state"
+        member.intent_state.is_empty(),
+        "`walls` takes no blockstate"
     );
 }
 
 #[test]
-fn site_place_use_is_preserved_in_intent_state() {
+fn a_stairs_blockstate_is_its_intent_state_and_the_rest_its_arguments() {
+    let src = "struct s size=3x3
+  stair kind=stairs side=front half=top facing=out shape=outer_left waterlogged=false y=2
+";
+    let ir = lower_source(src);
+    let member = &ir.structs[0].members[0];
+    let intent: Vec<&str> = member.intent_state.keys().map(String::as_str).collect();
+    assert_eq!(intent, ["half", "facing", "shape", "waterlogged"]);
+    let arguments: Vec<&str> = member.arguments.keys().map(String::as_str).collect();
+    assert_eq!(arguments, ["kind", "side", "y"]);
+    let written: Vec<&str> = member.written_fields().map(|(key, _)| key).collect();
+    assert_eq!(
+        written,
+        [
+            "kind",
+            "side",
+            "half",
+            "facing",
+            "shape",
+            "waterlogged",
+            "y"
+        ],
+        "the line's own order, across both",
+    );
+}
+
+#[test]
+fn a_key_that_is_blockstate_on_one_role_is_an_argument_on_another() {
+    let ir = lower_source(
+        "struct s size=5x5
+  window side=front y=1 size=1x1 shape=arch
+",
+    );
+    let member = &ir.structs[0].members[0];
+    assert!(member.intent_state.is_empty());
+    assert!(member.arguments.contains_key("shape"));
+}
+
+#[test]
+fn site_place_use_is_preserved_as_an_argument() {
     let ir = lower_source("site hamlet\n  place use=cottage\n");
     let placement = ir
         .sites
@@ -107,8 +146,7 @@ fn site_place_use_is_preserved_in_intent_state() {
         .expect("placement");
     assert!(matches!(placement.role, MemberRole::Place));
     let use_value = placement
-        .intent_state
-        .fields
+        .arguments
         .get("use")
         .expect("use= must survive lowering");
     assert!(
@@ -185,13 +223,13 @@ fn token_and_dotref_are_not_hoisted_into_label_fields() {
         "plain idents still hoist"
     );
     assert!(
-        member.intent_state.contains_key("id") && member.intent_state.contains_key("class"),
-        "unhoisted id/class values must stay in intent_state for the selector mismatch pass"
+        member.arguments.contains_key("id") && member.arguments.contains_key("class"),
+        "unhoisted id/class values must stay arguments for the selector mismatch pass"
     );
 }
 
 #[test]
-fn pressure_plate_binding_arrow_is_kept_separate_from_intent_state() {
+fn pressure_plate_binding_arrow_is_kept_separate_from_its_arguments() {
     let ir = lower_source(
         "struct gate size=3x3\n  pressure_plate id=plate at=front.outside -> sig.step\n",
     );
@@ -200,8 +238,8 @@ fn pressure_plate_binding_arrow_is_kept_separate_from_intent_state() {
     assert_eq!(member.id.as_deref(), Some("plate"));
     assert!(member.binding.is_some(), "-> binding must survive lowering");
     assert!(
-        !member.intent_state.fields.contains_key("->"),
-        "the arrow tail must never become a synthetic intent_state key"
+        !member.arguments.contains_key("->") && member.intent_state.is_empty(),
+        "the arrow tail must never become a synthetic key"
     );
 }
 

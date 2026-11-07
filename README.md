@@ -78,7 +78,7 @@ Diagnostics name what is wrong and what a valid value looks like, so a failed bu
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4   Bedrock: 1.21.0, 1.21.40, 1.21.60
+buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
 ```
@@ -87,7 +87,7 @@ semantic-sensitive:      (none)
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
-- Members: floors, walls, door openings, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, pressure plates, and `level` grouping.
+- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, pressure plates, and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
@@ -98,7 +98,7 @@ semantic-sensitive:      (none)
 **Not yet.**
 
 - Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
-- Blockstate derived beyond the roof and stair geometry. A `door` cuts its opening but places no door block, and pane and fence connections and waterlogging are not derived.
+- Blockstate derived beyond stairs, doors and connections. Chests are not paired and waterlogging is not derived.
 - `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
 - `.litematic` and `.schem` writers, and importing existing schematics.
 - Redstone in compiled output, gates and sequential macros beyond `and` / `or` / `not`, `assert latency`, and the tick simulator that verifies a circuit.
