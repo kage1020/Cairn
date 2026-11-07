@@ -41,6 +41,10 @@
             "named": true
           },
           {
+            "type": "coordinate",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -1294,6 +1298,10 @@
     "type": "comment",
     "named": true,
     "extra": true
+  },
+  {
+    "type": "coordinate",
+    "named": true
   },
   {
     "type": "def",

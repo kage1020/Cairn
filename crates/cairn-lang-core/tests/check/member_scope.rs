@@ -9,12 +9,14 @@ use crate::common::{PRELUDE, def_with, diagnose, notes, of_code, one_of_code, st
 const GEOMETRY_ROWS: &[&str] = &[
     "floor mat_slot=floor",
     "walls mat_slot=wall height=3",
+    "fill mat_slot=wall from=0,0,0 to=1,0,1",
     "door id=d side=front at=center",
     "window id=w side=front y=1 offset=1 size=1x1",
     "roof kind=flat mat_slot=wall",
     "stair kind=stairs mat_slot=wall",
     "level y=0",
     "pressure_plate id=p at=front.outside",
+    "chest id=c at=inside.front",
     "circuit region=floor void=1",
 ];
 
@@ -187,7 +189,7 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
     assert!(
         notes(&geometry).contains(
-            &"expected one of: floor, walls, door, window, roof, stair, level, pressure_plate, circuit"
+            &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, chest, circuit"
         ),
         "got {:#?}",
         notes(&geometry),

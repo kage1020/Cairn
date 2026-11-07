@@ -698,13 +698,23 @@ mod tests {
     fn mat_slot_offers_no_slot_on_a_keyword_that_reads_none() {
         let theme = "theme a:\n  slot floor -> @oak_planks\n";
         for (rest, expected) in [
-            ("struct s size=2x2\n  door side=front mat_slot=", vec![]),
-            ("struct s size=2x2\n  door side=front mat_slot=fl", vec![]),
+            (
+                "struct s size=2x2\n  circuit region=floor mat_slot=",
+                vec![],
+            ),
+            (
+                "struct s size=2x2\n  circuit region=floor mat_slot=fl",
+                vec![],
+            ),
             (
                 "struct s size=2x2\n  window side=front mat_slot=",
                 vec!["floor"],
             ),
-            ("theme b:\n  door[mat_slot=", vec![]),
+            (
+                "struct s size=2x2\n  door side=front mat_slot=",
+                vec!["floor"],
+            ),
+            ("theme b:\n  circuit[mat_slot=", vec![]),
             ("theme b:\n  window[mat_slot=", vec!["floor"]),
         ] {
             let source = format!("{theme}{rest}");

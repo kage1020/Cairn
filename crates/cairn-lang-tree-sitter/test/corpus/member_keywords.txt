@@ -5,11 +5,13 @@ Every member keyword
 struct s size=9x7
   floor mat_slot=floor
   walls mat_slot=wall height=3
+  fill fluid=water from=1,1,1 to=7,2,5
   door side=front at=center
   window side=front offset=2 y=2
   roof kind=gable overhang=1
   stair id=up from=0 to=1
   pressure_plate id=plate at=front.outside
+  chest id=store at=inside.back offset=2 size=single
   circuit id=main region=floor
   place kind=lamp at=center
   connect west.east_corner to east.west_corner
@@ -44,6 +46,21 @@ struct s size=9x7
             (attribute
               (identifier)
               (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))))
       (member_stmt
         (member_keyword)
         (command_arg_list
@@ -109,6 +126,27 @@ struct s size=9x7
               (signal_ref
                 (identifier)
                 (identifier))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
       (member_stmt
         (member_keyword)
         (command_arg_list

@@ -12,6 +12,7 @@
     { "include": "#material-token" },
     { "include": "#attribute-key" },
     { "include": "#arrow" },
+    { "include": "#coordinate" },
     { "include": "#number" }
   ],
   "repository": {
@@ -40,7 +41,7 @@
       }
     },
     "member-keyword": {
-      "match": "^\\s*(floor|walls|door|window|roof|stair|level|pressure_plate|circuit|place|connect)\\b",
+      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|level|pressure_plate|chest|circuit|place|connect)\\b",
       "captures": {
         "1": { "name": "keyword.other.member.cairn" }
       }
@@ -65,6 +66,10 @@
     "arrow": {
       "name": "keyword.operator.arrow.cairn",
       "match": "->"
+    },
+    "coordinate": {
+      "name": "constant.numeric.coordinate.cairn",
+      "match": "(?<==)\\d+,\\d+,\\d+\\b(?!,\\d)"
     },
     "number": {
       "name": "constant.numeric.cairn",

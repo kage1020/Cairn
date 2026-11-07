@@ -146,8 +146,9 @@ fn a_window_deferred_outright_carries_the_generic_deferral_note() {
     assert_eq!(
         all,
         [
-            "block-array lowering currently voxelises floor, walls, door, window, roof \
-             (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
+            "block-array lowering currently voxelises floor, walls, fill (from=x,y,z to=x,y,z \
+             with mat_slot= or fluid=water), door, window, roof \
+             (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate and chest \
              (at=<side>.outside|inside.<side>), and level y=N grouping, and recognises circuit \
              region=<label> void=<N> (u32, N>=1) plus door[id=<name>] opened_by=sig.<name> \
              actuator patches; other roles will be added as their lowering rules are spec'd"

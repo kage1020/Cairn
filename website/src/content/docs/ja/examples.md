@@ -32,6 +32,13 @@ description: 実際の .crn ファイル集。言語の書き方だけに集中�
 | [`at-side-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/at-side-walkway.crn) | ドアを `at=left` / `at=right` に置くと、ポートが向き合う角の側に寄る。 |
 | [`window-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/window-walkway.crn) | 窓のポート。窓の矩形の中心を基準にし、地面の高さに固定される。 |
 
+## ブロックステート
+
+| ファイル | 内容 |
+|---|---|
+| [`storeroom.crn`](https://github.com/kage1020/Cairn/blob/main/examples/storeroom.crn) | 壁を背にした `chest`。どのチェストも背にした壁から離れる向きを向き、並んだ 2 つは連結し、`size=single` で 2 つを別々に保つ。 |
+| [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`。マテリアルで砂の床を塗り、水槽に置いたものの周りに水を注ぐ。窓ガラスと 1 つのチェストは水を含み、`waterlogged=false` のもう 1 つは乾いたまま残る。 |
+
 ## 境界のケース
 
 | ファイル | 内容 |

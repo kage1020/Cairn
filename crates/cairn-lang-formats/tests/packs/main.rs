@@ -1,7 +1,13 @@
-//! What the built-in registry packs hold: ids that exist in their targets, and working aliases.
+//! What the built-in registry packs hold: ids that exist in their targets, working aliases, and the
+//! states and versions the game gives each id.
 
 #[path = "../common/mod.rs"]
 pub mod common;
 
 mod aliases;
+mod connections;
+mod declared_elsewhere;
 mod ids_exist;
+mod state_domain;
+mod states;
+mod waterlogged;

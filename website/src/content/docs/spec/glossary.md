@@ -38,17 +38,19 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Member.** A named element of the Intent IR. Types: `block`, `block_entity`, `entity`. The
   IR carries the type, but the author writes one selector grammar across all of them
   ([principles P4](/spec/principles/)). Today a member carries the `role` its keyword classifies to
-  and no type, and no keyword places a block entity or an entity yet.
+  and no type, and no keyword places a block entity or an entity yet; `type` will sit beside `role`.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
-- **`intent_state`.** The author's blockstate intent. Edit diffs look **only** here. Today it
-  holds every `key=value` a member line writes except `id`, `class` and `mat_slot`. See
+- **`intent_state`.** The author's blockstate intent: the blockstate keys a member's keyword names,
+  such as a `stair`'s `facing`. Edit diffs look **only** here. The line's other keys are the
+  member's arguments. See
   [blockstate §6.2](/spec/blockstate/#62-intent_state-and-resolved_state).
 - **`resolved_state`.** Compiler-derived blockstate (orientation, connections, waterlogged). Never
-  hand-written. Not populated yet: what lowering derives goes straight into the block array.
+  hand-written. Lowering records each member's, in the canonical vocabulary, beside the block array
+  it builds; `cairn lower --format json` prints it under `members`.
 - **Override-promotion.** Writing a blockstate that *could* be intent promotes it from
   `resolved_state` to `intent_state`. The spec rule is "derive by default; any blockstate that can
   be intent is overridable." See
@@ -84,7 +86,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 ## Compilation
 
 - **Phase.** A fixed evaluation slot the compiler sorts each command into:
-  `massing → envelope → openings → fixtures → logic_synth → logic_place → logic_route → raw`.
+  `massing → envelope → openings → fixtures → fluids → logic_synth → logic_place → logic_route → raw`.
   Source order is irrelevant; phases enforce semantics
   ([compilation §4.1](/spec/compilation/#41-phase-evaluation)).
 - **Last-wins (local).** Within the same phase, a later command overrides an earlier one. The old

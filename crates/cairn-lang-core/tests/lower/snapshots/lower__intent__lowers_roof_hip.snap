@@ -33,21 +33,24 @@ structs:
       - role:
           kind: Floor
         mat_slot: floor
+        arguments: {}
         intent_state: {}
       - role:
           kind: Walls
         mat_slot: wall
-        intent_state:
+        arguments:
           height:
             kind: Int
             value: 3
+        intent_state: {}
       - role:
           kind: Roof
         mat_slot: roof
-        intent_state:
+        arguments:
           kind:
             kind: Ident
             value: hip
           overhang:
             kind: Int
             value: 1
+        intent_state: {}

@@ -28,6 +28,7 @@ fn unit_ir(palette: Palette) -> BlockArrayIr {
         structures,
         placements: IndexMap::new(),
         walkways: IndexMap::new(),
+        members: IndexMap::new(),
         diagnostics: vec![],
     }
 }
