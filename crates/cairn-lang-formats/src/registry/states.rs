@@ -880,23 +880,27 @@ impl VersionStates<'_> {
             });
         };
         let defaults = &self.family(first).defaults;
-        if let Some(key) = given.keys().find(|key| !defaults.contains_key(*key)) {
+        let unknown = given.keys().find(|key| !defaults.contains_key(*key));
+        let mut full = defaults.clone();
+        full.extend(given.iter().map(|(k, v)| (k.clone(), v.clone())));
+        if unknown.is_none()
+            && let Some((bedrock, at)) = forms.iter().find(|(_, at)| self.family(*at).holds(&full))
+        {
+            return Ok(self.form(bedrock, id, self.family(*at), &full));
+        }
+        // The refused pairs may hold these states, so no family's domain can rule them out.
+        if self.map.refused_from.contains(id) {
+            return Err(StateRefusal::Unmapped {
+                reason: refused(id),
+            });
+        }
+        if let Some(key) = unknown {
             return Err(self.elsewhere(&[id], key, None).unwrap_or_else(|| {
                 StateRefusal::UnknownProperty {
                     key: key.clone(),
                     valid: defaults.keys().cloned().collect(),
                 }
             }));
-        }
-        let mut full = defaults.clone();
-        full.extend(given.iter().map(|(k, v)| (k.clone(), v.clone())));
-        if let Some((bedrock, at)) = forms.iter().find(|(_, at)| self.family(*at).holds(&full)) {
-            return Ok(self.form(bedrock, id, self.family(*at), &full));
-        }
-        if self.map.refused_from.contains(id) {
-            return Err(StateRefusal::Unmapped {
-                reason: refused(id),
-            });
         }
         let held = |key: &str| -> Vec<String> {
             let mut values: Vec<String> = Vec::new();
@@ -972,6 +976,11 @@ impl VersionStates<'_> {
             .filter(|(_, at)| self.family(*at).takes(given))
             .collect();
         let Some(&&(ref java, at)) = fitting.first() else {
+            if self.map.refused_onto.contains(id) {
+                return Err(StateRefusal::Unmapped {
+                    reason: refused(id),
+                });
+            }
             return Err(self.not_taken(id, given, forms));
         };
         let family = self.family(at);

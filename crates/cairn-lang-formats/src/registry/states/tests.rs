@@ -289,6 +289,14 @@ fn unmapped(reason: &str) -> StateRefusal {
     }
 }
 
+/// The refusal of `id`, whose states the version's palette does not declare.
+fn palette_refused(id: &str) -> StateRefusal {
+    unmapped(&format!(
+        "its palette does not declare the states GeyserMC maps `{id}` to, so the pack carries no \
+         form for them"
+    ))
+}
+
 #[test]
 fn the_fixture_maps_each_version_it_names_in_order() {
     let index = load(states(), sensitivity()).expect("the fixture loads");
@@ -756,29 +764,66 @@ fn a_property_or_value_the_java_block_lacks_is_a_leak() {
 
 #[test]
 fn a_pair_its_palette_refuses_is_unmapped_even_written_bare() {
-    let refused = |id: &str| {
-        unmapped(&format!(
-            "its palette does not declare the states GeyserMC maps `{id}` to, so the pack carries \
-             no form for them"
-        ))
-    };
     assert_eq!(
         resolve("1.0", "minecraft:jigsaw", &[]),
-        Err(refused("minecraft:jigsaw"))
+        Err(palette_refused("minecraft:jigsaw"))
     );
     assert_eq!(
         resolve("1.0", "minecraft:jigsaw", &[("orientation", "north_up")]),
-        Err(refused("minecraft:jigsaw")),
+        Err(palette_refused("minecraft:jigsaw")),
     );
     // Refused as `skull=creeper_head`: the Java id reads as itself though Bedrock spells it apart.
     assert_eq!(
         resolve("1.0", "minecraft:creeper_head", &[]),
-        Err(refused("minecraft:creeper_head")),
+        Err(palette_refused("minecraft:creeper_head")),
     );
     assert_eq!(
         resolve("1.0", "minecraft:creeper_head", &[("rotation", "4")]),
-        Err(refused("minecraft:creeper_head")),
+        Err(palette_refused("minecraft:creeper_head")),
     );
+}
+
+#[test]
+fn a_state_no_family_holds_on_a_partly_refused_block_is_unmapped() {
+    // `oak_fence` maps onto itself, while its pair onto `oak_double_slab` is refused.
+    let partly = with(
+        states(),
+        "/refused",
+        json!({ "1.0": ["jigsaw", "skull=creeper_head", "oak_double_slab=oak_fence"] }),
+    );
+    let index = load(partly, sensitivity()).expect("a partly refused block loads");
+    assert_eq!(
+        resolve_in(&index, "1.0", "minecraft:oak_fence", &[]),
+        Ok(form("minecraft:oak_fence", &[])),
+    );
+    assert_eq!(
+        resolve_in(&index, "1.0", "minecraft:oak_fence", &[("bogus", "1")]),
+        Err(palette_refused("minecraft:oak_fence")),
+    );
+    assert_eq!(
+        resolve_in(
+            &index,
+            "1.0",
+            "minecraft:oak_double_slab",
+            &[("type", "double")]
+        ),
+        Ok(form(
+            "minecraft:oak_double_slab",
+            &[("minecraft:vertical_half", s("bottom"))],
+        )),
+    );
+    assert_eq!(
+        resolve_in(
+            &index,
+            "1.0",
+            "minecraft:oak_double_slab",
+            &[("bogus", "1")]
+        ),
+        Err(palette_refused("minecraft:oak_double_slab")),
+    );
+    let at = index.at("1.0").expect("the fixture maps 1.0");
+    assert_eq!(at.canonical_domain("minecraft:oak_fence"), None);
+    assert_eq!(at.canonical_domain("minecraft:oak_double_slab"), None);
 }
 
 #[test]
