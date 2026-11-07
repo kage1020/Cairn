@@ -86,7 +86,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 ## Compilation
 
 - **Phase.** A fixed evaluation slot the compiler sorts each command into:
-  `massing → envelope → openings → fixtures → logic_synth → logic_place → logic_route → raw`.
+  `massing → envelope → openings → fixtures → fluids → logic_synth → logic_place → logic_route → raw`.
   Source order is irrelevant; phases enforce semantics
   ([compilation §4.1](/spec/compilation/#41-phase-evaluation)).
 - **Last-wins (local).** Within the same phase, a later command overrides an earlier one. The old
