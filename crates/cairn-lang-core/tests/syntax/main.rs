@@ -8,6 +8,7 @@ use cairn_lang_core::lex::{TokenKind, lex};
 #[path = "../common/mod.rs"]
 pub mod common;
 
+mod coordinates;
 mod lex;
 mod line_positions;
 mod nesting_depth;

@@ -32,8 +32,9 @@ with "expected `=`".
 
 ### 5.1.1 Literals and separators
 
-**Subject to change.** Decimals (`scale=1.5`), coordinate triples (`at=4,3,2`) and `nbt={...}`
-values, which other chapters write, do not parse yet
+**Subject to change.** Decimals (`scale=1.5`) and `nbt={...}` values, which other chapters write,
+do not parse yet. A coordinate triple parses, but no member reads one yet, so the cell it names and
+the rule for a cell outside the scope are not built either
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
@@ -45,9 +46,40 @@ A size literal is exactly two non-zero extents, `WxH`. A run that continues past
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
 else.
 
-Commas are **optional separators**, not structure. `@intended_targets ["1.20.4", "1.21.4"]` and
-`@intended_targets ["1.20.4" "1.21.4"]` name the same two versions, as do `[side=front, y=2]` and
-`[side=front y=2]`. The two list kinds differ in how much punctuation they tolerate:
+A **coordinate triple** is three integers joined by `,` with nothing between them, `x,y,z`, as in
+`at=4,3,2` or `from=1,1,1`. It names one cell of the scope it is written in, in the frame the
+scope's member lines are measured in ([Open Issues](/spec/open-issues/)): `x` along the `size=`
+footprint's `W` from its low-`x` corner, `z` along its `H` from its low-`z` corner, and `y` up from
+the base plane, or from the `level`'s under `level y=N`. A cell named this way shifts with a roof's
+`overhang=`, as every member does. No component is negative, since none counts back past the low
+corner, and each is read under the same ceiling as any integer. A key a later chapter defines as a
+distance rather than a cell, such as the `step=` of `raw_repeat`
+([Ecosystem Interop](/spec/ecosystem-interop/)), reads the same three integers as the distance from
+one repeat to the next.
+
+A triple is a `key=` value: it is what a key reads when an integer, a `,` and another integer
+follow its `=`. A `-` before either of those integers still starts a triple, which is then refused
+at the `-`, so `from=-1,2,3` and `from=1,-2,3` are told why no component is negative. Anywhere else
+the commas keep their own meaning. In a value list they separate
+items, so `[1,2,3]` is three integers, and a bare value or a `->` binding reads one integer, so
+`fill 1,1,1` is `E_PARSE` at its first `,`. In a selector a `,` followed by a key still separates
+attributes: `[y=2,side=front]` is two of them, and `[at=1,2,3, y=2]` a triple and an attribute. A
+space on either side of a `,` inside the triple, two components alone, a fourth component, and a
+`-` before a component are each refused at the literal.
+
+A cell outside the footprint, or above the top row the scope as written reaches ([Compilation Model
+§4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), is outside the scope. The member
+that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offset=` at or past its
+wall's length. No member reads a triple yet: `fill`, `raw_block`, `note_block` and the entities
+that take one are not keywords. A key that reads another kind of value treats a triple as any value
+of the wrong kind. A label or size key refuses it as a type mismatch, a member key such as `side=`
+or `height=` refuses its member as `E_INVALID_MEMBER`, and a key that falls back to its default,
+such as `sym=` or `overhang=`, says so with `W_IGNORED_ARGUMENT`.
+
+Outside a coordinate triple, commas are **optional separators**, not structure.
+`@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
+two versions, as do `[side=front, y=2]` and `[side=front y=2]`. The two list kinds differ in how
+much punctuation they tolerate:
 
 - A `[selector]`'s attribute list skips a comma wherever it finds one, so `[side=front, , y=2]`
   parses.
@@ -73,10 +105,10 @@ The literal's properties and values are not yet checked against the target: `E_S
 `@oak_log[axis=q]` as written. Each literal the build reads earns a `W_STATE_LITERAL_UNCHECKED`
 ([Lint](/spec/lint/)) on the token, so that is said rather than silent.
 
-Besides that literal, the one place a comma carries meaning is the input list of
-`assert truth(...)`, where it separates the signals whose count the row width is checked against. A
-row writes one character per input signal (`0`, `1`, or `-`), so `truth(a, b -> out)` takes rows
-two characters wide and refuses `{ 2->0 }` or `{ 0->0 }`.
+Besides that literal and a coordinate triple, the one place a comma carries meaning is the input
+list of `assert truth(...)`, where it separates the signals whose count the row width is checked
+against. A row writes one character per input signal (`0`, `1`, or `-`), so `truth(a, b -> out)`
+takes rows two characters wide and refuses `{ 2->0 }` or `{ 0->0 }`.
 
 `-` is a **don't-care**: the row means every value of that input, so `0- -> 1` says what `00->1` and
 `01->1` say together. It is a shorthand for those rows and not a construct of its own, which is why
@@ -145,9 +177,10 @@ reported there and never at the first column of the next one.
 
 The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts six forms the parser refuses, because tree-sitter cannot express their
+correctly. It also accepts seven forms the parser refuses, because tree-sitter cannot express their
 rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, a truth row whose width differs from the input count, and a block-state
+integer past 2^63 − 1, alone or as a coordinate's component, a coordinate whose last component runs
+into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
 literal naming one property twice.
 
 ## 5.2 Nesting

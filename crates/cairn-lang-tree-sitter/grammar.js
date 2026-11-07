@@ -229,7 +229,14 @@ module.exports = grammar({
 
     attribute_list: $ => repeat1($.attribute),
 
-    attribute: $ => seq(field('key', $.identifier), '=', field('value', $._value)),
+    attribute: $ => seq(
+      field('key', $.identifier),
+      '=',
+      field('value', choice($.coordinate, $._value)),
+    ),
+
+    // One token, so a selector's `y=2,side=front` still reads `2` and then a separator.
+    coordinate: _ => token(/[0-9]+,[0-9]+,[0-9]+/),
 
     // Only an undotted token takes a state literal; a `[` after a space starts a nested list.
     material_ref: $ => choice(
