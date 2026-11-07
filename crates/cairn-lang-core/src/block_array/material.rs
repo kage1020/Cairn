@@ -29,6 +29,14 @@ pub trait TargetRegistry {
         Vec::new()
     }
 
+    /// Why the pinned target's state map has no form for `state`, as a clause, or `None` when it
+    /// has one or the registry keeps no state map
+    /// (`spec/versioning-editions` "The `edition portability` row").
+    fn unmapped_state(&self, state: &BlockState) -> Option<String> {
+        let _ = state;
+        None
+    }
+
     /// Whether a version this registry covers may declare `id`, asked only when
     /// [`Self::block_ids`] is `None`. Lowering paints an id this denies as a stand-in, which no
     /// structure file can hold, so a registry whose lowering is written out denies none.

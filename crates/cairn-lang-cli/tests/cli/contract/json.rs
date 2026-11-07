@@ -350,31 +350,30 @@ fn an_authored_state_the_target_lacks_is_named_as_the_sources() {
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("`facing=up`"), "{stderr}");
-    assert!(
-        stderr.contains("a state literal on a stair in the source"),
-        "{stderr}",
-    );
+    assert!(stderr.contains("a state literal in the source"), "{stderr}");
 }
 
 #[test]
-fn an_authored_state_bedrock_cannot_map_yet_is_counted_as_unsupported() {
+fn an_authored_state_no_bedrock_version_maps_is_counted_as_unsupported() {
     let tmp = TempDir::new().expect("tempdir");
-    let path = tmp.path().join("log.crn");
+    let path = tmp.path().join("frame.crn");
     fs::write(
         &path,
-        "theme t:\n  slot f -> @oak_log[axis=x]\n\nstruct s size=3x3\n  floor mat_slot=f\n",
+        "theme t:\n  slot f -> @frame[facing=north]\n\nstruct s size=3x3\n  floor mat_slot=f\n",
     )
     .expect("write");
-    let out = cairn(
-        "info",
-        &[path.to_str().unwrap(), "--editions", "java,bedrock"],
-    );
+    let out = cairn("info", &[path.to_str().unwrap(), "--editions", "bedrock"]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "{stderr}");
     assert!(stdout.contains("unsupported: 1"), "{stdout}");
     assert!(
-        stderr.contains("`minecraft:oak_log`") && stderr.contains("`axis=x` has no form here yet"),
+        stderr.contains(
+            "  note: `minecraft:frame` — the edition has the block, but no version's state map \
+             has a form for `facing=north`: no Java block maps onto `minecraft:frame` there, so \
+             the canonical vocabulary names none of its states — bind the slot to another block, \
+             or build for the other edition"
+        ),
         "{stderr}",
     );
 }

@@ -23,8 +23,8 @@ use crate::block_array::{BlockArray, BlockState, Dims, Footprint, Placement, Wal
 
 use super::site_floor::{FloorExtent, FloorPlan, PlacedBody};
 use super::token_diag::{
-    TokenSite, diag_abstract_token, diag_state_literal_unchecked, diag_unknown_abstract_token,
-    diag_unknown_id,
+    TokenSite, diag_abstract_token, diag_state_literal_unchecked, diag_state_unmapped,
+    diag_unknown_abstract_token, diag_unknown_id,
 };
 
 /// A world cell, `(x, y, z)`.
@@ -300,6 +300,12 @@ fn walkway_material(
     match resolve_block_state(&connect.path, registry) {
         Ok(state) => {
             diagnostics.extend(diag_state_literal_unchecked(&connect.path, &state));
+            if let Some(unmapped) = registry.and_then(|registry| {
+                diag_state_unmapped(connect.path.span.clone(), &state, registry)
+            }) {
+                diagnostics.push(unmapped);
+                return None;
+            }
             Some(state)
         }
         Err(MaterialDeferred::Abstract(token)) => {

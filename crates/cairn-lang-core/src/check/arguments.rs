@@ -123,9 +123,9 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
     if let Some(extra) = widened {
         accepted.extend(extra.iter().copied().filter(|k| !own.contains(k)));
     }
-    for (key, value) in &member.intent_state.fields {
-        let coined = widened.is_some_and(|extra| extra.contains(key.as_str()));
-        if !accepted.contains(&key.as_str()) {
+    for (key, value) in member.written_fields() {
+        let coined = widened.is_some_and(|extra| extra.contains(key));
+        if !accepted.contains(&key) {
             sink.push(unknown_key(
                 Field::Argument,
                 keyword,
@@ -133,7 +133,7 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
                 &value.span,
                 &accepted,
             ));
-        } else if coined && !own.contains(&key.as_str()) {
+        } else if coined && !own.contains(&key) {
             // Only the role's own keys: the widened set holds the key itself, so it finds nothing.
             if let Some(suggested) = one_edit_match(key, own.iter().copied()) {
                 sink.push(coined_near_miss(
@@ -148,7 +148,7 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
         } else if let Some(why) = member.role.unread_argument(key) {
             // A universal key left in the fields failed to hoist, which `check::type_mismatch` or
             // `check::duplicate` reports.
-            if !UNIVERSAL_ARGUMENTS.contains(&key.as_str()) {
+            if !UNIVERSAL_ARGUMENTS.contains(&key) {
                 sink.push(unread_argument(keyword, key, &value.span, why));
             }
         } else if let Some(finding) = routed_past(member, key, &value.span) {
@@ -225,7 +225,7 @@ fn routed_past(member: &Member, key: &str, span: &crate::error::Span) -> Option<
             continue;
         }
         // An unwritten selector still picks a rule, such as the `place` one that reads `gap=`.
-        let written = match member.intent_state.get(axis.selector) {
+        let written = match member.written(axis.selector) {
             None => None,
             Some(value) => match &value.value.kind {
                 ValueKind::Ident(name) => Some(name.as_str()),

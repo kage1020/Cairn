@@ -235,7 +235,7 @@ fn an_expression_that_is_not_a_version_requirement_is_refused() {
 }
 
 // -- the edition scope ---------------------------------------------------
-// `1.21.4` names Java's newest release and no Bedrock release at all.
+// `1.21.4` names a Java release and no Bedrock release at all.
 
 #[test]
 fn a_scoped_floor_is_collected_for_the_edition_it_names() {

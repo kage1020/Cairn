@@ -169,9 +169,8 @@ fn carries_signal(member: &Member) -> bool {
     let is_signal = |value: &crate::ast::Value| matches!(&value.kind, ValueKind::DotRef(reference) if reference.head() == SIGNAL_HEAD);
     member.binding.as_ref().is_some_and(is_signal)
         || member
-            .intent_state
-            .values()
-            .any(|held| is_signal(&held.value))
+            .written_fields()
+            .any(|(_, held)| is_signal(&held.value))
 }
 
 fn advice(role: &MemberRole, body: BodyKind) -> &'static str {
