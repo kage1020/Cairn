@@ -12,7 +12,7 @@ use crate::block_array::args::{UnreadArgument, diag_invalid_member, ident_or_ign
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Fixture, Refusal, Toward, fixture_cell, outside_the_array, written_facing};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
-use super::members::{StructCtx, default_block_id, resolve_member_state};
+use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
 use super::waterlogged::{
     WrittenWaterlogged, keep_waterlogged, read_waterlogged, waterlogged_state,
 };
@@ -104,25 +104,38 @@ fn place_chest(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Refusal> {
-    let toward = written_facing(CHEST, member, written.facing, &Toward::LEVEL)?;
+    let toward = written_facing(CHEST, member, written.facing, &Toward::LEVEL);
     let single = match written.size {
-        None => false,
-        Some("single") => true,
-        Some(other) => {
-            return Err(Box::new(diag_invalid_member(
-                member,
-                format!("unknown chest `size={other}`"),
-                vec![
-                    "`size=` takes `single`, which keeps the chest from pairing; leave it out to \
-                     let the chest pair with the one beside it"
-                        .to_owned(),
-                ],
-            )));
+        None => Ok(false),
+        Some("single") => Ok(true),
+        Some(other) => Err(Box::new(diag_invalid_member(
+            member,
+            format!("unknown chest `size={other}`"),
+            vec![
+                "`size=` takes `single`, which keeps the chest from pairing; leave it out to let \
+                 the chest pair with the one beside it"
+                    .to_owned(),
+            ],
+        ))),
+    };
+    let waterlogged = waterlogged_state(member, written.waterlogged);
+    let (toward, single, waterlogged) = match (toward, single, waterlogged) {
+        (Ok(toward), Ok(single), Ok(waterlogged)) => (toward, single, waterlogged),
+        (toward, single, waterlogged) => {
+            let mut refusals: Vec<Refusal> = [toward.err(), single.err(), waterlogged.err()]
+                .into_iter()
+                .flatten()
+                .collect();
+            // The caller reports the one returned, after these.
+            let last = refusals.pop();
+            diagnostics.extend(refusals.into_iter().map(|refusal| *refusal));
+            return last.map_or(Ok(()), Err);
         }
     };
-    let waterlogged = waterlogged_state(member, written.waterlogged)?;
     let (anchor, cell) = fixture_cell(CHEST, member, y_offset, ctx)?;
-    let id = chest_block_id(member, ctx, diagnostics)?;
+    let Some(id) = chest_block_id(member, ctx, diagnostics)? else {
+        return Ok(());
+    };
     let side = anchor.side();
     let facing = toward
         .unwrap_or_else(|| Toward::away_from_the_wall(anchor))
@@ -143,22 +156,28 @@ fn place_chest(
     }
 }
 
-/// The block a chest is built from: its `mat_slot=`, or the pack's default chest.
+/// The block a chest is built from: its `mat_slot=`, or the pack's default chest; `None` for a
+/// binding whose state literal the target refused, which builds no chest.
 fn chest_block_id(
     member: &Member,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<String, Refusal> {
-    let resolved = resolve_member_state(
+) -> Result<Option<String>, Refusal> {
+    let resolved = match resolve_member_state(
         member,
         ctx.scope,
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-    );
+    ) {
+        MemberState::Bound(state) => Some(state),
+        MemberState::Unbound => None,
+        MemberState::Refused => return Ok(None),
+    };
     geometry_material_id(
         member,
         ctx.scope,
+        ctx.registry,
         resolved.as_ref(),
         || default_block_id(member, ctx.registry, CHEST_TOKEN, CHEST_BASE_ID),
         &GeometryMemberDescription {
@@ -168,4 +187,5 @@ fn chest_block_id(
         },
         diagnostics,
     )
+    .map(Some)
 }

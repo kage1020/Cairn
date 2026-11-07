@@ -20,8 +20,8 @@ pub use blocks::{
     SUPPORTED_BLOCKS_SCHEMA, StateValue,
 };
 pub use connections::{
-    ConnectionIndex, ConnectionKind, ConnectionRow, ConnectionsCatalog, ConnectionsError, FacesRow,
-    SUPPORTED_CONNECTIONS_SCHEMA,
+    ByState, ConnectionIndex, ConnectionKind, ConnectionRow, ConnectionsCatalog, ConnectionsError,
+    SUPPORTED_CONNECTIONS_SCHEMA, StateLookup,
 };
 pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;

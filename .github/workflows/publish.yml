@@ -189,7 +189,7 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "cairn-lang-cli-$TAG" \
-              --notes "Release binaries and SBOM are attached by the Publish workflow." \
+              --notes "Release binaries, the SBOM and the VS Code extension are attached by the Publish workflow." \
               || gh release view "$TAG" >/dev/null 2>&1
           fi
           uploads=("$ARCHIVE" "$ARCHIVE.sha256")
@@ -253,10 +253,272 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "cairn-lang-cli-$TAG" \
-              --notes "Release binaries and SBOM are attached by the Publish workflow." \
+              --notes "Release binaries, the SBOM and the VS Code extension are attached by the Publish workflow." \
               || gh release view "$TAG" >/dev/null 2>&1
           fi
           gh release upload "$TAG" \
             cairn-sbom.cdx.json \
             cairn-sbom.cdx.json.sigstore \
             --clobber
+
+  # A re-run keeps the `.vsix` the release already carries, so the release and both registries
+  # serve one file. Replacing a bad build means deleting its three assets from the release first.
+  vsix:
+    name: VS Code extension
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    outputs:
+      file: ${{ steps.existing.outputs.file }}
+      sha256: ${{ steps.digest.outputs.sha256 }}
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag }}
+          persist-credentials: false
+
+      # release.yml brings the manifest to the release version; a mismatch would publish another.
+      - name: Ensure package.json matches the tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          declared=$(jq -er '.version' package.json)
+          if [ "$declared" != "$VERSION" ]; then
+            echo "package.json declares $declared but the tag says $VERSION" >&2
+            exit 1
+          fi
+
+      # The registries show the changelog the `.vsix` packs as the page of the version it carries.
+      - name: Ensure CHANGELOG.md has a section for the tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          if ! grep -qE "^## ${VERSION//./\\.}( |$)" CHANGELOG.md; then
+            echo "editors/vscode/CHANGELOG.md has no \`## $VERSION\` section, so the registries would show another version's notes. release.yml writes it when it bumps the version (\`changelog.py extension\`); a tag cut before that ran is not published." >&2
+            exit 1
+          fi
+
+      - name: Look for the .vsix on the release
+        id: existing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          file="cairn-lang-${VERSION}.vsix"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)
+          held=()
+          missing=()
+          for name in "$file" "$file.sha256" "$file.sigstore"; do
+            if grep -qxF "$name" <<<"$assets"; then held+=("$name"); else missing+=("$name"); fi
+          done
+          if [ ${#held[@]} -eq 3 ]; then
+            echo "The release already carries $file; reusing it"
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+          elif [ ${#held[@]} -eq 0 ]; then
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "The release carries ${held[*]} but not ${missing[*]}. Delete ${held[*]} from $TAG and re-run, so the extension is built again." >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: steps.existing.outputs.reuse == 'false'
+        with:
+          package_json_file: editors/vscode/package.json
+      - uses: actions/setup-node@v7
+        if: steps.existing.outputs.reuse == 'false'
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - if: steps.existing.outputs.reuse == 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Package
+        if: steps.existing.outputs.reuse == 'false'
+        shell: bash
+        env:
+          FILE: ${{ steps.existing.outputs.file }}
+        run: |
+          set -euo pipefail
+          pnpm run package
+          if [ ! -f "$FILE" ]; then
+            echo "vsce package did not write $FILE" >&2
+            exit 1
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign .vsix
+        if: steps.existing.outputs.reuse == 'false'
+        shell: bash
+        env:
+          FILE: ${{ steps.existing.outputs.file }}
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes --bundle "${FILE}.sigstore" "$FILE"
+          sha256sum "$FILE" | awk '{print $1}' > "$FILE.sha256"
+
+      # The bundle proves this workflow, in this repository, signed the file the release carries.
+      - name: Download and verify the release's .vsix
+        if: steps.existing.outputs.reuse == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          FILE: ${{ steps.existing.outputs.file }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$FILE" --pattern "$FILE.sha256" --pattern "$FILE.sigstore"
+          cosign verify-blob \
+            --bundle "$FILE.sigstore" \
+            --certificate-identity-regexp "^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/publish\.yml@" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$FILE"
+
+      - name: Record the SHA-256
+        id: digest
+        shell: bash
+        env:
+          FILE: ${{ steps.existing.outputs.file }}
+        run: |
+          set -euo pipefail
+          sha256=$(sha256sum "$FILE" | awk '{print $1}')
+          if [ "$sha256" != "$(cat "$FILE.sha256")" ]; then
+            echo "$FILE hashes to $sha256, but $FILE.sha256 says $(cat "$FILE.sha256")" >&2
+            exit 1
+          fi
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to GitHub Release
+        if: steps.existing.outputs.reuse == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          FILE: ${{ steps.existing.outputs.file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "cairn-lang-cli-$TAG" \
+              --notes "Release binaries, the SBOM and the VS Code extension are attached by the Publish workflow." \
+              || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$FILE" "$FILE.sha256" "$FILE.sigstore"
+
+  # Marketplace Trusted Publishing: the policy on the publisher names this repository, this
+  # workflow and the `marketplace` environment, and vsce exchanges this job's OIDC token for a
+  # credential that lasts 15 minutes.
+  marketplace:
+    name: Visual Studio Marketplace
+    needs: [validate-tag, vsix]
+    runs-on: ubuntu-latest
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      # The CLI comes from this workflow's commit: a tag cut before it was added has no lockfile
+      # entry for it, and the `.vsix` comes from the release, not the tag.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: editors/vscode/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download the .vsix the vsix job settled on
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          FILE: ${{ needs.vsix.outputs.file }}
+          SHA256: ${{ needs.vsix.outputs.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$FILE" --dir "$RUNNER_TEMP"
+          echo "$SHA256  $RUNNER_TEMP/$FILE" | sha256sum --check
+
+      - name: Publish
+        env:
+          FILE: ${{ needs.vsix.outputs.file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vsce publish --oidc --packagePath "$RUNNER_TEMP/$FILE" --skip-duplicate
+
+  open-vsx:
+    name: Open VSX
+    needs: [validate-tag, vsix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      # As in `marketplace`, the CLI comes from this workflow's commit.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: editors/vscode/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download the .vsix the vsix job settled on
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          FILE: ${{ needs.vsix.outputs.file }}
+          SHA256: ${{ needs.vsix.outputs.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$FILE" --dir "$RUNNER_TEMP"
+          echo "$SHA256  $RUNNER_TEMP/$FILE" | sha256sum --check
+
+      # ovsx reads its token from OVSX_PAT.
+      - name: Publish
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          FILE: ${{ needs.vsix.outputs.file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::error::The repository secret OVSX_PAT is not set, so $FILE was not published to Open VSX. CONTRIBUTING.md \"Publishing the VS Code extension\" lists what Open VSX needs; add the secret and re-run this job."
+            exit 1
+          fi
+          pnpm exec ovsx publish --packagePath "$RUNNER_TEMP/$FILE" --skip-duplicate

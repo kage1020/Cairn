@@ -2,8 +2,16 @@
 //! walls and chests (`spec/blockstate` "Connections").
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockState, Face, Faces, JoinKind, Joins, TargetRegistry};
+use cairn_lang_core::block_array::{
+    BlockState, Covers, Face, Faces, JoinKind, Joins, TargetRegistry,
+};
+use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
+use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::registry::builtin_pack;
+use cairn_lang_nbt::tag::Tag;
+
+use crate::common::{block_palette, lower_source, note_fields, states_for};
 
 /// `minecraft:{id}` with `properties`.
 fn state(id: &str, properties: &[(&str, &str)]) -> BlockState {
@@ -94,10 +102,44 @@ fn a_face_is_sturdy_where_the_states_model_covers_it_whole() {
         leaves,
         Some(Joins {
             sturdy: Faces::ALL,
-            exception: true,
+            covers: every_part(),
+            never_joined_by_face: true,
             ..Joins::default()
         }),
     );
+}
+
+/// The post and every side of a wall.
+fn every_part() -> Covers {
+    Covers {
+        post: true,
+        sides: Face::SIDES.into_iter().collect(),
+    }
+}
+
+#[test]
+fn what_a_bottom_covers_of_a_wall_is_read_off_the_parts_of_the_model_resting_on_it() {
+    let covers = |id, properties: &[(&str, &str)]| {
+        joins(Edition::Java, Some("1.21"), &state(id, properties)).map(|joins| joins.covers)
+    };
+    let post = Covers {
+        post: true,
+        sides: Faces::NONE,
+    };
+    assert_eq!(covers("cobblestone", &[]), Some(every_part()));
+    assert_eq!(covers("oak_slab", &[]), Some(every_part()));
+    assert_eq!(
+        covers("oak_slab", &[("type", "top")]),
+        Some(Covers::default())
+    );
+    assert_eq!(covers("lantern", &[]), Some(post));
+    assert_eq!(
+        covers("lantern", &[("hanging", "true")]),
+        Some(Covers::default())
+    );
+    assert_eq!(covers("flower_pot", &[]), Some(post));
+    // A connecting block is read by its connection states instead.
+    assert_eq!(covers("cobblestone_wall", &[]), Some(Covers::default()));
 }
 
 #[test]
@@ -130,6 +172,18 @@ fn a_bedrock_id_is_read_as_the_canonical_blocks_its_state_map_names() {
     );
     // Java's standing and wall torch both become it, and only the standing one raises a post.
     assert_eq!(at("1.21.0", "unlit_redstone_torch"), None);
+}
+
+#[test]
+fn a_bedrock_id_several_java_blocks_become_is_read_as_those_that_take_its_states() {
+    let wall_torch = state("unlit_redstone_torch", &[("facing", "north")]);
+    assert_eq!(
+        joins(Edition::Bedrock, Some("1.21.0"), &wall_torch),
+        Some(Joins {
+            dust: SIDES,
+            ..Joins::default()
+        }),
+    );
 }
 
 #[test]
@@ -190,4 +244,116 @@ fn dust_joins_a_signal_source_on_every_side_and_a_repeater_or_observer_only_wher
     );
     assert_eq!(at("observer", &[]), Some(Faces::NONE.with(Face::North)));
     assert_eq!(at("stone", &[]), Some(Faces::NONE));
+}
+
+#[test]
+fn a_bedrock_target_writes_the_connections_a_wall_and_its_gate_derive() {
+    let source = "theme t:\n  slot wall -> @cobblestone_wall\n  slot gate -> @fence_gate\n\n\
+                  struct s size=5x3\n  walls mat_slot=wall height=1\n  \
+                  window side=front offset=1 y=1 size=1x1 mat_slot=gate\n";
+    let version = "1.21.0";
+    let out = lower_source(source, Edition::Bedrock, Some(version));
+    assert_eq!(out.diagnostics, []);
+    let target = resolve_bedrock_target(version).expect("known target");
+    let (root, notes) =
+        build_mcstructure_tag(&out.structures["struct::s"], &target, &states_for(&target))
+            .expect("build");
+    assert_eq!(notes, []);
+    let mut written: Vec<String> = block_palette(&root)
+        .iter()
+        .map(|entry| {
+            let Tag::Compound(entry) = entry else {
+                panic!("palette entry: {entry:?}");
+            };
+            let (Some(Tag::String(name)), Some(Tag::Compound(states))) =
+                (entry.entries.get("name"), entry.entries.get("states"))
+            else {
+                panic!("palette entry: {entry:?}");
+            };
+            let mut states: Vec<String> = states
+                .entries
+                .iter()
+                .map(|(key, value)| match value {
+                    Tag::Byte(v) => format!("{key}={v}"),
+                    Tag::Int(v) => format!("{key}={v}"),
+                    Tag::String(v) => format!("{key}={v}"),
+                    other => panic!("{key}: {other:?}"),
+                })
+                .collect();
+            states.sort();
+            format!("{name}[{}]", states.join(","))
+        })
+        .collect();
+    written.sort();
+    let wall = |east, north, south, west, post| {
+        format!(
+            "minecraft:cobblestone_wall[wall_block_type=cobblestone,\
+             wall_connection_type_east={east},wall_connection_type_north={north},\
+             wall_connection_type_south={south},wall_connection_type_west={west},\
+             wall_post_bit={post}]"
+        )
+    };
+    // Four corners, a straight run each way with its post down, and the gate set into the front.
+    assert_eq!(
+        written,
+        [
+            "minecraft:air[]".to_owned(),
+            wall("none", "none", "short", "short", 1),
+            wall("none", "short", "none", "short", 1),
+            wall("none", "short", "short", "none", 0),
+            wall("short", "none", "none", "short", 0),
+            wall("short", "none", "short", "none", 1),
+            wall("short", "short", "none", "none", 1),
+            "minecraft:fence_gate[direction=2,in_wall_bit=1,open_bit=0]".to_owned(),
+        ],
+    );
+}
+
+#[test]
+fn a_bedrock_target_writes_each_half_of_a_chest_pair_single_and_notes_the_pairing_it_drops() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=5x3\n  walls mat_slot=wall height=3\n  \
+                  chest at=inside.back offset=1 y=1\n  chest at=inside.back offset=2 y=1\n";
+    let version = "1.21.0";
+    let out = lower_source(source, Edition::Bedrock, Some(version));
+    assert_eq!(out.diagnostics, []);
+    let target = resolve_bedrock_target(version).expect("known target");
+    let (root, notes) =
+        build_mcstructure_tag(&out.structures["struct::s"], &target, &states_for(&target))
+            .expect("build");
+    let dropped = |value: &str| DroppedIntent {
+        key: "type".to_owned(),
+        value: value.to_owned(),
+        mc_versions: vec![version.to_owned()],
+        reason: "Bedrock pairs chests through their block entities, which Cairn does not write, \
+                 so each chest stands single"
+            .to_owned(),
+    };
+    assert_eq!(
+        note_fields(&notes),
+        [
+            (
+                "minecraft:chest",
+                "facing=south,type=left",
+                &dropped("left")
+            ),
+            (
+                "minecraft:chest",
+                "facing=south,type=right",
+                &dropped("right")
+            ),
+        ],
+    );
+    let chests: Vec<&Tag> = block_palette(&root)
+        .iter()
+        .filter(|entry| {
+            matches!(entry, Tag::Compound(entry)
+                if entry.entries.get("name") == Some(&Tag::String("minecraft:chest".to_owned())))
+        })
+        .collect();
+    assert_eq!(
+        chests.len(),
+        1,
+        "both halves write one single chest: {chests:?}"
+    );
 }

@@ -19,8 +19,8 @@ title: "用語集"
 - **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。現時点では、メンバーが持つのはキーワードから分類した `role` だけで、型は持ちません。ブロックエンティティやエンティティを置くキーワードも、まだありません。`type` は `role` の隣に並べます。
 - **`id` / `class` / `role`**: メンバーに付ける、同一性、グループ、建築上の役割のタグです。セレクタと安定したアドレスに使います。
 - **`mat_slot`**: メンバー上のマテリアルの注入ポイントです。`theme` が値を割り当てます。構造はスロットだけを持ち、どのブロックを使うかはテーマが持ちます。[マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット) を参照してください。
-- **`intent_state`**: 書き手が意図したブロックステートです。メンバーのキーワードが名前を挙げるブロックステートのキー (`stair` の `facing` など) が入ります。編集の差分は **ここだけ** を比べます。行のそれ以外のキーは、メンバーの引数です。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
-- **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。lowering が各メンバーの分を正規の語彙で、組み上げる block-array の隣に記録します。`cairn lower --format json` はそれを `members` の下に出力します。
+- **`intent_state`**: 書き手が意図したブロックステートです。メンバーのキーワードが名前を挙げるブロックステートのキー (`stair` の `facing` など) が入ります。行のそれ以外のキーは、メンバーの引数です。編集の差分が比べるのは、行に書いたもの、つまりこれと引数 **だけ** で、導出したものは比べません。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
+- **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。lowering が各メンバーの分を、組み上げる block-array の隣に記録します。ブロック ID はターゲットが解決したもので、ステート名は正規の語彙のものです。`cairn lower --format json` はそれを `members` の下に出力します。
 - **上書きによる昇格 (Override-promotion)**: 意図になりうるブロックステートを書くと、そのブロックステートは `resolved_state` から `intent_state` に昇格します。仕様上のルールは「既定では導出し、意図になりうるブロックステートはどれも上書きできる」です。[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) を参照してください。
 - **アンカーと bbox (Anchor / bbox)**: どのプリミティブも、IR の中に `anchor` (基準点)、宣言上の bbox、実際の bbox、取り付ける面の 4 つを持ちます。絵画、額縁、アーチ窓のように、宣言したサイズと実際に占める AABB が食い違うプリミティブを、この 4 つで扱います。現時点では、IR はこの 4 つのどれも持っていません。[エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約) を参照してください。
 
@@ -36,7 +36,7 @@ title: "用語集"
 
 ## コンパイル
 
-- **フェーズ (Phase)**: コンパイラが各コマンドを振り分ける、順番の決まった評価の枠です。`massing → envelope → openings → fixtures → fluids → logic_synth → logic_place → logic_route → raw` の順に評価します。ソース上の順番は関係なく、意味はフェーズの順番で決まります ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。
+- **フェーズ (Phase)**: コンパイラが各コマンドを振り分ける、順番の決まった評価の枠です。`massing` → `envelope` → `openings` → `fixtures` → `fluids` → `logic_synth` → `logic_place` → `logic_route` → `raw` の順に評価します。ソース上の順番は関係なく、意味はフェーズの順番で決まります ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。
 - **フェーズ内の後勝ち (Last-wins, local)**: 同じフェーズの中では、後に書いたコマンドが先のコマンドを上書きします。プログラム全体で後勝ちにする考え方 (「ペイントモデル」) は採りません。[原則 P2](/ja/spec/principles/) を参照してください。
 - **ターゲット軸 (Target axes)**: `(edition, version)` の組です。これを知っているのはバックエンドだけで、DSL のソースには決して現れません。`--edition` は必須で、`--target` だけを指定することはできません。[コンパイルモデル §4.2](/ja/spec/compilation/#42-ターゲット軸) と [バージョンとエディション](/ja/spec/versioning-editions/) を参照してください。
 - **lowering**: スコープのメンバーを block-array IR に変換するパスです。壁、開口部、屋根、通路、マテリアルが、パレットとインデックスの配列になります。`cairn compile`、`cairn lower`、`cairn info`、`cairn check` のどれもこのパスを通ります。[アーキテクチャ §3.1](/ja/spec/architecture/#31-block-array-ir-はすべてのフォーマットに共通のピボット) を参照してください。

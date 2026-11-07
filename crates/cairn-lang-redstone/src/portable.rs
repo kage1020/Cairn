@@ -4,7 +4,9 @@
 use std::collections::{HashMap, HashSet};
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, Dims, Face, ResolvedMember};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockArrayIr, Dims, Face, ResolvedBlock, ResolvedMember,
+};
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{ACTUATOR_BINDINGS, IntentModule, Member, SENSOR_HOSTS};
 
@@ -156,7 +158,7 @@ impl<'a> Body<'a> {
                     cells: resolved
                         .resolved_state
                         .iter()
-                        .flat_map(|block| block.cells.iter().copied())
+                        .flat_map(ResolvedBlock::cells)
                         .collect(),
                     facing: property("facing").and_then(Face::from_name),
                     face: property("face"),
