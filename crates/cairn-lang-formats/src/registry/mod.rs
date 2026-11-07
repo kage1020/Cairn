@@ -11,7 +11,8 @@ pub mod materials;
 
 pub use aliases::{AliasCatalog, AliasError, AliasGroup, AliasIndex, SUPPORTED_ALIASES_SCHEMA};
 pub use blocks::{
-    BlocksBase, BlocksCatalog, BlocksDiff, BlocksError, BlocksIndex, SUPPORTED_BLOCKS_SCHEMA,
+    BlockEntries, BlockStates, BlocksBase, BlocksCatalog, BlocksDiff, BlocksError, BlocksIndex,
+    SUPPORTED_BLOCKS_SCHEMA, StateValue,
 };
 pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;

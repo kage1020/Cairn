@@ -2,11 +2,36 @@
   "schema_version": 1,
   "edition": "java",
   "name": "cairn-builtin-java",
-  "description": "Built-in Java registry pack bundled with the Cairn reference compiler. DataVersions come from Mojang release notes (no `--reports` extraction yet). The per-version block tables come from PrismarineJS/minecraft-data (data/pc/{1.20.4,1.21.1,1.21.4}/blocks.json, retrieved 2026-08-12); 1.21.1 is the patch release of the 1.21 line. The `aliases` groups are hand-written: the spellings one block has worn, so a refused id can be answered with the name this target does use. They cover the Java/Bedrock spelling splits an author most often walks into and the ids Bedrock's own 1.21.40 flattening wave retired. Two cases are deliberately absent. A spelling both editions declare meaning different blocks (`snow` is Java's snow layer and Bedrock's snow block) gets no row, because a group is keyed on the spelling alone and the two pairs would have to share one. The seven numbered pre-flattening slab ids (`stone_block_slab2` … `4`, `double_stone_block_slab` … `4`) are absent for a different reason: each carried several unrelated materials in one state value and the 1.21.40 wave scattered them across the edition's 124 slab ids, and which of those each old id covers is recorded in no table shipped here — the row would be a guess. That is what separates them from the state-split families that are included (`stonebrick`, `monster_egg`, `skull`): each of those splits into one family, and the whole family is the answer.",
+  "description": "Built-in Java registry pack bundled with the Cairn reference compiler. The block tables, each block's state properties and their values, and each targetable version's DataVersion are extracted from the game by `.github/scripts/extract_registry.py`: each version's server jar runs its data generator with `--reports`, and `extracted` names the jar each table came from. The `aliases` groups are hand-written: the spellings one block has worn, so a refused id can be answered with the name this target does use. They cover the Java/Bedrock spelling splits an author most often walks into and the ids Bedrock's own 1.21.40 flattening wave retired. Two cases are deliberately absent. A spelling both editions declare meaning different blocks (`snow` is Java's snow layer and Bedrock's snow block) gets no row, because a group is keyed on the spelling alone and the two pairs would have to share one. The seven numbered pre-flattening slab ids (`stone_block_slab2` … `4`, `double_stone_block_slab` … `4`) are absent for a different reason: each carried several unrelated materials in one state value and the 1.21.40 wave scattered them across the edition's 124 slab ids, and which of those each old id covers is recorded in no table shipped here — the row would be a guess. That is what separates them from the state-split families that are included (`stonebrick`, `monster_egg`, `skull`): each of those splits into one family, and the whole family is the answer.",
   "files": {
     "data_versions": "data_versions.json",
     "materials": "materials.json",
     "blocks": "blocks.json",
     "aliases": "aliases.json"
+  },
+  "extracted": {
+    "by": ".github/scripts/extract_registry.py",
+    "blocks": [
+      {
+        "mc_version": "1.20.4",
+        "url": "https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar",
+        "sha1": "8dd1a28015f51b1803213892b50b7b4fc76e594d"
+      },
+      {
+        "mc_version": "1.21",
+        "url": "https://piston-data.mojang.com/v1/objects/450698d1863ab5180c25d7c804ef0fe6369dd1ba/server.jar",
+        "sha1": "450698d1863ab5180c25d7c804ef0fe6369dd1ba"
+      },
+      {
+        "mc_version": "1.21.4",
+        "url": "https://piston-data.mojang.com/v1/objects/4707d00eb834b446575d89a61a11b5d548d8c001/server.jar",
+        "sha1": "4707d00eb834b446575d89a61a11b5d548d8c001"
+      },
+      {
+        "mc_version": "26.3",
+        "url": "https://piston-data.mojang.com/v1/objects/33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c/server.jar",
+        "sha1": "33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c"
+      }
+    ]
   }
 }

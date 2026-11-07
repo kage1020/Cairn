@@ -51,8 +51,10 @@ const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock");
 
 /// The highest manifest `schema_version` this build reads.
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
-/// The highest `data_versions.schema_version` this build reads; version 2 adds `targetable`.
-pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 2;
+/// The highest `data_versions.schema_version` this build reads. Version 2 adds `targetable` and
+/// version 3 `block_version`, which every targetable Bedrock row needs, so a Bedrock table only
+/// loads from version 3.
+pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 3;
 
 /// Where a [`RegistryPack`] came from, for diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +182,23 @@ pub enum RegistryError {
         /// Which rows disagree, and about what.
         reason: String,
     },
+    /// A targetable Bedrock row lacks `block_version`.
+    #[error(
+        "registry pack `data_versions` row `{mc_version}` is a targetable Bedrock row and needs the `block_version` its structures write"
+    )]
+    BlockVersionMissing {
+        /// The row.
+        mc_version: String,
+    },
+    /// A row no structure is written for carries a `block_version`: a Java row, or a Bedrock row
+    /// `--target` cannot name.
+    #[error(
+        "registry pack `data_versions` row `{mc_version}` gives a `block_version`, which only a targetable Bedrock row writes"
+    )]
+    BlockVersionMisplaced {
+        /// The row.
+        mc_version: String,
+    },
     /// The manifest's edition is not the one the pack was loaded as.
     #[error("registry pack edition `{got:?}` does not match expected `{expected:?}`")]
     EditionMismatch {
@@ -227,6 +246,16 @@ pub enum RegistryError {
         /// The group's spellings, comma-joined.
         spellings: String,
     },
+    /// `blocks` resolves a version after a newer one.
+    #[error(
+        "registry pack `blocks` resolves `{version}` after `{follows}`, which `data_versions` orders after it; list the tables oldest first"
+    )]
+    BlocksOutOfOrder {
+        /// The version resolved too late.
+        version: String,
+        /// The newer version resolved before it.
+        follows: String,
+    },
     /// `blocks` lacks a table for a targetable version, or has one for a version not in the table.
     #[error(
         "registry pack `blocks` and `data_versions` disagree: no id table for [{missing}], and an id table for unsupported [{extra}]"
@@ -257,15 +286,17 @@ impl From<AliasError> for RegistryError {
     }
 }
 
-/// The targetable row `mc_version` names, as the row spells it. `1.21.0` names `1.21`
-/// (`spec/versioning-editions` "The target is a compile-time parameter").
-fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
+/// The targetable row `mc_version` names: `1.21.0` names `1.21` (`spec/versioning-editions`
+/// "The target is a compile-time parameter").
+fn targetable_row_for<'a>(
+    table: &'a DataVersionTable,
+    mc_version: &str,
+) -> Option<&'a DataVersionEntry> {
     table
         .versions
         .iter()
         .filter(|e| e.targetable)
         .find(|e| compare_versions(&e.mc_version, mc_version).is_eq())
-        .map(|e| (e.mc_version.clone(), e.data_version))
 }
 
 impl RegistryPack {
@@ -311,7 +342,7 @@ impl RegistryPack {
         &self.source
     }
 
-    /// The `(mc_version, data_version)` row `requested` names, `"latest"` included.
+    /// The targetable row `requested` names, `"latest"` included.
     ///
     /// # Panics
     ///
@@ -320,7 +351,7 @@ impl RegistryPack {
         &self,
         edition: Edition,
         requested: &str,
-    ) -> Result<(String, i32), UnsupportedTarget> {
+    ) -> Result<&DataVersionEntry, UnsupportedTarget> {
         assert_eq!(
             self.manifest.edition, edition,
             "{edition:?} target resolution against a non-{edition:?} pack is a caller bug",
@@ -349,10 +380,10 @@ impl RegistryPack {
     ///
     /// When the pack is not a Java pack.
     pub fn resolve_java_target(&self, requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
-        let (mc_version, data_version) = self.resolve_target_row(Edition::Java, requested)?;
+        let row = self.resolve_target_row(Edition::Java, requested)?;
         Ok(JavaTarget {
-            mc_version,
-            data_version,
+            mc_version: row.mc_version.clone(),
+            data_version: row.data_version,
         })
     }
 
@@ -369,10 +400,13 @@ impl RegistryPack {
         &self,
         requested: &str,
     ) -> Result<BedrockTarget, UnsupportedTarget> {
-        let (mc_version, block_version) = self.resolve_target_row(Edition::Bedrock, requested)?;
+        let row = self.resolve_target_row(Edition::Bedrock, requested)?;
         Ok(BedrockTarget {
-            mc_version,
-            block_version,
+            mc_version: row.mc_version.clone(),
+            order_key: row.data_version,
+            block_version: row
+                .block_version
+                .expect("a targetable Bedrock row's block_version is validated at load time"),
         })
     }
 
@@ -590,7 +624,7 @@ fn load_pack(
         source.read_text(Component::DataVersions, &manifest.files.data_versions)?;
     let data_versions: DataVersionTable =
         parse_component(&data_versions_text, Component::DataVersions)?;
-    validate_data_versions(&data_versions)?;
+    validate_data_versions(&data_versions, expected_edition)?;
 
     let (materials, materials_text) = optional_component(
         source,
@@ -603,7 +637,7 @@ fn load_pack(
         source,
         Component::Blocks,
         manifest.files.blocks.as_deref(),
-        BlocksIndex::from_catalog,
+        |catalog| BlocksIndex::from_catalog(catalog, expected_edition),
         BlocksIndex::empty,
     )?;
     let (aliases, aliases_text) = optional_component(
@@ -615,6 +649,7 @@ fn load_pack(
     )?;
     validate_material_overrides(&materials, &data_versions)?;
     validate_blocks_cover_versions(&blocks, &data_versions)?;
+    validate_blocks_order(&blocks, &data_versions)?;
     validate_aliases_answerable(&aliases, &blocks)?;
 
     let mut components: Vec<(&str, &[u8])> = vec![(
@@ -745,6 +780,35 @@ fn validate_blocks_cover_versions(
     })
 }
 
+/// Requires `blocks` to resolve its versions oldest first, so its first and last tables to declare
+/// an id are the versions it first and last appears in.
+fn validate_blocks_order(
+    blocks: &BlocksIndex,
+    data_versions: &DataVersionTable,
+) -> Result<(), RegistryError> {
+    let key = |version: &str| {
+        data_versions
+            .versions
+            .iter()
+            .find(|e| e.mc_version == version)
+            .map(|e| e.data_version)
+    };
+    let mut previous: Option<(&str, i32)> = None;
+    for version in blocks.versions() {
+        let this = key(version).expect("`validate_blocks_cover_versions` refused a table it lacks");
+        if let Some((follows, before)) = previous
+            && this <= before
+        {
+            return Err(RegistryError::BlocksOutOfOrder {
+                version: version.to_owned(),
+                follows: follows.to_owned(),
+            });
+        }
+        previous = Some((version, this));
+    }
+    Ok(())
+}
+
 fn validate_manifest(manifest: &PackManifest, expected: Edition) -> Result<(), RegistryError> {
     if manifest.schema_version > SUPPORTED_MANIFEST_SCHEMA {
         return Err(RegistryError::UnsupportedSchemaVersion {
@@ -762,7 +826,7 @@ fn validate_manifest(manifest: &PackManifest, expected: Edition) -> Result<(), R
     Ok(())
 }
 
-fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError> {
+fn validate_data_versions(table: &DataVersionTable, edition: Edition) -> Result<(), RegistryError> {
     if table.schema_version > SUPPORTED_DATA_VERSIONS_SCHEMA {
         return Err(RegistryError::UnsupportedSchemaVersion {
             kind: "data_versions",
@@ -785,7 +849,26 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
     if !table.versions.iter().any(|e| e.targetable) {
         return Err(RegistryError::NoTargetableVersion);
     }
+    validate_block_versions(table, edition)?;
     validate_version_order(table)?;
+    Ok(())
+}
+
+/// Requires a `block_version` on each targetable Bedrock row, the integer its structures write,
+/// and refuses one on any other row, which nothing writes.
+fn validate_block_versions(
+    table: &DataVersionTable,
+    edition: Edition,
+) -> Result<(), RegistryError> {
+    for entry in &table.versions {
+        let written = edition == Edition::Bedrock && entry.targetable;
+        let mc_version = entry.mc_version.clone();
+        match (written, entry.block_version) {
+            (true, None) => return Err(RegistryError::BlockVersionMissing { mc_version }),
+            (false, Some(_)) => return Err(RegistryError::BlockVersionMisplaced { mc_version }),
+            (true, Some(_)) | (false, None) => {}
+        }
+    }
     Ok(())
 }
 

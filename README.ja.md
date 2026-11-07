@@ -14,7 +14,7 @@ cargo install cairn-lang-cli
 
 これで `cairn` コマンドが使えるようになります。
 
-Linux・macOS・Windows (`x86_64` と `aarch64`) 向けのビルド済みアーカイブも、各[リリース](https://github.com/kage1020/Cairn/releases)に添付しています。アーカイブには `cairn` と言語サーバー `cairn-lsp` の両方が入っています。Windows `aarch64` 版を除くすべてのアーカイブに sigstore の署名が付きます (Windows `aarch64` 向けには cosign のバイナリがないためです)。
+Linux・macOS・Windows (`x86_64` と `aarch64`) 向けのビルド済みアーカイブも、各[リリース](https://github.com/kage1020/Cairn/releases)に添付しています。アーカイブには `cairn` と言語サーバー `cairn-lsp` の両方が入っています。Windows `aarch64` 版を除くすべてのアーカイブに sigstore の署名が付きます (Windows `aarch64` 向けには cosign のバイナリがないためです)。2026.12.0 からは [VS Code 拡張](editors/vscode/)も `cairn-lang-<version>.vsix` としてリリースに添付し、同じファイルを Visual Studio Marketplace と Open VSX に公開します。
 
 リポジトリから直接ビルドする場合は `cargo build --release` を実行してください。両方のバイナリが `target/release/` に出力されます。
 
@@ -78,7 +78,7 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4   Bedrock: 1.21.0, 1.21.40, 1.21.60
+buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
 ```

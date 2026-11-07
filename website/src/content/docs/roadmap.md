@@ -130,8 +130,9 @@ The release strategy itself is automated:
    `vYYYY.M.N`; build binaries for Linux, macOS, and Windows on `x86_64` and `aarch64`, each target
    on a runner of its own, and attach every archive with its SHA-256 checksum to a GitHub Release,
    beside a sigstore bundle for each archive except the Windows `aarch64` one, and a signed
-   CycloneDX SBOM; publish the tree-sitter grammar to npm; and open a PR that merges `main` back
-   into `canary`.
+   CycloneDX SBOM; package the VS Code extension, attach the `.vsix` with its checksum and sigstore
+   bundle, and publish that file to the Visual Studio Marketplace and Open VSX; publish the
+   tree-sitter grammar to npm; and open a PR that merges `main` back into `canary`.
 
 Compatibility expectations across this schedule are defined separately by
 [compatibility tier](/spec/compatibility/): the lockfile format is **Stable** from 2026.11.0, where

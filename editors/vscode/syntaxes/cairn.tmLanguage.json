@@ -12,6 +12,7 @@
     { "include": "#material-token" },
     { "include": "#attribute-key" },
     { "include": "#arrow" },
+    { "include": "#coordinate" },
     { "include": "#number" }
   ],
   "repository": {
@@ -65,6 +66,10 @@
     "arrow": {
       "name": "keyword.operator.arrow.cairn",
       "match": "->"
+    },
+    "coordinate": {
+      "name": "constant.numeric.coordinate.cairn",
+      "match": "(?<==)\\d+,\\d+,\\d+\\b(?!,\\d)"
     },
     "number": {
       "name": "constant.numeric.cairn",

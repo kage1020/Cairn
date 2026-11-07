@@ -1,5 +1,6 @@
 //! The portability counters over hand-built palettes and block tables.
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex,
 };
@@ -44,7 +45,7 @@ fn table() -> BlocksIndex {
     }"#,
     )
     .expect("test catalog parses as JSON");
-    BlocksIndex::from_catalog(catalog).expect("test catalog folds")
+    BlocksIndex::from_catalog(catalog, Edition::Bedrock).expect("test catalog folds")
 }
 
 fn one_block_array(scope: &str, states: Vec<BlockState>) -> BlockArray {
@@ -469,7 +470,7 @@ fn table_with_oak_sign() -> BlocksIndex {
     }"#,
     )
     .expect("test catalog parses as JSON");
-    BlocksIndex::from_catalog(catalog).expect("test catalog folds")
+    BlocksIndex::from_catalog(catalog, Edition::Bedrock).expect("test catalog folds")
 }
 
 #[test]

@@ -420,6 +420,15 @@ pub enum ValueKind {
         /// Height in blocks.
         h: NonZeroU32,
     },
+    /// Coordinate triple `x,y,z` (`4,3,2`): a cell of the scope, from its footprint's low corner.
+    Coord {
+        /// Along the `size=` footprint's `W`.
+        x: u64,
+        /// Up from the base plane, or from the level's under `level y=N`.
+        y: u64,
+        /// Along the `size=` footprint's `H`.
+        z: u64,
+    },
     /// Canonical or abstract token without its `@`: `@oak_planks` is `Token("oak_planks")`.
     Token(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
@@ -478,6 +487,7 @@ impl Value {
             ValueKind::Bool(b) => Some(b.to_string()),
             ValueKind::Int(i) => Some(i.to_string()),
             ValueKind::Size { w, h } => Some(format!("{w}x{h}")),
+            ValueKind::Coord { x, y, z } => Some(format!("{x},{y},{z}")),
             ValueKind::Token(t) => Some(format!("@{t}")),
             ValueKind::DotRef(d) => Some(d.to_string()),
             ValueKind::List(_) => None,
@@ -501,6 +511,7 @@ impl Value {
             ValueKind::Bool(..) => "boolean",
             ValueKind::Int(..) => "integer",
             ValueKind::Size { .. } => "size",
+            ValueKind::Coord { .. } => "coordinate",
             ValueKind::Token(..) => "token",
             ValueKind::DotRef(..) => "reference",
             ValueKind::Str(..) => "string",
