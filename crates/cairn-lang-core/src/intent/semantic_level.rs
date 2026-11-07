@@ -12,6 +12,6 @@ pub enum SemanticLevel {
     Raw,
     /// Named members with materials and themes unresolved; what `lower()` returns.
     Grouped,
-    /// Every member carries an `intent_state` and a `resolved_state`.
+    /// Members named semantically, a concrete block raised to a `mat_slot` and a `theme`.
     Lifted,
 }

@@ -58,8 +58,7 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
     let java = resolve_java_target("latest").expect("latest");
     let bedrock = resolve_bedrock_target("latest").expect("latest");
     let states = builtin_pack(Edition::Bedrock)
-        .states()
-        .at(&bedrock.mc_version)
+        .states_at(&bedrock.mc_version)
         .expect("the built-in Bedrock pack maps every targetable version");
     let small = cube(8);
     let large = cube(48);

@@ -268,6 +268,117 @@ fn a_waterlogged_entry_holds_water_in_the_second_layer() {
     assert_eq!(streamed_at(&ba, &target), tree);
 }
 
+/// `state` with `waterlogged=true`.
+fn wet(mut state: BlockState) -> BlockState {
+    state
+        .properties
+        .insert("waterlogged".to_owned(), "true".to_owned());
+    state
+}
+
+/// The names `block_palette` lists, in slot order.
+fn palette_names(root: &Compound) -> Vec<&str> {
+    block_palette(root).iter().map(name_of).collect()
+}
+
+#[test]
+fn entries_that_merge_into_one_block_keep_their_own_water() {
+    let ba = row_of(&[
+        wet(stair(OAK_STAIRS, "north", "outer_left")),
+        stair(OAK_STAIRS, "north", "straight"),
+    ]);
+    let (root, _) = build(&ba).expect("build");
+    assert_eq!(
+        palette_names(&root),
+        ["minecraft:air", OAK_STAIRS, "minecraft:water"]
+    );
+    assert_eq!(block_layer(&root), [0, 1, 1]);
+    assert_eq!(water_layer(&root), [-1, 2, -1]);
+}
+
+#[test]
+fn two_waterlogged_blocks_share_one_water_slot() {
+    let ba = row_of(&[
+        wet(stair(OAK_STAIRS, "north", "straight")),
+        wet(stair(OAK_STAIRS, "south", "straight")),
+    ]);
+    let (root, _) = build(&ba).expect("build");
+    assert_eq!(
+        palette_names(&root),
+        ["minecraft:air", OAK_STAIRS, OAK_STAIRS, "minecraft:water"]
+    );
+    assert_eq!(block_layer(&root), [0, 1, 2]);
+    assert_eq!(water_layer(&root), [-1, 3, 3]);
+}
+
+#[test]
+fn a_water_block_shares_the_slot_a_waterlogged_block_holds() {
+    let ba = row_of(&[
+        BlockState::bare("minecraft:water"),
+        wet(stair(OAK_STAIRS, "north", "straight")),
+    ]);
+    let (root, _) = build(&ba).expect("build");
+    assert_eq!(
+        palette_names(&root),
+        ["minecraft:air", "minecraft:water", OAK_STAIRS]
+    );
+    assert_eq!(block_layer(&root), [0, 1, 2]);
+    assert_eq!(water_layer(&root), [-1, -1, 1]);
+}
+
+#[test]
+fn the_water_layer_holds_still_water_at_every_version() {
+    let ba = row_of(&[wet(stair(OAK_STAIRS, "north", "straight"))]);
+    for version in ["1.21.0", "1.21.40", "1.21.60", "1.26.60"] {
+        let target = resolve_bedrock_target(version).expect("known target");
+        let (root, _) = build_at(&ba, &target).expect("build");
+        let entries = block_palette(&root);
+        assert_eq!(name_of(&entries[2]), "minecraft:water", "at {version}");
+        assert_eq!(
+            states_of(&entries[2]).entries.iter().collect::<Vec<_>>(),
+            [(&"liquid_depth".to_owned(), &Tag::Int(0))],
+            "at {version}",
+        );
+    }
+}
+
+#[test]
+fn a_block_bedrock_keeps_only_under_water_holds_water_without_waterlogged() {
+    let ba = row_of(&[
+        BlockState::bare("minecraft:kelp"),
+        BlockState::bare("minecraft:seagrass"),
+        BlockState::bare("minecraft:oak_planks"),
+    ]);
+    let (root, _) = build(&ba).expect("build");
+    assert_eq!(
+        palette_names(&root),
+        [
+            "minecraft:air",
+            "minecraft:kelp",
+            "minecraft:seagrass",
+            "minecraft:oak_planks",
+            "minecraft:water",
+        ]
+    );
+    assert_eq!(water_layer(&root), [-1, 4, 4, -1]);
+}
+
+#[test]
+fn a_slab_and_its_double_spelling_share_one_block() {
+    let mut double = BlockState::bare("minecraft:oak_slab");
+    double
+        .properties
+        .insert("type".to_owned(), "double".to_owned());
+    let ba = row_of(&[double, BlockState::bare("minecraft:oak_double_slab")]);
+    let (root, notes) = build(&ba).expect("build");
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(
+        palette_names(&root),
+        ["minecraft:air", "minecraft:oak_double_slab"]
+    );
+    assert_eq!(block_layer(&root), [0, 1, 1]);
+}
+
 #[test]
 fn stair_states_map_to_bedrock_vocabulary() {
     let mut stairs = BlockState::bare("minecraft:dark_oak_stairs");

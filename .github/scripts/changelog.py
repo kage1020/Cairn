@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Check and assemble the per-PR changelog fragments in `changelog.d/`.
 
+`extension` also gives the VS Code extension's hand-written changelog a section for the release.
+
 Standard library only: it runs on a bare `ubuntu-latest` runner.
 """
 
@@ -17,6 +19,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FRAGMENT_DIR = ROOT / "changelog.d"
 CHANGELOG = ROOT / "CHANGELOG.md"
+EXTENSION_CHANGELOG = ROOT / "editors/vscode/CHANGELOG.md"
+UNRELEASED = "## [Unreleased]"
+# The registries show the changelog the `.vsix` packs, so each release needs a section in it.
+NO_EXTENSION_CHANGE = "No change to the extension itself; it ships with this Cairn release."
 
 # In release-section order. `Added` to `Build` are spelled as release-plz.toml renders its unskipped
 # groups; the first two are what `spec/compatibility` "How a break is communicated" requires.
@@ -291,6 +297,38 @@ def assemble(args: argparse.Namespace) -> int:
     return 0
 
 
+def extension(args: argparse.Namespace) -> int:
+    """Rename the extension changelog's `[Unreleased]` to the version CHANGELOG.md heads."""
+    heading = next((line for line in CHANGELOG.read_text(encoding="utf-8").splitlines()
+                    if line.startswith(f"## {args.version} ")), None)
+    if heading is None:
+        error(CHANGELOG, None, f"no section for {args.version} to take the extension's heading "
+              "from; release-plz writes that section before this runs")
+        return 1
+    lines = EXTENSION_CHANGELOG.read_text(encoding="utf-8").splitlines()
+    if heading in lines:
+        print(f"{EXTENSION_CHANGELOG.relative_to(ROOT)} already has {heading}")
+        return 0
+    if any(line.startswith("## ") and line[3:].split(" ")[0].strip("[]") == args.version
+           for line in lines):
+        error(EXTENSION_CHANGELOG, None, f"a section for {args.version} under another heading "
+              f"than CHANGELOG.md's `{heading}`; give it that heading")
+        return 1
+    if UNRELEASED in lines:
+        start = lines.index(UNRELEASED)
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
+                   len(lines))
+        body = lines[start + 1:end] if any(line.strip() for line in lines[start + 1:end]) \
+            else ["", NO_EXTENSION_CHANGE, ""]
+        lines[start:end] = [heading, *body]
+    else:
+        start = next((i for i, line in enumerate(lines) if line.startswith("## ")), len(lines))
+        lines[start:start] = [heading, "", NO_EXTENSION_CHANGE, ""]
+    EXTENSION_CHANGELOG.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    print(f"wrote {heading} into {EXTENSION_CHANGELOG.relative_to(ROOT)}")
+    return 0
+
+
 def verify_release(_: argparse.Namespace) -> int:
     version = workspace_version()
     if git("tag", "--list", f"v{version}").stdout.strip():
@@ -320,6 +358,11 @@ def main() -> int:
     fold.add_argument("--version", required=True, help="the version release-plz wrote a section for")
     fold.add_argument("--delete", action="store_true", help="delete the fragments once folded")
     fold.set_defaults(run=assemble)
+    for_extension = commands.add_parser(
+        "extension", help="head the VS Code extension's [Unreleased] with the release's version")
+    for_extension.add_argument("--version", required=True,
+                               help="the version release-plz wrote a section for")
+    for_extension.set_defaults(run=extension)
     commands.add_parser("verify-release", help="refuse to publish without the folded entry") \
         .set_defaults(run=verify_release)
     args = parser.parse_args()

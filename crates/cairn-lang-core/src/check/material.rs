@@ -55,9 +55,7 @@ enum WithoutAMaterial {
 /// the `level`, `circuit`, `place` and `connect` arms.
 fn without_a_material(member: &Member) -> WithoutAMaterial {
     match &member.role {
-        MemberRole::Fill if member.written("fluid").is_some() => {
-            WithoutAMaterial::NamesItsMaterialElsewhere
-        }
+        MemberRole::Fill if member.pours_fluid() => WithoutAMaterial::NamesItsMaterialElsewhere,
         MemberRole::Floor | MemberRole::Walls | MemberRole::Fill => WithoutAMaterial::PaintsNothing,
         // A `window` without `mat_slot=` is an opening carved to air.
         MemberRole::Window => WithoutAMaterial::Carves,

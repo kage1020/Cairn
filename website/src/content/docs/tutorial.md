@@ -59,7 +59,7 @@ lines in whatever order reads best.
 compiler works them out from where each stair sits on the roof. The door is set the same way: it
 faces into the cottage, and its hinge is read from the wall on either side of it. So are the
 panes' connections: each pane joins the wall and the pane beside it, and leaves open the side that
-meets the door, which has no whole face to join.
+meets the door, whose side toward it is not whole.
 
 ## 2. Abstract materials and levels
 

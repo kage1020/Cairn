@@ -9,4 +9,9 @@
   pack's `@door.default`, `oak_door` on Java and `wooden_door` on Bedrock. A block outside the
   door family is `E_INCOMPATIBLE_MATERIAL` with `required: "door"`, and the door is built from the
   default beside the error.
+- *(core)* Two doors in one opening are a `W_PHASE_CONFLICT` when the blocks they would build
+  differ, a derived hinge judged as built, and a `W_PHASE_CONFLICT` on an opening that takes one
+  of a door's two cells says the door is left half built. A door's line and its material are
+  judged together, so a refused material is reported beside a refused or deferred line, and a
+  door whose material is a refused state literal is not built.
 - *(formats)* Both built-in packs declare the tier-1 token `door.default`.

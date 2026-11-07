@@ -8,7 +8,7 @@ fn every_actuator_key_is_in_its_host_vocabulary() {
     for (key, host) in ACTUATOR_BINDINGS {
         let role = role_of(host);
         let vocabulary = role
-            .arguments()
+            .own_keys()
             .unwrap_or_else(|| panic!("`{host}` is no keyword, so `{key}=` has nowhere to sit"));
         assert!(
             vocabulary.contains(key),

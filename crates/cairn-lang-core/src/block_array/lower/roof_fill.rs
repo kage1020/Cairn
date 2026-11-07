@@ -13,7 +13,7 @@ use crate::block_array::{BlockState, PaletteIndex};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
-use super::members::{StructCtx, resolve_member_state};
+use super::members::{MemberState, StructCtx, resolve_member_state};
 use super::roof_kind::{parse_roof_kind, roof_draws, shed_slope_to};
 
 pub(super) fn fill_roof(
@@ -31,16 +31,21 @@ pub(super) fn fill_roof(
         shed_slope_to(member, diagnostics);
         return;
     }
-    let resolved = resolve_member_state(
+    let resolved = match resolve_member_state(
         member,
         ctx.scope,
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-    );
+    ) {
+        MemberState::Bound(state) => Some(state),
+        MemberState::Unbound => None,
+        MemberState::Refused => return,
+    };
     let Ok(base_id) = geometry_material_id(
         member,
         ctx.scope,
+        ctx.registry,
         resolved.as_ref(),
         || Ok::<_, Infallible>(kind.base_block_id().to_owned()),
         &GeometryMemberDescription {
