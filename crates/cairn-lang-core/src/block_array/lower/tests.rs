@@ -370,6 +370,45 @@ fn the_palette_refusal_renders_as_prose() {
     assert_reads_as_prose("W_PALETTE_TOO_LARGE primary", &refused[0].primary);
     assert_eq!(refused[0].notes.len(), 1, "{:#?}", refused[0].notes);
     assert_reads_as_prose("W_PALETTE_TOO_LARGE note 0", &refused[0].notes[0].message);
+    assert_eq!(
+        refused[0].notes[0].message,
+        "every state a member writes counts, including one a later member covers; a vanilla \
+         registry has far fewer, so check the block ids and state literals by pinning a shipped \
+         version with `--edition` and `--target`",
+    );
+}
+
+#[test]
+fn a_pinned_palette_refusal_does_not_ask_for_a_target() {
+    let source = overwriting_walls(4);
+    let module = parse(&source).expect("parse");
+    let ir = lower(&module);
+    let ids = [
+        "minecraft:b0",
+        "minecraft:b1",
+        "minecraft:b2",
+        "minecraft:b3",
+    ];
+    let registry = PinnedRegistry::new(
+        vec![("b0", "b0"), ("b1", "b1"), ("b2", "b2"), ("b3", "b3")],
+        &ids,
+    );
+    let over = lower_to_block_array_within(&ir, &resolve(&ir, None), Some(&registry), 4);
+    let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+    assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+    let notes: Vec<&str> = refused[0]
+        .notes
+        .iter()
+        .map(|n| n.message.as_str())
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            "every state a member writes counts, including one a later member covers; the pinned \
+          target declares each block id, so split the members across more than one `struct`, \
+          each painting fewer"
+        ],
+    );
 }
 
 #[test]
@@ -1562,6 +1601,14 @@ fn abstract_token_deferral_says_what_each_member_does_instead() {
             voxels: |out| assert_eq!(block_id(struct_s(out), 1, 0, 1), BlockState::AIR_ID),
         },
         DeferralArm {
+            members: "walls mat_slot=wall height=3\n  fill mat_slot=trim from=0,1,0 to=4,1,4",
+            consequence: Some("the fill paints none of its box"),
+            voxels: |out| {
+                assert_eq!(block_id(struct_s(out), 0, 1, 0), "minecraft:cobblestone");
+                assert_eq!(block_id(struct_s(out), 1, 1, 1), BlockState::AIR_ID);
+            },
+        },
+        DeferralArm {
             members: "floor mat_slot=wall\n  \
                       walls mat_slot=trim height=3\n  \
                       window side=front offset=1 y=1 size=1x2 mat_slot=wall",
@@ -2026,6 +2073,7 @@ fn the_family_is_reported_before_the_properties_it_makes_moot() {
     let Ok(id) = geometry_material_id(
         member,
         Some(scope),
+        None,
         Some(&state),
         || Ok::<_, std::convert::Infallible>(STAIR_BASE_ID.to_owned()),
         &GeometryMemberDescription {
@@ -4021,7 +4069,7 @@ fn window_carve_stops_at_the_top_of_the_wall_not_the_top_of_the_volume() {
 }
 
 #[test]
-fn a_door_whose_level_sits_at_or_above_the_wall_it_would_carve_is_refused() {
+fn a_door_whose_level_sits_at_or_above_the_wall_it_would_stand_in_is_refused() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n"

@@ -27,7 +27,8 @@ pub(super) enum WrittenWaterlogged<'m> {
     Unknown(&'m str),
 }
 
-/// Read a member's `waterlogged=`: `Ok(None)` when absent, `Err` when its value is no word.
+/// Read a member's `waterlogged=`: `Ok(None)` when absent, `Err` when its value is neither a word
+/// nor a boolean.
 pub(super) fn read_waterlogged(
     member: &Member,
 ) -> Result<Option<WrittenWaterlogged<'_>>, UnreadArgument> {

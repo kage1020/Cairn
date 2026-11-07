@@ -1,6 +1,8 @@
 //! Painting a `fill` member's box with a material, or pouring water into it once every other
 //! member is painted (`spec/blockstate` "`waterlogged`").
 
+use std::collections::HashMap;
+
 use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
@@ -28,6 +30,10 @@ pub(super) fn fill_material(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    debug_assert!(
+        !member.pours_fluid(),
+        "a water fill pours in the fluids phase"
+    );
     let cells = match written_cells(member, Shape::Box, y_offset, ctx) {
         Ok(cells) => cells,
         Err(refusal) => {
@@ -146,6 +152,7 @@ fn pour_water(
     palette: &mut ScopePalette,
     canvas: &mut Canvas,
 ) {
+    let mut waterlogs: HashMap<PaletteIndex, bool> = HashMap::new();
     for cell in cells.cells() {
         let Some(slot) = canvas.slot_at(cell) else {
             continue;
@@ -157,8 +164,11 @@ fn pour_water(
             continue;
         }
         let state = palette.state(usize::from(slot.0));
-        let holds_water = registry.and_then(|registry| registry.holds_water(state));
-        if state.properties.contains_key(WATERLOGGED) || holds_water != Some(true) {
+        let waterlogged = *waterlogs.entry(slot).or_insert_with(|| {
+            !state.properties.contains_key(WATERLOGGED)
+                && registry.and_then(|registry| registry.holds_water(state)) == Some(true)
+        });
+        if !waterlogged {
             continue;
         }
         let mut held = state.clone();

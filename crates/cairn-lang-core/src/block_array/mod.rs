@@ -17,11 +17,11 @@ mod wall_column;
 use indexmap::IndexMap;
 use serde::Serialize;
 
-pub use joins::{Face, Faces, JoinKind, Joins};
+pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{BUILTIN_BLOCK_IDS, findings_without_target, lower_to_block_array};
 pub use material::{
     AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, MaterialDeferred,
-    OutOfDomain, StateDomain, TargetRegistry, UnknownId, resolve_block_state,
+    OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.
@@ -43,8 +43,8 @@ pub struct BlockArrayIr {
     /// Walkway metadata per `connect`; each walkway's array sits in [`Self::structures`].
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub walkways: IndexMap<WalkwayScopeKey, Walkway>,
-    /// Each struct and place body's members that built a cell, in paint order, keyed like
-    /// [`Self::structures`].
+    /// Each struct and place body's members that own a cell once it is painted, in the order of
+    /// the first cell each owns, keyed like [`Self::structures`]; a walkway has no entry.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub members: IndexMap<String, Vec<ResolvedMember>>,
     /// Lowering's findings, apart from the resolver's.
@@ -124,13 +124,13 @@ pub struct BlockArray {
     pub source_scope: String,
 }
 
-/// One member's `resolved_state`: every block it built in the volume as built, in the
-/// canonical vocabulary (`spec/blockstate` "`intent_state` and `resolved_state`").
+/// One member's `resolved_state`: each block state its cells hold, with those cells, as the
+/// lowering's target resolved them (`spec/blockstate` "`intent_state` and `resolved_state`").
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResolvedMember {
     /// The keyword the member was written with.
     pub role: String,
-    /// The member's `id=`, its one stable address.
+    /// The member's `id=`, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// Each block state the member resolved to, in the order its first cell is laid out.
@@ -145,8 +145,38 @@ pub struct ResolvedMember {
 pub struct ResolvedBlock {
     /// The state, as the palette holds it.
     pub state: BlockState,
+    /// The cells, as runs along `x`, in [`Dims::index`] order.
+    pub runs: Vec<CellRun>,
+}
+
+impl ResolvedBlock {
     /// Each cell, `(x, y, z)`, in [`Dims::index`] order.
-    pub cells: Vec<(u32, u32, u32)>,
+    pub fn cells(&self) -> impl Iterator<Item = (u32, u32, u32)> + '_ {
+        self.runs.iter().flat_map(|run| {
+            let (x, y, z) = run.from;
+            (x..x + run.len).map(move |x| (x, y, z))
+        })
+    }
+
+    /// Add `cell`, which follows every cell held so far in [`Dims::index`] order.
+    fn push(&mut self, cell: (u32, u32, u32)) {
+        let (x, y, z) = cell;
+        match self.runs.last_mut() {
+            Some(run) if run.from.1 == y && run.from.2 == z && run.from.0 + run.len == x => {
+                run.len += 1;
+            }
+            _ => self.runs.push(CellRun { from: cell, len: 1 }),
+        }
+    }
+}
+
+/// `len` cells along `x` from `from`, `(x, y, z)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CellRun {
+    /// The run's first cell.
+    pub from: (u32, u32, u32),
+    /// How many cells the run holds, one or more.
+    pub len: u32,
 }
 
 /// Voxel extents of a [`BlockArray`].
