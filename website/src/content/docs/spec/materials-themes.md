@@ -72,7 +72,9 @@ that select the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is 
 A theme binds **canonical tokens**, not raw block IDs. The backend resolves the ID, state names,
 state values, and serialization per `(edition, version)`
 ([Versioning and Editions](/spec/versioning-editions/)). An LLM never needs to know `pillar_axis`,
-little-endian NBT, or Bedrock's `weirdo_direction`.
+little-endian NBT, or Bedrock's `weirdo_direction`. The canonical vocabulary spells state names and
+state values as Java does: `@oak_stairs[facing=east]` writes Java's `facing`, and the Bedrock backend
+maps it to its own `weirdo_direction`.
 
 The backend resolves less than that today. A canonical token is written as `minecraft:<token>` and
 checked against the pinned target ([§7.3](#73-mappings-across-version-and-edition)), so

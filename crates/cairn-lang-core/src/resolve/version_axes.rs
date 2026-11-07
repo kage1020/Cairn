@@ -155,8 +155,7 @@ pub struct EditionPortability {
     pub edition: Edition,
     /// Palette entries that compile straight through.
     pub portable: u32,
-    /// Palette entries that compile but lose detail at some version (a stair `shape` on Bedrock
-    /// 1.21.60).
+    /// Palette entries that compile but lose detail at some version of the edition.
     pub degraded: u32,
     /// Palette entries with no representable form on this edition.
     pub unsupported: u32,
@@ -173,14 +172,14 @@ pub struct DegradedEntry {
     pub id: String,
     /// The entry's `key=value` pairs, comma-joined; an id appears once per state combination.
     pub states: String,
-    /// What the edition had no form for, one per intent dropped.
+    /// What the edition does not carry, one per intent dropped.
     pub dropped: Vec<DroppedIntent>,
 }
 
-/// One piece of intent an edition cannot represent, as pieces rather than a sentence.
+/// One piece of intent some versions of an edition cannot represent, in parts a consumer reads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DroppedIntent {
-    /// The canonical state the edition has no form for (`shape`).
+    /// The canonical state those versions do not carry (`shape`).
     pub key: String,
     /// The value asked for and not written (`outer_left`).
     pub value: String,

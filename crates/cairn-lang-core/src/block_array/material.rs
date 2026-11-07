@@ -1,5 +1,5 @@
-//! Translate a resolved theme-slot value into a [`BlockState`] and check its id against the
-//! pinned target.
+//! Translate a resolved theme-slot value into a [`BlockState`], and the pinned target's answers
+//! about its id and its states.
 
 use indexmap::IndexMap;
 
@@ -10,6 +10,18 @@ use crate::resolve::{TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
+
+/// A block state the pinned target's state map has no form for, as
+/// [`TargetRegistry::unmapped_state`] reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnmappedState {
+    /// The target, as a diagnostic names it, such as `"bedrock 1.21.40"`.
+    pub registry: String,
+    /// Why, as a clause.
+    pub reason: String,
+    /// The edition's other targetable versions whose state maps have a form for it, oldest first.
+    pub mapped_at: Vec<String>,
+}
 
 /// What the registry pack tells lowering, for one compile.
 ///
@@ -30,10 +42,10 @@ pub trait TargetRegistry {
         Vec::new()
     }
 
-    /// Why the pinned target's state map has no form for `state`, as a clause, or `None` when it
-    /// has one or the registry keeps no state map
-    /// (`spec/versioning-editions` "The `edition portability` row").
-    fn unmapped_state(&self, state: &BlockState) -> Option<String> {
+    /// Why the pinned target's state map has no form for `state`, or `None` when it has one, the
+    /// registry keeps no state map, or `state` is not one of its block's states
+    /// (`spec/versioning-editions` "Java / Bedrock portability").
+    fn unmapped_state(&self, state: &BlockState) -> Option<UnmappedState> {
         let _ = state;
         None
     }
@@ -45,7 +57,8 @@ pub trait TargetRegistry {
         None
     }
 
-    /// What the pinned target's tables say about `state`'s properties
+    /// What the pinned target's tables say about `state`'s properties, [`StateDomain::Unrecorded`]
+    /// unless the registry overrides it
     /// (`spec/versioning-editions` "A state is checked against its block's states at the target").
     fn state_domain(&self, state: &BlockState) -> StateDomain {
         let _ = state;
@@ -98,6 +111,9 @@ pub enum StateDomain {
     Unpinned,
     /// The pinned target's pack records no states for the block.
     Unrecorded,
+    /// The block's id, or its state map, is another code's to answer: `E_UNKNOWN_ID` or
+    /// `E_STATE_UNMAPPED`.
+    AnsweredElsewhere,
     /// Each property or value outside the block's states at the target, in the state's order;
     /// empty when there is none.
     Checked(Vec<OutOfDomain>),

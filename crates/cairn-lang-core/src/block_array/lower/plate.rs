@@ -13,7 +13,9 @@ use crate::block_array::material::{IdOrigin, MaterialDeferred, TargetRegistry, v
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::members::{StructCtx, resolve_member_state, side_name, unplaced_walls_note};
+use super::members::{
+    MemberState, StructCtx, resolve_member_state, side_name, unplaced_walls_note,
+};
 use super::stair::shift_outward;
 use super::token_diag::diag_unknown_id;
 
@@ -204,7 +206,9 @@ fn place_plate(
 ) -> Result<(), Refusal> {
     let anchor = plate_anchor_of(member)?;
     let (x, y_world, z) = plate_voxel_position(member, y_offset, anchor, ctx)?;
-    let base_id = plate_id_for_member(member, ctx, diagnostics)?;
+    let Some(base_id) = plate_id_for_member(member, ctx, diagnostics)? else {
+        return Ok(());
+    };
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint((x, y_world, z), || {
         palette.intern(BlockState::bare(base_id))
@@ -220,7 +224,7 @@ fn place_plate(
 
 /// Read a plate's `key=` as a non-negative integer, `0` when absent.
 fn plate_coordinate(member: &Member, key: &str, counts: &str) -> Result<u32, Refusal> {
-    let Some(raw) = member.arguments.get(key) else {
+    let Some(raw) = member.written(key) else {
         return Ok(0);
     };
     member.nonneg_u32(key).ok_or_else(|| {
@@ -615,36 +619,35 @@ fn inside_plate_refusal(
     ))
 }
 
-/// The block id a `pressure_plate` paints: its `mat_slot=`, or the pack's default.
+/// The block id a `pressure_plate` paints: its `mat_slot=`, or the pack's default; `None` for a
+/// binding whose state literal the target refused, which paints nothing.
 ///
-/// A binding with a state literal defers and paints nothing. An unresolved binding was already
-/// reported, so falling back adds no finding about the binding.
+/// A binding with a state literal the target takes defers and paints nothing. An unresolved
+/// binding was already reported, so falling back adds no finding about the binding.
 fn plate_id_for_member(
     member: &Member,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<String, Refusal> {
-    let resolved = resolve_member_state(
+) -> Result<Option<String>, Refusal> {
+    match resolve_member_state(
         member,
         ctx.scope,
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-    );
-    if let Some(state) = &resolved
-        && !state.properties.is_empty()
-    {
-        return Err(Box::new(diag_deferred_member_reason(
-            member,
-            &format!(
-                "pressure_plate does not honour bracketed state literals; the `mat_slot=` binding to `{}[...]` was not applied",
-                state.id,
-            ),
-        )));
-    }
-    match resolved {
-        Some(state) => Ok(state.id),
-        None => pack_plate_default(member, ctx.registry),
+    ) {
+        MemberState::Bound(state) if !state.properties.is_empty() => {
+            Err(Box::new(diag_deferred_member_reason(
+                member,
+                &format!(
+                    "pressure_plate does not honour bracketed state literals; the `mat_slot=` binding to `{}[...]` was not applied",
+                    state.id,
+                ),
+            )))
+        }
+        MemberState::Bound(state) => Ok(Some(state.id)),
+        MemberState::Unbound => pack_plate_default(member, ctx.registry).map(Some),
+        MemberState::Refused => Ok(None),
     }
 }
 

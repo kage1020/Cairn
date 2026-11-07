@@ -13,7 +13,9 @@ use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 use crate::block_array::roof::{Cardinal, STAIR_BASE_ID, StairShape, shed_high_side, stair_state};
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::members::{StructCtx, resolve_member_state, side_name, side_of, unplaced_walls_note};
+use super::members::{
+    MemberState, StructCtx, resolve_member_state, side_name, side_of, unplaced_walls_note,
+};
 use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
 
 /// The note on a stair refused for its `kind=`, naming the one kind there is.
@@ -90,13 +92,17 @@ fn draw_eave_band(
     let Some(y_world) = eave_row(member, y_offset, ctx, diagnostics) else {
         return false;
     };
-    let resolved = resolve_member_state(
+    let resolved = match resolve_member_state(
         member,
         ctx.scope,
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-    );
+    ) {
+        MemberState::Bound(state) => Some(state),
+        MemberState::Unbound => None,
+        MemberState::Refused => return false,
+    };
     let stair_id = geometry_material_id(
         member,
         ctx.scope,

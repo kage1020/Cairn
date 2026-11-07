@@ -1,7 +1,7 @@
 //! The paint set of a body: its members, the phase that paints each, and the material each reads.
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberRole, ValueWithSpan};
+use crate::intent::{Member, MemberRole};
 use crate::resolve::ScopeResolution;
 
 use crate::block_array::args::{
@@ -234,54 +234,76 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
     }
 }
 
-/// Resolve a member's `mat_slot=` binding into a [`BlockState`] without touching the palette.
-///
-/// `None` when there is no material, with at most one diagnostic saying why.
+/// A member's `mat_slot=` binding, resolved without touching the palette.
+#[derive(Debug)]
+pub(super) enum MemberState {
+    /// The block state the binding names.
+    Bound(BlockState),
+    /// No material, with the diagnostic saying why reported; a geometry member falls back.
+    Unbound,
+    /// A state literal the pinned target refuses, already reported; the member is not built.
+    Refused,
+}
+
+impl MemberState {
+    /// The bound block state, or `None` for a member that paints nothing from its binding.
+    pub(super) fn bound(self) -> Option<BlockState> {
+        match self {
+            Self::Bound(state) => Some(state),
+            Self::Unbound | Self::Refused => None,
+        }
+    }
+}
+
+/// Resolve a member's `mat_slot=` binding into a [`MemberState`], with each finding it raises.
 pub(super) fn resolve_member_state(
     member: &Member,
     scope: Option<&ScopeResolution>,
     registry: Option<&dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
-) -> Option<BlockState> {
+) -> MemberState {
     if theme_missing {
-        return None;
+        return MemberState::Unbound;
     }
-    let scope = scope?;
-    let binding = scope.members.get(&member.span.start)?;
+    let Some(binding) = scope.and_then(|scope| scope.members.get(&member.span.start)) else {
+        return MemberState::Unbound;
+    };
     // INVARIANT(upstream-diagnosed): every reason `slot_value` is `None` is reported on the same
     // diagnostic stream; `ResolvedMemberBinding::slot_value` names who reports each.
-    let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
-    match resolve_block_state(slot_value, registry) {
-        Ok(state) => {
-            check_state_literal(slot_value, &state, registry, diagnostics).then_some(state)
+    let Some(slot_value) = binding.slot_value.as_ref() else {
+        return MemberState::Unbound;
+    };
+    let unbound = match resolve_block_state(slot_value, registry) {
+        Ok(state) if check_state_literal(slot_value, &state, registry, diagnostics) => {
+            return MemberState::Bound(state);
         }
-        Err(MaterialDeferred::Abstract(token)) => {
+        Ok(_) => return MemberState::Refused,
+        Err(unbound) => unbound,
+    };
+    match unbound {
+        MaterialDeferred::Abstract(token) => {
             diagnostics.push(diag_abstract_token(
                 member_or_slot_span(member, slot_value),
                 &token,
                 TokenSite::MemberSlot(MemberFallback::for_role(&member.role)),
             ));
-            None
         }
-        Err(MaterialDeferred::UnknownAbstract { token, suggestion }) => {
+        MaterialDeferred::UnknownAbstract { token, suggestion } => {
             diagnostics.push(diag_unknown_abstract_token(
                 member_or_slot_span(member, slot_value),
                 &token,
                 suggestion.as_deref(),
                 TokenSite::MemberSlot(MemberFallback::for_role(&member.role)),
             ));
-            None
         }
-        Err(MaterialDeferred::UnknownId(unknown)) => {
+        MaterialDeferred::UnknownId(unknown) => {
             diagnostics.push(diag_unknown_id(slot_value.span.clone(), &unknown));
-            None
         }
-        Err(MaterialDeferred::AlreadyDiagnosed) => {
-            // INVARIANT(upstream-diagnosed): `check_slot_targets` reports `E_UNKNOWN_SLOT_TARGET`.
-            None
-        }
+        // INVARIANT(upstream-diagnosed): `check_slot_targets` reports `E_UNKNOWN_SLOT_TARGET`.
+        MaterialDeferred::AlreadyDiagnosed => {}
     }
+    MemberState::Unbound
 }
 
 /// [`resolve_member_state`], interned.
@@ -294,6 +316,7 @@ pub(super) fn palette_index_for(
     theme_missing: bool,
 ) -> Option<PaletteIndex> {
     resolve_member_state(member, scope, registry, diagnostics, theme_missing)
+        .bound()
         .map(|state| palette.intern(state))
 }
 
@@ -312,12 +335,13 @@ pub(super) fn member_will_paint(
         &mut ignored_diagnostics,
         theme_missing,
     )
+    .bound()
     .is_some()
 }
 
 pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
     let Some(raw) = member.ident_value("side") else {
-        let reason = match member.arguments.get("side") {
+        let reason = match member.written("side") {
             Some(written) => format!(
                 "`side=` must be one of front, back, left, right, not {}",
                 written.value.describe(),

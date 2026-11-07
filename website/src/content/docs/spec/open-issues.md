@@ -16,8 +16,9 @@ full extent, overhang columns included, which its structure file writes as `(0, 
 Coordinates on the member lines of a `struct` or `def` body are measured from the low corner of
 the `size=` footprint instead, and shift with `overhang=` as every member does
 ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)). Coordinate triples
-(`from=1,1,1`, `at=4,3,2`) on those lines are read the same way once the spec defines them. `y`
-rises from the floor, and `front` / `back` / `left` / `right` face `+z` / `-z` / `-x` / `+x`
+(`from=1,1,1`, `at=4,3,2`) on those lines are read the same way
+([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). `y` rises from the floor, and
+`front` / `back` / `left` / `right` face `+z` / `-z` / `-x` / `+x`
 ([Syntax §5.4](/spec/syntax/#54-selectors),
 [§9.3.1](/spec/components-editing-sites/#931-coordinate-convention)). A centre origin would sit
 off the true centre on every even side, behind a tie-break the author has to remember, as
