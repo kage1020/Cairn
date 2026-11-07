@@ -11,8 +11,7 @@ fn translate(
     pairs: &[(&str, &str)],
 ) -> Result<StateTranslation, BedrockStateError> {
     let map = builtin_pack(Edition::Bedrock)
-        .states()
-        .at(version)
+        .states_at(version)
         .expect("the built-in pack maps every targetable version");
     let properties: IndexMap<String, String> = pairs
         .iter()
@@ -274,6 +273,41 @@ fn a_property_the_java_block_lacks_is_a_leak() {
             valid: "facing, half, shape, waterlogged".to_owned(),
         },
     );
+    assert_eq!(
+        err.to_string(),
+        "block `minecraft:oak_stairs` carries blockstate `axis`, which the Java block does not \
+         have. Valid: facing, half, shape, waterlogged. Fix: remove it from the source blockstate; \
+         `--edition java` would write it unchanged, since Java has no such state either",
+    );
+}
+
+#[test]
+fn a_value_only_a_later_versions_map_holds_is_unmapped_before_it() {
+    let err = translate(
+        "1.21.60",
+        "minecraft:noteblock",
+        &[("instrument", "trumpet")],
+    )
+    .expect_err("unmapped");
+    assert_eq!(
+        err,
+        BedrockStateError::Unmapped {
+            id: "minecraft:noteblock".to_owned(),
+            properties: "instrument=trumpet".to_owned(),
+            mc_version: "1.21.60".to_owned(),
+            reason: "its state map there is read from a Java release whose \
+                     `minecraft:note_block` has no `instrument=trumpet`, which the map of 1.26.60 \
+                     holds"
+                .to_owned(),
+        },
+    );
+    let t = translate(
+        "1.26.60",
+        "minecraft:noteblock",
+        &[("instrument", "trumpet")],
+    )
+    .expect("mapped");
+    assert_eq!(t.id, "minecraft:noteblock");
 }
 
 #[test]

@@ -24,7 +24,7 @@ fn built_by(out: &BlockArrayIr, role: &str) -> Vec<Built> {
             } else {
                 format!("{}[{}]", state.id, state.properties_text())
             };
-            (printed, block.cells.clone())
+            (printed, block.cells().collect())
         })
         .collect()
 }

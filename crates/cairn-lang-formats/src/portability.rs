@@ -132,7 +132,7 @@ pub fn portability_for_java(
 }
 
 /// Bedrock's report, each entry its tables declare classified by [`translate_states`] at every
-/// version that declares it.
+/// version that declares it; without `states`, no entry has a form.
 ///
 /// # Errors
 ///
@@ -141,7 +141,7 @@ pub fn portability_for_bedrock(
     ir: &BlockArrayIr,
     blocks: &BlocksIndex,
     aliases: &AliasIndex,
-    states: &StateMapIndex,
+    states: Option<&StateMapIndex>,
 ) -> Result<PortabilityReport, InvalidPalette> {
     let mut report = PortabilityReport::default();
     let mut leaks = Vec::new();
@@ -158,7 +158,10 @@ pub fn portability_for_bedrock(
             let declared = blocks
                 .ids_for(version)
                 .is_some_and(|ids| ids.binary_search(&entry.id).is_ok());
-            let Some(map) = states.at(version).filter(|_| declared) else {
+            let Some(map) = states
+                .and_then(|states| states.at(version))
+                .filter(|_| declared)
+            else {
                 continue;
             };
             // No wildcard arm: a new refusal must be classified here.
@@ -177,13 +180,14 @@ pub fn portability_for_bedrock(
             }
         }
         match (written, leaked, unmapped) {
-            (true, ..) if dropped.is_empty() => report.count_portable(),
-            (true, ..) => report.push_degraded(DegradedEntry {
+            // At any version: a validated pack that writes the entry elsewhere still let it leak.
+            (_, Some(leak), _) => leaks.push(leak),
+            (true, None, _) if dropped.is_empty() => report.count_portable(),
+            (true, None, _) => report.push_degraded(DegradedEntry {
                 id: entry.id.clone(),
                 states: entry.properties_text(),
                 dropped,
             }),
-            (false, Some(leak), _) => leaks.push(leak),
             (false, None, detail) => report.push_unsupported(UnsupportedEntry {
                 id: entry.id.clone(),
                 reason: UnsupportedReason::StatesUnmapped {
@@ -202,16 +206,14 @@ pub fn portability_for_bedrock(
     }
 }
 
-/// Adds `intent`, lost at one version, to the list, beside the same loss at earlier versions.
+/// Adds `intent`, lost at one version, to the list: its version joins the same loss at earlier
+/// versions, whose reason the one Java block's `sensitivity` row already gave.
 fn merge_dropped(dropped: &mut Vec<DroppedIntent>, intent: DroppedIntent) {
     match dropped
         .iter_mut()
         .find(|seen| seen.key == intent.key && seen.value == intent.value)
     {
-        Some(seen) => {
-            seen.mc_versions.extend(intent.mc_versions);
-            seen.reason = intent.reason;
-        }
+        Some(seen) => seen.mc_versions.extend(intent.mc_versions),
         None => dropped.push(intent),
     }
 }

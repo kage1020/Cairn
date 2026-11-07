@@ -101,7 +101,8 @@ pub enum DiagnosticCode {
     StateLiteralUnchecked,
     /// A `mat_slot=` resolved to a block id the pinned target does not declare.
     UnknownId,
-    /// A member built a block state the pinned target's state map has no form for.
+    /// A member or a walkway's `path=` built a block state the pinned target's state map has no
+    /// form for.
     StateUnmapped,
     /// A block state's property or value its block does not take at the pinned target.
     StateDomain,
@@ -391,7 +392,8 @@ pub enum DiagnosticData {
         /// The catalog token involved; absent for `authored`.
         #[serde(skip_serializing_if = "Option::is_none")]
         token: Option<String>,
-        /// Nearest id the target does declare, when one is within the suggestion cap.
+        /// Nearest id the target does declare, when one is within the suggestion cap and no other
+        /// version of the edition declares the id.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
         /// Ids the pack's alias table declares for the same block: facts, unlike `suggestion`.
@@ -424,11 +426,11 @@ pub enum DiagnosticData {
         /// The target it was checked against, as `"<edition> <version>"`.
         registry: String,
         /// `unknown_property` or `value_outside`.
-        reason: &'static str,
+        reason: String,
         /// The block's properties, or the property's values, at the target.
         valid: Vec<String>,
         /// `literal` for a state literal, `derived` for a state lowering wrote.
-        origin: &'static str,
+        origin: String,
         /// The nearest of `valid`, when one is within the suggestion cap.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,

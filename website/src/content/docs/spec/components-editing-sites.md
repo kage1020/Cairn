@@ -52,8 +52,9 @@ are `theme`, `def`, `site` and `struct`, so no edit is applied today and the edi
 has nothing to compare.
 
 Editing at the level of a concept, such as "make only the second-floor windows arched", must be
-possible without breaking the whole. Edit diffs look only at `intent_state`
-([Blockstate Model](/spec/blockstate/)), so a change in derived results does not harm edit stability.
+possible without breaking the whole. Edit diffs look only at what a line writes, its `intent_state`
+and its arguments ([Blockstate Model](/spec/blockstate/)), so a change in derived results does not
+harm edit stability.
 
 ## 9.3 Multi-building with `site`
 
