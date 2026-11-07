@@ -3,6 +3,7 @@
 
 use indexmap::IndexMap;
 
+use crate::Edition;
 use crate::ast::ValueKind;
 use crate::intent::ValueWithSpan;
 use crate::resolve::{TokenKind, classify_token};
@@ -34,6 +35,13 @@ pub trait TargetRegistry {
     /// (`spec/versioning-editions` "The `edition portability` row").
     fn unmapped_state(&self, state: &BlockState) -> Option<String> {
         let _ = state;
+        None
+    }
+
+    /// The nearest versions of the pinned target's edition on either side of it that declare
+    /// `id`, asked only for an id the target does not declare; `None` when no other does.
+    fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
+        let _ = id;
         None
     }
 
@@ -230,7 +238,7 @@ pub enum MaterialDeferred {
     /// Not a `@TOKEN` at all; the resolver already reported `E_UNKNOWN_SLOT_TARGET`.
     AlreadyDiagnosed,
     /// An undeclared id (`spec/versioning-editions` "Fail-loud and minimum-version inference").
-    UnknownId(UnknownId),
+    UnknownId(Box<UnknownId>),
 }
 
 /// An id that resolved cleanly but does not exist in the pinned target.
@@ -246,6 +254,20 @@ pub struct UnknownId {
     pub suggestion: Option<String>,
     /// The ids this target declares for the same block, from the registry's alias table.
     pub aliases: Vec<String>,
+    /// The edition's versions nearest the target that do declare the id.
+    pub elsewhere: Option<DeclaredElsewhere>,
+}
+
+/// The versions of the pinned edition nearest the target that declare an id it does not
+/// (`spec/versioning-editions` "Which registry an unknown ID is unknown to").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredElsewhere {
+    /// The edition, which a floor that needs the id names.
+    pub edition: Edition,
+    /// The last version before the target that declares the id, where a removed id was last.
+    pub until: Option<String>,
+    /// The first version after the target that declares the id, where a new id first appears.
+    pub since: Option<String>,
 }
 
 /// Who chose the id that turned out not to exist.
@@ -352,15 +374,21 @@ pub(crate) fn validated_id(
     if ids.contains(&state.id) {
         return Ok(state);
     }
-    // Both can be filled: a rename has aliases, a typo a suggestion, and one id can be both.
+    // Both can be filled: a rename has aliases, a typo a suggestion, and one id can be both. An id
+    // another version declares is no typo, so the nearest spelling would only mislead.
     let aliases = registry.aliases_for(&state.id);
-    Err(MaterialDeferred::UnknownId(UnknownId {
-        suggestion: nearest_namespaced_id(&state.id, ids.iter()),
+    let elsewhere = registry.declared_elsewhere(&state.id);
+    Err(MaterialDeferred::UnknownId(Box::new(UnknownId {
+        suggestion: elsewhere
+            .is_none()
+            .then(|| nearest_namespaced_id(&state.id, ids.iter()))
+            .flatten(),
         aliases,
+        elsewhere,
         registry: ids.label().to_owned(),
         origin: origin.clone(),
         id: state.id,
-    }))
+    })))
 }
 
 /// Turn a canonical token body (`oak_planks`, `minecraft:oak_log[axis=x]`) into a [`BlockState`].

@@ -616,7 +616,8 @@ port reference, an abstract token, a `pressure_plate` side, a block id, a block 
 value, and a `--target` version. The note reads ``did you mean `X`?``, with `X` written as the line
 would be (`home1.entry` for a port, `at=front.outside` for a plate); `E_UNKNOWN_ID` instead names
 the target's nearest block and carries it as `data.suggestion`
-([§11.2](#112-machine-readable-payload)).
+([§11.2](#112-machine-readable-payload)), unless another version of the edition declares the ID,
+when it names that version instead.
 
 An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
 ...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
@@ -700,7 +701,7 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 |---|---|
 | `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. Present when cells were dropped; absent when the walkway was past the router's cap and not laid. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
-| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`. See below. |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"?, "since"?, "until"? }`. See below. |
 | `E_STATE_DOMAIN` | `{ "kind": "state_domain", "id", "key", "value", "registry", "reason", "valid", "origin", "suggestion"?, "valid_at"? }`. See below. |
 | `E_STATE_UNMAPPED` | `{ "kind": "state_unmapped", "id", "states", "registry" }`. The block ID, its `key=value` pairs comma-joined, and the target whose state map has no form for them, as `"<edition> <version>"`. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
@@ -720,8 +721,9 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 | `builtin` | The pack declares no row for a member default, so the compiler's own ID was used. | The pack, which has to grow the row. |
 
 `token` accompanies `catalog` and `builtin` and is absent for `authored`. `suggestion` is absent
-when no declared ID is within the typo threshold. A rename is normally past it, but the two fields
-are filled by independent rules and a renamed ID near its replacement carries both.
+when no declared ID is within the typo threshold, and when another version of the edition declares
+the ID, which makes it no typo. A rename is normally past the threshold, but the two fields are
+filled by independent rules and a renamed ID near its replacement carries both.
 
 `aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
 guess from a string distance; an alias is the registry pack's `aliases` component stating that two
@@ -730,6 +732,12 @@ holds every ID the target declares for that block, the closed set, never a pick 
 pack's own order, and is absent when the pack names none. The rendered note prints the first few and
 counts the rest; the payload is where the whole set lives. See [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
+
+`since` and `until` are the versions of the edition nearest the target that do declare the ID, as
+bare version labels: `since` the first after it, where an ID a later release added first appears,
+and `until` the last before it, where an ID a later release dropped was last declared. Each is
+absent when no such version is carried, so an ID no version declares has neither ([Versioning and
+Editions](/spec/versioning-editions/#which-registry-an-unknown-id-is-unknown-to)).
 
 **`E_STATE_DOMAIN`** is about one pair of one state, so a literal with two faults is two findings.
 `key` and `value` are the pair as the state carries it. `reason` is `unknown_property` when the

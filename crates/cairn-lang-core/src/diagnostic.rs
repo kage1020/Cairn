@@ -393,6 +393,12 @@ pub enum DiagnosticData {
         /// Ids the pack's alias table declares for the same block: facts, unlike `suggestion`.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         aliases: Vec<String>,
+        /// The first version of the edition after the target that declares the id.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<String>,
+        /// The last version of the edition before the target that declares the id.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<String>,
     },
     /// Companion payload for [`DiagnosticCode::StateUnmapped`].
     StateUnmapped {

@@ -153,13 +153,11 @@ dropping are forbidden. An error returns the closed set of candidates valid in t
 minimum version, and a suggested fix. That sends the model back to registry-derived candidates
 rather than to its memory.
 
-`E_PARITY_UNSUPPORTED` below is not implemented ([§10.7](#writing-an-alternative)). Nor does an
-error name a minimum version yet, although the tables say which version first declares an ID
-([below](#which-registry-an-unknown-id-is-unknown-to)).
+`E_PARITY_UNSUPPORTED` below is not implemented ([§10.7](#writing-an-alternative)).
 
 ```text
 E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
-  Nearest: minecraft:dark_oak_planks
+  First appears in 1.21.4. Fix: --target 1.21.4, or @requires java version>=1.21.4
 
 E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
   Valid java targets: 1.21.4. Fix: --target 1.21.4, or lower the @requires floor
@@ -243,15 +241,26 @@ and Bedrock 1.21.0 → 1.21.40 (`stonebrick` → `stone_bricks`) alike. An answe
 §10.4 asks for, never a pick from it: `@light` on Bedrock 1.21.60 is answered with all sixteen light
 levels, because choosing one would be the silent substitution this section forbids.
 
+A third kind of wrong ID is a real block at the wrong version: one a later release adds, or one a
+later release drops. The block tables answer it, so the error names the versions of the edition
+nearest the target on either side that declare the ID: the first after it, where a new block first
+appears, and the last before it, where a dropped one was last declared. The fix offered is a
+`--target` among them, and for a block a later release adds also an `@requires <edition>
+version>=` floor naming the version it appears in, so a target without it is refused at the floor
+instead. Such an ID is no typo, so no distance search runs for it: `@pale_oak_planks` on Java 1.21
+is answered with 1.21.4, not with `dark_oak_planks`. An alias answer still stands beside it, since
+both are true: Bedrock 1.21.0 spells `stone_bricks` `stonebrick`, and 1.21.40 declares
+`stone_bricks`.
+
 What the key cannot express is a spelling both editions declare meaning different blocks: Bedrock's
 `snow` is Java's `snow_block` while Java's `snow` is Bedrock's `snow_layer`. Such a pair gets no
 row, and the typo search still runs behind it.
 
 The same per-version scoping applies to a pack's own material mappings. An entry may carry
 `overrides` naming the versions that spell it differently, which is what lets one
-`@floor.stone.smooth` resolve across a range containing a rename. The `since` half is still
-deferred: the tables say which version first declares an ID, and no floor is inferred from that yet,
-so the `E_VERSION_CAP` example above is an `@requires` floor rather than registry-inferred.
+`@floor.stone.smooth` resolve across a range containing a rename. The version an ID first appears
+in is named by an error and nowhere else: no floor is inferred from it, so the `E_VERSION_CAP`
+example above is an `@requires` floor the file declares rather than one the registry inferred.
 
 ### A part may declare its own floor
 

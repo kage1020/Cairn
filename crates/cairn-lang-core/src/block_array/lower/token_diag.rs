@@ -9,7 +9,7 @@ use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
 use crate::block_array::material::{
-    DomainFault, IdOrigin, OutOfDomain, StateDomain, TargetRegistry, UnknownId,
+    DeclaredElsewhere, DomainFault, IdOrigin, OutOfDomain, StateDomain, TargetRegistry, UnknownId,
 };
 
 /// What becomes of a member whose `mat_slot=` resolves to no material.
@@ -390,8 +390,9 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         origin,
         suggestion,
         aliases,
+        elsewhere,
     } = unknown;
-    let mut notes = Vec::with_capacity(2);
+    let mut notes = Vec::with_capacity(3);
     match origin {
         IdOrigin::Authored => {}
         IdOrigin::Catalog { token } => notes.push(DiagnosticNote {
@@ -407,22 +408,32 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             ),
         }),
     }
-    // One note, the alias table winning it; the payload carries both answers.
-    notes.push(DiagnosticNote {
-        span: None,
-        message: match (aliases.as_slice(), suggestion) {
-            ([], None) => format!(
-                "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
-            ),
-            ([], Some(candidate)) => {
-                format!("`{registry}` spells the nearest block `{candidate}`")
-            }
-            (spellings, _) => format!(
-                "`{registry}` spells this block {}, per the registry pack's alias table",
-                candidate_list(spellings),
-            ),
-        },
-    });
+    let versions = elsewhere
+        .as_ref()
+        .and_then(|elsewhere| version_note(id, registry, elsewhere));
+    // The alias table wins the candidate note; the payload carries every answer.
+    let candidate = match (aliases.as_slice(), &versions, suggestion) {
+        ([], Some(_), _) => None,
+        ([], None, None) => Some(format!(
+            "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
+        )),
+        ([], None, Some(candidate)) => Some(format!(
+            "`{registry}` spells the nearest block `{candidate}`"
+        )),
+        (spellings, ..) => Some(format!(
+            "`{registry}` spells this block {}, per the registry pack's alias table",
+            candidate_list(spellings),
+        )),
+    };
+    notes.extend(
+        candidate
+            .into_iter()
+            .chain(versions)
+            .map(|message| DiagnosticNote {
+                span: None,
+                message,
+            }),
+    );
     Diagnostic {
         code: DiagnosticCode::UnknownId,
         span,
@@ -435,6 +446,30 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             token: origin.token().map(str::to_owned),
             suggestion: suggestion.clone(),
             aliases: aliases.clone(),
+            since: elsewhere.as_ref().and_then(|e| e.since.clone()),
+            until: elsewhere.as_ref().and_then(|e| e.until.clone()),
         }),
     }
+}
+
+/// Which versions of the edition build `id`, which `registry` does not declare, and how to pick
+/// one; `None` when `elsewhere` names none.
+fn version_note(id: &str, registry: &str, elsewhere: &DeclaredElsewhere) -> Option<String> {
+    let edition = elsewhere.edition.as_str();
+    Some(match (&elsewhere.until, &elsewhere.since) {
+        (None, Some(since)) => format!(
+            "`{id}` first appears in {edition} {since}: build with `--target {since}` or a later \
+             version, or declare `@requires {edition} version>={since}` so a target without it \
+             is refused at the floor"
+        ),
+        (Some(until), None) => format!(
+            "`{id}` was last declared in {edition} {until}: build with `--target {until}` or an \
+             earlier version, or pick a block `{registry}` has"
+        ),
+        (Some(until), Some(since)) => format!(
+            "`{id}` is declared in {edition} {until} and again from {since}: build with one of \
+             them as `--target`, or pick a block `{registry}` has"
+        ),
+        (None, None) => return None,
+    })
 }

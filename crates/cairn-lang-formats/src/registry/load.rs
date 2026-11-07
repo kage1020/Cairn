@@ -6,7 +6,8 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockIdSet, BlockState, DomainFault, OutOfDomain, StateDomain, TargetRegistry,
+    BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, OutOfDomain, StateDomain,
+    TargetRegistry,
 };
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{VersionOrder, compare_versions};
@@ -144,6 +145,24 @@ impl TargetRegistry for PackView<'_> {
             Ok(_)
             | Err(StateRefusal::UnknownProperty { .. } | StateRefusal::UnknownValue { .. }) => None,
         }
+    }
+
+    fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
+        let pinned = self.mc_version?;
+        let versions: Vec<&str> = self.blocks.versions().collect();
+        let at = versions.iter().position(|version| *version == pinned)?;
+        let declares = |version: &&&str| {
+            self.blocks
+                .ids_for(version)
+                .is_some_and(|ids| contains(ids, id))
+        };
+        let until = versions[..at].iter().rev().find(declares);
+        let since = versions[at + 1..].iter().find(declares);
+        (until.is_some() || since.is_some()).then(|| DeclaredElsewhere {
+            edition: self.edition,
+            until: until.map(|version| (*version).to_owned()),
+            since: since.map(|version| (*version).to_owned()),
+        })
     }
 
     fn state_domain(&self, state: &BlockState) -> StateDomain {
