@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crate::common::{assert_stream, cairn, crn_examples, examples_dir};
+use crate::common::{assert_stream, cairn, compile, crn_examples, examples_dir};
 
 /// A theme slot bound to a block no version has.
 const UNKNOWN_ID: &str =
@@ -68,6 +68,14 @@ const UNKNOWN_ID_PLACED_THREE_TIMES: &str = concat!(
     "  place id=b use=hut theme=t east_of=a gap=4\n",
     "  place id=c use=hut theme=t east_of=b gap=4\n",
 );
+
+/// A slot bound to a state Bedrock 1.21.40's map has no form for, which its other versions carry.
+const STATE_ONE_MAP_LACKS: &str =
+    "theme t:\n  slot f -> @cherry_wood[axis=x]\n\nstruct s size=3x3\n  floor mat_slot=f\n";
+
+/// A slot bound to a value only Bedrock 1.26.60's map holds, read from the first Java release with it.
+const VALUE_ONLY_THE_NEWEST_MAP_HOLDS: &str = "theme t:\n  slot f -> @noteblock[instrument=trumpet]\n\n\
+     struct s size=3x3\n  floor mat_slot=f\n";
 
 fn fixture(dir: &std::path::Path, source: &str) -> PathBuf {
     let path = dir.join("s.crn");
@@ -193,6 +201,116 @@ fn the_json_report_carries_the_unknown_id_payload() {
     );
     assert_eq!(first["data"]["registry"], "java 1.21.4", "got: {stdout}");
     assert_eq!(first["data"]["origin"], "authored", "got: {stdout}");
+}
+
+/// `cairn check` and `cairn compile` pinned to one Bedrock `target`, as their exit codes.
+fn check_and_compile_exits(src: &std::path::Path, target: &str) -> (Option<i32>, Option<i32>) {
+    let out = tempfile::TempDir::new().expect("out tempdir");
+    let checked = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            target,
+        ],
+    );
+    let lock = out.path().join("s.lock");
+    let compiled = compile(src, "bedrock", target, out.path(), Some(&lock));
+    (checked.status.code(), compiled.status.code())
+}
+
+#[test]
+fn a_pinned_target_reports_a_state_its_map_has_no_form_for() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = fixture(tmp.path(), STATE_ONE_MAP_LACKS);
+    let pinned = |target| {
+        cairn(
+            "check",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                "bedrock",
+                "--target",
+                target,
+            ],
+        )
+    };
+
+    let refused = pinned("1.21.40");
+    let stderr = String::from_utf8(refused.stderr).expect("utf-8");
+    assert_eq!(refused.status.code(), Some(1), "stderr={stderr}");
+    assert_stream(
+        &stderr,
+        &[
+            (2, 13, "warning", "W_STATE_LITERAL_UNCHECKED"),
+            (5, 3, "error", "E_STATE_UNMAPPED"),
+        ],
+    );
+
+    let accepted = pinned("1.21.60");
+    let stderr = String::from_utf8(accepted.stderr).expect("utf-8");
+    assert_eq!(accepted.status.code(), Some(0), "stderr={stderr}");
+    assert_stream(&stderr, &[(2, 13, "warning", "W_STATE_LITERAL_UNCHECKED")]);
+}
+
+#[test]
+fn the_json_report_carries_the_state_unmapped_payload() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = fixture(tmp.path(), STATE_ONE_MAP_LACKS);
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--target",
+            "1.21.40",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("one JSON document");
+    let data: Vec<&serde_json::Value> = parsed
+        .as_array()
+        .unwrap_or_else(|| panic!("a diagnostics array: {stdout}"))
+        .iter()
+        .map(|finding| &finding["data"])
+        .collect();
+    assert_eq!(
+        data,
+        [
+            &serde_json::Value::Null,
+            &serde_json::json!({
+                "kind": "state_unmapped",
+                "id": "minecraft:cherry_wood",
+                "states": "axis=x",
+                "registry": "bedrock 1.21.40",
+            }),
+        ],
+        "got: {stdout}",
+    );
+}
+
+#[test]
+fn a_value_only_another_versions_map_holds_refuses_check_and_compile_alike() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = fixture(tmp.path(), VALUE_ONLY_THE_NEWEST_MAP_HOLDS);
+    for (target, exit) in [
+        ("1.21.0", 1),
+        ("1.21.40", 1),
+        ("1.21.60", 1),
+        ("1.26.60", 0),
+    ] {
+        assert_eq!(
+            check_and_compile_exits(&src, target),
+            (Some(exit), Some(exit)),
+            "at {target}",
+        );
+    }
 }
 
 #[test]

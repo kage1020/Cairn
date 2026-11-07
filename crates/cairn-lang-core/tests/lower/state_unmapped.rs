@@ -2,17 +2,19 @@
 //! (`spec/lint` "Diagnostic codes").
 
 use cairn_lang_core::block_array::{
-    BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, lower_to_block_array,
+    BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, UnmappedState, lower_to_block_array,
 };
 use cairn_lang_core::{DiagnosticCode, lower, parse, resolve};
 use serde_json::json;
 
 use crate::common::{PRELUDE, findings};
 
-/// A pinned target whose state map has no form for a log lying along `x`.
+/// A pinned target whose state map has no form for a log lying along `x`, which the maps of
+/// `mapped_at` have.
 struct NoSidewaysLog {
     ids: Vec<String>,
     with_state_map: bool,
+    mapped_at: Vec<String>,
 }
 
 impl NoSidewaysLog {
@@ -25,6 +27,7 @@ impl NoSidewaysLog {
         Self {
             ids,
             with_state_map: true,
+            mapped_at: vec!["0.9".to_owned(), "1.1".to_owned()],
         }
     }
 }
@@ -42,9 +45,13 @@ impl TargetRegistry for NoSidewaysLog {
         Some(BlockIdSet::new("test 1.0", &self.ids))
     }
 
-    fn unmapped_state(&self, state: &BlockState) -> Option<String> {
+    fn unmapped_state(&self, state: &BlockState) -> Option<UnmappedState> {
         let sideways = state.properties.get("axis").is_some_and(|axis| axis == "x");
-        (self.with_state_map && sideways).then(|| "its map has no sideways log".to_owned())
+        (self.with_state_map && sideways).then(|| UnmappedState {
+            registry: "test 1.0".to_owned(),
+            reason: "its map has no sideways log".to_owned(),
+            mapped_at: self.mapped_at.clone(),
+        })
     }
 }
 
@@ -60,8 +67,8 @@ fn log_floor(axis: &str) -> String {
     )
 }
 
-const NOTE: &str = "pass a `--target` whose state map carries these states, bind the material \
-                    to a block test 1.0 has a form for, or build for the other edition";
+const NOTE: &str = "pass `--target` 0.9 or 1.1, whose state maps carry these states, bind the \
+                    material to a block test 1.0 has a form for, or build for the other edition";
 
 #[test]
 fn a_member_building_a_state_the_map_lacks_is_refused_at_the_member() {
@@ -107,6 +114,39 @@ fn a_member_building_a_state_the_map_lacks_is_refused_at_the_member() {
 }
 
 #[test]
+fn the_note_offers_each_version_whose_map_carries_the_state() {
+    let note = |mapped_at: &[&str]| {
+        let registry = NoSidewaysLog {
+            mapped_at: mapped_at.iter().map(|v| (*v).to_owned()).collect(),
+            ..NoSidewaysLog::pinned()
+        };
+        let source = log_floor("x");
+        let out = lowered_at(&source, &registry);
+        let unmapped = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::StateUnmapped)
+            .expect("the refusal");
+        let notes: Vec<&str> = unmapped.notes.iter().map(|n| n.message.as_str()).collect();
+        notes.join("\n")
+    };
+    assert_eq!(
+        note(&[]),
+        "bind the material to a block test 1.0 has a form for, or build for the other edition",
+    );
+    assert_eq!(
+        note(&["1.1"]),
+        "pass `--target 1.1`, whose state map carries these states, bind the material to a block \
+         test 1.0 has a form for, or build for the other edition",
+    );
+    assert_eq!(
+        note(&["0.8", "0.9", "1.1"]),
+        "pass `--target` 0.8, 0.9 or 1.1, whose state maps carry these states, bind the material \
+         to a block test 1.0 has a form for, or build for the other edition",
+    );
+}
+
+#[test]
 fn a_state_the_map_carries_is_not_refused() {
     let source = log_floor("y");
     let out = lowered_at(&source, &NoSidewaysLog::pinned());
@@ -137,17 +177,25 @@ fn a_walkway_whose_path_the_map_lacks_is_not_laid() {
     };
     let source = duo("x");
     let out = lowered_at(&source, &NoSidewaysLog::pinned());
-    let unmapped: Vec<(&str, &str)> = findings(&source, &out)
+    let found: Vec<(DiagnosticCode, &str, &str)> = findings(&source, &out)
         .into_iter()
-        .filter(|(code, ..)| *code == DiagnosticCode::StateUnmapped)
-        .map(|(_, at, primary, _)| (at, primary))
+        .map(|(code, at, primary, _)| (code, at, primary))
         .collect();
     assert_eq!(
-        unmapped,
-        [(
-            "@oak_log[axis=x]",
-            "`minecraft:oak_log[axis=x]` has no form at test 1.0: its map has no sideways log",
-        )],
+        found,
+        [
+            (
+                DiagnosticCode::StateLiteralUnchecked,
+                "@oak_log[axis=x]",
+                "`minecraft:oak_log` is written with `axis=x` unchecked: nothing checks a state \
+                 literal's properties or values against the target yet",
+            ),
+            (
+                DiagnosticCode::StateUnmapped,
+                "@oak_log[axis=x]",
+                "`minecraft:oak_log[axis=x]` has no form at test 1.0: its map has no sideways log",
+            ),
+        ],
     );
     assert!(out.walkways.is_empty(), "{:?}", out.walkways.keys());
 

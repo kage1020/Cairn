@@ -78,10 +78,10 @@ constraints:
 
 ### Folding the `(edition, version)` matrix
 
-The canonical token is the primary key, and each edition maps it: to a block ID through its
-`materials`, and from the canonical states, which are Java's, to its own through a state map. Java
-is the base, so its states need no map. The hand-written semantic catalog records only the points
-that differ.
+The canonical token is the primary key. An abstract token maps to a block ID through the
+edition's `materials`, a canonical token names its own, and the canonical states, which are Java's,
+map to the edition's own through a state map. Java is the base, so its states need no map. The
+hand-written semantic catalog records only the points that differ.
 
 Each edition has a registry pack of its own, whose `pack.json` names its `edition`, and versions
 fold with `inherits + diffs` inside one pack only. The two packs do not fold onto each other,
@@ -137,9 +137,12 @@ then `=` and the Java ID when the two are spelled apart (`oak_double_slab=oak_sl
 
 The same stairs at 1.21.60 have no `minecraft:corner`, so that row lists `shape` under `dropped`: a
 property the family holds at more than one value that no Bedrock state reads. `waterlogged` never
-drops, because the `.mcstructure` carries it as the water layer. A version's `refused` list names
-the pairs whose GeyserMC states its palette does not declare, so the pack carries no form for them
-there.
+drops, because the `.mcstructure` carries it as the water layer. A family writes every state its
+Bedrock block's palette declares, and a Bedrock state that is no function of the Java states fails
+the extraction. A version's `refused` list names the pairs whose GeyserMC states its palette does
+not declare, so the pack carries no form for them there, not even the bare block. `in_water` names
+the Bedrock blocks GeyserMC always places in water (`kelp`, `seagrass`, `bubble_column` and their
+kin), whose Java blocks have no `waterlogged`.
 
 What dropping a property costs is not in GeyserMC's mappings, so `sensitivity` is written by hand,
 one row per property and the blocks it covers, or every other block that drops it. A
@@ -642,7 +645,10 @@ Two further failures can reach the state translator: a property the Java block d
 value outside its domain (`facing=up` on a stair). Neither is an answer about the edition. No
 validated registry pack produces either, so each comes from a state literal in the source, which
 nothing checks against the target yet (`W_STATE_LITERAL_UNCHECKED`,
-[§10.4](#104-fail-loud-and-minimum-version-inference)), or from a defect in the pack or in Cairn.
+[§10.4](#104-fail-loud-and-minimum-version-inference)), or from a defect in the pack or in Cairn. A
+value one version's map holds is not outside the domain at a version whose map lacks it, as
+`instrument=trumpet` is not before 1.26.60: it is canonical vocabulary the older map has no form
+for, and counts there like any other state without one.
 
 So they are not a third and fourth reason for `unsupported`. `cairn info` reports **no** portability
 figures for an edition whose palette carries one. The counts would still be computable, and they
@@ -805,8 +811,9 @@ are the canonical vocabulary's, which are Java's
 ([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)). The Bedrock rows
 are what the Bedrock writer maps those states to as it writes, through the pack's state map for the
 target version ([Folding the matrix](#folding-the-edition-version-matrix)), so the record never
-shows them. A property the entry leaves out takes its Java block's default, and a waterlogged entry
-holds water in the `.mcstructure`'s second layer.
+shows them. A property the entry leaves out takes its Java block's default. A waterlogged entry
+holds water in the `.mcstructure`'s second layer, and so does a block the map lists `in_water`, such
+as `kelp`, which Bedrock keeps only under water.
 
 When a resolved difference becomes a visual or functional one, the build says so. `themed-tower`'s
 eave stair is `shape=outer_left`, which Bedrock 1.21.60 has no state for:
@@ -817,8 +824,11 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 ```
 
 A state the target's map has no form for at all, rather than one it drops, refuses the build with
-`E_STATE_UNMAPPED` at the member that built it ([Lint](/spec/lint/)): writing it bare would
-silently become the block's default.
+`E_STATE_UNMAPPED` at the member or walkway that built it ([Lint](/spec/lint/)): writing it bare
+would silently become the block's default. A pair the version's `refused` list names is refused
+this way even written bare, and so is a value only another version's map holds, as
+`noteblock[instrument=trumpet]` is before 1.26.60, whose maps follow Java releases without it. The
+note names the versions whose maps carry the states.
 
 The canonical vocabulary absorbs only ID, state, and serialization differences. **Concept absence
 and game-behaviour differences are not absorbed.** The cases that cannot be:

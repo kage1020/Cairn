@@ -98,7 +98,8 @@ pub enum DiagnosticCode {
     StateLiteralUnchecked,
     /// A `mat_slot=` resolved to a block id the pinned target does not declare.
     UnknownId,
-    /// A member built a block state the pinned target's state map has no form for.
+    /// A member or a walkway's `path=` built a block state the pinned target's state map has no
+    /// form for.
     StateUnmapped,
     /// A member whose geometry attaches blockstates is bound to a material that cannot carry them.
     IncompatibleMaterial,

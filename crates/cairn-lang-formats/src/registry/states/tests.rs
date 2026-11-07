@@ -21,7 +21,13 @@ fn blocks() -> BlocksIndex {
             "standing_sign": { "ground_sign_direction": [0, 1, 2, 3] },
             "cherry_wood": { "pillar_axis": ["y"] },
             "jigsaw": { "facing_direction": [0, 1] },
-            "frame": { "facing_direction": [0, 1] }
+            "frame": { "facing_direction": [0, 1] },
+            "creeper_head": { "facing_direction": [0, 1] },
+            "kelp": { "kelp_age": [0, 1] },
+            "wall_banner": { "facing_direction": [2, 3] },
+            "bed": { "head_piece_bit": [false, true] },
+            "birch_slab": { "minecraft:vertical_half": ["bottom", "top"] },
+            "birch_double_slab": { "minecraft:vertical_half": ["bottom", "top"] }
         } },
         "diffs": [{
             "mc_version": "1.1",
@@ -64,7 +70,8 @@ fn states() -> Value {
     json!({
         "schema_version": 1,
         "namespace": "minecraft",
-        "refused": { "1.0": ["cherry_wood", "jigsaw"] },
+        "refused": { "1.0": ["jigsaw", "skull=creeper_head"] },
+        "in_water": ["kelp"],
         "families": [
             {
                 "mc_versions": both(), "ids": ["oak_stairs"],
@@ -125,8 +132,44 @@ fn states() -> Value {
             },
             {
                 "mc_versions": ["1.1"], "ids": ["cherry_wood"],
-                "java": { "axis": ["x", "y", "z"] }, "defaults": { "axis": "y" },
+                "java": { "axis": ["x", "y", "z"], "waterlogged": waterlogged() },
+                "defaults": { "axis": "y", "waterlogged": "false" },
                 "states": { "pillar_axis": axis }
+            },
+            {
+                "mc_versions": both(), "ids": ["kelp"],
+                "java": { "age": ["0", "1"] }, "defaults": { "age": "0" },
+                "states": { "kelp_age": { "reads": ["age"], "map": { "0": 0, "1": 1 } } }
+            },
+            {
+                "mc_versions": both(), "ids": ["wall_banner=white_wall_banner"],
+                "java": { "facing": ["south", "west"] }, "defaults": { "facing": "north" },
+                "states": { "facing_direction":
+                    { "reads": ["facing"], "map": { "south": 3, "west": 2 } } }
+            },
+            {
+                "mc_versions": both(), "ids": ["bed=white_bed"],
+                "java": { "occupied": ["false"], "part": ["head"] },
+                "defaults": { "occupied": "false", "part": "foot" },
+                "states": { "head_piece_bit": { "value": true } }
+            },
+            {
+                "mc_versions": both(), "ids": ["bed=red_bed"],
+                "java": { "occupied": ["true"], "part": ["foot"] },
+                "defaults": { "occupied": "false", "part": "foot" },
+                "states": { "head_piece_bit": { "value": false } }
+            },
+            {
+                "mc_versions": both(), "ids": ["birch_slab"],
+                "java": { "type": ["top"], "waterlogged": ["false"] },
+                "defaults": { "type": "bottom", "waterlogged": "false" },
+                "states": { "minecraft:vertical_half": { "value": "top" } }
+            },
+            {
+                "mc_versions": both(), "ids": ["birch_double_slab=birch_slab"],
+                "java": { "type": ["double"], "waterlogged": ["true"] },
+                "defaults": { "type": "bottom", "waterlogged": "false" },
+                "states": { "minecraft:vertical_half": { "value": "bottom" } }
             }
         ]
     })
@@ -239,9 +282,7 @@ fn unmapped(reason: &str) -> StateRefusal {
 fn the_fixture_maps_each_version_it_names_in_order() {
     let index = load(states(), sensitivity()).expect("the fixture loads");
     assert_eq!(index.versions().collect::<Vec<_>>(), ["1.0", "1.1"]);
-    assert!(!index.is_empty());
     assert!(index.at("1.2").is_none());
-    assert!(StateMapIndex::empty().is_empty());
 }
 
 #[test]
@@ -273,6 +314,43 @@ fn a_version_the_block_tables_lack_is_refused() {
     assert_eq!(load(row, sensitivity()).unwrap_err(), unknown);
     let refused = with(states(), "/refused", json!({ "9.9": ["frame"] }));
     assert_eq!(load(refused, sensitivity()).unwrap_err(), unknown);
+}
+
+#[test]
+fn a_pair_both_mapped_and_refused_at_one_version_is_refused() {
+    let catalog = with(states(), "/refused", json!({ "1.0": ["oak_fence"] }));
+    assert_eq!(
+        load(catalog, sensitivity()).unwrap_err(),
+        StatesError::RefusedAndMapped {
+            mc_version: "1.0".to_owned(),
+            pair: "oak_fence".to_owned(),
+        },
+    );
+}
+
+#[test]
+fn a_block_in_water_no_family_maps_is_refused() {
+    let catalog = with(states(), "/in_water", json!(["seagrass"]));
+    assert_eq!(
+        load(catalog, sensitivity()).unwrap_err(),
+        StatesError::InWaterUnmapped {
+            java: "minecraft:seagrass".to_owned(),
+        },
+    );
+}
+
+#[test]
+fn a_rule_with_a_key_of_neither_shape_does_not_parse() {
+    for rule in [
+        json!({ "reads": ["half"], "map": { "top": true, "bottom": false }, "typo": 5 }),
+        json!({ "reads": ["half"], "map": { "top": true, "bottom": false }, "value": true }),
+    ] {
+        let catalog = with(states(), "/families/0/states/upside_down_bit", rule);
+        assert!(
+            serde_json::from_value::<StatesCatalog>(catalog).is_err(),
+            "a rule with an extra key parsed",
+        );
+    }
 }
 
 #[test]
@@ -319,6 +397,19 @@ fn a_state_or_value_the_palette_lacks_is_refused() {
             id: "minecraft:oak_fence".to_owned(),
             state: "connected_bit".to_owned(),
             value: "true".to_owned(),
+        },
+    );
+    let unwritten = with(
+        without(states(), "/families/0/states/upside_down_bit"),
+        "/families/0/dropped",
+        json!(["shape", "half"]),
+    );
+    assert_eq!(
+        load(unwritten, sensitivity()).unwrap_err(),
+        StatesError::StateUnwritten {
+            mc_version: "1.0".to_owned(),
+            id: "minecraft:oak_stairs".to_owned(),
+            state: "upside_down_bit".to_owned(),
         },
     );
 }
@@ -391,6 +482,22 @@ fn a_family_at_odds_with_its_properties_is_malformed() {
             ),
             "`weirdo_direction` holds an int past `TAG_Int`",
         ),
+        (
+            with(
+                states(),
+                &format!("{stairs}/dropped"),
+                json!(["shape", "half"]),
+            ),
+            "it drops `half`, which a state reads",
+        ),
+        (
+            with(states(), &format!("{stairs}/dropped"), json!([])),
+            "it holds `shape` at several values, which no state reads and it does not drop",
+        ),
+        (
+            with(states(), &format!("{stairs}/mc_versions"), json!([])),
+            "it maps no pair or no version",
+        ),
     ];
     for (catalog, problem) in cases {
         assert_eq!(
@@ -404,8 +511,40 @@ fn a_family_at_odds_with_its_properties_is_malformed() {
 }
 
 #[test]
+fn a_family_that_maps_no_pair_is_named_by_its_place() {
+    assert_eq!(
+        load(with(states(), "/families/3/ids", json!([])), sensitivity()).unwrap_err(),
+        StatesError::MalformedFamily {
+            pair: "families[3]".to_owned(),
+            problem: "it maps no pair or no version".to_owned(),
+        },
+    );
+}
+
+#[test]
+fn two_families_of_one_java_block_with_other_properties_or_defaults_disagree() {
+    let disagree = StatesError::Disagree {
+        mc_version: "1.0".to_owned(),
+        java: "minecraft:oak_slab".to_owned(),
+        first: "minecraft:oak_slab".to_owned(),
+        second: "minecraft:oak_double_slab".to_owned(),
+    };
+    let defaults = with(states(), "/families/2/defaults/type", json!("double"));
+    assert_eq!(load(defaults, sensitivity()).unwrap_err(), disagree);
+    let keys = without(
+        without(states(), "/families/2/java/waterlogged"),
+        "/families/2/defaults/waterlogged",
+    );
+    assert_eq!(load(keys, sensitivity()).unwrap_err(), disagree);
+}
+
+#[test]
 fn two_families_of_one_java_block_holding_one_state_overlap() {
-    let catalog = with(states(), "/families/2/java/type", json!(["double", "top"]));
+    let catalog = with(
+        with(states(), "/families/2/java/type", json!(["double", "top"])),
+        "/families/2/states/minecraft:vertical_half",
+        json!({ "reads": ["type"], "map": { "double": "bottom", "top": "top" } }),
+    );
     assert_eq!(
         load(catalog, sensitivity()).unwrap_err(),
         StatesError::Overlap {
@@ -605,12 +744,47 @@ fn a_property_or_value_the_java_block_lacks_is_a_leak() {
 }
 
 #[test]
-fn states_the_palette_refuses_are_unmapped_at_that_version_alone() {
-    let refused = "its palette does not declare the states GeyserMC maps `minecraft:cherry_wood` \
-                   to, so the pack carries no form for them";
+fn a_pair_its_palette_refuses_is_unmapped_even_written_bare() {
+    let refused = |id: &str| {
+        unmapped(&format!(
+            "its palette does not declare the states GeyserMC maps `{id}` to, so the pack carries \
+             no form for them"
+        ))
+    };
+    assert_eq!(
+        resolve("1.0", "minecraft:jigsaw", &[]),
+        Err(refused("minecraft:jigsaw"))
+    );
+    assert_eq!(
+        resolve("1.0", "minecraft:jigsaw", &[("orientation", "north_up")]),
+        Err(refused("minecraft:jigsaw")),
+    );
+    // Refused as `skull=creeper_head`: the Java id reads as itself though Bedrock spells it apart.
+    assert_eq!(
+        resolve("1.0", "minecraft:creeper_head", &[]),
+        Err(refused("minecraft:creeper_head")),
+    );
+    assert_eq!(
+        resolve("1.0", "minecraft:creeper_head", &[("rotation", "4")]),
+        Err(refused("minecraft:creeper_head")),
+    );
+}
+
+#[test]
+fn a_state_only_another_versions_map_holds_is_unmapped_there() {
     assert_eq!(
         resolve("1.0", "minecraft:cherry_wood", &[("axis", "x")]),
-        Err(unmapped(refused)),
+        Err(unmapped(
+            "its state map there is read from a Java release whose `minecraft:cherry_wood` has \
+             no `axis=x`, which the map of 1.1 holds"
+        )),
+    );
+    assert_eq!(
+        resolve("1.0", "minecraft:cherry_wood", &[("waterlogged", "true")]),
+        Err(unmapped(
+            "its state map there is read from a Java release whose `minecraft:cherry_wood` has \
+             no `waterlogged`, which the map of 1.1 holds"
+        )),
     );
     assert_eq!(
         resolve("1.0", "minecraft:cherry_wood", &[]),
@@ -620,21 +794,81 @@ fn states_the_palette_refuses_are_unmapped_at_that_version_alone() {
         resolve("1.1", "minecraft:cherry_wood", &[("axis", "x")]),
         Ok(form("minecraft:cherry_wood", &[("pillar_axis", s("x"))])),
     );
+    let index = load(states(), sensitivity()).expect("the fixture loads");
+    let sideways = BlockState {
+        id: "minecraft:cherry_wood".to_owned(),
+        properties: [("axis".to_owned(), "x".to_owned())].into_iter().collect(),
+    };
+    assert_eq!(
+        index.versions_writing(&sideways).collect::<Vec<_>>(),
+        ["1.1"]
+    );
 }
 
 #[test]
-fn a_block_without_a_form_is_written_bare_or_refused() {
+fn a_block_that_always_stands_in_water_holds_water() {
+    let mut expected = form("minecraft:kelp", &[("kelp_age", StateValue::Int(1))]);
+    expected.waterlogged = true;
     assert_eq!(
-        resolve("1.0", "minecraft:jigsaw", &[]),
-        Ok(form("minecraft:jigsaw", &[])),
+        resolve("1.0", "minecraft:kelp", &[("age", "1")]),
+        Ok(expected)
     );
+}
+
+#[test]
+fn values_no_one_family_holds_together_are_unmapped() {
     assert_eq!(
-        resolve("1.0", "minecraft:jigsaw", &[("orientation", "north_up")]),
+        resolve(
+            "1.0",
+            "minecraft:birch_slab",
+            &[("type", "top"), ("waterlogged", "true")]
+        ),
         Err(unmapped(
-            "its palette does not declare the states GeyserMC maps `minecraft:jigsaw` to, so the \
-             pack carries no form for them"
+            "no family of `minecraft:birch_slab` there holds these states together, so the pack \
+             carries no form for them"
         )),
     );
+}
+
+#[test]
+fn a_bedrock_spelling_whose_java_default_it_does_not_hold_is_written_bare() {
+    assert_eq!(
+        resolve("1.0", "minecraft:wall_banner", &[]),
+        Ok(form("minecraft:wall_banner", &[])),
+    );
+    assert_eq!(
+        resolve("1.0", "minecraft:wall_banner", &[("facing", "west")]),
+        Ok(form(
+            "minecraft:wall_banner",
+            &[("facing_direction", StateValue::Int(2))]
+        )),
+    );
+}
+
+#[test]
+fn a_bedrock_spelling_whose_families_each_take_part_of_the_states_needs_them_to_choose() {
+    assert_eq!(
+        resolve("1.0", "minecraft:bed", &[("part", "head")]),
+        Ok(form(
+            "minecraft:bed",
+            &[("head_piece_bit", StateValue::Bool(true))]
+        )),
+    );
+    assert_eq!(
+        resolve(
+            "1.0",
+            "minecraft:bed",
+            &[("part", "head"), ("occupied", "true")]
+        ),
+        Err(unmapped(
+            "`minecraft:bed` is `minecraft:white_bed` or `minecraft:red_bed` there, and these \
+             states do not say which"
+        )),
+    );
+}
+
+#[test]
+fn a_bedrock_block_no_java_block_maps_onto_is_written_bare_or_refused() {
     assert_eq!(
         resolve("1.0", "minecraft:frame", &[]),
         Ok(form("minecraft:frame", &[])),

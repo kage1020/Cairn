@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
+use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry, UnmappedState};
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{VersionOrder, compare_versions};
 use cairn_lang_core::suggest::nearest_match;
@@ -97,7 +97,7 @@ pub struct RegistryPack {
     materials: MaterialsIndex,
     blocks: BlocksIndex,
     aliases: AliasIndex,
-    states: StateMapIndex,
+    states: Option<StateMapIndex>,
     bytes_hash: HashHex,
     source: PackSource,
 }
@@ -113,6 +113,10 @@ pub struct PackView<'a> {
     ids: Option<&'a [String]>,
     /// The pinned version's state map; `None` unpinned or without a `states` component.
     states: Option<VersionStates<'a>>,
+    /// The edition's state maps, read for the other versions that have a form for a state.
+    state_maps: Option<&'a StateMapIndex>,
+    /// The targetable versions, which alone a note may offer as a `--target`.
+    targetable: Vec<&'a str>,
     /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
     label: String,
 }
@@ -132,13 +136,28 @@ impl TargetRegistry for PackView<'_> {
         self.ids.map(|ids| BlockIdSet::new(&self.label, ids))
     }
 
-    fn unmapped_state(&self, state: &BlockState) -> Option<String> {
+    fn unmapped_state(&self, state: &BlockState) -> Option<UnmappedState> {
+        let pinned = self.states?;
         // An unknown property or value is not the map's to answer: it is not the block's state.
-        match self.states?.resolve(state) {
-            Err(StateRefusal::Unmapped { reason }) => Some(reason),
+        let reason = match pinned.resolve(state) {
+            Err(StateRefusal::Unmapped { reason }) => reason,
             Ok(_)
-            | Err(StateRefusal::UnknownProperty { .. } | StateRefusal::UnknownValue { .. }) => None,
-        }
+            | Err(StateRefusal::UnknownProperty { .. } | StateRefusal::UnknownValue { .. }) => {
+                return None;
+            }
+        };
+        let mapped_at = self
+            .state_maps
+            .into_iter()
+            .flat_map(|maps| maps.versions_writing(state))
+            .filter(|version| *version != pinned.mc_version() && self.targetable.contains(version))
+            .map(str::to_owned)
+            .collect();
+        Some(UnmappedState {
+            registry: self.label.clone(),
+            reason,
+            mapped_at,
+        })
     }
 
     fn aliases_for(&self, id: &str) -> Vec<String> {
@@ -279,6 +298,16 @@ pub enum RegistryError {
         /// The versions, comma-joined.
         missing: String,
     },
+    /// A Java pack names a state map, though the canonical vocabulary's states are Java's.
+    #[error(
+        "registry pack names `states` or `sensitivity` for java, whose states are the canonical vocabulary's; only a bedrock pack maps them"
+    )]
+    StatesOnJava,
+    /// A Bedrock pack with block tables names no state map, which its `.mcstructure` writer needs.
+    #[error(
+        "registry pack for bedrock has block tables but names no `states`, which the `.mcstructure` writer needs to write them"
+    )]
+    StatesMissing,
     /// A file the manifest names is not embedded in the binary.
     #[error("registry pack names `{file}`, which the built-in pack does not embed")]
     NotEmbedded {
@@ -384,10 +413,16 @@ impl RegistryPack {
         &self.aliases
     }
 
-    /// The state maps, empty without the components.
+    /// The state maps, which a Bedrock pack with block tables carries and a Java pack never does.
     #[must_use]
-    pub fn states(&self) -> &StateMapIndex {
-        &self.states
+    pub fn states(&self) -> Option<&StateMapIndex> {
+        self.states.as_ref()
+    }
+
+    /// The state map of `mc_version`, or `None` when the pack carries none for it.
+    #[must_use]
+    pub fn states_at<'a>(&'a self, mc_version: &'a str) -> Option<VersionStates<'a>> {
+        self.states.as_ref()?.at(mc_version)
     }
 
     /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
@@ -538,7 +573,13 @@ impl RegistryPack {
             aliases: &self.aliases,
             mc_version,
             ids,
-            states: mc_version.and_then(|version| self.states.at(version)),
+            states: mc_version.and_then(|version| self.states.as_ref()?.at(version)),
+            state_maps: self.states.as_ref(),
+            targetable: self
+                .targetable()
+                .into_iter()
+                .map(|e| e.mc_version.as_str())
+                .collect(),
             label: match mc_version {
                 Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
                 None => self.manifest.edition.as_str().to_owned(),
@@ -721,7 +762,13 @@ fn load_pack(
     validate_blocks_order(&blocks, &data_versions)?;
     validate_aliases_answerable(&aliases, &blocks)?;
     let (states, states_text, sensitivity_text) = state_maps(source, &manifest, &blocks)?;
-    validate_states_cover_versions(&states, &data_versions)?;
+    match &states {
+        Some(states) => validate_states_cover_versions(states, &data_versions)?,
+        None if expected_edition == Edition::Bedrock && !blocks.is_empty() => {
+            return Err(RegistryError::StatesMissing);
+        }
+        None => {}
+    }
 
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
@@ -754,15 +801,16 @@ fn load_pack(
 /// A component's text, `None` when the manifest names no such component.
 type ComponentText<'s> = Option<Cow<'s, str>>;
 
-/// The state map index and the texts of its two components, which a pack names both or neither of.
+/// The state map index, if the pack names one, and the texts of its two components, which a pack
+/// names both or neither of.
 fn state_maps<'s>(
     source: &'s impl ComponentSource,
     manifest: &PackManifest,
     blocks: &BlocksIndex,
-) -> Result<(StateMapIndex, ComponentText<'s>, ComponentText<'s>), RegistryError> {
+) -> Result<(Option<StateMapIndex>, ComponentText<'s>, ComponentText<'s>), RegistryError> {
     let files = &manifest.files;
     let (states_file, sensitivity_file) = match (&files.states, &files.sensitivity) {
-        (None, None) => return Ok((StateMapIndex::empty(), None, None)),
+        (None, None) => return Ok((None, None, None)),
         (Some(states), Some(sensitivity)) => (states, sensitivity),
         (Some(_), None) => {
             return Err(StatesError::Unpaired {
@@ -786,7 +834,7 @@ fn state_maps<'s>(
         parse_component(&sensitivity_text, Component::Sensitivity)?,
         blocks,
     )?;
-    Ok((index, Some(states_text), Some(sensitivity_text)))
+    Ok((Some(index), Some(states_text), Some(sensitivity_text)))
 }
 
 /// An optional component's index and text, or its empty index when the manifest names none.
@@ -844,9 +892,6 @@ fn validate_states_cover_versions(
     states: &StateMapIndex,
     data_versions: &DataVersionTable,
 ) -> Result<(), RegistryError> {
-    if states.is_empty() {
-        return Ok(());
-    }
     let missing: Vec<&str> = data_versions
         .versions
         .iter()
@@ -957,6 +1002,10 @@ fn validate_manifest(manifest: &PackManifest, expected: Edition) -> Result<(), R
             expected,
             got: manifest.edition,
         });
+    }
+    let maps_states = manifest.files.states.is_some() || manifest.files.sensitivity.is_some();
+    if expected == Edition::Java && maps_states {
+        return Err(RegistryError::StatesOnJava);
     }
     Ok(())
 }

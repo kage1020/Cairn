@@ -77,7 +77,7 @@ title: "11. Lint と制約検証"
 | コード | 意味 |
 |---|---|
 | `E_UNKNOWN_ID` | 解決したブロック ID を、固定したターゲットが宣言していない。 |
-| `E_STATE_UNMAPPED` | メンバーが作ったブロックステートの形を、固定したターゲットのステートマップが持っていない ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
+| `E_STATE_UNMAPPED` | メンバーや通路の `path=` が作ったブロックステートの形を、固定したターゲットのステートマップが持っていない ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
 | `E_VERSION_CAP` | `--target` が、ソースの宣言する `@requires` の下限を下回っている ([バージョンとエディション §10.4](/ja/spec/versioning-editions/))。 |
 | `E_REQUIRES_UNORDERABLE` | `@requires` の下限が、ターゲットのエディションの `DataVersion` 表で位置づけられないバージョンを指している ([バージョンとエディション §10.4](/ja/spec/versioning-editions/))。 |
 | `E_INTENDED_TARGET_CAP` | `@intended_targets` が挙げるバージョンが、どれも同じファイルの宣言する下限を下回っている。 |

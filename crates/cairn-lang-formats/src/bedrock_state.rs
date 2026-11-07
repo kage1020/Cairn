@@ -1,7 +1,7 @@
 //! A palette entry's Bedrock block and `states`, through the registry pack's state map for the
 //! target version (`spec/versioning-editions` "Java / Bedrock portability"). The entry's
-//! properties are the canonical vocabulary's; a state the version has no form for drops with a
-//! degradation note, and one the map cannot place is refused.
+//! properties are the canonical vocabulary's; a state Bedrock does not carry drops with a
+//! degradation note, and one the map has no form for is refused.
 
 use cairn_lang_core::block_array::BlockState;
 use cairn_lang_core::resolve::DroppedIntent;
