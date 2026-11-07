@@ -186,7 +186,7 @@ impl TargetRegistry for PackView<'_> {
             return StateDomain::Unrecorded;
         }
         let Some(domain) = self.domain_at(version, id) else {
-            return StateDomain::Checked(Vec::new());
+            return StateDomain::AnsweredElsewhere;
         };
         let outside = state.properties.iter().filter_map(|(key, value)| {
             let fault = match domain.get(key) {
@@ -633,7 +633,8 @@ impl RegistryPack {
         self.blocks.declared_by_some_version(id).unwrap_or(true)
     }
 
-    /// The view block-array lowering consults for `mc_version`; `None` skips the id check.
+    /// The view block-array lowering consults for `mc_version`; `None` skips the id and state
+    /// checks.
     ///
     /// # Panics
     ///

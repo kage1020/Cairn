@@ -127,7 +127,8 @@ pub(super) fn lower_body_to_block_array<'a>(
     let mut palette = match palette.into_palette() {
         Ok(palette) => palette,
         Err(Overflow::Full(full)) => {
-            diagnostics.push(diag_palette_too_large(&body, full));
+            let checked = registry.is_some_and(|registry| registry.block_ids().is_some());
+            diagnostics.push(diag_palette_too_large(&body, full, checked));
             return None;
         }
         Err(Overflow::StandIn) => return None,
@@ -380,8 +381,20 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
     }
 }
 
-/// A body painted more distinct block states than its palette holds.
-fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagnostic {
+/// A body painted more distinct block states than its palette holds; `checked` when a pinned
+/// target checked its block ids.
+fn diag_palette_too_large(
+    body: &BodyDescriptor<'_>,
+    full: PaletteFull,
+    checked: bool,
+) -> Diagnostic {
+    let fix = if checked {
+        "the pinned target declares each block id, so split the members across more than one \
+         `struct`, each painting fewer"
+    } else {
+        "a vanilla registry has far fewer, so check the block ids and state literals by pinning \
+         a shipped version with `--edition` and `--target`"
+    };
     Diagnostic {
         code: DiagnosticCode::PaletteTooLarge,
         span: body.header_span.clone(),
@@ -393,11 +406,9 @@ fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagn
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "every state a member writes counts, including one a later member \
-                      covers; a vanilla registry has far fewer, so check the block ids and \
-                      state literals with `--edition` and `--target`, which pins a version \
-                      whose tables check both"
-                .to_owned(),
+            message: format!(
+                "every state a member writes counts, including one a later member covers; {fix}"
+            ),
         }],
         data: None,
     }

@@ -153,7 +153,7 @@ pub(super) fn diag_unknown_abstract_token(
 
 /// Check the state literal `value` carries against the pinned target, reporting each pair outside
 /// its block's states, or the literal as unchecked where the target records none; `false` when a
-/// pair is outside, so the binding builds nothing.
+/// pair is outside, and the member or walkway binding it is then not built.
 pub(super) fn check_state_literal(
     value: &ValueWithSpan,
     state: &BlockState,
@@ -167,7 +167,7 @@ pub(super) fn check_state_literal(
         return true;
     }
     match registry.state_domain(state) {
-        StateDomain::Unpinned => true,
+        StateDomain::Unpinned | StateDomain::AnsweredElsewhere => true,
         StateDomain::Unrecorded => {
             diagnostics.push(diag_state_literal_unchecked(
                 value.span.clone(),
@@ -278,30 +278,46 @@ fn diag_state_domain(
         ),
     };
     let mut notes = Vec::with_capacity(2);
-    notes.extend(suggestion.as_ref().map(|(_, pair)| did_you_mean_note(pair)));
+    // A derived pair is lowering's, so the author has no literal to correct.
+    if origin == StateOrigin::Literal {
+        notes.extend(suggestion.as_ref().map(|(_, pair)| did_you_mean_note(pair)));
+    }
     let elsewhere = (!valid_at.is_empty())
         .then(|| format!("`{key}={value}` is valid at {}", valid_at.join(", ")));
+    let correct = match kind {
+        DomainFault::UnknownProperty { .. } if valid.is_empty() => {
+            format!("remove `{key}` from the state literal")
+        }
+        DomainFault::UnknownProperty { .. } => {
+            format!("correct the state literal to a state {target} takes")
+        }
+        DomainFault::ValueOutside { .. } => {
+            format!("correct the state literal to a value {target} takes")
+        }
+    };
     let fix = match (origin, elsewhere, kind) {
         (StateOrigin::Derived, elsewhere, _) => format!(
-            "{}lowering derived this state for the member, so this is a compiler bug; bind the \
-             member's material to another block until it is fixed",
+            "{}lowering derived this state for the member, so Cairn's derivation or the registry \
+             pack's table for the block is wrong; bind the member's material to another block",
             elsewhere.map_or_else(String::new, |at| format!("{at}, but ")),
         ),
         (StateOrigin::Literal, Some(at), _) => format!(
-            "{at}: pass {} as `--target`, or correct the state literal to a state {target} takes",
+            "{at}: pass {} as `--target`, or {correct}",
             if valid_at.len() == 1 {
                 "that version"
             } else {
                 "one of them"
             },
         ),
+        (StateOrigin::Literal, None, DomainFault::UnknownProperty { .. }) if valid.is_empty() => {
+            correct
+        }
         (StateOrigin::Literal, None, DomainFault::UnknownProperty { .. }) => format!(
             "remove `{key}` from the state literal, or correct it to a state {target} takes"
         ),
-        (StateOrigin::Literal, None, DomainFault::ValueOutside { .. }) => format!(
-            "correct the state literal to a value {target} takes, or leave `{key}` out for the \
-             block's default"
-        ),
+        (StateOrigin::Literal, None, DomainFault::ValueOutside { .. }) => {
+            format!("{correct}, or leave `{key}` out for the block's default")
+        }
     };
     notes.push(DiagnosticNote {
         span: None,
@@ -317,9 +333,9 @@ fn diag_state_domain(
             key: key.clone(),
             value: value.clone(),
             registry: target.to_owned(),
-            reason: kind.kind(),
+            reason: kind.kind().to_owned(),
             valid: valid.to_vec(),
-            origin: origin.kind(),
+            origin: origin.kind().to_owned(),
             suggestion: suggestion.map(|(near, _)| near),
             valid_at: valid_at.clone(),
         }),

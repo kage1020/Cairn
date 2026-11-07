@@ -1,5 +1,5 @@
-//! Translate a resolved theme-slot value into a [`BlockState`] and check its id against the
-//! pinned target.
+//! Translate a resolved theme-slot value into a [`BlockState`], and the pinned target's answers
+//! about its id and its states.
 
 use indexmap::IndexMap;
 
@@ -49,7 +49,8 @@ pub trait TargetRegistry {
         None
     }
 
-    /// What the pinned target's tables say about `state`'s properties
+    /// What the pinned target's tables say about `state`'s properties, [`StateDomain::Unrecorded`]
+    /// unless the registry overrides it
     /// (`spec/versioning-editions` "A state is checked against its block's states at the target").
     fn state_domain(&self, state: &BlockState) -> StateDomain {
         let _ = state;
@@ -102,6 +103,9 @@ pub enum StateDomain {
     Unpinned,
     /// The pinned target's pack records no states for the block.
     Unrecorded,
+    /// The block's id, or its state map, is another code's to answer: `E_UNKNOWN_ID` or
+    /// `E_STATE_UNMAPPED`.
+    AnsweredElsewhere,
     /// Each property or value outside the block's states at the target, in the state's order;
     /// empty when there is none.
     Checked(Vec<OutOfDomain>),

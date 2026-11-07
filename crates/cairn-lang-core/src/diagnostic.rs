@@ -415,11 +415,11 @@ pub enum DiagnosticData {
         /// The target it was checked against, as `"<edition> <version>"`.
         registry: String,
         /// `unknown_property` or `value_outside`.
-        reason: &'static str,
+        reason: String,
         /// The block's properties, or the property's values, at the target.
         valid: Vec<String>,
         /// `literal` for a state literal, `derived` for a state lowering wrote.
-        origin: &'static str,
+        origin: String,
         /// The nearest of `valid`, when one is within the suggestion cap.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
