@@ -28,8 +28,8 @@ on:
       - ".github/scripts/extract_registry.py"
       - ".github/workflows/minecraft.yml"
   schedule:
-    # Weekly, off the hour, for a change to Java 25 or to Mojang's endpoints, which no path above
-    # sees.
+    # Weekly, off the hour, for a change to Java 25 or to what Mojang and GeyserMC serve, which no
+    # path above sees.
     - cron: "37 5 * * 1"
   workflow_dispatch:
 
@@ -97,11 +97,16 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Restore the server jars, palettes and state maps
+        id: downloads
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/cairn-minecraft
-          key: minecraft-${{ hashFiles('crates/cairn-lang-formats/registry-data/java/data_versions.json') }}
-          restore-keys: minecraft-
+          key: minecraft-tables-${{ hashFiles('crates/cairn-lang-formats/registry-data/*/data_versions.json') }}
+          # Not the load job's key, which saves no palette or state map. The script checks each file
+          # against its published hash, so an older set, the load job's included, is a safe start.
+          restore-keys: |
+            minecraft-tables-
+            minecraft-
 
       - name: Install Java
         uses: actions/setup-java@v6
@@ -116,8 +121,17 @@ jobs:
           --cache ~/.cache/cairn-minecraft
 
       - name: Bedrock
-        # The state maps read the reports of the Java releases GeyserMC's mappings follow.
+        # A Java difference says nothing about Bedrock's tables. The state maps read the reports of
+        # the Java releases GeyserMC's mappings follow.
+        if: success() || failure()
         run: >-
           python3 .github/scripts/extract_registry.py bedrock --check
           --java "$JAVA_HOME/bin/java"
           --cache ~/.cache/cairn-minecraft
+
+      - name: Save the server jars, palettes and state maps
+        if: github.ref == 'refs/heads/canary' && steps.downloads.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/cairn-minecraft
+          key: ${{ steps.downloads.outputs.cache-primary-key }}

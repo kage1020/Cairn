@@ -322,7 +322,7 @@ pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
 
 /// The first `DataVersion` whose block states the game reads as `id` and `properties`; an older
 /// file's `Name` and `Properties` reach it only through the `DataFixer`, which a file stamped with
-/// the newer version skips.
+/// the newer version skips. `cargo xtask lint state-keys` holds `minecraft_load.py` to it.
 const LOWERCASE_STATE_KEYS_FROM: i32 = 5006;
 
 /// The keys a palette entry names its block and its properties by, for `data_version`.

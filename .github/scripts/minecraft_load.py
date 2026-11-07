@@ -183,7 +183,8 @@ ROOT_KEYS = {"DataVersion", "size", "palette", "palettes", "blocks", "entities"}
 BLOCK_KEYS = {"pos", "state", "nbt"}
 ENTITY_KEYS = {"pos", "blockPos", "nbt"}
 # The first `DataVersion` (a 26.3 snapshot) whose block states the game reads as `id` and
-# `properties`; it runs no fixer on a file that already carries a version that new.
+# `properties`; it runs no fixer on a file that already carries a version that new. `cargo xtask
+# lint state-keys` holds it to the Java writer's.
 LOWERCASE_STATE_KEYS_FROM = 5006
 
 
