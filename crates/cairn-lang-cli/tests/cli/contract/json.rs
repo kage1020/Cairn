@@ -349,8 +349,19 @@ fn an_authored_state_the_target_lacks_is_named_as_the_sources() {
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("`facing=up`"), "{stderr}");
-    assert!(stderr.contains("a state literal in the source"), "{stderr}");
+    assert!(
+        stderr.contains(
+            "error: the bedrock palette carries blockstates a registry pack is expected to \
+             refuse, so this edition gets no portability figure:\n  \
+             error: block `minecraft:oak_stairs` has `facing=up`, which is not a valid Java \
+             `facing`."
+        ),
+        "{stderr}",
+    );
+    assert!(
+        stderr.contains("each is either a state literal in the source"),
+        "{stderr}"
+    );
 }
 
 #[test]

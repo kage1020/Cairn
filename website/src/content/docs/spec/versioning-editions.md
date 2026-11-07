@@ -78,10 +78,10 @@ constraints:
 
 ### Folding the `(edition, version)` matrix
 
-The canonical token is the primary key, and each edition maps it: to a block ID through its
-`materials`, and from the canonical states, which are Java's, to its own through a state map. Java
-is the base, so its states need no map. The hand-written semantic catalog records only the points
-that differ.
+The canonical token is the primary key. An abstract token maps to a block ID through the
+edition's `materials`, a canonical token names its own, and the canonical states, which are Java's,
+map to the edition's own through a state map. Java is the base, so its states need no map. The
+hand-written semantic catalog records only the points that differ.
 
 Each edition has a registry pack of its own, whose `pack.json` names its `edition`, and versions
 fold with `inherits + diffs` inside one pack only. The two packs do not fold onto each other,
@@ -137,9 +137,12 @@ then `=` and the Java ID when the two are spelled apart (`oak_double_slab=oak_sl
 
 The same stairs at 1.21.60 have no `minecraft:corner`, so that row lists `shape` under `dropped`: a
 property the family holds at more than one value that no Bedrock state reads. `waterlogged` never
-drops, because the `.mcstructure` carries it as the water layer. A version's `refused` list names
-the pairs whose GeyserMC states its palette does not declare, so the pack carries no form for them
-there.
+drops, because the `.mcstructure` carries it as the water layer. A family writes every state its
+Bedrock block's palette declares, and a Bedrock state that is no function of the Java states fails
+the extraction. A version's `refused` list names the pairs whose GeyserMC states its palette does
+not declare, so the pack carries no form for them there, not even the bare block. `in_water` names
+the Bedrock blocks GeyserMC always places in water (`kelp`, `seagrass`, `bubble_column` and their
+kin), whose Java blocks have no `waterlogged`.
 
 What dropping a property costs is not in GeyserMC's mappings, so `sensitivity` is written by hand,
 one row per property and the blocks it covers, or every other block that drops it. A
@@ -148,32 +151,43 @@ one row per property and the blocks it covers, or every other block that drops i
 `reason` is the sentence `W_INTENT_DEGRADED` prints ([§10.7](#107-java--bedrock-portability)). The
 loader refuses a dropped property no row classifies, and the extractor a row nothing drops.
 
-Both packs carry a `connections` component: what each block is to the rules that join panes,
-fences, walls and chests to their neighbours ([Blockstate §6.1](/spec/blockstate/#connections)).
-It is read off the Java release each version's states follow, the version itself on Java and the
-release its state map follows on Bedrock, so `ids` names canonical blocks in both. The release's
-block tags say which blocks are walls, fences and fence gates, which fences are wooden, and which
-raise a wall's post, the tags of the feature packs its jar ships included. A pane is a block with a
-pane's states that is no fence, a chest is a block whose `type` is `single`, `left` or `right`, and
-the blocks never joined by a face are the ones the game names in code. Which faces of each state
-are sturdy is read off the block models the release's client jar ships, a lookup over the fewest
-properties that decide them where they vary:
+Both packs carry a `connections` component: what each block is to the rules that join panes, fences,
+walls and chests to their neighbours ([Blockstate §6.1](/spec/blockstate/#connections)). It is read
+off the Java release each version's states follow, the version itself on Java and the release its
+state map follows on Bedrock, so `ids` names canonical blocks in both. The release's block tags say
+which blocks are walls, fences and fence gates, which fences are wooden, and which raise a wall's
+post, the tags of the feature packs its jar ships included. A pane is a block with a pane's states
+that is no fence, a chest is a block whose `type` is `single`, `left` or `right`, and the blocks
+never joined by a face are the ones the game names in code. Which faces of each state are sturdy,
+and which parts of a wall below its bottom covers, are read off the block models the release's
+client jar ships, each a lookup over the fewest properties that decide it where it varies:
 
 ```json
 { "mc_versions": ["1.20.4", "1.21", "1.21.4", "26.3"], "ids": ["acacia_slab", "..."],
   "defaults": { "type": "bottom" },
   "sturdy": { "reads": ["type"],
               "map": { "bottom": ["down"], "double": ["down", "up", "north", "south", "west", "east"],
-                       "top": ["up"] } } }
+                       "top": ["up"] } },
+  "covers": { "reads": ["type"],
+              "map": { "bottom": ["post", "north", "east", "south", "west"],
+                       "double": ["post", "north", "east", "south", "west"], "top": [] } } }
 ```
 
-A row's `kind` is `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate` or `chest`, `exception`
-marks a block never joined by a face, `raises_post` one in the `wall_post_override` tag, and
-`defaults` gives the default of each state the rules read, which a state that leaves it out takes. A
-block no row names is nothing to the rules. Every target postdates 1.16, where wall connections
-turned from booleans into `none` / `low` / `tall`
-([§10.5](#105-which-version-is-it-for-has-three-answers)), so the tables write the three values
-throughout.
+A row's `kind` is `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate` or `chest`,
+`never_joined_by_face` marks a block a pane, fence or wall never joins by a face, `raises_post` one
+in the `wall_post_override` tag, and `defaults` gives the default of each state the rules read,
+which a state that leaves it out takes, a fence gate's `facing` and `open` and a chest's `facing`
+among them. `covers` names `post` and the sides' directions, and a row with a `kind` has none, since
+the rules read a connecting block by its connection states. A block no row names is nothing to the
+rules. Every target postdates 1.16, where wall connections turned from booleans into `none` / `low`
+/ `tall` ([§10.5](#105-which-version-is-it-for-has-three-answers)), so a wall's sides are derived as
+those three values at every target.
+
+The loader refuses a component with no rows, a row that names no block or no version, a lookup that
+reads no property or maps no value, a default no rule reads, a fence gate whose default `facing` is
+no sideways face or whose `open` is no boolean, and a chest whose default `facing` is no sideways
+face. On Java it also refuses a row naming a block, or a value of a state, that the version's block
+table does not give.
 
 ## 10.4 Fail-loud and minimum-version inference
 
@@ -184,7 +198,7 @@ rather than to its memory.
 
 ```text
 E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
-  First appears in 1.21.4. Fix: --target 1.21.4, or @requires java version>=1.21.4
+  First target that declares it: 1.21.4. Fix: --target 1.21.4, or @requires java version>=1.21.4
 
 E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
   Valid java targets: 1.21.4. Fix: --target 1.21.4, or lower the @requires floor
@@ -215,7 +229,8 @@ the block has when it has no such property, and the other versions whose tables 
 domain that changed between releases is the likeliest cause of a literal that is valid somewhere,
 and the repair is then a target rather than an edit. Lowering checks the states it derives as well
 (a stair's `facing`, `half` and `shape`), at the member, so a derivation the target's block cannot
-hold is refused rather than written; that is a defect in Cairn, and the finding says so.
+hold is refused rather than written; that is a defect in Cairn or the pack's table, and the finding
+says so.
 
 A literal on a block the pinned target's pack records no states for is written as given, with
 `W_STATE_LITERAL_UNCHECKED` ([Lint](/spec/lint/)) so that it is said rather than silent. Both
@@ -248,12 +263,13 @@ would need no flag, and would answer a different question: `stone_bricks` is val
 Bedrock, so a build pinned to 1.21.0 would still be told nothing. The pin is what makes the answer
 true of the build being made.
 
-The suggested fix has two halves, because a wrong ID arrives two ways. A **typo** is answered by a
+The suggested fix depends on which of three ways a wrong ID arrived. A **typo** is answered by a
 distance search over the same table: `oak_plank` is answered with `oak_planks`. A **rename** is not
 a typo. Bedrock spells Java's `light` as `light_block_0` … `light_block_15`, eight edits away, and
 no threshold that keeps the typo finder honest will ever connect the two. Renames are answered from
 the registry pack's `aliases` component instead, and only where the pack has a row; where it does
-not, the message says it has no candidate rather than offering the nearest unrelated block.
+not, and no other version of the edition declares the ID, the message says it has no candidate
+rather than offering the nearest unrelated block.
 
 An `aliases` row is a **group of spellings**: the names one block has worn, across editions and
 across one edition's own range, including the several IDs one old spelling split into.
@@ -269,15 +285,21 @@ and Bedrock 1.21.0 → 1.21.40 (`stonebrick` → `stone_bricks`) alike. An answe
 §10.4 asks for, never a pick from it: `@light` on Bedrock 1.21.60 is answered with all sixteen light
 levels, because choosing one would be the silent substitution this section forbids.
 
-A third kind of wrong ID is a real block at the wrong version: one a later release adds, or one a
-later release drops. The block tables answer it, so the error names the versions of the edition
-nearest the target on either side that declare the ID: the first after it, where a new block first
-appears, and the last before it, where a dropped one was last declared. The fix offered is a
-`--target` among them, and for a block a later release adds also an `@requires <edition>
-version>=` floor naming the version it appears in, so a target without it is refused at the floor
-instead. Such an ID is no typo, so no distance search runs for it: `@pale_oak_planks` on Java 1.21
-is answered with 1.21.4, not with `dark_oak_planks`. An alias answer still stands beside it, since
-both are true: Bedrock 1.21.0 spells `stone_bricks` `stonebrick`, and 1.21.40 declares
+The third kind is a real block at the wrong version: one a later release adds, or one a later
+release drops. The block tables answer it, so the error names the targets of the edition nearest
+the pinned one on either side that declare the ID: the first after it and the last before it. They
+are the versions the pack carries a table for, not the releases that changed the block: the
+built-in Java tables carry 1.20.4, 1.21, 1.21.4 and 26.3, so `@leaf_litter`, which 1.21.5 added,
+is first declared at 26.3 as far as they say. The fix offered is a `--target` among them. For an ID
+the author named that no earlier target declares, it also offers an `@requires <edition>
+version>=` floor at the release that added it, with the first target as that release's upper
+bound, so a target without the block is refused at the floor instead; an ID the pack chose is the
+pack's to fix and gets no floor. `cairn check --target` is not held to the floors, so it keeps
+reporting the ID at an older target once the floor is declared, where `cairn compile` refuses the
+target at the floor. Such an ID is no typo, so no distance search runs for it: `@pale_oak_planks`
+on Java 1.21 is answered with 1.21.4, not with `dark_oak_planks`. An alias answer still stands
+beside it, and comes first, since both are true: `@stone_bricks` on Bedrock 1.21.0 is answered with
+both `stonebrick`, the spelling 1.21.0 declares, and 1.21.40, the first target that declares
 `stone_bricks`.
 
 What the key cannot express is a spelling both editions declare meaning different blocks: Bedrock's
@@ -286,8 +308,8 @@ row, and the typo search still runs behind it.
 
 The same per-version scoping applies to a pack's own material mappings. An entry may carry
 `overrides` naming the versions that spell it differently, which is what lets one
-`@floor.stone.smooth` resolve across a range containing a rename. The version an ID first appears
-in is named by an error and nowhere else: no floor is inferred from it, so the `E_VERSION_CAP`
+`@floor.stone.smooth` resolve across a range containing a rename. The first target that declares
+an ID is named by an error and nowhere else: no floor is inferred from it, so the `E_VERSION_CAP`
 example above is an `@requires` floor the file declares rather than one the registry inferred.
 
 ### A part may declare its own floor
@@ -638,17 +660,17 @@ The first is a question about IDs and the second about states. Only the second c
 `degraded`: a block that does not exist has nothing to lose detail from.
 
 Because two different repairs hide behind one figure, each counted entry is named on stderr with its
-reason. The ID case is answered the way `E_UNKNOWN_ID` answers one, and by the same two halves: the
-`aliases` component where it has a row, so an entry this edition has under another name is reported
-as that name rather than as a dead end (`standing_sign` on Java is `oak_sign`), and a `did you mean`
-where it has none. They are alternatives, not a sequence: a row is the pack's word about which block
-this is, and printing a distance guess beside it would ask the reader to choose between them. An
-entry the edition's `absent` component lists is answered with that row's reason instead, and
-neither half runs: the block is the other edition's, so the repair is a block this edition has or a
-build for the other ([§10.7](#a-block-only-the-other-edition-has)). Its JSON `reason` is
-`no_counterpart`, with the sentence as `detail`. The
-alias question is asked of the edition here too: a spelling *some* supported version declares is an
-answer, where a pinned build would keep only its own version's. `--format json` carries them as
+reason. The ID case is answered by the two halves `E_UNKNOWN_ID` gives an ID no other version of the
+edition declares: the `aliases` component where it has a row, so an entry this edition has under
+another name is reported as that name rather than as a dead end (`standing_sign` on Java is
+`oak_sign`), and a `did you mean` where it has none. They are alternatives, not a sequence: a row is
+the pack's word about which block this is, and printing a distance guess beside it would ask the
+reader to choose between them. An entry the edition's `absent` component lists is answered with that
+row's reason instead, and neither half runs: the block is the other edition's, so the repair is a
+block this edition has or a build for the other ([§10.7](#a-block-only-the-other-edition-has)). Its
+JSON `reason` is `no_counterpart`, with the sentence as `detail`. The alias question is asked of the
+edition here too: a spelling *some* supported version declares is an answer, where a pinned build
+would keep only its own version's. `--format json` carries them as
 `edition_portability[].unsupported_entries`, one element per unit of the count, in palette order.
 
 Both questions are asked of the *edition* rather than of a version, because this row reports across
@@ -702,7 +724,9 @@ value outside its domain (`facing=up` on a stair). Neither is an answer about th
 validated registry pack produces either, so each comes from a state literal in the source, which
 `E_STATE_DOMAIN` refuses at every pinned target but the range-wide lowering this row reads does not
 check ([§10.4](#a-state-is-checked-against-its-blocks-states-at-the-target)), or from a defect in
-the pack or in Cairn.
+the pack or in Cairn. A value one version's map holds is no such leak at a version whose map lacks
+it, as `instrument=trumpet` is not before 1.26.60: it is canonical vocabulary the older map has no
+form for, and counts there like any other state without one.
 
 So they are not a third and fourth reason for `unsupported`. `cairn info` reports **no** portability
 figures for an edition whose palette carries one. The counts would still be computable, and they
@@ -846,25 +870,28 @@ produces it.
 
 ## 10.7 Java / Bedrock portability
 
-Derivation rules are edition-specific: **`intent_state` is neutral, `resolved_state` is
-per-edition**. The contract is "from the same intent, resolve the nearest legal representation per
-edition", not "guarantee the same result".
+Derivation rules are edition-specific: **`intent_state` is neutral, and the blocks it resolves to
+differ by edition**. The contract is "from the same intent, resolve the nearest legal representation
+per edition", not "guarantee the same result".
 
 ```yaml
-intent_state: { primitive: stairs, corner: inner_left, facing: east }   # edition-neutral
-resolved_state:
+intent_state: { facing: east, shape: inner_left }                       # edition-neutral
+written:
   java:            { facing: east, half: bottom, shape: inner_left }
   bedrock 1.21.60: { weirdo_direction: 0, upside_down_bit: false }      # no shape → corners don't join
   bedrock 1.26.60: { minecraft:corner: inner_left, weirdo_direction: 0, upside_down_bit: false }
 ```
 
-Lowering records `resolved_state` once, in the canonical vocabulary
-([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)), whose state names
-are Java's ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)). The
-Bedrock rows are what the Bedrock backend maps that record to as it writes, through the pack's state
-map for the target version ([Folding the matrix](#folding-the-edition-version-matrix)), so
-`cairn lower` shows only the canonical one. A property the entry leaves out takes its Java block's
-default, and a waterlogged entry holds water in the `.mcstructure`'s second layer.
+Lowering records each member's `resolved_state` for the target it lowers at
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)): its block IDs are
+the ones that target resolved, a theme's edition variant included, and its state names and values
+are the canonical vocabulary's, which are Java's
+([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)). The Bedrock rows
+are what the Bedrock writer maps those states to as it writes, through the pack's state map for the
+target version ([Folding the matrix](#folding-the-edition-version-matrix)), so the record never
+shows them. A property the entry leaves out takes its Java block's default. A waterlogged entry
+holds water in the `.mcstructure`'s second layer, and so does a block the map lists `in_water`, such
+as `kelp`, which Bedrock keeps only under water.
 
 When a resolved difference becomes a visual or functional one, the build says so. `themed-tower`'s
 eave stair is `shape=outer_left`, which Bedrock 1.21.60 has no state for:
@@ -875,8 +902,12 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 ```
 
 A state the target's map has no form for at all, rather than one it drops, refuses the build with
-`E_STATE_UNMAPPED` at the member that built it ([Lint](/spec/lint/)): writing it bare would
-silently become the block's default.
+`E_STATE_UNMAPPED` at the member or walkway that built it ([Lint](/spec/lint/)): writing it bare
+would silently become the block's default. A pair the version's `refused` list names is refused
+this way even written bare, and the note names the versions whose maps carry the states. A value
+only another version's map holds, as `noteblock[instrument=trumpet]` is before 1.26.60, whose maps
+follow Java releases without it, is outside the block's states there, so it is `E_STATE_DOMAIN`
+naming those versions instead ([§10.4](#a-state-is-checked-against-its-blocks-states-at-the-target)).
 
 The canonical vocabulary absorbs only ID, state, and serialization differences. **Concept absence
 and game-behaviour differences are not absorbed.** The cases that cannot be:

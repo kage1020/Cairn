@@ -11,42 +11,49 @@
     ],
     "bottom": [
       {
+        "java": ["scaffolding"],
         "kind": "derived",
         "reason": "Bedrock works out whether scaffolding stands on the ground from the blocks below it"
       }
     ],
     "copper_golem_pose": [
       {
+        "java": ["copper_golem_statue", "exposed_copper_golem_statue", "oxidized_copper_golem_statue", "waxed_copper_golem_statue", "waxed_exposed_copper_golem_statue", "waxed_oxidized_copper_golem_statue", "waxed_weathered_copper_golem_statue", "weathered_copper_golem_statue"],
         "kind": "missing_state",
         "reason": "Bedrock's copper golem statue has no pose state"
       }
     ],
     "cracked": [
       {
+        "java": ["decorated_pot"],
         "kind": "missing_state",
         "reason": "Bedrock's decorated pot has no cracked state, so the pot shows whole"
       }
     ],
     "distance": [
       {
+        "java": ["acacia_leaves", "azalea_leaves", "birch_leaves", "cherry_leaves", "dark_oak_leaves", "flowering_azalea_leaves", "jungle_leaves", "mangrove_leaves", "oak_leaves", "orange_poplar_leaves", "pale_oak_leaves", "red_poplar_leaves", "spruce_leaves", "yellow_poplar_leaves"],
         "kind": "derived",
         "reason": "Bedrock works out how far a leaf is from a log as the world updates it"
       }
     ],
     "down": [
       {
+        "java": ["chorus_plant"],
         "kind": "derived",
         "reason": "Bedrock works the connection out from the neighbouring blocks"
       }
     ],
     "east": [
       {
+        "java": ["acacia_fence", "bamboo_fence", "birch_fence", "black_stained_glass_pane", "blue_stained_glass_pane", "brown_stained_glass_pane", "cherry_fence", "chorus_plant", "crimson_fence", "cyan_stained_glass_pane", "dark_oak_fence", "fire", "glass_pane", "gray_stained_glass_pane", "green_stained_glass_pane", "iron_bars", "jungle_fence", "light_blue_stained_glass_pane", "light_gray_stained_glass_pane", "lime_stained_glass_pane", "magenta_stained_glass_pane", "mangrove_fence", "nether_brick_fence", "oak_fence", "orange_stained_glass_pane", "pale_oak_fence", "pink_stained_glass_pane", "purple_stained_glass_pane", "red_stained_glass_pane", "redstone_wire", "spruce_fence", "tripwire", "warped_fence", "white_stained_glass_pane", "yellow_stained_glass_pane"],
         "kind": "derived",
         "reason": "Bedrock works the connection out from the neighbouring blocks"
       }
     ],
     "extended": [
       {
+        "java": ["piston", "sticky_piston"],
         "kind": "missing_state",
         "reason": "Bedrock keeps a piston's extension in its block entity, which Cairn does not write, so the piston stands retracted"
       }
@@ -58,96 +65,112 @@
         "reason": "Bedrock keeps a moving piston's facing in its block entity, which Cairn does not write"
       },
       {
+        "java": ["black_shulker_box", "blue_shulker_box", "brown_shulker_box", "cyan_shulker_box", "gray_shulker_box", "green_shulker_box", "light_blue_shulker_box", "light_gray_shulker_box", "lime_shulker_box", "magenta_shulker_box", "orange_shulker_box", "pink_shulker_box", "purple_shulker_box", "red_shulker_box", "shulker_box", "white_shulker_box", "yellow_shulker_box"],
         "kind": "missing_state",
         "reason": "Bedrock keeps a shulker box's facing in its block entity, which Cairn does not write"
       }
     ],
     "has_book": [
       {
+        "java": ["lectern"],
         "kind": "missing_state",
         "reason": "Bedrock shows a lectern's book from its block entity, which Cairn does not write, so the lectern stands empty"
       }
     ],
     "has_record": [
       {
+        "java": ["jukebox"],
         "kind": "missing_state",
         "reason": "Bedrock keeps a jukebox's record in its block entity, which Cairn does not write, so the jukebox stands empty"
       }
     ],
     "instrument": [
       {
+        "java": ["note_block"],
         "kind": "derived",
         "reason": "Bedrock works a note block's instrument out from the block below it"
       }
     ],
     "locked": [
       {
+        "java": ["repeater"],
         "kind": "derived",
         "reason": "Bedrock works out whether a repeater is locked from the repeaters and comparators beside it"
       }
     ],
     "north": [
       {
+        "java": ["acacia_fence", "bamboo_fence", "birch_fence", "black_stained_glass_pane", "blue_stained_glass_pane", "brown_stained_glass_pane", "cherry_fence", "chorus_plant", "crimson_fence", "cyan_stained_glass_pane", "dark_oak_fence", "fire", "glass_pane", "gray_stained_glass_pane", "green_stained_glass_pane", "iron_bars", "jungle_fence", "light_blue_stained_glass_pane", "light_gray_stained_glass_pane", "lime_stained_glass_pane", "magenta_stained_glass_pane", "mangrove_fence", "nether_brick_fence", "oak_fence", "orange_stained_glass_pane", "pale_oak_fence", "pink_stained_glass_pane", "purple_stained_glass_pane", "red_stained_glass_pane", "redstone_wire", "spruce_fence", "tripwire", "warped_fence", "white_stained_glass_pane", "yellow_stained_glass_pane"],
         "kind": "derived",
         "reason": "Bedrock works the connection out from the neighbouring blocks"
       }
     ],
     "note": [
       {
+        "java": ["note_block"],
         "kind": "missing_state",
         "reason": "Bedrock keeps a note block's note in its block entity, which Cairn does not write"
       }
     ],
     "orientation": [
       {
+        "java": ["jigsaw"],
         "kind": "missing_state",
         "reason": "this Bedrock version's state map writes every jigsaw facing down"
       }
     ],
     "power": [
       {
+        "java": ["calibrated_sculk_sensor", "sculk_sensor", "target"],
         "kind": "derived",
         "reason": "Bedrock works out the signal the block gives as the world runs"
       }
     ],
     "powered": [
       {
+        "java": ["acacia_door", "acacia_fence_gate", "acacia_trapdoor", "bamboo_door", "bamboo_fence_gate", "bamboo_trapdoor", "birch_door", "birch_fence_gate", "birch_trapdoor", "cherry_door", "cherry_fence_gate", "cherry_trapdoor", "copper_door", "copper_trapdoor", "creeper_head", "creeper_wall_head", "crimson_door", "crimson_fence_gate", "crimson_trapdoor", "dark_oak_door", "dark_oak_fence_gate", "dark_oak_trapdoor", "dragon_head", "dragon_wall_head", "exposed_copper_door", "exposed_copper_trapdoor", "iron_door", "iron_trapdoor", "jungle_door", "jungle_fence_gate", "jungle_trapdoor", "lightning_rod", "mangrove_door", "mangrove_fence_gate", "mangrove_trapdoor", "note_block", "oak_door", "oak_fence_gate", "oak_trapdoor", "oxidized_copper_door", "oxidized_copper_trapdoor", "pale_oak_door", "pale_oak_fence_gate", "pale_oak_trapdoor", "piglin_head", "piglin_wall_head", "player_head", "player_wall_head", "poplar_door", "poplar_fence_gate", "poplar_trapdoor", "skeleton_skull", "skeleton_wall_skull", "spruce_door", "spruce_fence_gate", "spruce_trapdoor", "warped_door", "warped_fence_gate", "warped_trapdoor", "waxed_copper_door", "waxed_copper_trapdoor", "waxed_exposed_copper_door", "waxed_exposed_copper_trapdoor", "waxed_oxidized_copper_door", "waxed_oxidized_copper_trapdoor", "waxed_weathered_copper_door", "waxed_weathered_copper_trapdoor", "weathered_copper_door", "weathered_copper_trapdoor", "wither_skeleton_skull", "wither_skeleton_wall_skull", "zombie_head", "zombie_wall_head"],
         "kind": "derived",
         "reason": "Bedrock works out whether the block is powered from the redstone signal around it"
       }
     ],
     "rotation": [
       {
+        "java": ["creeper_head", "dragon_head", "piglin_head", "player_head", "skeleton_skull", "wither_skeleton_skull", "zombie_head"],
         "kind": "missing_state",
         "reason": "Bedrock keeps a standing head's rotation in its block entity, which Cairn does not write"
       }
     ],
     "shape": [
       {
+        "java": ["acacia_stairs", "andesite_stairs", "bamboo_mosaic_stairs", "bamboo_stairs", "birch_stairs", "blackstone_stairs", "brick_stairs", "cherry_stairs", "cobbled_deepslate_stairs", "cobblestone_stairs", "crimson_stairs", "cut_copper_stairs", "dark_oak_stairs", "dark_prismarine_stairs", "deepslate_brick_stairs", "deepslate_tile_stairs", "diorite_stairs", "end_stone_brick_stairs", "exposed_cut_copper_stairs", "granite_stairs", "jungle_stairs", "mangrove_stairs", "mossy_cobblestone_stairs", "mossy_stone_brick_stairs", "mud_brick_stairs", "nether_brick_stairs", "oak_stairs", "oxidized_cut_copper_stairs", "pale_oak_stairs", "polished_andesite_stairs", "polished_blackstone_brick_stairs", "polished_blackstone_stairs", "polished_deepslate_stairs", "polished_diorite_stairs", "polished_granite_stairs", "polished_tuff_stairs", "prismarine_brick_stairs", "prismarine_stairs", "purpur_stairs", "quartz_stairs", "red_nether_brick_stairs", "red_sandstone_stairs", "resin_brick_stairs", "sandstone_stairs", "smooth_quartz_stairs", "smooth_red_sandstone_stairs", "smooth_sandstone_stairs", "spruce_stairs", "stone_brick_stairs", "stone_stairs", "tuff_brick_stairs", "tuff_stairs", "warped_stairs", "waxed_cut_copper_stairs", "waxed_exposed_cut_copper_stairs", "waxed_oxidized_cut_copper_stairs", "waxed_weathered_cut_copper_stairs", "weathered_cut_copper_stairs"],
         "kind": "missing_state",
         "reason": "this Bedrock version has no stair `shape` state; its stairs render straight, so corners show visual gaps"
       }
     ],
     "short": [
       {
+        "java": ["piston_head"],
         "kind": "missing_state",
         "reason": "Bedrock's piston arm has no state for the short arm a moving Java piston shows"
       }
     ],
     "signal_fire": [
       {
+        "java": ["campfire", "soul_campfire"],
         "kind": "derived",
         "reason": "Bedrock works out whether a campfire sends up a signal from the hay bale below it"
       }
     ],
     "snowy": [
       {
+        "java": ["grass_block", "mycelium", "podzol"],
         "kind": "derived",
         "reason": "Bedrock works out whether the block shows snow from the snow above it"
       }
     ],
     "south": [
       {
+        "java": ["acacia_fence", "bamboo_fence", "birch_fence", "black_stained_glass_pane", "blue_stained_glass_pane", "brown_stained_glass_pane", "cherry_fence", "chorus_plant", "crimson_fence", "cyan_stained_glass_pane", "dark_oak_fence", "fire", "glass_pane", "gray_stained_glass_pane", "green_stained_glass_pane", "iron_bars", "jungle_fence", "light_blue_stained_glass_pane", "light_gray_stained_glass_pane", "lime_stained_glass_pane", "magenta_stained_glass_pane", "mangrove_fence", "nether_brick_fence", "oak_fence", "orange_stained_glass_pane", "pale_oak_fence", "pink_stained_glass_pane", "purple_stained_glass_pane", "red_stained_glass_pane", "redstone_wire", "spruce_fence", "tripwire", "warped_fence", "white_stained_glass_pane", "yellow_stained_glass_pane"],
         "kind": "derived",
         "reason": "Bedrock works the connection out from the neighbouring blocks"
       }
@@ -159,6 +182,7 @@
         "reason": "Bedrock's bamboo has no state for whether it grows further, so it grows on Bedrock's own schedule"
       },
       {
+        "java": ["mangrove_propagule"],
         "kind": "missing_state",
         "reason": "Bedrock's mangrove propagule has no `stage` state, so it grows on Bedrock's own schedule"
       }
@@ -170,6 +194,7 @@
         "reason": "Bedrock keeps whether a moving piston is sticky in its block entity, which Cairn does not write"
       },
       {
+        "java": ["chest", "copper_chest", "exposed_copper_chest", "oxidized_copper_chest", "trapped_chest", "waxed_copper_chest", "waxed_exposed_copper_chest", "waxed_oxidized_copper_chest", "waxed_weathered_copper_chest", "weathered_copper_chest"],
         "kind": "missing_state",
         "reason": "Bedrock pairs chests through their block entities, which Cairn does not write, so each chest stands single"
       }
@@ -181,12 +206,14 @@
         "reason": "Bedrock's vine has no state for a face on the block above, so that face is not drawn"
       },
       {
+        "java": ["chorus_plant", "fire"],
         "kind": "derived",
         "reason": "Bedrock works the connection out from the neighbouring blocks"
       }
     ],
     "west": [
       {
+        "java": ["acacia_fence", "bamboo_fence", "birch_fence", "black_stained_glass_pane", "blue_stained_glass_pane", "brown_stained_glass_pane", "cherry_fence", "chorus_plant", "crimson_fence", "cyan_stained_glass_pane", "dark_oak_fence", "fire", "glass_pane", "gray_stained_glass_pane", "green_stained_glass_pane", "iron_bars", "jungle_fence", "light_blue_stained_glass_pane", "light_gray_stained_glass_pane", "lime_stained_glass_pane", "magenta_stained_glass_pane", "mangrove_fence", "nether_brick_fence", "oak_fence", "orange_stained_glass_pane", "pale_oak_fence", "pink_stained_glass_pane", "purple_stained_glass_pane", "red_stained_glass_pane", "redstone_wire", "spruce_fence", "tripwire", "warped_fence", "white_stained_glass_pane", "yellow_stained_glass_pane"],
         "kind": "derived",
         "reason": "Bedrock works the connection out from the neighbouring blocks"
       }

@@ -39,7 +39,7 @@ impl Height {
     }
 }
 
-/// Which half of a pair a chest is, as its `type` names it.
+/// A chest's `type`: single, or the half of a pair it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChestType {
     Single,
@@ -210,7 +210,7 @@ fn written_side(state: &BlockState, kind: JoinKind, side: Face) -> Option<bool> 
 /// Whether a `kind` block at `cell` joins the block beside it toward `side`.
 fn joins_toward(grid: &Grid<'_>, cell: Cell, kind: JoinKind, side: Face) -> bool {
     let (_, other) = grid.joins_beside(cell, side);
-    let by_face = other.sturdy.contains(side.opposite()) && !other.exception;
+    let by_face = other.sturdy.contains(side.opposite()) && !other.never_joined_by_face;
     let gate = matches!(
         other.kind,
         Some(JoinKind::FenceGate { facing, .. }) if across(facing, side)
@@ -248,11 +248,11 @@ fn covered(
     under: Under,
 ) -> bool {
     let (above, joins) = grid.joins_beside(cell, Face::Up);
-    if joins.sturdy.contains(Face::Down) {
-        return true;
-    }
     let Some(above) = above.and_then(|above| at.get(&above)).map(|&i| &joiners[i]) else {
-        return false;
+        return match under {
+            Under::Post => joins.covers.post,
+            Under::Side(side) => joins.covers.sides.contains(Face::SIDES[side]),
+        };
     };
     match (above.kind, under) {
         (JoinKind::FenceGate { open: true, .. } | JoinKind::Chest { .. }, _) => false,

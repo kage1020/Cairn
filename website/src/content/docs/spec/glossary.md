@@ -45,12 +45,13 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
 - **`intent_state`.** The author's blockstate intent: the blockstate keys a member's keyword names,
-  such as a `stair`'s `facing`. Edit diffs look **only** here. The line's other keys are the
-  member's arguments. See
+  such as a `stair`'s `facing`. The line's other keys are the member's arguments. Edit diffs look
+  **only** at what the line writes, these and the arguments, never at what was derived. See
   [blockstate §6.2](/spec/blockstate/#62-intent_state-and-resolved_state).
 - **`resolved_state`.** Compiler-derived blockstate (orientation, connections, waterlogged). Never
-  hand-written. Lowering records each member's, in the canonical vocabulary, beside the block array
-  it builds; `cairn lower --format json` prints it under `members`.
+  hand-written. Lowering records each member's beside the block array it builds, with the block ids
+  its target resolved and the canonical vocabulary's state names; `cairn lower --format json` prints
+  it under `members`.
 - **Override-promotion.** Writing a blockstate that *could* be intent promotes it from
   `resolved_state` to `intent_state`. The spec rule is "derive by default; any blockstate that can
   be intent is overridable." See
@@ -85,8 +86,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 
 ## Compilation
 
-- **Phase.** A fixed evaluation slot the compiler sorts each command into:
-  `massing → envelope → openings → fixtures → fluids → logic_synth → logic_place → logic_route → raw`.
+- **Phase.** A fixed evaluation slot the compiler sorts each command into: `massing` → `envelope`
+  → `openings` → `fixtures` → `fluids` → `logic_synth` → `logic_place` → `logic_route` → `raw`.
   Source order is irrelevant; phases enforce semantics
   ([compilation §4.1](/spec/compilation/#41-phase-evaluation)).
 - **Last-wins (local).** Within the same phase, a later command overrides an earlier one. The old
