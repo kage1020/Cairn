@@ -2,26 +2,9 @@
 //! equal list, compared by value and never by source span.
 
 use cairn_lang_core::ast::ValueKind;
-use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
+use cairn_lang_core::{DiagnosticCode, Severity};
 
-use crate::common::{codes, diagnose};
-
-/// The `key=value` bindings matching theme selectors injected, for every member of every scope.
-fn selector_extras(source: &str) -> Vec<(String, ValueKind)> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    resolve(&ir, None)
-        .scopes
-        .values()
-        .flat_map(|scope| scope.members.values())
-        .flat_map(|binding| {
-            binding
-                .selector_extras
-                .iter()
-                .map(|(key, value)| (key.clone(), value.value.kind.clone()))
-        })
-        .collect()
-}
+use crate::common::{codes, diagnose, selector_extras};
 
 const MATCHING: &str = "\
 theme t:

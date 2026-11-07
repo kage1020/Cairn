@@ -140,7 +140,7 @@ pub(super) fn written_cells(
             shape.built(),
         ))
     } else if top.row >= ctx.dims.y {
-        Some(ctx.shortfall().note(shape.built()))
+        Some(ctx.shortfall().note(shape.rows(), shape.built()))
     } else {
         None
     };

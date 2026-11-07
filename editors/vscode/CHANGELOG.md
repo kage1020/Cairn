@@ -1,8 +1,6 @@
 # Changelog — Cairn VS Code extension
 
-Extension versions track the Cairn CLI CalVer tag (`YYYY.M.PATCH`); the release pipeline realigns `package.json` with the workspace on every bump, whether or not a `.vsix` goes out.
-
-No version of this extension has been published to the Marketplace yet, so everything below is still unreleased and the version in the manifest is the tag it will first ship against.
+Extension versions track the Cairn CLI CalVer tag (`YYYY.M.PATCH`). From 2026.12.0, every Cairn release ships one: the `.vsix` is attached to the GitHub release, and the same file is published to the Visual Studio Marketplace and Open VSX.
 
 ## [Unreleased]
 

@@ -48,6 +48,31 @@ fn floor_with_no_mat_slot_is_refused() {
 }
 
 #[test]
+fn a_fill_with_neither_a_material_nor_a_fluid_is_offered_both() {
+    let src = format!("{THEME}struct s size=3x3\n  fill from=0,0,0 to=1,1,1\n");
+    let diagnostics = of_code(&src, DiagnosticCode::MissingMaterial);
+    let found: Vec<(&str, Vec<&str>)> = diagnostics
+        .iter()
+        .map(|d| {
+            (
+                d.primary.as_str(),
+                d.notes.iter().map(|note| note.message.as_str()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            "`fill` has no `mat_slot=`, so it paints nothing",
+            vec![
+                "add `mat_slot=NAME` to the `fill`, naming a slot the applied theme declares",
+                "or write `fluid=water` to pour water into the box, which needs no `mat_slot=`",
+            ],
+        )],
+    );
+}
+
+#[test]
 fn a_window_with_no_mat_slot_is_an_opening_and_not_a_mistake() {
     // `examples/themed-tower.crn` cuts its arrow slits this way.
     let src = format!(

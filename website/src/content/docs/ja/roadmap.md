@@ -52,7 +52,7 @@ Cairn は[日付ベースのバージョン](/ja/spec/versioning-editions/#101-�
 
 | リリース | 追加するもの |
 |---|---|
-| **2026.12.0** | M3 が待っているもの ([ドラフトを外すまで](#ドラフトを外すまで))。診断コードを固める。組み込みのパックを、各エディションの `--reports` やレジストリのダンプから、ブロックごとのステートとともに抽出する。これで `E_STATE_DOMAIN` がステートのリテラルをターゲットに照らして検査し、`E_UNKNOWN_ID` が ID の初出のバージョンを示す。`door` がドアのブロックを置き、向き・上下・蝶番の側を置かれた位置から導出する。ガラス板・フェンス・壁が隣のブロックからつながりを得る。`chest` が壁を背にして置かれ、隣のチェストと連結する。`fill` が座標の 3 つ組 (`from=1,1,1`) で示した箱をマテリアルか水で満たし、水と重なったブロックに `waterlogged` を設定する。`raw` による逃げ道 (`raw_block`・`raw_fill`) が、ほかのどのメンバーよりも後に、ブロック ID をセルや箱に置く。各リリースに VS Code 拡張の `.vsix` を添付し、Marketplace でも公開する。 |
+| **2026.12.0** | M3 が待っているもの ([ドラフトを外すまで](#ドラフトを外すまで))。診断コードを固める。組み込みのパックを、各エディションの `--reports` やレジストリのダンプから、ブロックごとのステートとともに抽出する。これで `E_STATE_DOMAIN` がステートのリテラルをターゲットに照らして検査し、`E_UNKNOWN_ID` が ID を宣言する最初のターゲットを示す。`door` がドアのブロックを置き、向き・上下・蝶番の側を置かれた位置から導出する。ガラス板・フェンス・壁が隣のブロックからつながりを得る。`chest` が壁を背にして置かれ、隣のチェストと連結する。`fill` が座標の 3 つ組 (`from=1,1,1`) で示した箱をマテリアルか水で満たし、水と重なったブロックに `waterlogged` を設定する。`raw` による逃げ道 (`raw_block`・`raw_fill`) が、ほかのどのメンバーよりも後に、ブロック ID をセルや箱に置く。各リリースに VS Code 拡張の `.vsix` を添付し、Marketplace でも公開する。 |
 | **2027.1.0** | すべてのサンプルが Java で警告なしにコンパイルでき、Minecraft で読み込める。仕様はドラフトを抜けて `2027.1` になり、`.crn` の構文、`compile` / `check` / `info` のインターフェース、診断コード、tier-1 の語彙が Stable になる。**M3**。 |
 | **2027.2.0** | 流水。`flow=` と `level=` で流れを明示する `water` キーワード。 |
 | **2027.3.0** | レッドストーンが構造ファイルに入る。エディション別の合法化と、Placement IR から block array への lowering を実装し、`cairn compile` が `logic_*` のフェーズを実行する。残りの組み合わせ回路のプリミティブ (`xor`・`nand`・`nor`・`mux`)、残りのセンサーとアクチュエータ (`lever`・`button`・`daylight`・`observer`・`lamp`・`piston`・`dispenser`)、手で置く `repeater` などの Tier 0 の部品、`E_PARITY_UNSUPPORTED` を伴う `@edition` による別記述。 |
@@ -78,6 +78,6 @@ Cairn は[日付ベースのバージョン](/ja/spec/versioning-editions/#101-�
 2. **バージョン** は、昇格やホットフィックスが `main` に入ったときに、既存のタグから計算します。`vYYYY.M.*` のタグがまだなければ次は `YYYY.M.0`、すでにあればその月の次のパッチになります。計算したバージョンは、ワークスペースの `Cargo.toml` に書き込みます。ジョブを手動で動かすメンテナは、使うバージョンを指定することもできます。
 3. **release-plz** がコミットから changelog の節を書き、`main` に向けてリリース PR を開きます。続けてジョブが、tree-sitter と VS Code のマニフェストを同じバージョンに揃え、パーサを生成し直し、`changelog.d/` のフラグメントを `CHANGELOG.md` にまとめます。
 4. **人によるレビュー** を経て、リリース PR を `main` にマージします。パッチでもマイナーでも同じです。
-5. **公開** は、このマージをきっかけに実行します。`xtask` 以外のすべてのクレートを crates.io に `cargo publish` して `vYYYY.M.N` のタグを打ちます。Linux・macOS・Windows の `x86_64` と `aarch64` 向けのバイナリを、ターゲットごとのランナーでビルドします。すべてのアーカイブを SHA-256 のチェックサムとともに GitHub Release に添付し、Windows の `aarch64` 版を除く各アーカイブには sigstore の署名バンドルも添えます。署名付きの CycloneDX 形式の SBOM も添付します。tree-sitter の文法を npm に公開し、最後に `main` を `canary` に戻す PR を開きます。
+5. **公開** は、このマージをきっかけに実行します。`xtask` 以外のすべてのクレートを crates.io に `cargo publish` して `vYYYY.M.N` のタグを打ちます。Linux・macOS・Windows の `x86_64` と `aarch64` 向けのバイナリを、ターゲットごとのランナーでビルドします。すべてのアーカイブを SHA-256 のチェックサムとともに GitHub Release に添付し、Windows の `aarch64` 版を除く各アーカイブには sigstore の署名バンドルも添えます。署名付きの CycloneDX 形式の SBOM も添付します。VS Code 拡張をパッケージして、`.vsix` をチェックサムと sigstore の署名バンドルとともに添付し、同じファイルを Visual Studio Marketplace と Open VSX に公開します。tree-sitter の文法を npm に公開し、最後に `main` を `canary` に戻す PR を開きます。
 
 このスケジュールを通じた互換性の扱いは、別に[互換性ティア](/ja/spec/compatibility/)で定めています。ロックファイルの形式は M2 を達成する 2026.11.0 から、LSP のワイヤプロトコルは M5 から **Stable** です。`.crn` の構文は M3 で、レッドストーンの DSL は M6 で続きます。Rust の API はずっと **Internal** のままで、それ以外のほとんどは当面 **Evolving** とします。

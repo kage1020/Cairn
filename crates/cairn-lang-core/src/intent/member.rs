@@ -1,7 +1,7 @@
 //! Named member of an Intent IR, the rich member of `spec/architecture`
 //! "The Intent IR is rich and carries invariants".
 
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -36,9 +36,7 @@ pub struct Member {
     pub binding: Option<Value>,
     /// `key=value` attributes the fields above did not consume and that name no blockstate.
     pub arguments: Arguments,
-    /// The blockstate the line writes, the keys [`MemberRole::state_arguments`] names; the only
-    /// part of a member an edit diff reads (`spec/blockstate` "`intent_state` and
-    /// `resolved_state`").
+    /// The blockstate keys the line writes, those [`MemberRole::state_arguments`] names.
     pub intent_state: IntentState,
     /// Nested body indented under this member.
     #[serde(default, skip_serializing_if = "MemberBody::is_empty")]
@@ -65,6 +63,13 @@ impl Member {
         self.arguments
             .get(key)
             .or_else(|| self.intent_state.get(key))
+    }
+
+    /// Whether it is a `fill` that writes `fluid=`, which pours in the `fluids` phase instead of
+    /// painting a material (`spec/compilation` "Phase evaluation").
+    #[must_use]
+    pub fn pours_fluid(&self) -> bool {
+        matches!(self.role, MemberRole::Fill) && self.written("fluid").is_some()
     }
 
     /// Every `key=value` [`Self::written`] answers for, in source order.
@@ -242,7 +247,7 @@ impl MemberBody {
 #[serde(transparent)]
 pub struct IntentState {
     /// Attributes in source order.
-    pub fields: IndexMap<String, ValueWithSpan>,
+    fields: IndexMap<String, ValueWithSpan>,
 }
 
 impl IntentState {
@@ -250,6 +255,11 @@ impl IntentState {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Record `key=value`, a key of its member's [`MemberRole::state_arguments`].
+    pub(super) fn insert(&mut self, key: String, value: ValueWithSpan) {
+        self.fields.insert(key, value);
     }
 }
 
@@ -261,18 +271,12 @@ impl Deref for IntentState {
     }
 }
 
-impl DerefMut for IntentState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.fields
-    }
-}
-
 /// The `key=value` attributes a [`Member`]'s line writes that name no blockstate, in source order.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct Arguments {
     /// Attributes in source order.
-    pub fields: IndexMap<String, ValueWithSpan>,
+    fields: IndexMap<String, ValueWithSpan>,
 }
 
 impl Arguments {
@@ -281,6 +285,11 @@ impl Arguments {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Record `key=value`, a key no [`MemberRole::state_arguments`] of its member names.
+    pub(super) fn insert(&mut self, key: String, value: ValueWithSpan) {
+        self.fields.insert(key, value);
+    }
 }
 
 impl Deref for Arguments {
@@ -288,12 +297,6 @@ impl Deref for Arguments {
 
     fn deref(&self) -> &Self::Target {
         &self.fields
-    }
-}
-
-impl DerefMut for Arguments {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.fields
     }
 }
 

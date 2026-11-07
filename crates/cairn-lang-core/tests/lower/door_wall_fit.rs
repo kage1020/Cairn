@@ -28,7 +28,7 @@ fn assert_clean(ir: &BlockArrayIr) {
 // ------------------------------------------------- the openings pass
 
 #[test]
-fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_carving_air() {
+fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_standing_in_air() {
     // The only course paints rows 7..=10, and the door opens at row 1.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
@@ -233,11 +233,11 @@ fn site_with_door_port(wall_level: u32, height: u32) -> String {
 }
 
 #[test]
-fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
+fn the_port_anchors_exactly_the_doorways_the_openings_pass_sets_a_door_in() {
     // `spec/components-editing-sites` "Ports and `connect`", as an equivalence of the two gates.
     for wall_level in 0..=3 {
         for height in [1, 2, 4] {
-            let carved = {
+            let set = {
                 let src = format!(
                     "{THEME}struct hut size=5x5\n  \
                      level id=up y={wall_level}\n    \
@@ -248,9 +248,9 @@ fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
             };
             let anchored = walkway_was_laid(&site_with_door_port(wall_level, height));
             assert_eq!(
-                carved, anchored,
+                set, anchored,
                 "`walls height={height}` under `level y={wall_level}`: \
-                 the openings pass sets the door = {carved}, the port anchors it = {anchored}",
+                 the openings pass sets the door = {set}, the port anchors it = {anchored}",
             );
         }
     }
