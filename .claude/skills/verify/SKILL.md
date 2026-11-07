@@ -38,8 +38,12 @@ Add these when the change reaches them:
 - `examples/`, `cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats` and its registry packs,
   `cairn-lang-cli` or `Cargo.lock`: the `Minecraft` workflow's `Examples load in Minecraft Java`
   check loads every example's `.nbt` in the game at each shipped Java target. To run it, with Java
-  21 (or `--java <path>`) and network access to Mojang: `cargo build -p cairn-lang-cli`, then
+  25 (or `--java <path>`) and network access to Mojang: `cargo build -p cairn-lang-cli`, then
   `python3 .github/scripts/minecraft_load.py --cairn ./target/debug/cairn`.
+- `crates/cairn-lang-formats/registry-data/` or `.github/scripts/extract_registry.py`: the same
+  workflow's `Registry tables match the game` check reruns the extraction. Run
+  `python3 .github/scripts/extract_registry.py java --check --java <Java 25>` and
+  `python3 .github/scripts/extract_registry.py bedrock --check --java <Java 25>`.
 - A new dependency or a recently stabilised API: CI's `MSRV` job runs
   `cargo +<floor> check --workspace --locked --all-features`, where the floor is the `rust-version`
   in `Cargo.toml` with `.0` appended (`1.95` → `1.95.0`), since rustup reads `1.95` as the newest

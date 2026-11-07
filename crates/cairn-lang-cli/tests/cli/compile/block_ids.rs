@@ -106,6 +106,28 @@ fn an_id_no_group_names_still_says_it_has_no_candidate() {
     );
 }
 
+#[test]
+fn an_id_a_later_version_adds_is_answered_with_that_version() {
+    let fixture = Fixture::new(&source_binding("pale_oak_planks"));
+    let out = compile_as(&fixture, "java", "1.21");
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
+    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
+    assert!(
+        stderr.contains(
+            "error[E_UNKNOWN_ID]: `minecraft:pale_oak_planks` is not a block in `java 1.21`\n  \
+             note: `minecraft:pale_oak_planks` first appears in java 1.21.4: build with \
+             `--target 1.21.4` or a later version, or declare `@requires java version>=1.21.4` \
+             so a target without it is refused at the floor\n"
+        ),
+        "the version note stands in place of the nearest spelling, got: {stderr}",
+    );
+
+    let later = Fixture::new(&source_binding("pale_oak_planks"));
+    let out = compile_as(&later, "java", "1.21.4");
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
+}
+
 /// Bedrock 1.21.0 spells `stone_bricks` `stonebrick`.
 #[test]
 fn an_id_is_checked_against_the_version_and_not_the_edition() {

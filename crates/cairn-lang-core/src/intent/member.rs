@@ -7,6 +7,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::ast::{Value, ValueKind};
+use crate::edition::Edition;
 use crate::error::Span;
 
 use super::{AssertIr, LogicBinding, MemberRole};
@@ -34,15 +35,30 @@ pub struct Member {
     /// `-> VALUE` tail at the end of the line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<Value>,
-    /// `key=value` attributes the fields above did not consume.
+    /// `key=value` attributes the fields above did not consume and that name no blockstate.
+    pub arguments: Arguments,
+    /// The blockstate the line writes, the keys [`MemberRole::state_arguments`] names; the only
+    /// part of a member an edit diff reads (`spec/blockstate` "`intent_state` and
+    /// `resolved_state`").
     pub intent_state: IntentState,
-    /// Per-edition resolved blockstate; `None` until the member is `Lifted`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved_state: Option<ResolvedState>,
     /// Nested body indented under this member.
     #[serde(default, skip_serializing_if = "MemberBody::is_empty")]
     pub children: MemberBody,
+    /// The `@edition` guard the member's line stands under, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edition_guard: Option<EditionGuard>,
     /// Byte range of the member's own line, children excluded.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+/// An `@edition` guard over a member
+/// (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EditionGuard {
+    /// The edition whose build keeps the member.
+    pub edition: Edition,
+    /// Byte range of the guard's `@edition` line.
     #[serde(skip)]
     pub span: Span,
 }
@@ -58,10 +74,30 @@ impl Member {
             .map(|slot| slot.name.as_str())
     }
 
+    /// The value the line writes for `key=`, blockstate or not; a hoisted key is not here.
+    #[must_use]
+    pub fn written(&self, key: &str) -> Option<&ValueWithSpan> {
+        self.arguments
+            .get(key)
+            .or_else(|| self.intent_state.get(key))
+    }
+
+    /// Every `key=value` [`Self::written`] answers for, in source order.
+    pub fn written_fields(&self) -> impl Iterator<Item = (&str, &ValueWithSpan)> {
+        let mut fields: Vec<(&str, &ValueWithSpan)> = self
+            .arguments
+            .iter()
+            .chain(self.intent_state.iter())
+            .map(|(key, value)| (key.as_str(), value))
+            .collect();
+        fields.sort_by_key(|(_, value)| value.span.start);
+        fields.into_iter()
+    }
+
     /// Read `key=` as a non-negative `u32`, or `None`.
     #[must_use]
     pub fn nonneg_u32(&self, key: &str) -> Option<u32> {
-        match &self.intent_state.get(key)?.value.kind {
+        match &self.written(key)?.value.kind {
             ValueKind::Int(v) if *v >= 0 => u32::try_from(*v).ok(),
             _ => None,
         }
@@ -70,7 +106,7 @@ impl Member {
     /// Read `key=` as a bare identifier, or `None`.
     #[must_use]
     pub fn ident_value(&self, key: &str) -> Option<&str> {
-        match &self.intent_state.get(key)?.value.kind {
+        match &self.written(key)?.value.kind {
             ValueKind::Ident(name) => Some(name.as_str()),
             _ => None,
         }
@@ -117,13 +153,24 @@ impl MemberRole {
                 BodyKind::Geometry,
                 Self::Floor
                 | Self::Walls
+                | Self::Fill
                 | Self::Door
                 | Self::Window
                 | Self::Roof
                 | Self::Stair
                 | Self::Level
                 | Self::PressurePlate
-                | Self::Circuit,
+                | Self::Lever
+                | Self::Button
+                | Self::Daylight
+                | Self::Observer
+                | Self::Lamp
+                | Self::Piston
+                | Self::Dispenser
+                | Self::Chest
+                | Self::Circuit
+                | Self::RawBlock
+                | Self::RawFill,
             )
             | (BodyKind::Site, Self::Place | Self::Connect) => true,
             (BodyKind::Geometry, Self::Place | Self::Connect)
@@ -131,13 +178,24 @@ impl MemberRole {
                 BodyKind::Site,
                 Self::Floor
                 | Self::Walls
+                | Self::Fill
                 | Self::Door
                 | Self::Window
                 | Self::Roof
                 | Self::Stair
                 | Self::Level
                 | Self::PressurePlate
-                | Self::Circuit,
+                | Self::Lever
+                | Self::Button
+                | Self::Daylight
+                | Self::Observer
+                | Self::Lamp
+                | Self::Piston
+                | Self::Dispenser
+                | Self::Chest
+                | Self::Circuit
+                | Self::RawBlock
+                | Self::RawFill,
             )
             | (_, Self::Other(_)) => false,
         }
@@ -149,13 +207,24 @@ impl MemberRole {
         match self {
             Self::Floor => "floor",
             Self::Walls => "walls",
+            Self::Fill => "fill",
             Self::Door => "door",
             Self::Window => "window",
             Self::Roof => "roof",
             Self::Stair => "stair",
             Self::Level => "level",
             Self::PressurePlate => "pressure_plate",
+            Self::Lever => "lever",
+            Self::Button => "button",
+            Self::Daylight => "daylight",
+            Self::Observer => "observer",
+            Self::Lamp => "lamp",
+            Self::Piston => "piston",
+            Self::Dispenser => "dispenser",
+            Self::Chest => "chest",
             Self::Circuit => "circuit",
+            Self::RawBlock => "raw_block",
+            Self::RawFill => "raw_fill",
             Self::Place => "place",
             Self::Connect => "connect",
             Self::Other(keyword) => keyword,
@@ -204,7 +273,7 @@ impl MemberBody {
     }
 }
 
-/// Raw `key=value` attributes attached to a [`Member`], in source order.
+/// The blockstate `key=value` attributes a [`Member`]'s line writes, in source order.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct IntentState {
@@ -229,6 +298,36 @@ impl Deref for IntentState {
 }
 
 impl DerefMut for IntentState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fields
+    }
+}
+
+/// The `key=value` attributes a [`Member`]'s line writes that name no blockstate, in source order.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Arguments {
+    /// Attributes in source order.
+    pub fields: IndexMap<String, ValueWithSpan>,
+}
+
+impl Arguments {
+    /// Construct an empty argument list.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Deref for Arguments {
+    type Target = IndexMap<String, ValueWithSpan>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl DerefMut for Arguments {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.fields
     }
@@ -263,26 +362,4 @@ pub struct Label {
     /// Byte range of the value in the original source.
     #[serde(skip)]
     pub span: Span,
-}
-
-/// Resolved, per-edition blockstate for a [`Member`]; always empty for now.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[serde(transparent)]
-pub struct ResolvedState {
-    /// Resolved state fields in source-stable order.
-    pub fields: IndexMap<String, ValueWithSpan>,
-}
-
-impl Deref for ResolvedState {
-    type Target = IndexMap<String, ValueWithSpan>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.fields
-    }
-}
-
-impl DerefMut for ResolvedState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.fields
-    }
 }

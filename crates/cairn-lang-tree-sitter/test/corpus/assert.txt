@@ -73,6 +73,55 @@ struct s size=3x3
             bound: (integer)))))))
 
 ==================
+Latency assertion (field labels)
+==================
+
+struct s size=3x3
+  assert latency(sig.step -> sig.open) <= 4
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (struct_body
+      (assert_stmt
+        (latency_form
+          from: (signal_ref
+            (identifier)
+            (identifier))
+          to: (signal_ref
+            (identifier)
+            (identifier))
+          bound: (integer))))))
+
+==================
+Latency assertion bounded from below is rejected
+:error
+==================
+
+struct s size=3x3
+  assert latency(sig.step -> sig.open) >= 4
+
+---
+
+==================
+Latency assertion without its bound is rejected
+:error
+==================
+
+struct s size=3x3
+  assert latency(sig.step -> sig.open)
+
+---
+
+==================
 Truth table and temporal assertion with bare identifiers (degenerate dotted refs)
 ==================
 

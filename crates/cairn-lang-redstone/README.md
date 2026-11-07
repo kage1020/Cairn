@@ -24,7 +24,7 @@ Every placed cell and output records which of the last four passes touched it as
 
 Still to come: edition legalization, the tick simulator, and the QC/BUD refusal (`E_NO_PORTABLE_IMPL`).
 
-`local_delay_ticks` is a local cost, not a path latency: the delay of that cell's slowest driven port plus the buffer repeaters on every net that drives it, summed, which is what crossing legalization's buffer blocks are checked against. A cell counts its delay per input port (`EditionCell::port_delay_ticks`), and a combinational cell settles when the *last* of its inputs arrives, so an arrival time maxes over the ports, each the arrival on its net plus that port's delay, and walks back through the upstream cells; nothing computes it yet, since `assert latency(sig.in -> sig.out)` ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)) is neither parsed nor evaluated.
+`local_delay_ticks` is a local cost, not a path latency: the delay of that cell's slowest driven port plus the buffer repeaters on every net that drives it, summed, which is what crossing legalization's buffer blocks are checked against. A cell counts its delay per input port (`EditionCell::port_delay_ticks`), and a combinational cell settles when the *last* of its inputs arrives, so an arrival time maxes over the ports, each the arrival on its net plus that port's delay, and walks back through the upstream cells. `verify_latency` computes it that way to check each `assert latency(sig.in -> sig.out)` ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)) against the legalized circuit, adding the buffer repeaters on the wire into each port and onto the actuator's pad.
 
 ## Pipeline
 
@@ -47,7 +47,7 @@ The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile
 
 ## v1 scope
 
-- **Combinational**: `and` / `or` / `not` are synthesised end to end. `xor` / `nand` / `nor` / `mux` are reserved on the Logic IR and Netlist IR enums, but no surface syntax produces them yet.
+- **Combinational**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux` are synthesised end to end, each to a cell on both editions.
 - **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`. Named in the spec, implemented nowhere yet.
 - **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; evaluating one waits on the simulator.
 

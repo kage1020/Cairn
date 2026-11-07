@@ -151,7 +151,9 @@ pub(crate) enum Command {
     #[command(
         long_about = "Lower a .crn source file all the way to the block-array IR and print the \
             result. A debugging surface for the universal voxel pivot; `cairn compile` writes the \
-            same IR out as `.nbt` or `.mcstructure` files, per edition. Lowering warnings \
+            same IR out as `.nbt` or `.mcstructure` files, per edition. No edition is pinned \
+            here, so a member under an `@edition` guard is left out, and a note says how many \
+            were. Lowering warnings \
             (deferred members, themeless scopes, abstract tokens) print to stderr but do not \
             affect the exit code. Exits 0 on success, 1 on a parse failure, on any \
             `Error`-severity diagnostic (`E_UNKNOWN_ABSTRACT_TOKEN` among them; `E_UNKNOWN_ID` is \
@@ -170,14 +172,16 @@ pub(crate) enum Command {
         long_about = "Compile a .crn source file to its edition+version-pinned structure artifact \
             set and write a lockfile next to the source. `--edition java` writes gzip `.nbt` \
             structures; `--edition bedrock` writes uncompressed `.mcstructure` files, translating \
-            the blockstate families it knows into Bedrock `states`; a property it cannot translate \
-            is a hard error, and intent it can only approximate (stair `shape`) is dropped with a \
-            `W_INTENT_DEGRADED` warning rather than silently. `--target` pins the one version a \
-            block id has an answer for, which is what lets the compile check them \
-            (`E_UNKNOWN_ID`); `cairn check --edition E --target V` pins the same pair to reach the \
-            same finding without building anything. Exits 0 on success, 1 on parse, lowering, or \
-            I/O failure (including an unsupported `--target` or a Bedrock property with no \
-            `states` translation), and 2 when the source file cannot be located"
+            each blockstate into the target version's Bedrock `states` through the registry \
+            pack's state map; a state the map has no form for is a hard error \
+            (`E_STATE_UNMAPPED`), and intent it can only approximate (stair `shape` before \
+            1.26.60) is dropped with a `W_INTENT_DEGRADED` warning rather than silently. \
+            `--target` pins the one version a block id and its states have an answer for, which \
+            is what lets the compile check them (`E_UNKNOWN_ID`, `E_STATE_UNMAPPED`); `cairn check \
+            --edition E --target V` pins the same pair to reach the same findings without building \
+            anything. Exits 0 on success, 1 on parse, lowering, or I/O failure (including an \
+            unsupported `--target` or a Bedrock property the Java block does not have), and 2 \
+            when the source file cannot be located"
     )]
     Compile {
         /// Path to the .crn file to compile.
@@ -385,14 +389,17 @@ pub(crate) enum SynthStage {
             repeater can stand on"
     )]
     Delay,
-    /// Legalized Placement IR: crossing legalization, filling each cell's `buffer_coords`.
+    /// Legalized Placement IR: crossing legalization, filling each cell's `buffer_coords`, then
+    /// latency verification.
     #[value(
         help = "Legalized Placement IR: crossing legalization over the delayed Placement IR \
             against `--edition`. Stage 4 of the pipeline `spec/redstone` \"Place-and-route\" lays \
             out. Materialises the coord of every implicit buffer repeater the delay pass counted \
             into every cell's `buffer_coords`, one entry per driver segment that passes through it \
             — so a block serving several segments is named once per segment and a consumer \
-            counting blocks deduplicates by coord"
+            counting blocks deduplicates by coord. Then checks each `assert latency` against the \
+            legalized circuit, refusing with `E_SIM_ASSERTION_FAILED` one whose slowest path \
+            takes more ticks than its bound"
     )]
     Crossing,
 }

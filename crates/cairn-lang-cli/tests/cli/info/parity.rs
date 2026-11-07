@@ -4,9 +4,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use cairn_lang_core::resolve::DroppedIntent;
-use cairn_lang_formats::bedrock_state::degradation_detail;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::common::{
     assert_stream, cargo_bin, compile, crn_examples, example_in_tempdir, examples_dir, stderr_of,
@@ -175,10 +173,22 @@ fn the_java_axis_is_pure_portable_for_a_source_java_can_build() {
     }
 }
 
-/// Compile a temp copy of `examples/<example>` for Bedrock; return its `W_INTENT_DEGRADED` lines.
+/// Why Bedrock up to 1.21.60 drops a stair `shape`, as the built-in pack words it.
+const NO_SHAPE: &str = "this Bedrock version has no stair `shape` state; its stairs render \
+                        straight, so corners show visual gaps";
+
+/// The Bedrock versions without a stair corner state.
+const SHAPELESS: [&str; 3] = ["1.21.0", "1.21.40", "1.21.60"];
+
+/// Compile a temp copy of `examples/<example>` for Bedrock 1.21.60, the newest version without a
+/// stair corner state; return its `W_INTENT_DEGRADED` lines.
 fn degraded_warnings(example: &str) -> Vec<String> {
+    degraded_warnings_at(example, "1.21.60")
+}
+
+fn degraded_warnings_at(example: &str, target: &str) -> Vec<String> {
     let (tmp, copied) = example_in_tempdir(example);
-    let compiled = compile(&copied, "bedrock", "latest", tmp.path(), None);
+    let compiled = compile(&copied, "bedrock", target, tmp.path(), None);
     let stderr = stderr_of(&compiled);
     assert!(
         compiled.status.success(),
@@ -209,6 +219,16 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
 }
 
 #[test]
+fn a_version_with_a_stair_corner_state_degrades_nothing() {
+    let latest = degraded_warnings_at("themed-tower.crn", "latest");
+    assert_eq!(
+        latest,
+        [] as [String; 0],
+        "the latest Bedrock keeps the corner"
+    );
+}
+
+#[test]
 fn each_dropped_intent_gets_a_warning_naming_the_entry_info_names() {
     // `roof-hip`'s four degraded entries are four states of one id.
     let axes = info_json("roof-hip.crn", "bedrock");
@@ -225,11 +245,8 @@ fn each_dropped_intent_gets_a_warning_naming_the_entry_info_names() {
             let dropped = entry["dropped"].as_array().expect("what it lost");
             dropped.iter().map(move |one| {
                 assert_eq!(one["key"], "shape", "got: {entry}");
-                let value = one["value"].as_str().expect("the value that was asked for");
-                let detail = degradation_detail(&DroppedIntent::Shape {
-                    value: value.to_owned(),
-                });
-                format!("warning[W_INTENT_DEGRADED]: struct::roof_hip: {id}[{states}]: {detail}")
+                assert_eq!(one["mc_versions"], json!(SHAPELESS), "got: {entry}");
+                format!("warning[W_INTENT_DEGRADED]: struct::roof_hip: {id}[{states}]: {NO_SHAPE}")
             })
         })
         .collect();
@@ -239,8 +256,9 @@ fn each_dropped_intent_gets_a_warning_naming_the_entry_info_names() {
     assert_eq!(
         warnings[0],
         "warning[W_INTENT_DEGRADED]: struct::roof_hip: \
-         minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]: Bedrock has no \
-         `shape` state; its stairs render straight, so corners show visual gaps",
+         minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]: this Bedrock \
+         version has no stair `shape` state; its stairs render straight, so corners show visual \
+         gaps",
     );
 }
 
@@ -334,12 +352,12 @@ fn a_source_no_supported_version_can_build_says_so() {
     );
     assert_eq!(
         strings(entry, "considered"),
-        ["1.21.0", "1.21.40", "1.21.60"]
+        ["1.21.0", "1.21.40", "1.21.60", "1.26.60"]
     );
 
     // The premise, asked of the command that decides it.
     let out = tmp.path().join("out");
-    for version in ["1.21.0", "1.21.40", "1.21.60"] {
+    for version in ["1.21.0", "1.21.40", "1.21.60", "1.26.60"] {
         assert!(
             !compile_accepts(&src, "bedrock", version, &out.join(version)),
             "premise: bedrock {version} should refuse this source",
@@ -355,7 +373,7 @@ fn a_source_no_supported_version_can_build_says_so() {
     );
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "the row must carry the same answer the JSON does, got: {stdout}",
     );
@@ -365,6 +383,7 @@ fn a_source_no_supported_version_can_build_says_so() {
             (3, 17, "error", "E_UNKNOWN_ID"),
             (2, 17, "error", "E_UNKNOWN_ID"),
             (3, 17, "error", "E_UNKNOWN_ID"),
+            (2, 17, "error", "E_UNKNOWN_ID"),
             (2, 17, "error", "E_UNKNOWN_ID"),
         ],
     );
@@ -395,7 +414,7 @@ fn a_palette_whose_default_ids_never_overlap_can_still_have_a_buildable_target()
     assert_eq!(strings(entry, "buildable"), ["1.21.0"]);
     assert_eq!(
         strings(entry, "considered"),
-        ["1.21.0", "1.21.40", "1.21.60"],
+        ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
         "the versions weighed are carried too, so an empty set can be read",
     );
 
@@ -428,17 +447,32 @@ fn a_warning_at_every_version_leaves_every_target_buildable() {
     );
 }
 
+/// `(example, edition, targets)`: the targets an example's own `@requires` refuses.
+const REFUSED_AT_A_FLOOR: &[(&str, &str, &[&str])] =
+    &[("edition-fallback.crn", "bedrock", &["1.21.0"])];
+
 #[test]
-fn every_example_lists_every_supported_target() {
+fn every_example_lists_every_supported_target_its_floors_admit() {
     for path in crn_examples() {
-        let name = path.display();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("utf-8 name");
         let axes = info_json_at(&path, "java,bedrock");
         for edition in ["java", "bedrock"] {
             let entry = buildable_entry(&axes, edition);
+            let refused: &[&str] = REFUSED_AT_A_FLOOR
+                .iter()
+                .find(|(example, at, _)| *example == name && *at == edition)
+                .map_or(&[], |(_, _, refused)| refused);
+            let expected: Vec<String> = strings(entry, "considered")
+                .into_iter()
+                .filter(|target| !refused.contains(&target.as_str()))
+                .collect();
             assert_eq!(
                 strings(entry, "buildable"),
-                strings(entry, "considered"),
-                "{name} on {edition} should build on every supported target",
+                expected,
+                "{name} on {edition} should build on every supported target its floors admit",
             );
         }
     }
@@ -550,11 +584,11 @@ fn the_versions_weighed_are_listed_in_release_order() {
     let axes = info_json_at(&examples_dir().join("cottage.crn"), "java,bedrock");
     assert_eq!(
         strings(buildable_entry(&axes, "java"), "considered"),
-        ["1.20.4", "1.21", "1.21.4"],
+        ["1.20.4", "1.21", "1.21.4", "26.3"],
     );
     assert_eq!(
         strings(buildable_entry(&axes, "bedrock"), "considered"),
-        ["1.21.0", "1.21.40", "1.21.60"],
+        ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
     );
 }
 
@@ -658,7 +692,7 @@ fn an_unplaceable_floor_does_not_hide_what_each_version_refused() {
     );
     assert_eq!(
         strings(&row, "considered"),
-        ["1.21.0", "1.21.40", "1.21.60"],
+        ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
         "{row}",
     );
     assert_eq!(
@@ -667,7 +701,7 @@ fn an_unplaceable_floor_does_not_hide_what_each_version_refused() {
     );
 }
 
-/// Two floors at different heights: `1.21.0` is under both, the two after it only the second.
+/// Two floors at different heights: `1.21.0` is under both, the three after it only the second.
 #[test]
 fn a_floor_above_every_release_names_the_line_under_each_version() {
     let (_tmp, row) = buildable_row(
@@ -689,6 +723,7 @@ fn a_floor_above_every_release_names_the_line_under_each_version() {
             ("1.21.0".to_owned(), "below_floor".to_owned()),
             ("1.21.40".to_owned(), "below_floor".to_owned()),
             ("1.21.60".to_owned(), "below_floor".to_owned()),
+            ("1.26.60".to_owned(), "below_floor".to_owned()),
         ],
         "{row}",
     );
@@ -700,7 +735,7 @@ fn a_floor_above_every_release_names_the_line_under_each_version() {
         ],
         "{row}",
     );
-    for later in [1, 2] {
+    for later in [1, 2, 3] {
         assert_eq!(
             floors(&row["reason"]["versions"][later], "floors"),
             [("bedrock version>=1.99".to_owned(), 5, 3)],
@@ -744,7 +779,7 @@ fn a_floor_is_credited_only_with_the_versions_it_refuses() {
     );
     assert!(
         below[1].ends_with(
-            "bedrock 1.21.0, 1.21.40, 1.21.60 are below the `bedrock version>=1.99` `def cottage` \
+            "bedrock 1.21.0, 1.21.40, 1.21.60, 1.26.60 are below the `bedrock version>=1.99` `def cottage` \
              declares"
         ),
         "{stderr}",
@@ -799,6 +834,7 @@ fn a_floor_does_not_hide_a_scope_that_produced_no_voxels() {
             ("1.21.0".to_owned(), "below_floor".to_owned()),
             ("1.21.40".to_owned(), "below_floor".to_owned()),
             ("1.21.60".to_owned(), "below_floor".to_owned()),
+            ("1.26.60".to_owned(), "below_floor".to_owned()),
         ],
         "both causes, in one run: {row}",
     );
@@ -808,7 +844,7 @@ fn a_floor_does_not_hide_a_scope_that_produced_no_voxels() {
 fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
     let (tmp, row) = buildable_row(
         "theme t:\n\
-         \x20\x20slot floor -> @oak_log[axis=x]\n\n\
+         \x20\x20slot floor -> @frame[facing=north]\n\n\
          struct hut size=5x5\n\
          \x20\x20floor mat_slot=floor\n",
         "bedrock",
@@ -816,7 +852,7 @@ fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
     assert!(strings(&row, "buildable").is_empty(), "{row}");
     assert_eq!(
         strings(&row["reason"], "states_unmapped"),
-        ["minecraft:oak_log[axis=x]"],
+        ["minecraft:frame[facing=north]"],
         "the entry the writer refuses, not the versions: {row}",
     );
     assert!(row["reason"].get("versions").is_none(), "{row}");
@@ -825,7 +861,7 @@ fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
     assert_eq!(code, Some(0), "info reports; the build refuses: {stderr}");
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "{stdout}",
     );
@@ -837,7 +873,7 @@ fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
         notes,
         [
             "note: no bedrock target can build this source: its writer cannot carry the states \
-             of `minecraft:oak_log[axis=x]`"
+             of `minecraft:frame[facing=north]`"
         ],
         "{stderr}",
     );
@@ -862,6 +898,7 @@ fn a_refused_lowering_names_what_each_version_refused() {
             ("1.21.0".to_owned(), "lowering_refused".to_owned()),
             ("1.21.40".to_owned(), "lowering_refused".to_owned()),
             ("1.21.60".to_owned(), "lowering_refused".to_owned()),
+            ("1.26.60".to_owned(), "lowering_refused".to_owned()),
         ],
         "{row}",
     );
@@ -895,6 +932,7 @@ fn versions_refused_for_different_reasons_each_carry_their_own() {
             ("1.21.0".to_owned(), "below_floor".to_owned()),
             ("1.21.40".to_owned(), "lowering_refused".to_owned()),
             ("1.21.60".to_owned(), "lowering_refused".to_owned()),
+            ("1.26.60".to_owned(), "lowering_refused".to_owned()),
         ],
         "{row}",
     );
@@ -943,7 +981,7 @@ fn naming_the_reason_does_not_move_the_exit_code_or_the_text_row() {
     assert_eq!(code, Some(0), "info reports; the build refuses: {stderr}");
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60 all refuse)"
+            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "the text row is unchanged: {stdout}",
     );
@@ -1056,7 +1094,7 @@ fn a_block_only_part_of_the_range_declares_stays_portable() {
     // `stone_bricks` is `stonebrick` on Bedrock 1.21.0, and `info` lowers the default mapping.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "renamed.crn", "floor.stone.smooth");
-    for target in ["1.21.0", "1.21.40", "1.21.60"] {
+    for target in ["1.21.0", "1.21.40", "1.21.60", "1.26.60"] {
         let run = compile(&src, "bedrock", target, &tmp.path().join(target), None);
         let stderr = stderr_of(&run);
         assert_eq!(
@@ -1254,6 +1292,11 @@ fn the_degraded_figure_names_the_entry_and_what_it_lost() {
         assert!(!dropped.is_empty(), "got: {entry}");
         for one in dropped {
             assert_eq!(one["key"], "shape", "got: {entry}");
+            assert_eq!(
+                one["mc_versions"],
+                json!(SHAPELESS),
+                "the versions that lose it, oldest first: {entry}",
+            );
             let value = one["value"].as_str().expect("the value that was asked for");
             assert_ne!(
                 value, "straight",
@@ -1305,13 +1348,12 @@ fn the_degraded_notes_and_the_build_share_one_wording() {
         figure,
         "one line per entry, counted against the header's own figure: {stderr}",
     );
+    let versions = SHAPELESS.join(", ");
     assert_eq!(
         named[0],
         format!(
-            "  note: `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]` — {}",
-            degradation_detail(&DroppedIntent::Shape {
-                value: "outer_left".to_owned(),
-            }),
+            "  note: `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]` — \
+             {NO_SHAPE} ({versions})",
         ),
         "got: {stderr}",
     );
@@ -1330,7 +1372,13 @@ fn the_degraded_notes_and_the_build_share_one_wording() {
     }
     let from_build: Vec<String> = from_build
         .iter()
-        .map(|(entry, details)| format!("  note: `{entry}` — {}", details.join("; ")))
+        .map(|(entry, details)| {
+            let details: Vec<String> = details
+                .iter()
+                .map(|d| format!("{d} ({versions})"))
+                .collect();
+            format!("  note: `{entry}` — {}", details.join("; "))
+        })
         .collect();
     assert_eq!(
         named, from_build,

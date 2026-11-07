@@ -1,5 +1,5 @@
-//! The `material` pass: a `floor` or `walls` without `mat_slot=`, which reads its block only from
-//! the theme's slot map and so contributes no voxel.
+//! The `material` pass: a `floor`, `walls` or material `fill` without `mat_slot=`, which reads its
+//! block only from the theme's slot map and so contributes no voxel.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{BodyKind, IntentModule, Member, MemberRole};
@@ -37,34 +37,48 @@ fn walk(
 /// `mat_slot` is also `None` for a value that failed to hoist, which another code reports.
 fn names_no_material(member: &Member) -> bool {
     member.mat_slot.is_none()
-        && !member.intent_state.contains_key("mat_slot")
-        && matches!(
-            without_a_material(&member.role),
-            WithoutAMaterial::PaintsNothing
-        )
+        && !member.arguments.contains_key("mat_slot")
+        && matches!(without_a_material(member), WithoutAMaterial::PaintsNothing)
 }
 
-/// What a member of one role does to the build when it carries no `mat_slot=`.
+/// What a member does to the build when it carries no `mat_slot=`.
 enum WithoutAMaterial {
     PaintsNothing,
     Carves,
     PaintsAFallback,
+    IsOneBlock,
     NamesItsMaterialElsewhere,
     PutsNothingDown,
 }
 
 /// Must agree with `block_array`'s `member_will_paint`; `MemberRole::unread_arguments` relies on
 /// the `level`, `circuit`, `place` and `connect` arms.
-fn without_a_material(role: &MemberRole) -> WithoutAMaterial {
-    match role {
-        MemberRole::Floor | MemberRole::Walls => WithoutAMaterial::PaintsNothing,
-        // A `window` without `mat_slot=` is an opening carved to air.
-        MemberRole::Window | MemberRole::Door => WithoutAMaterial::Carves,
-        MemberRole::Roof | MemberRole::Stair | MemberRole::PressurePlate => {
-            WithoutAMaterial::PaintsAFallback
+fn without_a_material(member: &Member) -> WithoutAMaterial {
+    match &member.role {
+        MemberRole::Fill if member.written("fluid").is_some() => {
+            WithoutAMaterial::NamesItsMaterialElsewhere
         }
-        // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`.
-        MemberRole::Connect => WithoutAMaterial::NamesItsMaterialElsewhere,
+        MemberRole::Floor | MemberRole::Walls | MemberRole::Fill => WithoutAMaterial::PaintsNothing,
+        // A `window` without `mat_slot=` is an opening carved to air.
+        MemberRole::Window => WithoutAMaterial::Carves,
+        MemberRole::Roof
+        | MemberRole::Stair
+        | MemberRole::Door
+        | MemberRole::PressurePlate
+        | MemberRole::Button
+        | MemberRole::Chest => WithoutAMaterial::PaintsAFallback,
+        // Each has one block to be built from, and `mat_slot=` chooses nothing.
+        MemberRole::Lever
+        | MemberRole::Daylight
+        | MemberRole::Observer
+        | MemberRole::Lamp
+        | MemberRole::Piston
+        | MemberRole::Dispenser => WithoutAMaterial::IsOneBlock,
+        // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`, and `mat=`, whose absence is
+        // `E_INVALID_MEMBER`.
+        MemberRole::Connect | MemberRole::RawBlock | MemberRole::RawFill => {
+            WithoutAMaterial::NamesItsMaterialElsewhere
+        }
         MemberRole::Level | MemberRole::Circuit | MemberRole::Place | MemberRole::Other(_) => {
             WithoutAMaterial::PutsNothingDown
         }
@@ -81,14 +95,23 @@ fn diagnose(member: &Member, has_a_theme: bool) -> Diagnostic {
              declare one, then give the `{keyword}` a `mat_slot=NAME` from it",
         )
     };
+    let mut notes = vec![DiagnosticNote {
+        span: None,
+        message: advice,
+    }];
+    if matches!(member.role, MemberRole::Fill) {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: "or write `fluid=water` to pour water into the box, which needs no \
+                      `mat_slot=`"
+                .to_owned(),
+        });
+    }
     Diagnostic {
         code: DiagnosticCode::MissingMaterial,
         span: member.span.clone(),
         primary: format!("`{keyword}` has no `mat_slot=`, so it paints nothing"),
-        notes: vec![DiagnosticNote {
-            span: None,
-            message: advice,
-        }],
+        notes,
         data: None,
     }
 }

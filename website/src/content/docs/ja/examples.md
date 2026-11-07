@@ -5,7 +5,7 @@ description: 実際の .crn ファイル集。言語の書き方だけに集中�
 
 どのファイルも [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) にあり、あえて最小限の内容にしています。最初のグループの 4 つは、[チュートリアル](/ja/tutorial/)で順番に解説しています。
 
-> どのファイルも、現在のコンパイラでコンパイルできます。ただし、レッドストーンはまだコンパイル結果に含まれないので、`redstone-door.crn` は回路なしで作られます。
+> どのファイルも、現在のコンパイラでコンパイルできます。ただし、レッドストーンはまだコンパイル結果に含まれないので、`redstone-door.crn` と `control-room.crn` は、センサーとアクチュエーターを置くだけで、その間の回路なしで作られます。
 
 ## まずはここから
 
@@ -32,9 +32,17 @@ description: 実際の .crn ファイル集。言語の書き方だけに集中�
 | [`at-side-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/at-side-walkway.crn) | ドアを `at=left` / `at=right` に置くと、ポートが向き合う角の側に寄る。 |
 | [`window-walkway.crn`](https://github.com/kage1020/Cairn/blob/main/examples/window-walkway.crn) | 窓のポート。窓の矩形の中心を基準にし、地面の高さに固定される。 |
 
+## ブロックステート
+
+| ファイル | 内容 |
+|---|---|
+| [`storeroom.crn`](https://github.com/kage1020/Cairn/blob/main/examples/storeroom.crn) | 壁を背にした `chest`。どのチェストも背にした壁から離れる向きを向き、並んだ 2 つは連結し、`size=single` で 2 つを別々に保つ。 |
+| [`control-room.crn`](https://github.com/kage1020/Cairn/blob/main/examples/control-room.crn) | 壁のそばに置いたすべてのセンサーとアクチュエーター。壁から離れる向きに掛けたレバーとボタン、日照センサー、上を向けたオブザーバーと粘着ピストン、ランプ、外を向いたディスペンサー、パッチで結び付けたピストン。 |
+| [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`。マテリアルで砂の床を塗り、水槽に置いたものの周りに水を注ぐ。窓ガラスと 1 つのチェストは水を含み、`waterlogged=false` のもう 1 つは乾いたまま残る。 |
+
 ## 境界のケース
 
 | ファイル | 内容 |
 |---|---|
-| [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | 両エディション共通のプリミティブがないスロットに、エディション別のテーマバリアントで対応する。 |
+| [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | 両エディション共通のプリミティブがないスロットに、エディション別のテーマバリアントで対応する。エディションごとに綴りの違うブロックは `@edition` ガードで分ける。 |
 | [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | 狭い領域に 4 つのネットを通す例。ルーターは各ネットをほかのネットを避けて敷き、`void=2` の範囲で 1 本をブリッジ層に持ち上げます。`void=1` では `E_ROUTE_CONGESTION` で拒否します。 |

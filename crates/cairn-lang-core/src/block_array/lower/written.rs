@@ -117,7 +117,7 @@ impl Written {
 
 /// A positive `height=` that fits `u32`, else `None` rather than a saturated height.
 pub(super) fn height_value(member: &Member) -> Option<u32> {
-    let raw = member.intent_state.get("height")?;
+    let raw = member.arguments.get("height")?;
     match &raw.value.kind {
         ValueKind::Int(v) if *v > 0 => u32::try_from(*v).ok(),
         _ => None,

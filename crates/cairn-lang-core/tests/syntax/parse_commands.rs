@@ -4,8 +4,8 @@
 use std::num::{IntErrorKind, NonZeroU32};
 
 use cairn_lang_core::ast::{
-    DottedRef, Expr, Header, Item, RawRequirement, RawVersion, Statement, ThemeRule, Value,
-    ValueKind,
+    DottedRef, Expr, Header, Item, NamedOperand, RawRequirement, RawVersion, Statement, ThemeRule,
+    Value, ValueKind,
 };
 use cairn_lang_core::error::IntContext;
 use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
@@ -209,6 +209,14 @@ fn not(operand: Expr) -> Expr {
     }
 }
 
+fn mux(sel: Expr, a: Expr, b: Expr) -> Expr {
+    let operand = |name, value| NamedOperand { name, value };
+    Expr::Call {
+        primitive: LogicPrimitive::Mux,
+        operands: vec![operand("sel", sel), operand("a", a), operand("b", b)],
+    }
+}
+
 #[test]
 fn parses_logic_expression() {
     let module = parse("struct s\n  logic sig.open = sig.step or sig.exit\n").expect("parse");
@@ -275,6 +283,31 @@ fn parses_assert_always() {
     assert_eq!(antecedent, &dr(&["sig", "step"]));
     assert_eq!(consequent, &dr(&["sig", "open"]));
     assert_eq!(*within, 2);
+}
+
+#[test]
+fn parses_assert_latency() {
+    let source = "struct s\n  assert latency(sig.step -> sig.open) <= 4\n";
+    let module = parse(source).expect("parse");
+    let Item::Struct { body, .. } = &module.items[0] else {
+        panic!("not a struct");
+    };
+    let Statement::AssertLatency {
+        from,
+        to,
+        bound,
+        span,
+    } = &body[0]
+    else {
+        panic!("expected AssertLatency, got {:?}", body[0]);
+    };
+    assert_eq!(from, &dr(&["sig", "step"]));
+    assert_eq!(to, &dr(&["sig", "open"]));
+    assert_eq!(*bound, 4);
+    assert_eq!(
+        &source[span.clone()],
+        "assert latency(sig.step -> sig.open) <= 4"
+    );
 }
 
 #[test]
@@ -363,13 +396,54 @@ fn logic_not_higher_than_and() {
 #[test]
 fn one_rank_groups_left_to_right() {
     let (a, b, c) = (name(&["a"]), name(&["b"]), name(&["c"]));
-    for primitive in [LogicPrimitive::And, LogicPrimitive::Or] {
+    let infixes = LogicPrimitive::ALL
+        .into_iter()
+        .filter(|primitive| primitive.infix_rank().is_some());
+    for primitive in infixes {
         let word = primitive.name();
         assert_eq!(
             logic_rhs(&format!("a {word} b {word} c")),
             infix(primitive, infix(primitive, a.clone(), b.clone()), c.clone()),
+            "{word}",
         );
     }
+    for (expression, first, second) in [
+        ("a and b nand c", LogicPrimitive::And, LogicPrimitive::Nand),
+        ("a nand b and c", LogicPrimitive::Nand, LogicPrimitive::And),
+        ("a or b nor c", LogicPrimitive::Or, LogicPrimitive::Nor),
+        ("a nor b or c", LogicPrimitive::Nor, LogicPrimitive::Or),
+    ] {
+        assert_eq!(
+            logic_rhs(expression),
+            infix(second, infix(first, a.clone(), b.clone()), c.clone()),
+            "{expression}",
+        );
+    }
+}
+
+#[test]
+fn and_and_nand_group_before_xor_and_xor_before_or_and_nor() {
+    let [a, b, c, d] = ["a", "b", "c", "d"].map(|segment| name(&[segment]));
+    assert_eq!(
+        logic_rhs("a or b xor c and d"),
+        infix(
+            LogicPrimitive::Or,
+            a.clone(),
+            infix(
+                LogicPrimitive::Xor,
+                b.clone(),
+                infix(LogicPrimitive::And, c.clone(), d.clone()),
+            ),
+        ),
+    );
+    assert_eq!(
+        logic_rhs("a nand b xor c nor d"),
+        infix(
+            LogicPrimitive::Nor,
+            infix(LogicPrimitive::Xor, infix(LogicPrimitive::Nand, a, b), c,),
+            d,
+        ),
+    );
 }
 
 #[test]
@@ -410,9 +484,78 @@ fn every_library_primitive_parses_in_its_notation() {
                 format!("sig.a {word} sig.b"),
                 infix(primitive, a.clone(), b.clone()),
             ),
+            Notation::Call { operands } => (
+                format!(
+                    "{word}({})",
+                    operands
+                        .iter()
+                        .map(|operand| format!("{operand}=sig.{operand}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                Expr::Call {
+                    primitive,
+                    operands: operands
+                        .iter()
+                        .map(|&operand| NamedOperand {
+                            name: operand,
+                            value: name(&["sig", operand]),
+                        })
+                        .collect(),
+                },
+            ),
         };
         assert_eq!(logic_rhs(&expression), expected, "{expression:?}");
     }
+}
+
+#[test]
+fn a_call_takes_its_operands_in_any_order_and_keeps_them_in_the_librarys() {
+    let expected = mux(
+        name(&["sig", "s"]),
+        name(&["sig", "x"]),
+        name(&["sig", "y"]),
+    );
+    for expression in [
+        "mux(sel=sig.s, a=sig.x, b=sig.y)",
+        "mux(sel=sig.s, b=sig.y, a=sig.x)",
+        "mux(a=sig.x, sel=sig.s, b=sig.y)",
+        "mux(a=sig.x, b=sig.y, sel=sig.s)",
+        "mux(b=sig.y, sel=sig.s, a=sig.x)",
+        "mux(b=sig.y, a=sig.x, sel=sig.s)",
+        "mux( sel = sig.s ,a=sig.x,b=sig.y )",
+    ] {
+        assert_eq!(logic_rhs(expression), expected, "{expression:?}");
+    }
+}
+
+#[test]
+fn each_operand_of_a_call_is_a_whole_expression_and_a_call_is_an_operand() {
+    let signal = |segment| name(&["sig", segment]);
+    assert_eq!(
+        logic_rhs("mux(sel=sig.s and sig.t, a=not sig.x, b=(sig.y or sig.z))"),
+        mux(
+            infix(LogicPrimitive::And, signal("s"), signal("t")),
+            not(signal("x")),
+            infix(LogicPrimitive::Or, signal("y"), signal("z")),
+        ),
+    );
+    assert_eq!(
+        logic_rhs("not mux(sel=sig.s, a=sig.x, b=sig.y) and sig.z"),
+        infix(
+            LogicPrimitive::And,
+            not(mux(signal("s"), signal("x"), signal("y"))),
+            signal("z"),
+        ),
+    );
+    assert_eq!(
+        logic_rhs("mux(sel=sig.s, a=mux(sel=sig.t, a=sig.x, b=sig.y), b=sig.z)"),
+        mux(
+            signal("s"),
+            mux(signal("t"), signal("x"), signal("y")),
+            signal("z"),
+        ),
+    );
 }
 
 #[test]
@@ -425,6 +568,10 @@ fn an_expression_serialises_with_its_primitive_by_name() {
         (
             "sig.a and sig.b",
             r#"{"kind":"Infix","value":{"primitive":"and","lhs":{"kind":"Ref","value":["sig","a"]},"rhs":{"kind":"Ref","value":["sig","b"]}}}"#,
+        ),
+        (
+            "mux(b=sig.y, sel=sig.s, a=sig.x)",
+            r#"{"kind":"Call","value":{"primitive":"mux","operands":[{"name":"sel","value":{"kind":"Ref","value":["sig","s"]}},{"name":"a","value":{"kind":"Ref","value":["sig","x"]}},{"name":"b","value":{"kind":"Ref","value":["sig","y"]}}]}}"#,
         ),
     ] {
         assert_eq!(
@@ -549,6 +696,28 @@ fn within_overflow_surfaces_invalid_int_variant() {
     assert_eq!(context, IntContext::WithinBound);
     assert_eq!(lexeme, "4294967296");
     assert_eq!(kind, IntErrorKind::PosOverflow);
+}
+
+#[test]
+fn latency_overflow_surfaces_invalid_int_variant() {
+    let err = parse("struct s\n  assert latency(a -> b) <= 4294967296\n").expect_err("overflow");
+    let message = err.user_message();
+    let ParseError::InvalidInt {
+        context,
+        lexeme,
+        kind,
+        ..
+    } = err
+    else {
+        panic!("expected ParseError::InvalidInt, got {err:?}");
+    };
+    assert_eq!(context, IntContext::LatencyBound);
+    assert_eq!(lexeme, "4294967296");
+    assert_eq!(kind, IntErrorKind::PosOverflow);
+    assert_eq!(
+        message,
+        "invalid `latency` bound `4294967296`: value out of range"
+    );
 }
 
 #[test]

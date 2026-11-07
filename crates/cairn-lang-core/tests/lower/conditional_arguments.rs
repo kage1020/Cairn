@@ -21,7 +21,8 @@ struct Pair {
     prologue: &'static str,
     /// The body, with [`MARKER`] where the conditional argument goes.
     body: &'static str,
-    /// Two valid values a reader would tell apart in the blocks.
+    /// Two valid values a reader would tell apart in the blocks; for a key that takes one value,
+    /// that value and a word a reader refuses.
     values: (&'static str, &'static str),
 }
 
@@ -39,6 +40,14 @@ const STAIR_BODY: &str = "  walls mat_slot=wall height=3\n  roof kind=gable mat_
 
 /// The same, without the `side=` the other stair fixtures carry.
 const STAIR_BODY_NO_SIDE: &str = "  walls mat_slot=wall height=3\n  roof kind=gable mat_slot=roof overhang=1\n  stair kind=stairs mat_slot=roof %CONDITIONAL%\n";
+
+/// A box inside the walls, filled with a material.
+const MATERIAL_FILL_BODY: &str =
+    "  walls mat_slot=wall height=3\n  fill mat_slot=wall from=1,1,1 to=7,2,7 %CONDITIONAL%\n";
+
+/// The same box, filled with water.
+const WATER_FILL_BODY: &str =
+    "  walls mat_slot=wall height=3\n  fill fluid=water from=1,1,1 to=7,2,7 %CONDITIONAL%\n";
 
 /// The first row of a site places at the origin, where `gap=` is not read.
 const PLACE_AT_ORIGIN: &str = "  place id=a use=hut theme=t at=origin %CONDITIONAL%\n";
@@ -117,6 +126,30 @@ const PAIRS: &[Pair] = &[
         prologue: GEOMETRY,
         body: STAIR_BODY,
         values: ("y=0", "y=2"),
+    },
+    Pair {
+        keyword: "stair",
+        selector_value: Some("stairs"),
+        key: "waterlogged",
+        prologue: GEOMETRY,
+        body: STAIR_BODY,
+        values: ("waterlogged=true", "waterlogged=false"),
+    },
+    Pair {
+        keyword: "fill",
+        selector_value: Some("water"),
+        key: "kind",
+        prologue: GEOMETRY,
+        body: WATER_FILL_BODY,
+        values: ("kind=source", "kind=flowing"),
+    },
+    Pair {
+        keyword: "fill",
+        selector_value: None,
+        key: "kind",
+        prologue: GEOMETRY,
+        body: MATERIAL_FILL_BODY,
+        values: ("kind=source", "kind=flowing"),
     },
     Pair {
         keyword: "place",
@@ -237,6 +270,9 @@ fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
     diagnostics.iter().map(|d| d.code.as_str()).collect()
 }
 
+/// `(keyword, key)` pairs whose key takes one value, so the rule that reads it refuses any other.
+const ONE_VALUED: &[(&str, &str)] = &[("fill", "kind")];
+
 #[test]
 fn conditional_arguments_match_the_lowering() {
     for pair in PAIRS {
@@ -244,6 +280,21 @@ fn conditional_arguments_match_the_lowering() {
         let first = lowered(&pair.source(one));
         let second = lowered(&pair.source(other));
         let without = lowered(&pair.source_without_member());
+        if pair.table_says_read() && ONE_VALUED.contains(&(pair.keyword, pair.key)) {
+            assert_eq!(
+                codes(&first.diagnostics),
+                Vec::<&str>::new(),
+                "{}",
+                pair.triple()
+            );
+            assert_eq!(
+                codes(&second.diagnostics),
+                ["E_INVALID_MEMBER"],
+                "`{}` is listed as read, so `{other}` is refused",
+                pair.triple(),
+            );
+            continue;
+        }
         for (value, ir) in [(one, &first), (other, &second)] {
             assert!(
                 painted(ir) > painted(&without),

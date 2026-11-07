@@ -15,17 +15,24 @@
 "always" @keyword.operator
 "eventually" @keyword.operator
 "within" @keyword.operator
+"latency" @keyword.operator
 "or" @keyword.operator
+"nor" @keyword.operator
+"xor" @keyword.operator
 "and" @keyword.operator
+"nand" @keyword.operator
 "not" @keyword.operator
+"mux" @function.builtin
 
 ; directives
 (directive_name) @keyword.directive
+(edition_guard "@" @keyword.directive "edition" @keyword.directive)
+(edition_name) @constant.builtin
 ; One opaque run to end of line, which the reference parser does not read either.
 (directive_literal) @string.special
 
 ; operators
-["->" "="] @operator
+["->" "=" "<="] @operator
 
 ; punctuation
 ["[" "]" "(" ")" "{" "}"] @punctuation.bracket
@@ -36,11 +43,14 @@
 (integer) @number
 (bit) @number
 (size_literal) @number.special
+(coordinate) @number.special
 (boolean) @constant.builtin
 
 ; types / references
 (material_ref) @type
+(block_id) @type
 (attribute key: (identifier) @variable.parameter)
+(operand_name) @variable.parameter
 ; Every segment after the first is a member; the first keeps the generic @variable.
 (signal_ref . (identifier) (identifier) @variable.member)
 

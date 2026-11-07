@@ -14,6 +14,14 @@ pub enum LogicPrimitive {
     Or,
     /// `not a`.
     Not,
+    /// `a xor b`.
+    Xor,
+    /// `a nand b`.
+    Nand,
+    /// `a nor b`.
+    Nor,
+    /// `mux(sel=s, a=x, b=y)`: `a` while `sel` is off, `b` while it is on.
+    Mux,
 }
 
 /// How a [`LogicPrimitive`] is written in an expression.
@@ -26,11 +34,24 @@ pub enum Notation {
         /// How tightly it binds: a higher rank groups first, and one rank groups left to right.
         rank: u8,
     },
+    /// Called with every operand named once, in any order: `mux(sel=s, a=x, b=y)`.
+    Call {
+        /// The operands' names, in the order the primitive's IRs take them.
+        operands: &'static [&'static str],
+    },
 }
 
 impl LogicPrimitive {
     /// Every primitive the library holds.
-    pub const ALL: [Self; 3] = [Self::And, Self::Or, Self::Not];
+    pub const ALL: [Self; 7] = [
+        Self::And,
+        Self::Or,
+        Self::Not,
+        Self::Xor,
+        Self::Nand,
+        Self::Nor,
+        Self::Mux,
+    ];
 
     /// The word that names the primitive in source.
     #[must_use]
@@ -39,6 +60,10 @@ impl LogicPrimitive {
             Self::And => "and",
             Self::Or => "or",
             Self::Not => "not",
+            Self::Xor => "xor",
+            Self::Nand => "nand",
+            Self::Nor => "nor",
+            Self::Mux => "mux",
         }
     }
 
@@ -46,9 +71,13 @@ impl LogicPrimitive {
     #[must_use]
     pub const fn notation(self) -> Notation {
         match self {
-            Self::And => Notation::Infix { rank: 1 },
-            Self::Or => Notation::Infix { rank: 0 },
+            Self::Or | Self::Nor => Notation::Infix { rank: 0 },
+            Self::Xor => Notation::Infix { rank: 1 },
+            Self::And | Self::Nand => Notation::Infix { rank: 2 },
             Self::Not => Notation::Prefix,
+            Self::Mux => Notation::Call {
+                operands: &["sel", "a", "b"],
+            },
         }
     }
 
@@ -60,13 +89,34 @@ impl LogicPrimitive {
             .find(|primitive| primitive.name() == name)
     }
 
-    /// The rank of an infix primitive, or `None` for a prefix one.
+    /// The rank of an infix primitive, or `None` for one written otherwise.
     #[must_use]
     pub const fn infix_rank(self) -> Option<u8> {
         match self.notation() {
             Notation::Infix { rank } => Some(rank),
-            Notation::Prefix => None,
+            Notation::Prefix | Notation::Call { .. } => None,
         }
+    }
+
+    /// The operands a called primitive names, or `None` for one written otherwise.
+    #[must_use]
+    pub const fn call_operands(self) -> Option<&'static [&'static str]> {
+        match self.notation() {
+            Notation::Call { operands } => Some(operands),
+            Notation::Prefix | Notation::Infix { .. } => None,
+        }
+    }
+
+    /// A called primitive as a call naming every operand, such as `mux(sel=…, a=…, b=…)`, or
+    /// `None` for one written otherwise.
+    #[must_use]
+    pub fn call_template(self) -> Option<String> {
+        let operands: Vec<String> = self
+            .call_operands()?
+            .iter()
+            .map(|operand| format!("{operand}=…"))
+            .collect();
+        Some(format!("{}({})", self.name(), operands.join(", ")))
     }
 }
 
@@ -111,9 +161,25 @@ mod tests {
     }
 
     #[test]
+    fn only_a_called_primitive_has_a_call_template() {
+        assert_eq!(
+            LogicPrimitive::iter()
+                .filter_map(|primitive| Some((primitive, primitive.call_template()?)))
+                .collect::<Vec<_>>(),
+            [(LogicPrimitive::Mux, "mux(sel=…, a=…, b=…)".to_owned())],
+        );
+    }
+
+    #[test]
     fn the_ranks_climb_through_the_ones_the_library_holds() {
-        assert_eq!(infix_rank_above(None), Some(0));
-        assert_eq!(infix_rank_above(Some(0)), Some(1));
-        assert_eq!(infix_rank_above(Some(1)), None);
+        assert_eq!(
+            [
+                infix_rank_above(None),
+                infix_rank_above(Some(0)),
+                infix_rank_above(Some(1)),
+                infix_rank_above(Some(2)),
+            ],
+            [Some(0), Some(1), Some(2), None],
+        );
     }
 }

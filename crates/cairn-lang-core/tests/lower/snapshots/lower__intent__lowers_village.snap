@@ -35,32 +35,35 @@ defs:
         role:
           kind: Floor
         mat_slot: floor
+        arguments: {}
         intent_state: {}
       - id: walls
         class: outer
         role:
           kind: Walls
         mat_slot: wall
-        intent_state:
+        arguments:
           height:
             kind: Int
             value: 4
+        intent_state: {}
       - id: entry
         class: entry
         role:
           kind: Door
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
           at:
             kind: Ident
             value: center
+        intent_state: {}
       - id: front
         role:
           kind: Window
         mat_slot: glass
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
@@ -75,24 +78,26 @@ defs:
             value:
               w: 2
               h: 2
+        intent_state: {}
       - id: roof
         role:
           kind: Roof
         mat_slot: roof
-        intent_state:
+        arguments:
           kind:
             kind: Ident
             value: gable
           overhang:
             kind: Int
             value: 1
+        intent_state: {}
 sites:
   - name: hamlet
     placements:
       - id: home1
         role:
           kind: Place
-        intent_state:
+        arguments:
           use:
             kind: Ident
             value: cottage
@@ -102,10 +107,11 @@ sites:
           at:
             kind: Ident
             value: origin
+        intent_state: {}
       - id: home2
         role:
           kind: Place
-        intent_state:
+        arguments:
           use:
             kind: Ident
             value: cottage
@@ -118,10 +124,11 @@ sites:
           gap:
             kind: Int
             value: 4
+        intent_state: {}
       - id: home3
         role:
           kind: Place
-        intent_state:
+        arguments:
           use:
             kind: Ident
             value: cottage
@@ -134,6 +141,7 @@ sites:
           gap:
             kind: Int
             value: 5
+        intent_state: {}
       - role:
           kind: Connect
         positional:
@@ -147,10 +155,11 @@ sites:
             value:
               - home2
               - entry
-        intent_state:
+        arguments:
           path:
             kind: Token
             value: gravel
+        intent_state: {}
       - role:
           kind: Connect
         positional:
@@ -164,8 +173,9 @@ sites:
             value:
               - home3
               - entry
-        intent_state:
+        arguments:
           path:
             kind: Token
             value: gravel
+        intent_state: {}
 structs: []

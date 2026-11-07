@@ -9,6 +9,7 @@ mod cairn_version;
 mod connect_arity;
 mod diagnostic_text;
 mod duplicate;
+mod edition_guard;
 mod incomplete_place;
 mod keyword_allowlist;
 mod member_scope;

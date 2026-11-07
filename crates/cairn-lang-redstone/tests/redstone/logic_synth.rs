@@ -543,6 +543,22 @@ fn a_primitive_in_a_notation_it_has_no_gate_in_still_reports_its_operands() {
              combinational lowering has no gate for",
             "Fix: write `and` between its two operands",
         ),
+        (
+            "sig.nope1 and sig.nope2",
+            LogicPrimitive::Mux,
+            &[unbound, unbound, unsupported][..],
+            "struct=s: logic expression applies `mux` between two operands, which the \
+             combinational lowering has no gate for",
+            "Fix: write `mux` with every operand named once, as in `mux(sel=…, a=…, b=…)`",
+        ),
+        (
+            "mux(sel=sig.nope1, a=sig.nope2, b=sig.nope3)",
+            LogicPrimitive::Or,
+            &[unbound, unbound, unbound, unsupported][..],
+            "struct=s: logic expression applies `or` called with named operands, which the \
+             combinational lowering has no gate for",
+            "Fix: write `or` between its two operands",
+        ),
     ] {
         let source = format!(
             "struct s size=1x1\n  logic sig.out = {expression}\n  \
@@ -550,7 +566,9 @@ fn a_primitive_in_a_notation_it_has_no_gate_in_still_reports_its_operands() {
         );
         let mut intent = lower(&parse(&source).expect("parse"));
         match &mut intent.structs[0].logic[0].rhs {
-            Expr::Infix { primitive: p, .. } | Expr::Prefix { primitive: p, .. } => *p = primitive,
+            Expr::Infix { primitive: p, .. }
+            | Expr::Prefix { primitive: p, .. }
+            | Expr::Call { primitive: p, .. } => *p = primitive,
             other => panic!("{expression:?}: expected a primitive, got {other:?}"),
         }
         let out = synthesize(&intent);
@@ -560,6 +578,34 @@ fn a_primitive_in_a_notation_it_has_no_gate_in_still_reports_its_operands() {
         let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
         assert_eq!(notes, [footer], "{expression:?}");
     }
+}
+
+#[test]
+fn a_call_without_the_operands_its_primitive_names_still_reports_the_ones_it_has() {
+    let source = "struct s size=1x1\n  logic sig.out = mux(sel=sig.nope1, a=sig.nope2, b=sig.x)\n  \
+                  door id=front side=front at=center\n  door[id=front] opened_by=sig.out\n";
+    let mut intent = lower(&parse(source).expect("parse"));
+    let Expr::Call { operands, .. } = &mut intent.structs[0].logic[0].rhs else {
+        panic!("expected a call");
+    };
+    operands.pop();
+    let out = synthesize(&intent);
+    let unbound = "E_LOGIC_UNBOUND_SIGNAL";
+    assert_eq!(
+        codes(&out),
+        [unbound, unbound, "E_LOGIC_UNSUPPORTED_PRIMITIVE"]
+    );
+    let finding = only(&out, DiagnosticCode::LogicUnsupportedPrimitive);
+    assert_eq!(
+        finding.primary,
+        "struct=s: logic expression applies `mux` with the operands `sel` and `a`, which the \
+         combinational lowering has no gate for",
+    );
+    let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
+    assert_eq!(
+        notes,
+        ["Fix: write `mux` with every operand named once, as in `mux(sel=…, a=…, b=…)`"],
+    );
 }
 
 /// The walk reaches the `level`-nested `assert` first, though it is written below.

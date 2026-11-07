@@ -1,0 +1,216 @@
+==================
+Coordinate triple as a key's value
+==================
+
+struct s size=5x5
+  fill from=1,1,1 to=3,2,3
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate))))))))
+
+==================
+Coordinate triple in a selector, beside a separator after an integer
+==================
+
+struct s size=5x5
+  door[y=2,side=front, at=1,2,3, id=d] opened_by=sig.a
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (selector
+          (filter_list
+            (attribute
+              (identifier)
+              (integer))
+            (attribute
+              (identifier)
+              (identifier))
+            (attribute
+              (identifier)
+              (coordinate))
+            (attribute
+              (identifier)
+              (identifier))))
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier)))))))))
+
+==================
+A list's commas separate items, so three integers in a list stay three
+==================
+
+struct s size=5x5
+  floor tags=[1,2,3]
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (value_list
+                (integer)
+                (integer)
+                (integer)))))))))
+
+==================
+Coordinate triple (field labels)
+==================
+
+struct s size=5x5
+  fill from=1,1,1
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (coordinate))))))))
+
+==================
+Space after a coordinate's comma
+:error
+==================
+
+struct s size=5x5
+  fill from=1, 1, 1
+
+---
+
+==================
+Coordinate with two components
+:error
+==================
+
+struct s size=5x5
+  fill from=1,1
+
+---
+
+==================
+Coordinate with a negative component
+:error
+==================
+
+struct s size=5x5
+  fill from=1,-1,1
+
+---
+
+==================
+Coordinate triple in a header
+==================
+
+struct s size=5x5 at=0,0,0
+  floor a=1
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer)))
+      (attribute
+        (identifier)
+        (coordinate)))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))))))
+
+==================
+Coordinate triple in a theme selector
+==================
+
+theme t:
+  window[at=1,2,3] -> mat_slot=g
+
+---
+
+(source_file
+  (theme_decl
+    (identifier)
+    (theme_body
+      (selector_rule
+        (selector
+          (identifier)
+          (selector_filter
+            (filter_list
+              (attribute
+                (identifier)
+                (coordinate)))))
+        (attribute_list
+          (attribute
+            (identifier)
+            (identifier)))))))

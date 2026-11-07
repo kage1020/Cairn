@@ -56,8 +56,10 @@ in the wall. The compiler sorts commands into fixed phases before evaluating the
 lines in whatever order reads best.
 
 **Blockstate is derived.** Nobody writes `facing`, `half`, or `shape` for the roof's stairs. The
-compiler works them out from where each stair sits on the roof. The door's facing and the pane's
-connections are to be derived the same way; for now the `door` only cuts its opening.
+compiler works them out from where each stair sits on the roof. The door is set the same way: it
+faces into the cottage, and its hinge is read from the wall on either side of it. So are the
+panes' connections: each pane joins the wall and the pane beside it, and leaves open the side that
+meets the door, which has no whole face to join.
 
 ## 2. Abstract materials and levels
 
@@ -120,6 +122,7 @@ struct gatehouse size=7x5
   circuit region=floor void=2
 
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
+  assert latency(sig.step -> sig.open) <= 1
   assert always(sig.step -> eventually sig.open within 2)
 ```
 
@@ -132,9 +135,9 @@ inside the walls row `y=0` is the floor itself, while outside it is the ground.
 **Sensors emit, actuators consume.** `-> sig.step` is a sensor's output; `opened_by=sig.open` is an
 actuator's input. `logic` writes the dependency between them.
 
-**There is no tick arithmetic.** The logic expression carries no time at all. The `within 2` in the
-assertion is the only number that means ticks, because delay is not known until the circuit has
-been placed and routed.
+**There is no tick arithmetic.** The logic expression carries no time at all. The `<= 1` and the
+`within 2` in the assertions are the only numbers that mean ticks, because delay is not known until
+the circuit has been placed and routed.
 
 **`circuit region=…` reserves space** for place-and-route. If routing does not fit you get
 `E_ROUTE_CONGESTION` with a suggested fix, never a silent overflow. For now only the experimental
@@ -143,7 +146,10 @@ been placed and routed.
 **Assertions come in three kinds:** `truth(…)` for combinational logic, `latency(in -> out) <= N`
 for bounded delay, and `always(in -> eventually out within N)` for bounded temporal. There is no
 full LTL by design, only what a per-tick simulator can decide cheaply. That simulator does not
-exist yet, and the parser does not accept `latency` yet either.
+exist yet. A latency bound needs none: `cairn synth --experimental-logic-synth --stage crossing`
+counts the ticks of the placed circuit for the edition it builds and refuses a bound it misses
+with `E_SIM_ASSERTION_FAILED`. On Java the OR here is two repeaters, one tick; on Bedrock it is a
+dust merge, which takes none.
 
 **The edition difference is in the cell library, not the language.** The same logic becomes a
 `ComparatorAND` cell on Java and a `TorchAND` on Bedrock. Circuits that depend on quasi-connectivity

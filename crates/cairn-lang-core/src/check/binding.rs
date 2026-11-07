@@ -50,7 +50,7 @@ fn tail_on_selector(keyword: &str, span: &Span) -> Diagnostic {
             span: None,
             message: format!(
                 "write the tail on the `{keyword}` line that declares the sensor, without \
-                 brackets; the door actuator patch `door[id=<label>] opened_by=` is the only \
+                 brackets; an actuator patch such as `door[id=<label>] opened_by=` is the only \
                  binding a selector line carries",
             ),
         }],

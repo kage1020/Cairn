@@ -743,7 +743,7 @@ fn mux_ports_each_keep_the_coord_their_own_segment_reaches() {
         DELAYED,
     ));
     ir.cells.push(placed_cell(
-        EditionCell::JavaMuxUnpinned,
+        EditionCell::JavaTorchMux,
         CellCoord::new(18, 0, 1),
         vec![
             CellPortDriver {
@@ -1352,7 +1352,7 @@ struct chain size=60x5
                 .expect("writing to a String cannot fail");
         }
         source.push_str(
-            "  door id=d side=front at=center mat_slot=wall opened_by=sig.c15\n  circuit region=floor void=2\n",
+            "  door id=d side=front at=center opened_by=sig.c15\n  circuit region=floor void=2\n",
         );
         source
     }

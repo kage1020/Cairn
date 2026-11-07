@@ -56,6 +56,8 @@ pub enum IntContext {
     IntLiteral,
     /// Bound of `assert always(... within N)`.
     WithinBound,
+    /// Bound of `assert latency(...) <= N`.
+    LatencyBound,
 }
 
 impl IntContext {
@@ -64,6 +66,7 @@ impl IntContext {
         match self {
             Self::SizeWidth | Self::SizeHeight | Self::IntLiteral => "invalid integer literal",
             Self::WithinBound => "invalid `within` bound",
+            Self::LatencyBound => "invalid `latency` bound",
         }
     }
 }

@@ -29,6 +29,15 @@ fn chained_not(depth: usize) -> String {
     )
 }
 
+/// `logic sig.out = mux(sel=sig.s, b=sig.b, a=mux(…sig.a…))`, which costs descent and tree depth.
+fn nested_mux(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}sig.a{}\n",
+        "mux(sel=sig.s, b=sig.b, a=".repeat(depth),
+        ")".repeat(depth),
+    )
+}
+
 /// One indented block per level, the third recursive production.
 fn nested_blocks(depth: usize) -> String {
     let mut source = String::from("struct a size=1x1\n");
@@ -45,6 +54,7 @@ fn descent_shapes(depth: usize) -> Vec<(&'static str, String)> {
         ("list", nested_list(depth)),
         ("parens", nested_parens(depth)),
         ("not", chained_not(depth)),
+        ("mux", nested_mux(depth)),
         ("blocks", nested_blocks(depth)),
     ]
 }
@@ -94,6 +104,13 @@ fn expression_shapes(depth: usize) -> Vec<(&'static str, String)> {
         (
             "parenthesised or chain",
             logic(&format!("({})", chain("or", depth))),
+        ),
+        (
+            "or chain in an operand of a call",
+            logic(&format!(
+                "mux(sel=sig.s, b=sig.b, a={})",
+                chain("or", depth - 1)
+            )),
         ),
     ]
 }

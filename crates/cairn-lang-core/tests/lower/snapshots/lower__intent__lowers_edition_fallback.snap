@@ -8,6 +8,8 @@ headers:
     version: "2026.06"
   - kind: Requires
     requirement: version>=1.20
+  - kind: Requires
+    requirement: bedrock version>=1.21.40
 themes:
   - name: shop_java
     slots:
@@ -45,29 +47,32 @@ structs:
       - role:
           kind: Floor
         mat_slot: floor
+        arguments: {}
         intent_state: {}
       - class: outer
         role:
           kind: Walls
         mat_slot: wall
-        intent_state:
+        arguments:
           height:
             kind: Int
             value: 3
+        intent_state: {}
       - role:
           kind: Door
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
           at:
             kind: Ident
             value: center
+        intent_state: {}
       - class: display
         role:
           kind: Window
         mat_slot: floating_text
-        intent_state:
+        arguments:
           side:
             kind: Ident
             value: front
@@ -82,3 +87,34 @@ structs:
             value:
               w: 1
               h: 1
+        intent_state: {}
+      - role:
+          kind: RawBlock
+        arguments:
+          mat:
+            kind: BlockId
+            value: "minecraft:light[level=15]"
+          at:
+            kind: Coord
+            value:
+              x: 2
+              y: 2
+              z: 2
+        intent_state: {}
+        edition_guard:
+          edition: java
+      - role:
+          kind: RawBlock
+        arguments:
+          mat:
+            kind: BlockId
+            value: "minecraft:light_block_15"
+          at:
+            kind: Coord
+            value:
+              x: 2
+              y: 2
+              z: 2
+        intent_state: {}
+        edition_guard:
+          edition: bedrock

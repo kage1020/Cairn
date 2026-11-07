@@ -7,6 +7,8 @@ headers:
     version: "2026.06"
   - kind: Requires
     requirement: version>=1.20
+  - kind: Requires
+    requirement: bedrock version>=1.21.40
 items:
   - kind: Theme
     name: shop_java
@@ -116,3 +118,37 @@ items:
             value:
               kind: Ident
               value: floating_text
+      - kind: EditionGuard
+        edition: java
+        children:
+          - kind: Generic
+            keyword: raw_block
+            args:
+              - key: mat
+                value:
+                  kind: BlockId
+                  value: "minecraft:light[level=15]"
+              - key: at
+                value:
+                  kind: Coord
+                  value:
+                    x: 2
+                    y: 2
+                    z: 2
+      - kind: EditionGuard
+        edition: bedrock
+        children:
+          - kind: Generic
+            keyword: raw_block
+            args:
+              - key: mat
+                value:
+                  kind: BlockId
+                  value: "minecraft:light_block_15"
+              - key: at
+                value:
+                  kind: Coord
+                  value:
+                    x: 2
+                    y: 2
+                    z: 2

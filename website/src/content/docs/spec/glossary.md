@@ -38,17 +38,19 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Member.** A named element of the Intent IR. Types: `block`, `block_entity`, `entity`. The
   IR carries the type, but the author writes one selector grammar across all of them
   ([principles P4](/spec/principles/)). Today a member carries the `role` its keyword classifies to
-  and no type, and no keyword places a block entity or an entity yet.
+  and no type, and no keyword places a block entity or an entity yet; `type` will sit beside `role`.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
-- **`intent_state`.** The author's blockstate intent. Edit diffs look **only** here. Today it
-  holds every `key=value` a member line writes except `id`, `class` and `mat_slot`. See
+- **`intent_state`.** The author's blockstate intent: the blockstate keys a member's keyword names,
+  such as a `stair`'s `facing`. Edit diffs look **only** here. The line's other keys are the
+  member's arguments. See
   [blockstate §6.2](/spec/blockstate/#62-intent_state-and-resolved_state).
 - **`resolved_state`.** Compiler-derived blockstate (orientation, connections, waterlogged). Never
-  hand-written. Not populated yet: what lowering derives goes straight into the block array.
+  hand-written. Lowering records each member's, in the canonical vocabulary, beside the block array
+  it builds; `cairn lower --format json` prints it under `members`.
 - **Override-promotion.** Writing a blockstate that *could* be intent promotes it from
   `resolved_state` to `intent_state`. The spec rule is "derive by default; any blockstate that can
   be intent is overridable." See
@@ -84,7 +86,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 ## Compilation
 
 - **Phase.** A fixed evaluation slot the compiler sorts each command into:
-  `massing → envelope → openings → fixtures → logic_synth → logic_place → logic_route → raw`.
+  `massing → envelope → openings → fixtures → fluids → logic_synth → logic_place → logic_route → raw`.
   Source order is irrelevant; phases enforce semantics
   ([compilation §4.1](/spec/compilation/#41-phase-evaluation)).
 - **Last-wins (local).** Within the same phase, a later command overrides an earlier one. The old
@@ -130,12 +132,12 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   Java/Bedrock difference to the library. See [redstone §14.6](/spec/redstone/#146-edition-differences).
 - **Combinational vs sequential.** v1 ships closed-set combinational gates and curated sequential
   macros (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`). Arbitrary
-  FSMs / CPUs are out of scope for v1. Today a `logic` line accepts only `and`, `or` and `not`; no
-  sequential macro is parsed yet.
+  FSMs / CPUs are out of scope for v1. Today a `logic` line accepts the combinational primitives,
+  `and`, `or`, `not`, `xor`, `nand`, `nor` and `mux`; no sequential macro is parsed yet.
 - **Truth / latency / temporal assertion.** The three verification kinds. See
   [redstone §14.7](/spec/redstone/#147-verification). Temporal is bounded `eventually within N` only, not
-  full LTL. `assert latency` is not parsed yet (`E_PARSE`), and no simulator checks the other two
-  against a built circuit.
+  full LTL. `assert latency` is checked against the ticks counted on the placed circuit, and no
+  simulator checks the other two against a built circuit yet.
 - **QC / BUD.** Quasi-connectivity / block-update-detector behaviors. **Not absorbed** by the cell
   library; a circuit that depends on update-order semantics is an `E_NO_PORTABLE_IMPL` compile
   error. That code is not implemented yet: nothing checks a circuit for update-order dependence.
@@ -164,6 +166,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 
 - **Edition.** `java` or `bedrock`. Compile-time only; never present in the DSL semantic layer.
   See [versioning-editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability).
+- **`@edition` guard.** A line in a body that keeps the raw members indented under it to one
+  edition's build. It is the one place a source writes an edition, and it never holds the semantic
+  layer. See
+  [versioning-editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch).
 - **Cairn version vs MC target.** Two **separate axes** distinguished by field/flag/keyword, never
   by format. `cairn:2026.06` vs `mc:1.21.4` in disambiguating prose. See
   [Specification overview](/spec/), [versioning-editions](/spec/versioning-editions/).
@@ -176,6 +182,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Raw / L1 / L2.** The three tiers of faithful transliteration on import. The compiler reaches
   L1 (spatial compression, no naming); L2 is the LLM's job (naming → `wall`, `mat_slot`,
   `theme`). See [ecosystem-interop §12.3](/spec/ecosystem-interop/#123-three-tiers-of-transliteration).
-- **`raw_fill` / `raw_block` / `raw_repeat`.** Escape-hatch primitives used by faithful
-  transliteration. Import-origin instances carry `origin=imported` so they are not treated as
-  first-class design DSL.
+- **`raw_fill` / `raw_block` / `raw_repeat`.** Escape-hatch primitives that name a block id
+  directly, skipping slot and theme; `raw_block` and `raw_fill` are built today. Faithful
+  transliteration writes them, and its instances carry `origin=imported` so they are not treated as
+  first-class design DSL. See
+  [materials-themes §7.4](/spec/materials-themes/#74-raw-blocks).

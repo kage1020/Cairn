@@ -24,12 +24,13 @@ pub fn findings_without_target(
     declared: &dyn Fn(Edition, &str) -> bool,
 ) -> Vec<Diagnostic> {
     let editions = edition.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |e| vec![e]);
+    let guarded = intent.has_edition_guards();
     let mut shared: Vec<(Vec<Edition>, Resolution)> = Vec::new();
     for edition in editions {
         let resolution = resolve(intent, Some(edition));
         match shared
             .iter_mut()
-            .find(|(_, seen)| lowers_alike(seen, &resolution))
+            .find(|(_, seen)| lowers_alike(seen, &resolution, guarded))
         {
             Some((editions, _)) => editions.push(edition),
             None => shared.push((vec![edition], resolution)),
@@ -49,13 +50,15 @@ pub fn findings_without_target(
     agreed(intent, lowerings)
 }
 
-/// Whether lowering reads the same input from both: it reads only the scopes and the connects.
-fn lowers_alike(a: &Resolution, b: &Resolution) -> bool {
-    a.scopes == b.scopes && a.connects == b.connects
+/// Whether lowering reads the same input from both: the scopes, the connects and, when `guarded`
+/// says some member stands under an `@edition` guard, the edition.
+fn lowers_alike(a: &Resolution, b: &Resolution, guarded: bool) -> bool {
+    a.scopes == b.scopes && a.connects == b.connects && (!guarded || a.edition == b.edition)
 }
 
 /// The findings of `lowerings` that every target reading their line raises: one in a theme only
-/// its own lowering binds, or one each lowering raises with the same code at the same span.
+/// its own lowering binds or on a line under its own edition's guard, or one each lowering raises
+/// with the same code at the same span.
 fn agreed(
     intent: &IntentModule,
     mut lowerings: Vec<(Resolution, Vec<Diagnostic>)>,
@@ -67,6 +70,7 @@ fn agreed(
         .iter()
         .map(|(resolution, _)| bound_themes(resolution))
         .collect();
+    let guarded = intent.guarded_members();
     let mut seen: HashSet<&Diagnostic> = HashSet::new();
     let mut kept: Vec<Diagnostic> = Vec::new();
     for (i, (_, found)) in lowerings.iter().enumerate() {
@@ -79,6 +83,12 @@ fn agreed(
                     && others().all(|(j, _)| !bound[j].contains(theme.name.as_str()))
             })
             .map(|theme| &theme.span)
+            .chain(
+                guarded
+                    .iter()
+                    .filter(|(guard, _)| Some(guard.edition) == lowerings[i].0.edition)
+                    .map(|(_, member)| &member.span),
+            )
             .collect();
         for finding in found {
             let read_alone = own

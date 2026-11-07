@@ -113,6 +113,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
         scopes,
         connects,
         diagnostics,
+        edition,
     }
 }
 
