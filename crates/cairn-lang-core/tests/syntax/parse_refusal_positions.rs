@@ -376,6 +376,10 @@ fn an_infix_primitive_is_not_read_as_a_signal() {
             "2:18: expected a signal after `(`, got the infix primitive `or`",
         ),
         (
+            "mux(sel=xor, a=sig.x, b=sig.y)",
+            "2:25: expected a signal after `=`, got the infix primitive `xor`",
+        ),
+        (
             "sig.a and or.x",
             "2:27: expected a signal after `and`, got the infix primitive `or`",
         ),
@@ -392,27 +396,29 @@ fn an_infix_primitive_word_may_end_a_dotted_name() {
 
 #[test]
 fn what_follows_an_operand_is_refused_with_the_primitives_that_could_stand_there() {
-    let end_of_line = "expected `and`, `or`, or end of line";
+    let infixes = "`and`, `or`, `xor`, `nand`, `nor`";
+    let end_of_line = format!("expected {infixes}, or end of line");
     let between = "two operands need an infix primitive between them";
     for (expression, expected) in [
         (
-            "sig.a xor sig.b",
+            "sig.a xnor sig.b",
             format!(
-                "2:23: {end_of_line}, got identifier `xor`: the built-in logic library has no \
-                 primitive `xor`"
+                "2:23: {end_of_line}, got identifier `xnor`: the built-in logic library has no \
+                 primitive `xnor`"
             ),
         ),
         (
-            "(sig.a xor sig.b)",
-            "2:24: expected `and`, `or`, or `)`, got identifier `xor`: the built-in logic \
-             library has no primitive `xor`"
-                .to_owned(),
+            "(sig.a xnor sig.b)",
+            format!(
+                "2:24: expected {infixes}, or `)`, got identifier `xnor`: the built-in logic \
+                 library has no primitive `xnor`"
+            ),
         ),
         (
-            "xor sig.a",
+            "xnor sig.a",
             format!(
-                "2:21: {end_of_line}, got identifier `sig`: the built-in logic library has no \
-                 primitive `xor`"
+                "2:22: {end_of_line}, got identifier `sig`: the built-in logic library has no \
+                 primitive `xnor`"
             ),
         ),
         (
@@ -426,8 +432,12 @@ fn what_follows_an_operand_is_refused_with_the_primitives_that_could_stand_there
             "pulse(sig.ring, 4)",
             format!(
                 "2:22: {end_of_line}, got `(`: the built-in logic library has no primitive \
-                 `pulse` to call"
+                 `pulse` to call, and calls only `mux`"
             ),
+        ),
+        (
+            "sig.a mux(sel=sig.s, a=sig.x, b=sig.y)",
+            format!("2:23: {end_of_line}, got identifier `mux`: {between}"),
         ),
         (
             "sig.a not",
@@ -459,7 +469,100 @@ fn what_follows_an_operand_is_refused_with_the_primitives_that_could_stand_there
         ),
         (
             "(sig.a",
-            "2:23: expected `and`, `or`, or `)`, got end of line".to_owned(),
+            format!("2:23: expected {infixes}, or `)`, got end of line"),
+        ),
+    ] {
+        let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");
+        assert_eq!(refusal(&source), expected, "{expression:?}");
+    }
+}
+
+#[test]
+fn a_call_is_refused_unless_it_names_each_of_its_operands_once() {
+    let shape = "as in `mux(sel=…, a=…, b=…)`";
+    let takes = "it takes `sel`, `a`, and `b`";
+    for (expression, expected) in [
+        (
+            "mux",
+            format!(
+                "2:20: expected `(` after `mux`, got end of line: `mux` is called with its \
+                 operands named, {shape}"
+            ),
+        ),
+        (
+            "mux sig.a",
+            format!(
+                "2:21: expected `(` after `mux`, got identifier `sig`: `mux` is called with its \
+                 operands named, {shape}"
+            ),
+        ),
+        (
+            "mux(sig.s, sig.x, sig.y)",
+            format!(
+                "2:21: expected `sel=`, `a=`, or `b=`, got identifier `sig`: `mux` takes each \
+                 operand by name, {shape}"
+            ),
+        ),
+        (
+            "mux()",
+            format!(
+                "2:21: expected `sel=`, `a=`, or `b=`, got `)`: `mux` takes each operand by \
+                 name, {shape}"
+            ),
+        ),
+        (
+            "mux(sel=sig.s, sig.x, sig.y)",
+            format!(
+                "2:32: expected `a=` or `b=`, got identifier `sig`: `mux` takes each operand by \
+                 name, {shape}"
+            ),
+        ),
+        (
+            "mux(sel=sig.s, a=sig.x, b=sig.y,)",
+            "2:48: expected `)`, got `,`: `mux` takes `sel`, `a`, and `b`, and every one is \
+             named, so the call closes here"
+                .to_owned(),
+        ),
+        (
+            "mux(sel=sig.s, a=sig.x,)",
+            format!("2:40: expected `b=`, got `)`: `mux` takes each operand by name, {shape}"),
+        ),
+        (
+            "mux(sl=sig.s, a=sig.x, b=sig.y)",
+            format!("2:21: `mux` has no operand `sl` (did you mean `sel`?): {takes}"),
+        ),
+        (
+            "mux(sel=sig.s, a=sig.x, c=sig.y)",
+            format!("2:41: `mux` has no operand `c` (did you mean `b`?): {takes}"),
+        ),
+        (
+            "mux(sel=sig.s, a=sig.x, a=sig.y)",
+            format!("2:41: `mux` names `a` twice: {takes}, each named once"),
+        ),
+        (
+            "mux(sel=sig.s, a=sig.x)",
+            format!("2:39: `mux` is missing its operand `b`: {takes}, each named once"),
+        ),
+        (
+            "mux(sel=sig.s)",
+            format!("2:30: `mux` is missing its operands `a` and `b`: {takes}, each named once"),
+        ),
+        (
+            "mux(sel=sig.s a=sig.x, b=sig.y)",
+            format!(
+                "2:31: expected `,`, got identifier `a`: the named operands of `mux` are \
+                 separated by commas, {shape}"
+            ),
+        ),
+        (
+            "mux(sel=sig.s, a=sig.x, b=sig.y",
+            "2:48: expected `and`, `or`, `xor`, `nand`, `nor`, or `)`, got end of line".to_owned(),
+        ),
+        (
+            "mux(sel=sig.s, a=sig.x sig.y, b=sig.z)",
+            "2:40: expected `and`, `or`, `xor`, `nand`, `nor`, `,`, or `)`, got identifier \
+             `sig`: two operands need an infix primitive between them"
+                .to_owned(),
         ),
     ] {
         let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");

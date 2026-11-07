@@ -78,7 +78,7 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4   Bedrock: 1.21.0, 1.21.40, 1.21.60
+buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
 ```
@@ -87,7 +87,7 @@ semantic-sensitive:      (none)
 
 - `cairn parse` / `check` / `info` / `lower` / `compile`
 - 1 つのソースから Java の `.nbt` と Bedrock の `.mcstructure` を出力
-- メンバー: 床、壁、ドアの開口、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、感圧板、`level` による階ごとのまとまり
+- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
@@ -98,7 +98,7 @@ semantic-sensitive:      (none)
 **未実装の機能。**
 
 - テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
-- 屋根と階段以外のブロックステートの導出。`door` は開口を切り抜くだけでドアのブロックは置かず、板ガラスやフェンスの接続や水没状態も導出しません。
+- 流水 (`flow=` と `level=` を取る `water` キーワード)
 - `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
 - `.litematic` と `.schem` の書き出し、既存の schematic の読み込み
 - コンパイル成果物へのレッドストーン出力、`and` / `or` / `not` 以外のゲートと順序マクロ、`assert latency`、回路を検証するティックシミュレータ
@@ -107,7 +107,7 @@ semantic-sensitive:      (none)
 ## 基本の考え方
 
 - **ブロックステートではなく意図を書く。** 切妻屋根は、自分の階段がどちらを向き、それぞれがブロックの上半分と下半分のどちらに置かれるかを知っているので、`facing=` を書く必要はありません。ブロックステートはコンパイラが導出します。自分で指定するのは、その値自体が意図であるときだけです。
-- **書く順番は問わない。** メンバーはどの順に書いても構いません。コンパイラが固定のフェーズ (massing → envelope → openings → fixtures → redstone → raw) に並べ替えます。
+- **書く順番は問わない。** メンバーはどの順に書いても構いません。コンパイラが固定のフェーズ (massing → envelope → openings → fixtures → fluids → redstone → raw) に並べ替えます。
 - **テーマで「どこに」と「何で」を分ける。** 構造は `mat_slot` を持ち、テーマがそのスロットに素材を割り当てます。スタイルシートがクラスにスタイルを割り当てるのと同じ関係です。
 - **変換せず、再コンパイルする。** 持ち運べる成果物は `.crn` ソースです。構造ファイルは特定のエディションとバージョン向けのビルド出力で、プログラムでいえば実行バイナリにあたります。
 - **黙って置き換えない。** 未知のブロック、解決できないスロット、意図を表現できないターゲットは、エラーか名前の付いた劣化 (degradation) として報告します。

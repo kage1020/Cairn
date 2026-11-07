@@ -11,6 +11,7 @@ mod readme;
 mod session_refs;
 mod site_parity;
 mod spec_citations;
+mod state_keys;
 mod subject_to_change;
 mod tier_1_tokens;
 mod unsafe_code;
@@ -45,6 +46,7 @@ pub const RULES: &[Rule] = &[
     comment_length::RULE,
     module_cycles::RULE,
     circuit_advice::RULE,
+    state_keys::RULE,
 ];
 
 /// A fault a rule found, at a file and, when it has one, a line.

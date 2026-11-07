@@ -78,7 +78,7 @@ Diagnostics name what is wrong and what a valid value looks like, so a failed bu
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4   Bedrock: 1.21.0, 1.21.40, 1.21.60
+buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
 ```
@@ -87,7 +87,7 @@ semantic-sensitive:      (none)
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
-- Members: floors, walls, door openings, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, pressure plates, and `level` grouping.
+- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
@@ -98,7 +98,7 @@ semantic-sensitive:      (none)
 **Not yet.**
 
 - Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
-- Blockstate derived beyond the roof and stair geometry. A `door` cuts its opening but places no door block, and pane and fence connections and waterlogging are not derived.
+- Flowing water, the `water` keyword with its `flow=` and `level=`.
 - `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
 - `.litematic` and `.schem` writers, and importing existing schematics.
 - Redstone in compiled output, gates and sequential macros beyond `and` / `or` / `not`, `assert latency`, and the tick simulator that verifies a circuit.
@@ -107,7 +107,7 @@ semantic-sensitive:      (none)
 ## Key ideas
 
 - **Declare intent, not blockstate.** A gable roof knows which way its stairs face and whether each one sits top or bottom half; you never write `facing=` for it. Blockstate is derived, and you override only when the value *is* the intent.
-- **Order doesn't matter.** Write members in any order; the compiler sorts them into fixed phases (massing → envelope → openings → fixtures → redstone → raw).
+- **Order doesn't matter.** Write members in any order; the compiler sorts them into fixed phases (massing → envelope → openings → fixtures → fluids → redstone → raw).
 - **Themes separate "where" from "what".** Structure carries `mat_slot`s; a theme binds those slots to materials, the way a stylesheet binds classes.
 - **Recompile, don't transcode.** The portable artifact is the `.crn` source. Structure files are build output for one edition and version, like a binary.
 - **Fail loud.** An unknown block, an unresolvable slot, or a target that cannot express your intent is an error or a named degradation, never a silent substitution.

@@ -22,7 +22,10 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
 /// Keeps the body kind: `flatten_members` splices a `level`'s children into the same buckets.
 fn walk(members: &[Member], body: BodyKind, inside_level: bool, sink: &mut DiagnosticSink) {
     for member in members {
-        if matches!(member.role, MemberRole::Other(_)) {
+        // `edition_guard` reports the line instead.
+        if matches!(member.role, MemberRole::Other(_))
+            || (member.edition_guard.is_some() && !member.role.is_raw())
+        {
             continue;
         }
         if !member.role.is_read_in(body) {
@@ -169,9 +172,8 @@ fn carries_signal(member: &Member) -> bool {
     let is_signal = |value: &crate::ast::Value| matches!(&value.kind, ValueKind::DotRef(reference) if reference.head() == SIGNAL_HEAD);
     member.binding.as_ref().is_some_and(is_signal)
         || member
-            .intent_state
-            .values()
-            .any(|held| is_signal(&held.value))
+            .written_fields()
+            .any(|(_, held)| is_signal(&held.value))
 }
 
 fn advice(role: &MemberRole, body: BodyKind) -> &'static str {

@@ -39,8 +39,9 @@ Cairn source; emitted NBT/schematics are per-target build outputs.
 
 <CardGrid stagger>
   <Card title="Declare intent, not blockstate" icon="puzzle">
-    The compiler derives stair facing, half, and shape, and is to derive door orientation, pane
-    connections, and bed head/foot the same way. You override only when the value *is* the intent.
+    The compiler derives stair facing, half, and shape, and a door's facing and hinge, and is to
+    derive pane connections and bed head/foot the same way. You override only when the value *is*
+    the intent.
   </Card>
   <Card title="Phase-ordered evaluation" icon="list-format">
     Write commands flat and order-free; the compiler sorts them into fixed phases: massing,

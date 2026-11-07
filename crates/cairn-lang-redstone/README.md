@@ -47,7 +47,7 @@ The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile
 
 ## v1 scope
 
-- **Combinational**: `and` / `or` / `not` are synthesised end to end. `xor` / `nand` / `nor` / `mux` are reserved on the Logic IR and Netlist IR enums, but no surface syntax produces them yet.
+- **Combinational**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux` are synthesised end to end, each to a cell on both editions.
 - **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`. Named in the spec, implemented nowhere yet.
 - **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; evaluating one waits on the simulator.
 

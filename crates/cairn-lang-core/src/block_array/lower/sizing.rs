@@ -91,7 +91,7 @@ pub(super) fn wall_height(member: &Member, diagnostics: &mut Vec<Diagnostic>) ->
     if let Some(h) = height_value(member) {
         return Some(h);
     }
-    let primary = match member.intent_state.get("height") {
+    let primary = match member.arguments.get("height") {
         Some(raw) => format!(
             "walls `height=` must be a positive integer that fits in u32, not {}",
             raw.value.describe(),

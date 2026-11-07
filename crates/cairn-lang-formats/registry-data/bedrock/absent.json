@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "namespace": "minecraft",
+  "entries": [
+    {
+      "ids": [
+        "test_block",
+        "test_instance_block"
+      ],
+      "reason": "a block of Java's test framework, which runs and reports the tests a structure holds; Bedrock has no such block"
+    }
+  ]
+}

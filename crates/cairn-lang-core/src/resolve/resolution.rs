@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::diagnostic::Diagnostic;
+use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName};
 use crate::intent::{StructIr, ValueWithSpan};
@@ -23,6 +24,9 @@ pub struct Resolution {
     /// Diagnostics found while resolving, in emission order.
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
+    /// The edition the theme variants were bound for, whose `@edition` guards lowering keeps.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edition: Option<Edition>,
 }
 
 /// One end of a `connect` row, resolved to a `(place, port)` pair.

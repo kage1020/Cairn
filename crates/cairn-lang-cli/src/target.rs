@@ -32,9 +32,15 @@ impl ResolvedTarget {
             ResolvedTarget::Java(t) => prepare_structure(array, t)
                 .map(|prepared| (PreparedStructure::Java(prepared), Vec::new()))
                 .map_err(|e| e.to_string()),
-            ResolvedTarget::Bedrock(t) => prepare_mcstructure(array, t)
-                .map(|(prepared, notes)| (PreparedStructure::Bedrock(prepared), notes))
-                .map_err(|e| e.to_string()),
+            ResolvedTarget::Bedrock(t) => {
+                let states = builtin_pack(Edition::Bedrock)
+                    .states()
+                    .at(&t.mc_version)
+                    .expect("the built-in Bedrock pack maps every targetable version");
+                prepare_mcstructure(array, t, &states)
+                    .map(|(prepared, notes)| (PreparedStructure::Bedrock(prepared), notes))
+                    .map_err(|e| e.to_string())
+            }
         }
     }
 
@@ -45,12 +51,22 @@ impl ResolvedTarget {
         }
     }
 
-    /// `DataVersion` on Java, the block-palette `version` on Bedrock.
+    /// `DataVersion` on Java, the block-palette `version` on Bedrock: the integer the artifact
+    /// and its lockfile carry.
     pub(crate) fn version_int(&self) -> i32 {
         match self {
             ResolvedTarget::Java(t) => t.data_version,
             ResolvedTarget::Bedrock(t) => t.block_version,
         }
+    }
+
+    /// The row's key in its edition's version order, which a floor is weighed against; two
+    /// Bedrock releases can share a block-palette `version` and never a key.
+    pub(crate) fn order_key(&self) -> i64 {
+        i64::from(match self {
+            ResolvedTarget::Java(t) => t.data_version,
+            ResolvedTarget::Bedrock(t) => t.order_key,
+        })
     }
 
     pub(crate) fn registry_pack(&self) -> &'static RegistryPack {

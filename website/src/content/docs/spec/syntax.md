@@ -32,9 +32,8 @@ with "expected `=`".
 
 ### 5.1.1 Literals and separators
 
-**Subject to change.** Decimals (`scale=1.5`), coordinate triples (`at=4,3,2`) and `nbt={...}`
-values, which other chapters write, do not parse yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+**Subject to change.** Decimals (`scale=1.5`) and `nbt={...}` values, which other chapters write,
+do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
 parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
@@ -45,9 +44,43 @@ A size literal is exactly two non-zero extents, `WxH`. A run that continues past
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
 else.
 
-Commas are **optional separators**, not structure. `@intended_targets ["1.20.4", "1.21.4"]` and
-`@intended_targets ["1.20.4" "1.21.4"]` name the same two versions, as do `[side=front, y=2]` and
-`[side=front y=2]`. The two list kinds differ in how much punctuation they tolerate:
+A **coordinate triple** is three integers joined by `,` with nothing between them, `x,y,z`, as in
+`at=4,3,2` or `from=1,1,1`. It names one cell of the scope it is written in, in the frame the
+scope's member lines are measured in ([Open Issues](/spec/open-issues/)): `x` along the `size=`
+footprint's `W` from its low-`x` corner, `z` along its `H` from its low-`z` corner, and `y` up from
+the base plane, or from the `level`'s under `level y=N`. A cell named this way shifts with a roof's
+`overhang=`, as every member does. No component is negative, since none counts back past the low
+corner, and each is read under the same ceiling as any integer. A key a later chapter defines as a
+distance rather than a cell, such as the `step=` of `raw_repeat`
+([Ecosystem Interop](/spec/ecosystem-interop/)), reads the same three integers as the distance from
+one repeat to the next.
+
+A triple is a `key=` value: it is what a key reads when an integer, a `,` and another integer
+follow its `=`. A `-` before either of those integers still starts a triple, which is then refused
+at the `-`, so `from=-1,2,3` and `from=1,-2,3` are told why no component is negative. Anywhere else
+the commas keep their own meaning. In a value list they separate
+items, so `[1,2,3]` is three integers, and a bare value or a `->` binding reads one integer, so
+`fill 1,1,1` is `E_PARSE` at its first `,`. In a selector a `,` followed by a key still separates
+attributes: `[y=2,side=front]` is two of them, and `[at=1,2,3, y=2]` a triple and an attribute. A
+space on either side of a `,` inside the triple, two components alone, a fourth component, and a
+`-` before a component are each refused at the literal.
+
+A cell outside the footprint, or above the top row the scope as written reaches ([Compilation Model
+§4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), is outside the scope. The member
+that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offset=` at or past its
+wall's length. The `from=` and `to=` of a `fill`
+([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and a `raw_block`'s
+`at=` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), read a triple, and no
+other key does yet: `note_block` and the entities that take one are not keywords. A key that reads
+another kind of value treats a triple as any value of the wrong kind. A label or size key refuses
+it as a type mismatch, a member key such as `side=` or `height=` refuses its member as
+`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says
+so with `W_IGNORED_ARGUMENT`.
+
+Outside a coordinate triple, commas are **optional separators**, not structure.
+`@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
+two versions, as do `[side=front, y=2]` and `[side=front y=2]`. The two list kinds differ in how
+much punctuation they tolerate:
 
 - A `[selector]`'s attribute list skips a comma wherever it finds one, so `[side=front, , y=2]`
   parses.
@@ -68,15 +101,26 @@ comes next, `mat_slot=@a[1]` would leave a bare value on a member line that read
 `E_UNEXPECTED_POSITIONAL`, and `mat_slot=[@a[b]]` would put a list where a label belongs, which is
 `E_TYPE_MISMATCH_LABEL`.
 
-The literal's properties and values are not yet checked against the target: `E_STATE_DOMAIN`
-([Versioning and Editions](/spec/versioning-editions/)) is not implemented, so a Java build writes
-`@oak_log[axis=q]` as written. Each literal the build reads earns a `W_STATE_LITERAL_UNCHECKED`
-([Lint](/spec/lint/)) on the token, so that is said rather than silent.
+A **block id** is a namespace and a path joined by `:` with nothing between them, `namespace:path`,
+as in `mat=minecraft:stone`, each half an identifier. It names a block as Minecraft spells it,
+rather than a meaning a theme binds, and only the `mat=` of a raw member reads one ([Materials and
+Themes §7.4](/spec/materials-themes/#74-raw-blocks)). It takes the block-state literal a canonical
+token takes, touching it, as in `minecraft:light[level=15]`. Like a triple, it is a `key=` value.
+Anywhere else the `:` keeps its own meaning, so the theme rule `slot wall -> minecraft:stone` is
+`E_PARSE`: a theme binds canonical tokens ([Materials and Themes
+§7.2](/spec/materials-themes/#72-canonical-vocabulary)). A space on either side of the `:` is
+`E_PARSE` too, and a key that reads a label, a token or an integer refuses a block id as it refuses
+any value of the wrong kind.
 
-Besides that literal, the one place a comma carries meaning is the input list of
-`assert truth(...)`, where it separates the signals whose count the row width is checked against. A
-row writes one character per input signal (`0`, `1`, or `-`), so `truth(a, b -> out)` takes rows
-two characters wide and refuses `{ 2->0 }` or `{ 0->0 }`.
+A build that pins a version checks the literal's properties and values against the states its
+block takes there, so `@oak_log[axis=q]` is `E_STATE_DOMAIN` ([Lint](/spec/lint/)), naming `x`, `y`
+and `z` ([Versioning and
+Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)).
+
+Besides that literal and a coordinate triple, the one place a comma carries meaning is the input
+list of `assert truth(...)`, where it separates the signals whose count the row width is checked
+against. A row writes one character per input signal (`0`, `1`, or `-`), so `truth(a, b -> out)`
+takes rows two characters wide and refuses `{ 2->0 }` or `{ 0->0 }`.
 
 `-` is a **don't-care**: the row means every value of that input, so `0- -> 1` says what `00->1` and
 `01->1` say together. It is a shorthand for those rows and not a construct of its own, which is why
@@ -145,9 +189,10 @@ reported there and never at the first column of the next one.
 
 The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts six forms the parser refuses, because tree-sitter cannot express their
+correctly. It also accepts seven forms the parser refuses, because tree-sitter cannot express their
 rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, a truth row whose width differs from the input count, and a block-state
+integer past 2^63 − 1, alone or as a coordinate's component, a coordinate whose last component runs
+into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
 literal naming one property twice.
 
 ## 5.2 Nesting
@@ -166,13 +211,18 @@ which bind materials and open nothing, so a line indented under one is a syntax 
 nesting diagnostic. So is a line indented after a directive: a directive is one line, and the line
 under it belongs to no construct.
 
+An `@edition` guard indents the lines under it too, but it is not a member and groups nothing. Its
+lines stand in the body around it, and it holds only raw members ([Versioning and Editions
+§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
+
 [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what `y=N`
 means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
-building's geometry: `floor`, `walls`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
-is global, so writing one in the other body parses and classifies and then reaches nothing. That is
+building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
+`pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`,
+`chest`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The
+keyword table is global, so writing one in the other body parses and classifies and then reaches nothing. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
 A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
 reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
@@ -223,12 +273,12 @@ worse than an absent one, because a reader will still believe it.
 @requires bedrock version>=1.21.40
 ```
 
-The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 /
-1.21.40 / 1.21.60`: `1.21.4` is Java's newest release and names no Bedrock release at all. A label
-is dot-separated components that each begin with a digit and carry only letters and digits, with an
-optional `-` and a pre-release tag of dot-separated letters and digits. `1.21.4`, `1.21.4-rc1`, and
-`24w14a` are all labels. Which of them the *target edition* can order is not a syntax question and
-is not answered here. See [Versioning and Editions](/spec/versioning-editions/).
+The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4 / 26.3` and Bedrock
+`1.21.0 / 1.21.40 / 1.21.60 / 1.26.60`: `1.21.4` is a Java release and names no Bedrock release at
+all. A label is dot-separated components that each begin with a digit and carry only letters and
+digits, with an optional `-` and a pre-release tag of dot-separated letters and digits. `1.21.4`,
+`1.21.4-rc1`, and `24w14a` are all labels. Which of them the *target edition* can order is not a
+syntax question and is not answered here. See [Versioning and Editions](/spec/versioning-editions/).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.
@@ -247,7 +297,9 @@ constraint rather than displacing one.
 A `def` or a `theme` may carry the same expression as a body line, spelled `requires` without the
 `@`. It is a floor on that part rather than on the file, inherited by every build that instantiates
 it. The sigil is what marks a file directive, and a part's floor is not one. See
-[Versioning and Editions](/spec/versioning-editions/).
+[Versioning and Editions](/spec/versioning-editions/). Inside a body the sigil opens only an
+`@edition` guard, which is not a directive either: it picks the edition whose build keeps the lines
+under it ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
 
 ## 5.4 Selectors
 
@@ -284,20 +336,27 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
+The same column resolves both the door and any `connect` walkway anchored to it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 Numeric offsets (`at=N`) are reserved for a future extension. A door with no `at=`, or one that
 names no anchor, is `E_INVALID_MEMBER` and cuts nothing.
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
-level's base plane. It takes the two rows a doorway wants, or, if fewer remain, as much of that
-row's wall course as is left counting the row it opens at. A door under a one-row course therefore
-opens that one row rather than cutting into the roof. The row it opens at MUST be inside a course
-of the masonry. A door whose row no `walls` member is written to hold is `E_INVALID_MEMBER` and cuts
-nothing, the same finding the `window` on that body earns. A door in a course whose `walls` paint
-nothing, or beside `walls` under a `level` that is not placed, is `W_DEFERRED_MEMBER` instead, since
-the repair is on those walls or that level
+level's base plane, and stands two rows tall: its door block takes that row and the one above it
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). Both rows
+MUST be inside one course of the masonry. A door whose two rows the walls as written hold in no one
+course is `E_INVALID_MEMBER` and cuts nothing, the same finding the `window` on that body earns. A
+door under a one-row course is one: the row above it is the roof's, or nothing's. A door in a course
+whose `walls` paint nothing, or beside `walls` under a `level` that is not placed, is
+`W_DEFERRED_MEMBER` instead, since the repair is on those walls or that level
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the courses a `walls`
 paints).
+
+**What a door is built from.** A door's `mat_slot=` names its door block, and a door without one is
+built from the registry pack's `@door.default`
+([Materials and Themes §7.2](/spec/materials-themes/#tier-1-tokens)). The block MUST be a door, one
+whose id ends in `_door`. Any other is `E_INCOMPATIBLE_MATERIAL` ([Lint](/spec/lint/)), as a sloped
+roof bound outside the stair family is, and the door is built from `@door.default` beside the
+error.
 
 ## 5.5 IDs, classes, addresses
 

@@ -463,10 +463,52 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  logic s.out = a.b and c.not\n",
         Accept,
     ),
+    // `mux` is a keyword where an operand may start, though a dotted name may end in it.
+    (
+        "logic_call_heads_a_dotted_name",
+        "struct s size=3x3\n  logic s.out = a.b and mux.x\n",
+        Reject,
+    ),
+    (
+        "logic_call_ends_a_dotted_name",
+        "struct s size=3x3\n  logic s.out = a.b and c.mux\n",
+        Accept,
+    ),
+    (
+        "logic_call_without_parentheses",
+        "struct s size=3x3\n  logic s.out = mux\n",
+        Reject,
+    ),
+    // An operand's name is a word only where a call names one, so a signal may be called it.
+    (
+        "logic_call_operand_names_as_signals",
+        "struct s size=3x3\n  logic s.out = mux(sel=sel.x, a=a, b=b.sel)\n",
+        Accept,
+    ),
+    (
+        "logic_call_operand_names_elsewhere",
+        "struct s size=3x3\n  walls sel=1 a=2 b=3\n",
+        Accept,
+    ),
+    (
+        "logic_call_infix_as_operand",
+        "struct s size=3x3\n  logic s.out = mux(sel=xor, a=c.d, b=e.f)\n",
+        Reject,
+    ),
+    (
+        "logic_call_spaced",
+        "struct s size=3x3\n  logic s.out = mux( sel = a.b ,a=c.d,b=e.f )\n",
+        Accept,
+    ),
+    (
+        "logic_call_space_before_parenthesis",
+        "struct s size=3x3\n  logic s.out = mux (sel=a.b, a=c.d, b=e.f)\n",
+        Accept,
+    ),
     // What the library does not hold, and two operands with no infix primitive between them.
     (
         "logic_word_the_library_lacks",
-        "struct s size=3x3\n  logic s.out = sig.a xor sig.b\n",
+        "struct s size=3x3\n  logic s.out = sig.a xnor sig.b\n",
         Reject,
     ),
     (
@@ -843,6 +885,248 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("string_unterminated", "theme t:\n  slot a -> \"x\n", Reject),
+    // -- coordinate triples ---------------------------------------------
+    (
+        "coordinate_triple",
+        "struct s size=5x5\n  fill from=1,1,1 to=3,2,3\n",
+        Accept,
+    ),
+    (
+        "coordinate_in_a_header",
+        "struct s size=5x5 at=0,0,0\n  floor a=1\n",
+        Accept,
+    ),
+    // A selector's `,` after an integer is a separator unless another component follows it.
+    (
+        "coordinate_in_a_selector_beside_a_separator",
+        "struct s size=5x5\n  door[y=2,side=front, at=1,2,3, id=d] opened_by=sig.a\n",
+        Accept,
+    ),
+    (
+        "coordinate_in_a_theme_selector",
+        "theme t:\n  window[at=1,2,3] -> mat_slot=g\n",
+        Accept,
+    ),
+    // A list's commas separate its items, so three integers in a list stay three.
+    (
+        "integers_in_a_list_are_no_coordinate",
+        "struct s size=5x5\n  floor tags=[1,2,3]\n",
+        Accept,
+    ),
+    (
+        "coordinate_spaced",
+        "struct s size=5x5\n  fill from=1, 1, 1\n",
+        Reject,
+    ),
+    (
+        "coordinate_space_before_a_comma",
+        "struct s size=5x5\n  fill from=1 ,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_two_components",
+        "struct s size=5x5\n  fill from=1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_four_components",
+        "struct s size=5x5\n  fill from=1,1,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_negative_component",
+        "struct s size=5x5\n  fill from=1,-1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_negative_first_component",
+        "struct s size=5x5\n  fill from=-1,2,3\n",
+        Reject,
+    ),
+    (
+        "two_selector_integers_before_a_key",
+        "struct s size=5x5\n  door[y=1,2,side=front]\n",
+        Reject,
+    ),
+    (
+        "integers_in_a_state_literal_are_no_coordinate",
+        "theme t:\n  slot a -> @oak_stairs[facing=1,2,3]\n",
+        Reject,
+    ),
+    (
+        "coordinate_trailing_comma",
+        "struct s size=5x5\n  fill from=1,1,1,\n",
+        Reject,
+    ),
+    (
+        "coordinate_as_a_positional",
+        "struct s size=5x5\n  fill 1,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_as_a_binding",
+        "struct s size=5x5\n  lever -> 1,1,1\n",
+        Reject,
+    ),
+    (
+        "coordinate_beside_a_binding",
+        "struct s size=5x5\n  lever -> sig.a at=1,2,3\n",
+        Accept,
+    ),
+    // -- block ids --------------------------------------------------------
+    (
+        "block_id",
+        "struct s size=5x5\n  raw_block mat=minecraft:stone at=1,0,1\n",
+        Accept,
+    ),
+    (
+        "block_id_with_a_state_literal",
+        "struct s size=5x5\n  raw_block mat=minecraft:light[level=15] at=1,0,1\n",
+        Accept,
+    ),
+    (
+        "block_id_in_a_theme_selector",
+        "theme t:\n  window[mat=minecraft:glass] -> frame=minecraft:stone\n",
+        Accept,
+    ),
+    // A `:` ending a header line opens the body, so the name before it is no namespace.
+    (
+        "header_colon_after_a_value",
+        "def hut size=3x3 tag=small:\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "block_id_space_after_the_colon",
+        "struct s size=5x5\n  raw_block mat=minecraft: stone\n",
+        Reject,
+    ),
+    (
+        "block_id_space_before_the_colon",
+        "struct s size=5x5\n  raw_block mat=minecraft :stone\n",
+        Reject,
+    ),
+    (
+        "block_id_integer_path",
+        "struct s size=5x5\n  raw_block mat=minecraft:1\n",
+        Reject,
+    ),
+    (
+        "block_id_two_colons",
+        "struct s size=5x5\n  raw_block mat=minecraft:stone:x\n",
+        Reject,
+    ),
+    (
+        "block_id_malformed_state_literal",
+        "struct s size=5x5\n  raw_block mat=minecraft:light[level=]\n",
+        Reject,
+    ),
+    (
+        "block_id_as_a_positional",
+        "struct s size=5x5\n  raw_block minecraft:stone\n",
+        Reject,
+    ),
+    (
+        "block_id_in_a_slot_row",
+        "theme t:\n  slot wall -> minecraft:stone\n",
+        Reject,
+    ),
+    // -- edition guards ---------------------------------------------------
+    (
+        "edition_guard_in_a_struct_body",
+        "struct s size=3x3\n  @edition java\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n  walls mat_slot=w\n",
+        Accept,
+    ),
+    (
+        "edition_guard_in_a_def_body",
+        "def d size=3x3\n  @edition bedrock\n    raw_fill mat=minecraft:stone from=0,0,0 to=1,1,1\n",
+        Accept,
+    ),
+    (
+        "edition_guard_under_a_member",
+        "struct s size=3x3\n  level y=1\n    @edition java\n      raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    (
+        "edition_guard_in_a_site_body",
+        "site s\n  @edition java\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    (
+        "edition_guard_with_a_comment",
+        "struct s size=3x3\n  @edition java # light\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    (
+        "edition_guard_after_a_space",
+        "struct s size=3x3\n  @ edition java\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    // The parser takes any member line under a guard; core's check refuses one that is not raw.
+    (
+        "edition_guard_over_a_semantic_member",
+        "struct s size=3x3\n  @edition java\n    walls mat_slot=w\n",
+        Accept,
+    ),
+    (
+        "edition_guard_over_logic_and_assert",
+        "struct s size=3x3\n  @edition java\n    logic a.b = c\n    assert always(a.b -> eventually c.d within 2)\n",
+        Accept,
+    ),
+    (
+        "edition_guard_over_a_member_with_a_body",
+        "struct s size=3x3\n  @edition java\n    level y=1\n      raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    (
+        "edition_guard_naming_no_edition",
+        "struct s size=3x3\n  @edition\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_naming_an_unknown_edition",
+        "struct s size=3x3\n  @edition pocket\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_with_a_trailing_word",
+        "struct s size=3x3\n  @edition java extra\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_with_a_colon",
+        "struct s size=3x3\n  @edition java:\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_with_nothing_under_it",
+        "struct s size=3x3\n  @edition java\n  walls mat_slot=w\n",
+        Reject,
+    ),
+    (
+        "edition_guard_in_braces",
+        "struct s size=3x3\n  @edition java { raw_block at=1,1,1 mat=minecraft:light[level=15] }\n",
+        Reject,
+    ),
+    (
+        "edition_guard_inside_a_guard",
+        "struct s size=3x3\n  @edition java\n    @edition bedrock\n      raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_at_top_level",
+        "@edition java\nstruct s size=3x3\n  walls mat_slot=w\n",
+        Reject,
+    ),
+    (
+        "edition_guard_in_a_theme_body",
+        "theme t:\n  @edition java\n    slot a -> @b\n",
+        Reject,
+    ),
+    (
+        "file_directive_in_a_body",
+        "struct s size=3x3\n  @cairn 2026.06\n",
+        Reject,
+    ),
     // -- indentation ----------------------------------------------------
     (
         "dedent_two_levels",
@@ -1184,6 +1468,11 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
     ),
+    (
+        "coordinate_component_out_of_range",
+        "struct s size=3x3\n  fill from=99999999999999999999,1,1\n",
+        Accept,
+    ),
     // -- a size literal that runs into a word --------------------------
     // Ending the literal before the tail needs negative lookahead, which tree-sitter rejects.
     (
@@ -1194,6 +1483,12 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "size_running_into_a_word",
         "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
+        Accept,
+    ),
+    // The grammar's coordinate ends at `3` and reads `x4` as a positional word.
+    (
+        "coordinate_running_into_a_size",
+        "struct s size=3x3\n  fill from=1,2,3x4\n",
         Accept,
     ),
     // -- a truth row of the wrong width --------------------------------
@@ -1265,6 +1560,11 @@ const DEPTH_DIVERGENCES: &[(&str, Shape, usize)] = &[
         nots_around_an_or_chain,
         MAX_EXPR_DEPTH + 1,
     ),
+    (
+        "mux_chain_past_the_nesting_bound",
+        nested_mux,
+        MAX_NESTING_DEPTH + 1,
+    ),
 ];
 
 /// One indented `level` block per level.
@@ -1306,6 +1606,15 @@ fn chained_not(depth: usize) -> String {
     format!(
         "struct a size=1x1\n  logic sig.out = {}sig.a\n",
         "not ".repeat(depth),
+    )
+}
+
+/// `logic sig.out = mux(sel=sig.s, b=sig.b, a=mux(… sig.a …))`.
+fn nested_mux(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}sig.a{}\n",
+        "mux(sel=sig.s, b=sig.b, a=".repeat(depth),
+        ")".repeat(depth),
     )
 }
 
@@ -1410,8 +1719,86 @@ fn library_primitives() -> impl Iterator<Item = (String, String, Verdict)> {
                     Reject,
                 ),
             ],
+            Notation::Call { operands } => {
+                let call = |named: &[&str]| {
+                    let named: Vec<String> = named
+                        .iter()
+                        .enumerate()
+                        .map(|(i, name)| format!("{name}=s.v{i}"))
+                        .collect();
+                    logic(format!("{word}({})", named.join(", ")))
+                };
+                let mut out: Vec<_> = permutations(operands)
+                    .into_iter()
+                    .map(|order| {
+                        (
+                            format!("library call `{word}` naming {order:?}"),
+                            call(&order),
+                            Accept,
+                        )
+                    })
+                    .collect();
+                for (i, left_out) in operands.iter().enumerate() {
+                    let mut named = operands.to_vec();
+                    named.remove(i);
+                    out.push((
+                        format!("library call `{word}` without `{left_out}`"),
+                        call(&named),
+                        Reject,
+                    ));
+                    named.insert(i, left_out);
+                    named.push(left_out);
+                    out.push((
+                        format!("library call `{word}` naming `{left_out}` twice"),
+                        call(&named),
+                        Reject,
+                    ));
+                }
+                let positional: Vec<String> =
+                    (0..operands.len()).map(|i| format!("s.v{i}")).collect();
+                out.extend([
+                    (
+                        format!("library call `{word}` with an operand it does not name"),
+                        call(&[operands, &["zz"]].concat()),
+                        Reject,
+                    ),
+                    (
+                        format!("library call `{word}` with a trailing comma"),
+                        call(operands).replace(")\n", ",)\n"),
+                        Reject,
+                    ),
+                    (
+                        format!("library call `{word}` with positional operands"),
+                        logic(format!("{word}({})", positional.join(", "))),
+                        Reject,
+                    ),
+                    (
+                        format!("library call `{word}` as an infix operand"),
+                        call(operands).replace(" = ", " = a.b and "),
+                        Accept,
+                    ),
+                ]);
+                out
+            }
         }
     })
+}
+
+/// Every order of `items`.
+fn permutations<'a>(items: &[&'a str]) -> Vec<Vec<&'a str>> {
+    if items.len() <= 1 {
+        return vec![items.to_vec()];
+    }
+    (0..items.len())
+        .flat_map(|i| {
+            let mut rest = items.to_vec();
+            let first = rest.remove(i);
+            permutations(&rest).into_iter().map(move |mut order| {
+                order.insert(0, first);
+                order
+            })
+        })
+        .collect()
 }
 
 #[test]
@@ -1468,6 +1855,19 @@ fn library_groupings() -> Vec<String> {
             out.push(format!("a.b {p} {r} c.d"));
         }
     }
+    let called = LogicPrimitive::ALL
+        .into_iter()
+        .filter_map(|primitive| Some((primitive.name(), primitive.call_operands()?)));
+    for (word, operands) in called {
+        for order in permutations(operands) {
+            let named: Vec<String> = order
+                .iter()
+                .zip(&infix)
+                .map(|(name, p)| format!("{name}=a.{name} {p} b.{name}"))
+                .collect();
+            out.push(format!("{word}({}) {} z.z", named.join(", "), infix[0]));
+        }
+    }
     out
 }
 
@@ -1517,6 +1917,16 @@ fn core_grouping(expr: &cairn_lang_core::ast::Expr) -> String {
         Expr::Prefix { primitive, operand } => {
             format!("({} {})", primitive.name(), core_grouping(operand))
         }
+        Expr::Call {
+            primitive,
+            operands,
+        } => {
+            let named: Vec<String> = operands
+                .iter()
+                .map(|operand| format!("{}={}", operand.name, core_grouping(&operand.value)))
+                .collect();
+            format!("({} {})", primitive.name(), named.join(" "))
+        }
         other => panic!("no grouping for {other:?}"),
     }
 }
@@ -1549,6 +1959,36 @@ fn grammar_grouping(node: tree_sitter::Node<'_>, source: &str) -> String {
             node.named_child(0).expect("a parenthesised operand"),
             source,
         ),
+        // In the order the library lists the operands, which is core's.
+        "call_expression" => {
+            let word = word(0);
+            let operands = LogicPrimitive::from_name(&word)
+                .and_then(LogicPrimitive::call_operands)
+                .expect("a called primitive of the library");
+            let mut cursor = node.walk();
+            let mut named: Vec<(usize, String)> = node
+                .named_children(&mut cursor)
+                .map(|operand| {
+                    let part = |name: &str| {
+                        operand
+                            .child_by_field_name(name)
+                            .unwrap_or_else(|| panic!("a named operand has a `{name}` field"))
+                    };
+                    let name = part("name").utf8_text(source.as_bytes()).expect("utf-8");
+                    let rank = operands
+                        .iter()
+                        .position(|known| *known == name)
+                        .expect("a name the library lists");
+                    (
+                        rank,
+                        format!("{name}={}", grammar_grouping(part("value"), source)),
+                    )
+                })
+                .collect();
+            named.sort();
+            let named: Vec<String> = named.into_iter().map(|(_, text)| text).collect();
+            format!("({word} {})", named.join(" "))
+        }
         _ => node.utf8_text(source.as_bytes()).expect("utf-8").to_owned(),
     }
 }
@@ -2110,12 +2550,16 @@ fn core_statements(
 ) {
     use cairn_lang_core::ast::Statement;
     for statement in body {
-        if let Statement::Generic {
-            keyword, children, ..
-        } = statement
-        {
-            out.push((depth, keyword.clone()));
-            core_statements(children, depth + 1, out);
+        match statement {
+            Statement::Generic {
+                keyword, children, ..
+            } => {
+                out.push((depth, keyword.clone()));
+                core_statements(children, depth + 1, out);
+            }
+            // A guard's lines stand in the body around it, as `edition_guard_body` adds no depth.
+            Statement::EditionGuard { children, .. } => core_statements(children, depth, out),
+            _ => {}
         }
     }
 }

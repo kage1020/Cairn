@@ -53,9 +53,29 @@ class Nbt(unittest.TestCase):
             load.read_nbt(gzip.compress(bytes([load.TAG_STRING, 0, 0, 0, 0])))
 
 
+def lowercase(entry: dict) -> dict:
+    """`entry` under the keys a palette entry names its block and properties by from 26.3."""
+    renamed = {"id": entry["Name"]}
+    if "Properties" in entry:
+        renamed["properties"] = copy.deepcopy(entry["Properties"])
+    return renamed
+
+
 class StrictLayout(unittest.TestCase):
     def test_the_layout_cairn_writes_is_accepted(self) -> None:
         load.strict_layout(written(structure(((0, 0, 0), STAIR), ((1, 0, 0), PLANKS))))
+
+    def test_from_26_3_a_palette_entry_names_its_block_and_properties_in_lower_case(self) -> None:
+        blocks = ((0, 0, 0), lowercase(STAIR)), ((1, 0, 0), lowercase(PLANKS))
+        load.strict_layout(written(structure(*blocks, data_version=5023)))
+        with self.assertRaises(load.Malformed) as refusal:
+            load.strict_layout(written(structure(((0, 0, 0), STAIR), data_version=5023)))
+        problem = "a palette entry has `Name`, `Properties`, which the game does not read"
+        self.assertEqual(str(refusal.exception), problem)
+
+    def test_the_state_keys_turn_lower_case_at_the_first_data_version_that_reads_them(self) -> None:
+        self.assertEqual(load.state_keys(5005), ("Name", "Properties"))
+        self.assertEqual(load.state_keys(5006), ("id", "properties"))
 
     def test_a_key_the_game_does_not_read_or_a_mistyped_position_is_refused(self) -> None:
         def misspelt_properties(s: dict) -> None:
@@ -109,6 +129,13 @@ class Differences(unittest.TestCase):
 
     def test_the_same_blocks_in_another_palette_order_are_no_difference(self) -> None:
         self.assertEqual(self.differences(structure(((1, 0, 0), PLANKS), ((0, 0, 0), STAIR))), [])
+
+    def test_a_palette_under_the_26_3_keys_reads_as_the_same_blocks(self) -> None:
+        blocks = ((0, 0, 0), lowercase(STAIR)), ((1, 0, 0), lowercase(PLANKS))
+        self.assertEqual(
+            load.block_states(structure(*blocks, data_version=5023)),
+            load.block_states(structure(((0, 0, 0), STAIR), ((1, 0, 0), PLANKS))),
+        )
 
     def test_a_default_property_the_game_saves_is_no_difference(self) -> None:
         stair = {**STAIR, "Properties": {**STAIR["Properties"], "waterlogged": "false"}}

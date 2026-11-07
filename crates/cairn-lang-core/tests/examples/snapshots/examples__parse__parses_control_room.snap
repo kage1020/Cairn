@@ -1,0 +1,337 @@
+---
+source: crates/cairn-lang-core/tests/examples/parse.rs
+expression: module
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: works
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: floor.stone.smooth
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+      - kind: Slot
+        slot: roof
+        value:
+          kind: Token
+          value: spruce_stairs
+      - kind: Slot
+        slot: knob
+        value:
+          kind: Token
+          value: stone_button
+  - kind: Struct
+    name: control_room
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 9
+            h: 7
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 4
+      - kind: Generic
+        keyword: door
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: entry
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: center
+      - kind: Generic
+        keyword: roof
+        args:
+          - key: kind
+            value:
+              kind: Ident
+              value: gable
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: roof
+          - key: overhang
+            value:
+              kind: Int
+              value: 1
+      - kind: Generic
+        keyword: lever
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: power
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - front
+          - key: offset
+            value:
+              kind: Int
+              value: 2
+          - key: y
+            value:
+              kind: Int
+              value: 2
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - power
+      - kind: Generic
+        keyword: daylight
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: sun
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - back
+                - outside
+          - key: offset
+            value:
+              kind: Int
+              value: 4
+          - key: y
+            value:
+              kind: Int
+              value: 0
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - day
+      - kind: Generic
+        keyword: button
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: bell
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - front
+          - key: offset
+            value:
+              kind: Int
+              value: 6
+          - key: y
+            value:
+              kind: Int
+              value: 2
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: knob
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - ring
+      - kind: Generic
+        keyword: observer
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: watch
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - left
+          - key: offset
+            value:
+              kind: Int
+              value: 3
+          - key: y
+            value:
+              kind: Int
+              value: 1
+          - key: facing
+            value:
+              kind: Ident
+              value: up
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - tick
+      - kind: Logic
+        lhs:
+          - sig
+          - light
+        rhs:
+          kind: Infix
+          value:
+            primitive: and
+            lhs:
+              kind: Ref
+              value:
+                - sig
+                - power
+            rhs:
+              kind: Prefix
+              value:
+                primitive: not
+                operand:
+                  kind: Ref
+                  value:
+                    - sig
+                    - day
+      - kind: Generic
+        keyword: lamp
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: light
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - back
+          - key: offset
+            value:
+              kind: Int
+              value: 4
+          - key: y
+            value:
+              kind: Int
+              value: 3
+          - key: lit_by
+            value:
+              kind: DotRef
+              value:
+                - sig
+                - light
+      - kind: Generic
+        keyword: dispenser
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: chute
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - front
+                - outside
+          - key: offset
+            value:
+              kind: Int
+              value: 1
+          - key: y
+            value:
+              kind: Int
+              value: 1
+          - key: facing
+            value:
+              kind: Ident
+              value: out
+          - key: fired_by
+            value:
+              kind: DotRef
+              value:
+                - sig
+                - ring
+      - kind: Generic
+        keyword: piston
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: ram
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - right
+          - key: offset
+            value:
+              kind: Int
+              value: 3
+          - key: y
+            value:
+              kind: Int
+              value: 1
+          - key: facing
+            value:
+              kind: Ident
+              value: up
+          - key: sticky
+            value:
+              kind: Bool
+              value: true
+      - kind: Generic
+        keyword: piston
+        selector:
+          - key: id
+            value:
+              kind: Ident
+              value: ram
+        args:
+          - key: powered_by
+            value:
+              kind: DotRef
+              value:
+                - sig
+                - tick
+      - kind: Generic
+        keyword: circuit
+        args:
+          - key: region
+            value:
+              kind: Ident
+              value: floor
+          - key: void
+            value:
+              kind: Int
+              value: 2

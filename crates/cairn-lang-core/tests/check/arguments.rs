@@ -344,8 +344,12 @@ const SWEEP: &[(&str, &str)] = &[
     ("floor", "  floor id=f class=c mat_slot=m\n"),
     ("walls", "  walls id=w class=outer mat_slot=m height=3\n"),
     (
+        "fill",
+        "  fill id=f class=c mat_slot=m from=1,1,1 to=2,1,2\n  fill id=g fluid=water kind=source from=1,1,1 to=2,2,2\n",
+    ),
+    (
         "door",
-        "  door id=d class=c side=front at=center opened_by=sig.a\n",
+        "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a hinge=left open=false\n",
     ),
     (
         "window",
@@ -357,12 +361,44 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "stair",
-        "  stair id=s class=c mat_slot=m kind=stairs side=front half=top facing=out shape=straight y=0\n",
+        "  stair id=s class=c mat_slot=m kind=stairs side=front half=top facing=out shape=straight y=0 waterlogged=false\n",
     ),
     ("level", "  level id=l class=c y=0\n"),
     (
         "pressure_plate",
         "  pressure_plate id=p class=c mat_slot=m at=front.outside offset=0 y=0\n",
+    ),
+    (
+        "lever",
+        "  lever id=v class=c at=inside.front offset=1 y=1\n",
+    ),
+    (
+        "button",
+        "  button id=b class=c mat_slot=m at=inside.front offset=2 y=1\n",
+    ),
+    (
+        "daylight",
+        "  daylight id=dl class=c at=inside.back offset=1 y=1\n",
+    ),
+    (
+        "observer",
+        "  observer id=o class=c at=inside.back offset=2 y=1 facing=up\n",
+    ),
+    (
+        "lamp",
+        "  lamp id=lp class=c at=inside.left offset=1 y=1 lit_by=sig.a\n",
+    ),
+    (
+        "piston",
+        "  piston id=pi class=c at=inside.left offset=2 y=1 powered_by=sig.a facing=in sticky=true\n",
+    ),
+    (
+        "dispenser",
+        "  dispenser id=ds class=c at=inside.right offset=1 y=1 fired_by=sig.a facing=out\n",
+    ),
+    (
+        "chest",
+        "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single waterlogged=false\n",
     ),
     ("circuit", "  circuit id=c class=c region=r void=2\n"),
     (
@@ -372,6 +408,14 @@ const SWEEP: &[(&str, &str)] = &[
     (
         "connect",
         "  connect id=e class=c a.entry to b.entry path=@gravel\n",
+    ),
+    (
+        "raw_block",
+        "  raw_block id=r class=c mat=minecraft:stone at=1,0,1\n",
+    ),
+    (
+        "raw_fill",
+        "  raw_fill id=q class=c mat=minecraft:stone from=0,0,0 to=1,0,1\n",
     ),
 ];
 
@@ -491,8 +535,7 @@ fn a_stair_reads_the_height_it_is_written_at() {
 
 #[test]
 fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // Each is written on a known keyword in `spec/entities` "Anchor conventions" or the prose of
-    // `spec/blockstate` "`waterlogged`".
+    // Each is written on a known keyword in `spec/entities` "Anchor conventions".
     let rows = [
         ("window side=front y=2 offset=4 size=3x3", "shape", "arch"),
         (
@@ -502,7 +545,6 @@ fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() 
         ),
         ("roof kind=gable", "footprint", "struct"),
         ("roof kind=gable", "bounds", "expand"),
-        ("stair kind=stairs side=front", "waterlogged", "false"),
     ];
     for (line, key, value) in rows {
         let keyword = keyword_of(line);
@@ -540,11 +582,14 @@ fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() 
 }
 
 #[test]
-fn a_state_override_on_a_member_that_lays_many_blocks_is_refused() {
-    // `spec/blockstate` "`waterlogged`" takes the key on a member that places one block.
+fn waterlogged_on_a_member_with_no_one_block_to_hold_water_is_refused() {
+    // `spec/blockstate` "`waterlogged`" takes the key only on a line naming one block that holds it.
     for line in [
+        "door side=front at=center waterlogged=false",
+        "pressure_plate at=front.outside offset=0 y=0 waterlogged=false",
         "roof kind=gable waterlogged=false",
         "window side=front y=2 offset=4 size=3x3 waterlogged=false",
+        "fill fluid=water from=0,0,0 to=1,0,1 waterlogged=false",
     ] {
         let src = format!("struct s size=9x9\n  {line}\n");
         let d = exactly_one(diagnose(&src));
@@ -929,9 +974,34 @@ impl UnreadSlot {
 
 const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
-        keyword: "door",
-        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door side=front at=center mat_slot=%SLOT%\n",
-        why: Unread::Unreached,
+        keyword: "lever",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  lever at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "daylight",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  daylight at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "observer",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  observer at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "lamp",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  lamp at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "piston",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  piston at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "dispenser",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  dispenser at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
     },
     UnreadSlot {
         keyword: "level",
@@ -951,6 +1021,16 @@ const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
         keyword: "connect",
         body: "def hut size=3x3:\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door id=entry side=front at=center\n\nsite v:\n  place id=a use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=4\n  connect a.entry to b.entry path=@gravel mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "raw_block",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_block mat=minecraft:stone at=1,1,1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "raw_fill",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_fill mat=minecraft:stone from=1,1,1 to=2,1,2 mat_slot=%SLOT%\n",
         why: Unread::Inapplicable,
     },
 ];
@@ -1063,10 +1143,20 @@ fn every_role_whose_mat_slot_is_unread_has_a_fixture() {
 
 #[test]
 fn a_slot_name_the_theme_lacks_on_a_role_that_reads_it_is_still_refused() {
-    let src = format!(
-        "{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  window side=front y=2 offset=2 size=2x1 mat_slot=nosuch\n"
-    );
-    assert_eq!(codes(&src), ["E_UNRESOLVED_SLOT"], "{:#?}", diagnose(&src));
+    for member in [
+        "window side=front y=2 offset=2 size=2x1",
+        "door side=front at=center",
+    ] {
+        let src = format!(
+            "{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  {member} mat_slot=nosuch\n"
+        );
+        assert_eq!(
+            codes(&src),
+            ["E_UNRESOLVED_SLOT"],
+            "{member}: {:#?}",
+            diagnose(&src)
+        );
+    }
 }
 
 #[test]
@@ -1128,7 +1218,7 @@ fn an_actuator_key_on_a_member_that_does_not_read_it_names_its_component() {
         ),
         (
             "window side=front y=1 offset=1 size=1x1 powered_by=sig.a",
-            "`powered_by=` binds a signal to a `piston`, which is not a keyword yet",
+            "`powered_by=` binds a signal to a `piston`, so it belongs on a `piston` line",
         ),
     ] {
         let src = format!("struct s size=5x5\n  {line}\n");

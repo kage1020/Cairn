@@ -390,16 +390,11 @@ fn a_blocked_walkway_is_reported_whichever_plate_buries_its_port() {
 fn a_finding_on_a_line_both_editions_read_needs_each_to_raise_it_there() {
     // Java's roof alone drops its state literal's properties, on the shared `roof` line.
     let source = variant_roofs("@oak_stairs[half=top]", "@spruce_stairs");
-    let literal = ("W_STATE_LITERAL_UNCHECKED", "5:16".to_owned());
     let roof = ("W_DEFERRED_MEMBER", "13:3".to_owned());
     let door = ("E_INVALID_MEMBER", "14:3".to_owned());
     assert_eq!(
         by_edition(&source),
-        [
-            vec![literal.clone(), roof, door.clone()],
-            vec![door.clone()],
-            vec![literal, door],
-        ],
+        [vec![roof, door.clone()], vec![door.clone()], vec![door]],
     );
 }
 
