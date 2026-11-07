@@ -64,15 +64,35 @@ fn a_block_without_properties_has_empty_states_rather_than_none() {
 #[test]
 fn a_block_whose_states_change_between_versions_reads_each_versions_own() {
     let blocks = builtin_pack(Edition::Java).blocks();
-    let before = blocks
-        .states_of("1.21.4", "minecraft:creaking_heart")
-        .expect("creaking_heart has states on 1.21.4");
-    let after = blocks
-        .states_of("26.3", "minecraft:creaking_heart")
-        .expect("creaking_heart has states on 26.3");
-    assert_ne!(before, after);
-    assert!(before.domain("active").is_some());
-    assert!(after.domain("active").is_none());
+    let states = |mc_version: &str| {
+        blocks
+            .states_of(mc_version, "minecraft:creaking_heart")
+            .expect("creaking_heart has states")
+            .properties()
+            .map(|(property, values)| (property.to_owned(), values.to_vec()))
+            .collect::<Vec<_>>()
+    };
+    let axis = ("axis".to_owned(), strings(&["x", "y", "z"]));
+    let natural = ("natural".to_owned(), strings(&["true", "false"]));
+    assert_eq!(
+        states("1.21.4"),
+        [
+            ("active".to_owned(), strings(&["true", "false"])),
+            axis.clone(),
+            natural.clone(),
+        ],
+    );
+    assert_eq!(
+        states("26.3"),
+        [
+            axis,
+            (
+                "creaking_heart_state".to_owned(),
+                strings(&["uprooted", "dormant", "awake"]),
+            ),
+            natural,
+        ],
+    );
 }
 
 #[test]

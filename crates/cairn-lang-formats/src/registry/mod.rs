@@ -26,10 +26,7 @@ pub use load::{
     PackSource, PackView, RegistryError, RegistryPack, SUPPORTED_DATA_VERSIONS_SCHEMA,
     SUPPORTED_MANIFEST_SCHEMA, builtin_pack, load_builtin_pack, load_from_dir,
 };
-pub use manifest::{
-    ExtractedConnections, ExtractedJar, ExtractedStateMap, ExtractedTable, Extraction, PackFiles,
-    PackManifest,
-};
+pub use manifest::{PackFiles, PackManifest};
 pub use states::{
     BedrockForm, DroppedState, SUPPORTED_SENSITIVITY_SCHEMA, SUPPORTED_STATES_SCHEMA,
     SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal, StatesCatalog, StatesError,
