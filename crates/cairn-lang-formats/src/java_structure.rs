@@ -310,14 +310,12 @@ impl OutputExt {
     }
 }
 
-/// The file name of one structure, such as `"cottage.nbt"` for `"struct::cottage"`.
+/// The file name of one structure from the stem
+/// [`BlockArrayIr::artifact_stem`](cairn_lang_core::block_array::BlockArrayIr::artifact_stem)
+/// gives, such as `"cottage.nbt"` for `"cottage"`.
 #[must_use]
-pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
-    format!(
-        "{}.{}",
-        cairn_lang_core::artifact_stem(source_scope),
-        ext.as_str()
-    )
+pub fn output_filename(stem: &str, ext: OutputExt) -> String {
+    format!("{stem}.{}", ext.as_str())
 }
 
 /// The first `DataVersion` whose block states the game reads as `id` and `properties`; an older
