@@ -95,7 +95,7 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, Refusal> {
             vec![ANCHOR_FORMS.to_owned()],
         ))
     };
-    let Some(raw) = member.intent_state.get("at") else {
+    let Some(raw) = member.arguments.get("at") else {
         return Err(refuse(
             "pressure_plate has no `at=`, so nothing says which wall it sits by".to_owned(),
         ));
@@ -220,7 +220,7 @@ fn place_plate(
 
 /// Read a plate's `key=` as a non-negative integer, `0` when absent.
 fn plate_coordinate(member: &Member, key: &str, counts: &str) -> Result<u32, Refusal> {
-    let Some(raw) = member.intent_state.get(key) else {
+    let Some(raw) = member.arguments.get(key) else {
         return Ok(0);
     };
     member.nonneg_u32(key).ok_or_else(|| {

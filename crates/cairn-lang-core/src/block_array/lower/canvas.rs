@@ -157,6 +157,11 @@ impl Canvas {
         }
     }
 
+    /// Per voxel: `0` while unwritten, `n + 1` once member `n` of the flattened paint list did.
+    pub(super) fn owners(&self) -> &[u32] {
+        &self.owners
+    }
+
     /// Borrow the canvas as the member at `index` of the flattened paint list sees it.
     pub(super) fn for_member(&mut self, index: u32) -> MemberCanvas<'_> {
         debug_assert!(

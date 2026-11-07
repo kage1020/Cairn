@@ -94,10 +94,15 @@ pub enum DiagnosticCode {
     AbstractTokenDeferred,
     /// A `mat_slot=` resolved to an abstract token the registry pack's catalog does not declare.
     UnknownAbstractToken,
-    /// A state literal (`@oak_log[axis=x]`) taken as written, unchecked against the target.
+    /// A state literal (`@oak_log[axis=x]`) taken as written, since the pinned target's pack
+    /// records no states for its block.
     StateLiteralUnchecked,
     /// A `mat_slot=` resolved to a block id the pinned target does not declare.
     UnknownId,
+    /// A member built a block state the pinned target's state map has no form for.
+    StateUnmapped,
+    /// A block state's property or value its block does not take at the pinned target.
+    StateDomain,
     /// A member whose geometry attaches blockstates is bound to a material that cannot carry them.
     IncompatibleMaterial,
     /// A `struct` has no `size=WxH` header, so block-array lowering skips it.
@@ -208,6 +213,8 @@ impl DiagnosticCode {
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
             Self::StateLiteralUnchecked => "W_STATE_LITERAL_UNCHECKED",
             Self::UnknownId => "E_UNKNOWN_ID",
+            Self::StateUnmapped => "E_STATE_UNMAPPED",
+            Self::StateDomain => "E_STATE_DOMAIN",
             Self::IncompatibleMaterial => "E_INCOMPATIBLE_MATERIAL",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
             Self::DefNoSize => "W_DEF_NO_SIZE",
@@ -269,6 +276,8 @@ impl DiagnosticCode {
             | Self::UnknownSlotTarget
             | Self::UnknownAbstractToken
             | Self::UnknownId
+            | Self::StateUnmapped
+            | Self::StateDomain
             | Self::IncompatibleMaterial
             | Self::InvalidMember
             | Self::UnresolvedPlaceRef
@@ -384,6 +393,44 @@ pub enum DiagnosticData {
         /// Ids the pack's alias table declares for the same block: facts, unlike `suggestion`.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         aliases: Vec<String>,
+        /// The first version of the edition after the target that declares the id.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<String>,
+        /// The last version of the edition before the target that declares the id.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::StateUnmapped`].
+    StateUnmapped {
+        /// The fully namespaced id of the block state.
+        id: String,
+        /// Its `key=value` pairs, comma-joined.
+        states: String,
+        /// The target it was mapped for, as `"<edition> <version>"`.
+        registry: String,
+    },
+    /// Companion payload for [`DiagnosticCode::StateDomain`].
+    StateDomain {
+        /// The fully namespaced id of the block state.
+        id: String,
+        /// The property.
+        key: String,
+        /// The value the state gives it.
+        value: String,
+        /// The target it was checked against, as `"<edition> <version>"`.
+        registry: String,
+        /// `unknown_property` or `value_outside`.
+        reason: &'static str,
+        /// The block's properties, or the property's values, at the target.
+        valid: Vec<String>,
+        /// `literal` for a state literal, `derived` for a state lowering wrote.
+        origin: &'static str,
+        /// The nearest of `valid`, when one is within the suggestion cap.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggestion: Option<String>,
+        /// The edition's other versions whose tables take the pair, oldest first.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        valid_at: Vec<String>,
     },
     /// Companion payload for [`DiagnosticCode::IncompatibleMaterial`].
     IncompatibleMaterial {

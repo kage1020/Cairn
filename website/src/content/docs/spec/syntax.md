@@ -68,10 +68,10 @@ comes next, `mat_slot=@a[1]` would leave a bare value on a member line that read
 `E_UNEXPECTED_POSITIONAL`, and `mat_slot=[@a[b]]` would put a list where a label belongs, which is
 `E_TYPE_MISMATCH_LABEL`.
 
-The literal's properties and values are not yet checked against the target: `E_STATE_DOMAIN`
-([Versioning and Editions](/spec/versioning-editions/)) is not implemented, so a Java build writes
-`@oak_log[axis=q]` as written. Each literal the build reads earns a `W_STATE_LITERAL_UNCHECKED`
-([Lint](/spec/lint/)) on the token, so that is said rather than silent.
+A build that pins a version checks the literal's properties and values against the states its
+block takes there, so `@oak_log[axis=q]` is `E_STATE_DOMAIN` ([Lint](/spec/lint/)), naming `x`, `y`
+and `z` ([Versioning and
+Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)).
 
 Besides that literal, the one place a comma carries meaning is the input list of
 `assert truth(...)`, where it separates the signals whose count the row width is checked against. A
@@ -223,12 +223,12 @@ worse than an absent one, because a reader will still believe it.
 @requires bedrock version>=1.21.40
 ```
 
-The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 /
-1.21.40 / 1.21.60`: `1.21.4` is Java's newest release and names no Bedrock release at all. A label
-is dot-separated components that each begin with a digit and carry only letters and digits, with an
-optional `-` and a pre-release tag of dot-separated letters and digits. `1.21.4`, `1.21.4-rc1`, and
-`24w14a` are all labels. Which of them the *target edition* can order is not a syntax question and
-is not answered here. See [Versioning and Editions](/spec/versioning-editions/).
+The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4 / 26.3` and Bedrock
+`1.21.0 / 1.21.40 / 1.21.60 / 1.26.60`: `1.21.4` is a Java release and names no Bedrock release at
+all. A label is dot-separated components that each begin with a digit and carry only letters and
+digits, with an optional `-` and a pre-release tag of dot-separated letters and digits. `1.21.4`,
+`1.21.4-rc1`, and `24w14a` are all labels. Which of them the *target edition* can order is not a
+syntax question and is not answered here. See [Versioning and Editions](/spec/versioning-editions/).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.

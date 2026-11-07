@@ -16,7 +16,7 @@ use super::canvas::ScopePalette;
 use super::phase::Phase;
 use super::roof_kind::roof_line_refused;
 use super::token_diag::{
-    MemberFallback, TokenSite, diag_abstract_token, diag_state_literal_unchecked,
+    MemberFallback, TokenSite, check_state_literal, diag_abstract_token,
     diag_unknown_abstract_token, diag_unknown_id,
 };
 use super::written::Written;
@@ -157,7 +157,7 @@ const LEVEL_Y_FORM: &str = "write `level y=N`, where `N` is a non-negative integ
 
 /// The `E_INVALID_MEMBER` on a `level` whose `y=` is missing or not a non-negative integer.
 fn level_offset_refusal(level: &Member) -> Diagnostic {
-    let primary = match level.intent_state.get("y") {
+    let primary = match level.arguments.get("y") {
         Some(raw) => format!(
             "level `y=` must be a non-negative integer that fits in u32, not {}",
             raw.value.describe(),
@@ -254,8 +254,7 @@ pub(super) fn resolve_member_state(
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
         Ok(state) => {
-            diagnostics.extend(diag_state_literal_unchecked(slot_value, &state));
-            Some(state)
+            check_state_literal(slot_value, &state, registry, diagnostics).then_some(state)
         }
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(
@@ -318,7 +317,7 @@ pub(super) fn member_will_paint(
 
 pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
     let Some(raw) = member.ident_value("side") else {
-        let reason = match member.intent_state.get("side") {
+        let reason = match member.arguments.get("side") {
             Some(written) => format!(
                 "`side=` must be one of front, back, left, right, not {}",
                 written.value.describe(),

@@ -254,42 +254,45 @@ fn bedrock_mcstructure_is_uncompressed_little_endian() {
     assert_eq!(&bytes[..3], &[0x0a, 0x00, 0x00], "unnamed root compound");
 }
 
+/// A lock records the block-state version a release's structures carry, which `1.26.60` shares
+/// with `1.21.60`, and not the release's key in Bedrock's version order.
 #[test]
 fn bedrock_lockfile_records_bedrock_target_and_pack_hash() {
-    let tmp = TempDir::new().expect("tempdir");
-    let dst = tmp.path().join("roof-flat.crn");
-    fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
-    let out_dir = TempDir::new().expect("out tempdir");
-    let lock_path = out_dir.path().join("bedrock.lock");
-    let result = cairn(
-        "compile",
-        &[
-            dst.to_str().unwrap(),
-            "--edition",
-            "bedrock",
-            "--target",
-            "1.21.60",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-            "--lock",
-            lock_path.to_str().unwrap(),
-        ],
-    );
-    assert!(
-        result.status.success(),
-        "stderr={}",
-        String::from_utf8_lossy(&result.stderr),
-    );
-    let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
-    assert_eq!(lf.target.edition, Edition::Bedrock);
-    assert_eq!(lf.target.mc_version, "1.21.60");
-    // Bedrock's block-palette version integer, not a Java DataVersion.
-    assert_eq!(lf.target.data_version, 18_168_865);
-    assert_ne!(
-        lf.inputs.registry_pack_hash.as_str(),
-        HashHex::ZERO_STR,
-        "bedrock pack hash must be filled in",
-    );
+    for mc_version in ["1.21.60", "1.26.60"] {
+        let tmp = TempDir::new().expect("tempdir");
+        let dst = tmp.path().join("roof-flat.crn");
+        fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
+        let out_dir = TempDir::new().expect("out tempdir");
+        let lock_path = out_dir.path().join("bedrock.lock");
+        let result = cairn(
+            "compile",
+            &[
+                dst.to_str().unwrap(),
+                "--edition",
+                "bedrock",
+                "--target",
+                mc_version,
+                "--out",
+                out_dir.path().to_str().unwrap(),
+                "--lock",
+                lock_path.to_str().unwrap(),
+            ],
+        );
+        assert!(
+            result.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&result.stderr),
+        );
+        let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
+        assert_eq!(lf.target.edition, Edition::Bedrock);
+        assert_eq!(lf.target.mc_version, mc_version);
+        assert_eq!(lf.target.data_version, 18_168_865, "{mc_version}");
+        assert_ne!(
+            lf.inputs.registry_pack_hash.as_str(),
+            HashHex::ZERO_STR,
+            "bedrock pack hash must be filled in",
+        );
+    }
 }
 
 #[test]
@@ -326,7 +329,7 @@ fn bedrock_cottage_maps_stair_states_without_degradation() {
 
 #[test]
 fn bedrock_themed_tower_degrades_stair_shape_but_compiles() {
-    // The eave's one `shape=outer_left` stair has no Bedrock state.
+    // The eave's one `shape=outer_left` stair has no state at 1.21.60.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
@@ -337,6 +340,8 @@ fn bedrock_themed_tower_degrades_stair_shape_but_compiles() {
             dst.to_str().unwrap(),
             "--edition",
             "bedrock",
+            "--target",
+            "1.21.60",
             "--out",
             out_dir.path().to_str().unwrap(),
         ],
@@ -351,8 +356,8 @@ fn bedrock_themed_tower_degrades_stair_shape_but_compiles() {
         .filter(|line| line.starts_with("warning[W_INTENT_DEGRADED]"))
         .collect();
     let quoted = "warning[W_INTENT_DEGRADED]: struct::keep: \
-        minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]: Bedrock has no `shape` \
-        state; its stairs render straight, so corners show visual gaps";
+        minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]: this Bedrock version \
+        has no stair `shape` state; its stairs render straight, so corners show visual gaps";
     assert_eq!(
         degraded,
         [quoted],
