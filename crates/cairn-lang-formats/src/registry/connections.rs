@@ -1,5 +1,6 @@
 //! The `connections` component of a registry pack: what each block is, per version, to the rules
-//! that join panes, fences, walls and chests to their neighbours (`spec/blockstate` "Connections").
+//! that join panes, fences, walls, chests and redstone dust to their neighbours (`spec/blockstate`
+//! "Connections").
 
 use std::collections::HashMap;
 
@@ -52,7 +53,10 @@ pub struct ConnectionRow {
     pub defaults: IndexMap<String, String>,
     /// The faces their models cover whole.
     #[serde(default)]
-    pub sturdy: Option<SturdyRow>,
+    pub sturdy: Option<FacesRow>,
+    /// The faces redstone dust beside them joins.
+    #[serde(default)]
+    pub dust: Option<FacesRow>,
 }
 
 /// The kind of connecting block a [`ConnectionRow`] describes.
@@ -71,12 +75,14 @@ pub enum ConnectionKind {
     FenceGate,
     /// A chest that pairs with the chest beside it.
     Chest,
+    /// Redstone dust.
+    RedstoneDust,
 }
 
-/// The whole faces of a [`ConnectionRow`]'s blocks.
+/// Some faces of a [`ConnectionRow`]'s blocks, the same in every state or looked up per state.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub enum SturdyRow {
+pub enum FacesRow {
     /// Looked up from the values of `reads`, comma-joined.
     Lookup {
         /// The properties read, in order.
@@ -134,11 +140,12 @@ struct Row {
     exception: bool,
     raises_post: bool,
     defaults: IndexMap<String, String>,
-    sturdy: Sturdy,
+    sturdy: FaceSet,
+    dust: FaceSet,
 }
 
 #[derive(Debug, Clone)]
-enum Sturdy {
+enum FaceSet {
     Every(Faces),
     Lookup {
         reads: Vec<String>,
@@ -228,9 +235,9 @@ impl ConnectionIndex {
                 .or_else(|| row.defaults.get(key))
                 .map(String::as_str)
         };
-        let sturdy = match &row.sturdy {
-            Sturdy::Every(faces) => *faces,
-            Sturdy::Lookup { reads, map } => {
+        let faces = |set: &FaceSet| match set {
+            FaceSet::Every(faces) => *faces,
+            FaceSet::Lookup { reads, map } => {
                 let values: Option<Vec<&str>> = reads.iter().map(|key| value(key)).collect();
                 values
                     .and_then(|values| map.get(&values.join(",")).copied())
@@ -254,13 +261,15 @@ impl ConnectionIndex {
                         .and_then(Face::from_name)
                         .filter(|face| Face::SIDES.contains(face))?,
                 },
+                ConnectionKind::RedstoneDust => JoinKind::Dust,
             })
         });
         Some(Joins {
             kind,
-            sturdy,
+            sturdy: faces(&row.sturdy),
             exception: row.exception,
             raises_post: row.raises_post,
+            dust: faces(&row.dust),
         })
     }
 }
@@ -273,31 +282,39 @@ fn faces_of(faces: &[String]) -> Result<Faces, String> {
         .collect()
 }
 
-fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
-    let sturdy = match &row.sturdy {
-        None => Sturdy::Every(Faces::NONE),
-        Some(SturdyRow::Every(faces)) => Sturdy::Every(faces_of(faces)?),
-        Some(SturdyRow::Lookup { reads, map }) => {
+/// `row` as a set of faces per state, or why its lookup is malformed; `field` names it.
+fn face_set(row: Option<&FacesRow>, field: &str) -> Result<FaceSet, String> {
+    Ok(match row {
+        None => FaceSet::Every(Faces::NONE),
+        Some(FacesRow::Every(faces)) => FaceSet::Every(faces_of(faces)?),
+        Some(FacesRow::Lookup { reads, map }) => {
             let mut parsed = HashMap::with_capacity(map.len());
             for (key, faces) in map {
                 if key.split(',').count() != reads.len() {
                     return Err(format!(
-                        "the `sturdy` key `{key}` holds no value for each of {}",
+                        "the `{field}` key `{key}` holds no value for each of {}",
                         reads.join(", ")
                     ));
                 }
                 parsed.insert(key.clone(), faces_of(faces)?);
             }
-            Sturdy::Lookup {
+            FaceSet::Lookup {
                 reads: reads.clone(),
                 map: parsed,
             }
         }
-    };
-    let mut needs: Vec<&str> = match &sturdy {
-        Sturdy::Lookup { reads, .. } => reads.iter().map(String::as_str).collect(),
-        Sturdy::Every(_) => Vec::new(),
-    };
+    })
+}
+
+fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
+    let sturdy = face_set(row.sturdy.as_ref(), "sturdy")?;
+    let dust = face_set(row.dust.as_ref(), "dust")?;
+    let mut needs: Vec<&str> = Vec::new();
+    for set in [&sturdy, &dust] {
+        if let FaceSet::Lookup { reads, .. } = set {
+            needs.extend(reads.iter().map(String::as_str));
+        }
+    }
     match row.kind {
         Some(ConnectionKind::FenceGate) => needs.extend(GATE_READS),
         Some(ConnectionKind::Chest) => needs.extend(CHEST_READS),
@@ -314,6 +331,7 @@ fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
         raises_post: row.raises_post,
         defaults: row.defaults.clone(),
         sturdy,
+        dust,
     })
 }
 

@@ -211,6 +211,38 @@ fn a_bedrock_spelling_reads_the_states_of_the_java_block_mapped_onto_it() {
 }
 
 #[test]
+fn an_id_both_editions_spell_reads_as_its_own_block_unless_another_takes_its_states() {
+    let standing = translate("1.26.60", "minecraft:redstone_torch", &[]).expect("standing");
+    assert_eq!(
+        (standing.id.as_str(), states(&standing)),
+        (
+            "minecraft:redstone_torch",
+            vec![("torch_facing_direction", &Tag::String("top".to_owned()))],
+        ),
+    );
+    let wall = translate("1.26.60", "minecraft:redstone_torch", &[("facing", "east")])
+        .expect("the wall torch takes `facing`");
+    assert_eq!(
+        (wall.id.as_str(), states(&wall)),
+        (
+            "minecraft:redstone_torch",
+            vec![("torch_facing_direction", &Tag::String("west".to_owned()))],
+        ),
+    );
+    let err = translate("1.26.60", "minecraft:redstone_torch", &[("facing", "up")])
+        .expect_err("no torch faces up");
+    assert_eq!(
+        err,
+        BedrockStateError::UnknownValue {
+            id: "minecraft:redstone_torch".to_owned(),
+            key: "facing".to_owned(),
+            value: "up".to_owned(),
+            valid: "north, south, west, east".to_owned(),
+        },
+    );
+}
+
+#[test]
 fn a_bedrock_spelling_of_several_java_blocks_is_written_bare_or_refused() {
     let t = translate("1.21.0", "minecraft:stonebrick", &[]).expect("bare");
     assert_eq!(

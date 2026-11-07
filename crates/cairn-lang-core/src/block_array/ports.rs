@@ -216,35 +216,11 @@ pub(super) fn port_world_position<S: BuildHasher>(
         .iter()
         .find(|m| m.id.as_deref() == Some(port_id.as_str()))
         .ok_or(PortRejection::UnknownMember)?;
-    match member.role {
-        MemberRole::Door | MemberRole::Window => {}
-        // No `_` arm, so a new `MemberRole` has to be classified here.
-        MemberRole::Floor
-        | MemberRole::Walls
-        | MemberRole::Fill
-        | MemberRole::Roof
-        | MemberRole::Stair
-        | MemberRole::Level
-        | MemberRole::PressurePlate
-        | MemberRole::Lever
-        | MemberRole::Button
-        | MemberRole::Daylight
-        | MemberRole::Observer
-        | MemberRole::Lamp
-        | MemberRole::Piston
-        | MemberRole::Dispenser
-        | MemberRole::Chest
-        | MemberRole::Circuit
-        | MemberRole::RawBlock
-        | MemberRole::RawFill
-        | MemberRole::Place
-        | MemberRole::Connect
-        | MemberRole::Other(_) => {
-            return Err(PortRejection::ReservedRole {
-                role: member.role.keyword().to_owned(),
-                member: member.span.clone(),
-            });
-        }
+    if !is_opening(&member.role) {
+        return Err(PortRejection::ReservedRole {
+            role: member.role.keyword().to_owned(),
+            member: member.span.clone(),
+        });
     }
     let side = member
         .ident_value("side")
@@ -311,6 +287,39 @@ pub(super) fn port_world_position<S: BuildHasher>(
     let x = wall_x.checked_add(nx).ok_or(PortRejection::OutOfRange)?;
     let z = wall_z.checked_add(nz).ok_or(PortRejection::OutOfRange)?;
     Ok((x, place_origin.1, z))
+}
+
+/// Whether a member of `role` is an opening, the only member a port names.
+fn is_opening(role: &MemberRole) -> bool {
+    match role {
+        MemberRole::Door | MemberRole::Window => true,
+        // No `_` arm, so a new `MemberRole` has to be classified here.
+        MemberRole::Floor
+        | MemberRole::Walls
+        | MemberRole::Fill
+        | MemberRole::Roof
+        | MemberRole::Stair
+        | MemberRole::Level
+        | MemberRole::PressurePlate
+        | MemberRole::Lever
+        | MemberRole::Button
+        | MemberRole::Daylight
+        | MemberRole::Observer
+        | MemberRole::Lamp
+        | MemberRole::Piston
+        | MemberRole::Dispenser
+        | MemberRole::Chest
+        | MemberRole::Repeater
+        | MemberRole::Comparator
+        | MemberRole::RedstoneTorch
+        | MemberRole::RedstoneDust
+        | MemberRole::Circuit
+        | MemberRole::RawBlock
+        | MemberRole::RawFill
+        | MemberRole::Place
+        | MemberRole::Connect
+        | MemberRole::Other(_) => false,
+    }
 }
 
 /// Refuse a port on an opening the openings pass did not cut.

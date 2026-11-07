@@ -872,6 +872,57 @@ class BlockKind(unittest.TestCase):
         with self.assertRaises(load.Refused):
             registry.block_kind("cobblestone_wall", FENCE_STATES, TAGS)
 
+    def test_dust_is_the_block_whose_sides_climb(self):
+        power = {"power": [str(level) for level in range(16)]}
+        dust = {**registry.KIND_STATES["redstone_dust"], **power}
+        self.assertEqual(registry.block_kind("redstone_wire", dust, TAGS), "redstone_dust")
+        flat = {side: ["side", "none"] for side in registry.SIDES}
+        self.assertIsNone(registry.block_kind("tripwire", flat, TAGS))
+
+
+SOURCE_TAGS = {"buttons": {"oak_button"}, "pressure_plates": {"stone_pressure_plate"}}
+FACING = {"facing": ["north", "east", "south", "west", "up", "down"]}
+
+
+class DustFaces(unittest.TestCase):
+    def test_a_signal_source_is_joined_on_every_side(self):
+        every = registry.FaceSet((), (("", ("north", "south", "west", "east")),))
+        for name in ("oak_button", "stone_pressure_plate", "redstone_torch", "waxed_lightning_rod"):
+            self.assertEqual(registry.dust_faces(name, {}, SOURCE_TAGS), every, name)
+        self.assertIsNone(registry.dust_faces("stone", {}, SOURCE_TAGS))
+
+    def test_a_repeater_is_joined_along_its_facing(self):
+        faces = registry.dust_faces("repeater", {"facing": FACING["facing"][:4]}, SOURCE_TAGS)
+        self.assertEqual(
+            faces,
+            registry.FaceSet(
+                ("facing",),
+                (
+                    ("east", ("west", "east")),
+                    ("north", ("north", "south")),
+                    ("south", ("north", "south")),
+                    ("west", ("west", "east")),
+                ),
+            ),
+        )
+
+    def test_an_observer_is_joined_at_its_back(self):
+        faces = registry.dust_faces("observer", FACING, SOURCE_TAGS)
+        self.assertEqual(
+            faces,
+            registry.FaceSet(
+                ("facing",),
+                (
+                    ("down", ("up",)),
+                    ("east", ("west",)),
+                    ("north", ("south",)),
+                    ("south", ("north",)),
+                    ("up", ("down",)),
+                    ("west", ("east",)),
+                ),
+            ),
+        )
+
 
 class ConnectionsText(unittest.TestCase):
     def test_a_block_read_alike_at_two_versions_is_one_row_with_both(self):
@@ -880,7 +931,7 @@ class ConnectionsText(unittest.TestCase):
             None,
             False,
             False,
-            registry.Sturdy(("type",), (("bottom", ("down",)), ("top", ("up",)))),
+            registry.FaceSet(("type",), (("bottom", ("down",)), ("top", ("up",)))),
             (("type", "bottom"),),
         )
         body = json.loads(
@@ -902,6 +953,33 @@ class ConnectionsText(unittest.TestCase):
                     "sturdy": {"reads": ["type"], "map": {"bottom": ["down"], "top": ["up"]}},
                 },
                 {"mc_versions": ["1.1"], "ids": ["tuff_wall"], "kind": "wall"},
+            ],
+        )
+
+    def test_the_faces_dust_joins_follow_the_whole_ones(self):
+        lever = registry.Joins(
+            None, False, False, None, dust=registry.FaceSet((), (("", ("north", "east")),))
+        )
+        observer = registry.Joins(
+            None,
+            False,
+            False,
+            registry.FaceSet((), (("", ("down", "up")),)),
+            (("facing", "south"),),
+            registry.FaceSet(("facing",), (("north", ("south",)), ("south", ("north",)))),
+        )
+        body = json.loads(registry.connections_text({"1.0": {"lever": lever, "observer": observer}}))
+        self.assertEqual(
+            body["rows"],
+            [
+                {"mc_versions": ["1.0"], "ids": ["lever"], "dust": ["north", "east"]},
+                {
+                    "mc_versions": ["1.0"],
+                    "ids": ["observer"],
+                    "defaults": {"facing": "south"},
+                    "sturdy": ["down", "up"],
+                    "dust": {"reads": ["facing"], "map": {"north": ["south"], "south": ["north"]}},
+                },
             ],
         )
 

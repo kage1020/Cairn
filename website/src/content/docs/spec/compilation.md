@@ -11,7 +11,7 @@ phases in this fixed order:
 massing     floor / walls / volume / fill
 envelope    roof / stair
 openings    door / window
-fixtures    sign / painting / frame / bed / chest / sensors / actuators
+fixtures    sign / painting / frame / bed / chest / sensors / actuators / Tier 0 parts
 fluids      fill fluid= / water
 logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
 logic_place cell placement → Placement IR
@@ -25,8 +25,8 @@ it may hold are placed.
 
 Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `water` are not keywords
 yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
-`envelope`, `openings`, `fixtures`, whose members are `chest` and every sensor and actuator but
-`door`, `fluids`, and
+`envelope`, `openings`, `fixtures`, whose members are `chest`, every sensor and actuator but
+`door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts)), `fluids`, and
 `raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)).
 `cairn compile` does not run the three `logic_*` phases, so a `logic` line lays no redstone in the
 artifact; they are reached only through `cairn synth --experimental-logic-synth`.

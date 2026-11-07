@@ -70,6 +70,22 @@ const FIXTURES: &[(&str, &str)] = &[
         "dispenser",
         "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  dispenser at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
     ),
+    (
+        "repeater",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  repeater at=2,1,2 facing=east mat_slot=%SLOT%\n",
+    ),
+    (
+        "comparator",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  comparator at=2,1,2 facing=east mat_slot=%SLOT%\n",
+    ),
+    (
+        "redstone_torch",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  redstone_torch at=2,1,2 mat_slot=%SLOT%\n",
+    ),
+    (
+        "redstone_dust",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  redstone_dust at=2,1,2 mat_slot=%SLOT%\n",
+    ),
     // The control: a `window` reads its `mat_slot=`, so it builds differently under the two names.
     (
         "window",

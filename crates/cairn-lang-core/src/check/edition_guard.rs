@@ -1,5 +1,5 @@
-//! The `edition_guard` pass: a line under an `@edition` guard that is not a raw member, since the
-//! semantic layer is edition-neutral
+//! The `edition_guard` pass: a line under an `@edition` guard that is neither a raw member nor a
+//! Tier 0 part, since the semantic layer is edition-neutral
 //! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
 use crate::ast::{Item, Module, Statement};
@@ -46,9 +46,9 @@ fn walk(body: &[Statement], sink: &mut DiagnosticSink) {
 fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut DiagnosticSink) {
     let what = match line {
         Statement::Generic { keyword, .. } => match role_of(keyword) {
-            // `keyword_allowlist` reports an unknown keyword, offering the raw ones.
+            // `keyword_allowlist` reports an unknown keyword, offering the ones a guard holds.
             MemberRole::Other(_) => return,
-            role if role.is_raw() => return,
+            role if role.is_escape_hatch() => return,
             _ => format!("a `{keyword}`"),
         },
         Statement::Logic { .. } => "a `logic` line".to_owned(),
@@ -62,8 +62,8 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
         code: DiagnosticCode::SemanticInEditionGuard,
         span: line.span().clone(),
         primary: format!(
-            "{what} stands under an `@edition {edition}` guard, which holds only raw members: the \
-             semantic layer is edition-neutral"
+            "{what} stands under an `@edition {edition}` guard, which holds only raw members and \
+             Tier 0 parts: the semantic layer is edition-neutral"
         ),
         notes: vec![
             DiagnosticNote {
@@ -74,7 +74,8 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
                 span: None,
                 message: "dedent the line out of the guard so that every edition builds it, and \
                           bind what differs per edition from a `theme NAME_java` and a `theme \
-                          NAME_bedrock`; the guard is for `raw_block` and `raw_fill`"
+                          NAME_bedrock`; the guard is for `raw_block`, `raw_fill` and the Tier 0 \
+                          parts `repeater`, `comparator`, `redstone_torch` and `redstone_dust`"
                     .into(),
             },
         ],

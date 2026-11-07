@@ -14,10 +14,9 @@ not carried in the language core ([§14.4](#144-time-model)).
 
 ## 14.1 Two tiers, and the v1 boundary
 
-- **Tier 0, physical placement.** You write `repeater facing=north delay=2` and the like, placing
-  parts yourself while the compiler derives the blockstate. Behaviour is not modeled
-  ([Blockstate Model](/spec/blockstate/)). None of these parts is a keyword yet, so such a line is
-  `E_UNKNOWN_KEYWORD` today.
+- **Tier 0, physical placement.** You write `repeater at=3,1,2 facing=north delay=2` and the like,
+  placing parts yourself while the compiler derives the blockstate. Behaviour is not modeled
+  ([Blockstate Model](/spec/blockstate/)). The parts are [below](#tier-0-parts).
 - **Tier 1, logic.** This chapter. You declare a signal graph and the compiler turns it into voxels
   through synthesis → placement → routing.
 
@@ -75,6 +74,68 @@ given to a primitive that counts none, as `edge_rising(sig.x, 2)` stops at `,`; 
 A word the library does not hold is `E_PARSE` where it stands, and the message names what could
 stand there: `sig.a xnor sig.b` stops at `xnor`, and `toggle(sig.x)` at its `(`, naming the
 primitives the library calls.
+
+### Tier 0 parts
+
+Four keywords place a redstone part by hand: `repeater`, `comparator`, `redstone_torch` and
+`redstone_dust`. Each sets one block, whose blockstate the compiler derives as it does any member's.
+What the part does is not modeled: it is in no netlist, nothing checks what it powers or what powers
+it, and it carries no signal binding, so a `->` tail on one is `E_MISPLACED_BINDING`
+([§14.2](#142-signal-binding)). A part stands in a `struct` or `def` body, directly or under a
+`level`, and an `@edition` guard holds it as it holds a `raw_block` ([Versioning and
+Editions](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). In a `site` body it
+is `E_MISPLACED_MEMBER`.
+
+```
+repeater       at=3,1,2 facing=east delay=2
+comparator     at=4,1,2 facing=east mode=subtract
+redstone_torch at=inside.back offset=2 y=2
+redstone_torch at=5,1,2 facing=east
+redstone_dust  at=6,1,2
+redstone_dust  at=6,1,4 connect=none
+```
+
+**Where a part stands.** `at=x,y,z` names its cell as a `raw_block`'s `at=` does ([Materials and
+Themes §7.4](/spec/materials-themes/#74-raw-blocks)), and the part is refused or deferred where a
+`raw_block` would be. `at=<side>.outside` or `at=inside.<side>`, with `offset=` and `y=`, sets it by
+a wall as a `pressure_plate` is set ([§14.2](#142-signal-binding)). An `offset=` or `y=` beside a
+triple is `E_INVALID_MEMBER`, since the triple names the cell whole.
+
+**Which way it looks.** A `repeater` or a `comparator` reads the cell behind it and drives the cell
+in front of it, and its `facing=` is the way it drives. By a wall it takes `in`, `out`, `left` or
+`right`, as an `observer` does, and drives away from the wall when its line writes none. At a triple
+it takes `north`, `south`, `east` or `west`, north toward the `back` wall and east toward the
+`right` one, and its line must write one, since no wall stands by it to drive away from. A
+`redstone_torch` by a wall hangs on the wall's face, pointing away from it. At a triple it stands on
+the block under it, or, with a `facing=` of the four compass words, hangs on the side of the block
+behind it, pointing that way: that is the torch to wall-torch substitution of [Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override), read off what the torch is
+attached to, and a torch by a wall has nothing for a `facing=` to choose. A `redstone_dust` looks
+no way, so `facing=` is not among its keys. Any word a part's anchor does not take there, a compass
+word by a wall, a word from a wall at a triple or a `facing=` on a torch by a wall among them, is
+`E_INVALID_MEMBER`, and the part is not placed.
+
+**Its states.** `delay=` sets a repeater's delay, a whole number from 1 to 4, and 1 when the line
+writes none. `mode=compare` or `mode=subtract` sets a comparator's mode, `compare` when the line
+writes none. A dust's four sides are derived once every member is painted ([Blockstate Model,
+Connections](/spec/blockstate/#connections)), unless `connect=none` builds it as a dot, joining no
+side, or `connect=all` as a cross, joining all four. Each part is built as it stands with nothing
+powering it: a repeater neither powered nor locked, a comparator unpowered, a torch lit and dust at
+power 0, and the game settles each once a block update reaches it. A `facing=`, `delay=`, `mode=`
+or `connect=` whose value is not the kind its key takes, a number where a word goes or a word where
+a number goes, is `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), and the
+part is built as if it were not written. A value of the right kind that names nothing listed here,
+such as `delay=5`, is `E_INVALID_MEMBER`.
+
+**What it is built from.** Each part has one block to be built from, its tier-1 token ([Materials
+and Themes](/spec/materials-themes/#tier-1-tokens)), and a `mat_slot=` on one is
+`W_IGNORED_ARGUMENT`. What a part stands or hangs on is not checked, as a lever's is not: a part
+with no block under it, or a torch with none behind it, drops as soon as a block update reaches it.
+
+**A part and the circuit.** A Tier 0 part is outside the netlist, so place-and-route neither reads
+it nor routes around it. The two never share a cell: a `circuit` reservation lies under the scope's
+base plane ([§14.5](#145-place-and-route)), and every member, a Tier 0 part among them, stands at or
+above it.
 
 ## 14.2 Signal binding
 
@@ -293,8 +354,9 @@ A `struct` or `def` has one such line: a second one in the same body is `E_DUPLI
 ([Lint §11.1](/spec/lint/#111-diagnostic-codes)). Logic that needs more than one reservation goes
 in more than one scope.
 
-The line stands among the body's own members: a reservation spans the scope's `size=WxH` and takes
-no `level`'s `y=`, so place-and-route reads no `circuit` line under a `level`. Such a line is
+The line stands among the body's own members: a reservation spans the scope's `size=WxH` under its
+base plane, where no member stands, and takes no `level`'s `y=`, so place-and-route reads no
+`circuit` line under a `level`. Such a line is
 `E_MISPLACED_MEMBER` on that line, not `E_DUPLICATE_CIRCUIT`.
 
 The internal algorithm runs five stages:

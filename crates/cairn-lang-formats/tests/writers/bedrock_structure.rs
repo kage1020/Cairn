@@ -1,5 +1,6 @@
 //! The Bedrock `.mcstructure` tag tree and bytes, against wiki.bedrock.dev's "mcstructure" page.
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockArray, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
 };
@@ -669,4 +670,48 @@ fn a_state_map_of_another_version_is_a_caller_bug() {
     let (ba, _) = asymmetric_array();
     let latest = resolve_bedrock_target("1.26.60").expect("known target");
     let _ = build_mcstructure_tag(&ba, &target_1_21_60(), &states_for(&latest));
+}
+
+#[test]
+fn the_tier0_parts_write_the_bedrock_blocks_and_states_of_their_java_ones() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+                  repeater at=1,1,1 facing=east delay=3\n  \
+                  comparator at=2,1,1 facing=north mode=subtract\n  \
+                  redstone_torch at=3,1,1\n  \
+                  redstone_torch at=inside.back offset=1 y=2\n  \
+                  redstone_dust at=1,1,3\n  redstone_dust at=2,1,3\n";
+    let ir = crate::common::lower_source(source, Edition::Bedrock, Some("1.21.60"));
+    assert_eq!(ir.diagnostics, []);
+    let ba = ir.structures.values().next().expect("one structure");
+    let (root, notes) = build(ba).expect("build");
+    assert_eq!(note_fields(&notes), []);
+    let written: Vec<(&str, String)> = block_palette(&root)
+        .iter()
+        .map(|entry| {
+            let states: Vec<String> = states_of(entry)
+                .entries
+                .iter()
+                .map(|(key, value)| format!("{key}={value:?}"))
+                .collect();
+            (name_of(entry), states.join(","))
+        })
+        .filter(|(name, _)| !matches!(*name, "minecraft:air" | "minecraft:cobblestone"))
+        .collect();
+    let expected = [
+        ("minecraft:redstone_torch", r#"torch_facing_direction=String("top")"#),
+        // GeyserMC's mapping: a Bedrock wall torch looks the opposite way to Java's `facing`.
+        ("minecraft:redstone_torch", r#"torch_facing_direction=String("north")"#),
+        ("minecraft:redstone_wire", "redstone_signal=Int(0)"),
+        (
+            "minecraft:unpowered_comparator",
+            r#"minecraft:cardinal_direction=String("south"),output_lit_bit=Byte(0),output_subtract_bit=Byte(1)"#,
+        ),
+        (
+            "minecraft:unpowered_repeater",
+            r#"minecraft:cardinal_direction=String("west"),repeater_delay=Int(2)"#,
+        ),
+    ]
+    .map(|(name, states)| (name, states.to_owned()));
+    assert_eq!(written, expected);
 }

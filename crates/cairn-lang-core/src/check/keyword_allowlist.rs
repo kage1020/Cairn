@@ -29,7 +29,7 @@ fn walk(members: &[Member], body: BodyKind, sink: &mut DiagnosticSink) {
                     Some(_) => known_keywords()
                         .iter()
                         .copied()
-                        .filter(|keyword| role_of(keyword).is_raw())
+                        .filter(|keyword| role_of(keyword).is_escape_hatch())
                         .collect(),
                     None => body.allowed_keywords(),
                 };

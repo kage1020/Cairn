@@ -11,6 +11,7 @@ use super::component::fill_component;
 use super::door::{HungDoor, fill_door};
 use super::fill::fill_material;
 use super::members::{StructCtx, palette_index_for};
+use super::part::fill_part;
 use super::plate::fill_pressure_plate;
 use super::raw::fill_raw;
 use super::roof_fill::fill_roof;
@@ -81,6 +82,12 @@ pub(super) fn paint_member(
             fill_component(member, y_offset, ctx, palette, canvas, diagnostics);
         }
         MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Repeater
+        | MemberRole::Comparator
+        | MemberRole::RedstoneTorch
+        | MemberRole::RedstoneDust => {
+            fill_part(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
         MemberRole::RawBlock | MemberRole::RawFill => {
             fill_raw(member, y_offset, ctx, palette, canvas, diagnostics);
         }

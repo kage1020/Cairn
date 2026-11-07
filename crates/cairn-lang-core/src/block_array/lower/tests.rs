@@ -1321,6 +1321,22 @@ const SLOT_IGNORERS: &[(&str, &str)] = &[
         "struct s size=3x3\n  connect a.entry to b.entry path=@gravel mat_slot=d\n",
     ),
     (
+        "repeater",
+        "struct s size=3x3\n  repeater at=1,0,1 facing=east mat_slot=d\n",
+    ),
+    (
+        "comparator",
+        "struct s size=3x3\n  comparator at=1,0,1 facing=east mat_slot=d\n",
+    ),
+    (
+        "redstone_torch",
+        "struct s size=3x3\n  redstone_torch at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "redstone_dust",
+        "struct s size=3x3\n  redstone_dust at=1,0,1 mat_slot=d\n",
+    ),
+    (
         "raw_block",
         "struct s size=3x3\n  raw_block mat=minecraft:stone at=1,0,1 mat_slot=d\n",
     ),

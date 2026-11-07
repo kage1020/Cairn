@@ -21,6 +21,10 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "piston",
     "dispenser",
     "chest",
+    "repeater",
+    "comparator",
+    "redstone_torch",
+    "redstone_dust",
     "circuit",
     "raw_block",
     "raw_fill",
@@ -81,6 +85,14 @@ pub enum MemberRole {
     Dispenser,
     /// `chest` fixture.
     Chest,
+    /// `repeater` Tier 0 part.
+    Repeater,
+    /// `comparator` Tier 0 part.
+    Comparator,
+    /// `redstone_torch` Tier 0 part, a standing or a wall torch.
+    RedstoneTorch,
+    /// `redstone_dust` Tier 0 part.
+    RedstoneDust,
     /// `circuit` redstone region marker.
     Circuit,
     /// `raw_block` escape hatch: one block id in one cell.
@@ -197,10 +209,21 @@ impl MemberRole {
             .map(|(key, _)| *key)
     }
 
-    /// Whether this is an escape-hatch role, the only kind an `@edition` guard holds.
+    /// Whether this is a role of the escape-hatch layer, a raw member or a Tier 0 part, the only
+    /// kind an `@edition` guard holds.
     #[must_use]
-    pub fn is_raw(&self) -> bool {
-        matches!(self, Self::RawBlock | Self::RawFill)
+    pub fn is_escape_hatch(&self) -> bool {
+        matches!(self, Self::RawBlock | Self::RawFill) || self.is_tier0_part()
+    }
+
+    /// Whether this is a Tier 0 part, a redstone part placed by hand (`spec/redstone` "Tier 0
+    /// parts").
+    #[must_use]
+    pub fn is_tier0_part(&self) -> bool {
+        matches!(
+            self,
+            Self::Repeater | Self::Comparator | Self::RedstoneTorch | Self::RedstoneDust
+        )
     }
 
     /// The `key=` arguments this role's vocabulary holds, in spec order, including spec'd keys
@@ -229,11 +252,14 @@ impl MemberRole {
             Self::PressurePlate | Self::Lever | Self::Button | Self::Daylight => {
                 &["at", "offset", "y"]
             }
-            Self::Observer => &["at", "offset", "y", "facing"],
+            Self::Observer | Self::RedstoneTorch => &["at", "offset", "y", "facing"],
             Self::Lamp => &["at", "offset", "y", "lit_by"],
             Self::Piston => &["at", "offset", "y", "powered_by", "facing", "sticky"],
             Self::Dispenser => &["at", "offset", "y", "fired_by", "facing"],
             Self::Chest => &["at", "offset", "y", "facing", "size", "waterlogged"],
+            Self::Repeater => &["at", "offset", "y", "facing", "delay"],
+            Self::Comparator => &["at", "offset", "y", "facing", "mode"],
+            Self::RedstoneDust => &["at", "offset", "y", "connect"],
             Self::Circuit => &["region", "void"],
             Self::RawBlock => &["mat", "at"],
             Self::RawFill => &["mat", "from", "to"],
@@ -253,7 +279,10 @@ impl MemberRole {
             Self::Stair => &["half", "facing", "shape", "waterlogged"],
             Self::Door => &["hinge", "open"],
             Self::Chest => &["facing", "size", "waterlogged"],
-            Self::Observer | Self::Piston | Self::Dispenser => &["facing"],
+            Self::Observer | Self::Piston | Self::Dispenser | Self::RedstoneTorch => &["facing"],
+            Self::Repeater => &["facing", "delay"],
+            Self::Comparator => &["facing", "mode"],
+            Self::RedstoneDust => &["connect"],
             Self::Floor
             | Self::Walls
             | Self::Fill
@@ -309,6 +338,10 @@ impl MemberRole {
             | Self::Lamp
             | Self::Piston
             | Self::Dispenser
+            | Self::Repeater
+            | Self::Comparator
+            | Self::RedstoneTorch
+            | Self::RedstoneDust
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
@@ -412,6 +445,10 @@ impl MemberRole {
             | Self::Piston
             | Self::Dispenser
             | Self::Chest
+            | Self::Repeater
+            | Self::Comparator
+            | Self::RedstoneTorch
+            | Self::RedstoneDust
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
@@ -457,6 +494,10 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "piston" => MemberRole::Piston,
         "dispenser" => MemberRole::Dispenser,
         "chest" => MemberRole::Chest,
+        "repeater" => MemberRole::Repeater,
+        "comparator" => MemberRole::Comparator,
+        "redstone_torch" => MemberRole::RedstoneTorch,
+        "redstone_dust" => MemberRole::RedstoneDust,
         "circuit" => MemberRole::Circuit,
         "raw_block" => MemberRole::RawBlock,
         "raw_fill" => MemberRole::RawFill,

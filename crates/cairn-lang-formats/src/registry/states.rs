@@ -647,13 +647,14 @@ pub enum StateRefusal {
 }
 
 impl<'a> VersionStates<'a> {
-    /// The canonical blocks `id` names here: its own Java block, or each Java block mapped onto it.
+    /// The canonical blocks `id` names here with the states `given`: its own Java block, or each
+    /// Java block mapped onto it.
     #[must_use]
-    pub fn java_ids<'s>(&self, id: &'s str) -> Vec<&'s str>
+    pub fn java_ids<'s>(&self, id: &'s str, given: &IndexMap<String, String>) -> Vec<&'s str>
     where
         'a: 's,
     {
-        if self.reads_as_java(id) {
+        if self.reads_as_own(id, given) {
             return vec![id];
         }
         self.map.onto.get(id).map_or_else(Vec::new, |forms| {
@@ -678,26 +679,35 @@ impl VersionStates<'_> {
     /// [`StateRefusal`] when the map has no form for the states, or they are not the block's.
     pub fn resolve(&self, state: &BlockState) -> Result<BedrockForm, StateRefusal> {
         let id = state.id.as_str();
-        if self.reads_as_java(id) {
+        if self.reads_as_own(id, &state.properties) {
             self.resolve_same(id, &state.properties)
         } else {
             self.resolve_onto(id, &state.properties)
         }
     }
 
-    /// Every canonical property `id` takes here with the values it holds, read as [`Self::resolve`]
-    /// reads the id, or `None` when no Java block maps onto it or the palette refuses some of its
-    /// states, so the map cannot tell which states it takes.
+    /// Every canonical property `id` takes here with the values it holds, those of each block
+    /// [`Self::resolve`] may read the id as, or `None` when no Java block maps onto it or the
+    /// palette refuses some of its states, so the map cannot tell which states it takes.
     #[must_use]
     pub fn canonical_domain(&self, id: &str) -> Option<IndexMap<String, Vec<String>>> {
-        let (forms, refused) = if self.reads_as_java(id) {
+        let own = self.reads_as_java(id);
+        let (forms, refused) = if own {
             (self.map.from.get(id), self.map.refused_from.contains(id))
         } else {
             (self.map.onto.get(id), self.map.refused_onto.contains(id))
         };
         let forms = forms.filter(|forms| !forms.is_empty() && !refused)?;
+        let others = self
+            .map
+            .onto
+            .get(id)
+            .filter(|_| own && !self.map.refused_onto.contains(id))
+            .into_iter()
+            .flatten()
+            .filter(|(java, _)| java != id);
         let mut domain: IndexMap<String, Vec<String>> = IndexMap::new();
-        for (_, at) in forms {
+        for (_, at) in forms.iter().chain(others) {
             for (key, held) in &self.family(*at).java {
                 let values = domain.entry(key.clone()).or_default();
                 for value in held {
@@ -718,6 +728,33 @@ impl VersionStates<'_> {
                 .onto
                 .get(id)
                 .is_some_and(|forms| forms.iter().any(|(java, _)| java == id))
+    }
+
+    /// Whether an entry of `id` with the states `given` reads as `id`'s own Java block: `id` names
+    /// one here, and that block has every property `given` carries or no other block mapped onto
+    /// `id` has them.
+    fn reads_as_own(&self, id: &str, given: &IndexMap<String, String>) -> bool {
+        if !self.reads_as_java(id) {
+            return false;
+        }
+        let own_takes = self
+            .map
+            .from
+            .get(id)
+            .and_then(|forms| forms.first())
+            .is_none_or(|(_, at)| {
+                let defaults = &self.family(*at).defaults;
+                given.keys().all(|key| defaults.contains_key(key))
+            });
+        own_takes
+            || !self.map.onto.get(id).is_some_and(|forms| {
+                forms.iter().any(|(java, at)| {
+                    java != id
+                        && given
+                            .keys()
+                            .all(|key| self.family(*at).java.contains_key(key))
+                })
+            })
     }
 
     fn family(&self, at: usize) -> &Family {

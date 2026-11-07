@@ -28,6 +28,13 @@ fn kind(kind: JoinKind) -> Joins {
     }
 }
 
+/// The four sideways faces.
+const SIDES: Faces = Faces::NONE
+    .with(Face::North)
+    .with(Face::East)
+    .with(Face::South)
+    .with(Face::West);
+
 #[test]
 fn a_java_target_reads_the_connecting_blocks_its_version_declares() {
     let at = |version, id| joins(Edition::Java, Some(version), &state(id, &[]));
@@ -139,7 +146,10 @@ fn a_chest_is_read_with_the_way_it_faces_and_an_ender_chest_pairs_with_none() {
             "trapped_chest",
             &[("facing", "east")]
         ),
-        chest(Face::East),
+        Some(Joins {
+            dust: SIDES,
+            ..kind(JoinKind::Chest { facing: Face::East })
+        }),
     );
     assert_eq!(
         at(Edition::Java, "26.3", "copper_chest", &[]),
@@ -154,4 +164,30 @@ fn a_chest_is_read_with_the_way_it_faces_and_an_ender_chest_pairs_with_none() {
         at(Edition::Bedrock, "1.21.0", "chest", &[]),
         chest(Face::North)
     );
+}
+
+#[test]
+fn dust_joins_a_signal_source_on_every_side_and_a_repeater_or_observer_only_where_it_reads_or_drives()
+ {
+    let at = |id, properties: &[(&str, &str)]| {
+        joins(Edition::Java, Some("1.21"), &state(id, properties)).map(|joins| joins.dust)
+    };
+    assert_eq!(
+        joins(Edition::Java, Some("1.21"), &state("redstone_wire", &[])),
+        Some(kind(JoinKind::Dust)),
+    );
+    assert_eq!(at("lever", &[]), Some(SIDES));
+    assert_eq!(at("oak_button", &[]), Some(SIDES));
+    assert_eq!(at("redstone_torch", &[]), Some(SIDES));
+    assert_eq!(at("redstone_block", &[]), Some(SIDES));
+    assert_eq!(
+        at("repeater", &[("facing", "east")]),
+        Some(Faces::NONE.with(Face::East).with(Face::West)),
+    );
+    assert_eq!(
+        at("observer", &[("facing", "east")]),
+        Some(Faces::NONE.with(Face::West)),
+    );
+    assert_eq!(at("observer", &[]), Some(Faces::NONE.with(Face::North)));
+    assert_eq!(at("stone", &[]), Some(Faces::NONE));
 }

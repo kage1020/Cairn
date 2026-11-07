@@ -82,6 +82,10 @@ theme exact_oak:
 | `@piston.default` | `piston` が置くピストン |
 | `@piston.sticky` | `sticky=true` の `piston` が置く粘着ピストン |
 | `@dispenser.default` | `dispenser` が置くディスペンサー |
+| `@repeater.default` | `repeater` が置くリピーター |
+| `@comparator.default` | `comparator` が置くコンパレーター |
+| `@redstone_torch.default`、`@redstone_torch.wall` | `redstone_torch` が置く、立てたトーチと壁付きトーチ |
+| `@redstone_dust.default` | `redstone_dust` が敷くダスト |
 
 tier-1 のトークンが解決するブロックは **tier-2** で、Evolving です。ターゲットごとにカタログで決まり、リリースによって変わることがあります。カタログにトークンを足しても何も壊れません。トークンの名前を変えたり廃止したりするのは Stable な面の破壊的変更なので、非推奨期間のあいだは古いトークンも `W_DEPRECATED` 付きで解決し続けます。正規ブロックトークンは tier-1 でも tier-2 でもありません。[§7.3](#73-バージョンとエディションをまたぐ対応付け) の対応付けを通じてブロックを指す名前で、ターゲットが受け付ける名前はそのレジストリパックで決まり、[互換性ティア](/ja/spec/compatibility/#evolving)で Evolving と定めています。
 

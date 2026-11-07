@@ -400,6 +400,22 @@ const SWEEP: &[(&str, &str)] = &[
         "chest",
         "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single waterlogged=false\n",
     ),
+    (
+        "repeater",
+        "  repeater id=rp class=c at=inside.front offset=1 y=1 facing=in delay=2\n",
+    ),
+    (
+        "comparator",
+        "  comparator id=cp class=c at=inside.back offset=1 y=1 facing=left mode=subtract\n",
+    ),
+    (
+        "redstone_torch",
+        "  redstone_torch id=t class=c at=inside.left offset=1 y=1\n  redstone_torch at=1,0,1 facing=east\n",
+    ),
+    (
+        "redstone_dust",
+        "  redstone_dust id=rd class=c at=inside.right offset=1 y=1\n  redstone_dust at=2,0,2 connect=none\n",
+    ),
     ("circuit", "  circuit id=c class=c region=r void=2\n"),
     (
         "place",
@@ -1001,6 +1017,26 @@ const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
         keyword: "dispenser",
         body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  dispenser at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "repeater",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  repeater at=1,1,1 facing=east mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "comparator",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  comparator at=1,1,1 facing=east mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "redstone_torch",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  redstone_torch at=1,1,1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "redstone_dust",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  redstone_dust at=1,1,1 mat_slot=%SLOT%\n",
         why: Unread::Inapplicable,
     },
     UnreadSlot {

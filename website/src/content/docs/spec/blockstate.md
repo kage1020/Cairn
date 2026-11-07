@@ -5,19 +5,21 @@ title: "6. Blockstate Model"
 ## 6.1 Derive by default, promote on override
 
 **Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape`, a
-door's `hinge` and `open`, a chest's `facing` and `size`, and an observer's, piston's and
-dispenser's `facing` are built. The others and the `beam` and `note_block` keywords are not
+door's `hinge` and `open`, a chest's `facing` and `size`, an observer's, piston's, dispenser's,
+repeater's and comparator's `facing`, a repeater's `delay`, a comparator's `mode` and a redstone
+dust's `connect` are built. The others and the `beam` and `note_block` keywords are not
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
-Of these, stair geometry, the orientation of doors, chests and redstone components, pane, fence and
-wall connections, and chest pairing are derived today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they
+Of these, stair geometry, the orientation of doors, chests and redstone components, pane, fence,
+wall and redstone dust connections, and chest pairing are derived today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they
 sit. An eave `stair` gets only its cardinal `facing`, from the side it sits on, and its `half` and
 `shape` are what its line writes, or `top` and `straight`. Connections and pairs are set once every
 member is painted ([Connections](#connections)), and `waterlogged` where a water `fill` overlaps a
-block ([§6.3](#63-waterlogged)). The torch and sign substitution below is not derived yet.
+block ([§6.3](#63-waterlogged)). Of the substitutions below, a redstone torch's is derived and a
+sign's is not yet.
 
 A `door` sets a door block two rows tall into the opening it cuts
 ([Syntax §5.4](/spec/syntax/#54-selectors)): `half=lower` on the row it opens at and `half=upper`
@@ -54,6 +56,16 @@ observer, piston or dispenser faces away from the wall unless a `facing=` on its
 with `up` and `down` beside a chest's four words. Each is built unpowered, so its `powered`,
 `lit`, `extended` or `triggered` is never written.
 
+The Tier 0 parts, `repeater`, `comparator`, `redstone_torch` and `redstone_dust`, take their
+cells and their turns as [Redstone §14.1](/spec/redstone/#tier-0-parts) says. A repeater's or
+comparator's `facing=` names the way it drives, the way its front looks, and the game's `facing` is
+the way its back looks, so the block takes the opposite one. A torch set by a wall, or at a triple
+with a `facing=`, is the wall torch, its `facing` the way it points, and a torch at a triple with
+none is the standing torch. A repeater's `delay` and a comparator's `mode` are what the line writes,
+or `1` and `compare`. Each part is built with nothing powering it, so its `powered`, `locked`, `lit`
+or `power` is never written and the block's own default stands: a repeater neither powered nor
+locked, a comparator unpowered, a torch lit and dust at power 0.
+
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
 promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let
 the author write it". The rule is "derive by default; any blockstate that can be intent is
@@ -67,10 +79,11 @@ Cases that MUST stay overridable, because each can be intent:
 | Furniture | `chest size=single` (auto-merging from adjacency is forbidden), `bed facing`, `door hinge` / `open` |
 | Orientation | `log` / `pillar axis` (a horizontal beam), `trapdoor open` / `half`, `glazed_terracotta` rotation |
 | Counts | `snow layers`, `candle count` |
-| Redstone | `redstone_dust connect`, `repeater delay`, `observer` / `piston` / `dispenser facing`, `note` / `instrument` |
+| Redstone | `redstone_dust connect`, `repeater delay`, `comparator mode`, `observer` / `piston` / `dispenser` / `repeater` / `comparator facing`, `note` / `instrument` |
 
 Two easy-to-miss cases belong to derivation, not intent: `torch` ↔ `wall_torch` and `sign` ↔
-`wall_sign` are substituted automatically by attachment face.
+`wall_sign` are substituted automatically by attachment face. A `redstone_torch` is the one built
+today, from the anchor and `facing=` its line writes.
 
 The example below uses keywords the compiler does not know yet. Only its `stair` and `chest` lines
 are accepted: `beam` and `note_block` are `E_UNKNOWN_KEYWORD`.
@@ -84,9 +97,9 @@ note_block at=2,1,2 instrument=bit note=12
 
 ### Connections
 
-Once every member of a body is painted, each glass pane, run of bars, fence, wall, fence gate and
-chest in it takes its connection states from the blocks beside it, as the game sets them when a
-block is placed. A face of a block is **sturdy** when the block's model covers it whole: a full block's
+Once every member of a body is painted, each glass pane, run of bars, fence, wall, fence gate,
+chest and redstone dust in it takes its connection states from the blocks beside it, as the game
+sets them when a block is placed. A face of a block is **sturdy** when the block's model covers it whole: a full block's
 every face, a bottom slab's bottom, an upright stair's bottom and back. Leaves, shulker boxes,
 barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined by a face.
 
@@ -110,6 +123,20 @@ barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined
   toward `offset=0` for a row along the inside of a wall, and an odd chest at its other end stays
   `single`. The chest whose partner is on its own right is `left`, and its partner is `right`. A
   chest that writes its `type`, as `size=single` does, pairs with none.
+- A redstone dust's `north`, `east`, `south` and `west` are `side` toward the blocks beside it that
+  the game joins dust to: dust, a repeater lying along that side, an observer whose back faces the
+  dust, and the blocks that give off a signal from any side, such as a comparator, a redstone torch,
+  a lever, a button, a pressure plate, a daylight detector and a block of redstone. Toward dust a
+  row up in the cell beside it, standing on a block whose top is sturdy, a side is `up` when that
+  block's face toward this dust is sturdy too and `side` when it is not; toward dust a row down in
+  the cell beside it, a side is `side`. The game also lets dust climb onto a hopper or a trapdoor,
+  whose tops are not sturdy, and that climb is not derived. A diagonal joins only through a cell
+  that holds nothing: the cell above this dust for the one up, the cell beside it for the one down.
+  A block standing there lets the dust past or cuts it off as the game decides by whether the block
+  conducts, which no table records, so the diagonal is derived as if it were cut. A dust joined on
+  neither side of one axis is then joined on both sides of the other, so a lone dust is a cross and
+  one joined once runs straight through. `connect=none` writes all four `none`, a dot, and
+  `connect=all` all four `side`, a cross, whatever stands beside it.
 
 A state the block's material or line writes is kept, and only the others are derived:
 `@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. A raw block keeps

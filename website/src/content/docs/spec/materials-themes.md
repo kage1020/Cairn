@@ -125,6 +125,10 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@piston.default` | The piston a `piston` sets |
 | `@piston.sticky` | The sticky piston a `piston` with `sticky=true` sets |
 | `@dispenser.default` | The dispenser a `dispenser` sets |
+| `@repeater.default` | The repeater a `repeater` sets |
+| `@comparator.default` | The comparator a `comparator` sets |
+| `@redstone_torch.default`, `@redstone_torch.wall` | The standing torch and the wall torch a `redstone_torch` sets |
+| `@redstone_dust.default` | The dust a `redstone_dust` lays |
 
 The block a tier-1 token resolves to is **tier-2**, which is Evolving: it is the catalog's answer
 for the target, and a release may change it. Adding a token to the catalogs breaks nothing.

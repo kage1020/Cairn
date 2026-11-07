@@ -24,7 +24,7 @@ fn walk(members: &[Member], body: BodyKind, inside_level: bool, sink: &mut Diagn
     for member in members {
         // `edition_guard` reports the line instead.
         if matches!(member.role, MemberRole::Other(_))
-            || (member.edition_guard.is_some() && !member.role.is_raw())
+            || (member.edition_guard.is_some() && !member.role.is_escape_hatch())
         {
             continue;
         }

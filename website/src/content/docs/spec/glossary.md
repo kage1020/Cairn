@@ -127,6 +127,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 
 ## Redstone
 
+- **Tier 0 part.** A redstone part placed by hand, `repeater`, `comparator`, `redstone_torch` or
+  `redstone_dust`, whose blockstate is derived and whose behaviour is not modeled. See
+  [redstone §14.1](/spec/redstone/#tier-0-parts).
 - **Logical cell / edition cell / physical tile.** The three-tier cell library. The Logic IR
   selects logical cells; the per-edition cell library lowers them to physical tiles. Confines the
   Java/Bedrock difference to the library. See [redstone §14.6](/spec/redstone/#146-edition-differences).
@@ -167,8 +170,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 
 - **Edition.** `java` or `bedrock`. Compile-time only; never present in the DSL semantic layer.
   See [versioning-editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability).
-- **`@edition` guard.** A line in a body that keeps the raw members indented under it to one
-  edition's build. It is the one place a source writes an edition, and it never holds the semantic
+- **`@edition` guard.** A line in a body that keeps the raw members and Tier 0 parts indented
+  under it to one edition's build. It is the one place a source writes an edition, and it never holds the semantic
   layer. See
   [versioning-editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch).
 - **Cairn version vs MC target.** Two **separate axes** distinguished by field/flag/keyword, never

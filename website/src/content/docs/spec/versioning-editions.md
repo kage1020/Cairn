@@ -135,6 +135,14 @@ then `=` and the Java ID when the two are spelled apart (`oak_double_slab=oak_sl
   "dropped": [] }
 ```
 
+A palette entry is read by its ID. An ID a row pairs with itself names its own Java block, and the
+entry reads as that block's family. Any other ID is a Bedrock spelling, and the entry reads as the
+family, among the Java blocks spelled that way, that takes its states. An ID that is both reads as
+its own Java block unless the entry carries a state that block does not take: Bedrock spells Java's
+`redstone_wall_torch` as `redstone_torch` too, so there `redstone_torch[facing=north,lit=true]` is
+the wall torch and `redstone_torch[lit=true]` the standing one. The states such an ID takes are
+those of every block it reads as.
+
 The same stairs at 1.21.60 have no `minecraft:corner`, so that row lists `shape` under `dropped`: a
 property the family holds at more than one value that no Bedrock state reads. `waterlogged` never
 drops, because the `.mcstructure` carries it as the water layer. A version's `refused` list names
@@ -979,11 +987,11 @@ one. What the guard adds is the edition whose build keeps the line.
 
 What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
 §7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
-§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary), which are not keywords yet, so one under
-a guard is `E_UNKNOWN_KEYWORD` as it is anywhere. Any other member, and a `logic` or `assert` line,
-is `E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking
-anything indented under it along. A raw member in a `site` body is `E_MISPLACED_MEMBER`, with a
-guard around it or not.
+§14.1](/spec/redstone/#tier-0-parts): `repeater`, `comparator`, `redstone_torch` and
+`redstone_dust`. Any other member, and a `logic` or `assert` line, is
+`E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking
+anything indented under it along. A raw member or a Tier 0 part in a `site` body is
+`E_MISPLACED_MEMBER`, with a guard around it or not.
 
 A pinned build keeps the lines under its own edition's guards and drops the other edition's.
 `cairn compile --edition java` builds the snippet's `minecraft:light` and never reads

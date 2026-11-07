@@ -10,7 +10,7 @@ title: "4. コンパイルモデル"
 massing     floor / walls / volume / fill
 envelope    roof / stair
 openings    door / window
-fixtures    sign / painting / frame / bed / chest / センサー / アクチュエーター
+fixtures    sign / painting / frame / bed / chest / センサー / アクチュエーター / Tier 0 の部品
 fluids      fill fluid= / water
 logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
 logic_place セルの配置 → Placement IR
@@ -20,7 +20,7 @@ raw         raw_block / raw_fill (エスケープハッチ)
 
 `fill` は、`mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。そのため、水は、水を含めるブロックが置かれたあとで注ぎます。
 
-ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest` と、`door` 以外のすべてのセンサーとアクチュエーターです ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
+ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 

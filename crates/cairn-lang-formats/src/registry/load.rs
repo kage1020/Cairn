@@ -286,7 +286,7 @@ impl PackView<'_> {
                     .is_none_or(|ids| contains(ids, id));
                 if declared { vec![id] } else { Vec::new() }
             }
-            Edition::Bedrock => self.state_maps.at(version)?.java_ids(id),
+            Edition::Bedrock => self.state_maps.at(version)?.java_ids(id, &state.properties),
         };
         let mut joins = canonical
             .into_iter()

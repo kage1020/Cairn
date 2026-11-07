@@ -139,7 +139,11 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         | MemberRole::Lamp
         | MemberRole::Piston
         | MemberRole::Dispenser
-        | MemberRole::Chest => MemberDisposition::Paints(Phase::Fixtures),
+        | MemberRole::Chest
+        | MemberRole::Repeater
+        | MemberRole::Comparator
+        | MemberRole::RedstoneTorch
+        | MemberRole::RedstoneDust => MemberDisposition::Paints(Phase::Fixtures),
         MemberRole::RawBlock | MemberRole::RawFill => MemberDisposition::Paints(Phase::Raw),
         MemberRole::Circuit => MemberDisposition::Reserves,
         MemberRole::Place | MemberRole::Connect | MemberRole::Other(_) => {
@@ -249,6 +253,10 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::Piston
         | MemberRole::Dispenser
         | MemberRole::Chest
+        | MemberRole::Repeater
+        | MemberRole::Comparator
+        | MemberRole::RedstoneTorch
+        | MemberRole::RedstoneDust
         | MemberRole::Circuit
         | MemberRole::RawBlock
         | MemberRole::RawFill

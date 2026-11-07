@@ -85,6 +85,8 @@ Bedrock のパックは、ステートマップをさらに 2 つのコンポー
   "dropped": [] }
 ```
 
+パレットの項目は ID で読みます。ある行が自分自身と対にしている ID は自分の Java ブロックを指し、項目はそのブロックのファミリとして読みます。それ以外の ID は Bedrock の綴りで、項目は、そう綴られる Java ブロックのうち、その項目のステートを取るファミリとして読みます。両方にあたる ID は、項目がその Java ブロックの取らないステートを持たない限り、自分の Java ブロックとして読みます。Bedrock は Java の `redstone_wall_torch` も `redstone_torch` と綴るので、そこでは `redstone_torch[facing=north,lit=true]` が壁付きトーチ、`redstone_torch[lit=true]` が立てたトーチです。そうした ID が取るステートは、それが読むすべてのブロックのステートです。
+
 1.21.60 の同じ階段には `minecraft:corner` がないので、その行は `shape` を `dropped` に挙げます。`dropped` は、ファミリが複数の値を取るのに、どの Bedrock ステートも読まないプロパティです。`waterlogged` は落ちません。`.mcstructure` は水の層としてそれを持つからです。バージョンの `refused` は、GeyserMC が写す先のステートをそのバージョンのパレットが宣言していないペアを挙げます。そのバージョンでは、パックはそれらの形を持ちません。
 
 プロパティを落とすと何を失うかは GeyserMC のマッピングにはないので、`sensitivity` は手で書きます。プロパティとそれが当てはまるブロックごとに 1 行で、ブロックを挙げない行は、そのプロパティを落とすほかのすべてのブロックに当てはまります。`missing_state` は Java の既定値以外の値を失い (1.21.60 までの階段の `shape`)、`derived` は Bedrock が自分で導くので何も失いません (フェンスの接続)。行の `reason` は `W_INTENT_DEGRADED` が出力する文章です ([§10.7](#107-java--bedrock-の可搬性))。どの行も分類していない落ちるプロパティはローダーが拒否し、何も落とさない行は抽出スクリプトが拒否します。
@@ -501,7 +503,7 @@ struct shop size=9x7
 
 ガードはスコープを作りません。その行は、ガードが立つ位置に書いたものとして読みます。そのため `level` の下のガードにある行は、その `level` の `y=` を受け継ぎます。また、ガードの外で受ける検査は、ガードの中でもすべて受けます。ガードが加えるのは、その行を残すビルドのエディションだけです。
 
-ガードの中に書けるのはエスケープハッチの層です。つまり `raw_block` と `raw_fill` ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))、そして [レッドストーン §14.1](/ja/spec/redstone/#141-2-つの層と-v1-の範囲) の Tier 0 の部品です。Tier 0 の部品はまだキーワードではないので、ガードの中でもほかの場所と同じく `E_UNKNOWN_KEYWORD` になります。それ以外のメンバー、`logic` の行、`assert` の行は `E_SEMANTIC_IN_EDITION_GUARD` です ([リント](/ja/spec/lint/))。報告は最も外側の該当行で 1 回だけ行い、その下にインデントした行もまとめて扱います。`site` の本体にある生のメンバーは、ガードの有無にかかわらず `E_MISPLACED_MEMBER` です。
+ガードの中に書けるのはエスケープハッチの層です。つまり `raw_block` と `raw_fill` ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))、そして [レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品) の Tier 0 の部品 (`repeater`、`comparator`、`redstone_torch`、`redstone_dust`) です。それ以外のメンバー、`logic` の行、`assert` の行は `E_SEMANTIC_IN_EDITION_GUARD` です ([リント](/ja/spec/lint/))。報告は最も外側の該当行で 1 回だけ行い、その下にインデントした行もまとめて扱います。`site` の本体にある生のメンバーと Tier 0 の部品は、ガードの有無にかかわらず `E_MISPLACED_MEMBER` です。
 
 エディションを固定したビルドは、そのエディションのガードの中の行を残し、もう一方のエディションの行を捨てます。`cairn compile --edition java` はスニペットの `minecraft:light` を組み上げ、`light_block_15` は読みません。エディションを固定しない lowering は、どちらも残しません。`cairn lower` はエディションに中立な中間表現を出力するので、ガードの中の行をすべて省き、省いた数を注記で示します。
 

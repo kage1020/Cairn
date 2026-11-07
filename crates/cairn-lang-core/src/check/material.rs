@@ -73,7 +73,11 @@ fn without_a_material(member: &Member) -> WithoutAMaterial {
         | MemberRole::Observer
         | MemberRole::Lamp
         | MemberRole::Piston
-        | MemberRole::Dispenser => WithoutAMaterial::IsOneBlock,
+        | MemberRole::Dispenser
+        | MemberRole::Repeater
+        | MemberRole::Comparator
+        | MemberRole::RedstoneTorch
+        | MemberRole::RedstoneDust => WithoutAMaterial::IsOneBlock,
         // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`, and `mat=`, whose absence is
         // `E_INVALID_MEMBER`.
         MemberRole::Connect | MemberRole::RawBlock | MemberRole::RawFill => {

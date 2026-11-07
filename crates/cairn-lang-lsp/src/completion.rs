@@ -109,8 +109,15 @@ pub fn completions(
             &replace,
             cairn_lang_core::intent::known_keywords()
                 .iter()
-                .filter(|kw| role_of(kw).is_raw())
-                .map(|kw| (*kw, "raw member")),
+                .filter(|kw| role_of(kw).is_escape_hatch())
+                .map(|kw| {
+                    let detail = if role_of(kw).is_tier0_part() {
+                        "Tier 0 part"
+                    } else {
+                        "raw member"
+                    };
+                    (*kw, detail)
+                }),
         ),
     })
 }
@@ -914,7 +921,7 @@ mod tests {
     }
 
     #[test]
-    fn an_edition_guard_completes_its_word_its_edition_and_the_raw_members_under_it() {
+    fn an_edition_guard_completes_its_word_its_edition_and_the_escape_hatches_under_it() {
         let guard = "struct s size=3x3\n  @";
         assert_eq!(labels(&complete(guard, "@")), ["edition"]);
         let edition = "struct s size=3x3\n  @edition ";
@@ -922,7 +929,14 @@ mod tests {
         let under = "struct s size=3x3\n  floor mat_slot=f\n  @edition java\n    ";
         assert_eq!(
             labels(&complete(under, "@edition java\n    ")),
-            ["raw_block", "raw_fill"]
+            [
+                "repeater",
+                "comparator",
+                "redstone_torch",
+                "redstone_dust",
+                "raw_block",
+                "raw_fill"
+            ]
         );
         let after = "struct s size=3x3\n  @edition java\n    raw_block at=1,0,1\n  ";
         assert_eq!(

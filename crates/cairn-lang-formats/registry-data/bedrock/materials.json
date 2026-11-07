@@ -38,6 +38,11 @@
     { "token": "lamp.default", "block": "redstone_lamp" },
     { "token": "piston.default", "block": "piston" },
     { "token": "piston.sticky", "block": "sticky_piston" },
-    { "token": "dispenser.default", "block": "dispenser" }
+    { "token": "dispenser.default", "block": "dispenser" },
+    { "token": "repeater.default", "block": "unpowered_repeater" },
+    { "token": "comparator.default", "block": "unpowered_comparator" },
+    { "token": "redstone_torch.default", "block": "redstone_torch" },
+    { "token": "redstone_torch.wall", "block": "redstone_torch" },
+    { "token": "redstone_dust.default", "block": "redstone_wire" }
   ]
 }
