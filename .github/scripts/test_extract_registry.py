@@ -357,6 +357,70 @@ class ExtractBedrock(Case):
         )
 
 
+class GeyserMappings(Case):
+    """`geyser_mappings` offline, its one pinned state map served by a fake `fetch`."""
+
+    MAP = load.write_nbt({"bedrock_mappings": [{"bedrock_identifier": "minecraft:air"}]})
+    SHA256 = hashlib.sha256(MAP).hexdigest()
+    URL = "https://raw.githubusercontent.com/GeyserMC/mappings/abc/blocks.nbt"
+
+    def setUp(self) -> None:
+        self.cache = self.temporary_folder()
+        self.cached = self.cache / f"geyser-mappings-{self.SHA256[:12]}.nbt"
+        self.fetched: list[str] = []
+        self.patch(registry, "BEDROCK_STATE_MAPS", {"1.21.0": ("abc", self.SHA256, "1.21")})
+
+    def serve(self, body: bytes) -> None:
+        def fetch(url: str, timeout: int) -> bytes:
+            self.fetched.append(url)
+            return body
+
+        self.patch(registry, "fetch", fetch)
+
+    def test_a_cached_map_that_matches_its_pin_is_read_without_a_download(self) -> None:
+        self.cached.write_bytes(self.MAP)
+        self.serve(b"")
+        self.assertEqual(
+            registry.geyser_mappings("1.21.0", self.cache),
+            [{"bedrock_identifier": "minecraft:air"}],
+        )
+        self.assertEqual(self.fetched, [])
+
+    def test_a_cached_map_that_fails_its_pin_is_downloaded_again(self) -> None:
+        self.cached.write_bytes(b"corrupt")
+        self.serve(self.MAP)
+        self.assertEqual(
+            registry.geyser_mappings("1.21.0", self.cache),
+            [{"bedrock_identifier": "minecraft:air"}],
+        )
+        self.assertEqual(self.fetched, [self.URL])
+        self.assertEqual(self.cached.read_bytes(), self.MAP)
+
+    def test_a_download_that_fails_its_pin_is_refused_and_not_cached(self) -> None:
+        self.serve(b"corrupt")
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.0", self.cache),
+            f"the state map at {self.URL} does not match its pinned SHA-256",
+        )
+        self.assertFalse(self.cached.exists())
+
+    def test_a_map_whose_nbt_does_not_read_is_refused(self) -> None:
+        body = load.write_nbt({"other": []})
+        pin = ("abc", hashlib.sha256(body).hexdigest(), "1.21")
+        self.patch(registry, "BEDROCK_STATE_MAPS", {"1.21.0": pin})
+        self.serve(body)
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.0", self.cache),
+            "the state map for Bedrock 1.21.0 does not read: 'bedrock_mappings'",
+        )
+
+    def test_a_version_with_no_pinned_map_is_refused(self) -> None:
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.1", self.cache),
+            "no state map is pinned for Bedrock 1.21.1; add it to BEDROCK_STATE_MAPS",
+        )
+
+
 class ExtractJava(Case):
     """`extract_java` offline: Mojang's metadata, the jar and the data generator are faked."""
 
@@ -641,12 +705,37 @@ class VersionFamilies(unittest.TestCase):
         self.assertEqual(sorted(version_map.families), [("oak_planks", "oak_planks")])
         self.assertEqual(version_map.refused, ["oak_stairs"])
 
+    def test_a_pair_that_leaves_out_a_state_the_palette_declares_is_refused(self):
+        palette = {**BEDROCK_TABLE, "oak_stairs": {**BEDROCK_TABLE["oak_stairs"], "lit": [False]}}
+        version_map = registry.version_families(JAVA, mappings(), palette)
+        self.assertEqual(sorted(version_map.families), [("oak_planks", "oak_planks")])
+        self.assertEqual(version_map.refused, ["oak_stairs"])
+
+    def test_a_bedrock_state_some_java_state_lacks_fails_the_run(self):
+        entries = mappings()
+        bit = entries[0]["state"]["upside_down_bit"]
+        entries[0] = {**entries[0], "state": {"upside_down_bit": bit}}
+        with self.assertRaisesRegex(
+            load.Refused, "a Bedrock state of `oak_stairs` is no function of its Java states"
+        ):
+            registry.version_families(JAVA, entries, BEDROCK_TABLE)
+
     def test_geysers_placeholder_maps_nothing(self):
         entries = mappings()
         entries[-1] = {"bedrock_identifier": "minecraft:unknown"}
-        version_map = registry.version_families(JAVA, entries, BEDROCK_TABLE)
+        with mock.patch.object(registry, "PLACEHOLDER_BLOCKS", frozenset({"oak_planks"})):
+            version_map = registry.version_families(JAVA, entries, BEDROCK_TABLE)
         self.assertEqual(sorted(version_map.families), [("oak_stairs", "oak_stairs")])
         self.assertEqual(version_map.refused, [])
+
+    def test_a_block_newly_mapped_to_the_placeholder_fails_the_run(self):
+        entries = mappings()
+        entries[-1] = {"bedrock_identifier": "minecraft:unknown"}
+        with self.assertRaisesRegex(
+            load.Refused,
+            "the state map maps `oak_planks` to no Bedrock block; add it to PLACEHOLDER_BLOCKS",
+        ):
+            registry.version_families(JAVA, entries, BEDROCK_TABLE)
 
     def test_a_map_whose_length_is_not_the_java_states_is_refused(self):
         with self.assertRaisesRegex(load.Refused, "entries for"):
@@ -696,6 +785,9 @@ class StatesText(unittest.TestCase):
         )
         body = json.loads(text)
         self.assertEqual(body["refused"], {"1.2": ["oak_stairs"]})
+        self.assertEqual(
+            body["in_water"], ["bubble_column", "kelp", "kelp_plant", "seagrass", "tall_seagrass"]
+        )
         self.assertEqual(
             [(row["mc_versions"], row["ids"]) for row in body["families"]],
             [(["1.0", "1.1", "1.2"], ["oak_planks"]), (["1.0", "1.1"], ["oak_stairs"])],
@@ -778,6 +870,34 @@ class WholeFaces(unittest.TestCase):
     def test_a_square_left_open_by_a_sliver_is_not_covered(self):
         self.assertTrue(registry.covers_square([(0, 8.5, 0, 16), (8.5, 16, 0, 16)]))
         self.assertFalse(registry.covers_square([(0, 8, 0, 16), (8.5, 16, 0, 16)]))
+        self.assertTrue(registry.covers_square([(6, 10, 6, 10)], (7, 9, 7, 9)))
+        self.assertFalse(registry.covers_square([(6, 10, 6, 10)], (7, 9, 0, 9)))
+
+    def test_a_turn_about_x_comes_before_the_turn_about_y(self):
+        # Up turns to north about x, and north to east about y; the other order leaves north.
+        self.assertEqual(registry.turned((0, 1, 0), 90, 0), (0, 0, -1))
+        self.assertEqual(registry.turned((0, 0, -1), 0, 90), (1, 0, 0))
+        self.assertEqual(registry.turned((0, 1, 0), 90, 90), (1, 0, 0))
+
+
+def box(low, high):
+    """A box showing every face."""
+    return (low, high, frozenset(registry.FACES))
+
+
+class CoveredParts(unittest.TestCase):
+    def test_a_box_resting_on_the_bottom_covers_the_parts_under_it(self):
+        lantern = [box((5, 0, 5), (11, 7, 11)), box((6, 7, 6), (10, 9, 10))]
+        self.assertEqual(registry.covered_parts(lantern), {"post"})
+        slab = [box((0, 0, 0), (16, 8, 16))]
+        self.assertEqual(registry.covered_parts(slab), set(registry.WALL_PARTS))
+        # A log of a campfire lying east to west covers the post and the strips it crosses.
+        log = [box((0, 0, 6), (16, 4, 10))]
+        self.assertEqual(registry.covered_parts(log), {"post", "east", "west"})
+
+    def test_a_box_off_the_bottom_or_without_height_covers_nothing(self):
+        self.assertEqual(registry.covered_parts([box((0, 8, 0), (16, 16, 16))]), set())
+        self.assertEqual(registry.covered_parts([box((0, 0, 0), (16, 0, 16))]), set())
 
 
 class StateModels(unittest.TestCase):
@@ -809,6 +929,10 @@ class StateModels(unittest.TestCase):
             registry.state_models(blockstate, {"north": "none", "east": "none", "up": "false"}),
             [[{"model": "post"}]],
         )
+
+    def test_a_state_no_variant_matches_is_refused(self):
+        with self.assertRaises(load.Refused):
+            registry.state_models({"variants": {"type=bottom": {"model": "a"}}}, {"type": "top"})
 
 
 class TagMembers(unittest.TestCase):
@@ -886,7 +1010,7 @@ FACING = {"facing": ["north", "east", "south", "west", "up", "down"]}
 
 class DustFaces(unittest.TestCase):
     def test_a_signal_source_is_joined_on_every_side(self):
-        every = registry.FaceSet((), (("", ("north", "south", "west", "east")),))
+        every = registry.Lookup((), (("", ("north", "south", "west", "east")),))
         for name in ("oak_button", "stone_pressure_plate", "redstone_torch", "waxed_lightning_rod"):
             self.assertEqual(registry.dust_faces(name, {}, SOURCE_TAGS), every, name)
         self.assertIsNone(registry.dust_faces("stone", {}, SOURCE_TAGS))
@@ -895,7 +1019,7 @@ class DustFaces(unittest.TestCase):
         faces = registry.dust_faces("repeater", {"facing": FACING["facing"][:4]}, SOURCE_TAGS)
         self.assertEqual(
             faces,
-            registry.FaceSet(
+            registry.Lookup(
                 ("facing",),
                 (
                     ("east", ("west", "east")),
@@ -910,7 +1034,7 @@ class DustFaces(unittest.TestCase):
         faces = registry.dust_faces("observer", FACING, SOURCE_TAGS)
         self.assertEqual(
             faces,
-            registry.FaceSet(
+            registry.Lookup(
                 ("facing",),
                 (
                     ("down", ("up",)),
@@ -924,6 +1048,128 @@ class DustFaces(unittest.TestCase):
         )
 
 
+FULL_MODEL = {
+    "elements": [{"from": [0, 0, 0], "to": [16, 16, 16], "faces": {f: {} for f in registry.FACES}}]
+}
+LANTERN_MODEL = {"elements": [{"from": [5, 0, 5], "to": [11, 7, 11], "faces": {"up": {}}}]}
+
+
+def connection_jars() -> tuple[zipfile.ZipFile, zipfile.ZipFile]:
+    """A server declaring the tags the rules read, and a client drawing a few blocks."""
+    tags = {
+        "walls": ["minecraft:cobblestone_wall"],
+        "fences": [],
+        "wooden_fences": [],
+        "fence_gates": ["minecraft:oak_fence_gate"],
+        "wall_post_override": ["minecraft:torch"],
+        "leaves": ["minecraft:oak_leaves"],
+        "shulker_boxes": [],
+        "buttons": [],
+        "pressure_plates": [],
+    }
+    server = archive(
+        {f"data/minecraft/tags/block/{tag}.json": {"values": v} for tag, v in tags.items()}
+    )
+    full = {"variants": {"": {"model": "block/full"}}}
+    client = archive(
+        {
+            "assets/minecraft/models/block/full.json": FULL_MODEL,
+            "assets/minecraft/models/block/lantern.json": LANTERN_MODEL,
+            "assets/minecraft/blockstates/stone.json": full,
+            "assets/minecraft/blockstates/oak_leaves.json": full,
+            "assets/minecraft/blockstates/cobblestone_wall.json": full,
+            "assets/minecraft/blockstates/torch.json": {"variants": {"": {"model": "block/air"}}},
+            "assets/minecraft/models/block/air.json": {},
+            "assets/minecraft/blockstates/lantern.json": {
+                "variants": {
+                    "hanging=false": {"model": "block/lantern"},
+                    "hanging=true": {"model": "block/air"},
+                }
+            },
+            "assets/minecraft/blockstates/oak_fence_gate.json": {
+                "variants": {"": {"model": "block/air"}}
+            },
+        }
+    )
+    return server, client
+
+
+def report_block(properties: dict[str, list[str]], default: dict[str, str]) -> dict:
+    """A `blocks.json` entry with every state of `properties`, `default` the default one."""
+    keys = sorted(properties)
+    states = []
+    for values in itertools.product(*(properties[k] for k in keys)):
+        state = dict(zip(keys, values))
+        states.append({"properties": state, **({"default": True} if state == default else {})})
+    return {"properties": properties, "states": states} if keys else {"states": [{"default": True}]}
+
+
+class ConnectionTable(unittest.TestCase):
+    def test_each_block_is_read_with_its_kind_tags_faces_and_covered_parts(self):
+        server, client = connection_jars()
+        gate_states = {
+            "facing": ["north", "south", "west", "east"],
+            "in_wall": registry.BOOLEAN,
+            "open": registry.BOOLEAN,
+            "powered": registry.BOOLEAN,
+        }
+        report = {
+            "minecraft:stone": report_block({}, {}),
+            "minecraft:oak_leaves": report_block({}, {}),
+            "minecraft:torch": report_block({}, {}),
+            "minecraft:lantern": report_block({"hanging": registry.BOOLEAN}, {"hanging": "false"}),
+            "minecraft:cobblestone_wall": report_block(
+                {**registry.KIND_STATES["wall"], "waterlogged": registry.BOOLEAN},
+                {
+                    "east": "none",
+                    "north": "none",
+                    "south": "none",
+                    "west": "none",
+                    "up": "true",
+                    "waterlogged": "false",
+                },
+            ),
+            "minecraft:oak_fence_gate": report_block(
+                gate_states,
+                {"facing": "north", "in_wall": "false", "open": "false", "powered": "false"},
+            ),
+        }
+        every_face = registry.Lookup((), (("", tuple(registry.FACES)),))
+        every_part = registry.Lookup((), (("", tuple(registry.WALL_PARTS)),))
+        self.assertEqual(
+            registry.connection_table(report, server, client),
+            {
+                "stone": registry.Joins(None, False, False, sturdy=every_face, covers=every_part),
+                "oak_leaves": registry.Joins(
+                    None, True, False, sturdy=every_face, covers=every_part
+                ),
+                "torch": registry.Joins(None, False, True, sturdy=None),
+                "lantern": registry.Joins(
+                    None,
+                    False,
+                    False,
+                    sturdy=None,
+                    covers=registry.Lookup(("hanging",), (("false", ("post",)), ("true", ()))),
+                    defaults=(("hanging", "false"),),
+                ),
+                # A connecting block's faces are its own, and what it covers is its states'.
+                "cobblestone_wall": registry.Joins("wall", False, False, sturdy=every_face),
+                "oak_fence_gate": registry.Joins(
+                    "fence_gate",
+                    False,
+                    False,
+                    sturdy=None,
+                    defaults=(("facing", "north"), ("open", "false")),
+                ),
+            },
+        )
+
+    def test_a_block_the_client_ships_no_blockstate_for_is_refused(self):
+        server, client = connection_jars()
+        with self.assertRaises(load.Refused):
+            registry.connection_table({"minecraft:dirt": report_block({}, {})}, server, client)
+
+
 class ConnectionsText(unittest.TestCase):
     def test_a_block_read_alike_at_two_versions_is_one_row_with_both(self):
         wall = registry.Joins("wall", False, False, None)
@@ -931,8 +1177,9 @@ class ConnectionsText(unittest.TestCase):
             None,
             False,
             False,
-            registry.FaceSet(("type",), (("bottom", ("down",)), ("top", ("up",)))),
-            (("type", "bottom"),),
+            sturdy=registry.Lookup(("type",), (("bottom", ("down",)), ("top", ("up",)))),
+            covers=registry.Lookup(("type",), (("bottom", ("post",)), ("top", ()))),
+            defaults=(("type", "bottom"),),
         )
         body = json.loads(
             registry.connections_text(
@@ -951,6 +1198,7 @@ class ConnectionsText(unittest.TestCase):
                     "ids": ["oak_slab"],
                     "defaults": {"type": "bottom"},
                     "sturdy": {"reads": ["type"], "map": {"bottom": ["down"], "top": ["up"]}},
+                    "covers": {"reads": ["type"], "map": {"bottom": ["post"], "top": []}},
                 },
                 {"mc_versions": ["1.1"], "ids": ["tuff_wall"], "kind": "wall"},
             ],
@@ -958,15 +1206,15 @@ class ConnectionsText(unittest.TestCase):
 
     def test_the_faces_dust_joins_follow_the_whole_ones(self):
         lever = registry.Joins(
-            None, False, False, None, dust=registry.FaceSet((), (("", ("north", "east")),))
+            None, False, False, None, dust=registry.Lookup((), (("", ("north", "east")),))
         )
         observer = registry.Joins(
             None,
             False,
             False,
-            registry.FaceSet((), (("", ("down", "up")),)),
-            (("facing", "south"),),
-            registry.FaceSet(("facing",), (("north", ("south",)), ("south", ("north",)))),
+            sturdy=registry.Lookup((), (("", ("down", "up")),)),
+            defaults=(("facing", "south"),),
+            dust=registry.Lookup(("facing",), (("north", ("south",)), ("south", ("north",)))),
         )
         body = json.loads(registry.connections_text({"1.0": {"lever": lever, "observer": observer}}))
         self.assertEqual(

@@ -23,7 +23,7 @@ fn raw_blocks(out: &BlockArrayIr) -> Vec<Built> {
         .iter()
         .filter(|member| member.role.starts_with("raw_"))
         .flat_map(|member| &member.resolved_state)
-        .map(|block| (block.state.id.clone(), block.cells.clone()))
+        .map(|block| (block.state.id.clone(), block.cells().collect()))
         .collect()
 }
 

@@ -145,7 +145,8 @@ fn a_key_that_is_blockstate_on_one_role_is_an_argument_on_another() {
     );
     let member = &ir.structs[0].members[0];
     assert!(member.intent_state.is_empty());
-    assert!(member.arguments.contains_key("shape"));
+    let arguments: Vec<&str> = member.arguments.keys().map(String::as_str).collect();
+    assert_eq!(arguments, ["side", "y", "size", "shape"]);
 }
 
 #[test]

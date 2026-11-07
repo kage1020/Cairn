@@ -2,4 +2,4 @@
 source: crates/cairn-lang-formats/src/registry/load/tests.rs
 expression: pack.bytes_hash().as_str()
 ---
-sha256:9397892cd541a426937ef45a6109e6e49c1ae2e97dad40eb9eaebf29cb5eb20e
+sha256:3e4410f84348aee0a3d870b56f1b21edeadea28023ff8f77b45076d8da1c4a03

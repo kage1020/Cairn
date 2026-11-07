@@ -14,7 +14,7 @@ cargo install cairn-lang-cli
 
 That installs the `cairn` binary.
 
-Every [release](https://github.com/kage1020/Cairn/releases) also attaches prebuilt archives for Linux, macOS, and Windows (`x86_64` and `aarch64`). Each archive contains `cairn` and the `cairn-lsp` language server. All but the Windows `aarch64` archive carry a sigstore bundle; cosign ships no binary for that platform.
+Every [release](https://github.com/kage1020/Cairn/releases) also attaches prebuilt archives for Linux, macOS, and Windows (`x86_64` and `aarch64`). Each archive contains `cairn` and the `cairn-lsp` language server. All but the Windows `aarch64` archive carry a sigstore bundle; cosign ships no binary for that platform. From 2026.12.0, each release also attaches the [VS Code extension](editors/vscode/) as `cairn-lang-<version>.vsix` and publishes that file to the Visual Studio Marketplace and Open VSX.
 
 From a checkout, `cargo build --release` puts both binaries in `target/release/`.
 

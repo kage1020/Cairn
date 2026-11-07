@@ -79,14 +79,11 @@ impl TargetRegistry for FakeResolver {
     }
 
     fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
-        self.later
-            .iter()
-            .any(|later| later == id)
-            .then(|| DeclaredElsewhere {
-                edition: Edition::Java,
-                until: None,
-                since: Some("2.0".to_owned()),
-            })
+        if self.later.iter().any(|later| later == id) {
+            DeclaredElsewhere::new(Edition::Java, None, Some("2.0".to_owned()))
+        } else {
+            None
+        }
     }
 }
 
@@ -322,23 +319,20 @@ fn a_suggestion_is_still_found_inside_the_namespace_that_has_one() {
 
 #[test]
 fn an_id_a_later_version_declares_is_answered_with_that_version_rather_than_a_spelling() {
+    // One edit from a declared id, so only the suppression keeps the spelling out.
     let registry = FakeResolver::new(vec![])
-        .pinned(&["minecraft:dark_oak_planks"])
-        .later(&["minecraft:pale_oak_planks"]);
-    let err = resolve_block_state(&token("pale_oak_planks"), Some(&registry)).unwrap_err();
+        .pinned(&["minecraft:oak_planks"])
+        .later(&["minecraft:oak_plank"]);
+    let err = resolve_block_state(&token("oak_plank"), Some(&registry)).unwrap_err();
     assert_eq!(
         err,
         MaterialDeferred::UnknownId(Box::new(UnknownId {
-            id: "minecraft:pale_oak_planks".into(),
+            id: "minecraft:oak_plank".into(),
             registry: "test 1.0".into(),
             origin: IdOrigin::Authored,
             suggestion: None,
             aliases: Vec::new(),
-            elsewhere: Some(DeclaredElsewhere {
-                edition: Edition::Java,
-                until: None,
-                since: Some("2.0".into()),
-            }),
+            elsewhere: DeclaredElsewhere::new(Edition::Java, None, Some("2.0".into())),
             absent: None,
         })),
     );

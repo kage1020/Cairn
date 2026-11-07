@@ -961,7 +961,7 @@ fn every_rejection_note_renders_in_full() {
         (format!("`a.p` is a window with no wall to cut into: {NO_WALLS}{OWN}"), true),
         (format!("`a.p` is a window whose rows y=0..=0 are not all inside one wall course (the walls occupy y=1..=3){OWN}"), true),
         (format!("`a.p` is a window whose 2 rows from y=4294967295 run past the highest row a build can address (the walls occupy y=1..=3){OWN}"), true),
-        ("`a.p` is a door the openings pass did not cut, so a strip would end against the wall — the finding on its own line says why".to_owned(), true),
+        ("`a.p` is a door the openings pass did not cut, so a strip would end against the wall — the finding on its own line, or on the material its `mat_slot=` names, says why".to_owned(), true),
         ("`a.p` is a window the openings pass did not cut, so a strip would end against the wall — the finding on its own line, or on the material its `mat_slot=` names, says why".to_owned(), true),
         ("`a.p` would sit outside the coordinate range a build can address — bring its `place` closer to the origin".to_owned(), false),
     ];

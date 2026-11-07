@@ -91,7 +91,8 @@ fn an_eave_stair_beside_a_roof_whose_kind_does_not_read_waits_up_to_the_tallest_
     let roof = "roof kind=gabel mat_slot=roof overhang=1";
     let within = "stair kind=stairs mat_slot=roof side=front y=4";
     let above = "stair kind=stairs mat_slot=roof side=back y=99";
-    let src = walled("9x9", &format!("{roof}\n  {within}\n  {above}"));
+    let fill = "fill fluid=water from=1,99,1 to=1,1,1";
+    let src = walled("9x9", &format!("{roof}\n  {within}\n  {above}\n  {fill}"));
     let out = lowered(&src);
     assert_eq!(
         findings(&src, &out),
@@ -121,6 +122,16 @@ fn an_eave_stair_beside_a_roof_whose_kind_does_not_read_waits_up_to_the_tallest_
                     "lower the stair or its `level`, or raise the `walls` to reach its row",
                 ],
             ),
+            (
+                DiagnosticCode::InvalidMember,
+                fill,
+                "fill `from=1,99,1` does not fit in the struct (dims.y=4)",
+                vec![
+                    "a corner's `y` runs from 0 to 3, the struct's top row",
+                    "a `roof` whose `kind=` or `slope_to=` does not read may raise it to row 14",
+                    "lower the fill's box, or raise the `walls` to reach its rows",
+                ],
+            ),
         ],
     );
 }
@@ -129,9 +140,12 @@ fn an_eave_stair_beside_a_roof_whose_kind_does_not_read_waits_up_to_the_tallest_
 fn an_eave_stair_above_walls_that_paint_nothing_names_the_rows_they_would_hold() {
     let above = "stair kind=stairs side=front y=20";
     let within = "stair kind=stairs side=back y=6";
+    let fill_above = "fill fluid=water from=1,1,1 to=1,20,1";
+    let fill_within = "fill fluid=water from=1,1,1 to=1,6,1";
     let src = format!(
         "struct hut size=5x5\n  walls mat_slot=wall height=3\n  \
-         roof kind=gable overhang=1 mat_slot=roof\n  {above}\n  {within}\n"
+         roof kind=gable overhang=1 mat_slot=roof\n  {above}\n  {within}\n  {fill_above}\n  \
+         {fill_within}\n"
     );
     let out = lowered(&src);
     assert_eq!(
@@ -154,6 +168,25 @@ fn an_eave_stair_above_walls_that_paint_nothing_names_the_rows_they_would_hold()
                 vec![
                     "a `walls` member that would reach this row paints nothing; the stair is \
                      built once that member's material resolves to a block",
+                ],
+            ),
+            (
+                DiagnosticCode::InvalidMember,
+                fill_above,
+                "fill `to=1,20,1` does not fit in the struct (dims.y=5)",
+                vec![
+                    "a corner's `y` runs from 0 to 7, the struct's top row",
+                    "rows 5 to 7 wait on a `walls` member that paints nothing",
+                    "lower the fill's box, or raise the `walls` to reach its rows",
+                ],
+            ),
+            (
+                DiagnosticCode::DeferredMember,
+                fill_within,
+                "fill `to=1,6,1` does not fit in the struct (dims.y=5)",
+                vec![
+                    "a `walls` member that would reach these rows paints nothing; the box is \
+                     filled once that member's material resolves to a block",
                 ],
             ),
         ],
@@ -199,8 +232,9 @@ fn a_member_beside_walls_under_a_level_with_no_y_waits_on_that_level() {
     let window = "window side=back offset=1 y=1 size=2x2 mat_slot=glass";
     let plate = "pressure_plate at=inside.front offset=2 y=5";
     let stair = "stair kind=stairs side=front y=5 mat_slot=roof";
+    let fill = "fill fluid=water from=1,1,1 to=1,5,1";
     let src = format!(
-        "{THEME}struct s size=7x7\n  {door}\n  {window}\n  {plate}\n  {stair}\n  \
+        "{THEME}struct s size=7x7\n  {door}\n  {window}\n  {plate}\n  {stair}\n  {fill}\n  \
          roof kind=flat overhang=1 mat_slot=roof\n\n  level id=l\n    walls mat_slot=wall height=3\n"
     );
     let out = lowered(&src);
@@ -243,6 +277,15 @@ fn a_member_beside_walls_under_a_level_with_no_y_waits_on_that_level() {
                 vec![
                     "a `level` that is not placed holds a `walls` member that may reach this row; \
                      the stair is built once that `level` is placed",
+                ],
+            ),
+            (
+                DiagnosticCode::DeferredMember,
+                fill,
+                "fill `to=1,5,1` does not fit in the struct (dims.y=2)",
+                vec![
+                    "a `level` that is not placed holds a `walls` member that may reach these \
+                     rows; the box is filled once that `level` is placed",
                 ],
             ),
         ],

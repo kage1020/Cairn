@@ -9,7 +9,7 @@ use cairn_lang_core::block_array::{
 use cairn_lang_core::{DiagnosticCode, lower, parse, resolve};
 use serde_json::json;
 
-use crate::common::{duo_with, findings, lowered};
+use crate::common::{duo_with, findings, lowered, only_structure, solid_cells};
 
 /// A block's states as a test table lists them.
 type Table = &'static [(
@@ -39,6 +39,14 @@ const PINNED: Table = &[
         ],
     ),
     ("minecraft:oak_log", &[("axis", &["x", "y", "z"])]),
+    (
+        "minecraft:oak_button",
+        &[
+            ("face", &["floor", "wall", "ceiling"]),
+            ("facing", &["north", "south", "west", "east"]),
+            ("powered", &["true", "false"]),
+        ],
+    ),
     ("minecraft:oak_planks", &[]),
     (
         "minecraft:oak_stairs",
@@ -48,17 +56,34 @@ const PINNED: Table = &[
             ("waterlogged", &["true", "false"]),
         ],
     ),
+    (
+        "minecraft:spruce_stairs",
+        &[
+            ("facing", &["north", "south", "west", "east"]),
+            ("half", &["top", "bottom"]),
+        ],
+    ),
 ];
 
-/// The edition's other version, which the pinned one dropped `active` from.
-const OLDER: Table = &[(
-    "minecraft:creaking_heart",
-    &[
-        ("active", &["true", "false"]),
-        ("axis", &["x", "y", "z"]),
-        ("natural", &["true", "false"]),
-    ],
-)];
+/// The edition's other version, which the pinned one dropped `active` and a stair's `shape` from.
+const OLDER: Table = &[
+    (
+        "minecraft:creaking_heart",
+        &[
+            ("active", &["true", "false"]),
+            ("axis", &["x", "y", "z"]),
+            ("natural", &["true", "false"]),
+        ],
+    ),
+    (
+        "minecraft:spruce_stairs",
+        &[
+            ("facing", &["north", "south", "west", "east"]),
+            ("half", &["top", "bottom"]),
+            ("shape", &["straight"]),
+        ],
+    ),
+];
 
 /// A target whose tables are [`PINNED`] and [`OLDER`], or no version at all.
 struct Tables {
@@ -190,10 +215,175 @@ fn a_property_the_block_lacks_is_refused_at_the_literal() {
             "suggestion": "axis",
         }),
     );
-    assert!(
-        !painted(&out, "minecraft:oak_log[axs=x]"),
+    assert_eq!(
+        solid_cells(only_structure(&out)),
+        0,
         "the floor is not built"
     );
+}
+
+#[test]
+fn a_property_on_a_block_with_no_states_is_only_removed() {
+    let source = floored("@oak_planks[axis=x]");
+    let out = lowered_at(&source, &Tables::pinned());
+    assert_eq!(
+        findings(&source, &out),
+        [(
+            DiagnosticCode::StateDomain,
+            "@oak_planks[axis=x]",
+            "`minecraft:oak_planks` has no state `axis` at test 2.0; it takes no state",
+            vec!["remove `axis` from the state literal"],
+        )],
+    );
+    assert_eq!(
+        solid_cells(only_structure(&out)),
+        0,
+        "the floor is not built"
+    );
+}
+
+/// The findings of `source`, which binds `@oak_stairs[facing=up]` once, when the literal is all
+/// it reports.
+fn the_stair_literal_alone(source: &str, out: &BlockArrayIr) {
+    assert_eq!(
+        findings(source, out),
+        [(
+            DiagnosticCode::StateDomain,
+            "@oak_stairs[facing=up]",
+            "`minecraft:oak_stairs` takes no `facing=up` at test 2.0; `facing` takes north, \
+             south, west, east",
+            vec![
+                "correct the state literal to a value test 2.0 takes, or leave `facing` out for \
+                 the block's default",
+            ],
+        )],
+    );
+}
+
+#[test]
+fn a_roof_whose_material_is_outside_its_block_is_not_built() {
+    let source = "theme t:\n  slot r -> @oak_stairs[facing=up]\n\nstruct s size=3x3\n  roof kind=gable mat_slot=r\n";
+    let out = lowered_at(source, &Tables::pinned());
+    the_stair_literal_alone(source, &out);
+    assert_eq!(solid_cells(only_structure(&out)), 0, "no roof falls back");
+}
+
+#[test]
+fn an_eave_stair_whose_material_is_outside_its_block_is_not_built() {
+    let roofed = "theme t:\n  slot wall -> @cobblestone\n  slot eave -> @oak_stairs[facing=up]\n\n\
+                  struct s size=3x1\n  walls mat_slot=wall height=1\n  \
+                  roof kind=flat mat_slot=wall overhang=1\n";
+    let source = format!(
+        "{roofed}  stair id=eave kind=stairs mat_slot=eave side=front half=top facing=out\n"
+    );
+    let out = lowered_at(&source, &Tables::pinned());
+    the_stair_literal_alone(&source, &out);
+    assert_eq!(
+        only_structure(&out),
+        only_structure(&lowered_at(roofed, &Tables::pinned())),
+        "no eave band falls back",
+    );
+}
+
+#[test]
+fn a_pressure_plate_whose_material_is_outside_its_block_is_not_placed() {
+    let plated = |state: &str| {
+        format!(
+            "theme t:\n  slot p -> {state}\n\nstruct s size=3x3\n  \
+             pressure_plate at=inside.front offset=1 mat_slot=p\n"
+        )
+    };
+    let source = plated("@oak_log[axis=q]");
+    let out = lowered_at(&source, &Tables::pinned());
+    let found: Vec<(DiagnosticCode, &str)> = findings(&source, &out)
+        .into_iter()
+        .map(|(code, at, ..)| (code, at))
+        .collect();
+    assert_eq!(found, [(DiagnosticCode::StateDomain, "@oak_log[axis=q]")]);
+    assert_eq!(solid_cells(only_structure(&out)), 0, "no default plate");
+
+    // A literal the target takes still defers, since a plate's states are its own.
+    let source = plated("@oak_log[axis=x]");
+    let out = lowered_at(&source, &Tables::pinned());
+    let found: Vec<(DiagnosticCode, &str)> = findings(&source, &out)
+        .into_iter()
+        .map(|(code, at, ..)| (code, at))
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            DiagnosticCode::DeferredMember,
+            "pressure_plate at=inside.front offset=1 mat_slot=p"
+        )]
+    );
+    assert_eq!(solid_cells(only_structure(&out)), 0);
+}
+
+#[test]
+fn a_door_whose_material_is_outside_its_block_is_not_set_in_the_wall() {
+    let walled = "theme t:\n  slot wall -> @cobblestone\n  slot d -> @oak_door[hinge=up]\n\n\
+                  struct s size=3x5\n  walls mat_slot=wall height=3\n";
+    let source = format!("{walled}  door side=front at=center mat_slot=d\n");
+    let out = lowered_at(&source, &Tables::pinned());
+    assert_eq!(
+        findings(&source, &out),
+        [(
+            DiagnosticCode::StateDomain,
+            "@oak_door[hinge=up]",
+            "`minecraft:oak_door` takes no `hinge=up` at test 2.0; `hinge` takes left, right",
+            vec![
+                "correct the state literal to a value test 2.0 takes, or leave `hinge` out for \
+                 the block's default",
+            ],
+        )],
+    );
+    assert_eq!(
+        only_structure(&out),
+        only_structure(&lowered_at(walled, &Tables::pinned())),
+        "no default door stands in the wall",
+    );
+}
+
+#[test]
+fn a_button_whose_material_is_outside_its_block_is_not_hung() {
+    let walled = "theme t:\n  slot wall -> @cobblestone\n  slot knob -> @oak_log[axis=q]\n\n\
+                  struct s size=5x5\n  walls mat_slot=wall height=3\n";
+    let source = format!("{walled}  button at=inside.back offset=1 y=1 mat_slot=knob\n");
+    let out = lowered_at(&source, &Tables::pinned());
+    assert_eq!(
+        findings(&source, &out),
+        [(
+            DiagnosticCode::StateDomain,
+            "@oak_log[axis=q]",
+            "`minecraft:oak_log` takes no `axis=q` at test 2.0; `axis` takes x, y, z",
+            vec![
+                "did you mean `axis=x`?",
+                "correct the state literal to a value test 2.0 takes, or leave `axis` out for \
+                 the block's default",
+            ],
+        )],
+    );
+    assert_eq!(
+        only_structure(&out),
+        only_structure(&lowered_at(walled, &Tables::pinned())),
+        "no default button hangs on the wall",
+    );
+
+    // A literal the target takes falls back to the default button, a log being no button.
+    let source = source.replace("axis=q", "axis=x");
+    let out = lowered_at(&source, &Tables::pinned());
+    let found: Vec<(DiagnosticCode, &str)> = findings(&source, &out)
+        .into_iter()
+        .map(|(code, at, ..)| (code, at))
+        .collect();
+    assert_eq!(
+        found,
+        [(DiagnosticCode::IncompatibleMaterial, "@oak_log[axis=x]")]
+    );
+    assert!(painted(
+        &out,
+        "minecraft:oak_button[face=wall,facing=south]"
+    ));
 }
 
 #[test]
@@ -323,14 +513,66 @@ fn a_state_lowering_derives_outside_its_block_is_refused_at_the_member() {
             "`minecraft:oak_stairs` has no state `shape` at test 2.0; its states are facing, \
              half, waterlogged",
             vec![
-                "lowering derived this state for the member, so this is a compiler bug; bind \
-                 the member's material to another block until it is fixed",
+                "lowering derived this state for the member, so Cairn's derivation or the \
+                 registry pack's table for the block is wrong; bind the member's material to \
+                 another block",
             ],
         )],
     );
-    let data = serde_json::to_value(&out.diagnostics[0].data).expect("the payload serialises");
-    assert_eq!(data["origin"], "derived");
-    assert_eq!(data["value"], "straight");
+    assert_eq!(
+        serde_json::to_value(&out.diagnostics[0].data).expect("the payload serialises"),
+        json!({
+            "kind": "state_domain",
+            "id": "minecraft:oak_stairs",
+            "key": "shape",
+            "value": "straight",
+            "registry": "test 2.0",
+            "reason": "unknown_property",
+            "valid": ["facing", "half", "waterlogged"],
+            "origin": "derived",
+        }),
+    );
+}
+
+#[test]
+fn a_derived_pair_another_version_takes_names_it_and_offers_no_literal() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n  slot eave -> @spruce_stairs\n\n\
+                  struct s size=3x1\n  walls mat_slot=wall height=1\n  \
+                  roof kind=flat mat_slot=wall overhang=1\n  \
+                  stair id=eave kind=stairs mat_slot=eave side=front half=top facing=out\n";
+    let out = lowered_at(source, &Tables::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [(
+            DiagnosticCode::StateDomain,
+            "stair id=eave kind=stairs mat_slot=eave side=front half=top facing=out",
+            "`minecraft:spruce_stairs` has no state `shape` at test 2.0; its states are facing, \
+             half",
+            vec![
+                "`shape=straight` is valid at 1.0, but lowering derived this state for the \
+                 member, so Cairn's derivation or the registry pack's table for the block is \
+                 wrong; bind the member's material to another block",
+            ],
+        )],
+    );
+}
+
+#[test]
+fn a_walkway_whose_path_the_target_records_no_states_for_is_laid_unchecked() {
+    let source = duo_with("connect anchor.entry to peer.entry path=@gravel[waterlogged=true]");
+    let out = lowered_at(&source, &Tables::pinned());
+    let found: Vec<(DiagnosticCode, &str)> = findings(&source, &out)
+        .into_iter()
+        .map(|(code, at, ..)| (code, at))
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            DiagnosticCode::StateLiteralUnchecked,
+            "@gravel[waterlogged=true]"
+        )]
+    );
+    assert_eq!(out.walkways.len(), 1, "{:?}", out.walkways.keys());
 }
 
 #[test]

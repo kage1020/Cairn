@@ -19,6 +19,9 @@ themes:
         value: cobblestone
       glass:
         kind: Token
+        value: glass
+      pane:
+        kind: Token
         value: glass_pane
       bed:
         kind: Token
@@ -83,6 +86,24 @@ structs:
               y: 1
               z: 3
         intent_state: {}
+      - id: divider
+        role:
+          kind: Fill
+        mat_slot: pane
+        arguments:
+          from:
+            kind: Coord
+            value:
+              x: 3
+              y: 2
+              z: 2
+          to:
+            kind: Coord
+            value:
+              x: 3
+              y: 3
+              z: 3
+        intent_state: {}
       - id: sunken
         role:
           kind: Chest
@@ -128,13 +149,13 @@ structs:
           from:
             kind: Coord
             value:
-              x: 0
+              x: 1
               y: 2
-              z: 0
+              z: 1
           to:
             kind: Coord
             value:
-              x: 6
+              x: 5
               y: 3
-              z: 4
+              z: 3
         intent_state: {}
