@@ -264,10 +264,10 @@ fn write_mcstructure_is_uncompressed_little_endian() {
     assert_eq!(&buf[3..6], &[0x03, 0x0e, 0x00]);
 
     assert_eq!(
-        output_filename("struct::asym", OutputExt::Mcstructure),
+        output_filename("asym", OutputExt::Mcstructure),
         "asym.mcstructure"
     );
-    assert_eq!(output_filename("struct::asym", OutputExt::Nbt), "asym.nbt");
+    assert_eq!(output_filename("asym", OutputExt::Nbt), "asym.nbt");
 }
 
 #[test]

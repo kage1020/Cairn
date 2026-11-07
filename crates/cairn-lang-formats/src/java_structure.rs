@@ -304,14 +304,10 @@ impl OutputExt {
     }
 }
 
-/// The file name of one structure, such as `"cottage.nbt"` for `"struct::cottage"`.
+/// The file name of one structure, such as `"cottage.nbt"` for the stem `"cottage"`.
 #[must_use]
-pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
-    format!(
-        "{}.{}",
-        cairn_lang_core::artifact_stem(source_scope),
-        ext.as_str()
-    )
+pub fn output_filename(stem: &str, ext: OutputExt) -> String {
+    format!("{stem}.{}", ext.as_str())
 }
 
 fn palette_list(entries: &[BlockState]) -> List {

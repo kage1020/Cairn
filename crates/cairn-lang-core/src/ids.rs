@@ -581,39 +581,10 @@ impl fmt::Display for WalkwayEndpoint {
     }
 }
 
-/// The file name, without extension, a scope of [`crate::BlockArrayIr::structures`] is written to
-/// (`spec/components-editing-sites` "Output naming"); a key of no known shape comes back as is.
-///
-/// # Panics
-///
-/// In a debug build, on a `walkway::SITE::…` key that does not parse.
+/// The file name, without extension, a `struct::` or `site::` scope key is written to
+/// (`spec/components-editing-sites` "Output naming"); any other key comes back as is.
 #[must_use]
 pub fn artifact_stem(source_scope: &str) -> String {
-    if let Some(rest) = source_scope.strip_prefix("walkway::")
-        && rest.contains("::")
-    {
-        match WalkwayScopeKey::parse(source_scope) {
-            Ok(key) => {
-                // Two keys can flatten to one name; the resolver reports `E_OUTPUT_NAME_COLLISION`.
-                let parts = key.parts();
-                return format!(
-                    "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}",
-                    site = parts.site,
-                    from_place = parts.from_place,
-                    from_port = parts.from_port,
-                    to_place = parts.to_place,
-                    to_port = parts.to_port,
-                );
-            }
-            Err(e) => {
-                debug_assert!(
-                    false,
-                    "artifact_stem received a `walkway::SITE::*` key that failed to parse \
-                     ({source_scope:?}): {e}",
-                );
-            }
-        }
-    }
     source_scope
         .strip_prefix("struct::")
         .or_else(|| {
@@ -623,6 +594,21 @@ pub fn artifact_stem(source_scope: &str) -> String {
         })
         .unwrap_or(source_scope)
         .to_owned()
+}
+
+/// The file name, without extension, the walkway from `from` to `to` in `site` is written to
+/// (`spec/components-editing-sites` "Output naming").
+#[must_use]
+pub fn walkway_artifact_stem(
+    site: &SiteName,
+    from: &WalkwayEndpoint,
+    to: &WalkwayEndpoint,
+) -> String {
+    // Two walkways can flatten to one name; the resolver reports `E_OUTPUT_NAME_COLLISION`.
+    format!(
+        "{site}_walkway_{}_{}__{}_{}",
+        from.place, from.port, to.place, to.port
+    )
 }
 
 #[cfg(test)]

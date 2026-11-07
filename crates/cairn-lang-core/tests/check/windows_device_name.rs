@@ -2,7 +2,7 @@
 //! device name Windows reserves, on every host; a site name or port id is only ever one part of a
 //! walkway's file name, so it may spell one.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, artifact_stem};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
 use crate::common::{PRELUDE, codes, diagnose, lowered, notes, one_of_code, slice};
 
@@ -303,6 +303,10 @@ fn a_site_and_a_port_may_spell_a_device() {
     assert_eq!(codes(source), Vec::<&str>::new());
     let out = lowered(source);
     assert_eq!(out.diagnostics, Vec::new());
-    let stems: Vec<String> = out.structures.keys().map(|k| artifact_stem(k)).collect();
+    let stems: Vec<String> = out
+        .structures
+        .keys()
+        .map(|k| out.artifact_stem(k))
+        .collect();
     assert_eq!(stems, ["a", "b", "con_walkway_a_nul__b_nul"]);
 }
