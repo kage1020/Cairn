@@ -69,7 +69,7 @@
     },
     "coordinate": {
       "name": "constant.numeric.coordinate.cairn",
-      "match": "(?<==)\\d+,\\d+,\\d+\\b"
+      "match": "(?<==)\\d+,\\d+,\\d+\\b(?!,\\d)"
     },
     "number": {
       "name": "constant.numeric.cairn",

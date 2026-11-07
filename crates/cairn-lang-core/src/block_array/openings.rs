@@ -115,16 +115,21 @@ pub(super) enum Written {
     Absent,
     /// The key carries an identifier the port does not accept.
     Ident(String),
-    /// The key carries a value of some other shape (a number, a string, …).
-    OtherShape,
+    /// The key carries an integer, a numeric offset on a door's `at=`.
+    Int(i64),
+    /// The key carries a value of some other shape, worded as [`crate::ast::Value::describe`] does.
+    OtherShape(String),
 }
 
 impl Written {
     pub(super) fn of_ident(member: &Member, key: &str) -> Self {
-        match member.written(key).map(|v| &v.value.kind) {
-            None => Self::Absent,
-            Some(ValueKind::Ident(s)) => Self::Ident(s.clone()),
-            Some(_) => Self::OtherShape,
+        let Some(raw) = member.written(key) else {
+            return Self::Absent;
+        };
+        match &raw.value.kind {
+            ValueKind::Ident(s) => Self::Ident(s.clone()),
+            ValueKind::Int(n) => Self::Int(*n),
+            _ => Self::OtherShape(raw.value.describe()),
         }
     }
 }
@@ -134,9 +139,12 @@ pub(super) fn door_at_clause(written: &Written) -> String {
     match written {
         Written::Absent => "has no `at=`".to_owned(),
         Written::Ident(s) => format!("has `at={s}`, which is not one of center, left, right"),
-        Written::OtherShape => "has an `at=` that is not one of center, left, right (numeric \
-                                offsets are reserved)"
-            .to_owned(),
+        Written::Int(n) => format!(
+            "has `at={n}`, which is not one of center, left, right (numeric offsets are reserved)"
+        ),
+        Written::OtherShape(described) => {
+            format!("has an `at=` that is {described}, not one of center, left, right")
+        }
     }
 }
 
