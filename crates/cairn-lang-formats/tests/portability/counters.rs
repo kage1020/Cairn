@@ -38,7 +38,7 @@ fn bedrock(
     blocks: &BlocksIndex,
     aliases: &AliasIndex,
 ) -> Result<PortabilityReport, InvalidPalette> {
-    portability_for_bedrock(ir, blocks, aliases, &states())
+    portability_for_bedrock(ir, blocks, aliases, Some(&states()))
 }
 
 /// Three versions with a rename between the first two; only the third has a stair corner state.
@@ -376,8 +376,7 @@ fn a_java_pack_with_no_id_tables_refutes_nothing() {
 #[test]
 fn a_bedrock_pack_without_a_state_map_writes_no_entry() {
     let ir = one_state_ir(vec![BlockState::bare("minecraft:oak_planks")]);
-    let report = portability_for_bedrock(&ir, &table(), &no_aliases(), &StateMapIndex::empty())
-        .expect("no leak");
+    let report = portability_for_bedrock(&ir, &table(), &no_aliases(), None).expect("no leak");
     assert_eq!(
         only_reason(&report),
         &UnsupportedReason::StatesUnmapped {
@@ -664,6 +663,99 @@ fn a_block_no_version_maps_the_states_of_is_named_by_the_states_it_carries() {
                      names none of its states"
                 .to_owned(),
         },
+    );
+}
+
+/// A note block whose `instrument` gains `trumpet` at 1.2, as the Java release its map reads does.
+fn note_block_pack() -> (BlocksIndex, StateMapIndex) {
+    let blocks: BlocksCatalog = serde_json::from_str(
+        r#"{
+        "schema_version": 2,
+        "namespace": "minecraft",
+        "base": { "mc_version": "1.0", "blocks": { "noteblock": {} } },
+        "diffs": [{ "mc_version": "1.2", "inherits": "1.0" }]
+    }"#,
+    )
+    .expect("test catalog parses as JSON");
+    let blocks = BlocksIndex::from_catalog(blocks, Edition::Bedrock).expect("test catalog folds");
+    let family = |versions: &str, instruments: &str| {
+        format!(
+            r#"{{
+            "mc_versions": {versions}, "ids": ["noteblock=note_block"],
+            "java": {{ "instrument": {instruments} }}, "defaults": {{ "instrument": "harp" }},
+            "states": {{}}, "dropped": ["instrument"]
+        }}"#
+        )
+    };
+    let catalog: StatesCatalog = serde_json::from_str(&format!(
+        r#"{{ "schema_version": 1, "namespace": "minecraft", "families": [{}, {}] }}"#,
+        family(r#"["1.0"]"#, r#"["harp", "bell"]"#),
+        family(r#"["1.2"]"#, r#"["harp", "bell", "trumpet"]"#),
+    ))
+    .expect("test states parse as JSON");
+    let sensitivity: SensitivityCatalog = serde_json::from_str(
+        r#"{
+        "schema_version": 1,
+        "namespace": "minecraft",
+        "dropped_states": {
+            "instrument": [{ "kind": "derived", "reason": "Bedrock reads the block below" }]
+        }
+    }"#,
+    )
+    .expect("test sensitivity parses as JSON");
+    let states =
+        StateMapIndex::from_catalogs(catalog, sensitivity, &blocks).expect("test states validate");
+    (blocks, states)
+}
+
+fn note_block(instrument: &str) -> BlockState {
+    BlockState {
+        id: "minecraft:noteblock".to_owned(),
+        properties: [("instrument".to_owned(), instrument.to_owned())]
+            .into_iter()
+            .collect(),
+    }
+}
+
+#[test]
+fn a_value_only_a_later_versions_map_holds_is_unmapped_before_it_and_no_leak() {
+    let (blocks, states) = note_block_pack();
+    let ir = one_state_ir(vec![note_block("trumpet")]);
+    let report = portability_for_bedrock(&ir, &blocks, &no_aliases(), Some(&states))
+        .expect("a value some version's map holds is no leak");
+    assert_eq!(
+        report.counts(),
+        PortabilityCounts {
+            portable: 1,
+            degraded: 0,
+            unsupported: 0,
+        },
+    );
+    let map = states.at("1.0").expect("1.0 has a map");
+    assert_eq!(
+        translate_states(&map, &note_block("trumpet")).expect_err("unmapped at 1.0"),
+        BedrockStateError::Unmapped {
+            id: "minecraft:noteblock".to_owned(),
+            properties: "instrument=trumpet".to_owned(),
+            mc_version: "1.0".to_owned(),
+            reason: "its state map there is read from a Java release whose \
+                     `minecraft:note_block` has no `instrument=trumpet`, which the map of 1.2 \
+                     holds"
+                .to_owned(),
+        },
+    );
+
+    let ir = one_state_ir(vec![note_block("kazoo")]);
+    let invalid = portability_for_bedrock(&ir, &blocks, &no_aliases(), Some(&states))
+        .expect_err("a value no version's map holds leaks");
+    assert_eq!(
+        invalid.leaks(),
+        [BedrockStateError::UnknownValue {
+            id: "minecraft:noteblock".to_owned(),
+            key: "instrument".to_owned(),
+            value: "kazoo".to_owned(),
+            valid: "harp, bell, trumpet".to_owned(),
+        }],
     );
 }
 

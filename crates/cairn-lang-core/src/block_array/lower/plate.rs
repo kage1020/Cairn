@@ -220,7 +220,7 @@ fn place_plate(
 
 /// Read a plate's `key=` as a non-negative integer, `0` when absent.
 fn plate_coordinate(member: &Member, key: &str, counts: &str) -> Result<u32, Refusal> {
-    let Some(raw) = member.arguments.get(key) else {
+    let Some(raw) = member.written(key) else {
         return Ok(0);
     };
     member.nonneg_u32(key).ok_or_else(|| {

@@ -9,7 +9,7 @@ use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
 use crate::block_array::material::{
-    DomainFault, IdOrigin, OutOfDomain, StateDomain, TargetRegistry, UnknownId,
+    DomainFault, IdOrigin, OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState,
 };
 
 /// What becomes of a member whose `mat_slot=` resolves to no material.
@@ -355,23 +355,34 @@ pub(super) fn diag_state_unmapped(
     state: &BlockState,
     registry: &dyn TargetRegistry,
 ) -> Option<Diagnostic> {
-    let reason = registry.unmapped_state(state)?;
-    let target = registry
-        .block_ids()
-        .map_or_else(|| "the target".to_owned(), |ids| ids.label().to_owned());
+    let UnmappedState {
+        registry: target,
+        reason,
+        mapped_at,
+    } = registry.unmapped_state(state)?;
     let states = state.properties_text();
+    let (entry, carried) = if states.is_empty() {
+        (state.id.clone(), "the block")
+    } else {
+        (format!("{}[{states}]", state.id), "these states")
+    };
+    let pinned = match mapped_at.as_slice() {
+        [] => String::new(),
+        [one] => format!("pass `--target {one}`, whose state map carries {carried}, "),
+        [init @ .., last] => format!(
+            "pass `--target` {} or {last}, whose state maps carry {carried}, ",
+            init.join(", ")
+        ),
+    };
     Some(Diagnostic {
         code: DiagnosticCode::StateUnmapped,
         span,
-        primary: format!(
-            "`{id}[{states}]` has no form at {target}: {reason}",
-            id = state.id,
-        ),
+        primary: format!("`{entry}` has no form at {target}: {reason}"),
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(
-                "pass a `--target` whose state map carries these states, bind the material to a \
-                 block {target} has a form for, or build for the other edition"
+                "{pinned}bind the material to a block {target} has a form for, or build for the \
+                 other edition"
             ),
         }],
         data: Some(DiagnosticData::StateUnmapped {

@@ -149,7 +149,7 @@ to compare.
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
-| `E_STATE_UNMAPPED` | A block state a member built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |

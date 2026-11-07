@@ -236,6 +236,15 @@ CI はどちらのベンチも時間を計測しません。共有ランナー�
 
 各ベンチは計測を始める前に、生成したソースが想定どおりの処理を通ることを確かめます。`lowering` は、すべての配置と通路が block-array lowering から出力されることを確かめます。`place_and_route` は、すべてのスコープがすべてのパスを通り、ゲート 1 つにつき配置済みのセルが 1 つあることを確かめます。生成器がパスまで届かなくなった場合は、黙って少ない処理を計測するのではなく、CI で失敗します。
 
+## VS Code 拡張の公開
+
+リリースのタグごとに、`publish.yml` の `vsix` ジョブが拡張をパッケージして署名し、SHA-256 とともに GitHub Release に添付します。続いて `marketplace` と `open-vsx` の 2 つのジョブが、そのファイルをそのまま公開します。どちらのレジストリも公開済みのバージョンを差し替えられないので、ワークフローを再実行したときは、リリースにすでに添付されている `.vsix` をそのまま使います。レジストリに渡る前に不良のビルドを差し替えるには、リリースから `cairn-lang-<version>.vsix*` の 3 つのアセットを削除してから、ワークフローをもう一度実行してください。
+
+これらのジョブが動く最初のリリースより前に、メンテナが各レジストリで一度だけ準備をしておく必要があります。
+
+- **Visual Studio Marketplace** は Trusted Publishing で公開するので、保存しておくトークンはありません。Marketplace の管理ポータルで `kage1020` パブリッシャーに、リポジトリ `kage1020/Cairn`、ワークフロー `publish.yml`、環境 `marketplace` を指定した Trusted Publishing のポリシーを追加します。この環境がなければ、ジョブが最初の実行で作成します。リポジトリの環境設定で、`publish.yml` が動く ref である `canary` と `v*` のタグだけに制限してください。
+- **Open VSX** はトークンで公開します。公開に使うアカウントで Eclipse Foundation の Open VSX Publisher Agreement に署名し、`kage1020` 名前空間を一度だけ作成して (`npx ovsx create-namespace kage1020 -p <token>`)、そのアカウントのアクセストークンをリポジトリのシークレット `OVSX_PAT` に保存します。
+
 ## バージョニング
 
 日付ベースの `YYYY.M[.PATCH]` を使います。主な変更は [CHANGELOG.md](CHANGELOG.md) に記録します。バージョンを上げるときに何を壊してよいかは、番号そのものではなく[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)で決まります。

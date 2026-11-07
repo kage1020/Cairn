@@ -1231,7 +1231,10 @@ fn a_pinned_view_refuses_only_the_states_its_map_has_no_form_for() {
     })
     .expect("pack");
     assert_eq!(
-        pack.states().versions().collect::<Vec<_>>(),
+        pack.states()
+            .expect("a state map")
+            .versions()
+            .collect::<Vec<_>>(),
         ["1.21.50", "1.21.60"]
     );
     let pinned = pack.view(Some("1.21.60"));
@@ -1242,13 +1245,99 @@ fn a_pinned_view_refuses_only_the_states_its_map_has_no_form_for() {
         properties: [("axis".to_owned(), "x".to_owned())].into_iter().collect(),
     };
     assert_eq!(
-        pinned.unmapped_state(&planks).as_deref(),
-        Some(
-            "no Java block maps onto `minecraft:oak_planks` there, so the canonical vocabulary \
-             names none of its states"
-        ),
+        pinned.unmapped_state(&planks),
+        Some(UnmappedState {
+            registry: "bedrock 1.21.60".to_owned(),
+            reason: "no Java block maps onto `minecraft:oak_planks` there, so the canonical \
+                     vocabulary names none of its states"
+                .to_owned(),
+            mapped_at: Vec::new(),
+        }),
     );
     assert_eq!(pack.view(None).unmapped_state(&planks), None);
+}
+
+#[test]
+fn a_pinned_view_names_the_other_versions_whose_map_has_the_state() {
+    let states = r#"{
+        "schema_version": 1,
+        "namespace": "minecraft",
+        "refused": { "1.21.60": ["oak_planks"] },
+        "families": [
+            {
+                "mc_versions": ["1.21.50"], "ids": ["oak_planks"],
+                "java": {}, "defaults": {}, "states": {}
+            },
+            {
+                "mc_versions": ["1.21.50"], "ids": ["oak_log"],
+                "java": { "axis": ["x", "y", "z"] }, "defaults": { "axis": "y" },
+                "states": { "pillar_axis":
+                    { "reads": ["axis"], "map": { "x": "x", "y": "y", "z": "z" } } }
+            },
+            {
+                "mc_versions": ["1.21.60"], "ids": ["oak_log"],
+                "java": { "axis": ["y"] }, "defaults": { "axis": "y" },
+                "states": { "pillar_axis": { "value": "y" } }
+            }
+        ]
+    }"#;
+    let pack = bedrock_dir(|dir| {
+        write_pack_with_states(dir, BOTH_STATE_FILES, states, NO_SENSITIVITY);
+    })
+    .expect("pack");
+    let at_1_21_60 = pack.view(Some("1.21.60"));
+    assert_eq!(
+        at_1_21_60.unmapped_state(&BlockState::bare("minecraft:oak_planks")),
+        Some(UnmappedState {
+            registry: "bedrock 1.21.60".to_owned(),
+            reason: "its palette does not declare the states GeyserMC maps \
+                     `minecraft:oak_planks` to, so the pack carries no form for them"
+                .to_owned(),
+            mapped_at: vec!["1.21.50".to_owned()],
+        }),
+    );
+    // Outside the block's states at 1.21.60, so `E_STATE_DOMAIN`'s to answer.
+    let sideways = log(&[("axis", "x")]);
+    assert_eq!(at_1_21_60.unmapped_state(&sideways), None);
+    assert_eq!(
+        at_1_21_60.state_domain(&sideways),
+        StateDomain::Checked(vec![OutOfDomain {
+            key: "axis".to_owned(),
+            value: "x".to_owned(),
+            fault: DomainFault::ValueOutside {
+                values: vec!["y".to_owned()],
+            },
+            valid_at: vec!["1.21.50".to_owned()],
+        }]),
+    );
+    assert_eq!(pack.view(Some("1.21.50")).unmapped_state(&sideways), None);
+}
+
+#[test]
+fn a_state_map_belongs_to_a_bedrock_pack_with_block_tables() {
+    let java = pack_dir();
+    write_pack_with_states(
+        java.path(),
+        BOTH_STATE_FILES,
+        &log_states(r#"["1.21.50", "1.21.60"]"#),
+        NO_SENSITIVITY,
+    );
+    let manifest = java.path().join("pack.json");
+    let text = std::fs::read_to_string(&manifest).expect("read manifest");
+    std::fs::write(&manifest, text.replace(r#""bedrock""#, r#""java""#)).expect("write manifest");
+    let err = load_pack(&PackDir(java.path()), Edition::Java).expect_err("a Java state map");
+    assert!(matches!(err, RegistryError::StatesOnJava), "{err}");
+
+    let err = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            "",
+            &log_states(r#"["1.21.50", "1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+    })
+    .expect_err("block tables without a state map");
+    assert!(matches!(err, RegistryError::StatesMissing), "{err}");
 }
 
 #[test]
@@ -1363,8 +1452,14 @@ fn the_builtin_bedrock_pack_maps_every_targetable_version() {
         .filter(|e| e.targetable)
         .map(|e| e.mc_version.as_str())
         .collect();
-    assert_eq!(pack.states().versions().collect::<Vec<_>>(), targetable);
-    assert!(builtin_pack(Edition::Java).states().is_empty());
+    assert_eq!(
+        pack.states()
+            .expect("a state map")
+            .versions()
+            .collect::<Vec<_>>(),
+        targetable
+    );
+    assert!(builtin_pack(Edition::Java).states().is_none());
 }
 
 #[test]

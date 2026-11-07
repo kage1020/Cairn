@@ -317,7 +317,7 @@ pub(super) fn member_will_paint(
 
 pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
     let Some(raw) = member.ident_value("side") else {
-        let reason = match member.arguments.get("side") {
+        let reason = match member.written("side") {
             Some(written) => format!(
                 "`side=` must be one of front, back, left, right, not {}",
                 written.value.describe(),

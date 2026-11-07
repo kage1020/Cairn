@@ -36,6 +36,7 @@
 (integer) @number
 (bit) @number
 (size_literal) @number.special
+(coordinate) @number.special
 (boolean) @constant.builtin
 
 ; types / references

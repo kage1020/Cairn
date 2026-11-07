@@ -125,8 +125,13 @@ impl PortRejection {
                 Written::Ident(s) => {
                     format!("has `side={s}`, which is not one of front, back, left, right")
                 }
-                Written::OtherShape => {
-                    "has a `side=` that is not one of front, back, left, right".to_owned()
+                Written::Int(n) => {
+                    format!("has `side={n}`, which is not one of front, back, left, right")
+                }
+                Written::OtherShape(described) => {
+                    format!(
+                        "has a `side=` that is {described}, not one of front, back, left, right"
+                    )
                 }
             },
             Self::Sizeless => {

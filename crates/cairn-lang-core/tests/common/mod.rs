@@ -3,6 +3,7 @@
 use std::ops::Range;
 use std::path::PathBuf;
 
+use cairn_lang_core::ast::ValueKind;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
@@ -99,6 +100,27 @@ pub fn one_of_code(source: &str, code: DiagnosticCode) -> Diagnostic {
 /// The codes of every finding `source` raises, in report order.
 pub fn codes(source: &str) -> Vec<&'static str> {
     diagnose(source).iter().map(|d| d.code.as_str()).collect()
+}
+
+/// The `key=value` bindings matching theme selectors injected, for every member of every scope.
+///
+/// # Panics
+///
+/// When `source` does not parse.
+pub fn selector_extras(source: &str) -> Vec<(String, ValueKind)> {
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
+    let ir = lower(&module);
+    resolve(&ir, None)
+        .scopes
+        .values()
+        .flat_map(|scope| scope.members.values())
+        .flat_map(|binding| {
+            binding
+                .selector_extras
+                .iter()
+                .map(|(key, value)| (key.clone(), value.value.kind.clone()))
+        })
+        .collect()
 }
 
 /// The text `diag` points at.
