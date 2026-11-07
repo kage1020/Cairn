@@ -199,17 +199,18 @@ which bind materials and open nothing, so a line indented under one is a syntax 
 nesting diagnostic. So is a line indented after a directive: a directive is one line, and the line
 under it belongs to no construct.
 
-[Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what `y=N`
-means to each grouped member.
+[Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what
+`y=N` means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
 `pressure_plate`, `chest`, `circuit`. A `site` body describes a layout: `place`, `connect`. The
-keyword table is global, so writing one in the other body parses and classifies and then reaches nothing. That is
-`E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
-A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
-reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
-`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+keyword table is global, so writing one in the other body parses and classifies and then reaches
+nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented
+under it along. A `level` groups the other members of a `struct` / `def` body, but not a `circuit`
+line, whose reservation spans the whole scope: a `circuit` line under a `level` reaches nothing
+either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:

@@ -36,7 +36,7 @@ title: "用語集"
 
 ## コンパイル
 
-- **フェーズ (Phase)**: コンパイラが各コマンドを振り分ける、順番の決まった評価の枠です。`massing → envelope → openings → fixtures → fluids → logic_synth → logic_place → logic_route → raw` の順に評価します。ソース上の順番は関係なく、意味はフェーズの順番で決まります ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。
+- **フェーズ (Phase)**: コンパイラが各コマンドを振り分ける、順番の決まった評価の枠です。`massing` → `envelope` → `openings` → `fixtures` → `fluids` → `logic_synth` → `logic_place` → `logic_route` → `raw` の順に評価します。ソース上の順番は関係なく、意味はフェーズの順番で決まります ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。
 - **フェーズ内の後勝ち (Last-wins, local)**: 同じフェーズの中では、後に書いたコマンドが先のコマンドを上書きします。プログラム全体で後勝ちにする考え方 (「ペイントモデル」) は採りません。[原則 P2](/ja/spec/principles/) を参照してください。
 - **ターゲット軸 (Target axes)**: `(edition, version)` の組です。これを知っているのはバックエンドだけで、DSL のソースには決して現れません。`--edition` は必須で、`--target` だけを指定することはできません。[コンパイルモデル §4.2](/ja/spec/compilation/#42-ターゲット軸) と [バージョンとエディション](/ja/spec/versioning-editions/) を参照してください。
 - **lowering**: スコープのメンバーを block-array IR に変換するパスです。壁、開口部、屋根、通路、マテリアルが、パレットとインデックスの配列になります。`cairn compile`、`cairn lower`、`cairn info`、`cairn check` のどれもこのパスを通ります。[アーキテクチャ §3.1](/ja/spec/architecture/#31-block-array-ir-はすべてのフォーマットに共通のピボット) を参照してください。

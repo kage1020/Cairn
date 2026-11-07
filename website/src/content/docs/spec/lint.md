@@ -238,11 +238,11 @@ from the `severity` field rather than from the first letter.
 something other than a material token resolves. A `floor` that names it is left air; a `fill` that
 names it paints none of its box; a `walls` that names it is not built and takes up no rows, so a
 `door` or `window` cut into it is deferred; a `window` that names it is not cut, so its wall stays;
-and a `roof`, eave `stair`, `door`,
-`pressure_plate` or `chest` that names it is built from its default block. Were it a warning, a
-theme whose slots are all mistyped would still build at exit 0 every scope that keeps something to
-draw, such as a `roof`: shorter than asked, with no floor and no walls, and only default blocks,
-less any eave `stair`, `pressure_plate` or `chest` set higher than the shorter structure reaches.
+and a `roof`, eave `stair`, `door`, `pressure_plate` or `chest` that names it is built from its
+default block. Were it a warning, a theme whose slots are all mistyped would still build at exit 0
+every scope that keeps something to draw, such as a `roof`: shorter than asked, with no floor and no
+walls, and only default blocks, less any eave `stair`, `pressure_plate` or `chest` set higher than
+the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member earns
 both: the key is absent for the first and present-but-unusable for the second. They have different
@@ -295,22 +295,22 @@ without a pack. A front end with no target (the language server, or a `cairn che
 
 The warning says how the member degrades. A `floor` leaves its cells air, a `fill` paints none of
 its box, and a `roof`, eave `stair`, `door`, `pressure_plate` or `chest` is built from its default
-block. A `walls` is not built and takes up no rows, so a `door` or `window` cut into it is deferred. A `window` is not cut, so its
-wall stays, and a port on it is refused with it
+block. A `walls` is not built and takes up no rows, so a `door` or `window` cut into it is deferred.
+A `window` is not cut, so its wall stays, and a port on it is refused with it
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
 all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
 or takes up rows, so no `door` or `window` is cut and the structure is shorter than asked. A `floor`
-leaves its cells air, a `fill` with a `mat_slot=` paints none of its box, and a `roof` is still built from its default block, as is an eave `stair`,
-`pressure_plate` or `chest` that still fits the shorter structure; one set higher than it reaches is
-deferred.
-It is judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported,
-whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a
-`level`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
-([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
-nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
-is `E_UNSUPPORTED_NESTING`.
+leaves its cells air, a `fill` with a `mat_slot=` paints none of its box, and a `roof` is still
+built from its default block, as is an eave `stair`, `pressure_plate` or `chest` that still fits the
+shorter structure; one set higher than it reaches is deferred. It is judged per scope: a scope with
+no theme bound that reads no `mat_slot=` is not reported, whatever the rest of the module reads. A
+`mat_slot=` on a keyword that reads none, such as a `level`'s, is not a read. Nor, for this warning,
+is one on a member a `level` drops ([Compilation Model
+§4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints nothing whatever
+the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body is
+`E_UNSUPPORTED_NESTING`.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A

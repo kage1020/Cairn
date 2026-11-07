@@ -157,10 +157,9 @@ The two are named apart from Minecraft's own term "blockstate" on purpose. Keepi
 A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a `stair`,
 `half`, `facing`, `shape` and `waterlogged`, on a `door`, `hinge` and `open`, and on a `chest`,
 `facing`, `size`, the line's spelling of its `type`, and `waterlogged`. No other keyword names one
-yet. Every other
-`key=value` the line writes is one of the member's arguments, apart from `id`, `class` and
-`mat_slot`, which become fields of their own. Where a key goes depends on the keyword: `shape=` on
-a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
+yet. Every other `key=value` the line writes is one of the member's arguments, apart from `id`,
+`class` and `mat_slot`, which become fields of their own. Where a key goes depends on the keyword:
+`shape=` on a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
 ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
 
 Lowering records each member's `resolved_state` beside the block array it builds: every state the

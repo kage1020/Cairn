@@ -25,6 +25,11 @@ items:
         slot: glass
         value:
           kind: Token
+          value: glass
+      - kind: Slot
+        slot: pane
+        value:
+          kind: Token
           value: glass_pane
       - kind: Slot
         slot: bed
@@ -110,6 +115,31 @@ items:
                 y: 1
                 z: 3
       - kind: Generic
+        keyword: fill
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: divider
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: pane
+          - key: from
+            value:
+              kind: Coord
+              value:
+                x: 3
+                y: 2
+                z: 2
+          - key: to
+            value:
+              kind: Coord
+              value:
+                x: 3
+                y: 3
+                z: 3
+      - kind: Generic
         keyword: chest
         args:
           - key: id
@@ -170,13 +200,13 @@ items:
             value:
               kind: Coord
               value:
-                x: 0
+                x: 1
                 y: 2
-                z: 0
+                z: 1
           - key: to
             value:
               kind: Coord
               value:
-                x: 6
+                x: 5
                 y: 3
-                z: 4
+                z: 3

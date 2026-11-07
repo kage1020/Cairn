@@ -18,7 +18,7 @@ logic_route Placement IR 上での配線、遅延の挿入、交差の合法化�
 raw         エスケープハッチ
 ```
 
-`fill` は、`mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。そのため、水は、水を含めるブロックが置かれたあとで注ぎます。
+水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
 
 ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water`、`raw` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids` の 5 つで、`fixtures` に属するのは `pressure_plate` と `chest` です。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
 
