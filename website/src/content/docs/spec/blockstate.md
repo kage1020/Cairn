@@ -5,7 +5,7 @@ title: "6. Blockstate Model"
 ## 6.1 Derive by default, promote on override
 
 **Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape` are
-built. The others, the `beam`, `chest` and `note_block` keywords, and coordinate triples are not
+built. The others and the `beam`, `chest` and `note_block` keywords are not
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 By default the compiler derives blockstate from position and neighbours: stair facing, door
@@ -36,9 +36,8 @@ Cases that MUST stay overridable, because each can be intent:
 Two easy-to-miss cases belong to derivation, not intent: `torch` ↔ `wall_torch` and `sign` ↔
 `wall_sign` are substituted automatically by attachment face.
 
-The example below uses syntax the parser does not accept yet. Only its `stair` line is accepted:
-`beam`, `chest` and `note_block` are `E_UNKNOWN_KEYWORD`, and a coordinate triple such as
-`at=2,1,2` is `E_PARSE`.
+The example below uses keywords the compiler does not know yet. Only its `stair` line is accepted:
+`beam`, `chest` and `note_block` are `E_UNKNOWN_KEYWORD`.
 
 ```
 stair id=eave   kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left  # eaves
@@ -75,7 +74,7 @@ fields of their own. In place of `type`, a member carries the `role` its keyword
 `waterlogged`: on a `stair`, `waterlogged=false` is an unreached key, reported as
 `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), and the stair is built as if
 the key were not written. In the example below, `fill`, `trapdoor` and `water` are
-`E_UNKNOWN_KEYWORD`, and a coordinate triple such as `from=1,1,1` is `E_PARSE`.
+`E_UNKNOWN_KEYWORD`.
 
 The default is paint-derived: when `fill fluid=water` overlaps a waterloggable block, the compiler
 sets `waterlogged`.

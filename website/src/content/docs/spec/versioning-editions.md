@@ -765,9 +765,8 @@ and game-behaviour differences are not absorbed.** The cases that cannot be:
 
 ### Writing an alternative
 
-**Subject to change.** `@edition` guards, `hologram`, `raw_block`, `slot` rules that take
-arguments, and coordinate triples are not built yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+**Subject to change.** `@edition` guards, `hologram`, `raw_block` and `slot` rules that take
+arguments are not built yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 `@edition` conditionals in the semantic layer are forbidden. When an alternative is needed, work
 down this hierarchy:

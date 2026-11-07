@@ -4,7 +4,7 @@ title: "6. ブロックステート"
 
 ## 6.1 既定では導出し、上書きで昇格する
 
-**変更の余地あり。** 下に挙げる上書きのうち、組み上げられるのは `stair` の `facing`、`half`、`shape` だけです。そのほかの上書き、`beam`・`chest`・`note_block` のキーワード、座標の組はまだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
+**変更の余地あり。** 下に挙げる上書きのうち、組み上げられるのは `stair` の `facing`、`half`、`shape` だけです。そのほかの上書きと、`beam`・`chest`・`note_block` のキーワードはまだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
 
 既定では、コンパイラが位置と隣接するブロックからブロックステートを導出します。階段の向き、ドアの向き、ガラス板・フェンス・壁のつながり、チェストの左右などです。
 
@@ -24,7 +24,7 @@ title: "6. ブロックステート"
 
 見落としやすいものが 2 つあります。これらは意図ではなく導出に属します。`torch` と `wall_torch`、`sign` と `wall_sign` は、取り付ける面に応じて自動的に入れ替わります。
 
-下の例には、パーサがまだ受け付けない構文が含まれています。受け付けるのは `stair` の行だけです。`beam`、`chest`、`note_block` は `E_UNKNOWN_KEYWORD` に、`at=2,1,2` のような座標の組は `E_PARSE` になります。
+下の例には、コンパイラがまだ知らないキーワードが含まれています。受け付けるのは `stair` の行だけで、`beam`、`chest`、`note_block` は `E_UNKNOWN_KEYWORD` になります。
 
 ```
 stair id=eave   kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left  # 軒
@@ -52,7 +52,7 @@ IR はまだこの形を持っていません。`resolved_state` には何も入
 
 ## 6.3 `waterlogged`
 
-**変更の余地あり。** この節の内容は、まだどれも組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。`waterlogged` を設定するパスも読むパスもありません。`stair` に書いた `waterlogged=false` はまだ届いていないキーです。コンパイラは `W_IGNORED_ARGUMENT` で報告し ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))、このキーを書かなかったときと同じ階段を作ります。下の例では、`fill`、`trapdoor`、`water` は `E_UNKNOWN_KEYWORD` に、`from=1,1,1` のような座標の組は `E_PARSE` になります。
+**変更の余地あり。** この節の内容は、まだどれも組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。`waterlogged` を設定するパスも読むパスもありません。`stair` に書いた `waterlogged=false` はまだ届いていないキーです。コンパイラは `W_IGNORED_ARGUMENT` で報告し ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))、このキーを書かなかったときと同じ階段を作ります。下の例では、`fill`、`trapdoor`、`water` は `E_UNKNOWN_KEYWORD` になります。
 
 既定では、塗りから決まります。`fill fluid=water` が水浸しにできるブロックと重なると、コンパイラが `waterlogged` を立てます。
 
