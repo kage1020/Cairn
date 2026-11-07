@@ -67,7 +67,7 @@ fn states() -> Value {
             "states": { "old_log_type": { "value": kind }, "pillar_axis": axis }
         })
     };
-    json!({
+    let mut catalog = json!({
         "schema_version": 1,
         "namespace": "minecraft",
         "refused": { "1.0": ["jigsaw", "skull=creeper_head"] },
@@ -135,44 +135,55 @@ fn states() -> Value {
                 "java": { "axis": ["x", "y", "z"], "waterlogged": waterlogged() },
                 "defaults": { "axis": "y", "waterlogged": "false" },
                 "states": { "pillar_axis": axis }
-            },
-            {
-                "mc_versions": both(), "ids": ["kelp"],
-                "java": { "age": ["0", "1"] }, "defaults": { "age": "0" },
-                "states": { "kelp_age": { "reads": ["age"], "map": { "0": 0, "1": 1 } } }
-            },
-            {
-                "mc_versions": both(), "ids": ["wall_banner=white_wall_banner"],
-                "java": { "facing": ["south", "west"] }, "defaults": { "facing": "north" },
-                "states": { "facing_direction":
-                    { "reads": ["facing"], "map": { "south": 3, "west": 2 } } }
-            },
-            {
-                "mc_versions": both(), "ids": ["bed=white_bed"],
-                "java": { "occupied": ["false"], "part": ["head"] },
-                "defaults": { "occupied": "false", "part": "foot" },
-                "states": { "head_piece_bit": { "value": true } }
-            },
-            {
-                "mc_versions": both(), "ids": ["bed=red_bed"],
-                "java": { "occupied": ["true"], "part": ["foot"] },
-                "defaults": { "occupied": "false", "part": "foot" },
-                "states": { "head_piece_bit": { "value": false } }
-            },
-            {
-                "mc_versions": both(), "ids": ["birch_slab"],
-                "java": { "type": ["top"], "waterlogged": ["false"] },
-                "defaults": { "type": "bottom", "waterlogged": "false" },
-                "states": { "minecraft:vertical_half": { "value": "top" } }
-            },
-            {
-                "mc_versions": both(), "ids": ["birch_double_slab=birch_slab"],
-                "java": { "type": ["double"], "waterlogged": ["true"] },
-                "defaults": { "type": "bottom", "waterlogged": "false" },
-                "states": { "minecraft:vertical_half": { "value": "bottom" } }
             }
         ]
-    })
+    });
+    catalog["families"]
+        .as_array_mut()
+        .expect("the fixture lists families")
+        .extend(edge_families());
+    catalog
+}
+
+/// Families only an edge of loading or resolution needs, after the ones tests name by place.
+fn edge_families() -> Vec<Value> {
+    vec![
+        json!({
+            "mc_versions": both(), "ids": ["kelp"],
+            "java": { "age": ["0", "1"] }, "defaults": { "age": "0" },
+            "states": { "kelp_age": { "reads": ["age"], "map": { "0": 0, "1": 1 } } }
+        }),
+        json!({
+            "mc_versions": both(), "ids": ["wall_banner=white_wall_banner"],
+            "java": { "facing": ["south", "west"] }, "defaults": { "facing": "north" },
+            "states": { "facing_direction":
+                { "reads": ["facing"], "map": { "south": 3, "west": 2 } } }
+        }),
+        json!({
+            "mc_versions": both(), "ids": ["bed=white_bed"],
+            "java": { "occupied": ["false"], "part": ["head"] },
+            "defaults": { "occupied": "false", "part": "foot" },
+            "states": { "head_piece_bit": { "value": true } }
+        }),
+        json!({
+            "mc_versions": both(), "ids": ["bed=red_bed"],
+            "java": { "occupied": ["true"], "part": ["foot"] },
+            "defaults": { "occupied": "false", "part": "foot" },
+            "states": { "head_piece_bit": { "value": false } }
+        }),
+        json!({
+            "mc_versions": both(), "ids": ["birch_slab"],
+            "java": { "type": ["top"], "waterlogged": ["false"] },
+            "defaults": { "type": "bottom", "waterlogged": "false" },
+            "states": { "minecraft:vertical_half": { "value": "top" } }
+        }),
+        json!({
+            "mc_versions": both(), "ids": ["birch_double_slab=birch_slab"],
+            "java": { "type": ["double"], "waterlogged": ["true"] },
+            "defaults": { "type": "bottom", "waterlogged": "false" },
+            "states": { "minecraft:vertical_half": { "value": "bottom" } }
+        }),
+    ]
 }
 
 fn sensitivity() -> Value {
