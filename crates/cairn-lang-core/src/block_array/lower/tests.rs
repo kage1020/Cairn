@@ -1263,6 +1263,10 @@ const SLOT_READERS: &[(&str, &str)] = &[
         "door",
         "struct s size=3x3\n  door id=front side=front at=center mat_slot=d\n",
     ),
+    (
+        "chest",
+        "struct s size=3x3\n  chest at=inside.front offset=1 mat_slot=c\n",
+    ),
 ];
 
 /// A themeless struct per keyword whose role reads no `mat_slot=`, `mat_slot=d` on its member;

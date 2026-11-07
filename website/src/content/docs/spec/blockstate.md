@@ -4,18 +4,19 @@ title: "6. Blockstate Model"
 
 ## 6.1 Derive by default, promote on override
 
-**Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape` and a
-door's `hinge` and `open` are built. The others, the `beam`, `chest` and `note_block` keywords, and
-coordinate triples are not ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+**Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape`, a
+door's `hinge` and `open`, and a chest's `facing` and `size` are built. The others, the `beam` and
+`note_block` keywords, and coordinate triples are not
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
-Of these, stair geometry, door orientation and pane, fence and wall connections are derived
-today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they sit. An eave `stair`
-gets only its cardinal `facing`, from the side it sits on, and its `half` and `shape` are what its
-line writes, or `top` and `straight`. Connections are set once every member is painted
-([Connections](#connections)). Chest pairing and the torch and sign substitution below are not
+Of these, stair geometry, door and chest orientation, pane, fence and wall connections, and chest
+pairing are derived today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they
+sit. An eave `stair` gets only its cardinal `facing`, from the side it sits on, and its `half` and
+`shape` are what its line writes, or `top` and `straight`. Connections and pairs are set once every
+member is painted ([Connections](#connections)). The torch and sign substitution below is not
 derived yet.
 
 A `door` sets a door block two rows tall into the opening it cuts
@@ -30,6 +31,21 @@ and none on its right, or more wall on its right than on its left, and on the le
 door in an unbroken wall is hinged on the left, one beside a window is hinged on the wall's side,
 and two side by side are hinged on their outer sides, so they open as a pair. A `hinge=left` or
 `hinge=right`, and an `open=true` or `open=false`, on the door's line replace what is derived.
+
+A `chest` sets one chest block against a wall. It takes its cell as a `pressure_plate` with the same
+`at=`, `offset=` and `y=` takes its own, one voxel inside the wall for `at=inside.<side>` and one
+outside it for `at=<side>.outside`, and its line is refused or deferred wherever the plate's would
+be ([Redstone §14.2](/spec/redstone/#142-signal-binding)). Its `facing` points away from the wall
+it stands against, into the struct from the inside and out of it from the outside. A `facing=` on
+its line turns it: `in` toward the struct's inside, `out` toward its outside, and `left` or `right`
+along the wall, as seen from outside it, so `left` is toward `offset=0`. A chest pairs with the
+chest beside it ([Connections](#connections)), and `size=single` keeps it single. Any other
+`facing=` or `size=` is `E_INVALID_MEMBER`. The chest's `mat_slot=` names its block, and a chest
+without one is built from the registry pack's `@chest.default`
+([Materials and Themes §7.2](/spec/materials-themes/#tier-1-tokens)). The block MUST be a chest, one
+whose id is `chest` or ends in `_chest`. Any other is `E_INCOMPATIBLE_MATERIAL`
+([Lint](/spec/lint/)), and the chest is built from `@chest.default` beside the error. A chest holds
+no contents ([Entities §8.3](/spec/entities/#83-where-the-line-is-drawn)).
 
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
 promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let
@@ -49,22 +65,22 @@ Cases that MUST stay overridable, because each can be intent:
 Two easy-to-miss cases belong to derivation, not intent: `torch` ↔ `wall_torch` and `sign` ↔
 `wall_sign` are substituted automatically by attachment face.
 
-The example below uses syntax the parser does not accept yet. Only its `stair` line is accepted:
-`beam`, `chest` and `note_block` are `E_UNKNOWN_KEYWORD`, and a coordinate triple such as
+The example below uses syntax the parser does not accept yet. Only its `stair` and `chest` lines
+are accepted: `beam` and `note_block` are `E_UNKNOWN_KEYWORD`, and a coordinate triple such as
 `at=2,1,2` is `E_PARSE`.
 
 ```
 stair id=eave   kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left  # eaves
 beam  id=lintel kind=pillar mat_slot=frame at=front.top axis=x                             # horizontal beam
-chest id=store  at=inside.back size=single
+chest id=store  at=inside.back offset=2 size=single
 note_block at=2,1,2 instrument=bit note=12
 ```
 
 ### Connections
 
-Once every member of a body is painted, each glass pane, run of bars, fence, wall and fence gate in
-it takes its connection states from the blocks beside it, as the game sets them when a block is
-placed. A face of a block is **sturdy** when the block's model covers it whole: a full block's
+Once every member of a body is painted, each glass pane, run of bars, fence, wall, fence gate and
+chest in it takes its connection states from the blocks beside it, as the game sets them when a
+block is placed. A face of a block is **sturdy** when the block's model covers it whole: a full block's
 every face, a bottom slab's bottom, an upright stair's bottom and back. Leaves, shulker boxes,
 barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined by a face.
 
@@ -83,6 +99,11 @@ barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined
   block whose bottom is sturdy, a pane, a fence, a closed fence gate, or a wall with its post up or
   a side joined.
 - A fence gate's `in_wall` is `true` when a wall stands beside it, across the way it faces.
+- A chest's `type` pairs it with a chest of the same block and `facing` beside it, on its own left
+  or right. A row of such chests pairs two by two from its end on the chests' own left, the end
+  toward `offset=0` for a row along the inside of a wall, and an odd chest at its other end stays
+  `single`. The chest whose partner is on its own right is `left`, and its partner is `right`. A
+  chest that writes its `type`, as `size=single` does, pairs with none.
 
 A state the block's material or line writes is kept, and only the others are derived:
 `@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. The states are
@@ -96,7 +117,9 @@ as nothing where they disagree; without a pack nothing is derived. A face is rea
 model, as the release's client draws it, while the game reads its collision shape, and the two
 disagree for a few blocks, such as honey, cactus and powder snow. A Bedrock target reads its block
 as the canonical blocks its state map names, and its writer maps the derived states as it maps
-every other.
+every other. Bedrock keeps a chest's pairing in its block entity, which no writer fills yet, so a
+Bedrock build writes each half of a pair as a single chest and says so with `W_INTENT_DEGRADED`
+([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
 
 ## 6.2 `intent_state` and `resolved_state`
 
@@ -112,12 +135,13 @@ member:
 The two are named apart from Minecraft's own term "blockstate" on purpose. Keeping resolved state
 (derived or paint-origin) out of intent state (authored) is what makes edits stable.
 
-A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a
-`stair`, `half`, `facing`, `shape` and `waterlogged`, and on a `door`, `hinge` and `open`. No other
-keyword names one yet. Every other `key=value` the line writes is one of the member's arguments,
-apart from `id`, `class` and `mat_slot`, which become fields of their own. Where a key goes depends
-on the keyword: `shape=` on a `stair` is intent, and `shape=` on a `window` is an argument, the
-opening's outline ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
+A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a `stair`,
+`half`, `facing`, `shape` and `waterlogged`, on a `door`, `hinge` and `open`, and on a `chest`,
+`facing` and `size`, the line's spelling of its `type`. No other keyword names one yet. Every other
+`key=value` the line writes is one of the member's arguments, apart from `id`, `class` and
+`mat_slot`, which become fields of their own. Where a key goes depends on the keyword: `shape=` on
+a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
+([Entities §8.2](/spec/entities/#82-anchor-conventions)).
 
 Lowering records each member's `resolved_state` beside the block array it builds: every state the
 member's cells hold once the body is painted, with the cells that hold it. A cell belongs to the

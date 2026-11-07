@@ -18,12 +18,24 @@ pub(super) enum Family {
     Stair,
     /// The `*_door` blocks a `door` sets in its opening.
     Door,
+    /// The `chest` and `*_chest` blocks a `chest` sets against a wall.
+    Chest,
 }
 
-/// Whether `id` names a door block: its path, not its namespace, ends in `_door`.
+/// The path of `id`, without its namespace.
+fn path_of(id: &str) -> &str {
+    id.rsplit_once(':').map_or(id, |(_, path)| path)
+}
+
+/// Whether `id` names a door block: its path ends in `_door`.
 fn is_door(id: &str) -> bool {
-    let path = id.rsplit_once(':').map_or(id, |(_, path)| path);
-    path.ends_with("_door")
+    path_of(id).ends_with("_door")
+}
+
+/// Whether `id` names a chest block: its path is `chest` or ends in `_chest`.
+fn is_chest(id: &str) -> bool {
+    let path = path_of(id);
+    path == "chest" || path.ends_with("_chest")
 }
 
 impl Family {
@@ -32,6 +44,7 @@ impl Family {
         match self {
             Self::Stair => is_stair(id),
             Self::Door => is_door(id),
+            Self::Chest => is_chest(id),
         }
     }
 
@@ -40,6 +53,7 @@ impl Family {
         match self {
             Self::Stair => "stair",
             Self::Door => "door",
+            Self::Chest => "chest",
         }
     }
 
@@ -48,6 +62,7 @@ impl Family {
         match self {
             Self::Stair => "`facing` / `half` / `shape`",
             Self::Door => "`facing` / `half` / `hinge`",
+            Self::Chest => "`facing` / `type`",
         }
     }
 
@@ -60,6 +75,10 @@ impl Family {
             }
             Self::Door => {
                 "bind the slot to a `*_door` material — the registry pack's `door.default` \
+                 resolves to one"
+            }
+            Self::Chest => {
+                "bind the slot to a chest material — the registry pack's `chest.default` \
                  resolves to one"
             }
         }

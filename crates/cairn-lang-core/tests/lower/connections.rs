@@ -1,5 +1,5 @@
-//! Panes, fences, walls and fence gates take their connection states from the blocks beside them
-//! once every member is painted (`spec/blockstate` "Connections").
+//! Panes, fences, walls, fence gates and chests take their connection states from the blocks
+//! beside them once every member is painted (`spec/blockstate` "Connections").
 
 use cairn_lang_core::block_array::{
     BlockArray, BlockArrayIr, BlockIdSet, BlockState, Face, Faces, JoinKind, Joins, TargetRegistry,
@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::{
 use cairn_lang_core::{lower, parse, resolve};
 use serde_json::json;
 
-use crate::common::{only_structure, state_at};
+use crate::common::{chests, only_structure, state_at};
 
 /// A target whose connection table holds the blocks these tests build with, read as the game's
 /// rules read them.
@@ -43,6 +43,9 @@ impl TargetRegistry for Rules {
             "oak_fence_gate" => kind(JoinKind::FenceGate {
                 facing: Face::from_name(value("facing", "north"))?,
                 open: value("open", "false") == "true",
+            }),
+            "chest" | "trapped_chest" => kind(JoinKind::Chest {
+                facing: Face::from_name(value("facing", "north"))?,
             }),
             "cobblestone" => Joins {
                 sturdy: Faces::ALL,
@@ -258,4 +261,93 @@ fn a_target_that_cannot_say_leaves_each_block_as_painted() {
         &Silent,
     );
     assert_eq!(at(only_structure(&out), 1, 1, 2), "minecraft:glass_pane[]");
+}
+
+/// A 7x5 struct with 3-row walls under a flat roof one voxel past them, `chests` after the roof;
+/// the overhang puts its back wall at `z=1`, where `offset=` grows toward the west.
+fn storeroom(chests: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @cobblestone\n  slot trap -> @trapped_chest\n\n\
+         struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  {chests}\n"
+    )
+}
+
+/// The chests `lines` sets in [`storeroom`], each with its cell, paired as [`Rules`] pairs them.
+fn paired(lines: &[&str]) -> Vec<((u32, u32, u32), String)> {
+    let out = lowered_with(&storeroom(&lines.join("\n  ")), &Rules);
+    assert_eq!(out.diagnostics, [], "{lines:?}");
+    chests(only_structure(&out))
+}
+
+#[test]
+fn chests_side_by_side_pair_two_by_two_from_their_own_left() {
+    // Facing into the struct, the chests' own left is the east end of the back wall, `offset=1`.
+    let inside = paired(&[
+        "chest at=inside.back offset=1 y=1",
+        "chest at=inside.back offset=2 y=1",
+        "chest at=inside.back offset=3 y=1",
+    ]);
+    let south = |kind| format!("minecraft:chest[facing=south,type={kind}]");
+    assert_eq!(
+        inside,
+        [
+            ((4, 1, 2), south("single")),
+            ((5, 1, 2), south("right")),
+            ((6, 1, 2), south("left")),
+        ],
+    );
+    // Facing out of it, their own left is the west end.
+    let outside = paired(&[
+        "chest at=back.outside offset=0 y=1",
+        "chest at=back.outside offset=1 y=1",
+    ]);
+    let north = |kind| format!("minecraft:chest[facing=north,type={kind}]");
+    assert_eq!(
+        outside,
+        [((6, 1, 0), north("left")), ((7, 1, 0), north("right"))],
+    );
+}
+
+#[test]
+fn a_chest_that_writes_its_type_faces_another_way_or_is_another_block_pairs_with_none() {
+    let south = |kind| format!("minecraft:chest[facing=south,type={kind}]");
+    assert_eq!(
+        paired(&[
+            "chest at=inside.back offset=1 y=1 size=single",
+            "chest at=inside.back offset=2 y=1",
+            "chest at=inside.back offset=3 y=1",
+        ]),
+        [
+            ((4, 1, 2), south("right")),
+            ((5, 1, 2), south("left")),
+            ((6, 1, 2), south("single")),
+        ],
+    );
+    assert_eq!(
+        paired(&[
+            "chest at=inside.back offset=1 y=1 facing=out",
+            "chest at=inside.back offset=2 y=1",
+        ]),
+        [
+            ((5, 1, 2), south("single")),
+            (
+                (6, 1, 2),
+                "minecraft:chest[facing=north,type=single]".to_owned()
+            ),
+        ],
+    );
+    assert_eq!(
+        paired(&[
+            "chest at=inside.back offset=1 y=1 mat_slot=trap",
+            "chest at=inside.back offset=2 y=1",
+        ]),
+        [
+            ((5, 1, 2), south("single")),
+            (
+                (6, 1, 2),
+                "minecraft:trapped_chest[facing=south,type=single]".to_owned()
+            ),
+        ],
+    );
 }

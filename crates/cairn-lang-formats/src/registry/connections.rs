@@ -1,5 +1,5 @@
 //! The `connections` component of a registry pack: what each block is, per version, to the rules
-//! that join panes, fences and walls to their neighbours (`spec/blockstate` "Connections").
+//! that join panes, fences, walls and chests to their neighbours (`spec/blockstate` "Connections").
 
 use std::collections::HashMap;
 
@@ -14,6 +14,9 @@ pub const SUPPORTED_CONNECTIONS_SCHEMA: u32 = 1;
 
 /// The states the rules read of a neighbouring fence gate.
 const GATE_READS: [&str; 2] = ["facing", "open"];
+
+/// The states the rules read of a chest.
+const CHEST_READS: [&str; 1] = ["facing"];
 
 /// The body of `connections.json`.
 #[derive(Debug, Clone, Deserialize)]
@@ -66,6 +69,8 @@ pub enum ConnectionKind {
     WoodenFence,
     /// A fence gate.
     FenceGate,
+    /// A chest that pairs with the chest beside it.
+    Chest,
 }
 
 /// The whole faces of a [`ConnectionRow`]'s blocks.
@@ -244,6 +249,11 @@ impl ConnectionIndex {
                         .filter(|face| Face::SIDES.contains(face))?,
                     open: value("open")? == "true",
                 },
+                ConnectionKind::Chest => JoinKind::Chest {
+                    facing: value("facing")
+                        .and_then(Face::from_name)
+                        .filter(|face| Face::SIDES.contains(face))?,
+                },
             })
         });
         Some(Joins {
@@ -288,8 +298,10 @@ fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
         Sturdy::Lookup { reads, .. } => reads.iter().map(String::as_str).collect(),
         Sturdy::Every(_) => Vec::new(),
     };
-    if row.kind == Some(ConnectionKind::FenceGate) {
-        needs.extend(GATE_READS);
+    match row.kind {
+        Some(ConnectionKind::FenceGate) => needs.extend(GATE_READS),
+        Some(ConnectionKind::Chest) => needs.extend(CHEST_READS),
+        _ => {}
     }
     if let Some(missing) = needs.iter().find(|key| !row.defaults.contains_key(**key)) {
         return Err(format!(

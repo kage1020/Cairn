@@ -220,6 +220,7 @@ pub(super) fn port_world_position<S: BuildHasher>(
         | MemberRole::Stair
         | MemberRole::Level
         | MemberRole::PressurePlate
+        | MemberRole::Chest
         | MemberRole::Circuit
         | MemberRole::Place
         | MemberRole::Connect

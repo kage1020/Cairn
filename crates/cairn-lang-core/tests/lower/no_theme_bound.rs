@@ -92,7 +92,7 @@ fn a_themeless_scope_is_told_how_each_role_degrades() {
         [
             "a `floor` is left air; no `walls` is built or takes up rows, so no `door` or \
              `window` is cut; a `roof` is built from its default block, and so is an eave \
-             `stair` or `pressure_plate` that still fits the shorter structure",
+             `stair`, `pressure_plate` or `chest` that still fits the shorter structure",
             "a scope binds a theme when the module declares exactly one logical theme, or the \
              `place` names one with `theme=`; under a `--edition` pin that theme must also have \
              a variant for that edition",

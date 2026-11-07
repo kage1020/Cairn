@@ -1,5 +1,5 @@
-//! What the built-in packs' connection tables say a block is to the rules that join panes, fences
-//! and walls (`spec/blockstate` "Connections").
+//! What the built-in packs' connection tables say a block is to the rules that join panes, fences,
+//! walls and chests (`spec/blockstate` "Connections").
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockState, Face, Faces, JoinKind, Joins, TargetRegistry};
@@ -123,4 +123,35 @@ fn a_bedrock_id_is_read_as_the_canonical_blocks_its_state_map_names() {
     );
     // Java's standing and wall torch both become it, and only the standing one raises a post.
     assert_eq!(at("1.21.0", "unlit_redstone_torch"), None);
+}
+
+#[test]
+fn a_chest_is_read_with_the_way_it_faces_and_an_ender_chest_pairs_with_none() {
+    let at = |edition, version, id, properties: &[(&str, &str)]| {
+        joins(edition, Some(version), &state(id, properties))
+    };
+    let chest = |facing| Some(kind(JoinKind::Chest { facing }));
+    assert_eq!(at(Edition::Java, "1.21", "chest", &[]), chest(Face::North));
+    assert_eq!(
+        at(
+            Edition::Java,
+            "1.21",
+            "trapped_chest",
+            &[("facing", "east")]
+        ),
+        chest(Face::East),
+    );
+    assert_eq!(
+        at(Edition::Java, "26.3", "copper_chest", &[]),
+        chest(Face::North)
+    );
+    assert_eq!(at(Edition::Java, "1.21", "copper_chest", &[]), None);
+    assert_eq!(
+        at(Edition::Java, "1.21", "ender_chest", &[]),
+        Some(Joins::default())
+    );
+    assert_eq!(
+        at(Edition::Bedrock, "1.21.0", "chest", &[]),
+        chest(Face::North)
+    );
 }

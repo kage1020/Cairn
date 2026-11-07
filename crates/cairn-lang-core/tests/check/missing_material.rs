@@ -240,6 +240,7 @@ const PAINTERS: &[(&str, &str, &str)] = &[
         "pressure_plate id=p at=inside.front offset=1 y=0",
         "",
     ),
+    ("chest", "chest id=c at=inside.front offset=1 y=0", ""),
 ];
 
 /// The lowered structure's extents, its sorted painted block ids, and its finding count.
@@ -318,7 +319,8 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Window
             | MemberRole::Roof
             | MemberRole::Stair
-            | MemberRole::PressurePlate => true,
+            | MemberRole::PressurePlate
+            | MemberRole::Chest => true,
             // None of these lays a block of its own material.
             MemberRole::Level
             | MemberRole::Circuit
@@ -337,6 +339,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         MemberRole::Stair,
         MemberRole::Level,
         MemberRole::PressurePlate,
+        MemberRole::Chest,
         MemberRole::Circuit,
         MemberRole::Place,
         MemberRole::Connect,

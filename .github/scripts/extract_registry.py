@@ -576,11 +576,15 @@ KIND_STATES = {
         "in_wall": BOOLEAN,
         "open": BOOLEAN,
     },
+    "chest": {
+        "facing": ["north", "south", "west", "east"],
+        "type": ["single", "left", "right"],
+    },
 }
 # A pane is any block holding exactly these states that is no fence: the game has no tag for them.
 PANE_STATES = {**KIND_STATES["pane"], WATER_LAYER_STATE: BOOLEAN}
-# The states the rules read of a neighbouring fence gate, which it does not derive.
-GATE_READS = ("facing", "open")
+# The states the rules read of a block of each kind that it does not derive.
+KIND_READS = {"fence_gate": ("facing", "open"), "chest": ("facing",)}
 
 # A box of a model, `(low corner, high corner, faces it shows)`.
 Box = tuple[tuple[float, float, float], tuple[float, float, float], frozenset[str]]
@@ -599,7 +603,8 @@ class Sturdy:
 class Joins:
     """What one block is to the connection rules at one release."""
 
-    # `pane`, `wall`, `fence`, `wooden_fence` or `fence_gate`; `None` for one that only has faces.
+    # `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate` or `chest`; `None` for one that only
+    # has faces.
     kind: str | None
     exception: bool
     # In `wall_post_override`: a wall under it raises its post.
@@ -876,6 +881,8 @@ def block_kind(name: str, states: dict, tags: dict[str, set[str]]) -> str | None
             ("fence", name in tags["fences"]),
             ("fence_gate", name in tags["fence_gates"]),
             ("pane", states == PANE_STATES and name not in tags["fences"]),
+            # No tag names them: a chest is any block whose `type` takes these values.
+            ("chest", states.get("type") == KIND_STATES["chest"]["type"]),
         )
         if held
     ]
@@ -904,7 +911,7 @@ def connection_table(
         states = {k: list(v) for k, v in block.get("properties", {}).items()}
         kind = block_kind(name, states, tags)
         sturdy = block_sturdy(client, name, block, cache)
-        reads = {*(sturdy.reads if sturdy else ()), *(GATE_READS if kind == "fence_gate" else ())}
+        reads = {*(sturdy.reads if sturdy else ()), *KIND_READS.get(kind, ())}
         default = next(dict(s.get("properties", {})) for s in block["states"] if s.get("default"))
         joins = Joins(
             kind=kind,

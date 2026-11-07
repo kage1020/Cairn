@@ -150,7 +150,7 @@ pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
 
 /// The note [`diag_deferred_member_reason`] gives, listing the roles lowering draws.
 const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls, door, window, \
-     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
+     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate and chest \
      (at=<side>.outside|inside.<side>), and level y=N grouping, and recognises circuit \
      region=<label> void=<N> (u32, N>=1) plus door[id=<name>] opened_by=sig.<name> actuator \
      patches; other roles will be added as their lowering rules are spec'd";

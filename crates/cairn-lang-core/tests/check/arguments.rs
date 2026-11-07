@@ -364,6 +364,10 @@ const SWEEP: &[(&str, &str)] = &[
         "pressure_plate",
         "  pressure_plate id=p class=c mat_slot=m at=front.outside offset=0 y=0\n",
     ),
+    (
+        "chest",
+        "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single\n",
+    ),
     ("circuit", "  circuit id=c class=c region=r void=2\n"),
     (
         "place",

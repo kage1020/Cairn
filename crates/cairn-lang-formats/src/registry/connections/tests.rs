@@ -83,6 +83,41 @@ fn a_gate_is_read_with_its_facing_and_whether_it_stands_open() {
 }
 
 #[test]
+fn a_chest_is_read_with_the_way_it_faces() {
+    let tables = index(&serde_json::json!([{
+        "mc_versions": ["1.0"], "ids": ["chest"], "kind": "chest",
+        "defaults": {"facing": "north"},
+    }]))
+    .expect("valid");
+    let kind = |pairs: &[(&str, &str)]| {
+        tables
+            .joins("1.0", "minecraft:chest", &properties(pairs))
+            .and_then(|joins| joins.kind)
+    };
+    assert_eq!(
+        kind(&[]),
+        Some(JoinKind::Chest {
+            facing: Face::North
+        })
+    );
+    assert_eq!(
+        kind(&[("facing", "west"), ("type", "left")]),
+        Some(JoinKind::Chest { facing: Face::West }),
+    );
+    assert_eq!(kind(&[("facing", "down")]), None);
+    let refused = index(&serde_json::json!([{
+        "mc_versions": ["1.0"], "ids": ["chest"], "kind": "chest",
+    }]));
+    assert_eq!(
+        refused.err(),
+        Some(ConnectionsError::MalformedRow {
+            id: "chest".to_owned(),
+            problem: "the rules read `facing`, which `defaults` does not give".to_owned(),
+        }),
+    );
+}
+
+#[test]
 fn a_row_whose_rules_read_a_property_without_a_default_is_refused() {
     let refused = index(&serde_json::json!([{
         "mc_versions": ["1.0"], "ids": ["oak_fence_gate"], "kind": "fence_gate",

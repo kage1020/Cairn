@@ -126,7 +126,7 @@ pub(super) fn member_disposition(role: &MemberRole) -> MemberDisposition {
         MemberRole::Floor | MemberRole::Walls => MemberDisposition::Paints(Phase::Massing),
         MemberRole::Roof | MemberRole::Stair => MemberDisposition::Paints(Phase::Envelope),
         MemberRole::Door | MemberRole::Window => MemberDisposition::Paints(Phase::Openings),
-        MemberRole::PressurePlate => MemberDisposition::Paints(Phase::Fixtures),
+        MemberRole::PressurePlate | MemberRole::Chest => MemberDisposition::Paints(Phase::Fixtures),
         MemberRole::Circuit => MemberDisposition::Reserves,
         MemberRole::Place | MemberRole::Connect | MemberRole::Other(_) => {
             MemberDisposition::NotLowered
@@ -226,6 +226,7 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::Window
         | MemberRole::Stair
         | MemberRole::PressurePlate
+        | MemberRole::Chest
         | MemberRole::Circuit
         | MemberRole::Place
         | MemberRole::Connect

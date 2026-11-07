@@ -147,14 +147,15 @@ one row per property and the blocks it covers, or every other block that drops i
 loader refuses a dropped property no row classifies, and the extractor a row nothing drops.
 
 Both packs carry a `connections` component: what each block is to the rules that join panes,
-fences and walls to their neighbours ([Blockstate §6.1](/spec/blockstate/#connections)). It is read
-off the Java release each version's states follow, the version itself on Java and the release its
-state map follows on Bedrock, so `ids` names canonical blocks in both. The release's block tags
-say which blocks are walls, fences and fence gates, which fences are wooden, and which raise a
-wall's post, the tags of the feature packs its jar ships included. A pane is a block with a pane's
-states that is no fence, and the blocks never joined by a face are the ones the game names in
-code. Which faces of each state are sturdy is read off the block models the release's client jar
-ships, a lookup over the fewest properties that decide them where they vary:
+fences, walls and chests to their neighbours ([Blockstate §6.1](/spec/blockstate/#connections)).
+It is read off the Java release each version's states follow, the version itself on Java and the
+release its state map follows on Bedrock, so `ids` names canonical blocks in both. The release's
+block tags say which blocks are walls, fences and fence gates, which fences are wooden, and which
+raise a wall's post, the tags of the feature packs its jar ships included. A pane is a block with a
+pane's states that is no fence, a chest is a block whose `type` is `single`, `left` or `right`, and
+the blocks never joined by a face are the ones the game names in code. Which faces of each state
+are sturdy is read off the block models the release's client jar ships, a lookup over the fewest
+properties that decide them where they vary:
 
 ```json
 { "mc_versions": ["1.20.4", "1.21", "1.21.4", "26.3"], "ids": ["acacia_slab", "..."],
@@ -164,12 +165,13 @@ ships, a lookup over the fewest properties that decide them where they vary:
                        "top": ["up"] } } }
 ```
 
-A row's `kind` is `pane`, `wall`, `fence`, `wooden_fence` or `fence_gate`, `exception` marks a
-block never joined by a face, `raises_post` one in the `wall_post_override` tag, and `defaults`
-gives the default of each state the rules read, which a state that leaves it out takes. A block no
-row names is nothing to the rules. Every target postdates 1.16, where wall connections turned from
-booleans into `none` / `low` / `tall` ([§10.5](#105-which-version-is-it-for-has-three-answers)), so
-the tables write the three values throughout.
+A row's `kind` is `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate` or `chest`, `exception`
+marks a block never joined by a face, `raises_post` one in the `wall_post_override` tag, and
+`defaults` gives the default of each state the rules read, which a state that leaves it out takes. A
+block no row names is nothing to the rules. Every target postdates 1.16, where wall connections
+turned from booleans into `none` / `low` / `tall`
+([§10.5](#105-which-version-is-it-for-has-three-answers)), so the tables write the three values
+throughout.
 
 ## 10.4 Fail-loud and minimum-version inference
 

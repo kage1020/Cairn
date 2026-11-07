@@ -13,7 +13,7 @@ title: "8. エンティティ"
 - **構造化する (第一級)**: `sign`、`painting`、`item_frame`、`armor_stand`、`villager` (と `trade`)、`display` (text / block / item)、`bed` (ブロックとして扱う)。
 - **汎用の受け皿**: そのほかの mob には `spawn id=.. type=<entity> at=<selector> [nbt={...}]` を使います。
 
-ただし、これらはまだどれもキーワードではなく、`spawn` を含めてすべて `E_UNKNOWN_KEYWORD` になるので、エンティティやブロックエンティティを置くビルドはまだありません。下の例には、パーサがまだ受け付けない構文も含まれています。座標の組 (`at=4,3,2`)、小数 (`scale=1.5`)、`nbt={...}` の値は `E_PARSE` になります ([構文 §5.1.1](/ja/spec/syntax/#511-リテラルと区切り))。
+ただし、これらはまだどれもキーワードではなく、`spawn` を含めてすべて `E_UNKNOWN_KEYWORD` になるので、エンティティを置くビルドはまだありません。ビルドが置くブロックエンティティは `chest` だけで、ブロックエンティティのデータは持ちません ([ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する))。下の例には、パーサがまだ受け付けない構文も含まれています。座標の組 (`at=4,3,2`)、小数 (`scale=1.5`)、`nbt={...}` の値は `E_PARSE` になります ([構文 §5.1.1](/ja/spec/syntax/#511-リテラルと区切り))。
 
 ```
 villager id=trader at=stall[0] profession=librarian level=master

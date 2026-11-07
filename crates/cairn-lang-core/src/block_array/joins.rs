@@ -1,4 +1,4 @@
-//! What a block is to the rules that join panes, fences and walls to their neighbours
+//! What a block is to the rules that join panes, fences, walls and chests to their neighbours
 //! (`spec/blockstate` "Connections").
 
 /// A face of a block, named for the direction it looks toward.
@@ -59,6 +59,29 @@ impl Face {
             Self::South => Self::North,
             Self::West => Self::East,
             Self::East => Self::West,
+        }
+    }
+
+    /// The sideways face a quarter turn clockwise from this one, seen from above; `None` for
+    /// `Down` and `Up`.
+    #[must_use]
+    pub const fn clockwise(self) -> Option<Self> {
+        Some(match self {
+            Self::North => Self::East,
+            Self::East => Self::South,
+            Self::South => Self::West,
+            Self::West => Self::North,
+            Self::Down | Self::Up => return None,
+        })
+    }
+
+    /// The sideways face a quarter turn counter-clockwise from this one, seen from above; `None`
+    /// for `Down` and `Up`.
+    #[must_use]
+    pub const fn counter_clockwise(self) -> Option<Self> {
+        match self.clockwise() {
+            Some(face) => Some(face.opposite()),
+            None => None,
         }
     }
 
@@ -127,6 +150,11 @@ pub enum JoinKind {
         facing: Face,
         /// Whether it stands open.
         open: bool,
+    },
+    /// A chest that pairs with a chest of the same block beside it.
+    Chest {
+        /// The way its front faces, a sideways face.
+        facing: Face,
     },
 }
 

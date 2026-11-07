@@ -312,6 +312,14 @@ class BlockKindTest(unittest.TestCase):
         self.assertEqual(extract.block_kind("nether_brick_fence", FENCE_STATES, TAGS), "fence")
         self.assertIsNone(extract.block_kind("stone", {}, TAGS))
 
+    def test_a_chest_is_a_block_whose_type_pairs_it(self):
+        chest = {**extract.KIND_STATES["chest"], "waterlogged": extract.BOOLEAN}
+        self.assertEqual(extract.block_kind("trapped_chest", chest, TAGS), "chest")
+        ender = {"facing": chest["facing"], "waterlogged": extract.BOOLEAN}
+        self.assertIsNone(extract.block_kind("ender_chest", ender, TAGS))
+        slab = {"type": ["top", "bottom", "double"], "waterlogged": extract.BOOLEAN}
+        self.assertIsNone(extract.block_kind("oak_slab", slab, TAGS))
+
     def test_a_tagged_block_without_its_kinds_states_is_refused(self):
         with self.assertRaises(Refused):
             extract.block_kind("cobblestone_wall", FENCE_STATES, TAGS)

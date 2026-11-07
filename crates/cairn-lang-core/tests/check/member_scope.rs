@@ -15,6 +15,7 @@ const GEOMETRY_ROWS: &[&str] = &[
     "stair kind=stairs mat_slot=wall",
     "level y=0",
     "pressure_plate id=p at=front.outside",
+    "chest id=c at=inside.front",
     "circuit region=floor void=1",
 ];
 
@@ -187,7 +188,7 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
     assert!(
         notes(&geometry).contains(
-            &"expected one of: floor, walls, door, window, roof, stair, level, pressure_plate, circuit"
+            &"expected one of: floor, walls, door, window, roof, stair, level, pressure_plate, chest, circuit"
         ),
         "got {:#?}",
         notes(&geometry),
