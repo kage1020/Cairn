@@ -155,8 +155,6 @@ struct VersionMap {
     onto: HashMap<String, Vec<(String, usize)>>,
     /// Java id to each Bedrock block it maps to, with the family.
     from: HashMap<String, Vec<(String, usize)>>,
-    /// The refused pairs, `(Bedrock id, Java id)`.
-    refused: HashSet<(String, String)>,
     refused_onto: HashSet<String>,
     refused_from: HashSet<String>,
 }
@@ -419,7 +417,6 @@ impl StateMapIndex {
                 }
                 map.refused_onto.insert(bedrock.clone());
                 map.refused_from.insert(java.clone());
-                map.refused.insert((bedrock, java));
             }
         }
         for java in &states.in_water {
