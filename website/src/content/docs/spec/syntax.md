@@ -50,10 +50,15 @@ scope's member lines are measured in ([Open Issues](/spec/open-issues/)): `x` al
 footprint's `W` from its low-`x` corner, `z` along its `H` from its low-`z` corner, and `y` up from
 the base plane, or from the `level`'s under `level y=N`. A cell named this way shifts with a roof's
 `overhang=`, as every member does. No component is negative, since none counts back past the low
-corner, and each is read under the same ceiling as any integer.
+corner, and each is read under the same ceiling as any integer. A key a later chapter defines as a
+distance rather than a cell, such as the `step=` of `raw_repeat`
+([Ecosystem Interop](/spec/ecosystem-interop/)), reads the same three integers as the distance from
+one repeat to the next.
 
 A triple is a `key=` value: it is what a key reads when an integer, a `,` and another integer
-follow its `=`. Anywhere else the commas keep their own meaning. In a value list they separate
+follow its `=`. A `-` before either of those integers still starts a triple, which is then refused
+at the `-`, so `from=-1,2,3` and `from=1,-2,3` are told why no component is negative. Anywhere else
+the commas keep their own meaning. In a value list they separate
 items, so `[1,2,3]` is three integers, and a bare value or a `->` binding reads one integer, so
 `fill 1,1,1` is `E_PARSE` at its first `,`. In a selector a `,` followed by a key still separates
 attributes: `[y=2,side=front]` is two of them, and `[at=1,2,3, y=2]` a triple and an attribute. A
@@ -66,12 +71,16 @@ that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offse
 wall's length. The `from=` and `to=` of a `fill`
 ([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and a `raw_block`'s
 `at=` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), read a triple, and no
-other key does yet: `note_block` and the entities that take one are not keywords, and a key that
-reads an integer or a label refuses a triple as it refuses any value of the wrong kind.
+other key does yet: `note_block` and the entities that take one are not keywords. A key that reads
+another kind of value treats a triple as any value of the wrong kind. A label or size key refuses
+it as a type mismatch, a member key such as `side=` or `height=` refuses its member as
+`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says
+so with `W_IGNORED_ARGUMENT`.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
-two versions, as do `[side=front, y=2]` and `[side=front y=2]`. The two list kinds differ in how much punctuation they tolerate:
+two versions, as do `[side=front, y=2]` and `[side=front y=2]`. The two list kinds differ in how
+much punctuation they tolerate:
 
 - A `[selector]`'s attribute list skips a comma wherever it finds one, so `[side=front, , y=2]`
   parses.
@@ -180,10 +189,11 @@ reported there and never at the first column of the next one.
 
 The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts six forms the parser refuses, because tree-sitter cannot express their
+correctly. It also accepts seven forms the parser refuses, because tree-sitter cannot express their
 rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, alone or as a coordinate's component, a truth row whose width differs from
-the input count, and a block-state literal naming one property twice.
+integer past 2^63 − 1, alone or as a coordinate's component, a coordinate whose last component runs
+into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
+literal naming one property twice.
 
 ## 5.2 Nesting
 

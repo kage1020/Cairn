@@ -420,13 +420,13 @@ pub enum ValueKind {
         /// Height in blocks.
         h: NonZeroU32,
     },
-    /// Coordinate triple `X,Y,Z` (`4,3,2`): a cell of the scope, from its footprint's low corner.
+    /// Coordinate triple `x,y,z` (`4,3,2`): a cell of the scope, from its footprint's low corner.
     Coord {
-        /// Along the footprint's width.
+        /// Along the `size=` footprint's `W`.
         x: u64,
-        /// Up from the base plane.
+        /// Up from the base plane, or from the level's under `level y=N`.
         y: u64,
-        /// Along the footprint's depth.
+        /// Along the `size=` footprint's `H`.
         z: u64,
     },
     /// Canonical or abstract token without its `@`: `@oak_planks` is `Token("oak_planks")`.
