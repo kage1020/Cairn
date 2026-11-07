@@ -37,6 +37,7 @@ Standard library only: it runs on a bare `ubuntu-latest` runner.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import io
 import itertools
@@ -77,8 +78,7 @@ GEYSER_PALETTE = (
 )
 
 # Geyser adds a protocol's palette when it supports the release and deletes it when it drops the
-# release, so each pin is the commit that added the file. The three 1.21 palettes match PocketMine's
-# `canonical_block_states.nbt` for the same releases state for state.
+# release, so each pin is the commit that added the file.
 BEDROCK_PALETTES = {
     "1.21.0": (
         "fa6808a62029373af4492329bbf2cbf80bb51e7f",
@@ -134,6 +134,8 @@ BEDROCK_STATE_MAPS = {
 # The Java state the `.mcstructure` writer carries as the water layer rather than as a state.
 WATER_LAYER_STATE = "waterlogged"
 
+DIFF_LINES_SHOWN = 40
+
 # A property's values, in the game's order: strings on Java; a bool, int or string on Bedrock.
 Domain = list
 States = dict[str, Domain]
@@ -161,6 +163,8 @@ def bare(identifier: str) -> str:
 
 def java_blocks(report: dict) -> dict[str, States]:
     """The ids and domains of a `--reports` `blocks.json`, keeping each property's value order."""
+    if not report:
+        raise Refused("the block report lists no block")
     blocks = {}
     for identifier, block in report.items():
         properties = block.get("properties", {})
@@ -181,11 +185,11 @@ class JavaReport:
 
 def java_report(version: str, java: str, cache: Path, work: Path) -> JavaReport:
     """The `--reports` blocks of the Java server jar for `version`, generated once per run."""
-    jar, needs_java = server_jar(version, cache)
-    download, _ = server_download(version, cache)
+    download, needs_java = server_download(version, cache)
     has_java = java_major(java)
     if has_java < needs_java:
         raise Refused(f"Java {version} needs Java {needs_java}, and `{java}` is {has_java}")
+    jar, _ = server_jar(version, cache)
     root = work / version
     report = root / "out" / "reports" / "blocks.json"
     if not report.exists():
@@ -224,7 +228,10 @@ def bedrock_blocks(palette: dict) -> tuple[dict[str, States], int]:
     """The ids and domains of a block palette, and the one block-state version all of it carries."""
     blocks: dict[str, dict[str, list]] = {}
     versions = set()
-    for entry in palette.get("blocks", []):
+    entries = palette.get("blocks", [])
+    if not entries:
+        raise Refused("the palette lists no block")
+    for entry in entries:
         states = blocks.setdefault(bare(entry["name"]), {})
         versions.add(int(entry["version"]))
         for name, raw in entry.get("states", {}).items():
@@ -249,10 +256,14 @@ def extract_bedrock(version: str, cache: Path) -> Table:
     url = GEYSER_PALETTE.format(commit=commit, file=file)
     cache.mkdir(parents=True, exist_ok=True)
     cached = cache / f"bedrock-{version}-{sha256[:12]}.nbt"
-    raw = cached.read_bytes() if cached.exists() else fetch(url, 300)
+    raw = cached.read_bytes() if cached.exists() else b""
     if hashlib.sha256(raw).hexdigest() != sha256:
-        raise Refused(f"the Bedrock {version} palette at {url} does not match its pinned SHA-256")
-    write_atomically(cached, raw)
+        raw = fetch(url, 300)
+        if hashlib.sha256(raw).hexdigest() != sha256:
+            raise Refused(
+                f"the Bedrock {version} palette at {url} does not match its pinned SHA-256"
+            )
+        write_atomically(cached, raw)
     try:
         blocks, block_version = bedrock_blocks(read_nbt(raw))
     except (ValueError, KeyError, EOFError) as problem:
@@ -300,10 +311,12 @@ def geyser_mappings(version: str, cache: Path) -> list[dict]:
     url = GEYSER_MAPPINGS.format(commit=commit)
     cache.mkdir(parents=True, exist_ok=True)
     cached = cache / f"geyser-mappings-{sha256[:12]}.nbt"
-    raw = cached.read_bytes() if cached.exists() else fetch(url, 300)
+    raw = cached.read_bytes() if cached.exists() else b""
     if hashlib.sha256(raw).hexdigest() != sha256:
-        raise Refused(f"the state map at {url} does not match its pinned SHA-256")
-    write_atomically(cached, raw)
+        raw = fetch(url, 300)
+        if hashlib.sha256(raw).hexdigest() != sha256:
+            raise Refused(f"the state map at {url} does not match its pinned SHA-256")
+        write_atomically(cached, raw)
     try:
         return list(read_nbt(raw)["bedrock_mappings"])
     except (ValueError, KeyError, EOFError) as problem:
@@ -1041,8 +1054,11 @@ def blocks_text(tables: list[Table]) -> str:
     ]
     for i, (parent, table) in enumerate(zip(tables, later)):
         added = {k: v for k, v in table.blocks.items() if k not in parent.blocks}
+        # `True == 1`, so comparing the lists would miss a boolean domain retyped as integers.
         changed = {
-            k: v for k, v in table.blocks.items() if k in parent.blocks and parent.blocks[k] != v
+            k: v
+            for k, v in table.blocks.items()
+            if k in parent.blocks and json.dumps(parent.blocks[k]) != json.dumps(v)
         }
         removed = [k for k in parent.blocks if k not in table.blocks]
         lines += [
@@ -1140,6 +1156,23 @@ def pack_files(edition: str, extracted: Extracted) -> dict[Path, str]:
     return files
 
 
+def diff_head(name: str, committed: str, wanted: str) -> list[str]:
+    """The first lines of the unified diff from `committed` to `wanted`, and a count of the rest."""
+    lines = [
+        line if line.endswith("\n") else line + "\n"
+        for line in difflib.unified_diff(
+            committed.splitlines(keepends=True),
+            wanted.splitlines(keepends=True),
+            f"{name} (committed)",
+            f"{name} (from the game)",
+        )
+    ]
+    head = lines[:DIFF_LINES_SHOWN]
+    if len(lines) > DIFF_LINES_SHOWN:
+        head.append(f"... and {len(lines) - DIFF_LINES_SHOWN} more lines\n")
+    return head
+
+
 def extract(edition: str, java: str, cache: Path, work: Path) -> Extracted:
     """Every targetable version of `edition`'s pack, extracted, in table order."""
     table = json.loads((PACKS / edition / "data_versions.json").read_text(encoding="utf-8"))
@@ -1164,7 +1197,8 @@ def extract(edition: str, java: str, cache: Path, work: Path) -> Extracted:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """0 when the files hold what the game says, 1 when not or refused, 2 on misuse."""
+    """0 when the files hold, or now hold, what the game says; 1 on a refusal or, with `--check`, a
+    difference; 2 on misuse."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("edition", choices=("java", "bedrock"))
     parser.add_argument(
@@ -1182,21 +1216,21 @@ def main(argv: list[str] | None = None) -> int:
         "--check", action="store_true", help="write nothing; fail when a file differs"
     )
     args = parser.parse_args(argv)
-    work = Path(tempfile.mkdtemp(prefix="cairn-extract-registry-")).resolve()
     try:
-        extracted = extract(args.edition, os.path.normpath(args.java), args.cache.resolve(), work)
+        with tempfile.TemporaryDirectory(prefix="cairn-extract-registry-") as work:
+            java = os.path.normpath(args.java)
+            extracted = extract(args.edition, java, args.cache.resolve(), Path(work).resolve())
         files = pack_files(args.edition, extracted)
     except Refused as refusal:
         print(f"error: {refusal}", file=sys.stderr, flush=True)
         return 1
-    stale = [
-        path
-        for path, text in files.items()
-        if not path.exists() or path.read_text(encoding="utf-8") != text
-    ]
+    committed = {path: path.read_text(encoding="utf-8") if path.exists() else "" for path in files}
+    stale = [path for path, text in files.items() if committed[path] != text]
     if args.check:
         for path in stale:
-            print(f"{path.relative_to(ROOT)} differs from what the game says", file=sys.stderr)
+            name = path.relative_to(ROOT).as_posix()
+            print(f"{name} differs from what the game says:", file=sys.stderr)
+            sys.stderr.writelines(diff_head(name, committed[path], files[path]))
         return 1 if stale else 0
     for path in stale:
         write_atomically(path, files[path].encode("utf-8"))

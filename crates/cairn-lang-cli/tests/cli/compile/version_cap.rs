@@ -266,7 +266,7 @@ fn bedrock_releases_sharing_a_block_state_version_are_ordered_by_release() {
     let stderr = String::from_utf8(below.stderr).expect("utf-8");
     assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
     assert!(
-        stderr.contains("valid bedrock targets: 1.26.60"),
+        stderr.contains("valid bedrock targets: 1.26.60\n"),
         "{stderr}",
     );
 }
