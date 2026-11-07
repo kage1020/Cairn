@@ -149,7 +149,7 @@ is not separated: `@cauldron[fluid=water]` names a state `minecraft:cauldron` do
 pinned target refuses it as `E_STATE_DOMAIN` rather than reading it as `water_cauldron`. A merged id
 is checked per target like any other. No floor is inferred for a new block: `@pale_oak_planks` with
 no `@requires` checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it, naming
-1.21.4 as the version it first appears in. A deleted id is `E_UNKNOWN_ID`, naming the last version
+1.21.4 as the first target that declares it. A deleted id is `E_UNKNOWN_ID`, naming the last target
 that declares it; an id no version declares names the nearest block the target has when one is near
 enough.
 

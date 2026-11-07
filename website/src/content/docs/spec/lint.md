@@ -724,8 +724,8 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 
 `token` accompanies `catalog` and `builtin` and is absent for `authored`. `suggestion` is absent
 when no declared ID is within the typo threshold, and when another version of the edition declares
-the ID, which makes it no typo. A rename is normally past the threshold, but the two fields are
-filled by independent rules and a renamed ID near its replacement carries both.
+the ID, which makes it no typo. A rename is normally past the threshold, and a renamed ID near its
+replacement carries both only when no version of the edition declares it.
 
 `aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
 guess from a string distance; an alias is the registry pack's `aliases` component stating that two
@@ -735,11 +735,11 @@ pack's own order, and is absent when the pack names none. The rendered note prin
 counts the rest; the payload is where the whole set lives. See [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
-`since` and `until` are the versions of the edition nearest the target that do declare the ID, as
-bare version labels: `since` the first after it, where an ID a later release added first appears,
-and `until` the last before it, where an ID a later release dropped was last declared. Each is
-absent when no such version is carried, so an ID no version declares has neither ([Versioning and
-Editions](/spec/versioning-editions/#which-registry-an-unknown-id-is-unknown-to)).
+`since` and `until` are the targets of the edition nearest the pinned one that do declare the ID,
+as bare version labels: `since` the first after it and `until` the last before it. They are the
+versions the pack carries a table for, so `since` bounds the release that added an ID rather than
+naming it. Each is absent when no such target is carried, so an ID no version declares has neither
+([Versioning and Editions](/spec/versioning-editions/#which-registry-an-unknown-id-is-unknown-to)).
 
 **`E_STATE_DOMAIN`** is about one pair of one state, so a literal with two faults is two findings.
 `key` and `value` are the pair as the state carries it. `reason` is `unknown_property` when the
