@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import itertools
 import json
 import shutil
 import tempfile
@@ -356,6 +357,70 @@ class ExtractBedrock(Case):
         )
 
 
+class GeyserMappings(Case):
+    """`geyser_mappings` offline, its one pinned state map served by a fake `fetch`."""
+
+    MAP = load.write_nbt({"bedrock_mappings": [{"bedrock_identifier": "minecraft:air"}]})
+    SHA256 = hashlib.sha256(MAP).hexdigest()
+    URL = "https://raw.githubusercontent.com/GeyserMC/mappings/abc/blocks.nbt"
+
+    def setUp(self) -> None:
+        self.cache = self.temporary_folder()
+        self.cached = self.cache / f"geyser-mappings-{self.SHA256[:12]}.nbt"
+        self.fetched: list[str] = []
+        self.patch(registry, "BEDROCK_STATE_MAPS", {"1.21.0": ("abc", self.SHA256, "1.21")})
+
+    def serve(self, body: bytes) -> None:
+        def fetch(url: str, timeout: int) -> bytes:
+            self.fetched.append(url)
+            return body
+
+        self.patch(registry, "fetch", fetch)
+
+    def test_a_cached_map_that_matches_its_pin_is_read_without_a_download(self) -> None:
+        self.cached.write_bytes(self.MAP)
+        self.serve(b"")
+        self.assertEqual(
+            registry.geyser_mappings("1.21.0", self.cache),
+            [{"bedrock_identifier": "minecraft:air"}],
+        )
+        self.assertEqual(self.fetched, [])
+
+    def test_a_cached_map_that_fails_its_pin_is_downloaded_again(self) -> None:
+        self.cached.write_bytes(b"corrupt")
+        self.serve(self.MAP)
+        self.assertEqual(
+            registry.geyser_mappings("1.21.0", self.cache),
+            [{"bedrock_identifier": "minecraft:air"}],
+        )
+        self.assertEqual(self.fetched, [self.URL])
+        self.assertEqual(self.cached.read_bytes(), self.MAP)
+
+    def test_a_download_that_fails_its_pin_is_refused_and_not_cached(self) -> None:
+        self.serve(b"corrupt")
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.0", self.cache),
+            f"the state map at {self.URL} does not match its pinned SHA-256",
+        )
+        self.assertFalse(self.cached.exists())
+
+    def test_a_map_whose_nbt_does_not_read_is_refused(self) -> None:
+        body = load.write_nbt({"other": []})
+        pin = ("abc", hashlib.sha256(body).hexdigest(), "1.21")
+        self.patch(registry, "BEDROCK_STATE_MAPS", {"1.21.0": pin})
+        self.serve(body)
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.0", self.cache),
+            "the state map for Bedrock 1.21.0 does not read: 'bedrock_mappings'",
+        )
+
+    def test_a_version_with_no_pinned_map_is_refused(self) -> None:
+        self.assertEqual(
+            self.refusal(registry.geyser_mappings, "1.21.1", self.cache),
+            "no state map is pinned for Bedrock 1.21.1; add it to BEDROCK_STATE_MAPS",
+        )
+
+
 class ExtractJava(Case):
     """`extract_java` offline: Mojang's metadata, the jar and the data generator are faked."""
 
@@ -507,6 +572,233 @@ class Main(Case):
         self.main("--check", wanted=self.COMMITTED, extract=extract)
         self.assertEqual(len(folders), 1)
         self.assertFalse(folders[0].exists())
+
+
+# --- the Bedrock state map ----------------------------------------------------------------------
+
+
+def report(blocks: dict[str, tuple[dict[str, list[str]], dict[str, str]]]) -> dict:
+    """A `--reports` `blocks.json` holding every state of `blocks`, each its domains and default."""
+    out = {}
+    next_id = 0
+    for name, (domains, default) in blocks.items():
+        states = []
+        keys = list(domains)
+        for values in itertools.product(*(domains[k] for k in keys)):
+            properties = dict(zip(keys, values))
+            state = {"id": next_id, "properties": properties} if keys else {"id": next_id}
+            if properties == default:
+                state["default"] = True
+            states.append(state)
+            next_id += 1
+        block = {"states": states}
+        if keys:
+            block["properties"] = domains
+        out[f"minecraft:{name}"] = block
+    return out
+
+
+STAIR_DOMAINS = {
+    "facing": ["north", "south"],
+    "half": ["top", "bottom"],
+    "shape": ["straight", "outer_left"],
+    "waterlogged": ["true", "false"],
+}
+STAIR_DEFAULT = {"facing": "north", "half": "bottom", "shape": "straight", "waterlogged": "false"}
+JAVA = registry.java_states(
+    report({"oak_stairs": (STAIR_DOMAINS, STAIR_DEFAULT), "oak_planks": ({}, {})})
+)
+
+
+def stair_mapping(properties: dict[str, str]) -> dict:
+    """Geyser's entry for a Java stair state: `shape` and `waterlogged` read by no state."""
+    return {
+        "bedrock_identifier": "minecraft:oak_stairs",
+        "state": {
+            "upside_down_bit": load.Byte(1 if properties["half"] == "top" else 0),
+            "weirdo_direction": 3 if properties["facing"] == "north" else 2,
+        },
+    }
+
+
+def mappings() -> list[dict]:
+    """Geyser's entries for every state of `JAVA`, in id order."""
+    out = []
+    for name, properties in JAVA.rows:
+        if name == "oak_stairs":
+            out.append(stair_mapping(properties))
+        else:
+            out.append({"bedrock_identifier": "oak_planks"})
+    return out
+
+
+BEDROCK_TABLE = {
+    "oak_stairs": {"upside_down_bit": [False, True], "weirdo_direction": [0, 1, 2, 3]},
+    "oak_planks": {},
+}
+
+
+class DecidedBy(unittest.TestCase):
+    def test_a_state_is_read_from_the_fewest_properties_that_decide_it(self):
+        rows = [
+            ({"facing": f, "half": h}, {"bit": h == "top"})
+            for f in ("north", "south")
+            for h in ("top", "bottom")
+        ]
+        rule = registry.decided_by(rows, ["facing", "half"], "bit")
+        self.assertEqual(rule, registry.StateRule(("half",), (("bottom", False), ("top", True))))
+
+    def test_a_state_every_row_shares_is_a_constant(self):
+        rows = [({"facing": f}, {"bit": True}) for f in ("north", "south")]
+        self.assertEqual(
+            registry.decided_by(rows, ["facing"], "bit"), registry.StateRule((), (("", True),))
+        )
+
+    def test_a_state_some_row_lacks_is_decided_by_nothing(self):
+        rows = [({"facing": "north"}, {"bit": True}), ({"facing": "south"}, {})]
+        self.assertIsNone(registry.decided_by(rows, ["facing"], "bit"))
+
+    def test_a_state_no_property_decides_is_decided_by_nothing(self):
+        rows = [({"facing": "north"}, {"bit": True}), ({"facing": "north"}, {"bit": False})]
+        self.assertIsNone(registry.decided_by(rows, ["facing"], "bit"))
+
+
+class Family(unittest.TestCase):
+    def test_a_property_no_state_reads_is_dropped_but_the_water_layer(self):
+        rows = [(p, stair_mapping(p)["state"]) for name, p in JAVA.rows if name == "oak_stairs"]
+        rows = [(p, {k: registry.bedrock_value(v) for k, v in s.items()}) for p, s in rows]
+        family = registry.family_of("oak_stairs", rows, JAVA)
+        self.assertEqual(family.dropped, ("shape",))
+        self.assertEqual(
+            [(state, rule.reads) for state, rule in family.states],
+            [("upside_down_bit", ("half",)), ("weirdo_direction", ("facing",))],
+        )
+        self.assertEqual(family.java[0], ("facing", ("north", "south")))
+
+    def test_states_that_are_no_product_of_their_values_are_refused(self):
+        rows = [
+            ({"facing": "north", "half": "top", "shape": "straight", "waterlogged": "false"}, {}),
+            (
+                {"facing": "south", "half": "bottom", "shape": "straight", "waterlogged": "false"},
+                {},
+            ),
+        ]
+        with self.assertRaisesRegex(load.Refused, "no product of their values"):
+            registry.family_of("oak_stairs", rows, JAVA)
+
+
+class VersionFamilies(unittest.TestCase):
+    def test_each_pair_the_palette_accepts_is_one_family(self):
+        version_map = registry.version_families(JAVA, mappings(), BEDROCK_TABLE)
+        self.assertEqual(
+            sorted(version_map.families),
+            [("oak_planks", "oak_planks"), ("oak_stairs", "oak_stairs")],
+        )
+        self.assertEqual(version_map.refused, [])
+
+    def test_a_pair_the_palette_does_not_declare_is_refused(self):
+        palette = {
+            **BEDROCK_TABLE,
+            "oak_stairs": {"upside_down_bit": [False, True], "weirdo_direction": [0]},
+        }
+        version_map = registry.version_families(JAVA, mappings(), palette)
+        self.assertEqual(sorted(version_map.families), [("oak_planks", "oak_planks")])
+        self.assertEqual(version_map.refused, ["oak_stairs"])
+
+    def test_a_pair_that_leaves_out_a_state_the_palette_declares_is_refused(self):
+        palette = {**BEDROCK_TABLE, "oak_stairs": {**BEDROCK_TABLE["oak_stairs"], "lit": [False]}}
+        version_map = registry.version_families(JAVA, mappings(), palette)
+        self.assertEqual(sorted(version_map.families), [("oak_planks", "oak_planks")])
+        self.assertEqual(version_map.refused, ["oak_stairs"])
+
+    def test_a_bedrock_state_some_java_state_lacks_fails_the_run(self):
+        entries = mappings()
+        bit = entries[0]["state"]["upside_down_bit"]
+        entries[0] = {**entries[0], "state": {"upside_down_bit": bit}}
+        with self.assertRaisesRegex(
+            load.Refused, "a Bedrock state of `oak_stairs` is no function of its Java states"
+        ):
+            registry.version_families(JAVA, entries, BEDROCK_TABLE)
+
+    def test_geysers_placeholder_maps_nothing(self):
+        entries = mappings()
+        entries[-1] = {"bedrock_identifier": "minecraft:unknown"}
+        with mock.patch.object(registry, "PLACEHOLDER_BLOCKS", frozenset({"oak_planks"})):
+            version_map = registry.version_families(JAVA, entries, BEDROCK_TABLE)
+        self.assertEqual(sorted(version_map.families), [("oak_stairs", "oak_stairs")])
+        self.assertEqual(version_map.refused, [])
+
+    def test_a_block_newly_mapped_to_the_placeholder_fails_the_run(self):
+        entries = mappings()
+        entries[-1] = {"bedrock_identifier": "minecraft:unknown"}
+        with self.assertRaisesRegex(
+            load.Refused,
+            "the state map maps `oak_planks` to no Bedrock block; add it to PLACEHOLDER_BLOCKS",
+        ):
+            registry.version_families(JAVA, entries, BEDROCK_TABLE)
+
+    def test_a_map_whose_length_is_not_the_java_states_is_refused(self):
+        with self.assertRaisesRegex(load.Refused, "entries for"):
+            registry.version_families(JAVA, mappings()[:-1], BEDROCK_TABLE)
+
+
+SHAPE = {"kind": "missing_state", "reason": "stairs render straight"}
+
+
+class Sensitivity(unittest.TestCase):
+    def maps(self):
+        return {"1.0": registry.version_families(JAVA, mappings(), BEDROCK_TABLE)}
+
+    def check(self, dropped_states: dict) -> None:
+        registry.check_sensitivity(self.maps(), {"dropped_states": dropped_states})
+
+    def test_every_dropped_state_classified_once_passes(self):
+        self.check({"shape": [SHAPE]})
+        self.check({"shape": [{**SHAPE, "java": ["oak_stairs"]}]})
+
+    def test_a_dropped_state_without_a_row_is_refused(self):
+        with self.assertRaisesRegex(load.Refused, "`shape` on `oak_stairs` is unclassified"):
+            self.check({})
+
+    def test_a_row_nothing_drops_is_refused(self):
+        with self.assertRaisesRegex(load.Refused, "no state map drops `shape` on `birch_stairs`"):
+            self.check({"shape": [SHAPE, {**SHAPE, "java": ["birch_stairs"]}]})
+
+    def test_a_block_classified_twice_is_refused(self):
+        with self.assertRaisesRegex(load.Refused, "`shape` classifies a block twice"):
+            self.check({"shape": [SHAPE, SHAPE]})
+
+    def test_an_unnamed_row_left_covering_nothing_is_refused(self):
+        with self.assertRaisesRegex(load.Refused, "`shape`'s unnamed row covers no block"):
+            self.check({"shape": [SHAPE, {**SHAPE, "java": ["oak_stairs"]}]})
+
+
+class StatesText(unittest.TestCase):
+    def test_a_family_two_versions_share_is_one_row_and_refusals_are_per_version(self):
+        mapped = registry.version_families(JAVA, mappings(), BEDROCK_TABLE)
+        refusing = registry.version_families(
+            JAVA, mappings(), {**BEDROCK_TABLE, "oak_stairs": {"upside_down_bit": [False]}}
+        )
+        text = registry.states_text(
+            {"1.0": mapped, "1.1": mapped, "1.2": refusing},
+            {"dropped_states": {"shape": [SHAPE]}},
+        )
+        body = json.loads(text)
+        self.assertEqual(body["refused"], {"1.2": ["oak_stairs"]})
+        self.assertEqual(
+            body["in_water"], ["bubble_column", "kelp", "kelp_plant", "seagrass", "tall_seagrass"]
+        )
+        self.assertEqual(
+            [(row["mc_versions"], row["ids"]) for row in body["families"]],
+            [(["1.0", "1.1", "1.2"], ["oak_planks"]), (["1.0", "1.1"], ["oak_stairs"])],
+        )
+        stairs = body["families"][1]
+        self.assertEqual(stairs["dropped"], ["shape"])
+        self.assertEqual(
+            stairs["states"]["weirdo_direction"],
+            {"reads": ["facing"], "map": {"north": 3, "south": 2}},
+        )
+        self.assertEqual(body["families"][0]["states"], {})
 
 
 if __name__ == "__main__":

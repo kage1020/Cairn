@@ -4,9 +4,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use cairn_lang_core::resolve::DroppedIntent;
-use cairn_lang_formats::bedrock_state::degradation_detail;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::common::{
     assert_stream, cargo_bin, compile, crn_examples, example_in_tempdir, examples_dir, stderr_of,
@@ -175,10 +173,22 @@ fn the_java_axis_is_pure_portable_for_a_source_java_can_build() {
     }
 }
 
-/// Compile a temp copy of `examples/<example>` for Bedrock; return its `W_INTENT_DEGRADED` lines.
+/// Why Bedrock up to 1.21.60 drops a stair `shape`, as the built-in pack words it.
+const NO_SHAPE: &str = "this Bedrock version has no stair `shape` state; its stairs render \
+                        straight, so corners show visual gaps";
+
+/// The Bedrock versions without a stair corner state.
+const SHAPELESS: [&str; 3] = ["1.21.0", "1.21.40", "1.21.60"];
+
+/// Compile a temp copy of `examples/<example>` for Bedrock 1.21.60, the newest version without a
+/// stair corner state; return its `W_INTENT_DEGRADED` lines.
 fn degraded_warnings(example: &str) -> Vec<String> {
+    degraded_warnings_at(example, "1.21.60")
+}
+
+fn degraded_warnings_at(example: &str, target: &str) -> Vec<String> {
     let (tmp, copied) = example_in_tempdir(example);
-    let compiled = compile(&copied, "bedrock", "latest", tmp.path(), None);
+    let compiled = compile(&copied, "bedrock", target, tmp.path(), None);
     let stderr = stderr_of(&compiled);
     assert!(
         compiled.status.success(),
@@ -209,6 +219,16 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
 }
 
 #[test]
+fn a_version_with_a_stair_corner_state_degrades_nothing() {
+    let latest = degraded_warnings_at("themed-tower.crn", "latest");
+    assert_eq!(
+        latest,
+        [] as [String; 0],
+        "the latest Bedrock keeps the corner"
+    );
+}
+
+#[test]
 fn each_dropped_intent_gets_a_warning_naming_the_entry_info_names() {
     // `roof-hip`'s four degraded entries are four states of one id.
     let axes = info_json("roof-hip.crn", "bedrock");
@@ -225,11 +245,8 @@ fn each_dropped_intent_gets_a_warning_naming_the_entry_info_names() {
             let dropped = entry["dropped"].as_array().expect("what it lost");
             dropped.iter().map(move |one| {
                 assert_eq!(one["key"], "shape", "got: {entry}");
-                let value = one["value"].as_str().expect("the value that was asked for");
-                let detail = degradation_detail(&DroppedIntent::Shape {
-                    value: value.to_owned(),
-                });
-                format!("warning[W_INTENT_DEGRADED]: struct::roof_hip: {id}[{states}]: {detail}")
+                assert_eq!(one["mc_versions"], json!(SHAPELESS), "got: {entry}");
+                format!("warning[W_INTENT_DEGRADED]: struct::roof_hip: {id}[{states}]: {NO_SHAPE}")
             })
         })
         .collect();
@@ -239,8 +256,9 @@ fn each_dropped_intent_gets_a_warning_naming_the_entry_info_names() {
     assert_eq!(
         warnings[0],
         "warning[W_INTENT_DEGRADED]: struct::roof_hip: \
-         minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]: Bedrock has no \
-         `shape` state; its stairs render straight, so corners show visual gaps",
+         minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]: this Bedrock \
+         version has no stair `shape` state; its stairs render straight, so corners show visual \
+         gaps",
     );
 }
 
@@ -445,86 +463,104 @@ fn every_example_lists_every_supported_target() {
     }
 }
 
+/// Sources the `buildable targets` row and `compile --target` are compared over.
+const BUILDABLE_FIXTURES: &[(&str, &str)] = &[
+    // Two blocks Bedrock declares on disjoint parts of its range.
+    (
+        "split.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @stonebrick\n\
+         \x20\x20slot wall  -> @pale_moss_block\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20walls class=outer mat_slot=wall height=3\n",
+    ),
+    // A default mapping the earliest target respells, beside the respelling written out.
+    (
+        "mix.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @floor.stone.smooth\n\
+         \x20\x20slot wall  -> @stonebrick\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20walls class=outer mat_slot=wall height=3\n",
+    ),
+    // A floor above part of the supported range.
+    (
+        "floor.crn",
+        "@requires version>=1.21.40\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A scope that does not lower: only `E_PARTIAL_BUILD` refuses it.
+    (
+        "partial.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n\n\
+         struct nosize\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A floor no edition's table can place, refusing every version at once.
+    (
+        "unorderable.crn",
+        "@requires version>=24w14a\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A floor Java places and Bedrock cannot, so the editions disagree in one run.
+    (
+        "cross_edition.crn",
+        "@requires version>=1.21.4\n\n\
+         theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A state no Bedrock version's map carries, refusing every version of the edition.
+    (
+        "states.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @frame[facing=north]\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A state only some Bedrock versions' maps carry, refusing the others alone.
+    (
+        "some_states.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @cherry_wood[axis=x]\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // A value only the newest Bedrock version's map holds, its Java release being the first
+    // to have it.
+    (
+        "new_value.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @noteblock[instrument=trumpet]\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+    // One that builds everywhere, so "refuse everything" fails.
+    (
+        "clean.crn",
+        "theme t:\n\
+         \x20\x20slot floor -> @cobblestone\n\n\
+         struct hut size=5x5\n\
+         \x20\x20floor mat_slot=floor\n",
+    ),
+];
+
 #[test]
 fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let fixtures: &[(&str, &str)] = &[
-        // Two blocks Bedrock declares on disjoint parts of its range.
-        (
-            "split.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @stonebrick\n\
-             \x20\x20slot wall  -> @pale_moss_block\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n\
-             \x20\x20walls class=outer mat_slot=wall height=3\n",
-        ),
-        // A default mapping the earliest target respells, beside the respelling written out.
-        (
-            "mix.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @floor.stone.smooth\n\
-             \x20\x20slot wall  -> @stonebrick\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n\
-             \x20\x20walls class=outer mat_slot=wall height=3\n",
-        ),
-        // A floor above part of the supported range.
-        (
-            "floor.crn",
-            "@requires version>=1.21.40\n\n\
-             theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // A scope that does not lower: only `E_PARTIAL_BUILD` refuses it.
-        (
-            "partial.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n\n\
-             struct nosize\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // A floor no edition's table can place, refusing every version at once.
-        (
-            "unorderable.crn",
-            "@requires version>=24w14a\n\n\
-             theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // A floor Java places and Bedrock cannot, so the editions disagree in one run.
-        (
-            "cross_edition.crn",
-            "@requires version>=1.21.4\n\n\
-             theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // A state Bedrock's writer cannot carry, refused after every source gate has passed.
-        (
-            "states.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @oak_log[axis=x]\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-        // One that builds everywhere, so "refuse everything" fails.
-        (
-            "clean.crn",
-            "theme t:\n\
-             \x20\x20slot floor -> @cobblestone\n\n\
-             struct hut size=5x5\n\
-             \x20\x20floor mat_slot=floor\n",
-        ),
-    ];
-
-    for (name, source) in fixtures {
+    for (name, source) in BUILDABLE_FIXTURES {
         let path = tmp.path().join(name);
         std::fs::write(&path, source).expect("write fixture");
         let axes = info_json_at(&path, "java,bedrock");
@@ -811,7 +847,7 @@ fn a_floor_does_not_hide_a_scope_that_produced_no_voxels() {
 fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
     let (tmp, row) = buildable_row(
         "theme t:\n\
-         \x20\x20slot floor -> @oak_log[axis=x]\n\n\
+         \x20\x20slot floor -> @frame[facing=north]\n\n\
          struct hut size=5x5\n\
          \x20\x20floor mat_slot=floor\n",
         "bedrock",
@@ -819,7 +855,7 @@ fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
     assert!(strings(&row, "buildable").is_empty(), "{row}");
     assert_eq!(
         strings(&row["reason"], "states_unmapped"),
-        ["minecraft:oak_log[axis=x]"],
+        ["minecraft:frame[facing=north]"],
         "the entry the writer refuses, not the versions: {row}",
     );
     assert!(row["reason"].get("versions").is_none(), "{row}");
@@ -840,7 +876,7 @@ fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
         notes,
         [
             "note: no bedrock target can build this source: its writer cannot carry the states \
-             of `minecraft:oak_log[axis=x]`"
+             of `minecraft:frame[facing=north]`"
         ],
         "{stderr}",
     );
@@ -1259,6 +1295,11 @@ fn the_degraded_figure_names_the_entry_and_what_it_lost() {
         assert!(!dropped.is_empty(), "got: {entry}");
         for one in dropped {
             assert_eq!(one["key"], "shape", "got: {entry}");
+            assert_eq!(
+                one["mc_versions"],
+                json!(SHAPELESS),
+                "the versions that lose it, oldest first: {entry}",
+            );
             let value = one["value"].as_str().expect("the value that was asked for");
             assert_ne!(
                 value, "straight",
@@ -1310,13 +1351,12 @@ fn the_degraded_notes_and_the_build_share_one_wording() {
         figure,
         "one line per entry, counted against the header's own figure: {stderr}",
     );
+    let versions = SHAPELESS.join(", ");
     assert_eq!(
         named[0],
         format!(
-            "  note: `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]` — {}",
-            degradation_detail(&DroppedIntent::Shape {
-                value: "outer_left".to_owned(),
-            }),
+            "  note: `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]` — \
+             {NO_SHAPE} ({versions})",
         ),
         "got: {stderr}",
     );
@@ -1335,7 +1375,13 @@ fn the_degraded_notes_and_the_build_share_one_wording() {
     }
     let from_build: Vec<String> = from_build
         .iter()
-        .map(|(entry, details)| format!("  note: `{entry}` — {}", details.join("; ")))
+        .map(|(entry, details)| {
+            let details: Vec<String> = details
+                .iter()
+                .map(|d| format!("{d} ({versions})"))
+                .collect();
+            format!("  note: `{entry}` — {}", details.join("; "))
+        })
         .collect();
     assert_eq!(
         named, from_build,

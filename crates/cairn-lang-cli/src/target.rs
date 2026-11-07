@@ -32,9 +32,14 @@ impl ResolvedTarget {
             ResolvedTarget::Java(t) => prepare_structure(array, t)
                 .map(|prepared| (PreparedStructure::Java(prepared), Vec::new()))
                 .map_err(|e| e.to_string()),
-            ResolvedTarget::Bedrock(t) => prepare_mcstructure(array, t)
-                .map(|(prepared, notes)| (PreparedStructure::Bedrock(prepared), notes))
-                .map_err(|e| e.to_string()),
+            ResolvedTarget::Bedrock(t) => {
+                let states = builtin_pack(Edition::Bedrock)
+                    .states_at(&t.mc_version)
+                    .expect("the built-in Bedrock pack maps every targetable version");
+                prepare_mcstructure(array, t, &states)
+                    .map(|(prepared, notes)| (PreparedStructure::Bedrock(prepared), notes))
+                    .map_err(|e| e.to_string())
+            }
         }
     }
 

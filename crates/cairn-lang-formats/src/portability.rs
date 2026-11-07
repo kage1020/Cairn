@@ -1,15 +1,17 @@
 //! Per-edition palette-entry portability for `cairn info`, counted over the lowered IR so each
 //! figure matches what `cairn compile --edition` emits. An id no version of the edition declares
-//! is unsupported; on Bedrock the rest go through the `.mcstructure` writer's state translation.
+//! is unsupported; on Bedrock the rest go through the `.mcstructure` writer's state translation at
+//! every version that declares them, and are asked of the edition: a state some version maps is
+//! not unsupported, and a loss at some version is a degradation.
 
 use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
-use cairn_lang_core::resolve::{DegradedEntry, UnsupportedEntry, UnsupportedReason};
+use cairn_lang_core::resolve::{DegradedEntry, DroppedIntent, UnsupportedEntry, UnsupportedReason};
 use cairn_lang_core::suggest::nearest_namespaced_id;
 
 use thiserror::Error;
 
-use crate::bedrock_state::{BedrockStateError, StateTranslation, translate_states};
-use crate::registry::{AliasIndex, BlocksIndex};
+use crate::bedrock_state::{BedrockStateError, translate_states};
+use crate::registry::{AliasIndex, BlocksIndex, StateMapIndex};
 
 /// One edition's portability counts and the entries behind them. The fields are private so each
 /// count always matches its list.
@@ -129,7 +131,8 @@ pub fn portability_for_java(
     report
 }
 
-/// Bedrock's report, each entry its tables declare classified by [`translate_states`].
+/// Bedrock's report, each entry its tables declare classified by [`translate_states`] at every
+/// version that declares it; without `states`, no entry has a form.
 ///
 /// # Errors
 ///
@@ -138,6 +141,7 @@ pub fn portability_for_bedrock(
     ir: &BlockArrayIr,
     blocks: &BlocksIndex,
     aliases: &AliasIndex,
+    states: Option<&StateMapIndex>,
 ) -> Result<PortabilityReport, InvalidPalette> {
     let mut report = PortabilityReport::default();
     let mut leaks = Vec::new();
@@ -146,47 +150,71 @@ pub fn portability_for_bedrock(
             report.push_unsupported(absent_entry(blocks, aliases, entry));
             continue;
         }
-        // No wildcard arm or `..`: a new refusal or field must be classified here.
-        match translate_states(entry) {
-            Ok(StateTranslation {
-                states: _,
-                degraded,
-            }) if degraded.is_empty() => {
-                report.count_portable();
+        let mut written = false;
+        let mut dropped: Vec<DroppedIntent> = Vec::new();
+        let mut unmapped: Option<String> = None;
+        let mut leaked: Option<BedrockStateError> = None;
+        for version in blocks.versions() {
+            let declared = blocks
+                .ids_for(version)
+                .is_some_and(|ids| ids.binary_search(&entry.id).is_ok());
+            let Some(map) = states
+                .and_then(|states| states.at(version))
+                .filter(|_| declared)
+            else {
+                continue;
+            };
+            // No wildcard arm: a new refusal must be classified here.
+            match translate_states(&map, entry) {
+                Ok(translated) => {
+                    written = true;
+                    for intent in translated.degraded {
+                        merge_dropped(&mut dropped, intent);
+                    }
+                }
+                Err(BedrockStateError::Unmapped { reason, .. }) => unmapped = Some(reason),
+                Err(
+                    err @ (BedrockStateError::UnknownProperty { .. }
+                    | BedrockStateError::UnknownValue { .. }),
+                ) => leaked = Some(err),
             }
-            Ok(StateTranslation {
-                states: _,
-                degraded,
-            }) => {
-                report.push_degraded(DegradedEntry {
-                    id: entry.id.clone(),
+        }
+        match (written, leaked, unmapped) {
+            // At any version: a validated pack that writes the entry elsewhere still let it leak.
+            (_, Some(leak), _) => leaks.push(leak),
+            (true, None, _) if dropped.is_empty() => report.count_portable(),
+            (true, None, _) => report.push_degraded(DegradedEntry {
+                id: entry.id.clone(),
+                states: entry.properties_text(),
+                dropped,
+            }),
+            (false, None, detail) => report.push_unsupported(UnsupportedEntry {
+                id: entry.id.clone(),
+                reason: UnsupportedReason::StatesUnmapped {
                     states: entry.properties_text(),
-                    dropped: degraded,
-                });
-            }
-            Err(BedrockStateError::UnmappableBlock {
-                properties, mapped, ..
-            }) => {
-                report.push_unsupported(UnsupportedEntry {
-                    id: entry.id.clone(),
-                    reason: UnsupportedReason::StatesUnmapped {
-                        states: properties,
-                        mapped: mapped.to_owned(),
-                    },
-                });
-            }
-            Err(
-                err @ (BedrockStateError::UnknownStairState { .. }
-                | BedrockStateError::UnknownStairKey { .. }),
-            ) => {
-                leaks.push(err);
-            }
+                    detail: detail.unwrap_or_else(|| {
+                        "no version that declares the block carries a state map".to_owned()
+                    }),
+                },
+            }),
         }
     }
     if leaks.is_empty() {
         Ok(report)
     } else {
         Err(InvalidPalette { leaks })
+    }
+}
+
+/// Adds `intent`, lost at one version, to the list: its version joins the same loss at earlier
+/// versions, whose reason the one Java block's `sensitivity` row already gave.
+fn merge_dropped(dropped: &mut Vec<DroppedIntent>, intent: DroppedIntent) {
+    match dropped
+        .iter_mut()
+        .find(|seen| seen.key == intent.key && seen.value == intent.value)
+    {
+        Some(seen) => seen.mc_versions.extend(intent.mc_versions),
+        None => dropped.push(intent),
     }
 }
 

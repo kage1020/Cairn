@@ -8,7 +8,7 @@ use crate::intent::{MemberRole, ValueWithSpan};
 use crate::suggest::{candidate_list, did_you_mean_note};
 
 use crate::block_array::BlockState;
-use crate::block_array::material::{IdOrigin, UnknownId};
+use crate::block_array::material::{IdOrigin, TargetRegistry, UnknownId, UnmappedState};
 
 /// What becomes of a member whose `mat_slot=` resolves to no material.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +177,50 @@ pub(super) fn diag_state_literal_unchecked(
                 .to_owned(),
         }],
         data: None,
+    })
+}
+
+/// Report `state`, built at `span`, when the pinned target's state map has no form for it.
+pub(super) fn diag_state_unmapped(
+    span: Span,
+    state: &BlockState,
+    registry: &dyn TargetRegistry,
+) -> Option<Diagnostic> {
+    let UnmappedState {
+        registry: target,
+        reason,
+        mapped_at,
+    } = registry.unmapped_state(state)?;
+    let states = state.properties_text();
+    let (entry, carried) = if states.is_empty() {
+        (state.id.clone(), "the block")
+    } else {
+        (format!("{}[{states}]", state.id), "these states")
+    };
+    let pinned = match mapped_at.as_slice() {
+        [] => String::new(),
+        [one] => format!("pass `--target {one}`, whose state map carries {carried}, "),
+        [init @ .., last] => format!(
+            "pass `--target` {} or {last}, whose state maps carry {carried}, ",
+            init.join(", ")
+        ),
+    };
+    Some(Diagnostic {
+        code: DiagnosticCode::StateUnmapped,
+        span,
+        primary: format!("`{entry}` has no form at {target}: {reason}"),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "{pinned}bind the material to a block {target} has a form for, or build for the \
+                 other edition"
+            ),
+        }],
+        data: Some(DiagnosticData::StateUnmapped {
+            id: state.id.clone(),
+            states,
+            registry: target,
+        }),
     })
 }
 

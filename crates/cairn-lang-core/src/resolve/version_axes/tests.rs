@@ -65,8 +65,11 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
                 degraded_entries: vec![DegradedEntry {
                     id: "minecraft:spruce_stairs".to_owned(),
                     states: "facing=north,shape=outer_left".to_owned(),
-                    dropped: vec![DroppedIntent::Shape {
+                    dropped: vec![DroppedIntent {
+                        key: "shape".to_owned(),
                         value: "outer_left".to_owned(),
+                        mc_versions: vec!["1.21.0".to_owned()],
+                        reason: "no stair shape".to_owned(),
                     }],
                 }],
                 buildable: vec!["1.21.0".to_owned()],
@@ -133,10 +136,10 @@ fn one_entry_per_reason() -> Vec<UnsupportedEntry> {
             },
         },
         UnsupportedEntry {
-            id: "minecraft:oak_door".to_owned(),
+            id: "minecraft:camera".to_owned(),
             reason: UnsupportedReason::StatesUnmapped {
-                states: "facing=north".to_owned(),
-                mapped: "the stair family".to_owned(),
+                states: "facing_direction=1".to_owned(),
+                detail: "no Java block maps onto `minecraft:camera` there".to_owned(),
             },
         },
     ]
@@ -156,10 +159,10 @@ fn every_unsupported_reason_carries_its_own_wire_shape() {
                 "aliases": ["minecraft:standing_sign"],
             },
             {
-                "id": "minecraft:oak_door",
+                "id": "minecraft:camera",
                 "reason": "states_unmapped",
-                "states": "facing=north",
-                "mapped": "the stair family",
+                "states": "facing_direction=1",
+                "detail": "no Java block maps onto `minecraft:camera` there",
             },
         ]),
     );
@@ -216,4 +219,22 @@ fn floor_part_spells_the_surface_keyword() {
             "`{keyword}` can declare a floor but `FloorPart` has no variant for it",
         );
     }
+}
+
+#[test]
+fn a_dropped_intent_serializes_its_pieces_and_not_its_sentence() {
+    let dropped = DroppedIntent {
+        key: "shape".to_owned(),
+        value: "outer_left".to_owned(),
+        mc_versions: vec!["1.21.0".to_owned(), "1.21.60".to_owned()],
+        reason: "no stair shape".to_owned(),
+    };
+    assert_eq!(
+        serde_json::to_value(dropped).expect("the intent serializes"),
+        serde_json::json!({
+            "key": "shape",
+            "value": "outer_left",
+            "mc_versions": ["1.21.0", "1.21.60"],
+        }),
+    );
 }

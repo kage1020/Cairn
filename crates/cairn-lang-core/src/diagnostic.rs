@@ -98,6 +98,9 @@ pub enum DiagnosticCode {
     StateLiteralUnchecked,
     /// A `mat_slot=` resolved to a block id the pinned target does not declare.
     UnknownId,
+    /// A member or a walkway's `path=` built a block state the pinned target's state map has no
+    /// form for.
+    StateUnmapped,
     /// A member whose geometry attaches blockstates is bound to a material that cannot carry them.
     IncompatibleMaterial,
     /// A `struct` has no `size=WxH` header, so block-array lowering skips it.
@@ -208,6 +211,7 @@ impl DiagnosticCode {
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
             Self::StateLiteralUnchecked => "W_STATE_LITERAL_UNCHECKED",
             Self::UnknownId => "E_UNKNOWN_ID",
+            Self::StateUnmapped => "E_STATE_UNMAPPED",
             Self::IncompatibleMaterial => "E_INCOMPATIBLE_MATERIAL",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
             Self::DefNoSize => "W_DEF_NO_SIZE",
@@ -269,6 +273,7 @@ impl DiagnosticCode {
             | Self::UnknownSlotTarget
             | Self::UnknownAbstractToken
             | Self::UnknownId
+            | Self::StateUnmapped
             | Self::IncompatibleMaterial
             | Self::InvalidMember
             | Self::UnresolvedPlaceRef
@@ -384,6 +389,15 @@ pub enum DiagnosticData {
         /// Ids the pack's alias table declares for the same block: facts, unlike `suggestion`.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         aliases: Vec<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::StateUnmapped`].
+    StateUnmapped {
+        /// The fully namespaced id of the block state.
+        id: String,
+        /// Its `key=value` pairs, comma-joined.
+        states: String,
+        /// The target it was mapped for, as `"<edition> <version>"`.
+        registry: String,
     },
     /// Companion payload for [`DiagnosticCode::IncompatibleMaterial`].
     IncompatibleMaterial {

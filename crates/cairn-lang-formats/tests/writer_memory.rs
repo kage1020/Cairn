@@ -1,10 +1,12 @@
 //! The structure writers' peak heap does not grow with the volume. One test in its own binary,
 //! because the allocation counter is process-wide.
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, prepare_mcstructure};
 use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_target};
 use cairn_lang_formats::java_structure::{build_structure_tag, prepare_structure};
+use cairn_lang_formats::registry::builtin_pack;
 use peak_alloc::PeakAlloc;
 
 // A local `GlobalAlloc` would need `unsafe`, which the workspace forbids here.
@@ -55,6 +57,9 @@ const SLACK: usize = 64 * 1024;
 fn writing_a_structure_does_not_hold_memory_per_voxel() {
     let java = resolve_java_target("latest").expect("latest");
     let bedrock = resolve_bedrock_target("latest").expect("latest");
+    let states = builtin_pack(Edition::Bedrock)
+        .states_at(&bedrock.mc_version)
+        .expect("the built-in Bedrock pack maps every targetable version");
     let small = cube(8);
     let large = cube(48);
     let grown = large.dims.volume() - small.dims.volume();
@@ -69,7 +74,8 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
     };
     let bedrock_write = |array: &BlockArray| {
         peak_during(|| {
-            let (prepared, _notes) = prepare_mcstructure(array, &bedrock).expect("prepare");
+            let (prepared, _notes) =
+                prepare_mcstructure(array, &bedrock, &states).expect("prepare");
             prepared.write(&mut std::io::sink()).expect("write");
         })
     };
@@ -77,7 +83,7 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
         peak_during(|| drop(build_structure_tag(array, &java).expect("build")))
     };
     let bedrock_tree = |array: &BlockArray| {
-        peak_during(|| drop(build_mcstructure_tag(array, &bedrock).expect("build")))
+        peak_during(|| drop(build_mcstructure_tag(array, &bedrock, &states).expect("build")))
     };
 
     // Controls: the trees must grow, or the harness cannot see a per-voxel allocation.

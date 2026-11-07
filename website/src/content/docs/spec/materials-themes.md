@@ -78,8 +78,10 @@ maps it to its own `weirdo_direction`.
 
 The backend resolves less than that today. A canonical token is written as `minecraft:<token>` and
 checked against the pinned target ([§7.3](#73-mappings-across-version-and-edition)), so
-`@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version, and the Bedrock writer maps the states
-of the stair family alone: `@oak_log[axis=x]` compiles for Java and is refused for Bedrock.
+`@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version. Its states are the ones the token's
+Java block takes, and the Bedrock writer maps them through the pack's state map for the target
+version: `@oak_log[axis=x]` is written as `pillar_axis=x` on every Bedrock version, while
+`@cherry_wood[axis=x]` is `E_STATE_UNMAPPED` at 1.21.40, whose map has no form for it.
 
 Tokens come in two kinds:
 

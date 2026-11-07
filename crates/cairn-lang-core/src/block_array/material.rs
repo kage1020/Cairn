@@ -10,6 +10,18 @@ use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
 
+/// A block state the pinned target's state map has no form for, as
+/// [`TargetRegistry::unmapped_state`] reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnmappedState {
+    /// The target, as a diagnostic names it, such as `"bedrock 1.21.40"`.
+    pub registry: String,
+    /// Why, as a clause.
+    pub reason: String,
+    /// The edition's other targetable versions whose state maps have a form for it, oldest first.
+    pub mapped_at: Vec<String>,
+}
+
 /// What the registry pack tells lowering, for one compile.
 ///
 /// [`Self::lookup`] runs once per `mat_slot=` value, so it must be cheap.
@@ -27,6 +39,14 @@ pub trait TargetRegistry {
     fn aliases_for(&self, id: &str) -> Vec<String> {
         let _ = id;
         Vec::new()
+    }
+
+    /// Why the pinned target's state map has no form for `state`, or `None` when it has one, the
+    /// registry keeps no state map, or `state` is not one of its block's states
+    /// (`spec/versioning-editions` "Java / Bedrock portability").
+    fn unmapped_state(&self, state: &BlockState) -> Option<UnmappedState> {
+        let _ = state;
+        None
     }
 
     /// Whether a version this registry covers may declare `id`, asked only when

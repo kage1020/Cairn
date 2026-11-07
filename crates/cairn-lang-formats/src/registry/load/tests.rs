@@ -1031,6 +1031,8 @@ fn bedrock_pack(data_versions: &'static str) -> Result<RegistryPack, RegistryErr
         materials: "",
         blocks: "",
         aliases: "",
+        states: None,
+        sensitivity: None,
     };
     load_pack(&files, Edition::Bedrock)
 }
@@ -1140,4 +1142,307 @@ fn block_tables_resolved_newest_first_are_refused() {
         "registry pack `blocks` resolves `1.20.4` after `1.21.4`, which `data_versions` orders \
          after it; list the tables oldest first",
     );
+}
+
+/// A pack whose `blocks` declares an `oak_log` with a pillar axis at both versions.
+fn write_pack_with_states(tmp: &Path, files: &str, states_json: &str, sensitivity_json: &str) {
+    write_full_pack(
+        tmp,
+        &format!(
+            r#"{{
+            "schema_version": 1,
+            "edition": "bedrock",
+            "name": "test",
+            "description": "test",
+            "files": {{
+                "data_versions": "data_versions.json",
+                "materials": "materials.json",
+                "blocks": "blocks.json"{files}
+            }}
+        }}"#
+        ),
+        r#"{
+        "schema_version": 3,
+        "latest": "1.21.60",
+        "versions": [
+            { "mc_version": "1.21.50", "data_version": 18166272, "block_version": 18166272 },
+            { "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168832 }
+        ]
+    }"#,
+        &one_material(r#"{ "token": "a.b", "block": "oak_log" }"#),
+        r#"{
+        "schema_version": 2,
+        "namespace": "minecraft",
+        "base": { "mc_version": "1.21.50", "blocks": {
+            "oak_log": { "pillar_axis": ["x", "y", "z"] }, "oak_planks": {}
+        } },
+        "diffs": [{ "mc_version": "1.21.60", "inherits": "1.21.50" }]
+    }"#,
+    );
+    std::fs::write(tmp.join("states.json"), states_json).expect("write states");
+    std::fs::write(tmp.join("sensitivity.json"), sensitivity_json).expect("write sensitivity");
+}
+
+const BOTH_STATE_FILES: &str = r#", "states": "states.json", "sensitivity": "sensitivity.json""#;
+
+fn log_states(mc_versions: &str) -> String {
+    format!(
+        r#"{{
+        "schema_version": 1,
+        "namespace": "minecraft",
+        "families": [{{
+            "mc_versions": {mc_versions}, "ids": ["oak_log"],
+            "java": {{ "axis": ["x", "y", "z"] }}, "defaults": {{ "axis": "y" }},
+            "states": {{ "pillar_axis": {{ "reads": ["axis"], "map": {{ "x": "x", "y": "y", "z": "z" }} }} }}
+        }}]
+    }}"#
+    )
+}
+
+const NO_SENSITIVITY: &str =
+    r#"{ "schema_version": 1, "namespace": "minecraft", "dropped_states": {} }"#;
+
+/// The Bedrock pack `write` lays out in a fresh directory.
+fn bedrock_dir(write: impl FnOnce(&Path)) -> Result<RegistryPack, RegistryError> {
+    let dir = pack_dir();
+    write(dir.path());
+    load_pack(&PackDir(dir.path()), Edition::Bedrock)
+}
+
+fn log(pairs: &[(&str, &str)]) -> BlockState {
+    BlockState {
+        id: "minecraft:oak_log".to_owned(),
+        properties: pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+    }
+}
+
+#[test]
+fn a_pinned_view_refuses_only_the_states_its_map_has_no_form_for() {
+    let pack = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            BOTH_STATE_FILES,
+            &log_states(r#"["1.21.50", "1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+    })
+    .expect("pack");
+    assert_eq!(
+        pack.states()
+            .expect("a state map")
+            .versions()
+            .collect::<Vec<_>>(),
+        ["1.21.50", "1.21.60"]
+    );
+    let pinned = pack.view(Some("1.21.60"));
+    assert_eq!(pinned.unmapped_state(&log(&[("axis", "x")])), None);
+    assert_eq!(pinned.unmapped_state(&log(&[("axis", "w")])), None);
+    let planks = BlockState {
+        id: "minecraft:oak_planks".to_owned(),
+        properties: [("axis".to_owned(), "x".to_owned())].into_iter().collect(),
+    };
+    assert_eq!(
+        pinned.unmapped_state(&planks),
+        Some(UnmappedState {
+            registry: "bedrock 1.21.60".to_owned(),
+            reason: "no Java block maps onto `minecraft:oak_planks` there, so the canonical \
+                     vocabulary names none of its states"
+                .to_owned(),
+            mapped_at: Vec::new(),
+        }),
+    );
+    assert_eq!(pack.view(None).unmapped_state(&planks), None);
+}
+
+#[test]
+fn a_pinned_view_names_the_other_versions_whose_map_has_the_state() {
+    let states = r#"{
+        "schema_version": 1,
+        "namespace": "minecraft",
+        "families": [
+            {
+                "mc_versions": ["1.21.50"], "ids": ["oak_log"],
+                "java": { "axis": ["x", "y", "z"] }, "defaults": { "axis": "y" },
+                "states": { "pillar_axis":
+                    { "reads": ["axis"], "map": { "x": "x", "y": "y", "z": "z" } } }
+            },
+            {
+                "mc_versions": ["1.21.60"], "ids": ["oak_log"],
+                "java": { "axis": ["y"] }, "defaults": { "axis": "y" },
+                "states": { "pillar_axis": { "value": "y" } }
+            }
+        ]
+    }"#;
+    let pack = bedrock_dir(|dir| {
+        write_pack_with_states(dir, BOTH_STATE_FILES, states, NO_SENSITIVITY);
+    })
+    .expect("pack");
+    assert_eq!(
+        pack.view(Some("1.21.60"))
+            .unmapped_state(&log(&[("axis", "x")])),
+        Some(UnmappedState {
+            registry: "bedrock 1.21.60".to_owned(),
+            reason: "its state map there is read from a Java release whose `minecraft:oak_log` \
+                     has no `axis=x`, which the map of 1.21.50 holds"
+                .to_owned(),
+            mapped_at: vec!["1.21.50".to_owned()],
+        }),
+    );
+    assert_eq!(
+        pack.view(Some("1.21.50"))
+            .unmapped_state(&log(&[("axis", "x")])),
+        None
+    );
+}
+
+#[test]
+fn a_state_map_belongs_to_a_bedrock_pack_with_block_tables() {
+    let java = pack_dir();
+    write_pack_with_states(
+        java.path(),
+        BOTH_STATE_FILES,
+        &log_states(r#"["1.21.50", "1.21.60"]"#),
+        NO_SENSITIVITY,
+    );
+    let manifest = java.path().join("pack.json");
+    let text = std::fs::read_to_string(&manifest).expect("read manifest");
+    std::fs::write(&manifest, text.replace(r#""bedrock""#, r#""java""#)).expect("write manifest");
+    let err = load_pack(&PackDir(java.path()), Edition::Java).expect_err("a Java state map");
+    assert!(matches!(err, RegistryError::StatesOnJava), "{err}");
+
+    let err = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            "",
+            &log_states(r#"["1.21.50", "1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+    })
+    .expect_err("block tables without a state map");
+    assert!(matches!(err, RegistryError::StatesMissing), "{err}");
+}
+
+#[test]
+fn a_state_map_needs_both_of_its_components() {
+    for (files, present, missing) in [
+        (r#", "states": "states.json""#, "states", "sensitivity"),
+        (
+            r#", "sensitivity": "sensitivity.json""#,
+            "sensitivity",
+            "states",
+        ),
+    ] {
+        let err = bedrock_dir(|dir| {
+            write_pack_with_states(
+                dir,
+                files,
+                &log_states(r#"["1.21.50", "1.21.60"]"#),
+                NO_SENSITIVITY,
+            );
+        })
+        .expect_err("one component alone");
+        assert!(
+            matches!(
+                err,
+                RegistryError::States {
+                    source: StatesError::Unpaired { present: p, missing: m }
+                } if p == present && m == missing
+            ),
+            "{present} alone: {err}",
+        );
+    }
+}
+
+#[test]
+fn a_state_map_missing_a_targetable_version_is_refused() {
+    let err = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            BOTH_STATE_FILES,
+            &log_states(r#"["1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+    })
+    .expect_err("a version unmapped");
+    assert!(
+        matches!(err, RegistryError::StatesMissVersion { ref missing } if missing == "1.21.50"),
+        "{err}",
+    );
+}
+
+#[test]
+fn a_state_map_the_binary_does_not_embed_is_refused() {
+    let files = BuiltinFiles {
+        manifest: r#"{
+            "schema_version": 1,
+            "edition": "bedrock",
+            "name": "test",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "states": "states.json",
+                "sensitivity": "sensitivity.json"
+            }
+        }"#,
+        data_versions: r#"{
+            "schema_version": 3,
+            "latest": "1.21.60",
+            "versions": [{ "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168832 }]
+        }"#,
+        materials: "",
+        blocks: "",
+        aliases: "",
+        states: None,
+        sensitivity: Some(NO_SENSITIVITY),
+    };
+    let err = load_pack(&files, Edition::Bedrock).expect_err("states not embedded");
+    assert!(
+        matches!(err, RegistryError::NotEmbedded { file: "states" }),
+        "{err}",
+    );
+}
+
+#[test]
+fn the_state_map_is_part_of_the_pack_hash() {
+    let hash = |reason: &str| {
+        let sensitivity = format!(
+            r#"{{ "schema_version": 1, "namespace": "minecraft", "dropped_states": {{
+                "shape": [{{ "kind": "missing_state", "reason": "{reason}" }}] }} }}"#
+        );
+        bedrock_dir(|dir| {
+            write_pack_with_states(
+                dir,
+                BOTH_STATE_FILES,
+                &log_states(r#"["1.21.50", "1.21.60"]"#),
+                &sensitivity,
+            );
+        })
+        .expect("pack")
+        .bytes_hash()
+        .clone()
+    };
+    assert_ne!(hash("one wording"), hash("another wording"));
+}
+
+#[test]
+fn the_builtin_bedrock_pack_maps_every_targetable_version() {
+    let pack = builtin_pack(Edition::Bedrock);
+    let targetable: Vec<&str> = pack
+        .data_versions
+        .versions
+        .iter()
+        .filter(|e| e.targetable)
+        .map(|e| e.mc_version.as_str())
+        .collect();
+    assert_eq!(
+        pack.states()
+            .expect("a state map")
+            .versions()
+            .collect::<Vec<_>>(),
+        targetable
+    );
+    assert!(builtin_pack(Edition::Java).states().is_none());
 }

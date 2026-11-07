@@ -96,13 +96,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Restore the server jars and palettes
+      - name: Restore the server jars, palettes and state maps
         id: downloads
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/cairn-minecraft
-          key: minecraft-tables-${{ hashFiles('crates/cairn-lang-formats/registry-data/*/data_versions.json') }}
-          # Not the load job's key, which saves no palette. The script checks each jar and palette
+          # The script pins the palettes and state maps, so a new pin needs a new key to be saved.
+          key: minecraft-tables-${{ hashFiles('crates/cairn-lang-formats/registry-data/*/data_versions.json', '.github/scripts/extract_registry.py') }}
+          # Not the load job's key, which saves no palette or state map. The script checks each file
           # against its published hash, so an older set, the load job's included, is a safe start.
           restore-keys: |
             minecraft-tables-
@@ -121,11 +122,15 @@ jobs:
           --cache ~/.cache/cairn-minecraft
 
       - name: Bedrock
-        # A Java difference says nothing about Bedrock's tables.
+        # A Java difference says nothing about Bedrock's tables. The state maps read the reports of
+        # the Java releases GeyserMC's mappings follow.
         if: success() || failure()
-        run: python3 .github/scripts/extract_registry.py bedrock --check --cache ~/.cache/cairn-minecraft
+        run: >-
+          python3 .github/scripts/extract_registry.py bedrock --check
+          --java "$JAVA_HOME/bin/java"
+          --cache ~/.cache/cairn-minecraft
 
-      - name: Save the server jars and palettes
+      - name: Save the server jars, palettes and state maps
         if: github.ref == 'refs/heads/canary' && steps.downloads.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:

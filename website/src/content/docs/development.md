@@ -194,20 +194,25 @@ The built-in packs' block tables are extracted from the game, never written by h
 `.github/scripts/extract_registry.py` reads each targetable row of an edition's
 `data_versions.json`: for Java it runs that version's server jar with `--reports` and reads
 `reports/blocks.json`, and for Bedrock it reads the release's block palette as GeyserMC ships it,
-pinned in the script by commit and SHA-256. It rewrites the edition's `blocks.json`, each
-targetable row's `data_version` on Java or `block_version` on Bedrock and `latest` in
-`data_versions.json`, and the `extracted` record in `pack.json`.
+pinned in the script by commit and SHA-256. For Bedrock it also derives `states.json`, the state
+maps, from GeyserMC's Java-to-Bedrock mappings, pinned the same way, and reads the `--reports` of
+the Java release each mapping follows to name its states, so the Bedrock run needs Java 25 as well.
+It rewrites the edition's `blocks.json`, each targetable row's `data_version` on Java or
+`block_version` on Bedrock and `latest` in `data_versions.json`, Bedrock's `states.json`, and the
+`extracted` record in `pack.json`.
 
 ```sh
 python3 .github/scripts/extract_registry.py java --java <path to Java 25>
-python3 .github/scripts/extract_registry.py bedrock
+python3 .github/scripts/extract_registry.py bedrock --java <path to Java 25>
 ```
 
 With `--check` it writes nothing and fails when a committed file differs from what the game says,
 which is the `Minecraft` workflow's `Registry tables match the game` check. To add a target, add its
-row to `data_versions.json` (and, for Bedrock, its palette's pin to the script), run the
-extraction, and rerun the load check above. The pack hash moves with every table, so the
-`builtin_*_pack_hash` snapshots in `cairn-lang-formats` move too.
+row to `data_versions.json` (and, for Bedrock, the pins of its palette and its state map to the
+script), run the extraction, and rerun the load check above. A Java property a state map drops
+needs a row in Bedrock's hand-written `sensitivity.json`, saying what dropping it costs, and the
+run refuses until it has one. The pack hash moves with every table, so the `builtin_*_pack_hash`
+snapshots in `cairn-lang-formats` move too.
 
 ## Conventions for Rust code
 

@@ -1,5 +1,6 @@
-//! A canonical token's block-state literal, `@oak_log[axis=x]`, end to end: Java writes it,
-//! `info` counts what Bedrock cannot map, and Bedrock refuses it.
+//! A canonical token's block-state literal end to end: Java writes `@oak_log[axis=q]` as given,
+//! and Bedrock writes `@cherry_wood[axis=x]` at each version whose state map carries it and
+//! refuses it at the others.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,25 +31,67 @@ fn string_tag(key: &str, value: &str) -> Vec<u8> {
 }
 
 #[test]
-fn bedrock_refuses_to_compile_the_entry_info_counts_unsupported() {
+fn bedrock_builds_a_state_only_at_the_versions_whose_map_carries_it() {
     let tmp = TempDir::new().expect("tempdir");
-    let src = floored(tmp.path(), "@oak_log[axis=x]");
+    // 1.21.40's palette lacks the states GeyserMC maps a cherry wood to; the others carry them.
+    let src = floored(tmp.path(), "@cherry_wood[axis=x]");
 
-    let info = cairn(
-        "info",
-        &[src.to_str().unwrap(), "--editions", "java,bedrock"],
-    );
+    let path = src.to_str().unwrap();
+    let info = cairn("info", &[path, "--editions", "bedrock"]);
     let stdout = String::from_utf8_lossy(&info.stdout);
     assert_eq!(info.status.code(), Some(0), "{}", stderr_of(&info));
-    assert!(stdout.contains("unsupported: 1"), "{stdout}");
+    let row = |label: &str| stdout.lines().find(|line| line.starts_with(label));
+    assert_eq!(
+        row("edition portability:"),
+        Some("edition portability:     Bedrock: portable: 1  degraded: 0  unsupported: 0"),
+    );
+    assert_eq!(
+        row("buildable targets:"),
+        Some("buildable targets:       Bedrock: 1.21.0, 1.21.60, 1.26.60 (1.21.40 refuses)"),
+    );
+    let refusal = stderr_of(&info)
+        .split_once("note: bedrock 1.21.40 refuses this source\n")
+        .map(|(_, refusal)| refusal.to_owned());
+    assert_eq!(
+        refusal,
+        Some(format!(
+            "{path}:5:3: error[E_STATE_UNMAPPED]: `minecraft:cherry_wood[axis=x]` has no form at \
+             bedrock 1.21.40: its palette does not declare the states GeyserMC maps \
+             `minecraft:cherry_wood` to, so the pack carries no form for them\n  \
+             note: pass `--target` 1.21.0, 1.21.60 or 1.26.60, whose state maps carry these \
+             states, bind the material to a block bedrock 1.21.40 has a form for, or build for \
+             the other edition\n"
+        )),
+    );
+    let json = cairn("info", &[path, "--editions", "bedrock", "--format", "json"]);
+    let axes: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("info prints one JSON document");
+    assert_eq!(
+        axes["buildable_targets"],
+        serde_json::json!([{
+            "edition": "bedrock",
+            "buildable": ["1.21.0", "1.21.60", "1.26.60"],
+            "considered": ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
+        }]),
+    );
 
     let out = TempDir::new().expect("out tempdir");
-    let compiled = compile(&src, "bedrock", "1.21.60", out.path(), None);
+    let compiled = compile(&src, "bedrock", "1.21.40", out.path(), None);
     let stderr = stderr_of(&compiled);
     assert_eq!(compiled.status.code(), Some(1), "{stderr}");
+    assert_stream(
+        &stderr,
+        &[
+            (2, 13, "warning", "W_STATE_LITERAL_UNCHECKED"),
+            (5, 3, "error", "E_STATE_UNMAPPED"),
+        ],
+    );
     assert!(
-        stderr.contains("`minecraft:oak_log[axis=x]`")
-            && stderr.contains("carries blockstate properties the Bedrock backend cannot map"),
+        stderr.contains(
+            "`minecraft:cherry_wood[axis=x]` has no form at bedrock 1.21.40: its palette does not \
+             declare the states GeyserMC maps `minecraft:cherry_wood` to, so the pack carries no \
+             form for them"
+        ),
         "{stderr}",
     );
     assert!(
@@ -58,6 +101,12 @@ fn bedrock_refuses_to_compile_the_entry_info_counts_unsupported() {
             .is_none(),
         "no artifact may be written: {stderr}",
     );
+
+    let out = TempDir::new().expect("out tempdir");
+    let compiled = compile(&src, "bedrock", "1.21.60", out.path(), None);
+    let stderr = stderr_of(&compiled);
+    assert_eq!(compiled.status.code(), Some(0), "{stderr}");
+    assert!(out.path().join("s.mcstructure").exists(), "{stderr}");
 }
 
 #[test]
