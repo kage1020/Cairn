@@ -218,19 +218,15 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
         }),
         // The guard's own lines join the body it stands in; `check` refuses any but raw members.
         Statement::EditionGuard {
-            edition,
-            children,
-            span,
+            edition, children, ..
         } => {
             let first = out.members.len();
             for child in children {
                 push_statement(child, out);
             }
+            // The parser refuses a guard directly under a guard, so none of these has one yet.
             for member in &mut out.members[first..] {
-                member.edition_guard.get_or_insert_with(|| EditionGuard {
-                    edition: *edition,
-                    span: span.clone(),
-                });
+                member.edition_guard = Some(EditionGuard { edition: *edition });
             }
         }
     }

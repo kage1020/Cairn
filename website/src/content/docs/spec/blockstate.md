@@ -194,7 +194,7 @@ the box. Each is a coordinate triple, a cell of the struct
 ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). With a `mat_slot=`, the fill paints
 every cell of the box with that material in `massing`, and has no default block, so one whose
 material does not resolve leaves its cells as they are. With `fluid=water`, it pours water once
-every other member is painted, in `fluids` ([Compilation Model
+the blocks it may hold are placed, in `fluids` ([Compilation Model
 §4.1](/spec/compilation/#41-phase-evaluation)). A cell of the box that holds no block takes a water
 source, `minecraft:water[level=0]`. A waterloggable block whose state does not write `waterlogged`
 takes `waterlogged=true` and stays its own member's ([§6.2](#62-intent_state-and-resolved_state)).
