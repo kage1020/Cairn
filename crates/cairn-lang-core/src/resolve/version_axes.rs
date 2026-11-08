@@ -5,10 +5,11 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement, guarded_lines};
+use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement};
 use crate::diagnostic::RenderedDiagnostic;
 use crate::edition::Edition;
 use crate::error::{Position, Span};
+use crate::intent::guarded_lines;
 use crate::version::{FloorVerdict, VersionOrder, compare_versions, parse_min_version};
 
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};

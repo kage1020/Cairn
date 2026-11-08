@@ -81,7 +81,7 @@ module.exports = grammar({
       choice($.member_stmt_with_body, $.edition_guard),
     ),
 
-    // Core's check, not the grammar, refuses a line in it other than a raw member.
+    // The grammar takes any line here; core's check refuses one other than a raw member.
     edition_guard: $ => seq(
       '@',
       'edition',

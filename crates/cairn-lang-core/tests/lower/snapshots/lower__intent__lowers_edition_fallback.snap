@@ -101,8 +101,7 @@ structs:
               y: 2
               z: 2
         intent_state: {}
-        edition_guard:
-          edition: java
+        edition_guard: java
       - role:
           kind: RawBlock
         arguments:
@@ -116,5 +115,4 @@ structs:
               y: 2
               z: 2
         intent_state: {}
-        edition_guard:
-          edition: bedrock
+        edition_guard: bedrock

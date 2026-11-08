@@ -18,7 +18,9 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
-pub use lower::{BUILTIN_BLOCK_IDS, findings_without_target, lower_to_block_array};
+pub use lower::{
+    BUILTIN_BLOCK_IDS, findings_under_guards, findings_without_target, lower_to_block_array,
+};
 pub use material::{
     AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, MaterialDeferred,
     OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, resolve_block_state,

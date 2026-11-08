@@ -27,8 +27,17 @@ use super::theme_reference::{
 /// INVARIANT(upstream-diagnosed): `check::duplicate` reports the others.
 #[must_use]
 pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
-    let branch = ir.branch_for(edition);
-    let ir = branch.as_ref();
+    resolve_branch(ir.branch_for(edition).as_ref(), edition)
+}
+
+/// The findings resolution raises on `edition`'s branch of `ir`, its guarded members included, with
+/// no theme variant pinned (`spec/lint` "Error vs warning").
+pub(crate) fn findings_on_branch(ir: &IntentModule, edition: Edition) -> Vec<Diagnostic> {
+    resolve_branch(ir.branch_for(Some(edition)).as_ref(), None).diagnostics
+}
+
+/// [`resolve`] of a module already branched, with `edition` picking only the theme variants.
+fn resolve_branch(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut themes: IndexMap<String, ThemeBinding> = IndexMap::new();
     // Every declared body, shadowed ones too, so a shadowed theme's bad slot value is reported.
