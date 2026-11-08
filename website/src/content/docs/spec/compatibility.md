@@ -31,6 +31,9 @@ Stable surfaces:
 - `.crn` syntax that is normative in the spec (keywords, headers, block kinds, blockstate
   primitives, theme/material primitives, edition guards), except what a section flags
   [subject to change](#subject-to-change).
+- The redstone DSL of [chapter 14](/spec/redstone/) (the `logic`, `circuit` and `assert` lines, the
+  built-in logic library, signal bindings, Tier 0 parts), except what a section flags
+  [subject to change](#subject-to-change).
 - The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
@@ -68,15 +71,15 @@ Evolving surfaces:
 
 #### Subject to change
 
-The flag is for the syntax the `.crn` syntax row of [§C.2](#c2-tier-of-each-surface-by-milestone)
-covers: chapters 5 to 9, and [§10.7](/spec/versioning-editions/#107-java--bedrock-portability),
-which writes the edition guards. A section there that specifies syntax the compiler does not build
+The flag is for the syntax the `.crn` syntax and redstone DSL rows of
+[§C.2](#c2-tier-of-each-surface-by-milestone) cover: chapters 5 to 9,
+[§10.7](/spec/versioning-editions/#107-java--bedrock-portability), which writes the edition guards,
+and [chapter 14](/spec/redstone/). A section there that specifies syntax the compiler does not build
 yet opens with a **Subject to change.** paragraph naming that syntax. What the flag names stays
 Evolving whatever tier the row gives, and the flag says nothing about the rest of its section. The
 change that builds the syntax takes the flag off. The syntax then takes the row's tier, and when
 that tier is Stable, the CHANGELOG entry says it graduates. No flag is added to syntax that is
-already Stable, since that would be a demotion. Chapter 14 carries no flag: the redstone DSL has a
-row of its own, Evolving until M6.
+already Stable, since that would be a demotion.
 
 ### Internal
 
@@ -117,6 +120,9 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 
 Reading the table: **the column where a row first turns Stable is the soft commitment.** Until that
 milestone lands, the project reserves the right to change the surface without a deprecation window.
+The columns run in milestone order, which is not the order the milestones are reached in: M4 and M5
+came before M2, and M6 is planned before M3. A row is Stable from the release that reaches the
+milestone of its first Stable column, even when that milestone comes before one to its left.
 
 The Rust API row never graduates within the planned roadmap. Cairn is consumed through the `cairn`
 CLI binary and the language server, not as a Rust library. If a downstream consumer wants a stable
