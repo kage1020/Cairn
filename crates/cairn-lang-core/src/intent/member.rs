@@ -14,6 +14,7 @@ use super::{AssertIr, LogicBinding, MemberRole};
 
 /// One named member produced by lowering a body statement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Member {
     /// Explicit `id=` value, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,9 +57,6 @@ pub struct Member {
 pub struct EditionGuard {
     /// The edition whose build keeps the member.
     pub edition: Edition,
-    /// Byte range of the guard's `@edition` line.
-    #[serde(skip)]
-    pub span: Span,
 }
 
 impl Member {

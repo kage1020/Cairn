@@ -390,7 +390,7 @@ pub enum Statement {
 }
 
 impl Statement {
-    /// Byte range covered by this statement; for `Generic` and `EditionGuard`, the first line alone.
+    /// Byte range of this statement; for `Generic` and `EditionGuard`, the first line alone.
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {
@@ -405,15 +405,18 @@ impl Statement {
 
 /// Each line of `body`, an `@edition` guard's own in the guard's place, with the edition of the
 /// guard it stands under.
-pub(crate) fn guarded_lines(body: &[Statement]) -> Vec<(Option<Edition>, &Statement)> {
-    body.iter()
-        .flat_map(|statement| match statement {
+pub(crate) fn guarded_lines(
+    body: &[Statement],
+) -> impl Iterator<Item = (Option<Edition>, &Statement)> {
+    body.iter().flat_map(|statement| {
+        let (edition, lines) = match statement {
             Statement::EditionGuard {
                 edition, children, ..
-            } => children.iter().map(|line| (Some(*edition), line)).collect(),
-            line => vec![(None, line)],
-        })
-        .collect()
+            } => (Some(*edition), children.as_slice()),
+            line => (None, std::slice::from_ref(line)),
+        };
+        lines.iter().map(move |line| (edition, line))
+    })
 }
 
 /// A `key=value` pair as it appears in an argument list.
@@ -457,7 +460,7 @@ pub enum ValueKind {
     },
     /// Canonical or abstract token without its `@`: `@oak_planks` is `Token("oak_planks")`.
     Token(String),
-    /// Block id as Minecraft spells it, with its state literal: `minecraft:light[level=15]`.
+    /// Block id as Minecraft spells it, with its state literal if any: `minecraft:light[level=15]`.
     BlockId(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(DottedRef),

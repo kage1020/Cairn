@@ -79,6 +79,20 @@ fn a_coordinate_on_a_label_or_size_key_is_a_type_mismatch() {
 }
 
 #[test]
+fn a_block_id_on_a_size_key_is_a_type_mismatch() {
+    let src = "struct s size=minecraft:stone\n  floor mat_slot=m\n";
+    let found = of_code(src, DiagnosticCode::TypeMismatchSize);
+    assert_eq!(found.len(), 1, "got {found:#?}");
+    assert_eq!(
+        (slice(src, &found[0]), found[0].primary.as_str()),
+        (
+            "minecraft:stone",
+            "`size=` expects a `WxH` literal, got block id"
+        ),
+    );
+}
+
+#[test]
 fn class_set_to_dotted_ref_is_flagged() {
     let src = "struct s size=1x1\n  walls class=foo.bar mat_slot=m\n";
     let diags = diagnose(src);

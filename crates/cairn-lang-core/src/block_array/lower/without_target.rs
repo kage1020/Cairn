@@ -57,8 +57,8 @@ fn lowers_alike(a: &Resolution, b: &Resolution, guarded: bool) -> bool {
 }
 
 /// The findings of `lowerings` that every target reading their line raises: one in a theme only
-/// its own lowering binds or on a line under its own edition's guard, or one each lowering raises
-/// with the same code at the same span.
+/// its own lowering binds, one any of whose spans is on a line under its own edition's guard, or
+/// one each lowering raises with the same code at the same span.
 fn agreed(
     intent: &IntentModule,
     mut lowerings: Vec<(Resolution, Vec<Diagnostic>)>,
@@ -70,7 +70,6 @@ fn agreed(
         .iter()
         .map(|(resolution, _)| bound_themes(resolution))
         .collect();
-    let guarded = intent.guarded_members();
     let mut seen: HashSet<&Diagnostic> = HashSet::new();
     let mut kept: Vec<Diagnostic> = Vec::new();
     for (i, (_, found)) in lowerings.iter().enumerate() {
@@ -83,17 +82,17 @@ fn agreed(
                     && others().all(|(j, _)| !bound[j].contains(theme.name.as_str()))
             })
             .map(|theme| &theme.span)
-            .chain(
-                guarded
-                    .iter()
-                    .filter(|(guard, _)| Some(guard.edition) == lowerings[i].0.edition)
-                    .map(|(_, member)| &member.span),
-            )
             .collect();
+        let guarded = lowerings[i]
+            .0
+            .edition
+            .map(|edition| intent.lines_guarded_for(edition))
+            .unwrap_or_default();
         for finding in found {
             let read_alone = own
                 .iter()
-                .any(|theme| theme.start <= finding.span.start && finding.span.end <= theme.end);
+                .any(|theme| theme.start <= finding.span.start && finding.span.end <= theme.end)
+                || finding.touches(&guarded);
             let raised_by_each = others().all(|(_, (_, other))| {
                 other
                     .iter()

@@ -23,7 +23,7 @@ use crate::block_array::{BlockArray, BlockState, Dims, Footprint, Placement, Wal
 
 use super::site_floor::{FloorExtent, FloorPlan, PlacedBody};
 use super::token_diag::{
-    TokenSite, check_state_literal, diag_abstract_token, diag_state_unmapped,
+    NamedBy, TokenSite, check_state_literal, diag_abstract_token, diag_state_unmapped,
     diag_undeclared_material, diag_unknown_abstract_token,
 };
 
@@ -303,7 +303,7 @@ fn walkway_material(
                 return None;
             }
             if let Some(unmapped) = registry.and_then(|registry| {
-                diag_state_unmapped(connect.path.span.clone(), &state, registry, false)
+                diag_state_unmapped(connect.path.span.clone(), &state, registry, NamedBy::Path)
             }) {
                 diagnostics.push(unmapped);
                 return None;
