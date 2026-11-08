@@ -1,6 +1,6 @@
-//! A semantic member bound to a block only the other edition has is `E_PARITY_UNSUPPORTED`, and a
-//! raw member naming one is `E_UNKNOWN_ID` with the guard that would keep it
-//! (`spec/versioning-editions` "A block only the other edition has").
+//! A semantic member or walkway bound to a block only the other edition has is
+//! `E_PARITY_UNSUPPORTED`, and a raw member naming one is `E_UNKNOWN_ID` with the guard that would
+//! keep it (`spec/versioning-editions` "A block only the other edition has").
 
 use cairn_lang_core::block_array::{
     AbsentConcept, BlockArrayIr, BlockIdSet, BlockState, TargetRegistry,
@@ -58,7 +58,7 @@ fn floored(token: &str) -> String {
     format!("theme t:\n  slot f -> @{token}\n\nstruct s size=3x3\n  floor mat_slot=f\n")
 }
 
-/// Both notes of `E_PARITY_UNSUPPORTED` on the border block at `java 2.0`.
+/// Both notes of `E_PARITY_UNSUPPORTED` on a member's border block at `java 2.0`.
 fn parity_notes() -> Vec<&'static str> {
     vec![
         BORDER_REASON,
@@ -95,7 +95,7 @@ fn a_slot_bound_to_the_other_editions_block_names_the_theme_and_the_guard_that_b
 }
 
 #[test]
-fn a_walkway_path_of_the_other_editions_block_is_refused_the_same_way() {
+fn a_walkway_path_of_the_other_editions_block_is_asked_for_a_block_both_editions_have() {
     let source = "theme t:\n  slot wall -> @stone\n\n\
                   def hut size=5x5:\n  \
                   walls id=w mat_slot=wall height=3\n  \
@@ -111,8 +111,24 @@ fn a_walkway_path_of_the_other_editions_block_is_refused_the_same_way() {
             DiagnosticCode::ParityUnsupported,
             "@border_block",
             "`minecraft:border_block` is a block only Bedrock has, so `java 2.0` cannot build it",
-            parity_notes(),
+            vec![
+                BORDER_REASON,
+                "a walkway is laid alike for every edition, and its `site` body binds no slot and \
+                 builds nothing under a guard: set `path=` to a block both editions have, or to an \
+                 abstract token each edition's materials catalog maps",
+            ],
         )],
+        "neither the per-edition theme nor the guard is open to a `path=`",
+    );
+    assert_eq!(
+        serde_json::to_value(&out.diagnostics[0].data).expect("the payload serialises"),
+        json!({
+            "kind": "parity_unsupported",
+            "id": "minecraft:border_block",
+            "registry": "java 2.0",
+            "declared_by": "bedrock",
+            "reason": BORDER_REASON,
+        }),
     );
 }
 
@@ -158,7 +174,21 @@ fn a_pack_mapping_onto_the_other_editions_block_stays_the_packs_fault() {
             vec![
                 "the registry pack maps `@wall.border` onto it; the token is fine and the pack's \
                  mapping is not, so this is not a fix you make here",
+                "`minecraft:border_block` is a block only Bedrock has: the border block, which \
+                 Bedrock uses to wall players in; Java has no such block",
             ],
         )],
+        "the pack's reason is printed, and no guard is offered for a line the author did not write",
+    );
+    assert_eq!(
+        serde_json::to_value(&out.diagnostics[0].data).expect("the payload serialises"),
+        json!({
+            "kind": "unknown_id",
+            "id": "minecraft:border_block",
+            "registry": "java 2.0",
+            "origin": "catalog",
+            "token": "wall.border",
+            "declared_by": "bedrock",
+        }),
     );
 }

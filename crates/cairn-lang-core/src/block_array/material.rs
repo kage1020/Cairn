@@ -298,7 +298,7 @@ pub struct UnknownId {
     /// Whether the author named the id or the pack's catalog did.
     pub origin: IdOrigin,
     /// Closest id the target does declare, within `nearest_match`'s edit cap; `None` when another
-    /// version of the edition declares the id.
+    /// version of the edition declares the id, or the id is a block only the other edition has.
     pub suggestion: Option<String>,
     /// The ids this target declares for the same block, from the registry's alias table.
     pub aliases: Vec<String>,
