@@ -89,9 +89,10 @@ body is a flat list. Reported once per dropped subtree, at its root.
 
 `E_SEMANTIC_IN_EDITION_GUARD`: the semantic layer is edition-neutral, so a guard holds only the
 escape hatch. Reported once at the outermost refused line, with a note at the guard, and anything
-indented under that line goes with it. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD`
-instead, offered `raw_block`, `raw_fill`, `repeater`, `comparator`, `redstone_torch` and
-`redstone_dust`, or nothing in a `site` body, where none of them builds.
+indented under that line goes with it. No other check reads the refused line or what goes with it,
+so it draws no other finding. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD` instead,
+offered `raw_block`, `raw_fill`, `repeater`, `comparator`, `redstone_torch` and `redstone_dust`, or
+nothing in a `site` body, where none of them builds.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
 `theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.
@@ -856,11 +857,15 @@ from its default block takes the block the pack names for it, so it is such a bl
 pack's verdicts and are not raised, nor are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned
 target's tables, and `E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition`
 alone picks that edition's theme variants and keeps its `@edition` guards. With neither flag, each
-edition's variants are lowered, with that edition's guards: a finding on a line only one edition's
-variant reads, or on a line under a guard, is that edition's verdict and is reported, and any other
-finding is reported when every edition raises it with the same code at the same span, once for each
-wording the editions give it. A check with `--target` lowers once, against the target, so no finding
-is reported twice.
+edition's variants are lowered, with that edition's guards: a finding whose span is on a line only
+one edition's variant reads, or whose span or one of whose notes' spans is on a line under that
+edition's guard, is that edition's verdict and is reported, and any other finding is reported when
+every edition raises it with the same code at the same span, once for each wording the editions give
+it. Where some line stands under a guard, resolution's findings are kept by the same rule, each
+edition's branch resolved with no variant pinned, so the edition-variant softening of
+`E_UNRESOLVED_SLOT` ([§11.1](#materials-and-targets)) holds on every line as it does in a source
+with no guard. A check with `--target` lowers once, against the target, so no finding is reported
+twice.
 
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a

@@ -181,6 +181,21 @@ fn a_circuit_finding_fails_a_lower_pinned_to_an_edition() {
 }
 
 #[test]
+fn the_note_counts_the_members_under_guards_and_not_the_guards() {
+    let source = "struct s size=5x5\n  raw_block mat=minecraft:dirt at=1,0,1\n  @edition java\n    \
+                  raw_block mat=minecraft:stone at=2,0,2\n    raw_block mat=minecraft:stone at=3,0,3\n";
+    let tmp = TempDir::new().expect("tempdir");
+    let src_path = write_source(tmp.path(), "guarded.crn", source);
+    let run = Run::from(cairn("lower", &[src_path.to_str().unwrap()]));
+    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    assert_eq!(
+        run.stderr,
+        "note: no edition is pinned here, so the 2 members under `@edition` guards are left out; \
+         `cairn compile --edition E` builds the ones E's guards hold\n",
+    );
+}
+
+#[test]
 fn a_guarded_line_check_refuses_fails_the_lowering_that_leaves_it_out() {
     let source = "struct s size=5x5\n  @edition java\n    raw_block mat=minecraft:stone at=2,4,2\n  \
                   raw_block mat=minecraft:dirt at=1,0,1\n";
