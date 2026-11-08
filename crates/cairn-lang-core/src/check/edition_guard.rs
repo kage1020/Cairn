@@ -51,18 +51,21 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
             // `keyword_allowlist` reports an unknown keyword, offering the raw ones.
             MemberRole::Other(_) => return,
             role if role.is_raw() => {
-                // `nesting` refuses a member under a raw one, but a `logic` or `assert` line there
-                // would still reach synthesis from under the guard.
-                for child in children.iter().filter(|child| {
-                    matches!(
-                        child,
-                        Statement::Logic { .. }
-                            | Statement::AssertTruth { .. }
-                            | Statement::AssertAlways { .. }
-                            | Statement::AssertLatency { .. }
-                    )
-                }) {
-                    check_guarded(child, edition, guard, sink);
+                // `nesting` refuses a member under a raw one; a nested guard's lines answer to it.
+                for child in children {
+                    match child {
+                        Statement::Generic { .. } => {}
+                        Statement::EditionGuard {
+                            edition,
+                            children,
+                            span,
+                        } => {
+                            for line in children {
+                                check_guarded(line, *edition, span, sink);
+                            }
+                        }
+                        logic_or_assert => check_guarded(logic_or_assert, edition, guard, sink),
+                    }
                 }
                 return;
             }
