@@ -1298,6 +1298,40 @@ fn the_json_row_names_exactly_what_its_count_counts() {
 }
 
 #[test]
+fn a_block_only_the_other_edition_has_is_counted_with_the_reason_its_pack_gives() {
+    const REASON: &str =
+        "the border block, which Bedrock uses to wall players in; Java has no such block";
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = one_slot_source(tmp.path(), "bedrockonly.crn", "border_block");
+    let axes = info_json_at(&src, "java,bedrock");
+    let java = portability_entry(&axes, "java");
+    assert_eq!(java["unsupported"], 1);
+    assert_eq!(
+        java["unsupported_entries"],
+        json!([{
+            "id": "minecraft:border_block",
+            "reason": "no_counterpart",
+            "detail": REASON,
+        }]),
+    );
+    let bedrock = portability_entry(&axes, "bedrock");
+    assert_eq!(bedrock["unsupported_entries"], json!([]));
+    let (_, _, stderr) = info_raw(&src, "java");
+    assert_eq!(
+        stderr.lines().take(2).collect::<Vec<_>>(),
+        [
+            "note: what `unsupported: 1` counts on java:".to_owned(),
+            format!(
+                "  note: `minecraft:border_block` — only the other edition has the block: \
+                 {REASON} — bind the slot to a block this edition has, or build for the other \
+                 edition"
+            ),
+        ],
+        "the note and the JSON give the same reason, got: {stderr}",
+    );
+}
+
+#[test]
 fn the_degraded_figure_names_the_entry_and_what_it_lost() {
     let axes = info_json("roof-hip.crn", "bedrock");
     let bedrock = portability_entry(&axes, "bedrock");

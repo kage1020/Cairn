@@ -18,8 +18,8 @@ use super::canvas::ScopePalette;
 use super::phase::Phase;
 use super::roof_kind::roof_line_refused;
 use super::token_diag::{
-    MemberFallback, TokenSite, check_state_literal, diag_abstract_token, diag_undeclared_material,
-    diag_unknown_abstract_token, diag_unknown_id,
+    IdSite, MemberFallback, TokenSite, check_state_literal, diag_abstract_token,
+    diag_undeclared_id, diag_unknown_abstract_token,
 };
 use super::written::Written;
 
@@ -331,7 +331,13 @@ pub(super) fn resolve_member_state(
             ));
         }
         MaterialDeferred::UnknownId(unknown) => {
-            diagnostics.push(diag_undeclared_material(slot_value.span.clone(), &unknown));
+            diagnostics.push(diag_undeclared_id(
+                slot_value.span.clone(),
+                &unknown,
+                IdSite::Semantic(TokenSite::MemberSlot(MemberFallback::for_role(
+                    &member.role,
+                ))),
+            ));
         }
         // INVARIANT(upstream-diagnosed): `check_slot_targets` reports `E_UNKNOWN_SLOT_TARGET`.
         MaterialDeferred::AlreadyDiagnosed => {}
@@ -362,7 +368,14 @@ pub(super) fn default_block_id(
     };
     validated_id(state, registry, &origin)
         .map(|state| state.id)
-        .map_err(|unknown| Box::new(diag_unknown_id(member.span.clone(), &unknown)))
+        .map_err(|unknown| {
+            let site = TokenSite::MemberSlot(MemberFallback::for_role(&member.role));
+            Box::new(diag_undeclared_id(
+                member.span.clone(),
+                &unknown,
+                IdSite::Semantic(site),
+            ))
+        })
 }
 
 /// [`resolve_member_state`], interned.
