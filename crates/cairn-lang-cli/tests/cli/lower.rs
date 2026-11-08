@@ -191,7 +191,7 @@ fn the_note_counts_the_members_under_guards_and_not_the_guards() {
     assert_eq!(
         run.stderr,
         "note: no edition is pinned here, so the 2 members under `@edition` guards are left out; \
-         `cairn compile --edition E` builds the ones E's guards hold\n",
+         `cairn lower --edition E` lowers the ones E's guards hold\n",
     );
 }
 
