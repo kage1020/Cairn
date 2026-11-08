@@ -26,8 +26,8 @@ remain.
 - **M3** is where the language leaves draft. Every example already compiles clean for Java and
   builds for Bedrock. What M3 still needs is listed under [Leaving draft](#leaving-draft).
 - **M6** is where redstone reaches the structure file. `cairn compile` builds each struct's circuit
-  under its floor and checks its latency bounds, but nothing checks `truth` and `always` against it
-  yet.
+  under its floor and checks its `truth`, `latency` and `always` assertions against it, so what M6
+  still needs is for the redstone DSL to turn Stable.
 
 ## Release cadence
 
