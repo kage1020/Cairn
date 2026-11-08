@@ -438,22 +438,50 @@ pub(super) fn diag_state_unmapped(
     })
 }
 
-/// Report a block id a `mat_slot=` reached that the compile's target does not declare:
-/// `E_PARITY_UNSUPPORTED` when the author named a block only the other edition has.
-pub(super) fn diag_undeclared_material(span: Span, unknown: &UnknownId) -> Diagnostic {
-    match (&unknown.origin, &unknown.absent) {
-        (IdOrigin::Authored, Some(absent)) => diag_parity_unsupported(span, unknown, absent),
-        _ => diag_unknown_id(span, unknown),
+/// Where a block id was written, which decides what its finding may advise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum IdSite {
+    /// A `raw_block` or `raw_fill`'s `mat=`, which names an edition's own block.
+    Raw,
+    /// A semantic member's block, or a `connect` row's `path=`.
+    Semantic(TokenSite),
+}
+
+/// Report a block id the compile's target does not declare: `E_PARITY_UNSUPPORTED` when a semantic
+/// line named a block only the other edition has, and `E_UNKNOWN_ID` otherwise.
+pub(super) fn diag_undeclared_id(span: Span, unknown: &UnknownId, site: IdSite) -> Diagnostic {
+    match (site, &unknown.origin, &unknown.absent) {
+        (IdSite::Semantic(token_site), IdOrigin::Authored, Some(absent)) => {
+            diag_parity_unsupported(span, unknown, absent, token_site)
+        }
+        _ => diag_unknown_id(span, unknown, site),
     }
 }
 
-/// Report a semantic member's block that only `absent.declared_by` has, with the per-edition
-/// theme and the guarded raw member that build it instead
-/// (`spec/versioning-editions` "Writing an alternative").
-fn diag_parity_unsupported(span: Span, unknown: &UnknownId, absent: &AbsentConcept) -> Diagnostic {
+/// Report a semantic line's block that only `absent.declared_by` has, with what the line can name
+/// instead (`spec/versioning-editions` "A block only the other edition has").
+fn diag_parity_unsupported(
+    span: Span,
+    unknown: &UnknownId,
+    absent: &AbsentConcept,
+    site: TokenSite,
+) -> Diagnostic {
     let UnknownId { id, registry, .. } = unknown;
     let has = absent.declared_by;
     let lacks = has.other();
+    let instead = match site {
+        TokenSite::MemberSlot(_) => format!(
+            "the semantic layer is edition-neutral: bind this slot from a `theme NAME_{has}` and \
+             give `theme NAME_{lacks}` a block {} has, or place the block with a `raw_block` under \
+             `@edition {has}`, which only a {} build keeps",
+            lacks.title(),
+            has.title(),
+        ),
+        TokenSite::WalkwayPath => "a walkway is laid alike for every edition, and its `site` body \
+             binds no slot and builds nothing under a guard: set `path=` to a block both editions \
+             have, or to an abstract token each edition's materials catalog maps"
+            .to_owned(),
+    };
     Diagnostic {
         code: DiagnosticCode::ParityUnsupported,
         span,
@@ -468,13 +496,7 @@ fn diag_parity_unsupported(span: Span, unknown: &UnknownId, absent: &AbsentConce
             },
             DiagnosticNote {
                 span: None,
-                message: format!(
-                    "the semantic layer is edition-neutral: bind this slot from a `theme NAME_{has}` \
-                     and give `theme NAME_{lacks}` a block {} has, or place the block with a \
-                     `raw_block` under `@edition {has}`, which only a {} build keeps",
-                    lacks.title(),
-                    has.title(),
-                ),
+                message: instead,
             },
         ],
         data: Some(DiagnosticData::ParityUnsupported {
@@ -487,7 +509,7 @@ fn diag_parity_unsupported(span: Span, unknown: &UnknownId, absent: &AbsentConce
 }
 
 /// Report a block id the compile's target does not declare, worded for who chose the id.
-pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
+fn diag_unknown_id(span: Span, unknown: &UnknownId, site: IdSite) -> Diagnostic {
     let UnknownId {
         id,
         registry,
@@ -531,23 +553,26 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             candidate_list(spellings),
         )),
     };
-    // A raw member's id reaches here; a semantic member's is `E_PARITY_UNSUPPORTED` instead.
-    let guard = match (origin, absent) {
-        (IdOrigin::Authored, Some(absent)) => Some(format!(
-            "`{id}` is a block only {} has: {}; put this line under `@edition {}`, so that only a \
-             {} build keeps it",
-            absent.declared_by.title(),
-            absent.reason,
-            absent.declared_by,
-            absent.declared_by.title(),
-        )),
-        _ => None,
-    };
+    let absence = absent.as_ref().map(|absent| {
+        let has = absent.declared_by;
+        let keep = match site {
+            IdSite::Raw => format!(
+                "; put this line under `@edition {has}`, so that only a {} build keeps it",
+                has.title()
+            ),
+            IdSite::Semantic(_) => String::new(),
+        };
+        format!(
+            "`{id}` is a block only {} has: {}{keep}",
+            has.title(),
+            absent.reason
+        )
+    });
     notes.extend(
         candidate
             .into_iter()
             .chain(versions)
-            .chain(guard)
+            .chain(absence)
             .map(|message| DiagnosticNote {
                 span: None,
                 message,
