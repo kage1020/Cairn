@@ -1070,6 +1070,22 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  @edition java\n    @edition bedrock\n      raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
         Reject,
     ),
+    // Deeper down, a guard is judged by the line it stands under, as it is outside one.
+    (
+        "edition_guard_under_a_member_under_a_guard",
+        "struct s size=3x3\n  @edition java\n    level y=1\n      @edition bedrock\n        raw_block at=1,1,1 mat=minecraft:stone\n",
+        Accept,
+    ),
+    (
+        "edition_guard_under_a_raw_member_under_a_guard",
+        "struct s size=3x3\n  @edition java\n    raw_block at=1,1,1 mat=minecraft:stone\n      @edition bedrock\n        raw_block at=1,1,1 mat=minecraft:stone\n",
+        Accept,
+    ),
+    (
+        "member_requires_under_a_guard_in_a_def",
+        "def d size=2x2:\n  @edition java\n    requires version>=1.21\n",
+        Reject,
+    ),
     (
         "edition_guard_at_top_level",
         "@edition java\nstruct s size=3x3\n  walls mat_slot=w\n",

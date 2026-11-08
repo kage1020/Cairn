@@ -56,7 +56,7 @@ use connect::{ConnectInputs, lower_connects};
 use diag::{VoxelSource, diag_def_no_size, diag_struct_no_size};
 use site_floor::{PlacedBody, collect_floor_cells};
 
-pub use without_target::findings_without_target;
+pub use without_target::{findings_under_guards, findings_without_target};
 
 /// Block ids lowering can put in a palette that no pack can redirect.
 ///

@@ -1,5 +1,8 @@
 //! [`Diagnostic`] payload used by every `check` pass.
 
+mod agreement;
+pub(crate) use agreement::{EditionFindings, agreed};
+
 use serde::{Serialize, Serializer};
 
 use crate::error::{Position, Span};
