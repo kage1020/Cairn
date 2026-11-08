@@ -16,13 +16,6 @@ rule belongs to another chapter, the row states what the code means and links th
 The row is what a reader with a code in hand needs to find, and the chapter is where the behaviour
 is defined.
 
-Every code of the redstone pipeline is outside that promise: the `E_LOGIC_*` / `W_LOGIC_*` codes,
-and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT`,
-`W_ROUTE_CROSS_LAYER_CLEARANCE`, `E_SIM_ASSERTION_FAILED` and `E_NO_PORTABLE_IMPL`. They are reachable only through `cairn synth
---experimental-logic-synth`, which is Internal tier ([Compatibility](/spec/compatibility/)). Nothing
-about those strings is guaranteed, so a row here would state a contract that does not exist.
-[Redstone and Logic](/spec/redstone/) names the ones its own rules turn on.
-
 ### Duplicates
 
 | Code | Meaning |
@@ -602,6 +595,32 @@ an earlier one, fills no combination the table did not already have. Two rows th
 exception: the coverage finding is withheld there, because a count taken without the later row would
 name a combination the table does assign.
 
+### Redstone
+
+Every command that builds a struct's circuit reports these ([Redstone
+§14.8](/spec/redstone/#148-connection-to-the-ir-and-phases)), and most depend on the edition, so a
+command that pins none reports the ones every edition raises at the same place.
+
+| Code | Meaning |
+|---|---|
+| `E_LOGIC_UNBOUND_SIGNAL` | A `logic` line, an actuator binding or an `assert` names a signal nothing in its scope drives. |
+| `E_LOGIC_MULTIPLE_DRIVERS` | Two sensors or `logic` lines drive one signal. |
+| `E_LOGIC_CYCLE` | A signal depends on itself through the `logic` lines that define it ([Redstone §14.3](/spec/redstone/#143-the-logic-layer-is-a-dependency-dag)). |
+| `E_LOGIC_UNSUPPORTED_PRIMITIVE` | A `logic` expression takes a form the logic lowering has no cell for. |
+| `E_LOGIC_NESTING_TOO_DEEP` | A `logic` expression nests deeper than the logic lowering descends. |
+| `W_LOGIC_UNUSED_SIGNAL` | A signal a `logic` line defines that nothing reads. |
+| `E_LOGIC_INVALID_SIGNAL` | A place that names a signal holds something other than `sig.` and one segment ([Redstone §14.2](/spec/redstone/#142-signal-binding)). |
+| `E_LOGIC_MISPLACED_BINDING` | An actuator key inside its component's `[selector]`, or on a member a `theme` selector made read it. |
+| `E_LOGIC_UNKNOWN_BINDING_KEY` | A `sig.` value under a key the member reads that is not an actuator key. |
+| `E_LOGIC_UNRESOLVED_PATCH` | An actuator patch whose selector picks no single component of its keyword. |
+| `E_LOGIC_DUPLICATE_BINDING` | A component carries a second binding under an actuator key it has. |
+| `E_NO_CIRCUIT_REGION` | A scope with a cell to build or an actuator to drive has no `circuit` line that reserves layers for them ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
+| `E_ROUTE_CONGESTION` | A scope's circuit does not fit the layers its `circuit` line reserves, or those layers take the struct past what one structure holds. |
+| `E_ROUTE_UNREACHABLE_COMPONENT` | A sensor or actuator the circuit wires stands where the circuit under the floor cannot reach it. |
+| `E_ATTENUATION_LIMIT` | A macro has more stages than its dust carries, or an input's wire runs too weak with nowhere for a buffer repeater. |
+| `E_NO_PORTABLE_IMPL` | A component of the built struct reads another through a block update, so what it does depends on update order ([Redstone §14.6](/spec/redstone/#146-edition-differences)). |
+| `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start ([Redstone §14.7](/spec/redstone/#147-verification)). |
+
 ### Semantic categories
 
 Beyond the codes above, lint covers:
@@ -628,10 +647,9 @@ pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block
 edition has, `E_STATE_DOMAIN` a state its block does not take there,
 `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
 version cannot carry, while no entity schema is checked. The redstone row runs only in part as well:
-the truth-table codes check a table against itself, nothing simulates the circuit, and a latency
-bound the placed circuit misses (`E_SIM_ASSERTION_FAILED`), routing congestion
-(`E_ROUTE_CONGESTION`) and a circuit's dependence on update order (`E_NO_PORTABLE_IMPL`) are reached
-only by the Internal-tier `cairn synth --experimental-logic-synth`.
+the truth-table codes check a table against itself, and nothing checks a truth table or a temporal
+assertion against the circuit, while a latency bound, routing congestion and a circuit's dependence
+on update order have the codes of [Redstone](#redstone).
 
 ### "did you mean"
 

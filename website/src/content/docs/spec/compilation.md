@@ -14,8 +14,8 @@ openings    door / window
 fixtures    sign / painting / frame / bed / chest / sensors / actuators / Tier 0 parts
 fluids      fill fluid= / water
 logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
-logic_place cell placement → Placement IR
-logic_route routing, delay insertion and crossing legalization over the Placement IR, delay determined
+logic_place pads, risers and cells laid under the floor → Placement IR
+logic_route routing, delay insertion and legalization over the Placement IR, delay determined
 raw         raw_block / raw_fill (the escape hatch)
 ```
 
@@ -28,15 +28,17 @@ yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `m
 `envelope`, `openings`, `fixtures`, whose members are `chest`, every sensor and actuator but
 `door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts)), `fluids`, and
 `raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)).
-`cairn compile` does not run the three `logic_*` phases, so a `logic` line lays no redstone in the
-artifact; they are reached only through `cairn synth --experimental-logic-synth`.
+The three `logic_*` phases lay each struct's circuit in the layers its `circuit` line reserves under
+the base plane, where no other phase paints, so they read the struct as every other phase leaves
+it, `raw` included, and contest no voxel with any of them.
 
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
 what a member means. Nor does it decide what the artifact is
 ([§4.8](#48-within-phase-conflicts-and-the-palette)): permuting two members that share no voxel
 leaves the whole `BlockArray` equal, palette numbering included, not only the voxels.
 
-`circuit` marks a routing region and writes no voxel, so it belongs to no phase. The three
+`circuit` reserves the layers the circuit is laid in and writes no voxel itself, so it belongs to
+no phase. The three
 `logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
 actuators are placed in 3D, and `fluids` because water washes away the wire it reaches. See
 [Redstone](/spec/redstone/).
@@ -207,7 +209,7 @@ The volume a struct lowers into is derived, never written:
 ```
 Dims.x = size.W + 2 × overhang
 Dims.z = size.H + 2 × overhang
-Dims.y = 1 + wall_top + roof_extra
+Dims.y = void + 1 + wall_top + roof_extra
 ```
 
 Each term counts only the members that will paint:
@@ -218,6 +220,9 @@ Each term counts only the members that will paint:
   enclosing level's offset and `0` in the body.
 - `roof_extra`: the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
 - `1`: the base plane, which every struct has.
+- `void`: the layers a `circuit` line reserves under the base plane once the struct's logic lays a
+  circuit in them, lowering every other row by as many
+  ([Redstone §14.5](/spec/redstone/#145-place-and-route)), and `0` otherwise.
 
 Members inside a `level` count in all three, at their offset: `walls height=3` written directly
 gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).

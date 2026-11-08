@@ -8,8 +8,6 @@ title: "11. Lint と制約検証"
 
 この節は診断コードのカタログです。安定したコマンドが出しうるコードには、必ずここに行があります。安定したコマンドが行のないコードを出すなら、それはカタログ外のコードではなく、この節の不備です。ほかの章が名前を挙げていて、まだどのコマンドも出さないコード (たとえば `E_REQUIRES_CONFLICT`) は、予約済みのコードです ([互換性ティア §C.3](/ja/spec/compatibility/#c3-破壊的変更の告知方法))。コードの規則が別の章にある場合は、行にコードの意味を書き、規則はその章へリンクします。コードを手にした読者が探すのはこの行で、振る舞いを定義しているのは各章だからです。
 
-レッドストーンのパイプラインが出すコードは、すべてこの約束の対象外です。`E_LOGIC_*` / `W_LOGIC_*` のほか、`E_NO_CIRCUIT_REGION`、`E_ROUTE_CONGESTION`、`E_ATTENUATION_LIMIT`、`W_ROUTE_CROSS_LAYER_CLEARANCE`、`E_SIM_ASSERTION_FAILED`、`E_NO_PORTABLE_IMPL` がこれにあたります。これらに到達できるのは `cairn synth --experimental-logic-synth` だけで、この機能はまるごと Internal ティア ([互換性](/ja/spec/compatibility/)) です。文字列について何も保証していないので、ここに行を置くと、存在しない契約を書くことになります。規則に関わるものは [レッドストーンと論理](/ja/spec/redstone/) で個別に挙げています。
-
 ### 重複
 
 | コード | 意味 |
@@ -239,6 +237,30 @@ title: "11. Lint と制約検証"
 
 2 つの警告が警告なのは、書かれている行はどれも本物の制約だからです。1 つの表に `W_TRUTH_TABLE_DUPLICATE_ROW` と `W_TRUTH_TABLE_PARTIAL` の両方が付くこともあります。繰り返した行も、先行する行に含まれる行も、表がまだ持っていない組を埋めないからです。ただし交差する 2 行だけは例外で、その場合は網羅性の指摘を出しません。後ろの行を除いて数えると、表が実際には割り当てている組を、未割り当てとして挙げてしまうからです。
 
+### レッドストーン
+
+struct の回路を組み上げるどのコマンドも、これらを報告します ([レッドストーン §14.8](/ja/spec/redstone/#148-ir-とフェーズの関係))。ほとんどはエディションによって変わるので、エディションを固定しないコマンドは、どのエディションも同じ場所で出すものを報告します。
+
+| コード | 意味 |
+|---|---|
+| `E_LOGIC_UNBOUND_SIGNAL` | `logic` 行、アクチュエーターのバインディング、`assert` が、スコープ内で何も駆動しない信号を挙げている。 |
+| `E_LOGIC_MULTIPLE_DRIVERS` | 2 つのセンサーまたは `logic` 行が 1 つの信号を駆動している。 |
+| `E_LOGIC_CYCLE` | 信号が、それを定義する `logic` 行を通して自分自身に依存している。 |
+| `E_LOGIC_UNSUPPORTED_PRIMITIVE` | `logic` の式が、論理の lowering にセルのない形を取っている。 |
+| `E_LOGIC_NESTING_TOO_DEEP` | `logic` の式の入れ子が、論理の lowering がたどる深さを超えている。 |
+| `W_LOGIC_UNUSED_SIGNAL` | `logic` 行が定義した信号を、何も読まない。 |
+| `E_LOGIC_INVALID_SIGNAL` | 信号を挙げる位置に、`sig.` と 1 つのセグメント以外のものがある ([レッドストーン §14.2](/ja/spec/redstone/#142-信号バインディング))。 |
+| `E_LOGIC_MISPLACED_BINDING` | アクチュエーターのキーが、その部品の `[selector]` の中か、`theme` のセレクタがそのキーを読ませたメンバーにある。 |
+| `E_LOGIC_UNKNOWN_BINDING_KEY` | メンバーが読むキーのうち、アクチュエーターのキーでないものの下に `sig.` の値がある。 |
+| `E_LOGIC_UNRESOLVED_PATCH` | アクチュエーターのパッチのセレクタが、そのキーワードの部品をちょうど 1 つ選んでいない。 |
+| `E_LOGIC_DUPLICATE_BINDING` | 部品が、すでに持つアクチュエーターのキーで 2 つ目のバインディングを持っている。 |
+| `E_NO_CIRCUIT_REGION` | 組み立てるセルか駆動するアクチュエーターを持つスコープに、それらのための層を確保する `circuit` 行がない ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。 |
+| `E_ROUTE_CONGESTION` | スコープの回路が `circuit` 行の確保した層に収まらない。またはその層で、struct が 1 つの構造物が持てる量を超える。 |
+| `E_ROUTE_UNREACHABLE_COMPONENT` | 回路がつなぐセンサーかアクチュエーターが、床下の回路の届かない場所に立っている。 |
+| `E_ATTENUATION_LIMIT` | マクロの段数がそのダストで運べる数を超えている。または入力への配線が弱すぎ、バッファのリピーターを置く場所がない。 |
+| `E_NO_PORTABLE_IMPL` | 組み上げた struct の部品が、別の部品をブロック更新を通して読むので、その動作が更新順序に依存する ([レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い))。 |
+| `E_SIM_ASSERTION_FAILED` | 合法化した回路が `assert latency` の上限より長くかかる。または上限の終点が始点に依存しない ([レッドストーン §14.7](/ja/spec/redstone/#147-検証))。 |
+
 ### 意味カテゴリ
 
 上のコードに加えて、lint は次の項目を検査します。
@@ -255,7 +277,7 @@ title: "11. Lint と制約検証"
 | **redstone** | 宣言した真理値表と時相アサーションに対する、tick 単位のシミュレーション。レイテンシの上限、タイミングの衝突、QC への依存、配線の混雑 ([レッドストーン](/ja/spec/redstone/))。 |
 | **AABB 干渉** | 重なった場合は、優先度に従って統合するか拒否する。境界のブロックステートの再解決は IR 層が担う。 |
 
-このうち attachment、entity_aabb、support、fluid、edit_stability、AABB の干渉は計画中で、現時点ではどのコマンドも検査しません。本体が重なる 2 つの `place` 行も報告しません。幾何は一部だけ守られます。自分の行の指定で struct の外に出る door、window、軒の stair、chest、センサー、アクチュエーターは描かずに `E_INVALID_MEMBER` として報告し、建たなかったメンバーのせいでだけ外に出るものは `W_DEFERRED_MEMBER` として報告します。version_caps / parity は、専用のコードを通じて一部だけ実行します。`E_VERSION_CAP` は `--target` を `@requires` の下限と照らし合わせ、`E_UNKNOWN_ID` は固定したターゲットが宣言していないブロック ID を、`E_PARITY_UNSUPPORTED` はもう一方のエディションにしかない意味メンバーのブロックを、`E_STATE_DOMAIN` はそこでブロックが取らないステートを、`E_STATE_UNMAPPED` はそのステートマップに形のないブロックステートを拒否し、`W_INTENT_DEGRADED` はバージョンが表せないものを示します。一方、エンティティのスキーマは検査しません。redstone の行も一部だけです。真理値表のコードが表そのものの整合性を検査するだけで、回路のシミュレーションは行いません。配置した回路が守れないレイテンシの上限 (`E_SIM_ASSERTION_FAILED`)、配線の混雑 (`E_ROUTE_CONGESTION`)、回路の更新順序への依存 (`E_NO_PORTABLE_IMPL`) に到達できるのは、Internal ティアの `cairn synth --experimental-logic-synth` だけです。
+このうち attachment、entity_aabb、support、fluid、edit_stability、AABB の干渉は計画中で、現時点ではどのコマンドも検査しません。本体が重なる 2 つの `place` 行も報告しません。幾何は一部だけ守られます。自分の行の指定で struct の外に出る door、window、軒の stair、chest、センサー、アクチュエーターは描かずに `E_INVALID_MEMBER` として報告し、建たなかったメンバーのせいでだけ外に出るものは `W_DEFERRED_MEMBER` として報告します。version_caps / parity は、専用のコードを通じて一部だけ実行します。`E_VERSION_CAP` は `--target` を `@requires` の下限と照らし合わせ、`E_UNKNOWN_ID` は固定したターゲットが宣言していないブロック ID を、`E_PARITY_UNSUPPORTED` はもう一方のエディションにしかない意味メンバーのブロックを、`E_STATE_DOMAIN` はそこでブロックが取らないステートを、`E_STATE_UNMAPPED` はそのステートマップに形のないブロックステートを拒否し、`W_INTENT_DEGRADED` はバージョンが表せないものを示します。一方、エンティティのスキーマは検査しません。redstone の行も一部だけです。真理値表のコードは表そのものの整合性を検査するだけで、真理値表や時相アサーションを回路と照合するものはありません。一方、レイテンシの上限、配線の混雑、回路の更新順序への依存には、[レッドストーン](#レッドストーン)のコードがあります。
 
 ### did you mean
 

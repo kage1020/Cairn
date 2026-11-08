@@ -132,10 +132,11 @@ and Themes](/spec/materials-themes/#tier-1-tokens)), and a `mat_slot=` on one is
 `W_IGNORED_ARGUMENT`. What a part stands or hangs on is not checked, as a lever's is not: a part
 with no block under it, or a torch with none behind it, drops as soon as a block update reaches it.
 
-**A part and the circuit.** A Tier 0 part is outside the netlist, so place-and-route neither reads
-it nor routes around it. The two never share a cell: a `circuit` reservation lies under the scope's
-base plane ([§14.5](#145-place-and-route)), and every member, a Tier 0 part among them, stands at or
-above it.
+**A part and the circuit.** A Tier 0 part is outside the netlist, so nothing reads what it does.
+The two never share a cell: a `circuit` reservation lies under the scope's base plane
+([§14.5](#145-place-and-route)), and every member, a Tier 0 part among them, stands at or above it.
+Since no table says what a part powers, the circuit runs no dust under one or under a cell beside
+it, and refuses an actuator whose riser would power one.
 
 ## 14.2 Signal binding
 
@@ -306,9 +307,9 @@ topological order. A signal that reads itself back is still `E_LOGIC_CYCLE`, thr
 
 In v1 only the macros carry time: `delay`, `pulse`, `edge_rising`, `edge_falling`, `latch`, and
 `counter`. There is no tick operator to write. A macro's count is of the stages its cell is built
-from, never of ticks: `delay(sig.x, 3)` lowers to three repeaters in series. A stage is one repeater
-at its shortest setting, which takes one tick on both editions, and what a macro adds to a path is
-its Edition Cell's ticks, counted as every cell's are ([§14.6](#146-edition-differences)).
+from, never of ticks: `delay(sig.x, 3)` lowers to repeaters in series that take six ticks in all.
+A stage is two ticks on both editions, and what a macro adds to a path is its Edition Cell's ticks,
+counted as every cell's are ([§14.6](#146-edition-differences)).
 
 | Macro | Its output |
 |---|---|
@@ -341,204 +342,144 @@ tick arithmetic inside a logic expression.
 
 ## 14.5 Place-and-route
 
-The DSL shows you a 2D mental model. A purely 2D floorplan gets stuck, so the internal
-implementation is pseudo-2.5D, holding `plane` / `via` / `bridge` concepts that the DSL never
-exposes. Circuit classes a pure 2D model cannot handle: fanout, bus, crossing, comparator feedback,
-observer chain.
+Place-and-route builds each scope's netlist as a circuit at full size, one block for each part, in
+layers the scope reserves under its floor. The struct rises over them.
 
 ```
-circuit region=basement void=3       # reserve a 3-high service layer; route the circuit here
+circuit region=floor void=3       # reserve 3 layers under the floor and lay the circuit in them
 ```
 
 A `struct` or `def` has one such line: a second one in the same body is `E_DUPLICATE_CIRCUIT`
 ([Lint §11.1](/spec/lint/#111-diagnostic-codes)). Logic that needs more than one reservation goes
 in more than one scope.
 
-The line stands among the body's own members: a reservation spans the scope's `size=WxH` under its
-base plane, where no member stands, and takes no `level`'s `y=`, so place-and-route reads no
-`circuit` line under a `level`. Such a line is
-`E_MISPLACED_MEMBER` on that line, not `E_DUPLICATE_CIRCUIT`.
+The line stands among the body's own members: a reservation lies under the scope's base plane,
+where no member stands, and takes no `level`'s `y=`, so place-and-route reads no `circuit` line
+under a `level`. Such a line is `E_MISPLACED_MEMBER` on that line, not `E_DUPLICATE_CIRCUIT`.
 
-The internal algorithm runs five stages:
+A scope needs the line once its logic has a cell to build or an actuator to drive. A scope without
+one is `E_NO_CIRCUIT_REGION` at its first cell, or at its first actuator binding when it has no
+cell, and so is a scope whose line reserves nothing: one with no `region=` label, a `void=` that is
+not a whole number of at least 1, or a scope with no `size=WxH`. Such logic in a `site` is
+`E_NO_CIRCUIT_REGION` too, since a `site` has no base plane to reserve under.
 
-1. **Placement.** Topological order, left to right, one clear column between each pair of cells. The
-   row starts in the column after the input pads and ends at the latest in the column before the
-   actuator pads, so a row of `n` cells needs `2n + 1` columns. That last column is the actuator
-   pads' own: at `2n` the last cell would stand in it, face to face with the pads at `z = 0` and `z
-   = 2`. Neither pad column carries a pad on the cell row, so an end cell that stands beside a pad
-   column keeps the coordinate beside it there as a free neighbour. A cell body is a block, so a net
-   reaches it through a neighbouring coordinate; a two-input gate has three distinct nets touching
-   it (its two drivers and its own output) and therefore needs three free neighbours, and a `mux`,
-   with three drivers, four. Packed against each other the cells in the middle of a row have two, at
-   any region size, so a row spaced like this is what makes a short-free wiring possible at all.
+**The reservation.** `void=N` reserves `N` layers under the base plane, across the whole footprint
+the struct is built on, the ring a roof's `overhang=` adds included. The built struct is `N`
+layers taller, every member standing over the reservation as it stood over the ground, and a `def`
+placed in a `site` has its origin lowered by `N`, so its base plane stays where the `site` sets it.
+A `void=` that takes the struct past the most blocks one structure holds, the volume
+`W_STRUCTURE_TOO_LARGE` guards ([Lint](/spec/lint/#lowering)), is `E_ROUTE_CONGESTION` on the
+`circuit` line.
 
-   The row also stands one row in from the near edge of the region. In a scope with cells the I/O
-   pads step along `z` from `0`, skipping the cell row; a scope with no cells has no cell row, and
-   its pads take every row from `0`. A pad on the cell row would stand face to face with the end
-   cell whenever the row reaches its column, so the terminal of a net that cell may have nothing to
-   do with would take one of its faces. With the pads off that row and the row ending before the
-   actuator-pad column, no pad touches a cell at any width the row check accepts. Dust reads the
-   dust in the coordinate beside it, so a lane of free coordinates carries one net however long it
-   is; a cell against the edge has one lane, and the three nets touching a two-input gate cannot
-   share it. One row in gives every cell a lane on each side, so with the clear columns either side
-   of it each cell has the four free neighbours a `mux` needs. That costs one row for the whole
-   netlist rather than one per cell, so unlike the column spacing it does not grow with the cell
-   count.
+The circuit lies in the top `min(N, 5)` of those layers, and any under them stay empty:
 
-   Neither spacing is a guarantee of a wiring: a net passing through can still take the last free
-   face, and that scope is refused rather than shorted. Three kinds of region are refused here
-   rather than left to fail as an unreachable sink at stage 2: one that cannot hold the row
-   (`2n + 1` columns for `n` cells, and three rows); one that cannot hold the rows its pads stand in
-   (a row per sensor or actuator on the busier edge, and, in a scope with cells, one more for the
-   cell row once that edge carries two); and, in a scope with both sensors and actuators, one
-   without two columns for its two pad columns, which at one column are the same column.
-2. **Steiner routing.** Manhattan, around what is already standing and around the dust of the nets
-   already laid. Cell bodies and I/O pads are reserved: dust cannot be drawn on one, and a signal
-   cannot pass *through* one, since a component either emits or consumes. Every sink is therefore a
-   leaf of its net's tree, and a fanout is a trunk beside the row with a tap into each sink rather
-   than a chain through them. Where nothing is in the way the wire is a straight rectilinear run;
-   otherwise it goes around, or climbs to a `bridge` layer inside the `void=<N>` budget.
+- the **bottom** layer, laid whole with the circuit block, which everything over it stands on;
+- the **cells'** layer, which every cell's tile stands in, a `counter`'s rising one layer over it;
+- up to **two** layers over that, where one signal's dust climbs over another's;
+- the **top** layer, directly under the floor, where the circuit meets the struct.
 
-   Two nets on one coordinate would be one strand of dust carrying two signals, and so would two
-   nets one coordinate apart in the same plane, because dust joins the dust next to it. So the nets
-   are laid one at a time, and each goes round the dust already laid *and* the coordinates beside
-   it. That is the crossing escape, and it happens here rather than at stage 4 so the climb is
-   measured: `wire_length` and the delay pass's tick count are both read off the routed tree. The
-   order is fanout descending, then the net's own key. That is a total order, so one layout has one
-   answer however many passes ask for it.
+So a reservation needs three layers, and four when its logic holds a `counter`, whose feedback
+crosses its own wire a layer up. A `void=` of fewer is `E_ROUTE_CONGESTION` on the `circuit` line,
+and the message names the count. The circuit block is `@circuit.block` ([Materials and
+Themes](/spec/materials-themes/#tier-1-tokens)), and it also fills every voxel of the top layer
+the circuit leaves empty under a block of the floor.
 
-   Beside is per-plane. Whether two strands a layer apart read each other depends on what is
-   standing between them, which this model does not carry: the internal model is pseudo-2.5D and the
-   voxel realisation belongs to the physical tile layer. Separating two strands within one step of
-   each other across layers is that layer's obligation rather than the router's. That covers both
-   the stacked pair and the diagonal one, which is a staircase and is the more numerous of the two,
-   because a coordinate has one coordinate directly under it and four diagonally under it, and a run
-   that climbed to clear a lane then travels alongside that lane, one step across from it, for as
-   long as the two run parallel. The tile tier carries the obligation as a requirement on what a
-   `bridge` coordinate may render as ([§14.6](#146-edition-differences)).
+**Where the circuit meets the struct.** Each sensor whose signal something reads enters the
+circuit by a pad in the top layer under it, and each actuator a binding drives is driven by a
+riser: two torches in series that carry the signal up from the cells' layer to the top layer, the
+upper one under the actuator. Neither reaches further than the floor row, so a component is met
+only where it stands in the floor row `y = 0`, or at `y = 1` over a block of the floor that passes
+power between it and the top layer:
 
-   Named, not inferred. A scope whose escape leaves two *strands* within one step of each other
-   across layers earns `W_ROUTE_CROSS_LAYER_CLEARANCE`, which lists the coordinates and the nets, so
-   those pairs are readable from the layout rather than derived from it. It is advisory and elides
-   nothing: the layout is not at fault, and a rule the router invented here would refuse layouts for
-   a reason nothing in its model can check. Nor is there a remedy to offer. Enlarging the region
-   does not remove the pairs: where a net has to climb at its own doorstep, because the lanes either
-   side of its cell are taken, more room only lengthens the run it then makes on the upper layer.
+| Component | Where it stands | What meets it |
+|---|---|---|
+| `pressure_plate` | `y = 0`, or `y = 1` on a block | at `y = 0`, a block under it, which it powers, and dust under that; at `y = 1`, dust under the block it stands on, which it powers whole |
+| `lever`, `button` | `y = 0` | dust under it |
+| `daylight` | `y = 0` | dust under it, then a repeater, since its strength follows the sky |
+| `observer` | looking up, `facing=up`, at `y = 0`, or at `y = 1` over a block | dust under its back, or under the block its back powers whole, then a two-tick repeater that holds its one-tick pulse for a stage |
+| `door` | `y = 1`, over a block | the riser's upper torch, under that block, which it powers |
+| `lamp`, `piston`, `dispenser` | `y = 0`, or `y = 1` over a block | the riser's upper torch, under it or under the block it stands on |
+
+A component anywhere else is `E_ROUTE_UNREACHABLE_COMPONENT` at its line: the message says where
+that kind of component reaches the layer under the floor, and the fix moves it there. So is a
+`piston` looking down, which would push into the torch under it, and an actuator whose riser would
+drive another component as well. The cell the riser's torch powers, the actuator itself in the
+floor row or the block under it at `y = 1`, powers whatever stands beside it in the floor row or
+over it, so no other actuator, Tier 0 part or raw member may stand there. A sensor may, since power
+moves no sensor.
+
+```text
+room.crn:8:3: error[E_ROUTE_UNREACHABLE_COMPONENT]: struct=room: the lever `l` at y=2 cannot reach the circuit under the floor: a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it
+  note: Fix: set `y=0` on it
+```
+
+The top layer stays clear of what the struct powers, since dust under a powered block reads that
+power. Dust runs there only under a **quiet** cell of the floor row: air or a block no component
+holds, with no sensor, Tier 0 part or raw member beside it or over it. A pad's own dust may also run
+under a cell its own sensor is the only one to power. A riser's upper torch hangs on a block its
+lower torch powers, and that block stands only under a cell no component holds.
+
+The internal algorithm runs four stages for each edition, each on the layout the stage before it
+left. Every choice in them is ordered, so one source lays one circuit.
+
+1. **Placement.** The pads and risers are laid first, since each stands under its component. Each
+   is turned the way that fits beside the others with the end the circuit joins nearest the
+   middle of the reservation, and a component whose pad or riser fits no way is `E_ROUTE_CONGESTION` at its
+   line. Each cell's tile then follows, in the netlist's order, at the free spot nearest the tiles
+   its nets join: the spot whose ports and outputs lie least far, in all, from those of the tiles
+   already laid that share a net with it, then the least `z`, the least `x`, and the turns in the
+   order east, south, west, north. A spot is free when the tile stays inside the reservation and
+   under its top layer, keeps a margin of clear columns from every other tile, and leaves every port
+   and output laid so far a side a wire can still reach it from. The cells are laid at margins of 2,
+   1 and 0 columns, and the layout whose cells lie nearest, in all, the tiles they share nets with
+   is kept. A cell with no free spot at any margin is `E_ROUTE_CONGESTION` at its `logic` line, and
+   the message names the columns its tile needs.
+
+   A `pulse` of more than 25 stages or a `counter` of more than 4 is `E_ATTENUATION_LIMIT` at its
+   `logic` line before anything is laid. The one's operand runs a block of dust past each of its
+   repeaters, and the other's past every stage, on one strand that goes dark past 15 blocks.
+2. **Routing.** Each net's dust runs from the tile that drives it to every input it feeds, along a
+   layer and up and down staircases. It takes the cheapest path from the net's dust so far to the
+   nearest input it has not reached, a step along a layer costing 1 and a step up or down 2. A step
+   up keeps the cell over the lower dust empty, and a step down the cell beside the upper one, so
+   the two link, and dust with nothing under it gets a block. Dust runs only over the bottom layer,
+   and never where it would link to another net's dust or run beside a tile's own. The nets are
+   routed most inputs first, then in the netlist's order. A net that finds no way is moved to the
+   front and the nets routed again, up to three times, and then the cells are laid again at the
+   other margins. A net that finds no way through any of them is `E_ROUTE_CONGESTION` at the line
+   that drives it.
 
    ```text
-   W_ROUTE_CROSS_LAYER_CLEARANCE line 45 circuit=floor:
-     routed netlist for struct `crossbar` leaves 12 pairs of dust within one step of each other
-     across layers (2 stacked, 10 staircase) — …
-     note: (4,1,1) on cell #0 stands directly over (4,0,1) on cell #1
-     note: (5,1,1) on cell #0 stands directly over (5,0,1) on cell #1
-     note: (1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,0) on sig.a
-     note: (1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,2) on sig.b
-     note: and 8 more of the same two shapes
-     …
-     Fix: nothing in the source is wrong — the pairs are what the escape costs, and enlarging
-     the region is not a remedy: …
+   crossbar.crn:24:3: error[E_ROUTE_CONGESTION]: struct=crossbar: the sensor's signal finds no way to every input it feeds through the reservation (region 10x8, void=4) without running beside another signal's dust
+     note: Fix: widen the struct's `size=WxH`, increase `void`, or split the logic across several scopes, each with its own `circuit` line
    ```
+3. **Delay insertion.** A signal leaves a part that restores it, a pad, a torch, a repeater or a
+   cell that restores strength ([§14.6](#146-edition-differences)), at strength 15, and loses one
+   for each block of dust. The Java `ComparatorAND` restores nothing: it passes on the strength its
+   rear input reads. Each input reads what its net's dust carries to it from each part that drives
+   the net on its own, and needs at least 1, or more where its tile's own dust carries the signal on
+   past the port. Where an input would read less than it needs, a buffer repeater replaces a block
+   of the net's own dust, at the spot nearest the input, on the way back to the part that last
+   restored the signal, where a repeater fits: where the dust runs straight and level through three
+   blocks, joins nothing else, still carries power into the repeater, and is not driven from the
+   side. Repeaters go in one at a time until every input reads what it needs. An input that no such
+   spot lifts far enough is `E_ATTENUATION_LIMIT` at the line of the tile that reads it, and the
+   message says the dust runs past 15 blocks with no straight stretch for a repeater.
+4. **Legalization.** Every part becomes the block it is built as, its id the target's for the part's
+   token: `@redstone_dust.default` for dust, `@redstone_torch.wall` for a torch,
+   `@repeater.default` for a repeater, `@comparator.default` for a comparator, and
+   `@circuit.block` for every other block. Each is written in the state the circuit rests in with
+   every sensor off, which this stage finds by running the circuit until nothing changes: dust with
+   its power and the sides it joins, a torch lit or not, a repeater powered and locked or not,
+   and a comparator with the strength it outputs, which the structure keeps in its block entity. A
+   `latch`, a `counter` and every other macro start off ([§14.4](#144-time-model)). Bedrock keeps
+   an unlit torch and a powered repeater or comparator in blocks of their own, such as
+   `unlit_redstone_torch` and `powered_repeater`, and its build writes those. A circuit that never
+   rests is `E_ROUTE_CONGESTION` on the `circuit` line. No layout the stages before accept should
+   do that, so the message asks for the struct as a bug report.
 
-   The segment cap is tested here too, before any wire is laid. The Manhattan distance between a
-   driver and its sink is a lower bound on every route between them, so a sink already past the cap
-   in a straight line is past it however the router goes, and that scope earns `E_ATTENUATION_LIMIT`
-   at this stage rather than at stage 3. A floor and not the measure: it refuses strictly less than
-   stage 3 does and replaces nothing. A region 256 wide puts its pad 255 blocks from the driver and
-   may route 257 to get there, which is over the cap and not over this. The fix line differs from
-   stage 3's for the same reason: nothing shortens a straight line, so enlarging the region is not
-   the remedy here.
-
-   The router's search is bounded by the same cap. A path from a net's wire to a sink is part of
-   that sink's segment, so the search does not look past the cap. Each sink it cannot reach is then
-   judged on its own. It earns `E_ROUTE_CONGESTION`, below, when the router can prove it walled in:
-   none of its faces can be arrived through, or the search ran out of coordinates before the cap cut
-   any off, or the free coordinates the sink opens onto all lie within the cap of it and the net's
-   wire is not among them. Otherwise it earns `E_ATTENUATION_LIMIT` here, which says only that no
-   route within the cap exists. A sink walled off in a free region wider than the cap is one of
-   these. When a scope has sinks of both kinds, the message is about a walled-in one. The bound is
-   what keeps giving up on a sink proportional to the cap rather than to the reservation: without
-   it, the search visited every free coordinate the net could reach before it refused.
-3. **Delay insertion.** A repeater goes in as a buffer only where a segment carries more dust than
-   the attenuation limit of 15 blocks: a source at strength 15 carries 15 blocks of dust, the last
-   at strength 1, which still drives the sink after it. The segment is measured along the **routed**
-   path from driver to sink, and the buffer stands on that path, so the straight line between the
-   two is not always wire. A segment past the v1 cap of 256 steps is refused rather than buffered,
-   under the same `E_ATTENUATION_LIMIT` stage 2 raises; what differs is that this pass measures the
-   wire that was actually laid. The figure the pass records per cell is a local cost, the delay of
-   its slowest driven port plus the buffer repeaters on the nets feeding it, not a signal's latency.
-
-   A repeater reads the block behind it and drives the one in front of it, at its own height, so it
-   stands only where the wire runs straight through a coordinate at one height and nothing branches
-   off there, nor where any block of its net other than the two it joins (dust the route reaches
-   some other way, or one of the net's cells or pads) is on any of its six faces, which a repeater
-   there would cut off. On a straight run from a fresh source it stands in place of every 16th
-   block, with 15 blocks of dust behind it. Where that coordinate turns, climbs or forks, the
-   repeater stands on the last coordinate before it that runs straight, which can leave a route one
-   repeater more than its length alone implies. When the coordinate it steps back from is a fork,
-   the one it lands on is on the trunk, so one block serves every branch past it; a fork further
-   back than that gets a repeater on each branch. Repeaters are placed on each net's routed tree
-   rather than per sink, and a sink is charged for the ones on its route. A stretch of dust past the
-   limit with no coordinate a repeater can stand on is refused with `E_ATTENUATION_LIMIT`.
-
-   The limit is counted from the last component that restores strength (a sensor pad, a repeater, a
-   torch), not from the start of each segment. Two of the cells pass on the strength they receive
-   instead: the Bedrock OR is a dust merge, and the Java comparator AND, a comparator with one
-   operand inverted onto its side ([§14.6](#146-edition-differences)), outputs the strength its rear
-   input carries while it is on. The wire into either cell on an input it passes on (both of the
-   merge's, and the comparator's rear) and the wire out of it count as one run of dust, though the
-   cell stands between them, measured from whichever of those inputs has spent the most. While the
-   cell is on, its output is never weaker than that input: the merge passes on its strongest lit
-   input and the comparator its rear. The wire into the comparator's side, port `b`, ends at the
-   inverter, which restores strength, so it is held to the limit as the wire into any sink that
-   restores strength is, and the dust spent on it does not count on the wire out. A net on both
-   ports feeds the rear as well, so it stays in the run. The repeater the run needs goes where the
-   running total would pass 15, or, on a wire of the run into such a cell, what the cell can spare
-   of it, since the wire out needs the rest. Where that is a block of dust, the repeater stands in
-   its place and reads the dust before it, as on a straight run. Where it is a sink, as such a cell
-   is, the repeater cannot stand in its place and stands on the wire before it. It lands on the wire
-   out of the cell, or on the wire into it when the wire out has no coordinate near enough to the
-   cell to take one.
-4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
-   wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
-   path belongs to that net alone, and no other net runs within a step of it, so there is no
-   short to lift and no coordinate to contest. It applies the straight-line cap as well, since it
-   lays nets of its own and a scope can reach it from a netlist an earlier stage handed over, and
-   for the same reason it refuses a stretch of dust with nowhere for a repeater as stage 3 does.
-5. **Edition legalization.** See [§14.6](#146-edition-differences). This stage is not implemented
-   yet.
-
-Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
-whose every way out is walled in, by a component, by an earlier net's dust or the coordinates beside
-it, or by the edge of the reservation, earns the same refusal for a different reason, and the
-message says which two coordinates it could not join and which nets took the faces.
-
-```text
-E_ROUTE_CONGESTION line 21 circuit=basement:
-  synthesized netlist needs ~3.2x the reserved area (void=3, region 9x7).
-  Fix: increase `void`, enlarge region, or split the logic across several scopes, each with its
-  own `circuit` line.
-```
-
-`E_ATTENUATION_LIMIT` is the other refusal these passes raise, for four shapes. Stages 2, 3 and 4
-all lay nets through one shared step, which tests the straight line between a driver and its sink
-against the cap before any route is laid, and refuses a sink no route within the cap reaches once
-the router has searched for one. Stage 3 also measures each routed segment against the cap. Stages 3
-and 4 both refuse a stretch of dust past the limit of 15 on which no coordinate can hold a repeater:
-each works out where the repeaters stand from the same routed tree, by the same rule, so the two
-agree on which stretch that is and the message names the node that goes dark. Which stage refuses a
-scope depends only on which one reached it first. The primary names the netlist that pass read
-(`placed` at stage 2, `routed` at stage 3, `delayed` at stage 4), so the message says where in the
-pipeline the shape was measured.
-
-```text
-E_ATTENUATION_LIMIT line 13 circuit=floor:
-  placed netlist for struct `wide_pack` puts output pad #0 299 steps from its driver in a
-  straight line — exceeds the v1 attenuation limit of 256 steps, and no route between two coords
-  is shorter than the straight line between them.
-  Fix: split the logic across several scopes, each with its own `circuit` line, or reserve a
-  `region=` whose pad column sits within the cap of the cells it serves — a larger reservation
-  cannot help, because the straight line between these two is already over the cap.
-```
+Routing is confined to the `circuit` reservation. A circuit that does not fit it is refused, never
+laid past it.
 
 ## 14.6 Edition differences
 
@@ -572,33 +513,33 @@ its inputs carries ([§14.5](#145-place-and-route)):
 | Logical cell | Java | Bedrock | Ticks per port | Strength |
 |---|---|---|---|---|
 | AND | `ComparatorAND` | `TorchAND`, two torches inverting an OR | Java `a` 1, `b` 2; Bedrock 2 | Java passes its rear on; Bedrock restores |
-| OR | `RepeaterOR`, two repeaters onto a common line | `TorchOR`, a dust merge | Java 1; Bedrock 0 | Java restores; Bedrock passes its strongest input on |
+| OR | `RepeaterOR`, two repeaters onto a common line | the same | 1 | restores |
 | NOT | `InverterTorch` | `InverterTorch` | 1 | restores |
 | NAND | `TorchNAND`, two inverter torches onto a common line | the same | 1 | restores |
 | NOR | `TorchNOR`, one torch on a block both operands power | the same | 1 | restores |
-| XOR | `TorchXOR`, the torch NORs of `not a` and `b` and of `a` and `not b`, onto a common line | the same | 2 | restores |
+| XOR | `TorchXOR`, the torch NORs of `a` and of `b`, each with the NOR of the two, onto a common line | the same | 2 | restores |
 | MUX | `TorchMUX`, the torch NORs of `sel` and `not a` and of `not sel` and `not b`, onto a common line | the same | 2 | restores |
-| DELAY `n` | `RepeaterDelay`, `n` repeaters in series | the same | `n` | restores |
-| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through `n + 1` repeaters | the same | `n + 2` | restores |
-| EDGE_RISING | `TorchEdgeRising`, the torch NOR of `not a` and `not not a` | the same | 3 | restores |
-| EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and `not a` | the same | 2 | restores |
+| DELAY `n` | `RepeaterDelay`, repeaters in series of `2n` ticks in all | the same | `2n` | restores |
+| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through repeaters of `2n + 1` ticks | the same | `2n + 2` | restores |
+| EDGE_RISING | `TorchEdgeRising`, a `TorchPulse` of one stage | the same | 4 | restores |
+| EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and of `not a` through a repeater | the same | 3 | restores |
 | LATCH | `TorchLatch`, two torch NORs each powered by the other | the same | `set` 4, `reset` 5 | restores |
 | COUNTER `n` | `RepeaterCounter`, `n` flip-flops of locking repeaters in a twisted ring | the same | 3 | restores |
 
-An operand of `xor` reaches one of its NORs straight and the other through an inverter, so its
-output settles once the inverted path has, two torches after the operand changes. Each port of
+An operand of `xor` reaches its own NOR straight and the other through the NOR of the two, so its
+output settles once that path has, two torches after the operand changes. Each port of
 `mux` likewise passes an inverter and a NOR on its slowest path, `sel` on the NOR that takes it
 inverted.
 
 A macro's cell is built of torches and repeaters alone, the same on both editions, and holds its
 feedback inside itself:
 
-- **`TorchPulse`** turns on once `not a` has turned off and off once `a` comes out of its `n + 1`
-  repeaters, one more than `n` to match the inverter, so it is on for `n` ticks. Its port counts to
-  that turning off: the repeaters and the NOR, `n + 2` ticks.
-- **`TorchEdgeRising`** has the same shape with two inverters for the repeaters, so it is on for one
-  tick, and its port counts the two inverters and the NOR. **`TorchEdgeFalling`** turns on once `a`
-  has turned off and off once `not a` has turned on: one tick on, two to the last change.
+- **`TorchPulse`** turns on once `not a` has turned off and off once `a` comes out of its
+  repeaters, which take a tick more than its `n` stages to match the inverter, so it is on for `n`
+  stages. Its port counts to that turning off: the repeaters and the NOR, `2n + 2` ticks.
+- **`TorchEdgeRising`** is a `TorchPulse` of one stage, on for two ticks, its port counting four.
+  **`TorchEdgeFalling`** turns on once `a` has turned off and off once `not a` has come through its
+  one-tick repeater: one stage on, three ticks to the last change.
 - **`TorchLatch`**: the output torch is the NOR of `reset` and the second torch, and the second
   torch is the NOR of the output and of `set` gated by `reset`, which is the torch NOR of `not set`
   and of `reset` held on two ticks past its fall by a repeater beside it. A `set` turns the output
@@ -613,20 +554,11 @@ feedback inside itself:
   two ticks after `a` turns on and its repeater passes the master on a tick later, three ticks in
   all, and the master locks at two ticks, before any stage it reads from can change.
 
-The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as a
-tile that conducts to neither **another net's** coordinate below it nor another net's coordinates
-diagonally below it. Its own net's coordinate below it is the climb that put it there, since there
-is no separate via, and has to conduct. Stage 2 ([§14.5](#145-place-and-route)) keeps each net's
-dust off another net's dust and off the coordinates beside it in their own plane, and climbs to
-clear what it cannot go round, so every strand a layer above another net is the escape's doing and
-separating the two is the tile's.
-
-It is a requirement on the catalogue rather than on the author, and it is wider than the finding
-that reports it: `W_ROUTE_CROSS_LAYER_CLEARANCE` names the strand-to-strand pairs, which are the
-ones two signals could come to share, while the obligation above holds over any coordinate of
-another net below a `bridge` tile, a cell body or an I/O pad as much as dust. Climbing over a
-component is the ordinary way past it, so a finding that named those too would report the layout
-rather than what is unresolved in it.
+Each Edition Cell's Physical Tile is its parts at full size: a block, torch, repeater, comparator or
+dust in each voxel, the voxel each port reads, and the dust its output leaves by, which placement
+lays turned a quarter at a time ([§14.5](#145-place-and-route)). A port reads its operand as a block
+it powers, a repeater it drives, or dust, and dust that carries the operand on inside the tile needs
+the strength to reach its end, so a port says how strong the wire into it must arrive.
 
 - **Absorbed**: repeater, observer, comparator, and orientation, all cell-implementation
   differences.
@@ -650,13 +582,14 @@ checked against the structure as built for the edition:
   that cell, or when it powers a block beside it whole: a `lever` or `button` the block it hangs on,
   a `pressure_plate` the block under it, and an `observer` the block behind it. Any block but air,
   a sensor and an actuator is taken to pass that power on, since no table records which blocks
-  conduct. A piston takes no power through its front. Bedrock has no quasi-connectivity, so the
-  same source builds there.
+  conduct. A piston takes no power through its front. Bedrock has no quasi-connectivity, so this
+  is no finding there.
 
 A [Tier 0 part](#tier-0-parts) and a raw member are the author's, so neither is checked, and a
 sensor that also powers the component directly is no dependence on order and is not reported.
-`cairn synth --experimental-logic-synth` runs the check at every edition-tagged stage. Here the
-lever two rows above the dispenser stands beside the cell above it:
+Every command that builds a circuit runs the check before place-and-route
+([§14.8](#148-connection-to-the-ir-and-phases)). Here the lever two rows above the dispenser stands
+beside the cell above it:
 
 ```
 theme t:
@@ -669,15 +602,19 @@ struct s size=7x5
   dispenser id=p at=inside.back offset=2 y=1 fired_by=sig.p
   lever id=sw at=inside.back offset=2 y=3 -> sig.a
   logic sig.p = not sig.a
-  circuit region=floor void=2
+  circuit region=floor void=4
 ```
 
 ```text
 dispenser.crn:8:3: error[E_NO_PORTABLE_IMPL]: struct=s: on java, the dispenser `p` also takes power from the lever `sw` through the cell above it, and acts on it only once a block update reaches it: this circuit requires update-order (quasi-connectivity) semantics
 dispenser.crn:9:3:   note: the lever `sw` powers the cell above the dispenser `p` from here
-  note: bedrock has no quasi-connectivity, so the same source builds there
+  note: bedrock has no quasi-connectivity, so this is no dependence on order there
   note: Fix: move the lever `sw` so that it powers no block beside the cell above the dispenser `p`, or redesign the logic to be order-independent; or drop to Tier 0 with an `@edition java` guard
 ```
+
+On Bedrock the same source stops at place-and-route instead, since a lever three rows over the
+floor row cannot reach the circuit under it (`E_ROUTE_UNREACHABLE_COMPONENT`,
+[§14.5](#145-place-and-route)).
 
 Hand-placed redstone breaks across editions. With a logic description the compiler emits an
 edition-correct circuit instead. That is the biggest reason to describe logic rather than parts.
@@ -710,35 +647,32 @@ a layout can break. The ticks are counted per target edition on the legalized Pl
 what drives `<from>`, a sensor's pad or a cell's output, and runs through cells to `<to>`. Each cell
 it enters costs the ticks of the port it enters by ([§14.4](#144-time-model)), each buffer repeater
 on the routed wire it runs along costs a tick ([§14.5](#145-place-and-route)), and dust costs
-none. Where an actuator reads `<to>`, the path runs on to the actuator's pad, over the repeaters on
-that wire, to the slowest of them where several do; where none does, it ends at the output of the
-cell that drives `<to>`. The bound holds the slowest path: where a change at `<from>` reaches one
+none. Where an actuator reads `<to>`, the path runs on over the repeaters on the wire to the
+actuator's riser and up its two torches, two ticks more, to the slowest of them where several do;
+where none does, it ends at the output of the cell that drives `<to>`. The bound holds the slowest path: where a change at `<from>` reaches one
 cell by two ports, the slower port counts.
 
 A bound the slowest path exceeds is `E_SIM_ASSERTION_FAILED` on that edition: one source can meet
-a bound on Bedrock, where an OR is a dust merge, and miss it on Java, where it is two repeaters. The
+a bound on Java, where an `and` entered by `a` passes a comparator alone, and miss it on Bedrock,
+where it passes two torches. The
 finding gives the ticks it measured and, in a note each, the cells the path enters, the port it
 enters each by, and the repeaters on each wire. A `<to>` that does not depend on `<from>` fails on
 every edition, since no path carries a change from one to the other, and synth refuses it with the
 same code before an edition is chosen. Place-and-route does not read a bound, so it is met in the
-source: relaxed, or met by a path through fewer cells or along a wire with fewer repeaters.
-`cairn synth --experimental-logic-synth --stage crossing` checks every bound after crossing
-legalization and prints no IR when one fails.
+source: relaxed, or met by a path through fewer cells or along a wire with fewer repeaters. Every
+command that builds the circuit checks each bound once it is legalized, and refuses to build it
+when one fails ([§14.8](#148-connection-to-the-ir-and-phases)).
 
 ```text
-E_SIM_ASSERTION_FAILED line 13:
-  struct=reach: `assert latency(sig.a -> sig.c) <= 1` fails on bedrock: its slowest path from
-  sig.a to sig.c takes 2 ticks, 2 in buffer repeaters on the routed wire
-  note: the path enters cell #0 (`TorchOR`) by port `a`: 0 ticks through the cell
-  note: then the pad of the actuator reading sig.c: 2 buffer repeaters on the wire to it
-  note: the wire carries 2 buffer repeaters, one wherever it runs past 15 blocks of dust, so a
-  smaller `circuit` region, which puts the pads nearer what drives them, needs fewer
-  note: Fix: relax the bound to `<= 2`, or shorten the path; the logic is never rewritten to
-  meet a bound
+reach.crn:13:3: error[E_SIM_ASSERTION_FAILED]: struct=reach: `assert latency(sig.a -> sig.c) <= 1` fails on java: its slowest path from sig.a to sig.c takes 4 ticks, 1 in buffer repeaters on the routed wire and 2 in the torches up to the actuator
+reach.crn:10:3:   note: the path enters cell #0 (`RepeaterOR`) by port `a`: 1 buffer repeater on the wire, then 1 tick through the cell
+reach.crn:7:3:   note: then the actuator reading sig.c: no buffer repeater on the wire to the torches under it, then 2 ticks up to it
+  note: the wire carries 1 buffer repeater, one wherever it runs past 15 blocks of dust, so laying what reads a signal nearer what drives it needs fewer
+  note: Fix: relax the bound to `<= 4`, or shorten the path; the logic is never rewritten to meet a bound
 ```
 
-Nothing simulates the circuit yet, so `truth` and `always` are not checked against it: a truth
-table its logic contradicts still synthesizes. The self-correction loop (P5) is
+Nothing checks `truth` and `always` against the circuit yet: a truth table its logic contradicts
+still builds. The self-correction loop (P5) is
 **synth → sim → diff → patch**, run per target edition. The patch targets place-and-route hints,
 repeaters, and buffers only. **The Logic IR is never rewritten**, because self-correction that
 auto-modifies logic is dangerous. The loop does not exist yet: a bound that fails is reported, and
@@ -758,20 +692,34 @@ Netlist IR          cells and nets. Logical Cell selection. Still no delay
    ↓
 Edition Netlist IR  the same cells and nets. Edition Cell selection. Still no wire
    ↓ logic_place
-Placement IR        cell coordinates
+Placement IR        every tile at its voxels: cells, pads under sensors, risers under actuators
    ↓ logic_route
-Placement IR        + actual wire length + delay + buffer repeater coordinates. Delay determined
+Placement IR        + each net's dust and buffer repeaters, then every voxel's block. Delay determined
    ↓
-block-array IR      the voxel reality of dust, repeater, torch, comparator
+block-array IR      the struct, risen over the circuit laid under it
 ```
 
-The Placement IR is filled pass by pass ([§14.5](#145-place-and-route)): placement gives every cell
-its coordinates, then routing adds the wire length, delay insertion the delay, and crossing
-legalization the buffer repeaters' coordinates. An Edition Cell fixes the ticks from each of its
-ports ([§14.6](#146-edition-differences)), but there is no wire to count before routing, so the
-delay is determined in the Placement IR and no earlier. Nothing lowers the Placement IR to the
-block-array IR yet: edition legalization is not implemented, `cairn compile` runs none of these
-passes, and a circuit goes no further than the IRs `cairn synth --experimental-logic-synth` prints.
+The Placement IR is filled pass by pass ([§14.5](#145-place-and-route)): placement lays every tile,
+then routing adds each net's dust, delay insertion its buffer repeaters, and legalization the block
+and state of every voxel. An Edition Cell fixes the ticks from each of its ports
+([§14.6](#146-edition-differences)), but there is no wire to count before routing, so the delay is
+determined in the Placement IR and no earlier, and `assert latency` is checked on the legalized
+circuit ([§14.7](#147-verification)).
+
+The passes run once the struct is lowered, since a pad or riser stands under a component the
+lowering placed: synthesis, the order check of [§14.6](#146-edition-differences) on the struct as
+built, the four stages of place-and-route, and the latency check. The first that reports an error
+stops the rest, and the struct is left as it was. Otherwise each legalized circuit is laid under
+its struct, which rises `void=` layers over it, and a comparator's output strength goes into its
+block entity.
+
+`cairn compile` builds every circuit for the edition it compiles, and an error the passes report
+refuses the compile as an error of the lowering does. `cairn lower --edition` prints the struct with
+its circuit laid, and `cairn lower` without one lays none, since every pass after synthesis is per
+edition. `cairn check` and `cairn info` run the passes for each edition they read: pinned to one,
+they report its findings, and otherwise the ones every edition raises at the same place, while
+`info` reports each edition's own under that edition. `cairn synth --experimental-logic-synth`
+prints each IR on the way.
 
 The phase model ([Compilation Model](/spec/compilation/)) splits the step right after `fixtures` into
 `logic_synth → logic_place → logic_route`, because the I/O port coordinates are not fixed until

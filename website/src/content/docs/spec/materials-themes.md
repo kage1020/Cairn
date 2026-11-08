@@ -131,6 +131,7 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@comparator.default` | The comparator a `comparator` sets |
 | `@redstone_torch.default`, `@redstone_torch.wall` | The standing torch and the wall torch a `redstone_torch` sets |
 | `@redstone_dust.default` | The dust a `redstone_dust` lays |
+| `@circuit.block` | The block a struct's circuit stands its dust, torches, repeaters and comparators on, under the floor |
 
 The block a tier-1 token resolves to is **tier-2**, which is Evolving: it is the catalog's answer
 for the target, and a release may change it. Adding a token to the catalogs breaks nothing.
