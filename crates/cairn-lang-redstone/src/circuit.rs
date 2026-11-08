@@ -7,6 +7,7 @@ use cairn_lang_core::check::Severity;
 use cairn_lang_core::intent::IntentModule;
 use indexmap::IndexMap;
 
+use crate::behaviour::verify_behaviour;
 use crate::delay::compile_delay;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::edition_netlist::compile_edition_netlist;
@@ -58,6 +59,9 @@ pub fn build_circuits(
         return found.all;
     }
     if found.stop(verify_latency(module, &legalized.scoped)) {
+        return found.all;
+    }
+    if found.stop(verify_behaviour(module, &legalized.scoped)) {
         return found.all;
     }
     let mut attached = built.clone();

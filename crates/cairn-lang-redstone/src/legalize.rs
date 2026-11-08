@@ -11,7 +11,7 @@ use crate::placement_ir::{CircuitBlock, CircuitLayout, LayoutStage, ScopedCircui
 use crate::sim::{Connection, Order, Sim};
 
 /// The ticks a circuit is given to come to rest before legalization gives up on it.
-const REST_TICKS: u32 = 256;
+pub(crate) const REST_TICKS: u32 = 256;
 
 /// Output of a [`compile_legalize`] run: the legalized circuits and the findings.
 #[derive(Debug, Clone, PartialEq, Default)]

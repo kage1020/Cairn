@@ -159,7 +159,6 @@ impl Sim {
     }
 
     /// Sets the source at `voxel`, which strongly powers the cell under it, to `level`.
-    #[cfg(test)]
     pub(crate) fn set_input(&mut self, voxel: Voxel, level: u8) {
         if level == 0 {
             self.inputs.remove(&voxel);

@@ -2,6 +2,7 @@
 //! routes, buffers and legalizes it under the struct, in the order of `spec/redstone`
 //! "Place-and-route".
 
+pub mod behaviour;
 pub mod circuit;
 pub(crate) mod coupling;
 pub mod delay;
@@ -26,6 +27,7 @@ pub mod synth;
 pub mod tile;
 pub mod verify;
 
+pub use behaviour::{MAX_DRIVEN_SENSORS, verify_behaviour};
 pub use circuit::build_circuits;
 pub use delay::{BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, DelayOutput, compile_delay};
 pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};

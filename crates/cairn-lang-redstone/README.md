@@ -1,6 +1,6 @@
 # cairn-lang-redstone
 
-Redstone for Cairn: lowers a *signal graph* to the blocks of a circuit laid under each struct, and will verify the result with a headless per-tick simulator. The crate builds the circuit today; checking `truth` and `always` assertions against it is still ahead.
+Redstone for Cairn: lowers a *signal graph* to the blocks of a circuit laid under each struct, and verifies the result with a headless per-tick simulator.
 
 Per [redstone](https://cairn.kage1020.com/spec/redstone/), the logical redstone surface is where Cairn's "declare intent, the compiler resolves the physics" thesis pays off most. Signal attenuation, crosstalk, delay, and the Java/Bedrock divergence — all things an LLM handles poorly — are derived deterministically from a small dataflow description.
 
@@ -19,6 +19,7 @@ Per [redstone](https://cairn.kage1020.com/spec/redstone/), the logical redstone 
 | Delay insertion | `compile_delay(&ScopedCircuitLayout)` | A buffer repeater in a net's dust wherever an input would read its signal weaker than it needs |
 | Legalization | `compile_legalize(&ScopedCircuitLayout, Option<&dyn TargetRegistry>)` | Every voxel as a block, in the state the circuit rests in with its sensors off |
 | Latency | `verify_latency(&IntentModule, &ScopedCircuitLayout)` | `E_SIM_ASSERTION_FAILED` for each `assert latency` the legalized circuit's slowest path exceeds |
+| Behaviour | `verify_behaviour(&IntentModule, &ScopedCircuitLayout)` | `E_SIM_ASSERTION_FAILED` for each `assert truth` and `assert always` a run of the legalized circuit breaks, and `W_SIM_ASSERTION_UNCHECKED` for one whose signals depend on more than `MAX_DRIVEN_SENSORS` sensors |
 
 Each `CircuitLayout` records the last pass that filled it as a `LayoutStage`, dumped as a `"stage"` key in the vocabulary `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage off the output rather than inferring it from which keys are present.
 
@@ -49,13 +50,13 @@ The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile
 
 - **Combinational**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux` are synthesised end to end, each to a cell on both editions.
 - **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` are synthesised the same way, each to one cell of torches and repeaters on both editions that keeps its feedback inside it, so the Logic IR stays a DAG. A macro's stage count travels with its cell, and its ticks are its Edition Cell's.
-- **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines, and `assert latency` against the legalized circuit; evaluating `truth` and `always` waits on the simulator.
+- **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines, `assert latency` against the legalized circuit, and `truth` and `always` by running it from rest through every combination of the sensors they depend on.
 
 Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits, which `verify_portable` refuses ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).
 
 ## Verification loop
 
-`synth → sim → diff → patch`. The patch may rewrite placement hints, routing, and buffer repeaters only; **the Logic IR is never auto-modified** ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). The simulator is to run per target edition, so one declaration gets checked against both the Java and the Bedrock implementation. Only the synthesis half of that loop exists today.
+`synth → sim → diff → patch`. The patch may rewrite placement hints, routing, and buffer repeaters only; **the Logic IR is never auto-modified** ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). The simulator runs per target edition, so one declaration is checked against both the Java and the Bedrock implementation. The synth and sim halves of that loop exist; nothing diffs a failed assertion or patches the layout yet.
 
 ## Dependencies
 

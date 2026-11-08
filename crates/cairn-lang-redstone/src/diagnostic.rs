@@ -43,6 +43,9 @@ pub enum DiagnosticCode {
     LogicDuplicateBinding,
     /// An `assert` the circuit does not meet.
     SimAssertionFailed,
+    /// An `assert truth` or `assert always` whose signals depend on more sensors than a check
+    /// runs every combination of.
+    SimAssertionUnchecked,
     /// A component of the built struct reads another through a block update, so what it does
     /// depends on update order.
     NoPortableImpl,
@@ -69,6 +72,7 @@ impl DiagnosticCode {
             Self::LogicUnresolvedPatch => "E_LOGIC_UNRESOLVED_PATCH",
             Self::LogicDuplicateBinding => "E_LOGIC_DUPLICATE_BINDING",
             Self::SimAssertionFailed => "E_SIM_ASSERTION_FAILED",
+            Self::SimAssertionUnchecked => "W_SIM_ASSERTION_UNCHECKED",
             Self::NoPortableImpl => "E_NO_PORTABLE_IMPL",
         }
     }
@@ -93,7 +97,7 @@ impl DiagnosticCode {
             | Self::LogicDuplicateBinding
             | Self::SimAssertionFailed
             | Self::NoPortableImpl => Severity::Error,
-            Self::LogicUnusedSignal => Severity::Warning,
+            Self::LogicUnusedSignal | Self::SimAssertionUnchecked => Severity::Warning,
         }
     }
 }

@@ -4,6 +4,7 @@ mod common;
 
 mod actuator_patch_targets;
 mod actuator_schema;
+mod behaviour;
 mod binding_hosts;
 mod circuit;
 mod components;

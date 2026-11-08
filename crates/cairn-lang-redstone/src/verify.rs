@@ -56,30 +56,38 @@ struct LatencyBound<'a> {
     span: &'a Span,
 }
 
-/// Each scope's `assert latency` lines, those under its members included, keyed as a
-/// [`ScopedCircuitLayout`] entry names its scope.
+/// Each scope's `assert latency` lines.
 fn latency_bounds(module: &IntentModule) -> HashMap<(ScopeKind, &str), Vec<LatencyBound<'_>>> {
-    fn collect<'a>(
-        asserts: &'a [AssertIr],
-        members: &'a [Member],
-        out: &mut Vec<LatencyBound<'a>>,
-    ) {
-        for assertion in asserts {
-            if let AssertIr::Latency {
-                from,
-                to,
-                bound,
-                span,
-            } = assertion
-            {
-                out.push(LatencyBound {
-                    from,
-                    to,
-                    bound: *bound,
-                    span,
-                });
-            }
-        }
+    scope_asserts(module)
+        .into_iter()
+        .map(|(scope, asserts)| {
+            let bounds = asserts
+                .into_iter()
+                .filter_map(|assertion| match assertion {
+                    AssertIr::Latency {
+                        from,
+                        to,
+                        bound,
+                        span,
+                    } => Some(LatencyBound {
+                        from,
+                        to,
+                        bound: *bound,
+                        span,
+                    }),
+                    _ => None,
+                })
+                .collect();
+            (scope, bounds)
+        })
+        .collect()
+}
+
+/// Each scope's `assert` lines, those under its members included, keyed as a
+/// [`ScopedCircuitLayout`] entry names its scope.
+pub(crate) fn scope_asserts(module: &IntentModule) -> HashMap<(ScopeKind, &str), Vec<&AssertIr>> {
+    fn collect<'a>(asserts: &'a [AssertIr], members: &'a [Member], out: &mut Vec<&'a AssertIr>) {
+        out.extend(asserts);
         for member in members {
             collect(&member.children.asserts, &member.children.members, out);
         }
@@ -100,7 +108,7 @@ fn latency_bounds(module: &IntentModule) -> HashMap<(ScopeKind, &str), Vec<Laten
                 .iter()
                 .map(|s| (ScopeKind::Site, s.name.as_str(), &s.asserts, &s.placements)),
         );
-    let mut out: HashMap<(ScopeKind, &str), Vec<LatencyBound<'_>>> = HashMap::new();
+    let mut out: HashMap<(ScopeKind, &str), Vec<&AssertIr>> = HashMap::new();
     for (kind, name, asserts, members) in scopes {
         collect(asserts, members, out.entry((kind, name)).or_default());
     }
