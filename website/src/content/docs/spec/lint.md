@@ -829,7 +829,8 @@ edition's verdict and is reported, and any other finding is reported when every 
 with the same code at the same span, once for each wording the editions give it. Where some line
 stands under a guard, resolution's findings are kept by the same rule, each edition's branch
 resolved with no variant pinned, so the edition-variant softening of `E_UNRESOLVED_SLOT`
-([§11.1](#materials-and-targets)) holds on every line as it does in a source with no guard. A check with `--target` lowers once, against the target, so no finding is reported twice.
+([§11.1](#materials-and-targets)) holds on every line as it does in a source with no guard. A check
+with `--target` lowers once, against the target, so no finding is reported twice.
 
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a
