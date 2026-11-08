@@ -4,13 +4,11 @@
 
 use indexmap::IndexMap;
 
-use crate::ast::{
-    Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind, guarded_lines,
-};
+use crate::ast::{Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::intent::{IntentModule, MemberRole, SelectorRule, ThemeIr, role_of};
+use crate::intent::{IntentModule, MemberRole, SelectorRule, ThemeIr, guarded_lines, role_of};
 use crate::prose::{and_list, selector_text};
 use crate::resolve::select_the_same_members;
 

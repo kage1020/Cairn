@@ -147,6 +147,170 @@ fn a_logic_line_under_a_guarded_tier0_part_is_refused() {
 }
 
 #[test]
+fn a_logic_line_in_a_guard_under_a_guarded_raw_member_is_refused_and_lowered_into_no_body() {
+    let source = struct_with(
+        "  @edition java\n    raw_block mat=minecraft:stone at=1,0,1\n      @edition bedrock\n        \
+         logic sig.a = sig.b\n        assert always(sig.a -> eventually sig.b within 4)\n",
+    );
+    let found = diagnose(&source);
+    let refused: Vec<(&str, &str, &str)> = found
+        .iter()
+        .map(|d| (d.code.as_str(), slice(&source, d), d.primary.as_str()))
+        .collect();
+    assert_eq!(
+        refused,
+        [
+            (
+                "E_SEMANTIC_IN_EDITION_GUARD",
+                "logic sig.a = sig.b",
+                "a `logic` line stands under an `@edition bedrock` guard, which holds only raw \
+                 members and Tier 0 parts: the semantic layer is edition-neutral",
+            ),
+            (
+                "E_SEMANTIC_IN_EDITION_GUARD",
+                "assert always(sig.a -> eventually sig.b within 4)",
+                "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
+                 members and Tier 0 parts: the semantic layer is edition-neutral",
+            ),
+        ],
+    );
+    let ir = lower(&parse(&source).expect("parses"));
+    let built = &ir.structs[0];
+    assert_eq!((built.logic.len(), built.asserts.len()), (0, 0));
+    assert!(
+        built.members[1].children.is_empty(),
+        "{:#?}",
+        built.members[1]
+    );
+}
+
+#[test]
+fn a_member_under_a_guarded_raw_member_is_unsupported_nesting_guarded_again_or_not() {
+    for (under, nested) in [
+        (
+            "@edition bedrock\n        raw_block mat=minecraft:dirt at=2,0,2",
+            "raw_block mat=minecraft:dirt at=2,0,2",
+        ),
+        ("walls mat_slot=f height=2", "walls mat_slot=f height=2"),
+    ] {
+        let source = struct_with(&format!(
+            "  @edition java\n    raw_block mat=minecraft:stone at=1,0,1\n      {under}\n"
+        ));
+        assert_eq!(
+            located(&source),
+            [("E_UNSUPPORTED_NESTING", nested)],
+            "{under}"
+        );
+    }
+}
+
+#[test]
+fn a_raw_member_under_a_guard_gets_each_check_it_gets_outside_one() {
+    let lines = [
+        "raw_block id=@stone mat=minecraft:stone at=1,0,1",
+        "raw_block mat=minecraft:stone mat=minecraft:dirt at=2,0,2",
+    ];
+    let expected = [
+        ("E_TYPE_MISMATCH_LABEL", "@stone"),
+        ("E_DUPLICATE_ARG", "mat=minecraft:dirt"),
+    ];
+    let bare = struct_with(&format!("  {}\n  {}\n", lines[0], lines[1]));
+    let guarded = struct_with(&format!(
+        "  @edition java\n    {}\n    {}\n",
+        lines[0], lines[1]
+    ));
+    assert_eq!(located(&bare), expected);
+    assert_eq!(located(&guarded), expected);
+}
+
+#[test]
+fn a_refused_line_draws_no_finding_but_its_own() {
+    let source = format!(
+        "{THEME}struct s size=5x5\n  floor mat_slot=f\n  circuit region=floor void=2\n  \
+         @edition java\n    walls mat_slot=f height=3 height=4\n    floor mat_slot=nope\n    \
+         circuit id=c\n\ndef d size=3x3\n  floor mat_slot=f\n\nsite v\n  \
+         place id=p use=d theme=t at=origin\n  @edition bedrock\n    \
+         place id=q use=missing theme=t east_of=p gap=2\n"
+    );
+    assert_eq!(
+        located(&source),
+        [
+            (
+                "E_SEMANTIC_IN_EDITION_GUARD",
+                "walls mat_slot=f height=3 height=4"
+            ),
+            ("E_SEMANTIC_IN_EDITION_GUARD", "floor mat_slot=nope"),
+            ("E_SEMANTIC_IN_EDITION_GUARD", "circuit id=c"),
+            (
+                "E_SEMANTIC_IN_EDITION_GUARD",
+                "place id=q use=missing theme=t east_of=p gap=2"
+            ),
+        ],
+    );
+}
+
+/// A def placed under `theme=`, after `themes`, whose body is a floor, `body` and a raw member,
+/// under a Java guard when `guarded` says so.
+fn placed(themes: &str, body: &str, theme: &str, guarded: bool) -> String {
+    let raw = if guarded {
+        "  @edition java\n    raw_block mat=minecraft:stone at=1,0,1\n"
+    } else {
+        "  raw_block mat=minecraft:stone at=1,0,1\n"
+    };
+    format!(
+        "{themes}def d size=5x5:\n  floor mat_slot=f\n{body}{raw}\nsite s:\n  \
+         place id=a use=d theme={theme} at=origin\n"
+    )
+}
+
+#[test]
+fn a_guard_elsewhere_leaves_an_unguarded_lines_unpinned_verdict_as_it_was() {
+    let java = "theme t_java:\n  slot f -> @stone\n\n";
+    let both = "theme t_java:\n  slot f -> @stone\n\ntheme t_bedrock:\n  slot f -> @stone\n  \
+                slot g -> @dirt\n\n";
+    let cases = [
+        (
+            java,
+            "",
+            "t_bedrock",
+            (
+                "E_UNRESOLVED_THEME_REF",
+                "`theme=t_bedrock` is not a declared theme",
+            ),
+        ),
+        (
+            both,
+            "  walls class=outer mat_slot=g height=3\n",
+            "t_java",
+            (
+                "E_UNRESOLVED_SLOT",
+                "`mat_slot=g` is not declared in theme `t_java`",
+            ),
+        ),
+        (
+            both,
+            "  walls class=outer mat_slot=nope height=3\n",
+            "t",
+            (
+                "E_UNRESOLVED_SLOT",
+                "`mat_slot=nope` is not declared in theme `t_java`",
+            ),
+        ),
+    ];
+    for (themes, body, theme, expected) in cases {
+        for guarded in [false, true] {
+            let source = placed(themes, body, theme, guarded);
+            let diagnostics = diagnose(&source);
+            let found: Vec<(&str, &str)> = diagnostics
+                .iter()
+                .map(|d| (d.code.as_str(), d.primary.as_str()))
+                .collect();
+            assert_eq!(found, [expected], "guarded: {guarded}\n{source}");
+        }
+    }
+}
+
+#[test]
 fn a_refused_line_takes_what_is_indented_under_it_along() {
     let source = struct_with(
         "  @edition java\n    level y=1\n      walls mat_slot=f height=2\n      \

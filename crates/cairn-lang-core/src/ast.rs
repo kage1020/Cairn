@@ -416,22 +416,6 @@ impl Statement {
     }
 }
 
-/// Each line of `body`, an `@edition` guard's own in the guard's place, with the edition of the
-/// guard it stands under.
-pub(crate) fn guarded_lines(
-    body: &[Statement],
-) -> impl Iterator<Item = (Option<Edition>, &Statement)> {
-    body.iter().flat_map(|statement| {
-        let (edition, lines) = match statement {
-            Statement::EditionGuard {
-                edition, children, ..
-            } => (Some(*edition), children.as_slice()),
-            line => (None, std::slice::from_ref(line)),
-        };
-        lines.iter().map(move |line| (edition, line))
-    })
-}
-
 /// A `key=value` pair as it appears in an argument list.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Arg {
