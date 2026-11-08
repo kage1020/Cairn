@@ -266,12 +266,17 @@ impl Canvas {
         }
     }
 
+    /// The phase that paints member `index` of the flattened paint list, if any.
+    pub(super) fn phase_of(&self, index: u32) -> Option<Phase> {
+        self.phases.get(index as usize).copied().flatten()
+    }
+
     /// Whether two members of the flattened paint list run in one phase; never for `None`.
     fn same_phase(&self, a: u32, b: u32) -> bool {
         matches!(
             (
-                self.phases.get(a as usize).copied().flatten(),
-                self.phases.get(b as usize).copied().flatten(),
+                self.phase_of(a),
+                self.phase_of(b),
             ),
             (Some(x), Some(y)) if x == y
         )

@@ -168,8 +168,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Edition.** `java` or `bedrock`. Compile-time only; never present in the DSL semantic layer.
   See [versioning-editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability).
 - **`@edition` guard.** A line in a body that keeps the raw members indented under it to one
-  edition's build. It is the one place a source writes an edition, and it never holds the semantic
-  layer. See
+  edition's build. It is the one line inside a body that names an edition, and it never holds the
+  semantic layer. See
   [versioning-editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch).
 - **Cairn version vs MC target.** Two **separate axes** distinguished by field/flag/keyword, never
   by format. `cairn:2026.06` vs `mc:1.21.4` in disambiguating prose. See
