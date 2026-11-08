@@ -257,7 +257,7 @@ title: "11. Lint と制約検証"
 
 閉じた語彙に照らして名前を拒否する診断は、入力の長さに応じた Damerau-Levenshtein 距離の閾値に収まる候補があれば、最も近いものを示します。閾値は、1〜3 文字なら 1 編集以下、4〜6 文字なら 2、それより長ければ 3 です。対象になる名前は、キーワード、引数のキー、`mat_slot=` の名前、place / def / theme / port の参照、抽象トークン、`pressure_plate` の側面、ブロック ID、ブロックステートのプロパティや値、`--target` のバージョンです。
 
-注記は ``did you mean `X`?`` の形で、`X` はその行に書くべき形で示します (ポートなら `home1.entry`、プレートなら `at=front.outside`、ステートなら `axis=x`)。`E_UNKNOWN_ID` は代わりにターゲットで最も近いブロックとして示します。`E_UNKNOWN_ID` と `E_STATE_DOMAIN` は、候補を `data.suggestion` にも持たせます ([§11.2](#112-機械可読ペイロード))。lowering が導いたステートへの `E_STATE_DOMAIN` は、ソースに直すべきリテラルがないので、候補を `data.suggestion` にだけ持たせます。
+注記は ``did you mean `X`?`` の形で、`X` はその行に書くべき形で示します (ポートなら `home1.entry`、プレートなら `at=front.outside`、ステートなら `axis=x`)。`E_UNKNOWN_ID` は代わりにターゲットで最も近いブロックとして示し、そのエディションのほかのバージョンがその ID を宣言しているときは、そのバージョンを示します。最も近いブロックと、`E_STATE_DOMAIN` の最も近いペアは、`data.suggestion` にも持たせます ([§11.2](#112-機械可読ペイロード))。lowering が導いたステートへの `E_STATE_DOMAIN` は、ソースに直すべきリテラルがないので、候補を `data.suggestion` にだけ持たせます。
 
 未知のキーワード、引数のキー、`mat_slot=` の名前には、閉じた語彙の一覧 (`expected one of: ...`) も併せて出力します。未知の `--target` には、指定できたバージョンの一覧 (`supported targets: ...`) を出力します。参照、トークン、ブロック ID には、こうした一覧は付きません。
 
@@ -295,7 +295,7 @@ title: "11. Lint と制約検証"
 |---|---|
 | `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`。フォールバックの L 字経路で既存の構造物と衝突し、飛ばしたセルの数。セルを飛ばしたときに付き、ルーターの上限を超えて敷かなかった通路では省略する。 |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`。この行が先行する行から奪う、割り当て対象のキー。末尾の `=` は含まない。必ず空でない。 |
-| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"? }`。後述。 |
+| `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"?, "since"?, "until"? }`。後述。 |
 | `E_STATE_DOMAIN` | `{ "kind": "state_domain", "id", "key", "value", "registry", "reason", "valid", "origin", "suggestion"?, "valid_at"? }`。後述。 |
 | `E_STATE_UNMAPPED` | `{ "kind": "state_unmapped", "id", "states", "registry" }`。ブロック ID、その `key=value` をカンマでつないだもの、それらの形をステートマップが持たないターゲット (`"<edition> <version>"`)。 |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`。割り当てられたマテリアル、ジオメトリが必要とするファミリ、割り当ての出どころ。 |
@@ -314,9 +314,11 @@ title: "11. Lint と制約検証"
 | `catalog` | レジストリパックがトークンを ID に対応付けた。 | パックの対応付け。 |
 | `builtin` | メンバーの既定値に使う行をパックが持たず、コンパイラ組み込みの ID を使った。 | 行を追加すべきパック。 |
 
-`token` は `catalog` と `builtin` のときに付き、`authored` では省略します。`suggestion` は、タイポの閾値に収まる宣言済みの ID がなければ省略します。リネームはふつうこの閾値の外にありますが、2 つのフィールドは互いに独立した規則で埋まるので、置き換え先に綴りが近いリネームは両方を持ちます。
+`token` は `catalog` と `builtin` のときに付き、`authored` では省略します。`suggestion` は、タイポの閾値に収まる宣言済みの ID がないときに省略します。そのエディションのほかのバージョンがその ID を宣言しているときも、タイポではないので省略します。リネームはふつうこの閾値の外にあり、置き換え先に綴りが近いリネームが両方を持つのは、そのエディションのどのバージョンもその ID を宣言していないときだけです。
 
 `aliases` はもう半分にあたり、この 2 つは同じ ID についての別種の主張です。`suggestion` は文字列の距離からの推測ですが、`aliases` は、レジストリパックの `aliases` コンポーネントが「2 つの名前は同じブロックだ」と述べたものなので、クイックフィックスは `aliases` なら確認なしで適用してよく、`suggestion` は適用すべきではありません。中身は、ターゲットがそのブロックについて宣言している ID すべて (閉じた候補集合であって、そこから選んだものではない) をパック自身の順番で並べたもので、パックが 1 つも挙げていなければ省略します。表示される注記は先頭のいくつかを並べて残りの数を示し、集合全体はペイロードに入っています。[バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定) を参照してください。
+
+`since` と `until` は、その ID を宣言しているそのエディションのターゲットのうち固定したものにいちばん近いもので、バージョンのラベルだけを書きます。`since` は後で最初のもの、`until` は前で最後のものです。どちらもパックが表を持つバージョンなので、`since` は ID を加えたリリースそのものではなく、その上限です。該当するターゲットをパックが持っていなければそれぞれ省略するので、どのバージョンも宣言していない ID はどちらも持ちません ([バージョンとエディション](/ja/spec/versioning-editions/#未知の-id-はどのレジストリに照らして未知なのか))。
 
 **`E_STATE_DOMAIN`** は 1 つのステートの 1 つのペアについての指摘なので、誤りが 2 つあるリテラルは 2 件の指摘になります。`key` と `value` は、ステートが持つとおりのペアです。`reason` は、ブロックにそのプロパティがなければ `unknown_property` で、`valid` はブロックが持つプロパティを挙げます。プロパティはあっても値がなければ `value_outside` で、`valid` はプロパティが取る値を挙げます。どちらも固定したターゲットのもので、その表の順です。`origin` は、ステートリテラルなら `literal`、lowering が自分で書いたステートなら `derived` で、後者はソースではなく Cairn かパックの欠陥です。`suggestion` は `valid` のうち綴りの許容範囲に収まる最も近いもの、`valid_at` はそのペアを取るそのエディションのほかのバージョンを古い順に挙げたもので、それぞれ空なら省略します。
 

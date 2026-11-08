@@ -388,12 +388,19 @@ pub enum DiagnosticData {
         /// The catalog token involved; absent for `authored`.
         #[serde(skip_serializing_if = "Option::is_none")]
         token: Option<String>,
-        /// Nearest id the target does declare, when one is within the suggestion cap.
+        /// Nearest id the target does declare, when one is within the suggestion cap and no other
+        /// version of the edition declares the id.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
         /// Ids the pack's alias table declares for the same block: facts, unlike `suggestion`.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         aliases: Vec<String>,
+        /// The first version of the edition after the target that declares the id.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<String>,
+        /// The last version of the edition before the target that declares the id.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<String>,
     },
     /// Companion payload for [`DiagnosticCode::StateUnmapped`].
     StateUnmapped {

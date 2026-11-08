@@ -6,7 +6,8 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockIdSet, BlockState, DomainFault, OutOfDomain, StateDomain, TargetRegistry, UnmappedState,
+    BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, OutOfDomain, StateDomain,
+    TargetRegistry, UnmappedState,
 };
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{VersionOrder, compare_versions};
@@ -168,6 +169,28 @@ impl TargetRegistry for PackView<'_> {
             reason,
             mapped_at,
         })
+    }
+
+    fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
+        self.ids?;
+        let pinned = self.mc_version?;
+        // A `--target` the note offers must be one `resolve_target` accepts.
+        let at = self
+            .targetable
+            .iter()
+            .position(|version| *version == pinned)?;
+        let declares = |version: &&&str| {
+            self.blocks
+                .ids_for(version)
+                .is_some_and(|ids| contains(ids, id))
+        };
+        let until = self.targetable[..at].iter().rev().find(declares);
+        let since = self.targetable[at + 1..].iter().find(declares);
+        DeclaredElsewhere::new(
+            self.edition,
+            until.map(|version| (*version).to_owned()),
+            since.map(|version| (*version).to_owned()),
+        )
     }
 
     fn state_domain(&self, state: &BlockState) -> StateDomain {

@@ -196,6 +196,8 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
         token: None,
         suggestion: None,
         aliases: Vec::new(),
+        since: None,
+        until: None,
     })
     .expect("serialise payload");
     assert_eq!(
@@ -213,8 +215,10 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
         registry: "bedrock 1.21.0".to_owned(),
         origin: "catalog".to_owned(),
         token: Some("floor.stone.smooth".to_owned()),
-        suggestion: Some("minecraft:stonebrick".to_owned()),
+        suggestion: None,
         aliases: vec!["minecraft:stonebrick".to_owned()],
+        since: Some("1.21.40".to_owned()),
+        until: None,
     })
     .expect("serialise payload");
     assert_eq!(
@@ -225,8 +229,8 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
             "registry": "bedrock 1.21.0",
             "origin": "catalog",
             "token": "floor.stone.smooth",
-            "suggestion": "minecraft:stonebrick",
             "aliases": ["minecraft:stonebrick"],
+            "since": "1.21.40",
         }),
     );
 }

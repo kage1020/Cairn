@@ -158,13 +158,11 @@ dropping are forbidden. An error returns the closed set of candidates valid in t
 minimum version, and a suggested fix. That sends the model back to registry-derived candidates
 rather than to its memory.
 
-`E_PARITY_UNSUPPORTED` below is not implemented ([§10.7](#writing-an-alternative)). Nor does an
-error name a minimum version yet, although the tables say which version first declares an ID
-([below](#which-registry-an-unknown-id-is-unknown-to)).
+`E_PARITY_UNSUPPORTED` below is not implemented ([§10.7](#writing-an-alternative)).
 
 ```text
 E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
-  Nearest: minecraft:dark_oak_planks
+  First target that declares it: 1.21.4. Fix: --target 1.21.4, or @requires java version>=1.21.4
 
 E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
   Valid java targets: 1.21.4. Fix: --target 1.21.4, or lower the @requires floor
@@ -228,12 +226,13 @@ would need no flag, and would answer a different question: `stone_bricks` is val
 Bedrock, so a build pinned to 1.21.0 would still be told nothing. The pin is what makes the answer
 true of the build being made.
 
-The suggested fix has two halves, because a wrong ID arrives two ways. A **typo** is answered by a
+The suggested fix depends on which of three ways a wrong ID arrived. A **typo** is answered by a
 distance search over the same table: `oak_plank` is answered with `oak_planks`. A **rename** is not
 a typo. Bedrock spells Java's `light` as `light_block_0` … `light_block_15`, eight edits away, and
 no threshold that keeps the typo finder honest will ever connect the two. Renames are answered from
 the registry pack's `aliases` component instead, and only where the pack has a row; where it does
-not, the message says it has no candidate rather than offering the nearest unrelated block.
+not, and no other version of the edition declares the ID, the message says it has no candidate
+rather than offering the nearest unrelated block.
 
 An `aliases` row is a **group of spellings**: the names one block has worn, across editions and
 across one edition's own range, including the several IDs one old spelling split into.
@@ -249,15 +248,32 @@ and Bedrock 1.21.0 → 1.21.40 (`stonebrick` → `stone_bricks`) alike. An answe
 §10.4 asks for, never a pick from it: `@light` on Bedrock 1.21.60 is answered with all sixteen light
 levels, because choosing one would be the silent substitution this section forbids.
 
+The third kind is a real block at the wrong version: one a later release adds, or one a later
+release drops. The block tables answer it, so the error names the targets of the edition nearest
+the pinned one on either side that declare the ID: the first after it and the last before it. They
+are the versions the pack carries a table for, not the releases that changed the block: the
+built-in Java tables carry 1.20.4, 1.21, 1.21.4 and 26.3, so `@leaf_litter`, which 1.21.5 added,
+is first declared at 26.3 as far as they say. The fix offered is a `--target` among them. For an ID
+the author named that no earlier target declares, it also offers an `@requires <edition>
+version>=` floor at the release that added it, with the first target as that release's upper
+bound, so a target without the block is refused at the floor instead; an ID the pack chose is the
+pack's to fix and gets no floor. `cairn check --target` is not held to the floors, so it keeps
+reporting the ID at an older target once the floor is declared, where `cairn compile` refuses the
+target at the floor. Such an ID is no typo, so no distance search runs for it: `@pale_oak_planks`
+on Java 1.21 is answered with 1.21.4, not with `dark_oak_planks`. An alias answer still stands
+beside it, and comes first, since both are true: `@stone_bricks` on Bedrock 1.21.0 is answered with
+both `stonebrick`, the spelling 1.21.0 declares, and 1.21.40, the first target that declares
+`stone_bricks`.
+
 What the key cannot express is a spelling both editions declare meaning different blocks: Bedrock's
 `snow` is Java's `snow_block` while Java's `snow` is Bedrock's `snow_layer`. Such a pair gets no
 row, and the typo search still runs behind it.
 
 The same per-version scoping applies to a pack's own material mappings. An entry may carry
 `overrides` naming the versions that spell it differently, which is what lets one
-`@floor.stone.smooth` resolve across a range containing a rename. The `since` half is still
-deferred: the tables say which version first declares an ID, and no floor is inferred from that yet,
-so the `E_VERSION_CAP` example above is an `@requires` floor rather than registry-inferred.
+`@floor.stone.smooth` resolve across a range containing a rename. The first target that declares
+an ID is named by an error and nowhere else: no floor is inferred from it, so the `E_VERSION_CAP`
+example above is an `@requires` floor the file declares rather than one the registry inferred.
 
 ### A part may declare its own floor
 
@@ -607,7 +623,8 @@ The first is a question about IDs and the second about states. Only the second c
 `degraded`: a block that does not exist has nothing to lose detail from.
 
 Because two different repairs hide behind one figure, each counted entry is named on stderr with its
-reason. The ID case is answered the way `E_UNKNOWN_ID` answers one, and by the same two halves: the
+reason. The ID case is answered by the two halves `E_UNKNOWN_ID` gives an ID no other version of
+the edition declares: the
 `aliases` component where it has a row, so an entry this edition has under another name is reported
 as that name rather than as a dead end (`standing_sign` on Java is `oak_sign`), and a `did you mean`
 where it has none. They are alternatives, not a sequence: a row is the pack's word about which block

@@ -9,7 +9,8 @@ use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
 use crate::block_array::material::{
-    DomainFault, IdOrigin, OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState,
+    DeclaredElsewhere, DomainFault, IdOrigin, OutOfDomain, Sides, StateDomain, TargetRegistry,
+    UnknownId, UnmappedState,
 };
 
 /// What becomes of a member whose `mat_slot=` resolves to no material.
@@ -417,8 +418,9 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         origin,
         suggestion,
         aliases,
+        elsewhere,
     } = unknown;
-    let mut notes = Vec::with_capacity(2);
+    let mut notes = Vec::with_capacity(3);
     match origin {
         IdOrigin::Authored => {}
         IdOrigin::Catalog { token } => notes.push(DiagnosticNote {
@@ -434,22 +436,32 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             ),
         }),
     }
-    // One note, the alias table winning it; the payload carries both answers.
-    notes.push(DiagnosticNote {
-        span: None,
-        message: match (aliases.as_slice(), suggestion) {
-            ([], None) => format!(
-                "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
-            ),
-            ([], Some(candidate)) => {
-                format!("`{registry}` spells the nearest block `{candidate}`")
-            }
-            (spellings, _) => format!(
-                "`{registry}` spells this block {}, per the registry pack's alias table",
-                candidate_list(spellings),
-            ),
-        },
-    });
+    let versions = elsewhere
+        .as_ref()
+        .map(|elsewhere| version_note(id, registry, origin, elsewhere));
+    // An alias note wins; without one, the version note stands in for the nearest spelling.
+    let candidate = match (aliases.as_slice(), &versions, suggestion) {
+        ([], Some(_), _) => None,
+        ([], None, None) => Some(format!(
+            "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
+        )),
+        ([], None, Some(candidate)) => Some(format!(
+            "`{registry}` spells the nearest block `{candidate}`"
+        )),
+        (spellings, ..) => Some(format!(
+            "`{registry}` spells this block {}, per the registry pack's alias table",
+            candidate_list(spellings),
+        )),
+    };
+    notes.extend(
+        candidate
+            .into_iter()
+            .chain(versions)
+            .map(|message| DiagnosticNote {
+                span: None,
+                message,
+            }),
+    );
     Diagnostic {
         code: DiagnosticCode::UnknownId,
         span,
@@ -462,6 +474,48 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             token: origin.token().map(str::to_owned),
             suggestion: suggestion.clone(),
             aliases: aliases.clone(),
+            since: elsewhere
+                .as_ref()
+                .and_then(|e| e.since().map(str::to_owned)),
+            until: elsewhere
+                .as_ref()
+                .and_then(|e| e.until().map(str::to_owned)),
         }),
+    }
+}
+
+/// Which targets of the edition declare `id`, which `registry` does not, and how to pick one; the
+/// `@requires` floor is offered only for an id the author named.
+fn version_note(
+    id: &str,
+    registry: &str,
+    origin: &IdOrigin,
+    elsewhere: &DeclaredElsewhere,
+) -> String {
+    let edition = elsewhere.edition().as_str();
+    match elsewhere.sides() {
+        Sides::Since(since) => {
+            let floor = if matches!(origin, IdOrigin::Authored) {
+                format!(
+                    ", or declare `@requires {edition} version>=V`, with V the release that added \
+                     it ({since} at the latest), so a target without it is refused at the floor"
+                )
+            } else {
+                String::new()
+            };
+            format!(
+                "the first target that declares `{id}` is {edition} {since}: build with \
+                 `--target {since}` or another target that declares it{floor}"
+            )
+        }
+        Sides::Until(until) => format!(
+            "the last target that declares `{id}` is {edition} {until}: build with \
+             `--target {until}` or another target that declares it, or pick a block `{registry}` \
+             has"
+        ),
+        Sides::Both { until, since } => format!(
+            "{edition} {until} declares `{id}` before this target and {since} after it: build \
+             with one of them as `--target`, or pick a block `{registry}` has"
+        ),
     }
 }

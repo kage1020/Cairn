@@ -106,16 +106,48 @@ fn an_id_no_group_names_still_says_it_has_no_candidate() {
     );
 }
 
+#[test]
+fn an_id_a_later_version_adds_is_answered_with_that_version() {
+    let fixture = Fixture::new(&source_binding("pale_oak_planks"));
+    let out = compile_as(&fixture, "java", "1.21");
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
+    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
+    assert!(
+        stderr.contains(
+            "error[E_UNKNOWN_ID]: `minecraft:pale_oak_planks` is not a block in `java 1.21`\n  \
+             note: the first target that declares `minecraft:pale_oak_planks` is java 1.21.4: \
+             build with `--target 1.21.4` or another target that declares it, or declare \
+             `@requires java version>=V`, with V the release that added it (1.21.4 at the \
+             latest), so a target without it is refused at the floor\n"
+        ),
+        "the version note stands in place of the nearest spelling, got: {stderr}",
+    );
+
+    let later = Fixture::new(&source_binding("pale_oak_planks"));
+    let out = compile_as(&later, "java", "1.21.4");
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
+}
+
 /// Bedrock 1.21.0 spells `stone_bricks` `stonebrick`.
 #[test]
 fn an_id_is_checked_against_the_version_and_not_the_edition() {
     let old = Fixture::new(&source_binding("stone_bricks"));
     let out = compile_as(&old, "bedrock", "1.21.0");
-    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
+    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
     assert!(
-        stderr_of(&out).contains("minecraft:stonebrick"),
-        "1.21.0 must point at its own spelling, got: {}",
-        stderr_of(&out),
+        stderr.contains(
+            "error[E_UNKNOWN_ID]: `minecraft:stone_bricks` is not a block in `bedrock 1.21.0`\n  \
+             note: `bedrock 1.21.0` spells this block `minecraft:stonebrick`, per the registry \
+             pack's alias table\n  \
+             note: the first target that declares `minecraft:stone_bricks` is bedrock 1.21.40: \
+             build with `--target 1.21.40` or another target that declares it, or declare \
+             `@requires bedrock version>=V`, with V the release that added it (1.21.40 at the \
+             latest), so a target without it is refused at the floor\n"
+        ),
+        "1.21.0 points at its own spelling, then at the first target that has this one: {stderr}",
     );
 
     let new = Fixture::new(&source_binding("stone_bricks"));

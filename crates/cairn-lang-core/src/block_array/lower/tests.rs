@@ -668,6 +668,7 @@ fn unknown_id_payload(out: &BlockArrayIr) -> UnknownIdPayload {
             token,
             suggestion,
             aliases,
+            ..
         }) => UnknownIdPayload {
             id,
             registry,
