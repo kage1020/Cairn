@@ -2,6 +2,7 @@
 //! [`Member`]s with roles, and `logic` and `assert` lines split out.
 
 mod branch;
+mod guard;
 mod keyword_table;
 mod lower;
 mod member;
@@ -17,6 +18,7 @@ use serde::Serialize;
 use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
+pub(crate) use self::guard::{guarded_lines, refused_under_guard};
 pub use self::keyword_table::{
     ACTUATOR_BINDINGS, MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue,
     UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
@@ -24,7 +26,7 @@ pub use self::keyword_table::{
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
-    Arguments, BodyKind, EditionGuard, IntentState, Label, Member, MemberBody, ValueWithSpan,
+    Arguments, BodyKind, IntentState, Label, Member, MemberBody, ValueWithSpan,
 };
 pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;

@@ -5,9 +5,9 @@ use indexmap::IndexMap;
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::{
-    Arguments, AssertIr, DefIr, EditionGuard, IntentModule, IntentState, Label, LogicBinding,
-    Member, MemberBody, SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr,
-    ValueWithSpan, role_of,
+    Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
+    SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan,
+    refused_under_guard, role_of,
 };
 
 /// Lower a parsed [`Module`] into its [`IntentModule`] form, at [`SemanticLevel::Grouped`].
@@ -216,19 +216,30 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             within: *within,
             span: span.clone(),
         }),
-        // The guard's own lines join the body it stands in; `check` refuses any but raw members.
+        // The guard's lines join the body it stands in, but `check` alone reads a refused one.
         Statement::EditionGuard {
             edition, children, ..
         } => {
             let first = out.members.len();
-            for child in children {
+            for child in children.iter().filter(|child| !refused_under_guard(child)) {
                 push_statement(child, out);
             }
             // The parser refuses a guard directly under a guard, so none of these has one yet.
             for member in &mut out.members[first..] {
-                member.edition_guard = Some(EditionGuard { edition: *edition });
+                member.edition_guard = Some(*edition);
+                drop_logic(&mut member.children);
             }
         }
+    }
+}
+
+/// Clear the `logic` and `assert` lines of `body` and of every body under it, which `check`
+/// refuses under a guarded member.
+fn drop_logic(body: &mut MemberBody) {
+    body.logic.clear();
+    body.asserts.clear();
+    for member in &mut body.members {
+        drop_logic(&mut member.children);
     }
 }
 

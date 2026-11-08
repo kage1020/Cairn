@@ -212,6 +212,36 @@ pub fn nbt_body(path: &Path) -> Vec<u8> {
     body
 }
 
+/// The value of every string tag named `name` in an uncompressed NBT `body`, in the order written;
+/// `little_endian` is Bedrock's byte order, as a `.mcstructure` writes it.
+pub fn string_tags(body: &[u8], name: &str, little_endian: bool) -> Vec<String> {
+    let length = |at: usize| {
+        let pair = [body[at], body[at + 1]];
+        usize::from(if little_endian {
+            u16::from_le_bytes(pair)
+        } else {
+            u16::from_be_bytes(pair)
+        })
+    };
+    let name_length = u16::try_from(name.len()).expect("a tag name fits a u16");
+    let mut header = vec![8];
+    header.extend(if little_endian {
+        name_length.to_le_bytes()
+    } else {
+        name_length.to_be_bytes()
+    });
+    header.extend(name.as_bytes());
+    let mut values = Vec::new();
+    let mut at = 0;
+    while let Some(found) = body[at..].windows(header.len()).position(|w| w == header) {
+        let start = at + found + header.len();
+        let end = start + 2 + length(start);
+        values.push(String::from_utf8(body[start + 2..end].to_vec()).expect("utf-8 string tag"));
+        at = end;
+    }
+    values
+}
+
 /// Whether `needle` occurs in `hay`; both writers store a block id as a string tag's bytes.
 pub fn bytes_contain(hay: &[u8], needle: impl AsRef<[u8]>) -> bool {
     let needle = needle.as_ref();
