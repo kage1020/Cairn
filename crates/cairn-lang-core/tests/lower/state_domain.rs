@@ -19,6 +19,14 @@ type Table = &'static [(
 
 /// The states each block takes at the pinned target; a block missing here is unrecorded.
 const PINNED: Table = &[
+    (
+        "minecraft:chest",
+        &[
+            ("facing", &["north", "south", "west", "east"]),
+            ("type", &["single", "left", "right"]),
+            ("waterlogged", &["true", "false"]),
+        ],
+    ),
     ("minecraft:cobblestone", &[]),
     (
         "minecraft:creaking_heart",
@@ -384,6 +392,31 @@ fn a_button_whose_material_is_outside_its_block_is_not_hung() {
         &out,
         "minecraft:oak_button[face=wall,facing=south]"
     ));
+}
+
+#[test]
+fn a_chest_whose_material_is_outside_its_block_is_not_set_against_the_wall() {
+    let walled = "theme t:\n  slot wall -> @cobblestone\n  slot c -> @chest[type=double]\n\n\
+                  struct s size=5x5\n  walls mat_slot=wall height=3\n";
+    let source = format!("{walled}  chest at=inside.back offset=2 y=1 mat_slot=c\n");
+    let out = lowered_at(&source, &Tables::pinned());
+    assert_eq!(
+        findings(&source, &out),
+        [(
+            DiagnosticCode::StateDomain,
+            "@chest[type=double]",
+            "`minecraft:chest` takes no `type=double` at test 2.0; `type` takes single, left, right",
+            vec![
+                "correct the state literal to a value test 2.0 takes, or leave `type` out for \
+                 the block's default",
+            ],
+        )],
+    );
+    assert_eq!(
+        only_structure(&out),
+        only_structure(&lowered_at(walled, &Tables::pinned())),
+        "no default chest stands against the wall",
+    );
 }
 
 #[test]
