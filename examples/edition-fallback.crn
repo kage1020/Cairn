@@ -2,8 +2,8 @@
 @requires version>=1.20
 @requires bedrock version>=1.21.40
 
-# Per-edition theme fallback (spec/versioning-editions "Java / Bedrock
-# portability", hierarchy #2).
+# A per-edition theme for what a theme can say, and `@edition` guards for
+# what only raw ids can (spec/versioning-editions "Writing an alternative").
 #
 # The `floating_text` slot has no cross-edition primitive: Java's
 # `text_display` is an entity (added 1.19.4), and Bedrock has no equivalent
@@ -19,11 +19,13 @@
 # names across both variants so `mat_slot=floating_text` resolves without
 # emitting `E_UNRESOLVED_SLOT` under either variant's presence.
 #
-# The lamp is the escape hatch (hierarchy #3). Java spells the light block
-# `minecraft:light[level=15]` and Bedrock `minecraft:light_block_15`, so
-# each spelling stands under its own edition's `@edition` guard, and a build
-# keeps only the guard of the edition it pins. Bedrock first spells the
-# block that way in 1.21.40, which the scoped floor above declares.
+# The light block is the escape hatch
+# (spec/versioning-editions "An `@edition` guard holds the escape hatch").
+# Java spells it `minecraft:light[level=15]` and Bedrock
+# `minecraft:light_block_15`, so each spelling stands under its own
+# edition's `@edition` guard, and a build keeps only the guard of the
+# edition it pins. Bedrock first spells the block that way in 1.21.40,
+# which the scoped floor above declares.
 
 theme shop_java:
   slot floor          -> @floor.stone.smooth

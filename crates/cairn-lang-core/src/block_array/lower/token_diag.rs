@@ -385,13 +385,23 @@ fn diag_state_literal_unchecked(span: Span, state: &BlockState, target: &str) ->
     }
 }
 
-/// Report `state`, built at `span`, when the pinned target's state map has no form for it;
-/// `raw` when a raw member's `mat=` named it rather than a binding.
+/// What named a material, which says how to name another.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum NamedBy {
+    /// The theme binding a member's `mat_slot=`, or the member's default.
+    Binding,
+    /// A raw member's `mat=`.
+    RawMat,
+    /// A walkway's `path=`.
+    Path,
+}
+
+/// Report `state`, built at `span`, when the pinned target's state map has no form for it.
 pub(super) fn diag_state_unmapped(
     span: Span,
     state: &BlockState,
     registry: &dyn TargetRegistry,
-    raw: bool,
+    named_by: NamedBy,
 ) -> Option<Diagnostic> {
     let UnmappedState {
         registry: target,
@@ -412,10 +422,10 @@ pub(super) fn diag_state_unmapped(
             init.join(", ")
         ),
     };
-    let choose = if raw {
-        "set `mat=` to"
-    } else {
-        "bind the material to"
+    let choose = match named_by {
+        NamedBy::Binding => "bind the material to",
+        NamedBy::RawMat => "set `mat=` to",
+        NamedBy::Path => "set `path=` to",
     };
     Some(Diagnostic {
         code: DiagnosticCode::StateUnmapped,
