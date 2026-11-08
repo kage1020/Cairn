@@ -59,6 +59,8 @@ corpus → import → normalize(edition/version) → L1 compact → cluster(shap
 
 The headless geometry simulator extends to a per-tick redstone logic simulator. It simulates the
 synthesized circuit per target edition and checks it against the declared truth-table, latency and
-temporal assertions, in a synth → sim → diff → patch loop. Neither simulator exists yet. A latency
-bound needs none, since its ticks are counted on the placed circuit, so of the three assertion kinds
-it alone is checked against a circuit today. See [Redstone](/spec/redstone/#147-verification).
+temporal assertions, in a synth → sim → diff → patch loop. The redstone simulator exists: every
+command that builds a circuit runs it against `assert truth` and `assert always`, and counts a
+latency bound's ticks on the legalized circuit. The geometry simulator and the loop do not exist
+yet, so a failed assertion is reported and nothing patches the layout. See
+[Redstone](/spec/redstone/#147-verification).

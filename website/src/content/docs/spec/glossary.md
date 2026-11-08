@@ -141,8 +141,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   feedback inside it. See [redstone §14.4](/spec/redstone/#144-time-model).
 - **Truth / latency / temporal assertion.** The three verification kinds. See
   [redstone §14.7](/spec/redstone/#147-verification). Temporal is bounded `eventually within N` only, not
-  full LTL. `assert latency` is checked against the ticks counted on the placed circuit, and no
-  simulator checks the other two against a built circuit yet.
+  full LTL. `assert latency` is checked against the ticks counted on the legalized circuit, and the
+  other two by running it from rest through every combination of the sensors they depend on.
 - **QC / BUD.** Quasi-connectivity / block-update-detector behaviors. **Not absorbed** by the cell
   library; a circuit that depends on update-order semantics is an `E_NO_PORTABLE_IMPL` compile
   error: an observer that watches what the circuit drives, and on Java a piston or dispenser a

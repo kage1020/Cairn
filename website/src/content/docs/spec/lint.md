@@ -619,7 +619,8 @@ command that pins none reports the ones every edition raises at the same place.
 | `E_ROUTE_UNREACHABLE_COMPONENT` | A sensor or actuator the circuit wires stands where the circuit under the floor cannot reach it. |
 | `E_ATTENUATION_LIMIT` | A macro has more stages than its dust carries, or an input's wire runs too weak with nowhere for a buffer repeater. |
 | `E_NO_PORTABLE_IMPL` | A component of the built struct reads another through a block update, so what it does depends on update order ([Redstone §14.6](/spec/redstone/#146-edition-differences)). |
-| `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start ([Redstone §14.7](/spec/redstone/#147-verification)). |
+| `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start, or an `assert truth` or `assert always` a run of the circuit breaks ([Redstone §14.7](/spec/redstone/#147-verification)). |
+| `W_SIM_ASSERTION_UNCHECKED` | An `assert truth` or `assert always` whose signals depend on more sensors than a check runs the circuit through every combination of, so it is not checked. |
 
 ### Semantic categories
 
@@ -646,10 +647,10 @@ keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, throu
 pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other
 edition has, `E_STATE_DOMAIN` a state its block does not take there,
 `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
-version cannot carry, while no entity schema is checked. The redstone row runs only in part as well:
-the truth-table codes check a table against itself, and nothing checks a truth table or a temporal
-assertion against the circuit, while a latency bound, routing congestion and a circuit's dependence
-on update order have the codes of [Redstone](#redstone).
+version cannot carry, while no entity schema is checked. The redstone row runs through codes of its
+own: the truth-table codes check a table against itself, and the codes of [Redstone](#redstone)
+check a truth table, a temporal assertion and a latency bound against the circuit, its routing, and
+its dependence on update order.
 
 ### "did you mean"
 
