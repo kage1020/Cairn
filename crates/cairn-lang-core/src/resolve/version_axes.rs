@@ -195,7 +195,7 @@ pub struct DroppedIntent {
 pub struct UnsupportedEntry {
     /// The palette entry's block id, verbatim as the lowering interned it.
     pub id: String,
-    /// Which of the two ways this entry has no form on the edition.
+    /// Why this entry has no form on the edition.
     #[serde(flatten)]
     pub reason: UnsupportedReason,
 }
