@@ -992,12 +992,13 @@ struct shop size=9x7
     raw_block mat=minecraft:light_block_15 at=4,3,2
 ```
 
-Of the snippet, the `@requires` line, the `struct` header and the two guards with what they hold
-parse today. A `theme` takes its rules on indented lines under its header, so the one-line form is
-`E_PARSE` at `slot`, and the parse ends there. Even indented, a `slot` rule binds one token and
-takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. Inside a body `hologram`
-is `E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is raised where a member is bound to a block only
-the other edition has ([above](#a-block-only-the-other-edition-has)). The `edition-fallback`
+Of the snippet, the `@requires` line parses today, and so would all of the `struct`: its header, the
+`hologram` line and the two guards with what they hold. The parse never reaches the `struct`,
+though. A `theme` takes its rules on indented lines under its header, so the one-line form is
+`E_PARSE` at the first `slot`, and the parse ends there. Even indented, a `slot` rule binds one
+token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. Inside a body
+`hologram` is `E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is raised where a member is bound to a
+block only the other edition has ([above](#a-block-only-the-other-edition-has)). The `edition-fallback`
 example builds the steps that do exist: a per-edition theme, and the light block under its guards.
 
 ### An `@edition` guard holds the escape hatch
@@ -1010,24 +1011,29 @@ where the `NAME_java` and `NAME_bedrock` variants say what differs
 ([below](#the-build-picks-the-variant-not-the-source)). A guard that names no edition or another
 word, takes anything after its edition, holds its lines in braces or has nothing indented under it
 is `E_PARSE` too. A guard does not nest: the one around it already picks the edition, so a guard
-inside a guard is `E_PARSE`.
+directly under a guard is `E_PARSE`. Deeper down, a line is judged by the line it stands under, as
+it would be outside the guard: a member under a raw member or a Tier 0 part, guarded again or not,
+is `E_UNSUPPORTED_NESTING`, and anything under a refused line goes with that line.
 
 A guard opens no scope. Its lines are read as if written where the guard stands, so one under a
-`level` takes the level's `y=`, and a line gets every check under a guard that it would get outside
-one. What the guard adds is the edition whose build keeps the line.
+`level` takes the level's `y=`, and a raw member or a Tier 0 part gets every check under a guard
+that it would get outside one. What the guard adds is the edition whose build keeps the line.
 
 What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
 §7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
 §14.1](/spec/redstone/#tier-0-parts): `repeater`, `comparator`, `redstone_torch` and
 `redstone_dust`. Any other member, and a `logic` or `assert` line, is
 `E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking
-anything indented under it along. A raw member or a Tier 0 part in a `site` body is
-`E_MISPLACED_MEMBER`, with a guard around it or not.
+anything indented under it along. So is a `logic` or `assert` line under a guarded raw member or
+Tier 0 part, which outside a guard would still reach redstone synthesis. A raw member or a Tier 0
+part in a `site` body is `E_MISPLACED_MEMBER`, with a guard around it or not, so a guard there
+holds nothing that builds.
 
 A pinned build keeps the lines under its own edition's guards and drops the other edition's.
-`cairn compile --edition java` builds the snippet's `minecraft:light` and never reads
+`cairn compile --edition java` builds the snippet's `minecraft:light` and never builds
 `light_block_15`. Lowering that pins no edition keeps neither: `cairn lower` prints the
-edition-neutral pivot, so it leaves every guarded line out and a note says how many.
+edition-neutral pivot, so it leaves every guarded line out and a note says how many. It still
+reports what each edition's branch finds on those lines, and exits 1 on an error there.
 
 Two lines under guards for different editions never build together, so they may share an `id=`.
 A guarded line and an unguarded one, or two under guards for one edition, are both built by that

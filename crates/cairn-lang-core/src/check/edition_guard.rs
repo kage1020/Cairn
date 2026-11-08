@@ -1,5 +1,5 @@
-//! The `edition_guard` pass: a line under an `@edition` guard that is neither a raw member nor a
-//! Tier 0 part, since the semantic layer is edition-neutral
+//! The `edition_guard` pass: a known member other than a raw member or a Tier 0 part, or a `logic`
+//! or `assert` line, under an `@edition` guard, since the semantic layer is edition-neutral
 //! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
 use crate::ast::{Item, Module, Statement};
@@ -45,17 +45,34 @@ fn walk(body: &[Statement], sink: &mut DiagnosticSink) {
 /// One finding per refused line, whatever is indented under it.
 fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut DiagnosticSink) {
     let what = match line {
-        Statement::Generic { keyword, .. } => match role_of(keyword) {
+        Statement::Generic {
+            keyword, children, ..
+        } => match role_of(keyword) {
             // `keyword_allowlist` reports an unknown keyword, offering the ones a guard holds.
             MemberRole::Other(_) => return,
-            role if role.is_escape_hatch() => return,
+            role if role.is_escape_hatch() => {
+                // `nesting` refuses a member under one, but a `logic` or `assert` line there would
+                // still reach synthesis from under the guard.
+                for child in children.iter().filter(|child| {
+                    matches!(
+                        child,
+                        Statement::Logic { .. }
+                            | Statement::AssertTruth { .. }
+                            | Statement::AssertAlways { .. }
+                            | Statement::AssertLatency { .. }
+                    )
+                }) {
+                    check_guarded(child, edition, guard, sink);
+                }
+                return;
+            }
             _ => format!("a `{keyword}`"),
         },
         Statement::Logic { .. } => "a `logic` line".to_owned(),
         Statement::AssertTruth { .. }
         | Statement::AssertAlways { .. }
         | Statement::AssertLatency { .. } => "an `assert` line".to_owned(),
-        // The parser refuses a guard in a guard.
+        // The parser refuses a guard directly under a guard.
         Statement::EditionGuard { .. } => return,
     };
     sink.push(Diagnostic {
