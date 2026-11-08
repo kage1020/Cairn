@@ -313,3 +313,144 @@ fn a_raw_member_above_the_struct_is_refused_and_one_a_roof_may_reach_is_deferred
         ],
     );
 }
+
+#[test]
+fn phase_order_not_line_order_puts_a_raw_member_over_the_walls() {
+    let src = format!(
+        "{BIN_THEME}struct s size=5x4\n  raw_fill mat=minecraft:air from=0,1,0 to=4,1,0\n  \
+         walls mat_slot=wall height=2\n  roof kind=flat mat_slot=wall overhang=1\n"
+    );
+    let out = lowered(&src);
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(
+        layer(only_structure(&out), 1),
+        [
+            ".......", ".......", ".#...#.", ".#...#.", ".#####.", ".......",
+        ],
+    );
+}
+
+#[test]
+fn a_raw_member_keeps_a_block_id_outside_the_minecraft_namespace() {
+    let out = lowered(&bin("raw_block mat=my_mod:copper_lamp[lit=true] at=1,1,1"));
+    assert_eq!(out.diagnostics, []);
+    assert_eq!(
+        built_by(&out, "raw_block"),
+        [("my_mod:copper_lamp[lit=true]".to_owned(), vec![(2, 1, 2)])],
+    );
+    assert!(
+        only_structure(&out)
+            .palette
+            .entries
+            .iter()
+            .any(|state| state.id == "my_mod:copper_lamp"),
+        "the id reaches the palette as written",
+    );
+}
+
+#[test]
+fn a_raw_fill_above_the_struct_is_refused() {
+    let src = bin("raw_fill mat=minecraft:stone from=1,1,1 to=1,9,1");
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::InvalidMember,
+            "raw_fill mat=minecraft:stone from=1,1,1 to=1,9,1",
+            "raw_fill `to=1,9,1` does not fit in the struct (dims.y=4)",
+            vec![
+                "a corner's `y` runs from 0 to 3, the struct's top row",
+                "lower the raw_fill's box, or raise the `walls` to reach its rows",
+            ],
+        )],
+    );
+}
+
+/// No theme binds the walls, so only the floor row builds and every raw member above it waits.
+const UNTHEMED: &str = "struct s size=5x5\n  walls height=3 mat_slot=w\n  \
+                        raw_block mat=minecraft:stone at=0,0,0\n";
+
+/// The findings on `src` after the `W_NO_THEME_BOUND` its struct opens with.
+fn past_no_theme<'a>(src: &'a str, out: &'a BlockArrayIr) -> Vec<Finding<'a>> {
+    let mut found = findings(src, out);
+    assert_eq!(found.remove(0).0, DiagnosticCode::NoThemeBound);
+    found
+}
+
+/// The note on a raw block that waits for the walls' row.
+const WAITS: &str = "a `walls` member that would reach this row paints nothing; the block is \
+                     placed once that member's material resolves to a block";
+
+#[test]
+fn a_raw_member_with_no_theme_builds_in_the_rows_left_and_waits_above_them() {
+    let line = "raw_block mat=minecraft:stone at=1,1,1";
+    let src = format!("{UNTHEMED}  {line}\n");
+    let out = lowered(&src);
+    assert_eq!(
+        past_no_theme(&src, &out),
+        [(
+            DiagnosticCode::DeferredMember,
+            line,
+            "raw_block `at=1,1,1` does not fit in the struct (dims.y=1)",
+            vec![WAITS],
+        )],
+    );
+    assert_eq!(
+        built_by(&out, "raw_block"),
+        [("minecraft:stone".to_owned(), vec![(0, 0, 0)])],
+    );
+}
+
+#[test]
+fn a_raw_member_whose_cells_wait_or_are_refused_is_still_refused_for_its_mat() {
+    const BLOCK_ID: &str = "write `mat=` as the block id itself, `namespace:path`, as in \
+                            `mat=minecraft:stone`";
+    const CANONICAL: &str = "`@stone` is a canonical token, which a theme binds to a \
+                             `mat_slot=`; write `mat=minecraft:stone` to place the block it names";
+    let token = "raw_block `mat=` must be a block id, not token `@stone`";
+    for (line, cells, mat) in [
+        (
+            "raw_block mat=@stone at=1,1,1",
+            (
+                DiagnosticCode::DeferredMember,
+                "raw_block `at=1,1,1` does not fit in the struct (dims.y=1)",
+                vec![WAITS],
+            ),
+            (token, vec![BLOCK_ID, CANONICAL]),
+        ),
+        (
+            "raw_block at=1,1,1",
+            (
+                DiagnosticCode::DeferredMember,
+                "raw_block `at=1,1,1` does not fit in the struct (dims.y=1)",
+                vec![WAITS],
+            ),
+            (
+                "raw_block has no `mat=`, so nothing says which block it places",
+                vec![BLOCK_ID],
+            ),
+        ),
+        (
+            "raw_block mat=@stone at=9,0,0",
+            (
+                DiagnosticCode::InvalidMember,
+                "raw_block `at=9,0,0` lies outside the struct's `size=5x5` footprint",
+                vec!["the cell's `x` runs from 0 to 4 and its `z` from 0 to 4"],
+            ),
+            (token, vec![BLOCK_ID, CANONICAL]),
+        ),
+    ] {
+        let src = format!("{UNTHEMED}  {line}\n");
+        let out = lowered(&src);
+        let (code, primary, notes) = cells;
+        let (mat_primary, mat_notes) = mat;
+        assert_eq!(
+            past_no_theme(&src, &out),
+            [
+                (code, line, primary, notes),
+                (DiagnosticCode::InvalidMember, line, mat_primary, mat_notes),
+            ],
+            "{line}",
+        );
+    }
+}
