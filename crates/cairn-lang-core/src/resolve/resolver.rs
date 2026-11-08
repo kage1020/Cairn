@@ -20,12 +20,15 @@ use super::theme_reference::{
     theme_variant_missing_diag,
 };
 
-/// The theme bindings, placements and `connect` rows of `ir` under `edition`'s theme variants.
+/// The theme bindings, placements and `connect` rows of `ir` under `edition`'s theme variants,
+/// reading the members of `edition`'s `@edition` guards and none of another's, as lowering does.
 ///
 /// INVARIANT(`FIRST_BINDING_WINS`): of two declarations with one binding key, the first binds.
 /// INVARIANT(upstream-diagnosed): `check::duplicate` reports the others.
 #[must_use]
 pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
+    let branch = ir.branch_for(edition);
+    let ir = branch.as_ref();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut themes: IndexMap<String, ThemeBinding> = IndexMap::new();
     // Every declared body, shadowed ones too, so a shadowed theme's bad slot value is reported.

@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use crate::common::{
     assert_stream, cargo_bin, compile, crn_examples, example_in_tempdir, examples_dir, stderr_of,
+    write_source,
 };
 
 fn info_json(file: &str, editions: &str) -> Value {
@@ -1046,6 +1047,31 @@ fn assert_build_refuses_the_id(
         stderr.contains(id),
         "premise: it must fail because {edition} {target} has no `{id}`; stderr={stderr}",
     );
+}
+
+#[test]
+fn each_edition_counts_the_blocks_of_its_own_guards_and_none_of_the_others() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let path = write_source(
+        dir.path(),
+        "s.crn",
+        "@requires bedrock version>=1.21.40\ntheme t:\n  slot floor -> @oak_planks\n\
+         struct s size=3x3\n  floor mat_slot=floor\n  walls class=outer mat_slot=floor height=3\n  \
+         @edition java\n    raw_block mat=minecraft:light[level=15] at=1,1,1\n  \
+         @edition bedrock\n    raw_block mat=minecraft:light_block_15 at=1,1,1\n    \
+         raw_fill mat=minecraft:glass from=1,2,1 to=1,2,1\n",
+    );
+    let axes = info_json_at(&path, "java,bedrock");
+    let counts = |edition| {
+        let entry = portability_entry(&axes, edition);
+        (
+            as_u64(entry, "portable"),
+            as_u64(entry, "degraded"),
+            as_u64(entry, "unsupported"),
+        )
+    };
+    assert_eq!(counts("java"), (2, 0, 0));
+    assert_eq!(counts("bedrock"), (3, 0, 0));
 }
 
 #[test]

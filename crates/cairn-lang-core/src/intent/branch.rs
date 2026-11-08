@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 
 use crate::edition::Edition;
+use crate::error::Span;
 
 use super::{EditionGuard, IntentModule, Member};
 
@@ -31,25 +32,44 @@ impl IntentModule {
     /// Whether any member, at any depth, stands under an `@edition` guard.
     #[must_use]
     pub fn has_edition_guards(&self) -> bool {
-        !self.guarded_members().is_empty()
+        self.member_lists().any(|members| any_guarded(members))
+    }
+
+    /// The lines of the members under an `@edition` guard for `edition`, which only its build reads.
+    #[must_use]
+    pub fn lines_guarded_for(&self, edition: Edition) -> Vec<&Span> {
+        self.guarded_members()
+            .into_iter()
+            .filter(|(guard, _)| guard.edition == edition)
+            .map(|(_, member)| &member.span)
+            .collect()
     }
 
     /// Every member under an `@edition` guard, at any depth, with its guard, in source order.
     #[must_use]
     pub fn guarded_members(&self) -> Vec<(&EditionGuard, &Member)> {
         let mut guarded = Vec::new();
-        let lists = self
-            .structs
-            .iter()
-            .map(|s| &s.members)
-            .chain(self.defs.iter().map(|d| &d.members))
-            .chain(self.sites.iter().map(|s| &s.placements));
-        for members in lists {
+        for members in self.member_lists() {
             collect_guarded(members, &mut guarded);
         }
         guarded.sort_by_key(|(_, member)| member.span.start);
         guarded
     }
+
+    /// The top-level member list of every struct, def and site.
+    fn member_lists(&self) -> impl Iterator<Item = &Vec<Member>> {
+        self.structs
+            .iter()
+            .map(|s| &s.members)
+            .chain(self.defs.iter().map(|d| &d.members))
+            .chain(self.sites.iter().map(|s| &s.placements))
+    }
+}
+
+fn any_guarded(members: &[Member]) -> bool {
+    members
+        .iter()
+        .any(|member| member.edition_guard.is_some() || any_guarded(&member.children.members))
 }
 
 fn keep_branch(members: &mut Vec<Member>, edition: Option<Edition>) {

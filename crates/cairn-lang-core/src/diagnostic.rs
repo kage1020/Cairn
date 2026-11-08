@@ -55,7 +55,8 @@ pub enum DiagnosticCode {
     /// A known statement keyword whose enclosing body has no reader for it, or a `circuit` line
     /// under a `level`.
     MisplacedMember,
-    /// A line under an `@edition` guard that is not a raw member.
+    /// A known member other than a raw member or a Tier 0 part, or a `logic` or `assert` line,
+    /// under an `@edition` guard.
     SemanticInEditionGuard,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
@@ -524,6 +525,18 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// Whether the primary span or a note's span lies inside one of `lines`.
+    #[must_use]
+    pub fn touches(&self, lines: &[&Span]) -> bool {
+        std::iter::once(&self.span)
+            .chain(self.notes.iter().filter_map(|note| note.span.as_ref()))
+            .any(|span| {
+                lines
+                    .iter()
+                    .any(|line| line.start <= span.start && span.end <= line.end)
+            })
+    }
+
     /// Severity of this finding, read from [`DiagnosticCode::severity`].
     #[must_use]
     pub fn severity(&self) -> Severity {

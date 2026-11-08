@@ -77,3 +77,62 @@ fn an_unpinned_check_reports_a_guarded_lines_finding_from_its_own_edition() {
     assert_eq!(unpinned(&source, Some(Edition::Bedrock)), refused);
     assert_eq!(unpinned(&source, Some(Edition::Java)), []);
 }
+
+#[test]
+fn a_conflict_a_guarded_line_loses_is_that_editions_finding_whichever_line_comes_first() {
+    let guarded = "  @edition java\n    raw_block mat=minecraft:stone at=2,0,2\n";
+    let bare = "  raw_block mat=minecraft:dirt at=2,0,2\n";
+    for (body, later) in [
+        (
+            format!("{guarded}{bare}"),
+            "raw_block mat=minecraft:dirt at=2,0,2",
+        ),
+        (
+            format!("{bare}{guarded}"),
+            "raw_block mat=minecraft:stone at=2,0,2",
+        ),
+    ] {
+        let source = format!("struct s size=5x5\n{body}");
+        assert_eq!(
+            unpinned(&source, None),
+            [("W_PHASE_CONFLICT", later)],
+            "{body}"
+        );
+        assert_eq!(
+            unpinned(&source, Some(Edition::Bedrock)),
+            [],
+            "Bedrock reads only the unguarded line",
+        );
+    }
+}
+
+#[test]
+fn a_guard_under_a_level_is_measured_from_the_level() {
+    let source = bin("level y=1\n    @edition java\n      raw_block mat=minecraft:stone at=1,0,1");
+    assert_eq!(
+        raw_blocks(&lowered_for(&source, Some(Edition::Java))),
+        [("minecraft:stone".to_owned(), vec![(2, 1, 2)])],
+    );
+    assert_eq!(
+        raw_blocks(&lowered_for(&source, Some(Edition::Bedrock))),
+        []
+    );
+}
+
+#[test]
+fn a_guard_in_a_def_body_is_kept_where_the_def_is_placed_for_its_edition() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  def hut size=3x3:\n  walls mat_slot=wall height=2\n  \
+                  @edition java\n    raw_block mat=minecraft:glowstone at=1,0,1\n\n\
+                  site s:\n  place id=a use=hut theme=t at=origin\n";
+    let glowstone = |edition| {
+        lowered_for(source, Some(edition))
+            .members
+            .values()
+            .flatten()
+            .filter(|member| member.role == "raw_block")
+            .count()
+    };
+    assert_eq!(glowstone(Edition::Java), 1);
+    assert_eq!(glowstone(Edition::Bedrock), 0);
+}

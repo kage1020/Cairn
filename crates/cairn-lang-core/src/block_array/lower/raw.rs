@@ -3,11 +3,11 @@
 
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberRole};
+use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::diag_invalid_member;
-use crate::block_array::material::{IdOrigin, MaterialDeferred, block_id_state, validated_id};
+use crate::block_array::material::{IdOrigin, block_id_state, validated_id};
 use crate::resolve::{TokenKind, classify_token};
 
 use super::canvas::{MemberCanvas, ScopePalette};
@@ -19,27 +19,21 @@ use super::token_diag::{check_state_literal, diag_unknown_id};
 const BLOCK_ID: &str = "write `mat=` as the block id itself, `namespace:path`, as in \
                         `mat=minecraft:stone`";
 
-/// Paint a raw member's block into every cell its triples name.
+/// Paint a raw member's block into every cell its triples name, the one `shape` writes.
 pub(super) fn fill_raw(
     member: &Member,
+    shape: Shape,
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let shape = match member.role {
-        MemberRole::RawBlock => Shape::Cell,
-        _ => Shape::Box,
-    };
-    let cells = match written_cells(member, shape, y_offset, ctx) {
-        Ok(cells) => cells,
-        Err(refusal) => {
-            diagnostics.push(*refusal);
-            return;
-        }
-    };
-    let Some(state) = raw_state(member, ctx, diagnostics) else {
+    // `mat=` is judged even where the cells are refused or deferred, as nothing else judges it.
+    let cells =
+        written_cells(member, shape, y_offset, ctx).map_err(|refusal| diagnostics.push(*refusal));
+    let state = raw_state(member, ctx, diagnostics);
+    let (Ok(cells), Some(state)) = (cells, state) else {
         return;
     };
     let idx = palette.intern(state);
@@ -88,13 +82,8 @@ fn raw_state(
         Ok(state) => {
             check_state_literal(written, &state, ctx.registry, diagnostics).then_some(state)
         }
-        Err(MaterialDeferred::UnknownId(unknown)) => {
+        Err(unknown) => {
             diagnostics.push(diag_unknown_id(written.span.clone(), &unknown));
-            None
-        }
-        // INVARIANT(validated-id-refuses-one-way): `validated_id` answers the state or `UnknownId`.
-        Err(other) => {
-            debug_assert!(false, "validated_id returned {other:?} for a block id");
             None
         }
     }
