@@ -806,6 +806,27 @@ pub enum StateRefusal {
     },
 }
 
+impl<'a> VersionStates<'a> {
+    /// The canonical blocks `id` with the states `given` names here: its own Java block, or each
+    /// Java block mapped onto it that takes `given`, as [`Self::resolve`] narrows them.
+    #[must_use]
+    pub fn java_ids<'s>(&self, id: &'s str, given: &IndexMap<String, String>) -> Vec<&'s str>
+    where
+        'a: 's,
+    {
+        if self.reads_as_java(id) {
+            return vec![id];
+        }
+        let mut ids: Vec<&'s str> = Vec::new();
+        for (java, at) in self.map.onto.get(id).map_or(&[][..], Vec::as_slice) {
+            if self.index.families[*at].takes(given) && !ids.contains(&java.as_str()) {
+                ids.push(java);
+            }
+        }
+        ids
+    }
+}
+
 impl VersionStates<'_> {
     /// The version this map is for.
     #[must_use]

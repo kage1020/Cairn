@@ -197,8 +197,12 @@ The built-in packs' block tables are extracted from the game, never written by h
 pinned in the script by commit and SHA-256. For Bedrock it also derives `states.json`, the state
 maps, from GeyserMC's Java-to-Bedrock mappings, pinned the same way, and reads the `--reports` of
 the Java release each mapping follows to name its states, so the Bedrock run needs Java 25 as well.
-It rewrites the edition's `blocks.json`, each targetable row's `data_version` on Java or
-`block_version` on Bedrock and `latest` in `data_versions.json`, Bedrock's `states.json`, and the
+For both editions it derives `connections.json`, what each block is to the rules that join panes,
+fences and walls, from the block tags in the server jar of the Java release each version's states
+follow, the version itself on Java and the release its state map follows on Bedrock, and the block
+models in that release's client jar, which it downloads beside the server jar. It rewrites the
+edition's `blocks.json`, each targetable row's `data_version` on Java or `block_version` on Bedrock
+and `latest` in `data_versions.json`, Bedrock's `states.json`, `connections.json`, and the
 `extracted` record in `pack.json`.
 
 ```sh

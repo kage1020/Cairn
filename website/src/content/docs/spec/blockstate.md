@@ -11,12 +11,12 @@ are not ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
-Of these, only stair geometry and door orientation are derived today. A `roof` gets its stairs'
-`facing`, `half` and `shape` from where they sit. An eave `stair` gets only its cardinal `facing`,
-from the side it sits on, and its `half` and `shape` are what its line writes, or `top` and
-`straight`. Pane, fence and wall connections, chest pairing and the torch and sign substitution
-below are not derived yet, so `cairn lower examples/cottage.crn` writes a bare
-`minecraft:glass_pane`.
+Of these, stair geometry, door orientation and pane, fence and wall connections are derived
+today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they sit. An eave `stair`
+gets only its cardinal `facing`, from the side it sits on, and its `half` and `shape` are what its
+line writes, or `top` and `straight`. Connections are set once every member is painted
+([Connections](#connections)). Chest pairing and the torch and sign substitution below are not
+derived yet.
 
 A `door` sets a door block two rows tall into the opening it cuts ([Syntax
 §5.4](/spec/syntax/#54-selectors)): `half=lower` on the row it opens at and `half=upper` on the row
@@ -58,6 +58,57 @@ beam  id=lintel kind=pillar mat_slot=frame at=front.top axis=x                  
 chest id=store  at=inside.back size=single
 note_block at=2,1,2 instrument=bit note=12
 ```
+
+### Connections
+
+Once every member of a body is painted, each glass pane, run of bars, fence, wall and fence gate in
+it takes its connection states from the blocks beside it, as the game sets them when a block is
+placed. A face of a block is **sturdy** when the block's model covers it whole: a full block's
+every face, a bottom slab's bottom, an upright stair's bottom and back. Leaves, shulker boxes,
+barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined by a face.
+
+- A pane's `north`, `east`, `south` and `west` are `true` toward a sturdy face, a pane or a wall.
+- A fence's are `true` toward a sturdy face, a fence of its own group, or a fence gate facing
+  across that side. A wooden fence's group is the wooden fences, and every other fence is in the
+  other group, as the game's `wooden_fences` tag divides them.
+- A wall's sides join a sturdy face, a wall, a pane, or a fence gate facing across them. A side
+  that joins nothing is `none`. One that joins is `tall` where the block above covers it, and
+  `low` otherwise.
+- A block covers a part of the wall under it, the post or a side, when the boxes of its model that
+  rest on its bottom cover that part seen from above, as the game's `WallBlock` tests them: the
+  post is the two-by-two square in the middle of the cell, and a side the strip as wide from the
+  middle to that edge. A full block or a bottom slab covers the post and every side, and a lantern
+  or a flower pot only the post. A connecting block above is read by its connection states
+  instead: a pane or a fence covers the post and each side it joins, a wall each side it joins and
+  the post when its own post is up or a side joins, and a closed fence gate the post and the sides
+  it spans. An open one covers nothing.
+- A wall's `up`, its post, rises under a wall whose post is up, where no side joins, and where a
+  side joins without the one opposite it, as at an end, a corner or a branch. Otherwise it stays
+  down where two opposite sides stand tall, and anywhere else rises only under a block the game's
+  `wall_post_override` tag lists, a torch or a sign among them, or one that covers the post.
+- A fence gate's `in_wall` is `true` when a wall stands beside it, across the way it faces.
+
+A state the block's material or line writes is kept, and only the others are derived:
+`@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. The states are
+resolved state, never intent ([§6.2](#62-intent_state-and-resolved_state)).
+
+The blocks beside are those of the same `struct` or `place` body, and nothing outside its array
+counts. What each block is to these rules comes from the target's registry pack
+([Versioning and Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). A lowering
+with no version pinned reads a block as every version of the edition that declares it agrees, and
+as nothing where they disagree; without a pack nothing is derived. A Bedrock target reads its block
+as the canonical blocks its state map names that take the block's states, and its writer maps the
+derived states as it maps every other. A block the pack cannot answer for is nothing to the rules:
+one no canonical block becomes, such as Bedrock's `border_block`, or one the canonical blocks it
+may be disagree on.
+
+A face, and what a block covers, are read off the block's model as the release's client draws it,
+while the game reads its collision shape. The two disagree for a few blocks. Honey, cactus and
+powder snow are drawn whole and collide inset. A block the game draws in code, such as a chest or
+a head, and a barrier, which has no model, cover nothing here. A block whose shape is one box
+around the parts its model draws, such as a campfire or two candles, covers here only what those
+parts do. One that rests on its bottom without colliding, such as a floor button or one layer of
+snow, covers here what its model does.
 
 ## 6.2 `intent_state` and `resolved_state`
 

@@ -151,6 +151,43 @@ one row per property and the blocks it covers, or every other block that drops i
 `reason` is the sentence `W_INTENT_DEGRADED` prints ([§10.7](#107-java--bedrock-portability)). The
 loader refuses a dropped property no row classifies, and the extractor a row nothing drops.
 
+Both packs carry a `connections` component: what each block is to the rules that join panes,
+fences and walls to their neighbours ([Blockstate §6.1](/spec/blockstate/#connections)). It is read
+off the Java release each version's states follow, the version itself on Java and the release its
+state map follows on Bedrock, so `ids` names canonical blocks in both. The release's block tags
+say which blocks are walls, fences and fence gates, which fences are wooden, and which raise a
+wall's post, the tags of the feature packs its jar ships included. A pane is a block with a pane's
+states that is no fence, and the blocks never joined by a face are the ones the game names in
+code. Which faces of each state are sturdy, and which parts of a wall below its bottom covers,
+are read off the block models the release's client jar ships, each a lookup over the fewest
+properties that decide it where it varies:
+
+```json
+{ "mc_versions": ["1.20.4", "1.21", "1.21.4", "26.3"], "ids": ["acacia_slab", "..."],
+  "defaults": { "type": "bottom" },
+  "sturdy": { "reads": ["type"],
+              "map": { "bottom": ["down"], "double": ["down", "up", "north", "south", "west", "east"],
+                       "top": ["up"] } },
+  "covers": { "reads": ["type"],
+              "map": { "bottom": ["post", "north", "east", "south", "west"],
+                       "double": ["post", "north", "east", "south", "west"], "top": [] } } }
+```
+
+A row's `kind` is `pane`, `wall`, `fence`, `wooden_fence` or `fence_gate`, `never_joined_by_face`
+marks a block a pane, fence or wall never joins by a face, `raises_post` one in the
+`wall_post_override` tag, and `defaults` gives the default of each state the rules read, which a
+state that leaves it out takes, a fence gate's `facing` and `open` among them. `covers` names
+`post` and the sides' directions, and a row with a `kind` has none, since the rules read a
+connecting block by its connection states. A block no row names is nothing to the rules. Every
+target postdates 1.16, where wall connections turned from booleans into `none` / `low` / `tall`
+([§10.5](#105-which-version-is-it-for-has-three-answers)), so a wall's sides are derived as those
+three values at every target.
+
+The loader refuses a component with no rows, a row that names no block or no version, a lookup
+that reads no property or maps no value, a default no rule reads, and a fence gate whose default
+`facing` is no sideways face or whose `open` is no boolean. On Java it also refuses a row naming a
+block, or a value of a state, that the version's block table does not give.
+
 ## 10.4 Fail-loud and minimum-version inference
 
 Unknown IDs, out-of-domain states, and parity gaps are hard errors. Silent substitution and implicit

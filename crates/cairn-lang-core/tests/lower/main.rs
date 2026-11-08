@@ -5,6 +5,7 @@ pub mod common;
 
 mod at_side_walkway;
 mod conditional_arguments;
+mod connections;
 mod cottage;
 mod door_block;
 mod door_wall_fit;

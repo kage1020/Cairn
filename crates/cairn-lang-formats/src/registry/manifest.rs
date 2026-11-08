@@ -38,6 +38,9 @@ pub struct PackFiles {
     /// The `sensitivity` file.
     #[serde(default)]
     pub sensitivity: Option<String>,
+    /// The `connections` file; without it, lowering derives no connection state.
+    #[serde(default)]
+    pub connections: Option<String>,
 }
 
 #[cfg(test)]

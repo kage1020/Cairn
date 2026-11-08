@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, OutOfDomain, StateDomain,
+    BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, Joins, OutOfDomain, StateDomain,
     TargetRegistry, UnmappedState,
 };
 use cairn_lang_core::lock::HashHex;
@@ -18,6 +18,7 @@ use thiserror::Error;
 
 use super::aliases::{AliasError, AliasIndex};
 use super::blocks::{BlocksError, BlocksIndex};
+use super::connections::{ConnectionIndex, ConnectionsError};
 use super::data_versions::{
     BedrockTarget, DataVersionEntry, DataVersionTable, JavaTarget, UnsupportedTarget,
 };
@@ -33,6 +34,7 @@ struct BuiltinFiles {
     materials: &'static str,
     blocks: &'static str,
     aliases: &'static str,
+    connections: &'static str,
     states: Option<&'static str>,
     sensitivity: Option<&'static str>,
 }
@@ -67,6 +69,7 @@ macro_rules! builtin_files {
             materials: include_str!(concat!("../../registry-data/", $dir, "/materials.json")),
             blocks: include_str!(concat!("../../registry-data/", $dir, "/blocks.json")),
             aliases: include_str!(concat!("../../registry-data/", $dir, "/aliases.json")),
+            connections: include_str!(concat!("../../registry-data/", $dir, "/connections.json")),
             states: $states,
             sensitivity: $sensitivity,
         }
@@ -102,6 +105,7 @@ pub struct RegistryPack {
     blocks: BlocksIndex,
     aliases: AliasIndex,
     states: Option<StateMapIndex>,
+    connections: ConnectionIndex,
     bytes_hash: HashHex,
     source: PackSource,
 }
@@ -123,6 +127,7 @@ pub struct PackView<'a> {
     state_maps: Option<&'a StateMapIndex>,
     /// The targetable versions, which alone a note may offer as a `--target`.
     targetable: Vec<&'a str>,
+    connections: &'a ConnectionIndex,
     /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
     label: String,
 }
@@ -231,6 +236,19 @@ impl TargetRegistry for PackView<'_> {
         StateDomain::Checked(outside.collect())
     }
 
+    fn joins(&self, state: &BlockState) -> Option<Joins> {
+        if let Some(version) = self.mc_version {
+            return self.joins_at(version, state);
+        }
+        // Unpinned, a state is read only as every version that can say agrees on it.
+        let mut said = self
+            .connections
+            .versions()
+            .filter_map(|version| self.joins_at(version, state));
+        let first = said.next()?;
+        said.all(|joins| joins == first).then_some(first)
+    }
+
     fn aliases_for(&self, id: &str) -> Vec<String> {
         // Unfiltered, a group would suggest spellings from other versions and editions.
         let Some(ids) = self.ids else {
@@ -249,6 +267,30 @@ impl TargetRegistry for PackView<'_> {
 type Domain = IndexMap<String, Vec<String>>;
 
 impl PackView<'_> {
+    /// What `state` is to the connection rules at `version`, read as the canonical blocks its id
+    /// names there, or `None` when the version's tables do not declare it or those blocks disagree.
+    fn joins_at(&self, version: &str, state: &BlockState) -> Option<Joins> {
+        let id = state.id.as_str();
+        let canonical: Vec<&str> = match self.edition {
+            Edition::Java => {
+                let declared = self
+                    .blocks
+                    .ids_for(version)
+                    .is_none_or(|ids| contains(ids, id));
+                if declared { vec![id] } else { Vec::new() }
+            }
+            Edition::Bedrock => self
+                .state_maps?
+                .at(version)?
+                .java_ids(id, &state.properties),
+        };
+        let mut joins = canonical
+            .into_iter()
+            .map(|java| self.connections.joins(version, java, &state.properties));
+        let first = joins.next()??;
+        joins.all(|other| other == Some(first)).then_some(first)
+    }
+
     /// The canonical states `id` takes at `version`, or `None` when the tables give it none to
     /// check against there.
     fn domain_at(&self, version: &str, id: &str) -> Option<Domain> {
@@ -404,6 +446,46 @@ pub enum RegistryError {
         #[from]
         source: StatesError,
     },
+    /// The pack's `connections` component failed to validate.
+    #[error(transparent)]
+    Connections {
+        /// The validation error.
+        #[from]
+        source: ConnectionsError,
+    },
+    /// `connections` lacks a table for a targetable version, or has one for a version not in the
+    /// table.
+    #[error(
+        "registry pack `connections` and `data_versions` disagree: no table for [{missing}], and a table for unsupported [{extra}]"
+    )]
+    ConnectionsVersionMismatch {
+        /// Versions only `data_versions` declares, comma-joined.
+        missing: String,
+        /// Versions only `connections` describes, comma-joined.
+        extra: String,
+    },
+    /// A Java pack's `connections` describes a block its `blocks` does not declare at the version.
+    #[error(
+        "registry pack `connections` describes `{id}`, which `blocks` does not declare at `{mc_version}`"
+    )]
+    ConnectionsUnknownBlock {
+        /// The version.
+        mc_version: String,
+        /// The id.
+        id: String,
+    },
+    /// A Java pack's `connections` names a state its `blocks` does not give the block there.
+    #[error(
+        "registry pack `connections` names `{state}` of `{id}`, which `blocks` does not give it at `{mc_version}`"
+    )]
+    ConnectionsUnknownState {
+        /// The version.
+        mc_version: String,
+        /// The id.
+        id: String,
+        /// The state, `property=value`.
+        state: String,
+    },
     /// `states` has no map for a targetable version.
     #[error("registry pack `states` has no map for the targetable [{missing}]")]
     StatesMissVersion {
@@ -535,6 +617,12 @@ impl RegistryPack {
     #[must_use]
     pub fn states_at<'a>(&'a self, mc_version: &'a str) -> Option<VersionStates<'a>> {
         self.states.as_ref()?.at(mc_version)
+    }
+
+    /// The connection tables, empty without the component.
+    #[must_use]
+    pub fn connections(&self) -> &ConnectionIndex {
+        &self.connections
     }
 
     /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
@@ -695,6 +783,7 @@ impl RegistryPack {
                 .into_iter()
                 .map(|e| e.mc_version.as_str())
                 .collect(),
+            connections: &self.connections,
             label: match mc_version {
                 Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
                 None => self.manifest.edition.as_str().to_owned(),
@@ -764,6 +853,7 @@ enum Component {
     Aliases,
     States,
     Sensitivity,
+    Connections,
 }
 
 impl Component {
@@ -776,6 +866,7 @@ impl Component {
             Component::Aliases => "aliases",
             Component::States => "states",
             Component::Sensitivity => "sensitivity",
+            Component::Connections => "connections",
         };
         RegistryError::File {
             file: file.to_owned(),
@@ -805,6 +896,7 @@ impl ComponentSource for BuiltinFiles {
             Component::Aliases => self.aliases,
             Component::States => embedded(self.states, "states")?,
             Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
+            Component::Connections => self.connections,
         }))
     }
 
@@ -884,6 +976,14 @@ fn load_pack(
         }
         None => {}
     }
+    let (connections, connections_text) = optional_component(
+        source,
+        Component::Connections,
+        manifest.files.connections.as_deref(),
+        ConnectionIndex::from_catalog,
+        ConnectionIndex::empty,
+    )?;
+    validate_connections(&connections, &data_versions, &blocks, expected_edition)?;
 
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
@@ -895,6 +995,7 @@ fn load_pack(
         (&manifest.files.aliases, &aliases_text),
         (&manifest.files.states, &states_text),
         (&manifest.files.sensitivity, &sensitivity_text),
+        (&manifest.files.connections, &connections_text),
     ] {
         if let (Some(file), Some(text)) = (file, text) {
             components.push((file.as_str(), text.as_bytes()));
@@ -908,6 +1009,7 @@ fn load_pack(
         blocks,
         aliases,
         states,
+        connections,
         bytes_hash,
         source: source.provenance(),
     })
@@ -1020,6 +1122,68 @@ fn validate_states_cover_versions(
             missing: missing.join(", "),
         })
     }
+}
+
+/// Refuses connection tables that miss a targetable version or describe one `data_versions` lacks,
+/// and, on Java, a block a version's `blocks` does not declare.
+fn validate_connections(
+    connections: &ConnectionIndex,
+    data_versions: &DataVersionTable,
+    blocks: &BlocksIndex,
+    edition: Edition,
+) -> Result<(), RegistryError> {
+    if connections.is_empty() {
+        return Ok(());
+    }
+    let missing: Vec<&str> = data_versions
+        .versions
+        .iter()
+        .filter(|e| e.targetable && connections.ids_at(&e.mc_version).is_none())
+        .map(|e| e.mc_version.as_str())
+        .collect();
+    let extra: Vec<&str> = connections
+        .versions()
+        .filter(|v| !data_versions.versions.iter().any(|e| e.mc_version == *v))
+        .collect();
+    if !missing.is_empty() || !extra.is_empty() {
+        return Err(RegistryError::ConnectionsVersionMismatch {
+            missing: missing.join(", "),
+            extra: extra.join(", "),
+        });
+    }
+    if edition == Edition::Bedrock {
+        // A Bedrock pack's tables name the canonical blocks, which its own tables do not declare.
+        return Ok(());
+    }
+    for version in connections.versions() {
+        let (Some(ids), Some(described)) = (blocks.ids_for(version), connections.ids_at(version))
+        else {
+            continue;
+        };
+        if let Some(unknown) = described.into_iter().find(|id| !contains(ids, id)) {
+            return Err(RegistryError::ConnectionsUnknownBlock {
+                mc_version: version.to_owned(),
+                id: unknown.to_owned(),
+            });
+        }
+        for (id, key, value) in connections.named_states(version) {
+            let Some(states) = blocks.states_of(version, id) else {
+                continue;
+            };
+            let held = states
+                .properties()
+                .find(|(property, _)| *property == key)
+                .is_some_and(|(_, values)| values.iter().any(|held| held.to_string() == value));
+            if !held {
+                return Err(RegistryError::ConnectionsUnknownState {
+                    mc_version: version.to_owned(),
+                    id: id.to_owned(),
+                    state: format!("{key}={value}"),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Refuses a materials override naming a version `data_versions` lacks, which would never fire.

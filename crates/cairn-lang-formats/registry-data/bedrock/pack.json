@@ -2,14 +2,15 @@
   "schema_version": 1,
   "edition": "bedrock",
   "name": "cairn-builtin-bedrock",
-  "description": "Built-in Bedrock registry pack bundled with the Cairn reference compiler. Material block ids are the flattened Bedrock identifiers; some match their Java spelling (planks, cobblestone, stairs) and some do not (standing_sign, wall_sign, wooden_pressure_plate), so each one is checked against the block table rather than assumed. The block tables, each block's state properties and their values, and each targetable version's block-state version are extracted from the game by `.github/scripts/extract_registry.py`: the block palette each release accepts, every state of every block, as GeyserMC ships it for that release, and `extracted` names the palette each table came from. The `aliases` groups are hand-written: the spellings one block has worn, so a refused id can be answered with the name this target does use. They cover the Java/Bedrock spelling splits an author most often walks into and the ids Bedrock's own 1.21.40 flattening wave retired. Two cases are deliberately absent. A spelling both editions declare meaning different blocks (`snow` is Java's snow layer and Bedrock's snow block) gets no row, because a group is keyed on the spelling alone and the two pairs would have to share one. The seven numbered pre-flattening slab ids (`stone_block_slab2` … `4`, `double_stone_block_slab` … `4`) are absent for a different reason: each carried several unrelated materials in one state value and the 1.21.40 wave scattered them across the edition's 124 slab ids, and which of those each old id covers is recorded in no table shipped here — the row would be a guess. That is what separates them from the state-split families that are included (`stonebrick`, `monster_egg`, `skull`): each of those splits into one family, and the whole family is the answer.",
+  "description": "Built-in Bedrock registry pack bundled with the Cairn reference compiler. Material block ids are the flattened Bedrock identifiers; some match their Java spelling (planks, cobblestone, stairs) and some do not (standing_sign, wall_sign, wooden_pressure_plate), so each one is checked against the block table rather than assumed. The block tables, each block's state properties and their values, and each targetable version's block-state version are extracted from the game by `.github/scripts/extract_registry.py`: the block palette each release accepts, every state of every block, as GeyserMC ships it for that release, and `extracted` names the palette each table came from. The `connections` table is extracted from the Java release each version's state map follows, from its block tags in that release's server jar and the block models its client jar ships, and `extracted` names both jars. The `aliases` groups are hand-written: the spellings one block has worn, so a refused id can be answered with the name this target does use. They cover the Java/Bedrock spelling splits an author most often walks into and the ids Bedrock's own 1.21.40 flattening wave retired. Two cases are deliberately absent. A spelling both editions declare meaning different blocks (`snow` is Java's snow layer and Bedrock's snow block) gets no row, because a group is keyed on the spelling alone and the two pairs would have to share one. The seven numbered pre-flattening slab ids (`stone_block_slab2` … `4`, `double_stone_block_slab` … `4`) are absent for a different reason: each carried several unrelated materials in one state value and the 1.21.40 wave scattered them across the edition's 124 slab ids, and which of those each old id covers is recorded in no table shipped here — the row would be a guess. That is what separates them from the state-split families that are included (`stonebrick`, `monster_egg`, `skull`): each of those splits into one family, and the whole family is the answer.",
   "files": {
     "data_versions": "data_versions.json",
     "materials": "materials.json",
     "blocks": "blocks.json",
     "aliases": "aliases.json",
     "states": "states.json",
-    "sensitivity": "sensitivity.json"
+    "sensitivity": "sensitivity.json",
+    "connections": "connections.json"
   },
   "extracted": {
     "by": ".github/scripts/extract_registry.py",
@@ -59,6 +60,56 @@
         "url": "https://raw.githubusercontent.com/GeyserMC/mappings/b1934f14ad6fba5ea00ee2938e1f8cbef48e6b12/blocks.nbt",
         "sha256": "efc9305b53fc170dd153eb417e003a61f2b17f924592892726ecffc3dce58536",
         "java": "26.3"
+      }
+    ],
+    "connections": [
+      {
+        "mc_version": "1.21.0",
+        "java": "1.21",
+        "server": {
+          "url": "https://piston-data.mojang.com/v1/objects/450698d1863ab5180c25d7c804ef0fe6369dd1ba/server.jar",
+          "sha1": "450698d1863ab5180c25d7c804ef0fe6369dd1ba"
+        },
+        "client": {
+          "url": "https://piston-data.mojang.com/v1/objects/0e9a07b9bb3390602f977073aa12884a4ce12431/client.jar",
+          "sha1": "0e9a07b9bb3390602f977073aa12884a4ce12431"
+        }
+      },
+      {
+        "mc_version": "1.21.40",
+        "java": "1.21",
+        "server": {
+          "url": "https://piston-data.mojang.com/v1/objects/450698d1863ab5180c25d7c804ef0fe6369dd1ba/server.jar",
+          "sha1": "450698d1863ab5180c25d7c804ef0fe6369dd1ba"
+        },
+        "client": {
+          "url": "https://piston-data.mojang.com/v1/objects/0e9a07b9bb3390602f977073aa12884a4ce12431/client.jar",
+          "sha1": "0e9a07b9bb3390602f977073aa12884a4ce12431"
+        }
+      },
+      {
+        "mc_version": "1.21.60",
+        "java": "1.21.5",
+        "server": {
+          "url": "https://piston-data.mojang.com/v1/objects/e6ec2f64e6080b9b5d9b471b291c33cc7f509733/server.jar",
+          "sha1": "e6ec2f64e6080b9b5d9b471b291c33cc7f509733"
+        },
+        "client": {
+          "url": "https://piston-data.mojang.com/v1/objects/b88808bbb3da8d9f453694b5d8f74a3396f1a533/client.jar",
+          "sha1": "b88808bbb3da8d9f453694b5d8f74a3396f1a533"
+        }
+      },
+      {
+        "mc_version": "1.26.60",
+        "java": "26.3",
+        "server": {
+          "url": "https://piston-data.mojang.com/v1/objects/33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c/server.jar",
+          "sha1": "33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c"
+        },
+        "client": {
+          "url": "https://piston-data.mojang.com/v1/objects/e877b6a07acd633fb3bb475002175cec036e7b87/client.jar",
+          "sha1": "e877b6a07acd633fb3bb475002175cec036e7b87"
+        }
       }
     ]
   }

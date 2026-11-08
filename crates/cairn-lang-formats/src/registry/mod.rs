@@ -1,8 +1,9 @@
-//! Registry packs: the JSON files of `DataVersion`s, materials, block ids, aliases and state maps
-//! a compile depends on, hashed into the lockfile so a build is reproducible.
+//! Registry packs: the JSON files of `DataVersion`s, materials, block ids, aliases, state maps and
+//! connection tables a compile depends on, hashed into the lockfile so a build is reproducible.
 
 pub mod aliases;
 pub mod blocks;
+pub mod connections;
 pub mod data_versions;
 pub mod hash;
 pub mod load;
@@ -14,6 +15,10 @@ pub use aliases::{AliasCatalog, AliasError, AliasGroup, AliasIndex, SUPPORTED_AL
 pub use blocks::{
     BlockEntries, BlockStates, BlocksBase, BlocksCatalog, BlocksDiff, BlocksError, BlocksIndex,
     SUPPORTED_BLOCKS_SCHEMA, StateValue,
+};
+pub use connections::{
+    ByState, ConnectionIndex, ConnectionKind, ConnectionRow, ConnectionsCatalog, ConnectionsError,
+    SUPPORTED_CONNECTIONS_SCHEMA, StateLookup,
 };
 pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
