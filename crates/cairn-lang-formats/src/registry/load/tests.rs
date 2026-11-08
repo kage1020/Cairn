@@ -1842,3 +1842,21 @@ fn every_builtin_absence_is_a_block_the_other_builtin_pack_declares() {
         assert_eq!(undeclared, [] as [&str; 0], "{edition}'s absences");
     }
 }
+
+#[test]
+fn every_builtin_absence_lists_each_spelling_the_other_pack_declares_for_its_block() {
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let pack = load_builtin_pack(edition).expect("builtin pack");
+        let other = load_builtin_pack(edition.other()).expect("builtin pack");
+        let listed = |id: &str| pack.absent().reason_for(id).is_some();
+        let missing: Vec<&str> = other
+            .aliases()
+            .groups()
+            .filter(|group| group.iter().any(|id| listed(id)))
+            .flatten()
+            .map(String::as_str)
+            .filter(|id| other.blocks().declared_by_some_version(id) == Some(true) && !listed(id))
+            .collect();
+        assert_eq!(missing, [] as [&str; 0], "{edition}'s absences");
+    }
+}

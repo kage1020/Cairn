@@ -263,7 +263,7 @@ would need no flag, and would answer a different question: `stone_bricks` is val
 Bedrock, so a build pinned to 1.21.0 would still be told nothing. The pin is what makes the answer
 true of the build being made.
 
-The suggested fix depends on which of three ways a wrong ID arrived. A **typo** is answered by a
+The suggested fix depends on which of four ways a wrong ID arrived. A **typo** is answered by a
 distance search over the same table: `oak_plank` is answered with `oak_planks`. A **rename** is not
 a typo. Bedrock spells Java's `light` as `light_block_0` … `light_block_15`, eight edits away, and
 no threshold that keeps the typo finder honest will ever connect the two. Renames are answered from
@@ -301,6 +301,11 @@ on Java 1.21 is answered with 1.21.4, not with `dark_oak_planks`. An alias answe
 beside it, and comes first, since both are true: `@stone_bricks` on Bedrock 1.21.0 is answered with
 both `stonebrick`, the spelling 1.21.0 declares, and 1.21.40, the first target that declares
 `stone_bricks`.
+
+The fourth is a block only the other edition has, which the pinned edition's pack lists as
+`absent` ([§10.7](#a-block-only-the-other-edition-has)). It is not a typo, a rename or a version,
+so it gets none of these answers: its note gives the reason the pack writes for it, and the fix is
+a block this edition has, or a build for the other edition.
 
 What the key cannot express is a spelling both editions declare meaning different blocks: Bedrock's
 `snow` is Java's `snow_block` while Java's `snow` is Bedrock's `snow_layer`. Such a pair gets no
@@ -925,11 +930,11 @@ and game-behaviour differences are not absorbed.** The cases that cannot be:
 Some blocks of one edition have no counterpart in the other under any ID: Bedrock's world-building
 blocks (`allow`, `deny`, `border_block`), its Education Edition blocks and chemistry, and its
 item-frame blocks, which Java places only as entities, and Java's test-framework blocks
-(`test_block`, `test_instance_block`). They are not renames, which `aliases` answers
-([§10.4](#which-registry-an-unknown-id-is-unknown-to)), and the block tables cannot tell them from
-one: Java's `snow_block` is Bedrock's `snow`, and Java's `comparator` is Bedrock's
-`powered_comparator` and `unpowered_comparator`, so a diff of the two tables would call all three
-absent. Each pack therefore lists the other edition's blocks it lacks by hand, in an `absent`
+(`test_block`, `test_instance_block`). They are not renames, which `aliases` answers where it has a
+row ([§10.4](#which-registry-an-unknown-id-is-unknown-to)), and the block tables cannot tell them
+from one: Java's `snow_block` is Bedrock's `snow`, and Java's `comparator` is Bedrock's
+`powered_comparator` and `unpowered_comparator`, so a diff of the two tables would call each of
+them absent. Each pack therefore lists the other edition's blocks it lacks by hand, in an `absent`
 component, each row with the sentence a diagnostic prints for it:
 
 ```json
@@ -943,12 +948,17 @@ spelling or another of its `aliases` group, since the edition then has the block
 A semantic member whose `mat_slot=` resolves to such a block, and a `connect … path=` that does, is
 `E_PARITY_UNSUPPORTED` ([Lint](/spec/lint/)) at the token, at a pinned target of the edition that
 lacks it. The block is no typo, so no nearest ID is offered. The notes give the pack's reason and
-the two steps down the hierarchy [below](#writing-an-alternative): a per-edition theme that binds
-the slot to a block each edition has, or a `raw_block` under the other edition's `@edition` guard.
+what to write instead. For a member, that is a step down the hierarchy
+[below](#writing-an-alternative): a per-edition theme that binds the slot to a block each edition
+has, or a `raw_block` under the other edition's `@edition` guard. Neither is open to a walkway,
+since `path=` names its block with no slot to bind and nothing a guard holds builds in a `site`
+body ([§10.7](#an-edition-guard-holds-the-escape-hatch)). So for a `path=`, the note asks for a
+block both editions have, or an abstract token each edition's materials catalog maps.
+
 A `raw_block` or `raw_fill` that names such a block is `E_UNKNOWN_ID`, since a raw ID is
-edition-specific by nature, with a note naming the guard that would keep it. An ID the pack's own
-mapping reached stays `E_UNKNOWN_ID` too: the mapping is the pack's to fix, and no line of the
-source is.
+edition-specific by nature, with a note giving the pack's reason and naming the guard that would
+keep the line. An ID the pack's own mapping reached stays `E_UNKNOWN_ID` too, with the reason and
+no guard: the mapping is the pack's to fix, and no line of the source is.
 
 Like `E_UNKNOWN_ID`, the finding needs a pinned target
 ([§10.4](#which-registry-an-unknown-id-is-unknown-to)). `cairn info`'s `edition portability` row
