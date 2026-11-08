@@ -1,5 +1,5 @@
-//! `E_MISSING_MATERIAL`: a `floor` or `walls` with no `mat_slot=` paints nothing, so it is an
-//! error at the member; a present but unusable `mat_slot=` is another code's finding.
+//! `E_MISSING_MATERIAL`: a `floor`, `walls` or material `fill` with no `mat_slot=` paints nothing,
+//! so it is an error at the member; a present but unusable `mat_slot=` is another code's finding.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -44,6 +44,31 @@ fn floor_with_no_mat_slot_is_refused() {
         1,
         "a floor takes the same route to a block as a walls; got {:?}",
         codes(&diagnose(&src)),
+    );
+}
+
+#[test]
+fn a_fill_with_neither_a_material_nor_a_fluid_is_offered_both() {
+    let src = format!("{THEME}struct s size=3x3\n  fill from=0,0,0 to=1,1,1\n");
+    let diagnostics = of_code(&src, DiagnosticCode::MissingMaterial);
+    let found: Vec<(&str, Vec<&str>)> = diagnostics
+        .iter()
+        .map(|d| {
+            (
+                d.primary.as_str(),
+                d.notes.iter().map(|note| note.message.as_str()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            "`fill` has no `mat_slot=`, so it paints nothing",
+            vec![
+                "add `mat_slot=NAME` to the `fill`, naming a slot the applied theme declares",
+                "or write `fluid=water` to pour water into the box, which needs no `mat_slot=`",
+            ],
+        )],
     );
 }
 
@@ -222,6 +247,9 @@ site x:\n  floor\n"
 const PAINTERS: &[(&str, &str, &str)] = &[
     ("floor", "floor id=extra", ""),
     ("walls", "walls class=inner height=2", ""),
+    ("fill", "fill from=1,1,1 to=1,1,1", ""),
+    // A pour names its fluid instead of a material.
+    ("fill", "fill fluid=water from=1,1,1 to=1,1,1", ""),
     ("door", "door id=d side=front at=center", ""),
     (
         "window",
@@ -315,6 +343,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         match role {
             MemberRole::Floor
             | MemberRole::Walls
+            | MemberRole::Fill
             | MemberRole::Door
             | MemberRole::Window
             | MemberRole::Roof
@@ -333,6 +362,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
     let roles = [
         MemberRole::Floor,
         MemberRole::Walls,
+        MemberRole::Fill,
         MemberRole::Door,
         MemberRole::Window,
         MemberRole::Roof,

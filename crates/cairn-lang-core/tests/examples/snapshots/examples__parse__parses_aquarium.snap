@@ -1,0 +1,212 @@
+---
+source: crates/cairn-lang-core/tests/examples/parse.rs
+expression: module
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: reef
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: smooth_stone
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+      - kind: Slot
+        slot: glass
+        value:
+          kind: Token
+          value: glass
+      - kind: Slot
+        slot: pane
+        value:
+          kind: Token
+          value: glass_pane
+      - kind: Slot
+        slot: bed
+        value:
+          kind: Token
+          value: sand
+  - kind: Struct
+    name: aquarium
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 7
+            h: 5
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 4
+      - kind: Generic
+        keyword: window
+        args:
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: offset
+            value:
+              kind: Int
+              value: 2
+          - key: y
+            value:
+              kind: Int
+              value: 2
+          - key: size
+            value:
+              kind: Size
+              value:
+                w: 3
+                h: 2
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: glass
+      - kind: Generic
+        keyword: fill
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: bed
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: bed
+          - key: from
+            value:
+              kind: Coord
+              value:
+                x: 1
+                y: 1
+                z: 1
+          - key: to
+            value:
+              kind: Coord
+              value:
+                x: 5
+                y: 1
+                z: 3
+      - kind: Generic
+        keyword: fill
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: divider
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: pane
+          - key: from
+            value:
+              kind: Coord
+              value:
+                x: 3
+                y: 2
+                z: 2
+          - key: to
+            value:
+              kind: Coord
+              value:
+                x: 3
+                y: 3
+                z: 3
+      - kind: Generic
+        keyword: chest
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: sunken
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - back
+          - key: offset
+            value:
+              kind: Int
+              value: 2
+          - key: y
+            value:
+              kind: Int
+              value: 2
+      - kind: Generic
+        keyword: chest
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: dry
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - back
+          - key: offset
+            value:
+              kind: Int
+              value: 4
+          - key: y
+            value:
+              kind: Int
+              value: 2
+          - key: waterlogged
+            value:
+              kind: Bool
+              value: false
+      - kind: Generic
+        keyword: fill
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: water
+          - key: fluid
+            value:
+              kind: Ident
+              value: water
+          - key: from
+            value:
+              kind: Coord
+              value:
+                x: 1
+                y: 2
+                z: 1
+          - key: to
+            value:
+              kind: Coord
+              value:
+                x: 5
+                y: 3
+                z: 3

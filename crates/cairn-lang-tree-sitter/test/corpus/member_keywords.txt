@@ -5,6 +5,7 @@ Every member keyword
 struct s size=9x7
   floor mat_slot=floor
   walls mat_slot=wall height=3
+  fill fluid=water from=1,1,1 to=7,2,5
   door side=front at=center
   window side=front offset=2 y=2
   roof kind=gable overhang=1
@@ -45,6 +46,21 @@ struct s size=9x7
             (attribute
               (identifier)
               (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))))
       (member_stmt
         (member_keyword)
         (command_arg_list

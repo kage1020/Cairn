@@ -23,7 +23,6 @@ use super::members::{
     MemberState, StructCtx, UNPAINTED_COURSE, default_block_id, resolve_member_state, side_name,
     side_of, unplaced_walls_note,
 };
-use super::phase::Phase;
 
 /// Catalog token a `door`'s default material comes from; the pack spells it per edition.
 pub(super) const DOOR_TOKEN: &str = "door.default";
@@ -298,12 +297,18 @@ fn door_block_id(
 }
 
 /// Settle the hinge of each door in `hung` whose line writes none, from the wall beside it now
-/// that every opening is cut, then judge the contests its cells took part in.
-pub(super) fn hang_doors(hung: &[HungDoor], palette: &mut ScopePalette, canvas: &mut Canvas) {
+/// that every opening is cut, then judge the contests its cells took part in; `walls` are the
+/// paint-list indices of the `walls` members.
+pub(super) fn hang_doors(
+    hung: &[HungDoor],
+    walls: &[u32],
+    palette: &mut ScopePalette,
+    canvas: &mut Canvas,
+) {
     let derived: Vec<(&HungDoor, Hinge)> = hung
         .iter()
         .filter(|door| door.hinge.is_none())
-        .map(|door| (door, derived_hinge(door, hung, canvas)))
+        .map(|door| (door, derived_hinge(door, hung, walls, canvas)))
         .collect();
     let mut settled: Vec<(u32, PaletteIndex, PaletteIndex)> = Vec::new();
     for (door, hinge) in derived {
@@ -343,7 +348,7 @@ pub(super) fn split_doors(hung: &[HungDoor], canvas: &Canvas) -> Vec<u32> {
 
 /// The hinge `spec/blockstate` "Derive by default, promote on override" gives `door`: on the right
 /// with a door on its left and none on its right, or with more wall on its right than its left.
-fn derived_hinge(door: &HungDoor, hung: &[HungDoor], canvas: &Canvas) -> Hinge {
+fn derived_hinge(door: &HungDoor, hung: &[HungDoor], walls: &[u32], canvas: &Canvas) -> Hinge {
     let (dx, dz) = door.side.along();
     let beside = |toward: i32| {
         let step = |(x, y, z): (u32, u32, u32)| {
@@ -353,12 +358,15 @@ fn derived_hinge(door: &HungDoor, hung: &[HungDoor], canvas: &Canvas) -> Hinge {
                 z.checked_add_signed(dz * toward)?,
             ))
         };
-        // Above row 0, where a door stands, only `walls` members paint in the massing phase.
         let wall = door
             .cells()
             .into_iter()
             .filter_map(|(_, pos)| step(pos))
-            .filter(|&pos| canvas.written_in(pos, Phase::Massing))
+            .filter(|&pos| {
+                canvas
+                    .owner_at(pos)
+                    .is_some_and(|owner| walls.contains(&owner))
+            })
             .count();
         let has_door = step(door.lower).is_some_and(|pos| {
             hung.iter()

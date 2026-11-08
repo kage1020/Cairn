@@ -33,9 +33,7 @@ with "expected `=`".
 ### 5.1.1 Literals and separators
 
 **Subject to change.** Decimals (`scale=1.5`) and `nbt={...}` values, which other chapters write,
-do not parse yet. A coordinate triple parses, but no member reads one yet, so the cell it names and
-the rule for a cell outside the scope are not built either
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
 parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
@@ -70,11 +68,13 @@ space on either side of a `,` inside the triple, two components alone, a fourth 
 A cell outside the footprint, or above the top row the scope as written reaches ([Compilation Model
 §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), is outside the scope. The member
 that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offset=` at or past its
-wall's length. No member reads a triple yet: `fill`, `raw_block`, `note_block` and the entities
-that take one are not keywords. A key that reads another kind of value treats a triple as any value
-of the wrong kind. A label or size key refuses it as a type mismatch, a member key such as `side=`
-or `height=` refuses its member as `E_INVALID_MEMBER`, and a key that falls back to its default,
-such as `sym=` or `overhang=`, says so with `W_IGNORED_ARGUMENT`.
+wall's length. A `fill`'s `from=` and `to=` read a triple
+([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)), and no other key does yet: `raw_block`,
+`note_block` and the entities that take one are not keywords. A key that reads another kind of
+value treats a triple as any value of the wrong kind. A label or size key refuses it as a type
+mismatch, a member key such as `side=` or `height=` refuses its member as `E_INVALID_MEMBER`, and a
+key that falls back to its default, such as `sym=` or `overhang=`, says so with
+`W_IGNORED_ARGUMENT`.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
@@ -199,17 +199,18 @@ which bind materials and open nothing, so a line indented under one is a syntax 
 nesting diagnostic. So is a line indented after a directive: a directive is one line, and the line
 under it belongs to no construct.
 
-[Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what `y=N`
-means to each grouped member.
+[Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what
+`y=N` means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
-building's geometry: `floor`, `walls`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `chest`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
-is global, so writing one in the other body parses and classifies and then reaches nothing. That is
-`E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
-A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
-reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
-`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
+`pressure_plate`, `chest`, `circuit`. A `site` body describes a layout: `place`, `connect`. The
+keyword table is global, so writing one in the other body parses and classifies and then reaches
+nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented
+under it along. A `level` groups the other members of a `struct` / `def` body, but not a `circuit`
+line, whose reservation spans the whole scope: a `circuit` line under a `level` reaches nothing
+either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:

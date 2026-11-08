@@ -15,8 +15,8 @@ Of these, stair geometry, door and chest orientation, pane, fence and wall conne
 pairing are derived today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they
 sit. An eave `stair` gets only its cardinal `facing`, from the side it sits on, and its `half` and
 `shape` are what its line writes, or `top` and `straight`. Connections and pairs are set once every
-member is painted ([Connections](#connections)). The torch and sign substitution below is not
-derived yet.
+member is painted ([Connections](#connections)), and `waterlogged` where a water `fill` overlaps a
+block ([§6.3](#63-waterlogged)). The torch and sign substitution below is not derived yet.
 
 A `door` sets a door block two rows tall into the opening it cuts ([Syntax
 §5.4](/spec/syntax/#54-selectors)): `half=lower` on the row it opens at and `half=upper` on the row
@@ -156,10 +156,10 @@ The two are named apart from Minecraft's own term "blockstate" on purpose. Keepi
 
 A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a `stair`,
 `half`, `facing`, `shape` and `waterlogged`, on a `door`, `hinge` and `open`, and on a `chest`,
-`facing` and `size`, the line's spelling of its `type`. No other keyword names one yet. Every other
-`key=value` the line writes is one of the member's arguments, apart from `id`, `class` and
-`mat_slot`, which become fields of their own. Where a key goes depends on the keyword: `shape=` on
-a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
+`facing`, `size`, the line's spelling of its `type`, and `waterlogged`. No other keyword names one
+yet. Every other `key=value` the line writes is one of the member's arguments, apart from `id`,
+`class` and `mat_slot`, which become fields of their own. Where a key goes depends on the keyword:
+`shape=` on a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
 ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
 
 Lowering records each member's `resolved_state` beside the block array it builds: every state the
@@ -180,25 +180,54 @@ In place of `type`, a member carries the `role` its keyword classifies to.
 
 ## 6.3 `waterlogged`
 
-**Subject to change.** Nothing in this section is built yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)). No pass sets or reads
-`waterlogged`: on a `stair`, `waterlogged=false` is an unreached key, reported as
-`W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), and the stair is built as if
-the key were not written. In the example below, `fill`, `trapdoor` and `water` are
-`E_UNKNOWN_KEYWORD`.
+**Subject to change.** Flowing water is not built yet: `water` is `E_UNKNOWN_KEYWORD`, and a `fill`
+pours only source water ([Compatibility Tiers](/spec/compatibility/#subject-to-change)). In the
+example below, `trapdoor` and `water` are `E_UNKNOWN_KEYWORD`.
 
 The default is paint-derived: when `fill fluid=water` overlaps a waterloggable block, the compiler
 sets `waterlogged`.
 
+A `fill` names a box by two of its opposite corners, `from=` and `to=`, in either order and both in
+the box. Each is a coordinate triple, a cell of the struct
+([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). With a `mat_slot=`, the fill paints
+every cell of the box with that material in `massing`, and has no default block, so one whose
+material does not resolve leaves its cells as they are. With `fluid=water`, it pours water once
+every other member is painted, in `fluids` ([Compilation Model
+§4.1](/spec/compilation/#41-phase-evaluation)). A cell of the box that holds no block takes a water
+source, `minecraft:water[level=0]`. A waterloggable block whose state does not write `waterlogged`
+takes `waterlogged=true` and stays its own member's ([§6.2](#62-intent_state-and-resolved_state)).
+Any other block is left as it was painted, so water fills only around what stands in the box.
+
+A block is waterloggable when the target's registry pack gives it a `waterlogged` state that takes
+`true` and its state leaves room for water. A slab written `type=double` fills its cell and is not
+waterloggable, as the game never puts water in one. A block whose states the pack does not carry,
+such as a Bedrock block with no Java counterpart, is not waterloggable either, and water leaves it
+as it was painted. A lowering with no version pinned reads a block as every version of the edition
+that declares it agrees, as [Connections](#connections) do, and without a pack no block is
+waterloggable. The derived `waterlogged` is resolved state, never intent. A Bedrock backend holds
+the water of a waterlogged block in the structure's second layer ([Versioning and Editions
+§10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
+
+`water` is the one fluid and `kind=source` the one kind, which a fill with no `kind=` pours too. A
+`fill` that writes both `mat_slot=` and `fluid=`, another fluid or kind, a `from=` or `to=` that is
+missing or not a triple, or a corner outside the struct is `E_INVALID_MEMBER`; a `kind=` on a fill
+with no `fluid=` is `W_IGNORED_ARGUMENT`, and a fill with neither `mat_slot=` nor `fluid=` is
+`E_MISSING_MATERIAL` ([Lint](/spec/lint/)). A fill does not size the volume
+([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)): one that
+reaches a row the struct as written reaches and does not build is `W_DEFERRED_MEMBER`, waiting on
+the member that would build the row.
+
 A three-valued `waterlogged=auto|true|false` is allowed, for leaving an air pocket inside a tank
 (explicit `false`), distinguishing source from flowing, and version differences in the waterloggable
-table. Flowing water is made explicit with `flow=` and `level=`.
+table. On a `stair` or a `chest`, `waterlogged=true` and `waterlogged=false` are written into the
+block's state and kept, and `waterlogged=auto`, like no `waterlogged=` at all, lets a water fill set
+it. Any other word is `E_INVALID_MEMBER`. Flowing water is made explicit with `flow=` and `level=`.
 
 Like the overrides in [§6.1](#61-derive-by-default-promote-on-override), `waterlogged=` is written
 on a member that places one block and names that block's state, and of the keywords the compiler
-knows only `stair` does so for a block that can hold water. A `door`'s block holds none, and a
-`roof` or a `window` derives the state of every block it lays and takes no override, so
-`waterlogged=` on any of the three is `E_UNKNOWN_ARGUMENT`.
+knows only `stair` and `chest` do so for a block that can hold water. The block of a `door` or a
+`pressure_plate` holds none, and a `roof` or a `window` derives the state of every block it lays
+and takes no override, so `waterlogged=` on any of the four is `E_UNKNOWN_ARGUMENT`.
 
 ```
 fill fluid=water kind=source from=1,1,1 to=5,3,5    # overlapping fences/stairs/signs auto-waterlogged

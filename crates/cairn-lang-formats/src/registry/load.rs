@@ -25,7 +25,11 @@ use super::data_versions::{
 use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
-use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates};
+use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates, WATER_LAYER_STATE};
+
+/// The state of a slab that fills its cell, which the game never lets hold water although its
+/// block takes `waterlogged=true`.
+const DOUBLE_SLAB: (&str, &str) = ("type", "double");
 
 #[derive(Clone, Copy)]
 struct BuiltinFiles {
@@ -247,6 +251,36 @@ impl TargetRegistry for PackView<'_> {
             .filter_map(|version| self.joins_at(version, state));
         let first = said.next()?;
         said.all(|joins| joins == first).then_some(first)
+    }
+
+    fn holds_water(&self, state: &BlockState) -> Option<bool> {
+        let (key, filled) = DOUBLE_SLAB;
+        let fills_its_cell = state
+            .properties
+            .get(key)
+            .is_some_and(|value| value == filled);
+        let holds_at = |version: &str| {
+            let domain = self.domain_at(version, &state.id)?;
+            Some(
+                !fills_its_cell
+                    && domain
+                        .get(WATER_LAYER_STATE)
+                        .is_some_and(|values| values.iter().any(|value| value == "true")),
+            )
+        };
+        if let Some(version) = self.mc_version {
+            return holds_at(version);
+        }
+        // Unpinned, a block is read only as every version that declares it agrees on it.
+        let versions: Vec<&str> = match self.edition {
+            Edition::Java => self.blocks.versions().collect(),
+            Edition::Bedrock => self
+                .state_maps
+                .map_or_else(Vec::new, |maps| maps.versions().collect()),
+        };
+        let mut said = versions.into_iter().filter_map(holds_at);
+        let first = said.next()?;
+        said.all(|holds| holds == first).then_some(first)
     }
 
     fn aliases_for(&self, id: &str) -> Vec<String> {

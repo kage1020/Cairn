@@ -48,10 +48,11 @@ pub(super) fn diag_no_theme_bound_generic(
         notes: vec![
             DiagnosticNote {
                 span: None,
-                message: "a `floor` is left air; no `walls` is built or takes up rows, so no \
-                          `door` or `window` is cut; a `roof` is built from its default block, \
-                          and so is an eave `stair`, `pressure_plate` or `chest` that still fits \
-                          the shorter structure"
+                message: "a `floor` is left air and a `fill` with a `mat_slot=` paints none \
+                          of its box; no `walls` is built or takes up rows, so no `door` or \
+                          `window` is cut; a `roof` is built from its default block, and so is an \
+                          eave `stair`, `pressure_plate` or `chest` that still fits the shorter \
+                          structure"
                     .to_owned(),
             },
             DiagnosticNote {

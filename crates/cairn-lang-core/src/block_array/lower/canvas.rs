@@ -254,13 +254,6 @@ impl Canvas {
         self.owners[i].checked_sub(1)
     }
 
-    /// Whether the member that wrote `pos` last runs in `phase`.
-    pub(super) fn written_in(&self, pos: (u32, u32, u32), phase: Phase) -> bool {
-        self.owner_at(pos)
-            .and_then(|owner| self.phases.get(owner as usize).copied().flatten())
-            == Some(phase)
-    }
-
     /// Borrow the canvas as the member at `index` of the flattened paint list sees it.
     pub(super) fn for_member(&mut self, index: u32) -> MemberCanvas<'_> {
         debug_assert!(

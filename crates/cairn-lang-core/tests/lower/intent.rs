@@ -123,6 +123,20 @@ fn a_stairs_blockstate_is_its_intent_state_and_the_rest_its_arguments() {
 }
 
 #[test]
+fn a_chests_blockstate_is_its_intent_state_and_the_rest_its_arguments() {
+    let ir = lower_source(
+        "struct s size=3x3
+  chest at=inside.back offset=1 y=0 waterlogged=true facing=left size=single
+",
+    );
+    let member = &ir.structs[0].members[0];
+    let intent: Vec<&str> = member.intent_state.keys().map(String::as_str).collect();
+    assert_eq!(intent, ["waterlogged", "facing", "size"]);
+    let arguments: Vec<&str> = member.arguments.keys().map(String::as_str).collect();
+    assert_eq!(arguments, ["at", "offset", "y"]);
+}
+
+#[test]
 fn a_key_that_is_blockstate_on_one_role_is_an_argument_on_another() {
     let ir = lower_source(
         "struct s size=5x5

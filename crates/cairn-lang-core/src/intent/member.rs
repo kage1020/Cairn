@@ -65,6 +65,13 @@ impl Member {
             .or_else(|| self.intent_state.get(key))
     }
 
+    /// Whether it is a `fill` that writes `fluid=`, which pours in the `fluids` phase instead of
+    /// painting a material (`spec/compilation` "Phase evaluation").
+    #[must_use]
+    pub fn pours_fluid(&self) -> bool {
+        matches!(self.role, MemberRole::Fill) && self.written("fluid").is_some()
+    }
+
     /// Every `key=value` [`Self::written`] answers for, in source order.
     pub fn written_fields(&self) -> impl Iterator<Item = (&str, &ValueWithSpan)> {
         let mut fields: Vec<(&str, &ValueWithSpan)> = self
@@ -136,6 +143,7 @@ impl MemberRole {
                 BodyKind::Geometry,
                 Self::Floor
                 | Self::Walls
+                | Self::Fill
                 | Self::Door
                 | Self::Window
                 | Self::Roof
@@ -151,6 +159,7 @@ impl MemberRole {
                 BodyKind::Site,
                 Self::Floor
                 | Self::Walls
+                | Self::Fill
                 | Self::Door
                 | Self::Window
                 | Self::Roof
@@ -170,6 +179,7 @@ impl MemberRole {
         match self {
             Self::Floor => "floor",
             Self::Walls => "walls",
+            Self::Fill => "fill",
             Self::Door => "door",
             Self::Window => "window",
             Self::Roof => "roof",

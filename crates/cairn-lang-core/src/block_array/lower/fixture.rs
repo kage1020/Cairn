@@ -294,7 +294,7 @@ fn displaced(
     } else if y_world >= ctx.dims.y {
         Some((
             row_past_the_struct(fixture, row, ctx),
-            ctx.shortfall().note(&fits),
+            ctx.shortfall().note("this row", &fits),
         ))
     } else if outside && ctx.overhang == 0 {
         // An overhang a roof is written with and does not draw is the roof's to repair.

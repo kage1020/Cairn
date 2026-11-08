@@ -83,7 +83,7 @@ fn size_single_writes_the_chests_type_and_both_are_recorded_as_intent() {
 }
 
 #[test]
-fn an_unknown_facing_or_size_refuses_the_chest_and_both_are_reported() {
+fn an_unknown_facing_size_or_waterlogged_refuses_the_chest_and_each_is_reported() {
     for (line, primary, note) in [
         (
             "chest at=inside.back offset=2 y=1 facing=up",
@@ -105,7 +105,7 @@ fn an_unknown_facing_or_size_refuses_the_chest_and_both_are_reported() {
         assert_eq!(chests(only_structure(&out)), [], "{line}");
     }
 
-    let line = "chest at=inside.back offset=2 y=1 facing=up size=double";
+    let line = "chest at=inside.back offset=2 y=1 facing=up size=double waterlogged=yes";
     let src = storeroom(line);
     let out = lowered(&src);
     assert_eq!(
@@ -124,6 +124,15 @@ fn an_unknown_facing_or_size_refuses_the_chest_and_both_are_reported() {
                 vec![
                     "`size=` takes `single`, which keeps the chest from pairing; leave it out to \
                      let the chest pair with the one beside it",
+                ],
+            ),
+            (
+                DiagnosticCode::InvalidMember,
+                line,
+                "unknown chest `waterlogged=yes`",
+                vec![
+                    "`waterlogged=` takes `auto`, which lets a water `fill` set it, or `true` or \
+                     `false`, which keep it",
                 ],
             ),
         ],

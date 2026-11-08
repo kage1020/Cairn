@@ -194,7 +194,7 @@ fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
     }
 }
 
-// --- stair `facing=` / `half=` / `shape=` ----------------------------------
+// --- stair `facing=` / `half=` / `shape=` / `waterlogged=` ------------------
 
 /// An eave band on a struct whose roof overhangs one block, the least an eave needs.
 fn stair(args: &str) -> String {
@@ -223,6 +223,7 @@ fn an_unreadable_stair_state_builds_the_default_and_says_so() {
             "`straight`, `outer_left`, or `outer_right`",
             "straight",
         ),
+        ("waterlogged", "true", "`auto`, `true` or `false`", "auto"),
     ] {
         // Guard: the identifier meant changes the build, so the equality below is not vacuous.
         let meant = lowered(&stair(&format!(" {key}={readable}")));

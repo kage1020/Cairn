@@ -1284,6 +1284,10 @@ const SLOT_READERS: &[(&str, &str)] = &[
     ("floor", "struct s size=3x3\n  floor mat_slot=f\n"),
     ("walls", "struct s size=3x3\n  walls mat_slot=w height=2\n"),
     (
+        "fill",
+        "struct s size=3x3\n  fill from=0,0,0 to=2,0,2 mat_slot=f\n",
+    ),
+    (
         "window",
         "struct s size=5x5\n  window side=front y=1 offset=1 size=1x1 mat_slot=g\n",
     ),
@@ -1559,6 +1563,14 @@ fn abstract_token_deferral_says_what_each_member_does_instead() {
             members: "walls mat_slot=wall height=3\n  floor mat_slot=trim",
             consequence: Some("the cell falls back to air"),
             voxels: |out| assert_eq!(block_id(struct_s(out), 1, 0, 1), BlockState::AIR_ID),
+        },
+        DeferralArm {
+            members: "walls mat_slot=wall height=3\n  fill mat_slot=trim from=0,1,0 to=4,1,4",
+            consequence: Some("the fill paints none of its box"),
+            voxels: |out| {
+                assert_eq!(block_id(struct_s(out), 0, 1, 0), "minecraft:cobblestone");
+                assert_eq!(block_id(struct_s(out), 1, 1, 1), BlockState::AIR_ID);
+            },
         },
         DeferralArm {
             members: "floor mat_slot=wall\n  \

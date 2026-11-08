@@ -4,11 +4,13 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 use cairn_lang_core::ast::ValueKind;
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockArrayIr, BlockState, TargetRegistry, lower_to_block_array,
+};
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
-pub const SHIPPED_EXAMPLES: usize = 13;
+pub const SHIPPED_EXAMPLES: usize = 14;
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
@@ -200,6 +202,17 @@ pub fn lowered(source: &str) -> BlockArrayIr {
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     lower_to_block_array(&ir, &resolution, None)
+}
+
+/// `source` lowered to the block-array IR against `registry`; only that pass's diagnostics.
+///
+/// # Panics
+///
+/// When `source` does not parse.
+pub fn lowered_with(source: &str, registry: &dyn TargetRegistry) -> BlockArrayIr {
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
+    let ir = lower(&module);
+    lower_to_block_array(&ir, &resolve(&ir, None), Some(registry))
 }
 
 /// [`lowered`], with the resolver's diagnostics ahead of the block-array pass's.

@@ -22,6 +22,7 @@ use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circ
 use super::connections::derive_connections;
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::door::{HungDoor, hang_doors, split_doors};
+use super::fill::pour_fluids;
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::paint_member;
 use super::phase::Phase;
@@ -261,8 +262,6 @@ fn resolved_members(
 /// Paint one body's members onto a fresh canvas, phase by phase in `spec/compilation` "Phase
 /// evaluation" order, then set the connection states the painted blocks derive; with the `door`
 /// members left holding one of their two cells.
-///
-/// No test pins the order: neighbouring phases write disjoint cells, so only a two-step swap shows.
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
@@ -270,13 +269,24 @@ fn paint_phases(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Canvas, Vec<u32>) {
     let PhaseBuckets { by_phase, phases } = buckets;
+    let walls: Vec<u32> = by_phase[Phase::Massing.index()]
+        .iter()
+        .filter(|(_, _, member)| matches!(member.role, MemberRole::Walls))
+        .map(|&(index, _, _)| index)
+        .collect();
     let mut canvas = Canvas::new(ctx.dims, phases);
     let mut hung = Vec::new();
-    for (index, bucket) in by_phase.into_iter().enumerate() {
-        run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
-        // A door's hinge reads the wall beside it, which a later opening in the phase may cut.
-        if index == Phase::Openings.index() {
-            hang_doors(&hung, palette, &mut canvas);
+    for (phase, bucket) in Phase::ALL.into_iter().zip(by_phase) {
+        match phase {
+            Phase::Massing | Phase::Envelope | Phase::Fixtures => {
+                run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+            }
+            Phase::Openings => {
+                run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+                // A door's hinge reads the wall beside it, which a later opening may cut.
+                hang_doors(&hung, &walls, palette, &mut canvas);
+            }
+            Phase::Fluids => pour_fluids(bucket, ctx, palette, &mut canvas, diagnostics),
         }
     }
     if let Some(registry) = ctx.registry {
@@ -315,7 +325,7 @@ fn bucket_members<'a>(
             buckets.phases.push(None);
             continue;
         }
-        let disposition = member_disposition(&member.role);
+        let disposition = member_disposition(member);
         buckets.phases.push(match disposition {
             MemberDisposition::Paints(phase) => Some(phase),
             MemberDisposition::Reserves | MemberDisposition::NotLowered => None,

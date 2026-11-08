@@ -18,6 +18,8 @@ use crate::block_array::material::{
 pub(super) enum MemberFallback {
     /// A `floor`: `fill_floor` is not reached, so its cells stay air.
     Air,
+    /// A `fill`: it paints none of its box, which keeps what the other members paint there.
+    Unpainted,
     /// A `walls`: it paints no row and claims none in the volume, so a cut into it is refused.
     Absent,
     /// A `window`: [`fill_window`] refuses it, so the wall stays and a port on it is refused.
@@ -36,6 +38,7 @@ impl MemberFallback {
     pub(super) fn for_role(role: &MemberRole) -> Self {
         match role {
             MemberRole::Floor => Self::Air,
+            MemberRole::Fill => Self::Unpainted,
             MemberRole::Walls => Self::Absent,
             MemberRole::Window => Self::WallStays,
             MemberRole::Roof
@@ -79,6 +82,7 @@ impl TokenSite {
         match self {
             Self::WalkwayPath => "the walkway falls back to air",
             Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
+            Self::MemberSlot(MemberFallback::Unpainted) => "the fill paints none of its box",
             Self::MemberSlot(MemberFallback::Absent) => {
                 "the walls are not built and take up no rows, so a door or window cut into them \
                  is refused"

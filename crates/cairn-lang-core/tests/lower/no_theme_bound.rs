@@ -90,9 +90,10 @@ fn a_themeless_scope_is_told_how_each_role_degrades() {
     assert_eq!(
         notes(&out.diagnostics[0]),
         [
-            "a `floor` is left air; no `walls` is built or takes up rows, so no `door` or \
-             `window` is cut; a `roof` is built from its default block, and so is an eave \
-             `stair`, `pressure_plate` or `chest` that still fits the shorter structure",
+            "a `floor` is left air and a `fill` with a `mat_slot=` paints none of its box; no \
+             `walls` is built or takes up rows, so no `door` or `window` is cut; a `roof` is \
+             built from its default block, and so is an eave `stair`, `pressure_plate` or `chest` \
+             that still fits the shorter structure",
             "a scope binds a theme when the module declares exactly one logical theme, or the \
              `place` names one with `theme=`; under a `--edition` pin that theme must also have \
              a variant for that edition",
@@ -129,6 +130,25 @@ fn a_themeless_scope_builds_its_roof_eave_and_plate_from_their_default_blocks() 
         );
     }
     assert_eq!(state_at(ba, 1, 0, 6).id, "minecraft:oak_pressure_plate");
+}
+
+#[test]
+fn a_themeless_scope_still_pours_its_water_and_paints_no_material_fill() {
+    let out = lowered(
+        "struct s size=5x5\n  \
+         fill mat_slot=bed from=1,0,1 to=2,0,2\n  \
+         fill fluid=water from=0,0,0 to=4,0,4\n",
+    );
+    let ba = only_structure(&out);
+    assert_eq!(
+        painted_ids(ba),
+        BTreeSet::from(["minecraft:air", "minecraft:water"])
+    );
+    for z in 0..5 {
+        for x in 0..5 {
+            assert_eq!(state_at(ba, x, 0, z).id, "minecraft:water", "({x}, {z})");
+        }
+    }
 }
 
 #[test]

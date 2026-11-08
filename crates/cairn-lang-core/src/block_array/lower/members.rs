@@ -85,22 +85,22 @@ impl Shortfall {
         }
     }
 
-    /// The note on a member deferred to a row the struct as written reaches and the struct built
+    /// The note on a member deferred to `rows` the struct as written reaches and the struct built
     /// does not, with `outcome` saying what happens to it then: "the stair is built".
-    pub(super) fn note(self, outcome: &str) -> String {
+    pub(super) fn note(self, rows: &str, outcome: &str) -> String {
         match self {
             Self {
                 walls: true,
                 roof: true,
             } => format!(
                 "a `walls` member that paints nothing and a `roof` that draws nothing keep the \
-                 struct below this row; {outcome} once both build"
+                 struct below {rows}; {outcome} once both build"
             ),
             Self { roof: true, .. } => format!(
-                "a `roof` that would rise to this row draws nothing; {outcome} once that roof draws"
+                "a `roof` that would rise to {rows} draws nothing; {outcome} once that roof draws"
             ),
             Self { .. } => format!(
-                "a `walls` member that would reach this row paints nothing; {outcome} once that \
+                "a `walls` member that would reach {rows} paints nothing; {outcome} once that \
                  member's material resolves to a block"
             ),
         }
@@ -121,9 +121,12 @@ pub(super) enum MemberDisposition {
 /// Where a member's role puts it, per `spec/compilation` "Phase evaluation".
 ///
 /// Every role is spelled out, so a new one fails the compile here instead of panicking later.
-pub(super) fn member_disposition(role: &MemberRole) -> MemberDisposition {
-    match role {
-        MemberRole::Floor | MemberRole::Walls => MemberDisposition::Paints(Phase::Massing),
+pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
+    match &member.role {
+        MemberRole::Fill if member.pours_fluid() => MemberDisposition::Paints(Phase::Fluids),
+        MemberRole::Floor | MemberRole::Walls | MemberRole::Fill => {
+            MemberDisposition::Paints(Phase::Massing)
+        }
         MemberRole::Roof | MemberRole::Stair => MemberDisposition::Paints(Phase::Envelope),
         MemberRole::Door | MemberRole::Window => MemberDisposition::Paints(Phase::Openings),
         MemberRole::PressurePlate | MemberRole::Chest => MemberDisposition::Paints(Phase::Fixtures),
@@ -222,6 +225,7 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         MemberRole::Roof => Some("level-scoped `roof` is not yet supported"),
         // A level-scoped `circuit` region is not shifted: its recogniser takes no `y_offset`.
         MemberRole::Walls
+        | MemberRole::Fill
         | MemberRole::Door
         | MemberRole::Window
         | MemberRole::Stair

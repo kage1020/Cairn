@@ -2,13 +2,12 @@
 //! beside them once every member is painted (`spec/blockstate` "Connections").
 
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockIdSet, BlockState, Covers, Face, Faces, JoinKind, Joins,
-    StateDomain, TargetRegistry, lower_to_block_array,
+    BlockArray, BlockIdSet, BlockState, Covers, Face, Faces, JoinKind, Joins, StateDomain,
+    TargetRegistry,
 };
-use cairn_lang_core::{lower, parse, resolve};
 use serde_json::json;
 
-use crate::common::{chests, only_structure, state_at};
+use crate::common::{chests, lowered_with, only_structure, state_at};
 
 /// A target whose connection table holds the blocks these tests build with, read as the game's
 /// rules read them.
@@ -110,12 +109,6 @@ impl TargetRegistry for Silent {
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
         None
     }
-}
-
-fn lowered_with(source: &str, registry: &dyn TargetRegistry) -> BlockArrayIr {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    lower_to_block_array(&ir, &resolve(&ir, None), Some(registry))
 }
 
 /// A 5x3 struct of `walls` built from `wall`, `height` rows tall, with `members` after them; its
