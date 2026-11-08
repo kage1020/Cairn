@@ -6,6 +6,7 @@ use crate::intent::{Member, MemberRole};
 use crate::block_array::PaletteIndex;
 
 use super::canvas::{MemberCanvas, ScopePalette};
+use super::cell_box::Shape;
 use super::chest::fill_chest;
 use super::component::fill_component;
 use super::door::{HungDoor, fill_door};
@@ -81,8 +82,27 @@ pub(super) fn paint_member(
             fill_component(member, y_offset, ctx, palette, canvas, diagnostics);
         }
         MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
-        MemberRole::RawBlock | MemberRole::RawFill => {
-            fill_raw(member, y_offset, ctx, palette, canvas, diagnostics);
+        MemberRole::RawBlock => {
+            fill_raw(
+                member,
+                Shape::Cell,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
+        }
+        MemberRole::RawFill => {
+            fill_raw(
+                member,
+                Shape::Box,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
         }
         MemberRole::Level
         | MemberRole::Circuit

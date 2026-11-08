@@ -25,9 +25,8 @@ it may hold are placed.
 
 Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `water` are not keywords
 yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
-`envelope`, `openings`, `fixtures`, whose members are `chest` and every sensor and actuator but
-`door`, `fluids`, and
-`raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)).
+`envelope`, `openings`, `fixtures` (whose members are `chest` and every sensor and actuator but
+`door`), `fluids` and `raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)).
 `cairn compile` does not run the three `logic_*` phases, so a `logic` line lays no redstone in the
 artifact; they are reached only through `cairn synth --experimental-logic-synth`.
 
@@ -224,10 +223,9 @@ gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 +
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, `chest`, every
 sensor and actuator, `fill`, `raw_block` and `raw_fill` read `N` as the base their geometry is
-measured from. A `floor`
-and a `roof` are planes a struct has one of, and what one under a raised `level` builds is reserved
-for a later extension: under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to
-nothing.
+measured from. A `floor` and a `roof` are planes a struct has one of, and what one under a raised
+`level` builds is reserved for a later extension: under `level y=N` with `N > 0` each fires
+`W_DEFERRED_MEMBER` and lowers to nothing.
 
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under

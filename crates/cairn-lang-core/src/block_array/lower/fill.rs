@@ -1,5 +1,5 @@
-//! Painting a `fill` member's box with a material, or pouring water into it once every other
-//! member is painted (`spec/blockstate` "`waterlogged`").
+//! Painting a `fill` member's box with a material, or pouring water into it in the `fluids` phase
+//! (`spec/blockstate` "`waterlogged`").
 
 use std::collections::HashMap;
 

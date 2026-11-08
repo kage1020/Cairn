@@ -352,25 +352,9 @@ pub(super) fn default_block_id(
         ),
         None => (BlockState::bare(base_id), IdOrigin::Builtin { token }),
     };
-    match validated_id(state, registry, &origin) {
-        Ok(state) => Ok(state.id),
-        Err(MaterialDeferred::UnknownId(unknown)) => {
-            Err(Box::new(diag_unknown_id(member.span.clone(), &unknown)))
-        }
-        // INVARIANT(validated-id-refuses-one-way): `validated_id` answers the state or `UnknownId`.
-        Err(other) => {
-            let keyword = member.role.keyword();
-            debug_assert!(
-                false,
-                "validated_id returned {other:?} for the `{keyword}` default, which resolves no \
-                 mat_slot= value",
-            );
-            Err(Box::new(diag_deferred_member_reason(
-                member,
-                &format!("{keyword} default resolved to no block id"),
-            )))
-        }
-    }
+    validated_id(state, registry, &origin)
+        .map(|state| state.id)
+        .map_err(|unknown| Box::new(diag_unknown_id(member.span.clone(), &unknown)))
 }
 
 /// [`resolve_member_state`], interned.
