@@ -161,6 +161,7 @@ fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
         ("3", "integer `3`"),
         ("true", "boolean `true`"),
         ("[front]", "a list"),
+        ("minecraft:stone", "block id `minecraft:stone`"),
     ] {
         let window = lowered(&window("").replace("side=front", &format!("side={written}")));
         assert_eq!(

@@ -510,16 +510,16 @@ Multi-building](/spec/components-editing-sites/).
 `E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
 ([§11.3](#113-error-vs-warning)): the member is dropped with nothing in its place, and the
 incomplete side is its own line rather than the compiler. A line does that with an argument the
-member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose `y=`
-is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=` is no
-block id), a value outside the ones its key
-takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair` whose `half=` is an
-identifier other than `top` or `bottom`), or arguments that put it outside its struct as written: a
-`window` past the end of its wall, a `door` or `window` whose rows no course of the walls holds, an
-eave `stair` above the struct or on one where no `roof` has an `overhang=` of at least 1, a `fill`
-or `raw_fill` with a corner outside the struct, or a `raw_block` whose `at=` is
-([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member at the
-size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
+member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose
+`y=` is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=`
+is no block id), a value outside the ones its key takes (a `roof kind=` that names no kind,
+`side=middle`, an eave `stair` whose `half=` is an identifier other than `top` or `bottom`), or
+arguments that put it outside its struct as written: a `window` past the end of its wall, a `door`
+or `window` whose rows no course of the walls holds, an eave `stair` above the struct or on one
+where no `roof` has an `overhang=` of at least 1, a `fill` or `raw_fill` with a corner outside the
+struct, or a `raw_block` whose `at=` is outside it
+([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member
+at the size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
 overhangs as its line says, and an unreadable value counts as the default its `W_IGNORED_ARGUMENT`
 puts in its place. A `roof` whose `kind=` or `slope_to=` does not read may rise as far as any roof
 on its footprint, and `walls` under a `level` that is not placed may hold any row, so a member only
@@ -897,7 +897,7 @@ reads where it is written, carried into the IR and never consulted. It comes in 
 reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
 ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
 accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
-`circuit`, `place` or `connect` is that key today. A `mat_slot=` of either kind is not looked up in
+`circuit`, `place`, `connect`, `raw_block` or `raw_fill` is that key today. A `mat_slot=` of either kind is not looked up in
 the theme, so a slot name the theme does not declare is this warning rather than
 `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword
 reads only under some ways of writing a sibling argument, on a member that writes it another way.

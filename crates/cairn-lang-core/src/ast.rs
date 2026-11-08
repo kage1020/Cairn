@@ -457,7 +457,7 @@ pub enum ValueKind {
     },
     /// Canonical or abstract token without its `@`: `@oak_planks` is `Token("oak_planks")`.
     Token(String),
-    /// Block id as Minecraft spells it, with its state literal: `minecraft:light[level=15]`.
+    /// Block id as Minecraft spells it, with its state literal if any: `minecraft:light[level=15]`.
     BlockId(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(DottedRef),
