@@ -200,16 +200,21 @@ states are the canonical vocabulary, which the state map writes as a canonical t
 The block is written as given. The `raw` phase runs after every other, so a raw block replaces
 whatever another member put in its cell, air included, and none of its states is derived: water
 poured before it does not waterlog it, and the connection rules neither join it to its neighbours
-nor pair it with a chest beside it, though a neighbour still joins it as it would any block
-([Blockstate Model §6.1](/spec/blockstate/#connections)). Two raw members writing one cell contest
-it in their phase, and the later line wins with `W_PHASE_CONFLICT`. A raw member does not size the
-volume. As with a `fill`, a cell outside the footprint, or above every row the struct as written
-reaches, is `E_INVALID_MEMBER`, and a cell in a row the struct reaches but does not build is
+nor pair it with a chest beside it. A neighbour still joins it as it would any block, reading the
+connection states it writes and the block's defaults for the rest, so a pane that writes no side
+stands as a lone post to the wall under it
+([Blockstate Model §6.1](/spec/blockstate/#connections)).
+A raw block over one half of a `door` replaces that half, and the game then drops the other; the
+line asks for that block, so nothing warns. Two raw members writing one cell contest it in their
+phase, and the later line wins with `W_PHASE_CONFLICT`. A raw member does not size the volume. As
+with a `fill`, a cell outside the footprint, or above every row the struct as written reaches, is
+`E_INVALID_MEMBER`, and a cell in a row the struct reaches but does not build is
 `W_DEFERRED_MEMBER`.
 
 A `mat=` that is missing or not a block id is `E_INVALID_MEMBER`. That includes `@stone`, a
 canonical token, which a slot binds. So is an `at=`, `from=` or `to=` that is missing or not a
-triple.
+triple. The `mat=` is judged whether or not the cells build, so a raw member deferred for its row,
+or refused for a cell outside the struct, still gets the finding its `mat=` earns.
 
 A raw member may stand outside an `@edition` guard. Raw ids are edition-specific by nature, and the
 check at the pinned target keeps an unguarded one honest: `minecraft:light` builds on Java and is

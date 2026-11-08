@@ -133,7 +133,7 @@ fn a_guard_parses_whatever_lines_it_holds_and_leaves_them_to_the_check() {
 #[test]
 fn a_malformed_guard_is_refused_at_what_is_wrong_with_it() {
     let body = |guard: &str| format!("struct s size=3x3\n  {guard}\n");
-    let cases: [(String, &str, (u32, u32)); 7] = [
+    let cases: [(String, &str, (u32, u32)); 8] = [
         (
             body("@edition pocket\n    raw_block mat=minecraft:stone at=1,0,1"),
             "`pocket` is not an edition: an `@edition` guard names `java` or `bedrock`",
@@ -176,6 +176,11 @@ fn a_malformed_guard_is_refused_at_what_is_wrong_with_it() {
              `@` opens only an `@edition` guard",
             (2, 3),
         ),
+        (
+            body("@foo java"),
+            "unknown directive `@foo`: inside a body, `@` opens only an `@edition` guard",
+            (2, 3),
+        ),
     ];
     for (source, message, at) in cases {
         assert_eq!(refusal(&source), (message.to_owned(), at), "{source:?}");
@@ -183,10 +188,73 @@ fn a_malformed_guard_is_refused_at_what_is_wrong_with_it() {
 }
 
 #[test]
+fn a_floor_under_a_guard_is_refused_for_the_guard() {
+    let guarded = |item: &str| {
+        format!(
+            "{item}\n  @edition java\n    requires version>=1.21\n    \
+             raw_block mat=minecraft:stone at=1,0,1\n"
+        )
+    };
+    assert_eq!(
+        refusal(&guarded("def d")),
+        (
+            "an `@edition` guard may not hold `requires version>=X`: the floor belongs to the \
+             whole part on every edition, so it goes at the `def` body's own level"
+                .to_owned(),
+            (3, 5),
+        ),
+    );
+    assert_eq!(
+        refusal(&guarded("struct s size=3x3")),
+        (
+            "an `@edition` guard may not hold `requires version>=X`, and neither may the \
+             `struct` or `site` it is in: the floor is the whole file's and is written \
+             `@requires version>=X` at the top of the file"
+                .to_owned(),
+            (3, 5),
+        ),
+    );
+    assert_eq!(
+        refusal("def d\n  @requires version>=1.21\n  raw_block mat=minecraft:stone at=1,0,1\n"),
+        (
+            "a `def` or `theme` body's floor is written `requires version>=X`, without the `@`: \
+             inside a body, `@` opens only an `@edition` guard"
+                .to_owned(),
+            (2, 3),
+        ),
+    );
+}
+
+#[test]
+fn a_guard_in_a_theme_body_is_refused_for_a_theme_named_for_its_edition() {
+    let in_theme =
+        |line: &str| format!("theme t\n  slot f -> @stone\n  {line}\n    slot g -> @dirt\n");
+    assert_eq!(
+        refusal(&in_theme("@edition java")),
+        (
+            "an `@edition` guard stands inside a `struct`, `def` or `site` body, never in a \
+             `theme`: a theme is picked per edition by its name, so write this edition's slots in \
+             a `theme NAME_java` or a `theme NAME_bedrock`"
+                .to_owned(),
+            (3, 3),
+        ),
+    );
+    assert_eq!(
+        refusal(&in_theme("@intended_targets java")),
+        (
+            "`@intended_targets` is a file directive, which goes at the top of the file: inside a \
+             body, `@` opens only an `@edition` guard"
+                .to_owned(),
+            (3, 3),
+        ),
+    );
+}
+
+#[test]
 fn a_guard_outside_every_body_is_refused() {
-    let outside = "an `@edition` guard stands inside a `struct` or `def` body, around the raw \
-                   members it guards: the items of a file are edition-neutral, so move the guard \
-                   into the body that places those blocks";
+    let outside = "an `@edition` guard stands inside a `struct`, `def` or `site` body, around \
+                   the raw members it guards: the items of a file are edition-neutral, so move \
+                   the guard into the body that places those blocks";
     let at_the_top = "@cairn 2026.11\n@edition java\nstruct s size=3x3\n  floor mat_slot=f\n";
     assert_eq!(refusal(at_the_top), (outside.to_owned(), (2, 1)));
     let between_items = "struct s size=3x3\n  floor mat_slot=f\n@edition java\n  \

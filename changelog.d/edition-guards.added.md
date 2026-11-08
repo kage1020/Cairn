@@ -8,10 +8,12 @@
   `cairn check` that pins no edition checks each edition's branch, and reports a finding on a
   guarded line as that edition's.
 - *(cli)* `cairn lower`, which pins no edition, leaves out every member under a guard, and a note on
-  stderr says how many it left out. `cairn info` counts each edition's branch in that edition's
+  stderr says how many it left out. It still reports each edition's findings on those lines, and
+  exits 1 on an error there. `cairn info` counts each edition's branch in that edition's
   rows.
-- *(lsp)* Completion offers `edition` after a line-opening `@` in a body, the two editions after
-  `@edition`, and the raw keywords on a line under a guard.
+- *(lsp)* Completion offers `edition` after a line-opening `@` in a `struct`, `def` or `site`
+  body outside a guard, the two editions after `@edition` there, and the raw keywords on a line
+  under a guard in a `struct` or `def` body.
 - *(tree-sitter)* The grammar reads a guard as an `edition_guard` node, with an `edition_name`
   highlighted as a built-in constant.
 - *(vscode)* `@edition` is highlighted as a directive, and the edition after it as a constant.
