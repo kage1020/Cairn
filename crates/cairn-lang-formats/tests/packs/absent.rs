@@ -6,14 +6,14 @@ use cairn_lang_core::{DiagnosticCode, Edition};
 
 use crate::common::{latest, lower_source};
 
-/// Each finding's code, primary message and notes.
-fn findings(source: &str, edition: Edition) -> Vec<(DiagnosticCode, String, Vec<String>)> {
+/// Each finding's code, the source text it points at, its primary message and its notes.
+fn findings(source: &str, edition: Edition) -> Vec<(DiagnosticCode, &str, String, Vec<String>)> {
     lower_source(source, edition, Some(latest(edition)))
         .diagnostics
         .into_iter()
         .map(|d| {
             let notes = d.notes.into_iter().map(|note| note.message).collect();
-            (d.code, d.primary, notes)
+            (d.code, &source[d.span], d.primary, notes)
         })
         .collect()
 }
@@ -47,10 +47,12 @@ fn a_slot_bound_to_a_block_only_one_edition_has_is_refused_at_the_others_target(
     ];
     for (block, lacks, primary, reason, fix) in cases {
         let source = floored(block);
+        let token = format!("@{block}");
         assert_eq!(
             findings(&source, lacks),
             [(
                 DiagnosticCode::ParityUnsupported,
+                token.as_str(),
                 primary.to_owned(),
                 vec![reason.to_owned(), fix.to_owned()],
             )],
@@ -72,12 +74,15 @@ fn a_guarded_raw_block_builds_only_on_its_edition_and_an_unguarded_one_is_offere
     assert_eq!(findings(guarded, Edition::Java), []);
     let bedrock = lower_source(guarded, Edition::Bedrock, Some(latest(Edition::Bedrock)));
     assert_eq!(bedrock.diagnostics, []);
-    assert!(
-        bedrock.structures["struct::s"]
-            .palette
-            .entries
-            .iter()
-            .any(|entry| entry.id == "minecraft:border_block"),
+    let palette: Vec<&str> = bedrock.structures["struct::s"]
+        .palette
+        .entries
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+    assert_eq!(
+        palette,
+        ["minecraft:air", "minecraft:border_block"],
         "the Bedrock build keeps the guarded block",
     );
 
@@ -86,6 +91,7 @@ fn a_guarded_raw_block_builds_only_on_its_edition_and_an_unguarded_one_is_offere
         findings(unguarded, Edition::Java),
         [(
             DiagnosticCode::UnknownId,
+            "minecraft:border_block",
             "`minecraft:border_block` is not a block in `java 26.3`".to_owned(),
             vec![
                 "`minecraft:border_block` is a block only Bedrock has: the border block, which \
