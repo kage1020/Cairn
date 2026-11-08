@@ -13,6 +13,7 @@ use super::binding::ThemeBinding;
 
 /// Resolution of one whole [`IntentModule`](crate::intent::IntentModule).
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Resolution {
     /// One entry per theme defined in the module, keyed by theme name.
     pub themes: IndexMap<String, ThemeBinding>,
@@ -24,7 +25,8 @@ pub struct Resolution {
     /// Diagnostics found while resolving, in emission order.
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
-    /// The edition the theme variants were bound for, whose `@edition` guards lowering keeps.
+    /// The edition the theme variants were bound for, whose `@edition` guards resolution and
+    /// lowering both read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edition: Option<Edition>,
 }

@@ -468,6 +468,50 @@ fn a_raw_block_keeps_its_state_and_a_neighbour_still_joins_it() {
 }
 
 #[test]
+fn a_wall_under_a_raw_pane_reads_only_the_sides_the_pane_writes() {
+    // `spec/materials-themes` "Raw blocks".
+    let raw = lowered_with(
+        &yard(
+            "@cobblestone_wall",
+            2,
+            "raw_block mat=minecraft:glass_pane at=2,2,2",
+        ),
+        &Rules,
+    );
+    assert_eq!(raw.diagnostics, []);
+    let ba = only_structure(&raw);
+    assert_eq!(at(ba, 2, 2, 2), "minecraft:glass_pane[]");
+    let under = wall("low", "none", "none", true, "low");
+    assert_eq!(at(ba, 2, 1, 2), under);
+    assert_eq!(
+        set_into(
+            "@cobblestone_wall",
+            2,
+            "@glass_pane[east=false,west=false]",
+            2
+        )[1],
+        under,
+        "the same as a themed pane that writes those sides",
+    );
+}
+
+#[test]
+fn a_raw_wall_on_a_wall_stands_as_written_and_the_wall_under_reads_its_defaults() {
+    let out = lowered_with(
+        &yard(
+            "@cobblestone_wall",
+            2,
+            "raw_block mat=minecraft:cobblestone_wall at=2,2,2",
+        ),
+        &Rules,
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    assert_eq!(at(ba, 2, 2, 2), "minecraft:cobblestone_wall[]");
+    assert_eq!(at(ba, 2, 1, 2), wall("low", "none", "none", true, "low"));
+}
+
+#[test]
 fn a_block_beside_that_the_target_cannot_say_anything_of_is_joined_as_nothing() {
     let out = lowered_with(
         &yard(

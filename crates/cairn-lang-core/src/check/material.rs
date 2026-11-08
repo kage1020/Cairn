@@ -22,7 +22,10 @@ fn walk(
 ) {
     for member in members {
         // `member_scope::walk`'s gates: such a row is already reported, subtree and all.
-        if matches!(member.role, MemberRole::Other(_)) || !member.role.is_read_in(body) {
+        if matches!(member.role, MemberRole::Other(_))
+            || (member.edition_guard.is_some() && !member.role.is_escape_hatch())
+            || !member.role.is_read_in(body)
+        {
             continue;
         }
         if names_no_material(member) {

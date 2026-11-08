@@ -27,7 +27,7 @@ use super::members::{MemberDisposition, StructCtx, flatten_members, member_dispo
 use super::paint::paint_member;
 use super::phase::Phase;
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
-use super::token_diag::{diag_derived_state_domain, diag_state_unmapped};
+use super::token_diag::{NamedBy, diag_derived_state_domain, diag_state_unmapped};
 use super::written::{Written, written_members};
 
 /// What every body of one run is lowered against.
@@ -206,11 +206,12 @@ fn state_findings<'a>(
     members.iter().flat_map(move |member| {
         member.resolved_state.iter().flat_map(move |block| {
             let outside = diag_derived_state_domain(&member.span, &block.state, registry);
-            let raw = matches!(
-                role_of(&member.role),
-                MemberRole::RawBlock | MemberRole::RawFill
-            );
-            let unmapped = diag_state_unmapped(member.span.clone(), &block.state, registry, raw);
+            let named_by = match role_of(&member.role) {
+                MemberRole::RawBlock | MemberRole::RawFill => NamedBy::RawMat,
+                _ => NamedBy::Binding,
+            };
+            let unmapped =
+                diag_state_unmapped(member.span.clone(), &block.state, registry, named_by);
             outside.into_iter().chain(unmapped)
         })
     })
@@ -278,10 +279,6 @@ fn paint_phases(
         .filter(|(_, _, member)| matches!(member.role, MemberRole::Walls))
         .map(|&(index, _, _)| index)
         .collect();
-    let raw: Vec<u32> = by_phase[Phase::Raw.index()]
-        .iter()
-        .map(|&(index, _, _)| index)
-        .collect();
     let mut canvas = Canvas::new(ctx.dims, phases);
     let mut hung = Vec::new();
     for (phase, bucket) in Phase::ALL.into_iter().zip(by_phase) {
@@ -298,7 +295,7 @@ fn paint_phases(
         }
     }
     if let Some(registry) = ctx.registry {
-        derive_connections(&mut canvas, palette, registry, &raw);
+        derive_connections(&mut canvas, palette, registry);
     }
     let split = split_doors(&hung, &canvas);
     (canvas, split)

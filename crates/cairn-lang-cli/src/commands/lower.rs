@@ -3,11 +3,13 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockArrayIr, findings_without_target, lower_to_block_array,
+};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::intent::{IntentModule, circuit_lines};
 use cairn_lang_core::resolve::resolve;
-use cairn_lang_core::{Edition, Severity, lower};
+use cairn_lang_core::{Edition, Severity, Span, lower};
 use cairn_lang_formats::registry::builtin_pack;
 
 use crate::cli::LowerFormat;
@@ -24,6 +26,23 @@ pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerForm
     // No `--target`, so no version to check ids against.
     let registry = builtin_pack(edition.unwrap_or(Edition::Java)).view(None);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
+    // With no edition pinned the guarded lines are left out, but `check` judges them, and so does
+    // the gate.
+    let guarded: Vec<&Span> = match edition {
+        Some(_) => Vec::new(),
+        None => [Edition::Java, Edition::Bedrock]
+            .into_iter()
+            .flat_map(|edition| ir.lines_guarded_for(edition))
+            .collect(),
+    };
+    if !guarded.is_empty() {
+        let declared = |edition, id: &str| builtin_pack(edition).may_declare(id);
+        block_ir.diagnostics.extend(
+            findings_without_target(&ir, None, &declared)
+                .into_iter()
+                .filter(|finding| finding.touches(&guarded)),
+        );
+    }
     // Check findings lead, ahead of the lowering deferrals they cascade into.
     block_ir.diagnostics = build_diagnostics(
         &module,

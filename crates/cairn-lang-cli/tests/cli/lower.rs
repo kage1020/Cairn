@@ -70,6 +70,7 @@ fn members_under_edition_guards_are_left_out_and_counted_in_a_note() {
         .iter()
         .map(|p| p["id"].as_str().expect("id is a string"))
         .collect();
+    ids.sort_unstable();
     ids.dedup();
     assert_eq!(
         ids,
@@ -177,6 +178,18 @@ fn a_circuit_finding_fails_a_lower_pinned_to_an_edition() {
     let unpinned = Run::from(cairn("lower", &[file]));
     assert_eq!(unpinned.code, Some(0), "stderr={}", unpinned.stderr);
     assert_stream(&unpinned.stderr, &[]);
+}
+
+#[test]
+fn a_guarded_line_check_refuses_fails_the_lowering_that_leaves_it_out() {
+    let source = "struct s size=5x5\n  @edition java\n    raw_block mat=minecraft:stone at=2,4,2\n  \
+                  raw_block mat=minecraft:dirt at=1,0,1\n";
+    let tmp = TempDir::new().expect("tempdir");
+    let src_path = write_source(tmp.path(), "guarded.crn", source);
+    let run = Run::from(cairn("lower", &[src_path.to_str().unwrap()]));
+    assert_eq!(run.code, Some(1), "stderr={}", run.stderr);
+    assert_stream(&run.stderr, &[(3, 5, "error", "E_INVALID_MEMBER")]);
+    assert_eq!(run.stdout, "");
 }
 
 #[test]
