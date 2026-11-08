@@ -13,7 +13,7 @@ use crate::resolve::{TokenKind, classify_token};
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::cell_box::{Shape, written_cells};
 use super::members::StructCtx;
-use super::token_diag::{check_state_literal, diag_unknown_id};
+use super::token_diag::{IdSite, check_state_literal, diag_undeclared_id};
 
 /// The note on a `mat=` that is missing or no block id, saying what one is.
 const BLOCK_ID: &str = "write `mat=` as the block id itself, `namespace:path`, as in \
@@ -83,7 +83,11 @@ fn raw_state(
             check_state_literal(written, &state, ctx.registry, diagnostics).then_some(state)
         }
         Err(unknown) => {
-            diagnostics.push(diag_unknown_id(written.span.clone(), &unknown));
+            diagnostics.push(diag_undeclared_id(
+                written.span.clone(),
+                &unknown,
+                IdSite::Raw,
+            ));
             None
         }
     }
