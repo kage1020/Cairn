@@ -4,20 +4,13 @@
 
 use std::fs;
 
-use crate::common::{Fixture, assert_stream, bytes_contain, compile_as, nbt_body, stderr_of};
+use crate::common::{Fixture, assert_stream, compile_as, nbt_body, stderr_of, string_tags};
 
 /// The light block under a guard per edition, inside walls tall enough to hold it.
 const LIGHT: &str = "theme t:\n  slot floor -> @oak_planks\nstruct s size=3x3\n  \
                      floor mat_slot=floor\n  walls class=outer mat_slot=floor height=3\n  \
                      @edition java\n    raw_block mat=minecraft:light[level=15] at=1,1,1\n  \
                      @edition bedrock\n    raw_block mat=minecraft:light_block_15 at=1,1,1\n";
-
-/// How many times `needle` occurs in `hay`.
-fn occurrences(hay: &[u8], needle: &str) -> usize {
-    hay.windows(needle.len())
-        .filter(|w| *w == needle.as_bytes())
-        .count()
-}
 
 #[test]
 fn a_pinned_build_writes_its_own_editions_guarded_block_and_not_the_others() {
@@ -27,8 +20,10 @@ fn a_pinned_build_writes_its_own_editions_guarded_block_and_not_the_others() {
     assert_eq!(java.status.code(), Some(0), "stderr={}", stderr_of(&java));
     assert_stream(&stderr_of(&java), &[]);
     let nbt = nbt_body(&fixture.out().join("s.nbt"));
-    assert!(bytes_contain(&nbt, "minecraft:light"));
-    assert!(!bytes_contain(&nbt, "light_block_15"));
+    assert_eq!(
+        string_tags(&nbt, "Name", false),
+        ["minecraft:air", "minecraft:light", "minecraft:oak_planks"],
+    );
 
     let bedrock = compile_as(&fixture, "bedrock", "1.21.60");
     assert_eq!(
@@ -39,9 +34,14 @@ fn a_pinned_build_writes_its_own_editions_guarded_block_and_not_the_others() {
     );
     assert_stream(&stderr_of(&bedrock), &[]);
     let structure = fs::read(fixture.out().join("s.mcstructure")).expect("read artifact");
-    assert_eq!(occurrences(&structure, "minecraft:light_block_15"), 1);
-    // Every `minecraft:light` is the start of the Bedrock spelling, so the Java one is absent.
-    assert_eq!(occurrences(&structure, "minecraft:light"), 1);
+    assert_eq!(
+        string_tags(&structure, "name", true),
+        [
+            "minecraft:air",
+            "minecraft:light_block_15",
+            "minecraft:oak_planks"
+        ],
+    );
 }
 
 /// Only the Bedrock guard's id is checked against Bedrock 1.21.0, which spells it `light_block`.

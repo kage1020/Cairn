@@ -29,6 +29,7 @@ pub use intended_targets::weigh_intended_targets;
 pub use sink::DiagnosticSink;
 
 use crate::ast::Module;
+use crate::diagnostic::{EditionFindings, agreed};
 use crate::edition::Edition;
 use crate::intent::IntentModule;
 
@@ -61,34 +62,22 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
 }
 
 /// The resolver's findings on `ir` under `edition`, or with none pinned and some line under an
-/// `@edition` guard, the ones each edition's branch raises or that sit on a line only one reads
+/// `@edition` guard, those [`agreed`] keeps of each edition's branch resolved with no variant pinned
 /// (`spec/lint` "Error vs warning").
 fn resolver_findings(ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
     if edition.is_some() || !ir.has_edition_guards() {
         return crate::resolve::resolve(ir, edition).diagnostics;
     }
-    let branches = [Edition::Java, Edition::Bedrock].map(|edition| {
-        (
-            edition,
-            crate::resolve::resolve(ir, Some(edition)).diagnostics,
-        )
-    });
-    let mut kept: Vec<Diagnostic> = Vec::new();
-    for (i, (edition, found)) in branches.iter().enumerate() {
-        let own = ir.lines_guarded_for(*edition);
-        for finding in found {
-            let raised_by_each = branches.iter().enumerate().all(|(j, (_, other))| {
-                i == j
-                    || other
-                        .iter()
-                        .any(|o| o.code == finding.code && o.span == finding.span)
-            });
-            if (raised_by_each || finding.touches(&own)) && !kept.contains(finding) {
-                kept.push(finding.clone());
-            }
-        }
-    }
-    kept
+    agreed(
+        [Edition::Java, Edition::Bedrock]
+            .into_iter()
+            .map(|edition| EditionFindings {
+                found: crate::resolve::findings_on_branch(ir, edition),
+                guarded: ir.lines_guarded_for(edition),
+                themes: Vec::new(),
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

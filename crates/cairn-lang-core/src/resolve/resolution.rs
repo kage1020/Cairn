@@ -28,7 +28,16 @@ pub struct Resolution {
     /// The edition the theme variants were bound for, whose `@edition` guards resolution and
     /// lowering both read.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub edition: Option<Edition>,
+    pub(crate) edition: Option<Edition>,
+}
+
+impl Resolution {
+    /// The edition the theme variants were bound for, whose `@edition` guards resolution and
+    /// lowering both read.
+    #[must_use]
+    pub fn edition(&self) -> Option<Edition> {
+        self.edition
+    }
 }
 
 /// One end of a `connect` row, resolved to a `(place, port)` pair.

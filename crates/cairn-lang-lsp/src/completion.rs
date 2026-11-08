@@ -954,7 +954,21 @@ mod tests {
         let after = "struct s size=3x3\n  @edition java\n    raw_block at=1,0,1\n  ";
         assert_eq!(
             labels(&complete(after, "at=1,0,1\n  ")),
-            labels(&complete("struct s size=3x3\n  ", "\n  ")),
+            [
+                "floor",
+                "walls",
+                "fill",
+                "door",
+                "window",
+                "roof",
+                "stair",
+                "level",
+                "pressure_plate",
+                "chest",
+                "circuit",
+                "raw_block",
+                "raw_fill",
+            ],
         );
         let in_site = "site town size=9x9\n  @";
         assert_eq!(labels(&complete(in_site, "@")), ["edition"]);
