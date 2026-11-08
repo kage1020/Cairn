@@ -241,18 +241,12 @@ fn a_pinned_target_reports_a_state_its_map_has_no_form_for() {
     let refused = pinned("1.21.40");
     let stderr = String::from_utf8(refused.stderr).expect("utf-8");
     assert_eq!(refused.status.code(), Some(1), "stderr={stderr}");
-    assert_stream(
-        &stderr,
-        &[
-            (2, 13, "warning", "W_STATE_LITERAL_UNCHECKED"),
-            (5, 3, "error", "E_STATE_UNMAPPED"),
-        ],
-    );
+    assert_stream(&stderr, &[(5, 3, "error", "E_STATE_UNMAPPED")]);
 
     let accepted = pinned("1.21.60");
     let stderr = String::from_utf8(accepted.stderr).expect("utf-8");
     assert_eq!(accepted.status.code(), Some(0), "stderr={stderr}");
-    assert_stream(&stderr, &[(2, 13, "warning", "W_STATE_LITERAL_UNCHECKED")]);
+    assert_stream(&stderr, &[]);
 }
 
 #[test]
@@ -282,15 +276,12 @@ fn the_json_report_carries_the_state_unmapped_payload() {
         .collect();
     assert_eq!(
         data,
-        [
-            &serde_json::Value::Null,
-            &serde_json::json!({
+        [&serde_json::json!({
                 "kind": "state_unmapped",
                 "id": "minecraft:cherry_wood",
                 "states": "axis=x",
-                "registry": "bedrock 1.21.40",
-            }),
-        ],
+            "registry": "bedrock 1.21.40",
+        })],
         "got: {stdout}",
     );
 }

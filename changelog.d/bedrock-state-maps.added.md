@@ -12,9 +12,8 @@
 - *(core)* `E_STATE_UNMAPPED` refuses, at a pinned target, a block state a member or a walkway's
   `path=` built that the target's state map has no form for, such as `@cherry_wood[axis=x]` at
   Bedrock 1.21.40, where the writer would otherwise fail on it. A block whose pair the version's
-  palette refuses is refused even written bare, and a value only another version's map holds, such
-  as a note block's `instrument=trumpet` before 1.26.60, is refused there. The note names the
-  targetable versions whose map has a form for the state. `cairn check --target`, `cairn compile`
+  palette refuses is refused even written bare. The note names the targetable versions whose map
+  has a form for the state. `cairn check --target`, `cairn compile`
   and the `buildable targets` row of `cairn info` raise it, and a `TargetRegistry` answers it
   through `unmapped_state`.
 - *(cli)* Each `dropped` intent in `cairn info --format json` names the versions that lose it,

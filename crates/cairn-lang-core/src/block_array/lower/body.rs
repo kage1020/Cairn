@@ -24,7 +24,7 @@ use super::members::{MemberDisposition, StructCtx, flatten_members, member_dispo
 use super::paint::paint_member;
 use super::phase::Phase;
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
-use super::token_diag::diag_state_unmapped;
+use super::token_diag::{diag_derived_state_domain, diag_state_unmapped};
 use super::written::{Written, written_members};
 
 /// What every body of one run is lowered against.
@@ -127,7 +127,8 @@ pub(super) fn lower_body_to_block_array<'a>(
     let mut palette = match palette.into_palette() {
         Ok(palette) => palette,
         Err(Overflow::Full(full)) => {
-            diagnostics.push(diag_palette_too_large(&body, full));
+            let checked = registry.is_some_and(|registry| registry.block_ids().is_some());
+            diagnostics.push(diag_palette_too_large(&body, full, checked));
             return None;
         }
         Err(Overflow::StandIn) => return None,
@@ -169,7 +170,7 @@ pub(super) fn lower_body_to_block_array<'a>(
     array.canonicalize_palette();
     let members = resolved_members(&flattened, canvas.owners(), &array);
     if let Some(registry) = registry {
-        diagnostics.extend(unmapped_states(&members, registry));
+        diagnostics.extend(state_findings(&members, registry));
     }
 
     Some(LoweredBody {
@@ -192,14 +193,17 @@ fn cut_openings(flattened: &[(u32, &Member)], wrote: &[bool]) -> HashSet<Span> {
         .collect()
 }
 
-/// An `E_STATE_UNMAPPED` for each state a member resolved to that `registry` has no form for.
-fn unmapped_states<'a>(
+/// The findings on each state a member resolved to that `registry` cannot carry: a derived pair
+/// outside the block's states, or a state its state map has no form for.
+fn state_findings<'a>(
     members: &'a [ResolvedMember],
     registry: &'a dyn TargetRegistry,
 ) -> impl Iterator<Item = Diagnostic> + 'a {
     members.iter().flat_map(move |member| {
-        member.resolved_state.iter().filter_map(move |block| {
-            diag_state_unmapped(member.span.clone(), &block.state, registry)
+        member.resolved_state.iter().flat_map(move |block| {
+            let outside = diag_derived_state_domain(&member.span, &block.state, registry);
+            let unmapped = diag_state_unmapped(member.span.clone(), &block.state, registry);
+            outside.into_iter().chain(unmapped)
         })
     })
 }
@@ -377,8 +381,20 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
     }
 }
 
-/// A body painted more distinct block states than its palette holds.
-fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagnostic {
+/// A body painted more distinct block states than its palette holds; `checked` when a pinned
+/// target checked its block ids.
+fn diag_palette_too_large(
+    body: &BodyDescriptor<'_>,
+    full: PaletteFull,
+    checked: bool,
+) -> Diagnostic {
+    let fix = if checked {
+        "the pinned target declares each block id, so split the members across more than one \
+         `struct`, each painting fewer"
+    } else {
+        "a vanilla registry has far fewer, so check the block ids and state literals by pinning \
+         a shipped version with `--edition` and `--target`"
+    };
     Diagnostic {
         code: DiagnosticCode::PaletteTooLarge,
         span: body.header_span.clone(),
@@ -390,11 +406,9 @@ fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagn
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "every state a member writes counts, including one a later member \
-                      covers; a vanilla registry has far fewer, so check the block ids with \
-                      `--edition` and `--target`, and each state literal by hand, since no \
-                      target checks its properties (`W_STATE_LITERAL_UNCHECKED`)"
-                .to_owned(),
+            message: format!(
+                "every state a member writes counts, including one a later member covers; {fix}"
+            ),
         }],
         data: None,
     }

@@ -113,13 +113,14 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
         format!("  error: {}", invalid.leaks()[0]),
         "the leak is quoted, not reworded",
     );
-    assert!(
-        lines[2].contains("a state literal in the source")
-            && lines[2].contains("a property the Java block does not have, or a value outside")
-            && lines[2].contains("a leak in the pack or this compiler"),
-        "the block names both places such a blockstate can come from, since the leak's own \
-         `Fix:` addresses only the first, got: {}",
+    // Both places such a blockstate can come from, since the leak's own `Fix:` names only one.
+    assert_eq!(
         lines[2],
+        "  note: a validated pack cannot produce these, so each is either a state literal in the \
+         source — a property the Java block does not have, or a value outside its domain, which \
+         `E_STATE_DOMAIN` refuses at a pinned target but these figures' range-wide lowering does \
+         not check — or a leak in the pack or this compiler. The figure is withheld rather than \
+         counting a validation gap as ordinary portability",
     );
 }
 

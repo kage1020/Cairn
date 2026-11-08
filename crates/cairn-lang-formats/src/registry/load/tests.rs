@@ -1262,7 +1262,12 @@ fn a_pinned_view_names_the_other_versions_whose_map_has_the_state() {
     let states = r#"{
         "schema_version": 1,
         "namespace": "minecraft",
+        "refused": { "1.21.60": ["oak_planks"] },
         "families": [
+            {
+                "mc_versions": ["1.21.50"], "ids": ["oak_planks"],
+                "java": {}, "defaults": {}, "states": {}
+            },
             {
                 "mc_versions": ["1.21.50"], "ids": ["oak_log"],
                 "java": { "axis": ["x", "y", "z"] }, "defaults": { "axis": "y" },
@@ -1280,22 +1285,32 @@ fn a_pinned_view_names_the_other_versions_whose_map_has_the_state() {
         write_pack_with_states(dir, BOTH_STATE_FILES, states, NO_SENSITIVITY);
     })
     .expect("pack");
+    let at_1_21_60 = pack.view(Some("1.21.60"));
     assert_eq!(
-        pack.view(Some("1.21.60"))
-            .unmapped_state(&log(&[("axis", "x")])),
+        at_1_21_60.unmapped_state(&BlockState::bare("minecraft:oak_planks")),
         Some(UnmappedState {
             registry: "bedrock 1.21.60".to_owned(),
-            reason: "its state map there is read from a Java release whose `minecraft:oak_log` \
-                     has no `axis=x`, which the map of 1.21.50 holds"
+            reason: "its palette does not declare the states GeyserMC maps \
+                     `minecraft:oak_planks` to, so the pack carries no form for them"
                 .to_owned(),
             mapped_at: vec!["1.21.50".to_owned()],
         }),
     );
+    // Outside the block's states at 1.21.60, so `E_STATE_DOMAIN`'s to answer.
+    let sideways = log(&[("axis", "x")]);
+    assert_eq!(at_1_21_60.unmapped_state(&sideways), None);
     assert_eq!(
-        pack.view(Some("1.21.50"))
-            .unmapped_state(&log(&[("axis", "x")])),
-        None
+        at_1_21_60.state_domain(&sideways),
+        StateDomain::Checked(vec![OutOfDomain {
+            key: "axis".to_owned(),
+            value: "x".to_owned(),
+            fault: DomainFault::ValueOutside {
+                values: vec!["y".to_owned()],
+            },
+            valid_at: vec!["1.21.50".to_owned()],
+        }]),
     );
+    assert_eq!(pack.view(Some("1.21.50")).unmapped_state(&sideways), None);
 }
 
 #[test]
@@ -1323,6 +1338,79 @@ fn a_state_map_belongs_to_a_bedrock_pack_with_block_tables() {
     })
     .expect_err("block tables without a state map");
     assert!(matches!(err, RegistryError::StatesMissing), "{err}");
+}
+
+#[test]
+fn a_pair_only_an_untargetable_version_takes_names_no_version() {
+    let pack = load_from_dir_or_die("untargetable-pair", |dir| {
+        write_full_pack(
+            dir,
+            manifest_with_blocks(),
+            r#"{
+            "schema_version": 2,
+            "latest": "1.21.4",
+            "versions": [
+                { "mc_version": "1.21.1", "data_version": 3955, "targetable": false },
+                { "mc_version": "1.21.4", "data_version": 4189 }
+            ]
+        }"#,
+            &one_material(r#"{ "token": "a.b", "block": "oak_log" }"#),
+            r#"{
+            "schema_version": 2,
+            "namespace": "minecraft",
+            "base": { "mc_version": "1.21.1", "blocks": {
+                "oak_log": { "axis": ["x", "y", "z", "w"] }
+            } },
+            "diffs": [{
+                "mc_version": "1.21.4",
+                "inherits": "1.21.1",
+                "changed": { "oak_log": { "axis": ["x", "y", "z"] } }
+            }]
+        }"#,
+        );
+    });
+    let sideways = BlockState {
+        id: "minecraft:oak_log".to_owned(),
+        properties: [("axis".to_owned(), "w".to_owned())].into_iter().collect(),
+    };
+    assert_eq!(
+        pack.view(Some("1.21.4")).state_domain(&sideways),
+        StateDomain::Checked(vec![OutOfDomain {
+            key: "axis".to_owned(),
+            value: "w".to_owned(),
+            fault: DomainFault::ValueOutside {
+                values: vec!["x".to_owned(), "y".to_owned(), "z".to_owned()],
+            },
+            valid_at: Vec::new(),
+        }]),
+    );
+}
+
+#[test]
+fn a_bedrock_pack_without_block_tables_leaves_a_state_unrecorded() {
+    let pack = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            "",
+            &log_states(r#"["1.21.50", "1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+        let manifest = dir.join("pack.json");
+        let mut parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest).expect("read manifest"))
+                .expect("the manifest parses");
+        parsed["files"]
+            .as_object_mut()
+            .expect("a files object")
+            .remove("blocks");
+        std::fs::write(&manifest, parsed.to_string()).expect("write manifest");
+    })
+    .expect("a pack of materials alone");
+    assert_eq!(
+        pack.view(Some("1.21.60"))
+            .state_domain(&log(&[("axis", "q")])),
+        StateDomain::Unrecorded
+    );
 }
 
 #[test]
@@ -1445,4 +1533,31 @@ fn the_builtin_bedrock_pack_maps_every_targetable_version() {
         targetable
     );
     assert!(builtin_pack(Edition::Java).states().is_none());
+}
+
+#[test]
+fn a_block_table_without_states_leaves_a_declared_blocks_state_unrecorded() {
+    let pack = load_from_dir_or_die("ids-only", |dir| {
+        write_full_pack(
+            dir,
+            manifest_with_blocks(),
+            good_data_versions(),
+            &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+            good_blocks(),
+        );
+    });
+    let pinned = pack.view(Some("1.21.4"));
+    let planks = BlockState {
+        id: "minecraft:oak_planks".to_owned(),
+        properties: [("axis".to_owned(), "x".to_owned())].into_iter().collect(),
+    };
+    assert_eq!(pinned.state_domain(&planks), StateDomain::Unrecorded);
+    let undeclared = BlockState {
+        id: "minecraft:dirt".to_owned(),
+        ..planks
+    };
+    assert_eq!(
+        pinned.state_domain(&undeclared),
+        StateDomain::AnsweredElsewhere
+    );
 }

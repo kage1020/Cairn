@@ -5,10 +5,13 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry, UnmappedState};
+use cairn_lang_core::block_array::{
+    BlockIdSet, BlockState, DomainFault, OutOfDomain, StateDomain, TargetRegistry, UnmappedState,
+};
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{VersionOrder, compare_versions};
 use cairn_lang_core::suggest::nearest_match;
+use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
@@ -105,7 +108,9 @@ pub struct RegistryPack {
 /// A registry pack seen through the one version a compile pinned, whose ids it checks against.
 #[derive(Debug, Clone)]
 pub struct PackView<'a> {
+    edition: Edition,
     materials: &'a MaterialsIndex,
+    blocks: &'a BlocksIndex,
     /// Edition-wide; `ids` narrows a group to the spellings this target declares.
     aliases: &'a AliasIndex,
     mc_version: Option<&'a str>,
@@ -113,7 +118,7 @@ pub struct PackView<'a> {
     ids: Option<&'a [String]>,
     /// The pinned version's state map; `None` unpinned or without a `states` component.
     states: Option<VersionStates<'a>>,
-    /// The edition's state maps, read for the other versions that have a form for a state.
+    /// Every version's state map, read for the other versions that take or carry a state.
     state_maps: Option<&'a StateMapIndex>,
     /// The targetable versions, which alone a note may offer as a `--target`.
     targetable: Vec<&'a str>,
@@ -138,6 +143,11 @@ impl TargetRegistry for PackView<'_> {
 
     fn unmapped_state(&self, state: &BlockState) -> Option<UnmappedState> {
         let pinned = self.states?;
+        // A pair outside the block's states here is `E_STATE_DOMAIN`'s to answer.
+        if matches!(self.state_domain(state), StateDomain::Checked(outside) if !outside.is_empty())
+        {
+            return None;
+        }
         // An unknown property or value is not the map's to answer: it is not the block's state.
         let reason = match pinned.resolve(state) {
             Err(StateRefusal::Unmapped { reason }) => reason,
@@ -160,6 +170,44 @@ impl TargetRegistry for PackView<'_> {
         })
     }
 
+    fn state_domain(&self, state: &BlockState) -> StateDomain {
+        let Some(version) = self.mc_version else {
+            return StateDomain::Unpinned;
+        };
+        let id = state.id.as_str();
+        let recorded = match self.edition {
+            // An id the target does not declare is `E_UNKNOWN_ID`'s to answer.
+            Edition::Java => self.ids.is_some_and(|ids| {
+                !contains(ids, id) || self.blocks.states_of(version, id).is_some()
+            }),
+            Edition::Bedrock => self.states.is_some(),
+        };
+        if !recorded {
+            return StateDomain::Unrecorded;
+        }
+        let Some(domain) = self.domain_at(version, id) else {
+            return StateDomain::AnsweredElsewhere;
+        };
+        let outside = state.properties.iter().filter_map(|(key, value)| {
+            let fault = match domain.get(key) {
+                None => DomainFault::UnknownProperty {
+                    properties: domain.keys().cloned().collect(),
+                },
+                Some(values) if !values.contains(value) => DomainFault::ValueOutside {
+                    values: values.clone(),
+                },
+                Some(_) => return None,
+            };
+            Some(OutOfDomain {
+                key: key.clone(),
+                value: value.clone(),
+                fault,
+                valid_at: self.valid_at(version, id, key, value),
+            })
+        });
+        StateDomain::Checked(outside.collect())
+    }
+
     fn aliases_for(&self, id: &str) -> Vec<String> {
         // Unfiltered, a group would suggest spellings from other versions and editions.
         let Some(ids) = self.ids else {
@@ -168,13 +216,54 @@ impl TargetRegistry for PackView<'_> {
         self.aliases
             .spellings_of(id)
             .iter()
-            .filter(|spelling| {
-                ids.binary_search_by(|known| known.as_str().cmp(spelling.as_str()))
-                    .is_ok()
-            })
+            .filter(|spelling| contains(ids, spelling))
             .cloned()
             .collect()
     }
+}
+
+/// A block's canonical states at one version: each property with the values it takes.
+type Domain = IndexMap<String, Vec<String>>;
+
+impl PackView<'_> {
+    /// The canonical states `id` takes at `version`, or `None` when the tables give it none to
+    /// check against there.
+    fn domain_at(&self, version: &str, id: &str) -> Option<Domain> {
+        match self.edition {
+            Edition::Java => self.blocks.states_of(version, id).map(|states| {
+                states
+                    .properties()
+                    .map(|(property, values)| {
+                        let values = values.iter().map(ToString::to_string).collect();
+                        (property.to_owned(), values)
+                    })
+                    .collect()
+            }),
+            Edition::Bedrock => self.state_maps?.at(version)?.canonical_domain(id),
+        }
+    }
+
+    /// The targetable versions other than `pinned` whose tables take `key=value` on `id`.
+    fn valid_at(&self, pinned: &str, id: &str, key: &str, value: &str) -> Vec<String> {
+        self.targetable
+            .iter()
+            .copied()
+            .filter(|version| *version != pinned)
+            .filter(|version| {
+                self.domain_at(version, id).is_some_and(|domain| {
+                    domain
+                        .get(key)
+                        .is_some_and(|values| values.iter().any(|held| held == value))
+                })
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+/// Whether the sorted `ids` hold `id`.
+fn contains(ids: &[String], id: &str) -> bool {
+    ids.binary_search_by(|known| known.as_str().cmp(id)).is_ok()
 }
 
 /// A registry pack that could not be read or failed validation.
@@ -544,7 +633,8 @@ impl RegistryPack {
         self.blocks.declared_by_some_version(id).unwrap_or(true)
     }
 
-    /// The view block-array lowering consults for `mc_version`; `None` skips the id check.
+    /// The view block-array lowering consults for `mc_version`; `None` skips the id and state
+    /// checks.
     ///
     /// # Panics
     ///
@@ -569,7 +659,9 @@ impl RegistryPack {
             ids
         });
         PackView {
+            edition: self.manifest.edition,
             materials: &self.materials,
+            blocks: &self.blocks,
             aliases: &self.aliases,
             mc_version,
             ids,

@@ -5,10 +5,12 @@ use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{MemberRole, ValueWithSpan};
-use crate::suggest::{candidate_list, did_you_mean_note};
+use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
-use crate::block_array::material::{IdOrigin, TargetRegistry, UnknownId, UnmappedState};
+use crate::block_array::material::{
+    DomainFault, IdOrigin, OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState,
+};
 
 /// What becomes of a member whose `mat_slot=` resolves to no material.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,25 +151,208 @@ pub(super) fn diag_unknown_abstract_token(
     }
 }
 
-/// Warn that a state literal reaches the output unchecked, when `value` carries one.
-pub(super) fn diag_state_literal_unchecked(
+/// Check the state literal `value` carries against the pinned target, reporting each pair outside
+/// its block's states, or the literal as unchecked where the target records none; `false` when a
+/// pair is outside, and the member or walkway binding it is then not built.
+pub(super) fn check_state_literal(
     value: &ValueWithSpan,
     state: &BlockState,
-) -> Option<Diagnostic> {
-    let ValueKind::Token(text) = &value.value.kind else {
-        return None;
+    registry: Option<&dyn TargetRegistry>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let (ValueKind::Token(text), Some(registry)) = (&value.value.kind, registry) else {
+        return true;
     };
     if state.properties.is_empty() || !text.contains('[') {
-        return None;
+        return true;
     }
+    match registry.state_domain(state) {
+        StateDomain::Unpinned | StateDomain::AnsweredElsewhere => true,
+        StateDomain::Unrecorded => {
+            diagnostics.push(diag_state_literal_unchecked(
+                value.span.clone(),
+                state,
+                &target_label(registry),
+            ));
+            true
+        }
+        StateDomain::Checked(faults) => {
+            let target = target_label(registry);
+            diagnostics.extend(faults.iter().map(|fault| {
+                diag_state_domain(
+                    value.span.clone(),
+                    &state.id,
+                    fault,
+                    &target,
+                    StateOrigin::Literal,
+                )
+            }));
+            faults.is_empty()
+        }
+    }
+}
+
+/// Report each pair of `state`, which lowering built for the member at `span`, outside its
+/// block's states at the pinned target.
+pub(super) fn diag_derived_state_domain(
+    span: &Span,
+    state: &BlockState,
+    registry: &dyn TargetRegistry,
+) -> Vec<Diagnostic> {
+    let StateDomain::Checked(faults) = registry.state_domain(state) else {
+        return Vec::new();
+    };
+    let target = target_label(registry);
+    faults
+        .iter()
+        .map(|fault| {
+            diag_state_domain(
+                span.clone(),
+                &state.id,
+                fault,
+                &target,
+                StateOrigin::Derived,
+            )
+        })
+        .collect()
+}
+
+/// How the pinned target reads in a finding.
+fn target_label(registry: &dyn TargetRegistry) -> String {
+    registry
+        .block_ids()
+        .map_or_else(|| "the target".to_owned(), |ids| ids.label().to_owned())
+}
+
+/// Who wrote a state an `E_STATE_DOMAIN` is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StateOrigin {
+    /// A state literal in the source.
+    Literal,
+    /// Lowering, for the member's geometry.
+    Derived,
+}
+
+impl StateOrigin {
+    fn kind(self) -> &'static str {
+        match self {
+            Self::Literal => "literal",
+            Self::Derived => "derived",
+        }
+    }
+}
+
+/// One pair of a state on block `id` that `target` does not take.
+fn diag_state_domain(
+    span: Span,
+    id: &str,
+    fault: &OutOfDomain,
+    target: &str,
+    origin: StateOrigin,
+) -> Diagnostic {
+    let OutOfDomain {
+        key,
+        value,
+        fault: kind,
+        valid_at,
+    } = fault;
+    let valid = kind.valid();
+    let listed = valid.join(", ");
+    let (primary, suggestion) = match kind {
+        DomainFault::UnknownProperty { .. } => {
+            let takes = if valid.is_empty() {
+                "it takes no state".to_owned()
+            } else {
+                format!("its states are {listed}")
+            };
+            (
+                format!("`{id}` has no state `{key}` at {target}; {takes}"),
+                nearest_match(key, valid.iter().map(String::as_str))
+                    .map(|near| (near.to_owned(), format!("{near}={value}"))),
+            )
+        }
+        DomainFault::ValueOutside { .. } => (
+            format!("`{id}` takes no `{key}={value}` at {target}; `{key}` takes {listed}"),
+            nearest_match(value, valid.iter().map(String::as_str))
+                .map(|near| (near.to_owned(), format!("{key}={near}"))),
+        ),
+    };
+    let mut notes = Vec::with_capacity(2);
+    // A derived pair is lowering's, so the author has no literal to correct.
+    if origin == StateOrigin::Literal {
+        notes.extend(suggestion.as_ref().map(|(_, pair)| did_you_mean_note(pair)));
+    }
+    let elsewhere = (!valid_at.is_empty())
+        .then(|| format!("`{key}={value}` is valid at {}", valid_at.join(", ")));
+    let correct = match kind {
+        DomainFault::UnknownProperty { .. } if valid.is_empty() => {
+            format!("remove `{key}` from the state literal")
+        }
+        DomainFault::UnknownProperty { .. } => {
+            format!("correct the state literal to a state {target} takes")
+        }
+        DomainFault::ValueOutside { .. } => {
+            format!("correct the state literal to a value {target} takes")
+        }
+    };
+    let fix = match (origin, elsewhere, kind) {
+        (StateOrigin::Derived, elsewhere, _) => format!(
+            "{}lowering derived this state for the member, so Cairn's derivation or the registry \
+             pack's table for the block is wrong; bind the member's material to another block",
+            elsewhere.map_or_else(String::new, |at| format!("{at}, but ")),
+        ),
+        (StateOrigin::Literal, Some(at), _) => format!(
+            "{at}: pass {} as `--target`, or {correct}",
+            if valid_at.len() == 1 {
+                "that version"
+            } else {
+                "one of them"
+            },
+        ),
+        (StateOrigin::Literal, None, DomainFault::UnknownProperty { .. }) if valid.is_empty() => {
+            correct
+        }
+        (StateOrigin::Literal, None, DomainFault::UnknownProperty { .. }) => format!(
+            "remove `{key}` from the state literal, or correct it to a state {target} takes"
+        ),
+        (StateOrigin::Literal, None, DomainFault::ValueOutside { .. }) => {
+            format!("{correct}, or leave `{key}` out for the block's default")
+        }
+    };
+    notes.push(DiagnosticNote {
+        span: None,
+        message: fix,
+    });
+    Diagnostic {
+        code: DiagnosticCode::StateDomain,
+        span,
+        primary,
+        notes,
+        data: Some(DiagnosticData::StateDomain {
+            id: id.to_owned(),
+            key: key.clone(),
+            value: value.clone(),
+            registry: target.to_owned(),
+            reason: kind.kind().to_owned(),
+            valid: valid.to_vec(),
+            origin: origin.kind().to_owned(),
+            suggestion: suggestion.map(|(near, _)| near),
+            valid_at: valid_at.clone(),
+        }),
+    }
+}
+
+/// Warn that a state literal reaches the output unchecked, since `target` records no states for
+/// its block.
+fn diag_state_literal_unchecked(span: Span, state: &BlockState, target: &str) -> Diagnostic {
     let pairs = state.properties_text();
-    Some(Diagnostic {
+    Diagnostic {
         code: DiagnosticCode::StateLiteralUnchecked,
-        span: value.span.clone(),
+        span,
         primary: format!(
-            "`{id}` is written with `{pairs}` unchecked: nothing checks a state literal's \
-             properties or values against the target yet",
-            id = state.id,
+            "`{id}` is written with `{pairs}` unchecked: {target}'s registry pack records no \
+             states for the block",
+            id = state.id
         ),
         notes: vec![DiagnosticNote {
             span: None,
@@ -177,7 +362,7 @@ pub(super) fn diag_state_literal_unchecked(
                 .to_owned(),
         }],
         data: None,
-    })
+    }
 }
 
 /// Report `state`, built at `span`, when the pinned target's state map has no form for it.

@@ -93,7 +93,7 @@ Bedrock のパックは、ステートマップをさらに 2 つのコンポー
 
 未知の ID、ドメイン外のステート、パリティの欠落はハードエラーです。黙って置き換えることも、暗黙に落とすことも禁止します。エラーは、ターゲットで有効な候補の閉じた集合、最小バージョン、修正案を返します。モデルを自分の記憶ではなく、レジストリ由来の候補へ引き戻すためです。
 
-ドメイン外のステートは、まだ検査していません。パックは各ブロックのステートを持っていますが ([§10.3](#103-バックエンドはデータテーブル))、下の `E_STATE_DOMAIN` は未実装です。それまでは、ステートリテラル ([構文](/ja/spec/syntax/)) は書かれたとおりに出力され、代わりにどれにも `W_STATE_LITERAL_UNCHECKED` ([Lint](/ja/spec/lint/)) が付きます。下の `E_PARITY_UNSUPPORTED` も未実装です ([§10.7](#代替を書くとき))。最小バージョンを示すエラーもまだありません。ID を最初に宣言したバージョンは表からわかりますが、エラーはまだそれを読みません ([後述](#未知の-id-はどのレジストリに照らして未知なのか))。
+下の `E_PARITY_UNSUPPORTED` は未実装です ([§10.7](#代替を書くとき))。最小バージョンを示すエラーもまだありません。ID を最初に宣言したバージョンは表からわかりますが、エラーはまだそれを読みません ([後述](#未知の-id-はどのレジストリに照らして未知なのか))。
 
 ```text
 E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
@@ -102,12 +102,20 @@ E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
 E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
   Valid java targets: 1.21.4. Fix: --target 1.21.4, or lower the @requires floor
 
-E_STATE_DOMAIN line 18: wall north=true invalid for 1.21.4. Valid: none, low, tall (changed from boolean in 1.16).
-  Suggested DSL: wall_segment id=yard_wall connect_north=low
+E_STATE_DOMAIN line 18: minecraft:creaking_heart has no state `active` at java 26.3. Valid: axis, creaking_heart_state, natural.
+  `active=true` is valid at 1.21.4. Fix: --target 1.21.4, or correct the state literal
 
 E_PARITY_UNSUPPORTED line 8: text_display is Java-only (since 1.19.4); Bedrock has no display entity.
   Suggested: sign side=front text="Inn", or slot+theme fallback, or @edition java guard
 ```
+
+### ステートはターゲットでのブロックのステートと照らし合わせる
+
+メンバーが解決したブロックステートのプロパティと値は、どれも固定したバージョンでそのブロックが取るステートと照らし合わせ、外れたものは `E_STATE_DOMAIN` になります ([Lint](/ja/spec/lint/))。Java では `blocks` の表のステートです。Bedrock のパレットのエントリはライターが写すまで Java のステートを持つので、Bedrock では、そのバージョンのステートマップが読む正規の語彙です ([行列の畳み込み](#edition-version-行列の畳み込み))。そこでどの Java ブロックも写されない ID や、そのバージョンのパレットがステートを拒否する ID にはステートがなく、そのステートは代わりに `E_STATE_UNMAPPED` になります。この検査は ID の検査と同じところでだけ行います ([後述](#未知の-id-はどのレジストリに照らして未知なのか))。バージョンを固定しない lowering は、どちらも固定するビルドに任せます。
+
+ステートリテラル ([構文](/ja/spec/syntax/)) はそのトークンで照らし合わせ、それを割り当てたメンバーや通路は建てません。指摘は、そのペアと、プロパティが取る値 (ブロックにそのプロパティがなければ、ブロックが持つプロパティ) を示します。どこかで有効なリテラルの原因として最もありそうなのはリリースの間でドメインが変わったことで、そのときの直し方はソースの編集ではなくターゲットの指定なので、そのペアを取るほかのバージョンも示します。lowering が自分で導くステート (階段の `facing`、`half`、`shape`) もメンバーの位置で照らし合わせるので、ターゲットのブロックが持てない導出は、書き出さずに拒否します。これは Cairn かパックの表の欠陥で、指摘もそう述べます。
+
+固定したターゲットのパックがステートを記録していないブロックへのリテラルは、書かれたとおりに出力し、黙って通さないよう `W_STATE_LITERAL_UNCHECKED` ([Lint](/ja/spec/lint/)) を付けます。組み込みの 2 つのパックはどちらもすべてのブロックのステートを記録しているので、記録のないブロックを残せるのは外部のパックだけです。
 
 ### 未知の ID はどのレジストリに照らして未知なのか
 
@@ -320,7 +328,7 @@ semantic-sensitive:      (none)
 
 #### パックが弾くべきだったブロックステートは数に入れない
 
-ステートの変換器には、ほかに 2 種類の失敗が届くことがあります。Java のブロックにないプロパティと、そのドメイン外の値 (階段の `facing=up`) です。どちらもエディションについての答えではありません。検証済みのレジストリパックからはどちらも生まれないので、出どころは、まだターゲットに照らして検査していないソースのステートリテラル (`W_STATE_LITERAL_UNCHECKED`、[§10.4](#104-fail-loud-と最小バージョン推定)) か、パックまたは Cairn の欠陥のどちらかです。あるバージョンのマップが持つ値は、それを持たないマップのバージョンでもドメイン外にはなりません。1.26.60 より前の `instrument=trumpet` がその例で、古いマップに形がないだけの正規の語彙なので、そこでは形のないほかのステートと同じく数えます。
+ステートの変換器には、ほかに 2 種類の失敗が届くことがあります。Java のブロックにないプロパティと、そのドメイン外の値 (階段の `facing=up`) です。どちらもエディションについての答えではありません。検証済みのレジストリパックからはどちらも生まれないので、出どころは、固定したどのターゲットでも `E_STATE_DOMAIN` が拒否するものの、この行が読む範囲全体の lowering では照らし合わせないソースのステートリテラル ([§10.4](#ステートはターゲットでのブロックのステートと照らし合わせる)) か、パックまたは Cairn の欠陥のどちらかです。あるバージョンのマップが持つ値は、それを持たないマップのバージョンでもこうした漏れにはなりません。1.26.60 より前の `instrument=trumpet` がその例で、古いマップに形がないだけの正規の語彙なので、そこでは形のないほかのステートと同じく数えます。
 
 したがって、これらは `unsupported` の 3 つ目、4 つ目の理由ではありません。パレットにこうしたエントリを含むエディションについては、`cairn info` は可搬性の数値を **一切** 報告しません。数値そのものは計算できますが、通常の可搬性の数値として読まれてしまいます。`facing=up` を `unsupported: 1` と数えると、どの Bedrock バージョンにも形のないステートと見分けがつきません。それこそ、読み手に導かせてはならない結論です。コマンドはそうしたエントリを 1 つずつ、変換器自身のメッセージとともに stderr に出力します。メッセージはソースのブロックステートの直し方を示し、続く note は、各エントリがソースのステートリテラルか、パックまたは Cairn からの漏れのどちらかであることを伝えます。そのうえで行を出さずに非ゼロで終了します。コマンドを拒否するほかの指摘と同じ振る舞いです。
 
@@ -421,7 +429,7 @@ $ cairn compile examples/themed-tower.crn --edition bedrock --target 1.21.60
 warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]: this Bedrock version has no stair `shape` state; its stairs render straight, so corners show visual gaps
 ```
 
-ターゲットのマップが落とすのではなく、そもそも形を持たないステートは、それを作ったメンバーや通路で `E_STATE_UNMAPPED` としてビルドを拒否します ([Lint](/ja/spec/lint/))。そのまま書き出すと、黙ってブロックの既定値になってしまうからです。バージョンの `refused` が挙げるペアは、素のまま書いてもこうして拒否されます。ほかのバージョンのマップだけが持つ値も同じで、1.26.60 より前の `noteblock[instrument=trumpet]` がその例です。それらのマップは、その値のない Java リリースに従うからです。note は、そのステートを持つマップのバージョンを挙げます。
+ターゲットのマップが落とすのではなく、そもそも形を持たないステートは、それを作ったメンバーや通路で `E_STATE_UNMAPPED` としてビルドを拒否します ([Lint](/ja/spec/lint/))。そのまま書き出すと、黙ってブロックの既定値になってしまうからです。バージョンの `refused` が挙げるペアは、素のまま書いてもこうして拒否され、note はそのステートを持つマップのバージョンを挙げます。ほかのバージョンのマップだけが持つ値は、そこではブロックのステートの外にあるので、代わりにそのバージョンを挙げる `E_STATE_DOMAIN` になります ([§10.4](#ステートはターゲットでのブロックのステートと照らし合わせる))。1.26.60 より前の `noteblock[instrument=trumpet]` がその例で、それらのマップはその値のない Java リリースに従います。
 
 トークンで吸収できるのは、ID、ステート、シリアライズの違いだけです。**概念がないことと、ゲーム挙動の違いは吸収しません。** 吸収できない代表例は次のとおりです。
 

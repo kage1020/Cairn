@@ -822,17 +822,46 @@ impl VersionStates<'_> {
     /// [`StateRefusal`] when the map has no form for the states, or they are not the block's.
     pub fn resolve(&self, state: &BlockState) -> Result<BedrockForm, StateRefusal> {
         let id = state.id.as_str();
-        let same = self.map.refused_from.contains(id)
-            || self
-                .map
-                .onto
-                .get(id)
-                .is_some_and(|forms| forms.iter().any(|(java, _)| java == id));
-        if same {
+        if self.reads_as_java(id) {
             self.resolve_same(id, &state.properties)
         } else {
             self.resolve_onto(id, &state.properties)
         }
+    }
+
+    /// Every canonical property `id` takes here with the values it holds, read as [`Self::resolve`]
+    /// reads the id, or `None` when no Java block maps onto it or the palette refuses some of its
+    /// states, so the map cannot tell which states it takes.
+    #[must_use]
+    pub fn canonical_domain(&self, id: &str) -> Option<IndexMap<String, Vec<String>>> {
+        let (forms, refused) = if self.reads_as_java(id) {
+            (self.map.from.get(id), self.map.refused_from.contains(id))
+        } else {
+            (self.map.onto.get(id), self.map.refused_onto.contains(id))
+        };
+        let forms = forms.filter(|forms| !forms.is_empty() && !refused)?;
+        let mut domain: IndexMap<String, Vec<String>> = IndexMap::new();
+        for (_, at) in forms {
+            for (key, held) in &self.family(*at).java {
+                let values = domain.entry(key.clone()).or_default();
+                for value in held {
+                    if !values.contains(value) {
+                        values.push(value.clone());
+                    }
+                }
+            }
+        }
+        Some(domain)
+    }
+
+    /// Whether `id` names its own Java block here rather than a Bedrock spelling others map onto.
+    fn reads_as_java(&self, id: &str) -> bool {
+        self.map.refused_from.contains(id)
+            || self
+                .map
+                .onto
+                .get(id)
+                .is_some_and(|forms| forms.iter().any(|(java, _)| java == id))
     }
 
     fn family(&self, at: usize) -> &Family {
@@ -851,23 +880,27 @@ impl VersionStates<'_> {
             });
         };
         let defaults = &self.family(first).defaults;
-        if let Some(key) = given.keys().find(|key| !defaults.contains_key(*key)) {
+        let unknown = given.keys().find(|key| !defaults.contains_key(*key));
+        let mut full = defaults.clone();
+        full.extend(given.iter().map(|(k, v)| (k.clone(), v.clone())));
+        if unknown.is_none()
+            && let Some((bedrock, at)) = forms.iter().find(|(_, at)| self.family(*at).holds(&full))
+        {
+            return Ok(self.form(bedrock, id, self.family(*at), &full));
+        }
+        // The refused pairs may hold these states, so no family's domain can rule them out.
+        if self.map.refused_from.contains(id) {
+            return Err(StateRefusal::Unmapped {
+                reason: refused(id),
+            });
+        }
+        if let Some(key) = unknown {
             return Err(self.elsewhere(&[id], key, None).unwrap_or_else(|| {
                 StateRefusal::UnknownProperty {
                     key: key.clone(),
                     valid: defaults.keys().cloned().collect(),
                 }
             }));
-        }
-        let mut full = defaults.clone();
-        full.extend(given.iter().map(|(k, v)| (k.clone(), v.clone())));
-        if let Some((bedrock, at)) = forms.iter().find(|(_, at)| self.family(*at).holds(&full)) {
-            return Ok(self.form(bedrock, id, self.family(*at), &full));
-        }
-        if self.map.refused_from.contains(id) {
-            return Err(StateRefusal::Unmapped {
-                reason: refused(id),
-            });
         }
         let held = |key: &str| -> Vec<String> {
             let mut values: Vec<String> = Vec::new();
@@ -943,6 +976,11 @@ impl VersionStates<'_> {
             .filter(|(_, at)| self.family(*at).takes(given))
             .collect();
         let Some(&&(ref java, at)) = fitting.first() else {
+            if self.map.refused_onto.contains(id) {
+                return Err(StateRefusal::Unmapped {
+                    reason: refused(id),
+                });
+            }
             return Err(self.not_taken(id, given, forms));
         };
         let family = self.family(at);

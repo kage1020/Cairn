@@ -2,7 +2,8 @@
 //! (`spec/lint` "Diagnostic codes").
 
 use cairn_lang_core::block_array::{
-    BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, UnmappedState, lower_to_block_array,
+    BlockArrayIr, BlockIdSet, BlockState, StateDomain, TargetRegistry, UnmappedState,
+    lower_to_block_array,
 };
 use cairn_lang_core::{DiagnosticCode, lower, parse, resolve};
 use serde_json::json;
@@ -10,7 +11,7 @@ use serde_json::json;
 use crate::common::{PRELUDE, findings};
 
 /// A pinned target whose state map has no form for a log lying along `x`, or for a jigsaw at all,
-/// which the maps of `mapped_at` have.
+/// which the maps of `mapped_at` have, and whose tables take every state.
 struct NoSidewaysLog {
     ids: Vec<String>,
     with_state_map: bool,
@@ -58,6 +59,10 @@ impl TargetRegistry for NoSidewaysLog {
             mapped_at: self.mapped_at.clone(),
         })
     }
+
+    fn state_domain(&self, _state: &BlockState) -> StateDomain {
+        StateDomain::Checked(Vec::new())
+    }
 }
 
 fn lowered_at(source: &str, registry: &NoSidewaysLog) -> BlockArrayIr {
@@ -81,25 +86,12 @@ fn a_member_building_a_state_the_map_lacks_is_refused_at_the_member() {
     let out = lowered_at(&source, &NoSidewaysLog::pinned());
     assert_eq!(
         findings(&source, &out),
-        [
-            (
-                DiagnosticCode::StateLiteralUnchecked,
-                "@oak_log[axis=x]",
-                "`minecraft:oak_log` is written with `axis=x` unchecked: nothing checks a state \
-                 literal's properties or values against the target yet",
-                vec![
-                    "a property the block does not have, or a value outside its domain, reaches \
-                     the structure file unchanged; check each one against the block's states in \
-                     the target edition and version",
-                ],
-            ),
-            (
-                DiagnosticCode::StateUnmapped,
-                "floor mat_slot=f",
-                "`minecraft:oak_log[axis=x]` has no form at test 1.0: its map has no sideways log",
-                vec![NOTE],
-            ),
-        ],
+        [(
+            DiagnosticCode::StateUnmapped,
+            "floor mat_slot=f",
+            "`minecraft:oak_log[axis=x]` has no form at test 1.0: its map has no sideways log",
+            vec![NOTE],
+        )],
     );
     let unmapped = out
         .diagnostics
@@ -173,8 +165,7 @@ fn the_note_offers_each_version_whose_map_carries_the_state() {
 fn a_state_the_map_carries_is_not_refused() {
     let source = log_floor("y");
     let out = lowered_at(&source, &NoSidewaysLog::pinned());
-    let codes: Vec<DiagnosticCode> = out.diagnostics.iter().map(|d| d.code).collect();
-    assert_eq!(codes, [DiagnosticCode::StateLiteralUnchecked]);
+    assert_eq!(out.diagnostics, []);
 }
 
 #[test]
@@ -185,8 +176,7 @@ fn a_target_without_a_state_map_refuses_no_state() {
         ..NoSidewaysLog::pinned()
     };
     let out = lowered_at(&source, &registry);
-    let codes: Vec<DiagnosticCode> = out.diagnostics.iter().map(|d| d.code).collect();
-    assert_eq!(codes, [DiagnosticCode::StateLiteralUnchecked]);
+    assert_eq!(out.diagnostics, []);
 }
 
 #[test]
@@ -206,19 +196,11 @@ fn a_walkway_whose_path_the_map_lacks_is_not_laid() {
         .collect();
     assert_eq!(
         found,
-        [
-            (
-                DiagnosticCode::StateLiteralUnchecked,
-                "@oak_log[axis=x]",
-                "`minecraft:oak_log` is written with `axis=x` unchecked: nothing checks a state \
-                 literal's properties or values against the target yet",
-            ),
-            (
-                DiagnosticCode::StateUnmapped,
-                "@oak_log[axis=x]",
-                "`minecraft:oak_log[axis=x]` has no form at test 1.0: its map has no sideways log",
-            ),
-        ],
+        [(
+            DiagnosticCode::StateUnmapped,
+            "@oak_log[axis=x]",
+            "`minecraft:oak_log[axis=x]` has no form at test 1.0: its map has no sideways log",
+        )],
     );
     assert!(out.walkways.is_empty(), "{:?}", out.walkways.keys());
 
