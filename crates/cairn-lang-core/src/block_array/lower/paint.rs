@@ -6,6 +6,7 @@ use crate::intent::{Member, MemberRole};
 use crate::block_array::PaletteIndex;
 
 use super::canvas::{MemberCanvas, ScopePalette};
+use super::chest::fill_chest;
 use super::door::{HungDoor, fill_door};
 use super::members::{StructCtx, palette_index_for};
 use super::plate::fill_pressure_plate;
@@ -66,6 +67,7 @@ pub(super) fn paint_member(
         MemberRole::PressurePlate => {
             fill_pressure_plate(member, y_offset, ctx, palette, canvas, diagnostics);
         }
+        MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Level
         | MemberRole::Circuit
         | MemberRole::Place

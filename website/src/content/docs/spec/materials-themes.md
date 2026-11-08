@@ -117,6 +117,7 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
 | `@sign.oak`, `@sign.oak_wall` | A standing sign and a wall sign |
 | `@door.default` | The door block a `door` places when no `mat_slot=` binds one |
+| `@chest.default` | The chest block a `chest` places when no `mat_slot=` binds one |
 | `@pressure_plate.default` | The block a `pressure_plate` places when no `mat_slot=` binds one |
 
 The block a tier-1 token resolves to is **tier-2**, which is Evolving: it is the catalog's answer

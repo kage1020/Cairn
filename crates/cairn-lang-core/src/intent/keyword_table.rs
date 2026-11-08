@@ -12,6 +12,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "stair",
     "level",
     "pressure_plate",
+    "chest",
     "circuit",
     "place",
     "connect",
@@ -52,6 +53,8 @@ pub enum MemberRole {
     Level,
     /// `pressure_plate` fixture.
     PressurePlate,
+    /// `chest` fixture.
+    Chest,
     /// `circuit` redstone region marker.
     Circuit,
     /// `place` site placement.
@@ -177,6 +180,7 @@ impl MemberRole {
             ],
             Self::Level => &["y"],
             Self::PressurePlate => &["at", "offset", "y"],
+            Self::Chest => &["at", "offset", "y", "facing", "size"],
             Self::Circuit => &["region", "void"],
             // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
             // fix this set.
@@ -193,6 +197,7 @@ impl MemberRole {
         match self {
             Self::Stair => &["half", "facing", "shape", "waterlogged"],
             Self::Door => &["hinge", "open"],
+            Self::Chest => &["facing", "size"],
             Self::Floor
             | Self::Walls
             | Self::Window
@@ -242,7 +247,12 @@ impl MemberRole {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
             }],
-            Self::Floor | Self::Walls | Self::Door | Self::PressurePlate | Self::Other(_) => &[],
+            Self::Floor
+            | Self::Walls
+            | Self::Door
+            | Self::PressurePlate
+            | Self::Chest
+            | Self::Other(_) => &[],
         }
     }
 
@@ -308,6 +318,7 @@ impl MemberRole {
             | Self::Window
             | Self::Level
             | Self::PressurePlate
+            | Self::Chest
             | Self::Circuit
             | Self::Connect
             | Self::Other(_) => &[],
@@ -342,6 +353,7 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "stair" => MemberRole::Stair,
         "level" => MemberRole::Level,
         "pressure_plate" => MemberRole::PressurePlate,
+        "chest" => MemberRole::Chest,
         "circuit" => MemberRole::Circuit,
         "place" => MemberRole::Place,
         "connect" => MemberRole::Connect,

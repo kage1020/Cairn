@@ -1302,6 +1302,10 @@ const SLOT_READERS: &[(&str, &str)] = &[
         "door",
         "struct s size=3x3\n  door id=front side=front at=center mat_slot=d\n",
     ),
+    (
+        "chest",
+        "struct s size=3x3\n  chest at=inside.front offset=1 mat_slot=c\n",
+    ),
 ];
 
 /// A themeless struct per keyword whose role reads no `mat_slot=`, `mat_slot=d` on its member;
@@ -2021,6 +2025,7 @@ fn the_family_is_reported_before_the_properties_it_makes_moot() {
     let Ok(id) = geometry_material_id(
         member,
         Some(scope),
+        None,
         Some(&state),
         || Ok::<_, std::convert::Infallible>(STAIR_BASE_ID.to_owned()),
         &GeometryMemberDescription {

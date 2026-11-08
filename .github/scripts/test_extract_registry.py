@@ -984,6 +984,14 @@ class BlockKind(unittest.TestCase):
         self.assertEqual(registry.block_kind("nether_brick_fence", FENCE_STATES, TAGS), "fence")
         self.assertIsNone(registry.block_kind("stone", {}, TAGS))
 
+    def test_a_chest_is_a_block_whose_type_pairs_it(self):
+        chest = {**registry.KIND_STATES["chest"], "waterlogged": registry.BOOLEAN}
+        self.assertEqual(registry.block_kind("trapped_chest", chest, TAGS), "chest")
+        ender = {"facing": chest["facing"], "waterlogged": registry.BOOLEAN}
+        self.assertIsNone(registry.block_kind("ender_chest", ender, TAGS))
+        slab = {"type": ["top", "bottom", "double"], "waterlogged": registry.BOOLEAN}
+        self.assertIsNone(registry.block_kind("oak_slab", slab, TAGS))
+
     def test_a_tagged_block_without_its_kinds_states_is_refused(self):
         with self.assertRaises(load.Refused):
             registry.block_kind("cobblestone_wall", FENCE_STATES, TAGS)

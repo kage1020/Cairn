@@ -4,6 +4,7 @@
 pub mod common;
 
 mod at_side_walkway;
+mod chest_block;
 mod conditional_arguments;
 mod connections;
 mod cottage;

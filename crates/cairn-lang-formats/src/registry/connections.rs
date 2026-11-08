@@ -1,5 +1,5 @@
 //! The `connections` component of a registry pack: what each block is, per version, to the rules
-//! that join panes, fences and walls to their neighbours (`spec/blockstate` "Connections").
+//! that join panes, fences, walls and chests to their neighbours (`spec/blockstate` "Connections").
 
 use std::collections::HashMap;
 
@@ -14,6 +14,9 @@ pub const SUPPORTED_CONNECTIONS_SCHEMA: u32 = 1;
 
 /// The states the rules read of a neighbouring fence gate.
 const GATE_READS: [&str; 2] = ["facing", "open"];
+
+/// The states the rules read of a chest.
+const CHEST_READS: [&str; 1] = ["facing"];
 
 /// The body of `connections.json`.
 #[derive(Debug, Clone, Deserialize)]
@@ -69,6 +72,8 @@ pub enum ConnectionKind {
     WoodenFence,
     /// A fence gate.
     FenceGate,
+    /// A chest, which pairs with a chest of the same block and facing beside it.
+    Chest,
 }
 
 /// Names that hold of a [`ConnectionRow`]'s blocks, in every state alike or by state.
@@ -162,6 +167,10 @@ enum RowKind {
     Gate {
         facing: Face,
         open: bool,
+    },
+    /// A chest, with the `facing` its default state holds.
+    Chest {
+        facing: Face,
     },
 }
 
@@ -326,6 +335,12 @@ impl ConnectionIndex {
                     None => open,
                 },
             }),
+            RowKind::Chest { facing } => Some(JoinKind::Chest {
+                facing: match properties.get("facing") {
+                    Some(written) => side_named(written)?,
+                    None => facing,
+                },
+            }),
         });
         Some(Joins {
             kind,
@@ -404,8 +419,10 @@ fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
         })
         .map(String::as_str)
         .collect();
-    if row.kind == Some(ConnectionKind::FenceGate) {
-        needs.extend(GATE_READS);
+    match row.kind {
+        Some(ConnectionKind::FenceGate) => needs.extend(GATE_READS),
+        Some(ConnectionKind::Chest) => needs.extend(CHEST_READS),
+        _ => {}
     }
     if let Some(missing) = needs.iter().find(|key| !row.defaults.contains_key(**key)) {
         return Err(format!(
@@ -436,6 +453,13 @@ fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
                 open: open
                     .parse()
                     .map_err(|_| format!("the default `open={open}` is neither true nor false"))?,
+            })
+        }
+        Some(ConnectionKind::Chest) => {
+            let facing = &row.defaults["facing"];
+            Some(RowKind::Chest {
+                facing: side_named(facing)
+                    .ok_or_else(|| format!("the default `facing={facing}` is no sideways face"))?,
             })
         }
     };

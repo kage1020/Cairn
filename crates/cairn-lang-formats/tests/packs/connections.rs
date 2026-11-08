@@ -1,16 +1,17 @@
-//! What the built-in packs' connection tables say a block is to the rules that join panes, fences
-//! and walls (`spec/blockstate` "Connections").
+//! What the built-in packs' connection tables say a block is to the rules that join panes, fences,
+//! walls and chests (`spec/blockstate` "Connections").
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockState, Covers, Face, Faces, JoinKind, Joins, TargetRegistry,
 };
+use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_nbt::tag::Tag;
 
-use crate::common::{block_palette, lower_source, states_for};
+use crate::common::{block_palette, lower_source, note_fields, states_for};
 
 /// `minecraft:{id}` with `properties`.
 fn state(id: &str, properties: &[(&str, &str)]) -> BlockState {
@@ -176,6 +177,37 @@ fn a_bedrock_id_several_java_blocks_become_is_read_as_those_that_take_its_states
 }
 
 #[test]
+fn a_chest_is_read_with_the_way_it_faces_and_an_ender_chest_pairs_with_none() {
+    let at = |edition, version, id, properties: &[(&str, &str)]| {
+        joins(edition, Some(version), &state(id, properties))
+    };
+    let chest = |facing| Some(kind(JoinKind::Chest { facing }));
+    assert_eq!(at(Edition::Java, "1.21", "chest", &[]), chest(Face::North));
+    assert_eq!(
+        at(
+            Edition::Java,
+            "1.21",
+            "trapped_chest",
+            &[("facing", "east")]
+        ),
+        chest(Face::East),
+    );
+    assert_eq!(
+        at(Edition::Java, "26.3", "copper_chest", &[]),
+        chest(Face::North)
+    );
+    assert_eq!(at(Edition::Java, "1.21", "copper_chest", &[]), None);
+    assert_eq!(
+        at(Edition::Java, "1.21", "ender_chest", &[]),
+        Some(Joins::default())
+    );
+    assert_eq!(
+        at(Edition::Bedrock, "1.21.0", "chest", &[]),
+        chest(Face::North)
+    );
+}
+
+#[test]
 fn a_bedrock_target_writes_the_connections_a_wall_and_its_gate_derive() {
     let source = "theme t:\n  slot wall -> @cobblestone_wall\n  slot gate -> @fence_gate\n\n\
                   struct s size=5x3\n  walls mat_slot=wall height=1\n  \
@@ -235,5 +267,54 @@ fn a_bedrock_target_writes_the_connections_a_wall_and_its_gate_derive() {
             wall("short", "short", "none", "none", 1),
             "minecraft:fence_gate[direction=2,in_wall_bit=1,open_bit=0]".to_owned(),
         ],
+    );
+}
+
+#[test]
+fn a_bedrock_target_writes_each_half_of_a_chest_pair_single_and_notes_the_pairing_it_drops() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=5x3\n  walls mat_slot=wall height=3\n  \
+                  chest at=inside.back offset=1 y=1\n  chest at=inside.back offset=2 y=1\n";
+    let version = "1.21.0";
+    let out = lower_source(source, Edition::Bedrock, Some(version));
+    assert_eq!(out.diagnostics, []);
+    let target = resolve_bedrock_target(version).expect("known target");
+    let (root, notes) =
+        build_mcstructure_tag(&out.structures["struct::s"], &target, &states_for(&target))
+            .expect("build");
+    let dropped = |value: &str| DroppedIntent {
+        key: "type".to_owned(),
+        value: value.to_owned(),
+        mc_versions: vec![version.to_owned()],
+        reason: "Bedrock pairs chests through their block entities, which Cairn does not write, \
+                 so each chest stands single"
+            .to_owned(),
+    };
+    assert_eq!(
+        note_fields(&notes),
+        [
+            (
+                "minecraft:chest",
+                "facing=south,type=left",
+                &dropped("left")
+            ),
+            (
+                "minecraft:chest",
+                "facing=south,type=right",
+                &dropped("right")
+            ),
+        ],
+    );
+    let chests: Vec<&Tag> = block_palette(&root)
+        .iter()
+        .filter(|entry| {
+            matches!(entry, Tag::Compound(entry)
+                if entry.entries.get("name") == Some(&Tag::String("minecraft:chest".to_owned())))
+        })
+        .collect();
+    assert_eq!(
+        chests.len(),
+        1,
+        "both halves write one single chest: {chests:?}"
     );
 }

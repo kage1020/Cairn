@@ -1,4 +1,4 @@
-//! What a block is to the rules that join panes, fences and walls to their neighbours
+//! What a block is to the rules that join panes, fences, walls and chests to their neighbours
 //! (`spec/blockstate` "Connections").
 
 /// A face of a block, named for the direction it looks toward.
@@ -59,6 +59,29 @@ impl Face {
             Self::South => Self::North,
             Self::West => Self::East,
             Self::East => Self::West,
+        }
+    }
+
+    /// The sideways face a quarter turn clockwise from this one, seen from above; `None` for
+    /// `Down` and `Up`.
+    #[must_use]
+    pub const fn clockwise(self) -> Option<Self> {
+        Some(match self {
+            Self::North => Self::East,
+            Self::East => Self::South,
+            Self::South => Self::West,
+            Self::West => Self::North,
+            Self::Down | Self::Up => return None,
+        })
+    }
+
+    /// The sideways face a quarter turn counter-clockwise from this one, seen from above; `None`
+    /// for `Down` and `Up`.
+    #[must_use]
+    pub const fn counter_clockwise(self) -> Option<Self> {
+        match self.clockwise() {
+            Some(face) => Some(face.opposite()),
+            None => None,
         }
     }
 
@@ -128,6 +151,11 @@ pub enum JoinKind {
         /// Whether it stands open.
         open: bool,
     },
+    /// A chest, which pairs with a chest of the same block and facing beside it.
+    Chest {
+        /// The way its front faces, a sideways face.
+        facing: Face,
+    },
 }
 
 /// The parts of a wall that the bottom of the block above it covers, which stand them tall.
@@ -167,4 +195,26 @@ pub struct Joins {
     pub never_joined_by_face: bool,
     /// Whether the game's `wall_post_override` tag holds it.
     pub raises_post: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Face;
+
+    #[test]
+    fn a_quarter_turn_steps_through_the_sideways_faces_and_leaves_down_and_up_unturned() {
+        let turns = Face::SIDES.map(|face| (face.clockwise(), face.counter_clockwise()));
+        assert_eq!(
+            turns,
+            [
+                (Some(Face::East), Some(Face::West)),
+                (Some(Face::South), Some(Face::North)),
+                (Some(Face::West), Some(Face::East)),
+                (Some(Face::North), Some(Face::South)),
+            ],
+        );
+        for face in [Face::Down, Face::Up] {
+            assert_eq!((face.clockwise(), face.counter_clockwise()), (None, None));
+        }
+    }
 }

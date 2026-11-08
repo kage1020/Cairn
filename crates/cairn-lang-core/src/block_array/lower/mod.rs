@@ -8,11 +8,13 @@
 mod anchor;
 mod body;
 mod canvas;
+mod chest;
 mod circuit;
 mod connect;
 mod connections;
 mod diag;
 mod door;
+mod fixture;
 mod geometry_material;
 mod members;
 mod paint;

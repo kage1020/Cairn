@@ -66,6 +66,7 @@ fn both_packs_declare_the_tokens_that_redirect_the_member_defaults() {
     for (token, member) in [
         ("pressure_plate.default", "plate"),
         ("door.default", "door"),
+        ("chest.default", "chest"),
     ] {
         for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
             for version in supported_versions(pack) {

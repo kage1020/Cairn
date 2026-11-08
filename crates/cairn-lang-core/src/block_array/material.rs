@@ -67,8 +67,9 @@ pub trait TargetRegistry {
         StateDomain::Unrecorded
     }
 
-    /// What `state` is to the rules joining panes, fences and walls to their neighbours at the
-    /// pinned target (`spec/blockstate` "Connections"), or `None` when the registry cannot say.
+    /// What `state` is to the rules joining panes, fences, walls and chests to their neighbours
+    /// at the pinned target (`spec/blockstate` "Connections"), or `None` when the registry cannot
+    /// say.
     fn joins(&self, state: &BlockState) -> Option<Joins> {
         let _ = state;
         None

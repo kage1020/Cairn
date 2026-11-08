@@ -110,6 +110,7 @@ fn draw_eave_band(
     let Ok(stair_id) = geometry_material_id(
         member,
         ctx.scope,
+        ctx.registry,
         resolved.as_ref(),
         || Ok::<_, Infallible>(STAIR_BASE_ID.to_owned()),
         &GeometryMemberDescription {

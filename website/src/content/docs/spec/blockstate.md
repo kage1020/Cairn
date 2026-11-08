@@ -4,18 +4,18 @@ title: "6. Blockstate Model"
 
 ## 6.1 Derive by default, promote on override
 
-**Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape` and a
-door's `hinge` and `open` are built. The others and the `beam`, `chest` and `note_block` keywords
-are not ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+**Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape`, a door's
+`hinge` and `open`, and a chest's `facing` and `size` are built. The others and the `beam` and
+`note_block` keywords are not ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
-Of these, stair geometry, door orientation and pane, fence and wall connections are derived
-today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they sit. An eave `stair`
-gets only its cardinal `facing`, from the side it sits on, and its `half` and `shape` are what its
-line writes, or `top` and `straight`. Connections are set once every member is painted
-([Connections](#connections)). Chest pairing and the torch and sign substitution below are not
+Of these, stair geometry, door and chest orientation, pane, fence and wall connections, and chest
+pairing are derived today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they
+sit. An eave `stair` gets only its cardinal `facing`, from the side it sits on, and its `half` and
+`shape` are what its line writes, or `top` and `straight`. Connections and pairs are set once every
+member is painted ([Connections](#connections)). The torch and sign substitution below is not
 derived yet.
 
 A `door` sets a door block two rows tall into the opening it cuts ([Syntax
@@ -30,6 +30,25 @@ wall on its right than on its left, and on the left otherwise: a door in an unbr
 on the left, one beside a window is hinged on the wall's side, and two side by side are hinged on
 their outer sides, so they open as a pair. A `hinge=left` or `hinge=right`, and an `open=true` or
 `open=false`, on the door's line replace what is derived.
+
+A `chest` sets one chest block against a wall. It takes the cell a `pressure_plate` with the same
+`at=`, `offset=` and `y=` would take: one voxel inside the wall for `at=inside.<side>` and one
+outside it for `at=<side>.outside`. Its line is refused or deferred wherever the plate's would be
+([Redstone §14.2](/spec/redstone/#142-signal-binding)). Its `facing` points away from the wall it
+stands against, into the struct from the inside and out of it from the outside. A `facing=` on its
+line turns it: `in` toward the struct's inside, `out` toward its outside, and `left` or `right`
+along the wall, as seen from outside it, so `left` is toward `offset=0`. A chest pairs with the
+chest beside it ([Connections](#connections)), and `size=single` keeps it single. Any other
+identifier for `facing=` or `size=` is `E_INVALID_MEMBER`, and a value that is no identifier, such
+as `size=2x3`, is `W_IGNORED_ARGUMENT` and read as if the key were not written. The chest's
+`mat_slot=` names its block, and a chest without one is built from the registry pack's
+`@chest.default` ([Materials and Themes §7.2](/spec/materials-themes/#tier-1-tokens)). The block
+MUST be a chest: one the registry pack's `connections` component reads as a chest, a block whose
+`type` is `single`, `left` or `right` ([Versioning and Editions
+§10.3](/spec/versioning-editions/#103-backend--data-tables)), so an ender chest is not one. Where
+the pack cannot say, a block whose id is `chest` or ends in `_chest` is taken as one. Any other is
+`E_INCOMPATIBLE_MATERIAL` ([Lint](/spec/lint/)), and the chest is built from `@chest.default` beside
+the error. A chest holds no contents ([Entities §8.3](/spec/entities/#83-where-the-line-is-drawn)).
 
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
 promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let
@@ -49,13 +68,13 @@ Cases that MUST stay overridable, because each can be intent:
 Two easy-to-miss cases belong to derivation, not intent: `torch` ↔ `wall_torch` and `sign` ↔
 `wall_sign` are substituted automatically by attachment face.
 
-The example below uses keywords the compiler does not know yet. Only its `stair` line is accepted:
-`beam`, `chest` and `note_block` are `E_UNKNOWN_KEYWORD`.
+The example below uses keywords the compiler does not know yet. Only its `stair` and `chest` lines
+are accepted: `beam` and `note_block` are `E_UNKNOWN_KEYWORD`.
 
 ```
 stair id=eave   kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left  # eaves
 beam  id=lintel kind=pillar mat_slot=frame at=front.top axis=x                             # horizontal beam
-chest id=store  at=inside.back size=single
+chest id=store  at=inside.back offset=2 size=single
 note_block at=2,1,2 instrument=bit note=12
 ```
 
@@ -63,9 +82,11 @@ note_block at=2,1,2 instrument=bit note=12
 
 Once every member of a body is painted, each glass pane, run of bars, fence, wall and fence gate in
 it takes its connection states from the blocks beside it, as the game sets them when a block is
-placed. A face of a block is **sturdy** when the block's model covers it whole: a full block's
-every face, a bottom slab's bottom, an upright stair's bottom and back. Leaves, shulker boxes,
-barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined by a face.
+placed. Each chest in it pairs by the rule below, which is Cairn's own: the game pairs chests in the
+order they are placed, which a build does not have. A face of a block is **sturdy** when the block's
+model covers it whole: a full block's every face, a bottom slab's bottom, an upright stair's bottom
+and back. Leaves, shulker boxes, barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are
+never joined by a face.
 
 - A pane's `north`, `east`, `south` and `west` are `true` toward a sturdy face, a pane or a wall.
 - A fence's are `true` toward a sturdy face, a fence of its own group, or a fence gate facing
@@ -87,20 +108,27 @@ barriers, melons, pumpkins, carved pumpkins and jack o'lanterns are never joined
   down where two opposite sides stand tall, and anywhere else rises only under a block the game's
   `wall_post_override` tag lists, a torch or a sign among them, or one that covers the post.
 - A fence gate's `in_wall` is `true` when a wall stands beside it, across the way it faces.
+- A chest's `type` pairs it with a chest of the same block and `facing` beside it, on its own left
+  or right. A row of such chests pairs two by two from its end on the chests' own left, the end
+  toward `offset=0` for a row facing into the struct from inside a wall, and an odd chest at its
+  other end stays `single`. The chest whose partner is on its own right is `left`, and its partner
+  is `right`. A chest that writes its `type`, as `size=single` does, pairs with none.
 
 A state the block's material or line writes is kept, and only the others are derived:
 `@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. The states are
 resolved state, never intent ([§6.2](#62-intent_state-and-resolved_state)).
 
 The blocks beside are those of the same `struct` or `place` body, and nothing outside its array
-counts. What each block is to these rules comes from the target's registry pack
-([Versioning and Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). A lowering
-with no version pinned reads a block as every version of the edition that declares it agrees, and
-as nothing where they disagree; without a pack nothing is derived. A Bedrock target reads its block
-as the canonical blocks its state map names that take the block's states, and its writer maps the
-derived states as it maps every other. A block the pack cannot answer for is nothing to the rules:
-one no canonical block becomes, such as Bedrock's `border_block`, or one the canonical blocks it
-may be disagree on.
+counts. What each block is to these rules comes from the target's registry pack ([Versioning and
+Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). A lowering with no version
+pinned reads a block as every version of the edition that declares it agrees, and as nothing where
+they disagree; without a pack nothing is derived. A Bedrock target reads its block as the canonical
+blocks its state map names that take the block's states, and its writer maps the derived states as
+it maps every other. A block the pack cannot answer for is nothing to the rules: one no canonical
+block becomes, such as Bedrock's `border_block`, or one the canonical blocks it may be disagree on.
+Bedrock keeps a chest's pairing in its block entity, which no writer fills yet, so a Bedrock build
+writes each half of a pair as a single chest and says so with `W_INTENT_DEGRADED` ([Versioning and
+Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
 
 A face, and what a block covers, are read off the block's model as the release's client draws it,
 while the game reads its collision shape. The two disagree for a few blocks. Honey, cactus and
@@ -126,21 +154,22 @@ member:
 The two are named apart from Minecraft's own term "blockstate" on purpose. Keeping resolved state
 (derived or paint-origin) out of intent state (authored) is what makes edits stable.
 
-A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a
-`stair`, `half`, `facing`, `shape` and `waterlogged`, and on a `door`, `hinge` and `open`. No other
-keyword names one yet. Every other `key=value` the line writes is one of the member's arguments,
-apart from `id`, `class` and `mat_slot`, which become fields of their own. Where a key goes depends
-on the keyword: `shape=` on a `stair` is intent, and `shape=` on a `window` is an argument, the
-opening's outline ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
+A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a `stair`,
+`half`, `facing`, `shape` and `waterlogged`, on a `door`, `hinge` and `open`, and on a `chest`,
+`facing` and `size`, the line's spelling of its `type`. No other keyword names one yet. Every other
+`key=value` the line writes is one of the member's arguments, apart from `id`, `class` and
+`mat_slot`, which become fields of their own. Where a key goes depends on the keyword: `shape=` on
+a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
+([Entities §8.2](/spec/entities/#82-anchor-conventions)).
 
 Lowering records each member's `resolved_state` beside the block array it builds: every state the
 member's cells hold once the body is painted, with the cells that hold it as runs along `x`, each
 from its first cell, in block-array order. A cell belongs to the member that painted it last, so a
-door's block is recorded on the door and not on the wall it was set into, and a member none of
-whose cells survive records nothing. `cairn lower --format json` prints the record under `members`,
-keyed like `structures`, which is what lets two builds be compared member by member. A body lists
-its members in the order of the first cell each owns, so reordering lines that share no cell leaves
-the record as it was, as it leaves the grid ([Compilation Model
+door's block is recorded on the door and not on the wall it was set into, and a member none of whose
+cells survive records nothing. `cairn lower --format json` prints the record under `members`, keyed
+like `structures`, which is what lets two builds be compared member by member. A body lists its
+members in the order of the first cell each owns, so reordering lines that share no cell leaves the
+record as it was, as it leaves the grid ([Compilation Model
 §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The record is made each time a
 body is lowered: its block ids are those the lowering's target resolved, a theme's edition variant
 and a pinned version's override included, and its property names are the canonical vocabulary's.

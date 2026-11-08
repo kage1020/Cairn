@@ -142,6 +142,7 @@ impl MemberRole {
                 | Self::Stair
                 | Self::Level
                 | Self::PressurePlate
+                | Self::Chest
                 | Self::Circuit,
             )
             | (BodyKind::Site, Self::Place | Self::Connect) => true,
@@ -156,6 +157,7 @@ impl MemberRole {
                 | Self::Stair
                 | Self::Level
                 | Self::PressurePlate
+                | Self::Chest
                 | Self::Circuit,
             )
             | (_, Self::Other(_)) => false,
@@ -174,6 +176,7 @@ impl MemberRole {
             Self::Stair => "stair",
             Self::Level => "level",
             Self::PressurePlate => "pressure_plate",
+            Self::Chest => "chest",
             Self::Circuit => "circuit",
             Self::Place => "place",
             Self::Connect => "connect",

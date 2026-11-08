@@ -605,11 +605,15 @@ KIND_STATES = {
         "in_wall": BOOLEAN,
         "open": BOOLEAN,
     },
+    "chest": {
+        "facing": ["north", "south", "west", "east"],
+        "type": ["single", "left", "right"],
+    },
 }
 # A pane is any block holding exactly these states that is no fence: the game has no tag for them.
 PANE_STATES = {**KIND_STATES["pane"], WATER_LAYER_STATE: BOOLEAN}
-# The states the rules read of a neighbouring fence gate, which it does not derive.
-GATE_READS = ("facing", "open")
+# The states the rules read of a block of each kind that it does not derive.
+KIND_READS = {"fence_gate": ("facing", "open"), "chest": ("facing",)}
 # The square of a wall's cell, `(x0, x1, z0, z1)`, that the bottom of the block above must cover
 # to cover each part of the wall, as `WallBlock` tests its post and its sides.
 WALL_PARTS = {
@@ -637,7 +641,8 @@ class Lookup:
 class Joins:
     """What one block is to the connection rules at one release."""
 
-    # `pane`, `wall`, `fence`, `wooden_fence` or `fence_gate`; `None` for one that only has faces.
+    # `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate` or `chest`; `None` for one that only
+    # has faces.
     kind: str | None
     never_joined_by_face: bool
     # Whether the game's `wall_post_override` tag holds it.
@@ -950,6 +955,8 @@ def block_kind(name: str, states: dict, tags: dict[str, set[str]]) -> str | None
             ("fence", name in tags["fences"]),
             ("fence_gate", name in tags["fence_gates"]),
             ("pane", states == PANE_STATES and name not in tags["fences"]),
+            # No tag names them: a chest is any block whose `type` takes these values.
+            ("chest", states.get("type") == KIND_STATES["chest"]["type"]),
         )
         if held
     ]
@@ -981,7 +988,7 @@ def connection_table(
         reads = {
             *(sturdy.reads if sturdy else ()),
             *(covers.reads if covers else ()),
-            *(GATE_READS if kind == "fence_gate" else ()),
+            *KIND_READS.get(kind, ()),
         }
         default = next(dict(s.get("properties", {})) for s in block["states"] if s.get("default"))
         joins = Joins(

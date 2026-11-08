@@ -6,10 +6,11 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNo
 use crate::intent::{Member, ValueWithSpan};
 use crate::resolve::ScopeResolution;
 
-use crate::block_array::BlockState;
 use crate::block_array::args::{diag_deferred_member_reason, member_or_slot_span};
+use crate::block_array::joins::JoinKind;
 use crate::block_array::material::is_stand_in;
 use crate::block_array::roof::is_stair;
+use crate::block_array::{BlockState, TargetRegistry};
 
 /// A block family whose blockstates a member's geometry derives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,20 +19,38 @@ pub(super) enum Family {
     Stair,
     /// The `*_door` blocks a `door` sets in its opening.
     Door,
+    /// The blocks the registry pack reads as chests, which a `chest` sets against a wall.
+    Chest,
 }
 
-/// Whether `id` names a door block: its path, not its namespace, ends in `_door`.
+/// The path of `id`, without its namespace.
+fn path_of(id: &str) -> &str {
+    id.rsplit_once(':').map_or(id, |(_, path)| path)
+}
+
+/// Whether `id` names a door block: its path ends in `_door`.
 fn is_door(id: &str) -> bool {
-    let path = id.rsplit_once(':').map_or(id, |(_, path)| path);
-    path.ends_with("_door")
+    path_of(id).ends_with("_door")
+}
+
+/// Whether `id` names a chest block: one the pack reads as a chest, or, where it cannot say, one
+/// whose path is `chest` or ends in `_chest` (`spec/blockstate` "Derive by default, promote on
+/// override").
+fn is_chest(id: &str, registry: Option<&dyn TargetRegistry>) -> bool {
+    if let Some(joins) = registry.and_then(|registry| registry.joins(&BlockState::bare(id))) {
+        return matches!(joins.kind, Some(JoinKind::Chest { .. }));
+    }
+    let path = path_of(id);
+    path == "chest" || path.ends_with("_chest")
 }
 
 impl Family {
     /// Whether `id` is a block of this family.
-    fn admits(self, id: &str) -> bool {
+    fn admits(self, id: &str, registry: Option<&dyn TargetRegistry>) -> bool {
         match self {
             Self::Stair => is_stair(id),
             Self::Door => is_door(id),
+            Self::Chest => is_chest(id, registry),
         }
     }
 
@@ -40,6 +59,7 @@ impl Family {
         match self {
             Self::Stair => "stair",
             Self::Door => "door",
+            Self::Chest => "chest",
         }
     }
 
@@ -48,6 +68,7 @@ impl Family {
         match self {
             Self::Stair => "`facing` / `half` / `shape`",
             Self::Door => "`facing` / `half` / `hinge`",
+            Self::Chest => "`facing` / `type`",
         }
     }
 
@@ -60,6 +81,10 @@ impl Family {
             }
             Self::Door => {
                 "bind the slot to a `*_door` material — the registry pack's `door.default` \
+                 resolves to one"
+            }
+            Self::Chest => {
+                "bind the slot to a chest material — the registry pack's `chest.default` \
                  resolves to one"
             }
         }
@@ -86,6 +111,7 @@ pub(super) struct GeometryMemberDescription {
 pub(super) fn geometry_material_id<E>(
     member: &Member,
     scope: Option<&ScopeResolution>,
+    registry: Option<&dyn TargetRegistry>,
     resolved: Option<&BlockState>,
     fallback: impl FnOnce() -> Result<String, E>,
     shape: &GeometryMemberDescription,
@@ -113,7 +139,7 @@ pub(super) fn geometry_material_id<E>(
         .and_then(|binding| binding.slot_value.as_ref());
     // Whether a stand-in belongs to the family is the target's pack to say.
     if let Some(family) = shape.requires
-        && !family.admits(&state.id)
+        && !family.admits(&state.id, registry)
         && !is_stand_in(state)
     {
         diagnostics.push(diag_incompatible_material(

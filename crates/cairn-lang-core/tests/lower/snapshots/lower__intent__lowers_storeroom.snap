@@ -1,0 +1,149 @@
+---
+source: crates/cairn-lang-core/tests/lower/intent.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: pantry
+    slots:
+      floor:
+        kind: Token
+        value: spruce_planks
+      wall:
+        kind: Token
+        value: cobblestone
+      roof:
+        kind: Token
+        value: spruce_stairs
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: storeroom
+    size:
+      w: 7
+      h: 5
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: floor
+        arguments: {}
+        intent_state: {}
+      - role:
+          kind: Walls
+        mat_slot: wall
+        arguments:
+          height:
+            kind: Int
+            value: 3
+        intent_state: {}
+      - role:
+          kind: Door
+        arguments:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+        intent_state: {}
+      - role:
+          kind: Roof
+        mat_slot: roof
+        arguments:
+          kind:
+            kind: Ident
+            value: gable
+          overhang:
+            kind: Int
+            value: 1
+        intent_state: {}
+      - id: grain
+        role:
+          kind: Chest
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - back
+          offset:
+            kind: Int
+            value: 1
+          y:
+            kind: Int
+            value: 1
+        intent_state: {}
+      - id: flour
+        role:
+          kind: Chest
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - back
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 1
+        intent_state: {}
+      - id: salt
+        role:
+          kind: Chest
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - back
+          offset:
+            kind: Int
+            value: 3
+          y:
+            kind: Int
+            value: 1
+        intent_state: {}
+      - id: tools
+        role:
+          kind: Chest
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - left
+          offset:
+            kind: Int
+            value: 1
+          y:
+            kind: Int
+            value: 1
+        intent_state:
+          size:
+            kind: Ident
+            value: single
+      - id: seeds
+        role:
+          kind: Chest
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - left
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 1
+        intent_state: {}

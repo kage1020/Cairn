@@ -87,7 +87,7 @@ semantic-sensitive:      (none)
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
-- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, pressure plates, and `level` grouping.
+- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, pressure plates, chests, and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
@@ -98,7 +98,7 @@ semantic-sensitive:      (none)
 **Not yet.**
 
 - Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
-- Blockstate derived beyond stairs, doors and connections. Chests are not paired and waterlogging is not derived.
+- `waterlogged` derivation, and the `fill` that sets it.
 - `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
 - `.litematic` and `.schem` writers, and importing existing schematics.
 - Redstone in compiled output, gates and sequential macros beyond `and` / `or` / `not`, `assert latency`, and the tick simulator that verifies a circuit.

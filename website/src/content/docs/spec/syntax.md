@@ -204,7 +204,7 @@ means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
+`pressure_plate`, `chest`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
 is global, so writing one in the other body parses and classifies and then reaches nothing. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
 A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
