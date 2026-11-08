@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::diagnostic::{Diagnostic, sort_by_position};
+use crate::diagnostic::{Diagnostic, EditionFindings, agreed};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::intent::IntentModule;
@@ -47,7 +47,7 @@ pub fn findings_without_target(
             (resolution, found)
         })
         .collect();
-    agreed(intent, lowerings)
+    agreed_lowerings(intent, lowerings)
 }
 
 /// Whether lowering reads the same input from both: the scopes, the connects and, when `guarded`
@@ -56,55 +56,61 @@ fn lowers_alike(a: &Resolution, b: &Resolution, guarded: bool) -> bool {
     a.scopes == b.scopes && a.connects == b.connects && (!guarded || a.edition == b.edition)
 }
 
-/// The findings of `lowerings` that every target reading their line raises: one in a theme only
-/// its own lowering binds, one any of whose spans is on a line under its own edition's guard, or
-/// one each lowering raises with the same code at the same span.
-fn agreed(
+/// The findings [`agreed`] keeps of `lowerings`, where a theme only one lowering binds is that
+/// lowering's own, like the lines under its edition's guards.
+fn agreed_lowerings(
     intent: &IntentModule,
-    mut lowerings: Vec<(Resolution, Vec<Diagnostic>)>,
+    lowerings: Vec<(Resolution, Vec<Diagnostic>)>,
 ) -> Vec<Diagnostic> {
-    if lowerings.len() == 1 {
-        return lowerings.pop().map(|(_, found)| found).unwrap_or_default();
-    }
-    let bound: Vec<HashSet<&str>> = lowerings
-        .iter()
-        .map(|(resolution, _)| bound_themes(resolution))
-        .collect();
-    let mut seen: HashSet<&Diagnostic> = HashSet::new();
-    let mut kept: Vec<Diagnostic> = Vec::new();
-    for (i, (_, found)) in lowerings.iter().enumerate() {
-        let others = || lowerings.iter().enumerate().filter(move |(j, _)| *j != i);
-        let own: Vec<&Span> = intent
-            .themes
-            .iter()
-            .filter(|theme| {
-                bound[i].contains(theme.name.as_str())
-                    && others().all(|(j, _)| !bound[j].contains(theme.name.as_str()))
-            })
-            .map(|theme| &theme.span)
-            .collect();
-        let guarded = lowerings[i]
-            .0
-            .edition
-            .map(|edition| intent.lines_guarded_for(edition))
-            .unwrap_or_default();
-        for finding in found {
-            let read_alone = own
+    let (resolutions, found): (Vec<Resolution>, Vec<Vec<Diagnostic>>) =
+        lowerings.into_iter().unzip();
+    let bound: Vec<HashSet<&str>> = resolutions.iter().map(bound_themes).collect();
+    let only_bound_by = |i: usize, name: &str| {
+        bound[i].contains(name)
+            && bound
                 .iter()
-                .any(|theme| theme.start <= finding.span.start && finding.span.end <= theme.end)
-                || finding.touches(&guarded);
-            let raised_by_each = others().all(|(_, (_, other))| {
-                other
-                    .iter()
-                    .any(|o| o.code == finding.code && o.span == finding.span)
-            });
-            if (read_alone || raised_by_each) && seen.insert(finding) {
-                kept.push(finding.clone());
-            }
-        }
+                .enumerate()
+                .all(|(j, other)| i == j || !other.contains(name))
+    };
+    let editions = found
+        .into_iter()
+        .enumerate()
+        .map(|(i, found)| EditionFindings {
+            found,
+            guarded: resolutions[i]
+                .edition
+                .map(|edition| intent.lines_guarded_for(edition))
+                .unwrap_or_default(),
+            themes: intent
+                .themes
+                .iter()
+                .filter(|theme| only_bound_by(i, &theme.name))
+                .map(|theme| &theme.span)
+                .collect(),
+        })
+        .collect();
+    agreed(editions)
+}
+
+/// The findings each edition's lowering raises on the lines under its `@edition` guards, which a
+/// lowering that pins no edition leaves out; `declared` is [`findings_without_target`]'s.
+#[must_use]
+pub fn findings_under_guards(
+    intent: &IntentModule,
+    declared: &dyn Fn(Edition, &str) -> bool,
+) -> Vec<Diagnostic> {
+    let guarded: Vec<&Span> = intent
+        .guarded_members()
+        .into_iter()
+        .map(|(_, member)| &member.span)
+        .collect();
+    if guarded.is_empty() {
+        return Vec::new();
     }
-    sort_by_position(&mut kept);
-    kept
+    findings_without_target(intent, None, declared)
+        .into_iter()
+        .filter(|finding| finding.touches(&guarded))
+        .collect()
 }
 
 /// The themes `resolution` binds to some scope, each by its own name.

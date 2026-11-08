@@ -136,3 +136,12 @@ fn a_guard_in_a_def_body_is_kept_where_the_def_is_placed_for_its_edition() {
     assert_eq!(glowstone(Edition::Java), 1);
     assert_eq!(glowstone(Edition::Bedrock), 0);
 }
+
+#[test]
+fn a_refused_line_is_lowered_by_no_edition() {
+    let source = bin("@edition java\n    circuit id=c");
+    for edition in [None, Some(Edition::Java), Some(Edition::Bedrock)] {
+        assert_eq!(unpinned(&source, edition), [], "{edition:?}");
+        assert_eq!(lowered_for(&source, edition).diagnostics, [], "{edition:?}");
+    }
+}
