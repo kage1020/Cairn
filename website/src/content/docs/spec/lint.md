@@ -214,7 +214,8 @@ lowers, with no target, and reports only the findings every target that reads th
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
-family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)).
+family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)), or a `door` bound
+outside the door family ([Syntax §5.4](/spec/syntax/#54-selectors)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
@@ -223,7 +224,7 @@ theme, the lockfile records the bound theme for the placement, and the theme's f
 is bound ([Versioning and Editions](/spec/versioning-editions/#a-part-may-declare-its-own-floor)).
 A module that names such a theme in no `place`, and whose `struct` and `def` members read no
 `mat_slot=` from it, is not reported: the build is byte-identical with or without the pin. A
-`mat_slot=` on a keyword that reads none, such as a `door`'s, is not such a read
+`mat_slot=` on a keyword that reads none, such as a `level`'s, is not such a read
 ([§11.3](#113-error-vs-warning)).
 
 `E_THEME_SELECTOR_UNMATCHED` is a warning despite its prefix. A rule that matches nothing overrides
@@ -235,11 +236,11 @@ from the `severity` field rather than from the first letter.
 `E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: no `mat_slot=` pointing at a slot bound to
 something other than a material token resolves. A `floor` that names it is left air; a `walls` that
 names it is not built and takes up no rows, so a `door` or `window` cut into it is deferred; a
-`window` that names it is not cut, so its wall stays; and a `roof`, eave `stair` or `pressure_plate`
-that names it is built from its default block. Were it a warning, a theme whose slots are all
-mistyped would still build at exit 0 every scope that keeps something to draw, such as a `roof`:
-shorter than asked, with no floor and no walls, and only default blocks, less any eave `stair` or
-`pressure_plate` set higher than the shorter structure reaches.
+`window` that names it is not cut, so its wall stays; and a `roof`, eave `stair`, `door` or
+`pressure_plate` that names it is built from its default block. Were it a warning, a theme whose
+slots are all mistyped would still build at exit 0 every scope that keeps something to draw, such
+as a `roof`: shorter than asked, with no floor and no walls, and only default blocks, less any eave
+`stair` or `pressure_plate` set higher than the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member earns
 both: the key is absent for the first and present-but-unusable for the second. They have different
@@ -253,10 +254,9 @@ absence is not reported, and its name is not looked up, so a label written there
 reach the palette through the applied theme's slot map and have no default block, so a bare one
 contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
 reported; that is how a narrow slit is punched through a wall without choosing a species for it. A
-`door` carves its opening and reads no material, since its own block is not placed yet. A `roof`,
-`stair` or `pressure_plate` paints a default block and is not reported either. `cairn check` raises
-it, before any lowering, and it needs no theme: a module that declares none is still told which of
-its members name no material.
+`roof`, `stair`, `door` or `pressure_plate` paints a default block and is not reported either.
+`cairn check` raises it, before any lowering, and it needs no theme: a module that declares none is
+still told which of its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
 resolved once as its own scope and once again for every `place` that instantiates it, and each of
@@ -289,10 +289,11 @@ without a pack. A front end with no target (the language server, or a `cairn che
 `--target`) raises neither, and leaves the token to the pack of the target that builds it
 ([§11.3](#113-error-vs-warning)).
 
-The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
-or `pressure_plate` is built from its default block. A `walls` is not built and takes up no rows, so
-a `door` or `window` cut into it is deferred. A `window` is not cut, so its wall stays, and a port on
-it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
+The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave
+`stair`, `door` or `pressure_plate` is built from its default block. A `walls` is not built and
+takes up no rows, so a `door` or `window` cut into it is deferred. A `window` is not cut, so its
+wall stays, and a port on it is refused with it
+([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
 all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
@@ -301,7 +302,7 @@ leaves its cells air, and a `roof` is still built from its default block, as is 
 `pressure_plate` that still fits the shorter structure; one set higher than it reaches is deferred.
 It is judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported,
 whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a
-`door`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
+`level`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
 ([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
 nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
 is `E_UNSUPPORTED_NESTING`.
@@ -512,14 +513,14 @@ reserves no region and an actuator patch that binds no door are refused the same
 for a plate the drop reaches past the block array as well: its `->` binding is still read, so its
 signal stays in the netlist with no plate to drive it, and the finding says so in a note.
 
-A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with
-a note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws
-nothing, or a `level` that is not placed. That member's finding, or the scope's
-`W_NO_THEME_BOUND`, says why it did not build. A member whose line is wrong too is
-`E_INVALID_MEMBER` all the same, and so is one whose line also writes what the pass does not lower
-yet, so neither hides a line's own fault. The members under a `level` that is not placed are the
-exception: `E_UNSUPPORTED_NESTING` says that level produces no blocks, and their own lines are read
-once it is placed.
+A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with a
+note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws nothing,
+or a `level` that is not placed. That member's finding, or the scope's `W_NO_THEME_BOUND`, says why
+it did not build. A member whose line is wrong too is `E_INVALID_MEMBER` all the same, and so is one
+whose line also writes what the pass does not lower yet, so neither hides a line's own fault. A
+`door`'s material is judged too, whatever refuses or defers it, so a refused material is not hidden
+either. The members under a `level` that is not placed are the exception: `E_UNSUPPORTED_NESTING`
+says that level produces no blocks, and their own lines are read once it is placed.
 
 `E_PARTIAL_BUILD` is the run-level counterpart: a finding above says a scope builds without
 something, and this says a scope the command was asked for did not build at all. A scope that
@@ -752,8 +753,8 @@ versions of the edition whose tables take the pair, oldest first; each is absent
 
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
-mapping is what to correct rather than the source line. `required` is named rather than implied so
-that adding a second family later is a new value here, not a new code.
+mapping is what to correct rather than the source line. `required` is `stair` or `door`, named
+rather than implied so that a further family is a new value here, not a new code.
 
 `W_TRUTH_TABLE_PARTIAL.missing` is a **sample** rather than the set: twenty inputs have a million
 combinations. Take the count from `2^inputs - covered`, never from `missing.len()`. `inputs` is
@@ -797,12 +798,12 @@ shipped version declares, are not deferred: each stands in for the block a targe
 it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no
 `W_PHASE_CONFLICT` between it and another block, and no `W_PALETTE_TOO_LARGE` that only it could
 cause, since the palette is counted without it. A stand-in overwritten by air, or air by a stand-in,
-is still a `W_PHASE_CONFLICT`, since no pack names air. A `pressure_plate` built from its default
-block takes the pack's plate, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a
-block" where a pinned check would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED` and
-`E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, nor are
-`W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, and `E_PARTIAL_BUILD`, which
-counts what a build at a target loses. `--edition` alone picks that edition's theme variants.
+is still a `W_PHASE_CONFLICT`, since no pack names air. A `door` or `pressure_plate` built from its
+default block takes the pack's door or plate, so it is such a block too, and a `W_WALKWAY_BLOCKED`
+note says "a block" where a pinned check would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`,
+`E_STATE_UNMAPPED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, nor
+are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, and `E_PARTIAL_BUILD`,
+which counts what a build at a target loses. `--edition` alone picks that edition's theme variants.
 With neither flag, each edition's variants are lowered: a finding on a line only one edition's
 variant reads is that edition's verdict and is reported, and any other finding is reported when
 every edition raises it with the same code at the same span, once for each wording the editions give
@@ -874,10 +875,10 @@ the key itself decides whether the member is built at all, the member is left ou
 An **unread key**: a `key=` the keyword accepts and nothing reads where it is written, carried into
 the IR and never consulted. It comes in two kinds. An *unreached* key is one this specification
 defines that no pass reads yet. `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a
-header's `class=`, a `door`'s `mat_slot=`, which waits on the door block itself, and a `stair`'s
-`waterlogged=` are those keys today. Every `key=value` on the right of a `theme` selector row whose
-keyword the compiler knows is one too, reported on the binding whatever its key or value, since no
-pass lowers a selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). An
+header's `class=` and a `stair`'s `waterlogged=` are those keys today. Every `key=value` on the
+right of a `theme` selector row whose keyword the compiler knows is one too, reported on the binding
+whatever its key or value, since no pass lowers a selector's bindings yet
+([Materials and Themes](/spec/materials-themes/)). An
 *inapplicable* key is one every member accepts, on a keyword that puts down nothing it would be read
 for; `mat_slot=` on a `level`, `circuit`, `place` or `connect` is that key today. A `mat_slot=` of
 either kind is not looked up in the theme, so a slot name the theme does not declare is this warning

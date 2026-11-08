@@ -24,7 +24,7 @@ pub(super) enum MemberFallback {
     ///
     /// [`fill_window`]: super::window::fill_window
     WallStays,
-    /// A `roof`, an eave `stair` or a `pressure_plate`: built from its default block.
+    /// A `roof`, an eave `stair`, a `door` or a `pressure_plate`: built from its default block.
     DefaultBlock,
 }
 
@@ -37,9 +37,10 @@ impl MemberFallback {
             MemberRole::Floor => Self::Air,
             MemberRole::Walls => Self::Absent,
             MemberRole::Window => Self::WallStays,
-            MemberRole::Roof | MemberRole::Stair | MemberRole::PressurePlate => Self::DefaultBlock,
-            MemberRole::Door
-            | MemberRole::Level
+            MemberRole::Roof | MemberRole::Stair | MemberRole::Door | MemberRole::PressurePlate => {
+                Self::DefaultBlock
+            }
+            MemberRole::Level
             | MemberRole::Circuit
             | MemberRole::Place
             | MemberRole::Connect

@@ -59,8 +59,8 @@ fn without_a_material(role: &MemberRole) -> WithoutAMaterial {
     match role {
         MemberRole::Floor | MemberRole::Walls => WithoutAMaterial::PaintsNothing,
         // A `window` without `mat_slot=` is an opening carved to air.
-        MemberRole::Window | MemberRole::Door => WithoutAMaterial::Carves,
-        MemberRole::Roof | MemberRole::Stair | MemberRole::PressurePlate => {
+        MemberRole::Window => WithoutAMaterial::Carves,
+        MemberRole::Roof | MemberRole::Stair | MemberRole::Door | MemberRole::PressurePlate => {
             WithoutAMaterial::PaintsAFallback
         }
         // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`.

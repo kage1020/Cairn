@@ -71,6 +71,7 @@ theme exact_oak:
 | `@wood.dark`、`@wood.light`、`@wood.warm`、`@wood.cool` | 色味で選ぶ板材 |
 | `@roof.dark_wood`、`@roof.light_wood`、`@roof.warm_wood`、`@roof.cool_wood` | 色味で選ぶ屋根の階段 |
 | `@sign.oak`、`@sign.oak_wall` | 立てた看板と壁の看板 |
+| `@door.default` | `mat_slot=` で割り当てていない `door` が置くドアのブロック |
 | `@pressure_plate.default` | `mat_slot=` で割り当てていない `pressure_plate` が置くブロック |
 
 tier-1 のトークンが解決するブロックは **tier-2** で、Evolving です。ターゲットごとにカタログで決まり、リリースによって変わることがあります。カタログにトークンを足しても何も壊れません。トークンの名前を変えたり廃止したりするのは Stable な面の破壊的変更なので、非推奨期間のあいだは古いトークンも `W_DEPRECATED` 付きで解決し続けます。正規ブロックトークンは tier-1 でも tier-2 でもありません。[§7.3](#73-バージョンとエディションをまたぐ対応付け) の対応付けを通じてブロックを指す名前で、ターゲットが受け付ける名前はそのレジストリパックで決まり、[互換性ティア](/ja/spec/compatibility/#evolving)で Evolving と定めています。

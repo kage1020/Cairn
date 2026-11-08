@@ -272,6 +272,25 @@ pub fn state_at(array: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
     &array.palette.entries[array.voxels[i].0 as usize]
 }
 
+/// The door standing with its lower half at `(x, y, z)` of `array`, as `id[properties]` per half.
+///
+/// # Panics
+///
+/// When either cell is outside `array`.
+pub fn door_at(array: &BlockArray, x: u32, y: u32, z: u32) -> [String; 2] {
+    [y, y + 1].map(|y| {
+        let state = state_at(array, x, y, z);
+        format!("{}[{}]", state.id, state.properties_text())
+    })
+}
+
+/// The two halves of a closed oak door facing `facing`, hinged on `hinge`, as [`door_at`] reads.
+pub fn oak_door(facing: &str, hinge: &str) -> [String; 2] {
+    ["lower", "upper"].map(|half| {
+        format!("minecraft:oak_door[facing={facing},half={half},hinge={hinge},open=false]")
+    })
+}
+
 /// The single structure `ir` holds.
 ///
 /// # Panics

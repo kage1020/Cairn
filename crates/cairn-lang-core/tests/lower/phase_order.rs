@@ -202,7 +202,7 @@ fn the_palette_is_sorted_rather_than_left_in_the_order_the_phases_painted() {
 
 #[test]
 fn two_openings_on_one_cell_are_reported_with_both_members_and_the_count() {
-    // The door carves x=3 at y=1..2, and the 1x2 window takes both cells back.
+    // The door stands in x=3 at y=1..2, and the 1x2 window takes both cells back.
     let out = lowered(&source(
         "  door side=front at=center\n  \
          window side=front y=1 offset=3 size=1x2 mat_slot=glass\n",
@@ -299,7 +299,7 @@ fn the_conflict_warning_does_not_change_which_block_wins() {
         ba.palette.entries[usize::from(ba.voxels[i].0)].id.clone()
     };
     assert_eq!(cell(only_structure(&door_first)), "minecraft:glass_pane");
-    assert_eq!(cell(only_structure(&window_first)), "minecraft:air");
+    assert_eq!(cell(only_structure(&window_first)), "minecraft:oak_door");
     assert_eq!(conflicts(&door_first).len(), 1);
     assert_eq!(conflicts(&window_first).len(), 1);
 }

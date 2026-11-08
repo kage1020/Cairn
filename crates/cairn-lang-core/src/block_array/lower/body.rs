@@ -20,6 +20,7 @@ use crate::block_array::{
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
+use super::door::{HungDoor, hang_doors, split_doors};
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::paint_member;
 use super::phase::Phase;
@@ -121,7 +122,7 @@ pub(super) fn lower_body_to_block_array<'a>(
     };
 
     let buckets = bucket_members(&flattened, &written_members, diagnostics);
-    let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
+    let (canvas, split_doors) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
     // Before anything reads the grid: a voxel painted after the palette filled holds air.
     let mut palette = match palette.into_palette() {
@@ -147,6 +148,7 @@ pub(super) fn lower_body_to_block_array<'a>(
             flattened[*overridden as usize].1,
             flattened[*overriding as usize].1,
             contested.values().sum(),
+            split_doors.contains(overridden),
         ));
     }
     let cut = cut_openings(&flattened, &canvas.wrote);
@@ -256,7 +258,7 @@ fn resolved_members(
 }
 
 /// Paint one body's members onto a fresh canvas, phase by phase in `spec/compilation` "Phase
-/// evaluation" order.
+/// evaluation" order, with the `door` members left holding one of their two cells.
 ///
 /// No test pins the order: neighbouring phases write disjoint cells, so only a two-step swap shows.
 fn paint_phases(
@@ -264,13 +266,19 @@ fn paint_phases(
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Canvas {
+) -> (Canvas, Vec<u32>) {
     let PhaseBuckets { by_phase, phases } = buckets;
     let mut canvas = Canvas::new(ctx.dims, phases);
-    for bucket in by_phase {
-        run_phase(bucket, ctx, palette, &mut canvas, diagnostics);
+    let mut hung = Vec::new();
+    for (index, bucket) in by_phase.into_iter().enumerate() {
+        run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+        // A door's hinge reads the wall beside it, which a later opening in the phase may cut.
+        if index == Phase::Openings.index() {
+            hang_doors(&hung, palette, &mut canvas);
+        }
     }
-    canvas
+    let split = split_doors(&hung, &canvas);
+    (canvas, split)
 }
 
 /// The paint set filed by phase, each entry keeping its index in the flattened list.
@@ -320,7 +328,7 @@ fn bucket_members<'a>(
 }
 
 /// Paint one phase's bucket, each member through its own [`MemberCanvas`] so its writes are
-/// filed under it.
+/// filed under it; each door that stands is added to `hung`.
 ///
 /// [`MemberCanvas`]: super::canvas::MemberCanvas
 pub(super) fn run_phase(
@@ -328,6 +336,7 @@ pub(super) fn run_phase(
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut Canvas,
+    hung: &mut Vec<HungDoor>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (index, y_offset, member) in bucket {
@@ -338,6 +347,7 @@ pub(super) fn run_phase(
             ctx,
             palette,
             &mut member_canvas,
+            hung,
             diagnostics,
         );
     }
@@ -345,8 +355,42 @@ pub(super) fn run_phase(
 
 /// Two members of one phase wrote the same cell to different blocks (`spec/compilation` "Phase
 /// evaluation"); anchored at the later.
-fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) -> Diagnostic {
+fn diag_phase_conflict(
+    overridden: &Member,
+    overriding: &Member,
+    voxels: u32,
+    splits_a_door: bool,
+) -> Diagnostic {
     let cell = if voxels == 1 { "voxel" } else { "voxels" };
+    let mut notes = vec![DiagnosticNote {
+        span: Some(overridden.span.clone()),
+        message: "overwritten member declared here".to_owned(),
+    }];
+    if splits_a_door {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: "the `door` is left with one of its two blocks, and the game removes a door \
+                      block whose other half is missing"
+                .to_owned(),
+        });
+    }
+    notes.extend([
+        DiagnosticNote {
+            span: None,
+            message: "If the override is deliberate this is the local-override rule of \
+                      spec/compilation \"Phase evaluation\" and the later line wins as \
+                      written. If it is not, move one of the two so their footprints do \
+                      not meet."
+                .to_owned(),
+        },
+        DiagnosticNote {
+            span: None,
+            message: "Members in different phases may overlap freely — a `door` cut \
+                      through a `walls` is the evaluation model working — so this is \
+                      only reported for two members the same phase evaluates."
+                .to_owned(),
+        },
+    ]);
     Diagnostic {
         code: DiagnosticCode::PhaseConflict,
         span: overriding.span.clone(),
@@ -356,27 +400,7 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
             MemberRole::keyword(&overriding.role),
             MemberRole::keyword(&overridden.role),
         ),
-        notes: vec![
-            DiagnosticNote {
-                span: Some(overridden.span.clone()),
-                message: "overwritten member declared here".to_owned(),
-            },
-            DiagnosticNote {
-                span: None,
-                message: "If the override is deliberate this is the local-override rule of \
-                          spec/compilation \"Phase evaluation\" and the later line wins as \
-                          written. If it is not, move one of the two so their footprints do \
-                          not meet."
-                    .to_owned(),
-            },
-            DiagnosticNote {
-                span: None,
-                message: "Members in different phases may overlap freely — a `door` cut \
-                          through a `walls` is the evaluation model working — so this is \
-                          only reported for two members the same phase evaluates."
-                    .to_owned(),
-            },
-        ],
+        notes,
         data: None,
     }
 }

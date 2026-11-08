@@ -7,7 +7,9 @@ use crate::resolve::ScopeResolution;
 use crate::block_array::args::{
     diag_deferred_member_reason, diag_invalid_member, member_or_slot_span,
 };
-use crate::block_array::material::{MaterialDeferred, TargetRegistry, resolve_block_state};
+use crate::block_array::material::{
+    IdOrigin, MaterialDeferred, TargetRegistry, resolve_block_state, validated_id,
+};
 use crate::block_array::openings::WallSide;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{BlockState, Dims, PaletteIndex};
@@ -304,6 +306,48 @@ pub(super) fn resolve_member_state(
         MaterialDeferred::AlreadyDiagnosed => {}
     }
     MemberState::Unbound
+}
+
+/// The block a member is built from when no `mat_slot=` binds one: the pack's `token`, or
+/// `base_id` when no pack declares it, checked against the target.
+///
+/// # Errors
+///
+/// The `E_UNKNOWN_ID` for an id the target does not declare.
+pub(super) fn default_block_id(
+    member: &Member,
+    registry: Option<&dyn TargetRegistry>,
+    token: &'static str,
+    base_id: &'static str,
+) -> Result<String, Box<Diagnostic>> {
+    let (state, origin) = match registry.and_then(|r| r.lookup(token)) {
+        Some(state) => (
+            state,
+            IdOrigin::Catalog {
+                token: token.to_owned(),
+            },
+        ),
+        None => (BlockState::bare(base_id), IdOrigin::Builtin { token }),
+    };
+    match validated_id(state, registry, &origin) {
+        Ok(state) => Ok(state.id),
+        Err(MaterialDeferred::UnknownId(unknown)) => {
+            Err(Box::new(diag_unknown_id(member.span.clone(), &unknown)))
+        }
+        // INVARIANT(validated-id-refuses-one-way): `validated_id` answers the state or `UnknownId`.
+        Err(other) => {
+            let keyword = member.role.keyword();
+            debug_assert!(
+                false,
+                "validated_id returned {other:?} for the `{keyword}` default, which resolves no \
+                 mat_slot= value",
+            );
+            Err(Box::new(diag_deferred_member_reason(
+                member,
+                &format!("{keyword} default resolved to no block id"),
+            )))
+        }
+    }
 }
 
 /// [`resolve_member_state`], interned.

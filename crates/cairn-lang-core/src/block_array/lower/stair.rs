@@ -1,5 +1,7 @@
 //! Painting an eave `stair` member.
 
+use std::convert::Infallible;
+
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
@@ -10,13 +12,15 @@ use crate::block_array::args::{
     nonneg_int_or_refuse,
 };
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
-use crate::block_array::roof::{Cardinal, STAIR_BASE_ID, StairShape, shed_high_side, stair_state};
+use crate::block_array::roof::{
+    Cardinal, STAIR_BASE_ID, StairShape, inward_cardinal, shed_high_side, stair_state,
+};
 
 use super::canvas::{MemberCanvas, ScopePalette};
+use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{
     MemberState, StructCtx, resolve_member_state, side_name, side_of, unplaced_walls_note,
 };
-use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
 
 /// The note on a stair refused for its `kind=`, naming the one kind there is.
 const STAIR_KINDS: &str = "write `kind=stairs`, the one stair kind: a band of stairs in the \
@@ -103,20 +107,20 @@ fn draw_eave_band(
         MemberState::Unbound => None,
         MemberState::Refused => return false,
     };
-    let stair_id = geometry_material_id(
+    let Ok(stair_id) = geometry_material_id(
         member,
         ctx.scope,
         resolved.as_ref(),
-        STAIR_BASE_ID,
+        || Ok::<_, Infallible>(STAIR_BASE_ID.to_owned()),
         &GeometryMemberDescription {
             subject: "eave `stair`".to_owned(),
             states_from: "its own arguments",
             // `eave_kind_is_stairs` has refused any other `kind=`.
-            requires_stair: true,
+            requires: Some(Family::Stair),
         },
         diagnostics,
     );
-    let idx = palette.intern(stair_state(stair_id, facing, half, shape));
+    let idx = palette.intern(stair_state(&stair_id, facing, half, shape));
     paint_eave_band(side, y_world, idx, ctx, canvas);
     true
 }
@@ -313,16 +317,6 @@ fn paint_eave_band(
         };
         let (x, z) = shift_outward(side, wx, wz);
         canvas.paint((x, y_world, z), || idx);
-    }
-}
-
-/// The cardinal opposite the wall's outward normal, for `facing=in`.
-fn inward_cardinal(side: WallSide) -> Cardinal {
-    match side {
-        WallSide::Front => Cardinal::North,
-        WallSide::Back => Cardinal::South,
-        WallSide::Left => Cardinal::East,
-        WallSide::Right => Cardinal::West,
     }
 }
 

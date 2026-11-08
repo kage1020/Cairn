@@ -185,10 +185,10 @@ at the primary `offset` side. Its mirrored cut, when there is one, appears in th
 
 **A port is somewhere a wall was opened.** Both port roles are openings cut through masonry, so a
 placement whose walls do not reach the rows the opening needs anchors neither: a `door` needs the
-row it opens at inside one course, and a `window` needs its whole rectangle inside one.
+two rows it stands in inside one course, and a `window` needs its whole rectangle inside one.
 
 ```
-row 1 in one course                              # door (a port's door is a def-body member,
+rows 1 and 2 in one course                       # door (a port's door is a def-body member,
                                                  #       so the row it opens at is always 1)
 offset + size.w ≤ wall_length                    # window, horizontal
 every row of y … y + size.h - 1 in one course    # window, vertical

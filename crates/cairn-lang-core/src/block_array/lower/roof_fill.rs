@@ -1,20 +1,18 @@
-//! Painting a `roof` member, and the material rule it shares with the
-//! eave `stair`.
+//! Painting a `roof` member.
 
-use crate::ast::ValueKind;
-use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
-use crate::intent::{Member, ValueWithSpan};
-use crate::resolve::ScopeResolution;
+use std::convert::Infallible;
 
-use crate::block_array::args::{diag_deferred_member_reason, member_or_slot_span};
-use crate::block_array::material::is_stand_in;
+use crate::diagnostic::Diagnostic;
+use crate::intent::Member;
+
 use crate::block_array::roof::{
     RoofKind, RoofVoxel, flat_block_state, flat_voxels, gable_ridge_axis, gable_stair_state,
-    gable_voxels, hip_stair_state, hip_voxels, is_stair, shed_stair_state, shed_voxels,
+    gable_voxels, hip_stair_state, hip_voxels, shed_stair_state, shed_voxels,
 };
 use crate::block_array::{BlockState, PaletteIndex};
 
 use super::canvas::{MemberCanvas, ScopePalette};
+use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{MemberState, StructCtx, resolve_member_state};
 use super::roof_kind::{parse_roof_kind, roof_draws, shed_slope_to};
 
@@ -44,15 +42,15 @@ pub(super) fn fill_roof(
         MemberState::Unbound => None,
         MemberState::Refused => return,
     };
-    let base_id = geometry_material_id(
+    let Ok(base_id) = geometry_material_id(
         member,
         ctx.scope,
         resolved.as_ref(),
-        kind.base_block_id(),
+        || Ok::<_, Infallible>(kind.base_block_id().to_owned()),
         &GeometryMemberDescription {
             subject: format!("`{}` roof", kind.name()),
             states_from: "the geometry",
-            requires_stair: kind.paints_stairs(),
+            requires: kind.paints_stairs().then_some(Family::Stair),
         },
         diagnostics,
     );
@@ -64,7 +62,7 @@ pub(super) fn fill_roof(
             paint_roof(
                 gable_voxels(roof_w, roof_h, wall_top),
                 |face| gable_stair_state(ridge_axis, face),
-                base_id,
+                &base_id,
                 palette,
                 canvas,
             );
@@ -76,7 +74,7 @@ pub(super) fn fill_roof(
             paint_roof(
                 shed_voxels(roof_w, roof_h, wall_top, slope_to),
                 |face| shed_stair_state(slope_to, face),
-                base_id,
+                &base_id,
                 palette,
                 canvas,
             );
@@ -87,7 +85,7 @@ pub(super) fn fill_roof(
             paint_roof(
                 hip_voxels(roof_w, roof_h, wall_top),
                 |face| hip_stair_state(ridge_axis, face),
-                base_id,
+                &base_id,
                 palette,
                 canvas,
             );
@@ -98,7 +96,7 @@ pub(super) fn fill_roof(
                 .into_iter()
                 .map(|pos| RoofVoxel { pos, face: () }),
             |()| flat_block_state(),
-            base_id,
+            &base_id,
             palette,
             canvas,
         ),
@@ -125,111 +123,5 @@ fn paint_roof<F: Copy + PartialEq>(
             claimed.push((face, idx));
             idx
         });
-    }
-}
-
-/// How a geometry-driven member names itself and its blockstates in a material finding.
-pub(super) struct GeometryMemberDescription {
-    /// How the member names itself in a message, already quoted: `` `gable` roof ``.
-    pub(super) subject: String,
-    /// Where its blockstates come from, as a noun phrase.
-    pub(super) states_from: &'static str,
-    /// Whether it attaches stair blockstates, and so needs a stair material.
-    pub(super) requires_stair: bool,
-}
-
-/// The block id a roof or eave stair paints, given its resolved `mat_slot=` binding.
-///
-/// A non-stair where a stair is needed is `E_INCOMPATIBLE_MATERIAL`; `fallback` is still returned
-/// so the pass can finish.
-pub(super) fn geometry_material_id<'a>(
-    member: &Member,
-    scope: Option<&ScopeResolution>,
-    resolved: Option<&'a BlockState>,
-    fallback: &'a str,
-    shape: &GeometryMemberDescription,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> &'a str {
-    let Some(state) = resolved else {
-        if member.mat_slot.is_some() {
-            // Names the theme, so two placements under two themes write two findings.
-            let under = scope
-                .and_then(|scope| scope.bound_theme.as_deref())
-                .map_or_else(String::new, |theme| format!(" under theme `{theme}`"));
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "{}'s `mat_slot=` did not resolve to a block id{under}; it falls back to `{fallback}`",
-                    shape.subject,
-                ),
-            ));
-        }
-        return fallback;
-    };
-    let slot_value = scope
-        .and_then(|scope| scope.members.get(&member.span.start))
-        .and_then(|binding| binding.slot_value.as_ref());
-    // Whether a stand-in is a stair is the target's pack to say.
-    if shape.requires_stair && !is_stair(&state.id) && !is_stand_in(state) {
-        diagnostics.push(diag_incompatible_material(member, state, shape, slot_value));
-        return fallback;
-    }
-    if !state.properties.is_empty() {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "{} derives its blockstates from {}; the `mat_slot=` binding to `{}[...]` also carried properties and was not applied verbatim",
-                shape.subject,
-                shape.states_from,
-                state.id,
-            ),
-        ));
-    }
-    &state.id
-}
-
-/// A member whose geometry attaches blockstates was bound to a material that cannot carry them.
-///
-/// Anchored on the theme's slot value when there is one, since that is where the fix goes.
-fn diag_incompatible_material(
-    member: &Member,
-    state: &BlockState,
-    shape: &GeometryMemberDescription,
-    slot_value: Option<&ValueWithSpan>,
-) -> Diagnostic {
-    let mut notes = vec![DiagnosticNote {
-        span: None,
-        message: "bind the slot to a `*_stairs` material — the registry pack's \
-                  `roof.dark_wood`, `roof.light_wood`, `roof.warm_wood`, and \
-                  `roof.cool_wood` all resolve to one"
-            .to_owned(),
-    }];
-    if let Some(slot) = &member.mat_slot {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: format!(
-                "reached through `mat_slot={}`, so every member reading that slot has it too",
-                slot.name,
-            ),
-        });
-    }
-    Diagnostic {
-        code: DiagnosticCode::IncompatibleMaterial,
-        span: slot_value.map_or_else(|| member.span.clone(), |v| member_or_slot_span(member, v)),
-        primary: format!(
-            "{} derives `facing` / `half` / `shape` from {} and `{}` is not a stair, so those states have nowhere to go",
-            shape.subject, shape.states_from, state.id,
-        ),
-        notes,
-        data: Some(DiagnosticData::IncompatibleMaterial {
-            id: state.id.clone(),
-            required: "stair".to_owned(),
-            slot: member.mat_slot.as_ref().map(|slot| slot.name.clone()),
-            token: slot_value.and_then(|v| match &v.value.kind {
-                ValueKind::Token(token) => Some(token.clone()),
-                // Anything else was refused upstream as `E_UNKNOWN_SLOT_TARGET`.
-                _ => None,
-            }),
-        }),
     }
 }

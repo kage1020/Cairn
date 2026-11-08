@@ -161,7 +161,7 @@ impl MemberRole {
         Some(match self {
             Self::Floor => &[],
             Self::Walls => &["height"],
-            Self::Door => &["side", "at", "opened_by"],
+            Self::Door => &["side", "at", "opened_by", "hinge", "open"],
             Self::Window => &[
                 "side", "y", "offset", "size", "sym", "repeat", "step", "shape", "anchor",
             ],
@@ -192,9 +192,9 @@ impl MemberRole {
     pub fn state_arguments(&self) -> &'static [&'static str] {
         match self {
             Self::Stair => &["half", "facing", "shape", "waterlogged"],
+            Self::Door => &["hinge", "open"],
             Self::Floor
             | Self::Walls
-            | Self::Door
             | Self::Window
             | Self::Roof
             | Self::Level
@@ -233,11 +233,6 @@ impl MemberRole {
                     why: Unread::Unreached,
                 },
             ],
-            // The door block itself is not placed yet; this entry goes when it is.
-            Self::Door => &[UnreadArgument {
-                key: "mat_slot",
-                why: Unread::Unreached,
-            }],
             // From `spec/blockstate` "`waterlogged`"; the entry goes when stair lowering reads it.
             Self::Stair => &[UnreadArgument {
                 key: "waterlogged",
@@ -247,7 +242,7 @@ impl MemberRole {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
             }],
-            Self::Floor | Self::Walls | Self::PressurePlate | Self::Other(_) => &[],
+            Self::Floor | Self::Walls | Self::Door | Self::PressurePlate | Self::Other(_) => &[],
         }
     }
 

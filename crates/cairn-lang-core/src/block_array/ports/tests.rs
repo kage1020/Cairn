@@ -536,7 +536,12 @@ fn port_world_position_door_refuses_when_the_walls_start_above_the_doorway() {
     let both_storeys = WallColumn::from_walls([(0, 3), (6, 4)]);
     assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &both_storeys).is_ok());
     let one_row = WallColumn::from_walls([(0, 1)]);
-    assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &one_row).is_ok());
+    assert!(matches!(
+        port_at((0, 0, 0), dims, def, &pid("entry"), &one_row),
+        Err(PortRejection::DoorShortCourse { .. }),
+    ));
+    let two_rows = WallColumn::from_walls([(0, 2)]);
+    assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &two_rows).is_ok());
 }
 
 #[test]
@@ -805,6 +810,10 @@ fn every_rejection() -> Vec<PortRejection> {
             walls: WallColumn::default(),
             member: 0..0,
         },
+        PortRejection::DoorShortCourse {
+            walls: WallColumn::default(),
+            member: 0..0,
+        },
         PortRejection::WindowArgument {
             fault: WindowArgFault::YAbsent,
             member: 0..0,
@@ -867,6 +876,10 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
                 member: span.clone(),
             }]
         }
+        PortRejection::DoorShortCourse { .. } => vec![PortRejection::DoorShortCourse {
+            walls: WallColumn::from_walls([(0, 1)]),
+            member: span.clone(),
+        }],
         PortRejection::WindowArgument { .. } => [
             WindowArgFault::OffsetMalformed,
             WindowArgFault::YAbsent,
@@ -938,6 +951,7 @@ fn every_rejection_note_renders_in_full() {
         (format!("`a.p` is a door that has an `at=` that is coordinate `1,2,3`, not one of center, left, right{OWN}"), true),
         (format!("`a.p` is a door with no wall to open: {NO_WALLS}{OWN}"), true),
         (format!("`a.p` is a door that opens at y=1, the row above the floor slab, which is not inside any wall course (the walls occupy y=7..=10){OWN}"), true),
+        (format!("`a.p` is a door that stands at y=1..=2, and the wall course holding y=1 ends there (the walls occupy y=1..=1){OWN}"), true),
         (format!("`a.p` is a window that has an `offset=` that is not a non-negative integer that fits in u32{OWN}"), true),
         (format!("`a.p` is a window that has no `y=`{OWN}"), true),
         (format!("`a.p` is a window that has a `y=` that is not a non-negative integer that fits in u32{OWN}"), true),
@@ -947,7 +961,7 @@ fn every_rejection_note_renders_in_full() {
         (format!("`a.p` is a window with no wall to cut into: {NO_WALLS}{OWN}"), true),
         (format!("`a.p` is a window whose rows y=0..=0 are not all inside one wall course (the walls occupy y=1..=3){OWN}"), true),
         (format!("`a.p` is a window whose 2 rows from y=4294967295 run past the highest row a build can address (the walls occupy y=1..=3){OWN}"), true),
-        ("`a.p` is a door the openings pass did not cut, so a strip would end against the wall — the finding on its own line says why".to_owned(), true),
+        ("`a.p` is a door the openings pass did not cut, so a strip would end against the wall — the finding on its own line, or on the material its `mat_slot=` names, says why".to_owned(), true),
         ("`a.p` is a window the openings pass did not cut, so a strip would end against the wall — the finding on its own line, or on the material its `mat_slot=` names, says why".to_owned(), true),
         ("`a.p` would sit outside the coordinate range a build can address — bring its `place` closer to the origin".to_owned(), false),
     ];

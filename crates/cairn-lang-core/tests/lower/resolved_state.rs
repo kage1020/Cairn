@@ -241,7 +241,16 @@ fn a_cell_is_recorded_on_the_member_that_painted_it_last() {
             member(
                 "door",
                 Some("entry"),
-                &[("minecraft:air", vec![(1, 1, 0), (1, 2, 0)])],
+                &[
+                    (
+                        "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false]",
+                        vec![(1, 1, 0)],
+                    ),
+                    (
+                        "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false]",
+                        vec![(1, 2, 0)],
+                    ),
+                ],
             ),
         ],
     );

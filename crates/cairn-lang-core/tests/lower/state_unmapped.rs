@@ -20,10 +20,17 @@ struct NoSidewaysLog {
 
 impl NoSidewaysLog {
     fn pinned() -> Self {
-        let mut ids: Vec<String> = ["cobblestone", "gravel", "jigsaw", "oak_log", "oak_planks"]
-            .iter()
-            .map(|id| format!("minecraft:{id}"))
-            .collect();
+        let mut ids: Vec<String> = [
+            "cobblestone",
+            "gravel",
+            "jigsaw",
+            "oak_door",
+            "oak_log",
+            "oak_planks",
+        ]
+        .iter()
+        .map(|id| format!("minecraft:{id}"))
+        .collect();
         ids.sort();
         Self {
             ids,

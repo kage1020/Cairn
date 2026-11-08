@@ -1,11 +1,14 @@
-//! A `door` opens only at a row some `walls` member paints, capped by that course, and a walkway
-//! port draws the same line as the openings pass.
+//! A `door` stands only in two rows one painted `walls` course holds, and a walkway port draws the
+//! same line as the openings pass.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
 
-use crate::common::{defers, lowered, only_structure, refusals, state_at, walkway_was_laid};
+use crate::common::{
+    defers, door_at, findings, lowered, oak_door, only_structure, refusals, state_at,
+    walkway_was_laid,
+};
 
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
@@ -25,7 +28,7 @@ fn assert_clean(ir: &BlockArrayIr) {
 // ------------------------------------------------- the openings pass
 
 #[test]
-fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_carving_air() {
+fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_standing_in_air() {
     // The only course paints rows 7..=10, and the door opens at row 1.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
@@ -61,8 +64,8 @@ fn the_door_and_the_window_on_that_body_give_the_same_answer() {
 }
 
 #[test]
-fn a_door_inside_the_level_whose_walls_it_opens_is_carved() {
-    // The door under the `level` opens at row 7, inside the 7..=10 course.
+fn a_door_inside_the_level_whose_walls_it_opens_stands_there() {
+    // The door under the `level` stands in rows 7 and 8, inside the 7..=10 course.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          floor mat_slot=floor\n  \
@@ -73,9 +76,7 @@ fn a_door_inside_the_level_whose_walls_it_opens_is_carved() {
     let out = lowered(&src);
     assert_clean(&out);
     let ba = only_structure(&out);
-    for y in 7..=8 {
-        assert_eq!(state_at(ba, 2, y, 4).id, "minecraft:air", "row y={y}");
-    }
+    assert_eq!(door_at(ba, 2, 7, 4), oak_door("north", "left"));
     // The rows above the opening are still the wall they were cut from.
     for y in 9..=10 {
         assert_eq!(
@@ -108,7 +109,10 @@ fn a_door_is_checked_against_its_own_course_and_not_the_tallest_one() {
     );
     let out = lowered(&two_courses(6));
     assert_clean(&out);
-    assert_eq!(state_at(only_structure(&out), 2, 7, 4).id, "minecraft:air");
+    assert_eq!(
+        door_at(only_structure(&out), 2, 7, 4),
+        oak_door("north", "left")
+    );
 }
 
 #[test]
@@ -124,9 +128,7 @@ fn two_courses_that_touch_are_one_wall_to_the_doorway_too() {
     let out = lowered(&src);
     assert_clean(&out);
     let ba = only_structure(&out);
-    for y in 1..=2 {
-        assert_eq!(state_at(ba, 2, y, 4).id, "minecraft:air", "row y={y}");
-    }
+    assert_eq!(door_at(ba, 2, 1, 4), oak_door("north", "left"));
     for y in 3..=4 {
         assert_eq!(
             state_at(ba, 2, y, 4).id,
@@ -187,7 +189,7 @@ fn a_door_in_walls_that_paint_nothing_defers_to_them() {
 }
 
 #[test]
-fn a_door_under_a_one_row_course_opens_that_row_and_stops() {
+fn a_door_under_a_one_row_course_is_refused_for_want_of_a_row_for_its_upper_half() {
     // `walls height=1` paints row 1 only. The roof slot is a stair, as a sloped roof needs.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
@@ -196,20 +198,32 @@ fn a_door_under_a_one_row_course_opens_that_row_and_stops() {
          door id=e side=front at=center\n",
     );
     let out = lowered(&src);
-    assert_clean(&out);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::InvalidMember,
+            "door id=e side=front at=center",
+            "door stands at y=1..=2, and the wall course holding y=1 ends there (the walls occupy \
+             y=1..=1)",
+            vec![
+                "a door block is two rows tall; raise the `walls` so their course holds the row \
+                 above the one the door opens at"
+            ],
+        )],
+    );
     let ba = only_structure(&out);
-    assert_eq!(state_at(ba, 2, 1, 4).id, "minecraft:air");
+    assert_eq!(state_at(ba, 2, 1, 4).id, "minecraft:cobblestone");
     assert_eq!(state_at(ba, 2, 2, 4).id, "minecraft:spruce_stairs");
 }
 
 // --------------------------------------------- the walkway port agrees
 
-/// A two-hut site whose walkway anchors on a door under walls at `level y={wall_level}`.
-fn site_with_door_port(wall_level: u32) -> String {
+/// A two-hut site whose walkway anchors on a door under `height` walls at `level y={wall_level}`.
+fn site_with_door_port(wall_level: u32, height: u32) -> String {
     format!(
         "{THEME}def hut size=5x5:\n  \
          level id=up y={wall_level}\n    \
-         walls id=w mat_slot=wall height=4\n  \
+         walls id=w mat_slot=wall height={height}\n  \
          door id=e side=front at=center\n\n\
          site s:\n  \
          place id=a use=hut theme=t at=origin\n  \
@@ -219,24 +233,26 @@ fn site_with_door_port(wall_level: u32) -> String {
 }
 
 #[test]
-fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
+fn the_port_anchors_exactly_the_doorways_the_openings_pass_sets_a_door_in() {
     // `spec/components-editing-sites` "Ports and `connect`", as an equivalence of the two gates.
     for wall_level in 0..=3 {
-        let carved = {
-            let src = format!(
-                "{THEME}struct hut size=5x5\n  \
-                 level id=up y={wall_level}\n    \
-                 walls id=w mat_slot=wall height=4\n  \
-                 door id=e side=front at=center\n",
+        for height in [1, 2, 4] {
+            let set = {
+                let src = format!(
+                    "{THEME}struct hut size=5x5\n  \
+                     level id=up y={wall_level}\n    \
+                     walls id=w mat_slot=wall height={height}\n  \
+                     door id=e side=front at=center\n",
+                );
+                lowered(&src).diagnostics.is_empty()
+            };
+            let anchored = walkway_was_laid(&site_with_door_port(wall_level, height));
+            assert_eq!(
+                set, anchored,
+                "`walls height={height}` under `level y={wall_level}`: \
+                 the openings pass sets the door = {set}, the port anchors it = {anchored}",
             );
-            lowered(&src).diagnostics.is_empty()
-        };
-        let anchored = walkway_was_laid(&site_with_door_port(wall_level));
-        assert_eq!(
-            carved, anchored,
-            "walls under `level y={wall_level}`: \
-             the openings pass carves the doorway = {carved}, the port anchors it = {anchored}",
-        );
+        }
     }
 }
 
@@ -283,7 +299,7 @@ fn a_door_under_a_level_is_not_a_port_at_all() {
 
 #[test]
 fn the_walkway_defer_states_the_rule_the_door_broke() {
-    let src = site_with_door_port(6);
+    let src = site_with_door_port(6, 4);
     let out = lowered(&src);
     let notes: Vec<_> = out
         .diagnostics
@@ -315,5 +331,24 @@ fn the_walkway_defer_states_the_rule_the_door_broke() {
             .any(|d| d.starts_with("door opens at y=1")),
         "the doorway that could not be cut says so itself: {:?}",
         refusals(&out),
+    );
+}
+
+#[test]
+fn the_walkway_defer_names_the_course_with_no_row_for_the_upper_half() {
+    let out = lowered(&site_with_door_port(0, 1));
+    let notes: Vec<&str> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.primary.contains("was skipped because port"))
+        .flat_map(|d| &d.notes)
+        .map(|n| n.message.as_str())
+        .collect();
+    assert_eq!(
+        notes,
+        ["a", "b"].map(|place| format!(
+            "`{place}.e` is a door that stands at y=1..=2, and the wall course holding y=1 ends \
+             there (the walls occupy y=1..=1); the member says so on its own line too"
+        )),
     );
 }

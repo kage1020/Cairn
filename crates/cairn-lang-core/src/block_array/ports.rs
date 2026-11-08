@@ -13,7 +13,7 @@ use crate::intent::{DefIr, Member, MemberRole};
 
 use super::Dims;
 use super::openings::{
-    WallSide, WindowArgFault, WindowArgs, Written, door_anchor_offset, door_at_clause,
+    DOOR_HEIGHT, WallSide, WindowArgFault, WindowArgs, Written, door_anchor_offset, door_at_clause,
     read_window_args, wall_length, wall_local_to_grid,
 };
 use super::wall_column::WallColumn;
@@ -23,7 +23,7 @@ const PORT_GROUND_V: u32 = 0;
 
 /// World row a door port's doorway opens at: one above the floor slab.
 ///
-/// `carve_door` asks about `y_offset + 1`; the two agree because no port reaches a door under a
+/// `fill_door` asks about `y_offset + 1`; the two agree because no port reaches a door under a
 /// `level`.
 const DOOR_PORT_BASE_V: u32 = 1;
 
@@ -44,6 +44,8 @@ pub(super) enum PortRejection {
     DoorNoWalls { member: Span },
     /// The walls paint, but not the row a door opens at.
     DoorOutsideCourse { walls: WallColumn, member: Span },
+    /// The course holding the row a door opens at ends there, leaving no row for its upper half.
+    DoorShortCourse { walls: WallColumn, member: Span },
     /// A window's `offset=` / `y=` / `size=` cannot be used.
     WindowArgument { fault: WindowArgFault, member: Span },
     /// A window's rectangle runs past the far end of its wall.
@@ -90,6 +92,7 @@ impl PortRejection {
             | Self::DoorAt { member, .. }
             | Self::DoorNoWalls { member }
             | Self::DoorOutsideCourse { member, .. }
+            | Self::DoorShortCourse { member, .. }
             | Self::WindowArgument { member, .. }
             | Self::WindowPastWall { member, .. }
             | Self::WindowNoWalls { member }
@@ -143,6 +146,11 @@ impl PortRejection {
                 "is a door that opens at y={DOOR_PORT_BASE_V}, the row above the floor slab, which \
                  is not inside any wall course (the walls occupy {walls})",
             ),
+            Self::DoorShortCourse { walls, .. } => format!(
+                "is a door that stands at y={DOOR_PORT_BASE_V}..={}, and the wall course holding \
+                 y={DOOR_PORT_BASE_V} ends there (the walls occupy {walls})",
+                DOOR_PORT_BASE_V + DOOR_HEIGHT - 1,
+            ),
             Self::WindowArgument { fault, .. } => format!("is a window that {}", fault.clause()),
             Self::WindowPastWall {
                 offset,
@@ -168,18 +176,11 @@ impl PortRejection {
                      can address (the walls occupy {walls})",
                 ),
             },
-            Self::NotCut { role, .. } => {
-                // A door is carved to air, so only a window has a material to blame.
-                let why = if *role == "window" {
-                    "the finding on its own line, or on the material its `mat_slot=` names, says why"
-                } else {
-                    "the finding on its own line says why"
-                };
-                format!(
-                    "is a {role} the openings pass did not cut, so a strip would end against \
-                     the wall — {why}",
-                )
-            }
+            Self::NotCut { role, .. } => format!(
+                "is a {role} the openings pass did not cut, so a strip would end against the \
+                 wall — the finding on its own line, or on the material its `mat_slot=` names, \
+                 says why",
+            ),
             Self::OutOfRange => "would sit outside the coordinate range a build can address — \
                                  bring its `place` closer to the origin"
                 .to_owned(),
@@ -250,6 +251,12 @@ pub(super) fn port_world_position<S: BuildHasher>(
         }
         if walls.course_top_at(DOOR_PORT_BASE_V).is_none() {
             return Err(PortRejection::DoorOutsideCourse {
+                walls: walls.clone(),
+                member: member.span.clone(),
+            });
+        }
+        if !walls.contains_rows(DOOR_PORT_BASE_V, DOOR_HEIGHT) {
+            return Err(PortRejection::DoorShortCourse {
                 walls: walls.clone(),
                 member: member.span.clone(),
             });

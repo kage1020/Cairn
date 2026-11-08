@@ -166,7 +166,7 @@ struct chain size=60x5
     }
     source.push_str(
         r"
-  door id=d side=front at=center mat_slot=wall opened_by=sig.s15
+  door id=d side=front at=center opened_by=sig.s15
 
   circuit region=floor void=2
 ",

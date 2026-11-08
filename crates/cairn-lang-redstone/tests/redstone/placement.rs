@@ -96,7 +96,7 @@ struct sim size=7x5
   logic sig.or_ab    = sig.a or sig.b
   logic sig.combined = sig.and_ab and sig.or_ab
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=d side=front at=center opened_by=sig.combined
 
   circuit region=floor void=3
 ";
@@ -143,7 +143,7 @@ struct tiny size=3x3
   logic sig.or_ab    = sig.a or sig.b
   logic sig.combined = sig.and_ab and sig.or_ab
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.combined
+  door id=d side=front at=center opened_by=sig.combined
 
   circuit region=floor void=1
 ";
@@ -223,7 +223,7 @@ struct nomarker size=7x5
 
   logic sig.open = sig.a or sig.b
 
-  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  door id=d side=front at=center opened_by=sig.open
 ";
     let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
     let out = compile_placement(&edition_netlist, &intent);
@@ -303,7 +303,7 @@ def gadget
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
-  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  door id=d side=front at=center opened_by=sig.open
   circuit region=floor void=2
 ";
     let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
@@ -358,7 +358,7 @@ struct simple size=5x5
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
-  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  door id=d side=front at=center opened_by=sig.open
   circuit region=floor void=0
 ";
     let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Java);
@@ -592,7 +592,7 @@ theme t:
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
-  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  door id=d side=front at=center opened_by=sig.open
 {lines}"
     )
 }
@@ -709,7 +709,7 @@ site s
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
-  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  door id=d side=front at=center opened_by=sig.open
   circuit region=floor void=2
 ";
     let out = placement_of(site);
@@ -743,7 +743,7 @@ struct dup size=7x5
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
-  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  door id=d side=front at=center opened_by=sig.open
   circuit region=floor void=2
   circuit region=basement void=3
 ";
@@ -781,7 +781,7 @@ struct alpha size=7x5
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
   logic sig.na = not sig.a
-  door id=d side=front at=center mat_slot=wall opened_by=sig.na
+  door id=d side=front at=center opened_by=sig.na
   circuit region=floor void=2
 
 struct beta size=7x5
@@ -789,7 +789,7 @@ struct beta size=7x5
   pressure_plate id=q at=front.outside offset=0 y=0 -> sig.b1
   pressure_plate id=r at=inside.front  offset=1 y=0 -> sig.b2
   logic sig.both = sig.b1 and sig.b2
-  door id=e side=front at=center mat_slot=wall opened_by=sig.both
+  door id=e side=front at=center opened_by=sig.both
 ";
     let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Bedrock);
     let out = compile_placement(&edition_netlist, &intent);

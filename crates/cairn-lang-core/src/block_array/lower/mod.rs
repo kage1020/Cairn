@@ -12,6 +12,7 @@ mod circuit;
 mod connect;
 mod diag;
 mod door;
+mod geometry_material;
 mod members;
 mod paint;
 mod phase;
