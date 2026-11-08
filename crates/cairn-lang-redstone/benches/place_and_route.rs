@@ -3,7 +3,7 @@
 use std::hint::black_box;
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::lower_to_block_array;
+use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry, lower_to_block_array};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_redstone::{
@@ -14,6 +14,25 @@ use criterion::{Criterion, criterion_group, criterion_main};
 
 /// The examples whose circuits build on both editions.
 const EXAMPLES: [&str; 3] = ["redstone-door", "control-room", "crossbar"];
+
+/// A target that spells every token as the block of its name, so the floor under a component
+/// stands as written.
+struct Named;
+
+impl TargetRegistry for Named {
+    fn lookup(&self, token: &str) -> Option<BlockState> {
+        let name = token.split('.').next()?;
+        Some(BlockState::bare(format!("minecraft:{name}")))
+    }
+
+    fn known_tokens(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
+        None
+    }
+}
 
 fn example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -34,7 +53,8 @@ fn place_and_route(c: &mut Criterion) {
     for name in EXAMPLES {
         for edition in [Edition::Java, Edition::Bedrock] {
             let intent = lower(&parse(&example(name)).expect("the example parses"));
-            let built = lower_to_block_array(&intent, &resolve(&intent, Some(edition)), None);
+            let built =
+                lower_to_block_array(&intent, &resolve(&intent, Some(edition)), Some(&Named));
             let synth = synthesize(&intent);
             assert_clean("synthesis", &synth.diagnostics);
             let netlist = compile_edition_netlist(&compile_netlist(&synth.scoped), edition);
