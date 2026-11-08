@@ -1027,7 +1027,8 @@ What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materia
 a guard is `E_UNKNOWN_KEYWORD` as it is anywhere. Any other member, and a `logic` or `assert` line,
 is `E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking
 anything indented under it along. So is a `logic` or `assert` line under a guarded raw member,
-which outside a guard would still reach redstone synthesis. A raw member in a `site` body is
+which outside a guard would still reach redstone synthesis. No build and no other check reads a
+refused line or what goes with it, so it draws that finding alone. A raw member in a `site` body is
 `E_MISPLACED_MEMBER`, with a guard around it or not, so a guard there holds nothing that builds.
 
 A pinned build keeps the lines under its own edition's guards and drops the other edition's.
@@ -1040,9 +1041,11 @@ Two lines under guards for different editions never build together, so they may 
 A guarded line and an unguarded one, or two under guards for one edition, are both built by that
 edition and are `E_DUPLICATE_ID`.
 
-A `cairn check` that pins no edition checks both branches. Each edition's lowering keeps that
-edition's guards, and a finding on a guarded line is that edition's verdict, reported as it is for
-a line only one edition's theme variant reads ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+A `cairn check` that pins no edition checks both branches. Each edition's resolution and lowering
+keep that edition's guards, and a finding whose span, or one of whose notes' spans, is on a line
+under that edition's guard is that edition's verdict, reported as it is for a line only one
+edition's theme variant reads ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Resolution pins no
+variant on either branch, so it binds each theme as it would in a source with no guard.
 `cairn info`'s portability and buildable-target rows ([§10.5](#105-which-version-is-it-for-has-three-answers))
 are per edition already, so each counts its own edition's branch and none of the other's.
 

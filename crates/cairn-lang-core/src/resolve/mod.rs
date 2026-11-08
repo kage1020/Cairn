@@ -24,6 +24,7 @@ pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 pub use resolution::{
     PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
 };
+pub(crate) use resolver::findings_on_branch;
 pub use resolver::resolve;
 pub(crate) use selector::select_the_same_members;
 pub use version_axes::{

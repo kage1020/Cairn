@@ -2,9 +2,9 @@
 //! non-`WxH` one. It walks the surface AST, where a value lowering hoisted still has its type and
 //! span.
 
-use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind, guarded_lines};
+use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
-use crate::intent::role_of;
+use crate::intent::{guarded_lines, role_of};
 
 use super::DiagnosticSink;
 

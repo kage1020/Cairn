@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use crate::edition::Edition;
 use crate::error::Span;
 
-use super::{EditionGuard, IntentModule, Member};
+use super::{IntentModule, Member};
 
 impl IntentModule {
     /// The module as `edition`'s build reads it, with each guarded member kept only under its
@@ -40,14 +40,14 @@ impl IntentModule {
     pub fn lines_guarded_for(&self, edition: Edition) -> Vec<&Span> {
         self.guarded_members()
             .into_iter()
-            .filter(|(guard, _)| guard.edition == edition)
+            .filter(|(guard, _)| *guard == edition)
             .map(|(_, member)| &member.span)
             .collect()
     }
 
     /// Every member under an `@edition` guard, at any depth, with its guard, in source order.
     #[must_use]
-    pub fn guarded_members(&self) -> Vec<(&EditionGuard, &Member)> {
+    pub fn guarded_members(&self) -> Vec<(Edition, &Member)> {
         let mut guarded = Vec::new();
         for members in self.member_lists() {
             collect_guarded(members, &mut guarded);
@@ -76,17 +76,16 @@ fn keep_branch(members: &mut Vec<Member>, edition: Option<Edition>) {
     members.retain(|member| {
         member
             .edition_guard
-            .as_ref()
-            .is_none_or(|guard| Some(guard.edition) == edition)
+            .is_none_or(|guard| Some(guard) == edition)
     });
     for member in members {
         keep_branch(&mut member.children.members, edition);
     }
 }
 
-fn collect_guarded<'a>(members: &'a [Member], into: &mut Vec<(&'a EditionGuard, &'a Member)>) {
+fn collect_guarded<'a>(members: &'a [Member], into: &mut Vec<(Edition, &'a Member)>) {
     for member in members {
-        if let Some(guard) = &member.edition_guard {
+        if let Some(guard) = member.edition_guard {
             into.push((guard, member));
         }
         collect_guarded(&member.children.members, into);
