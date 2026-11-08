@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockArrayIr, BlockEntity, BlockState, Dims, Palette, PaletteIndex,
+    lower_to_block_array,
+};
 use cairn_lang_core::resolve::{DroppedIntent, declared_version_floors, versions_satisfying};
 use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::ParityNote;
@@ -214,4 +217,42 @@ pub fn states_for(target: &BedrockTarget) -> VersionStates<'_> {
     builtin_pack(Edition::Bedrock)
         .states_at(&target.mc_version)
         .expect("the built-in Bedrock pack maps every targetable version")
+}
+
+/// A 2×2×3 array of stone under a comparator spelled `id` at (1, 1, 1), its block entity resting
+/// at strength 3, where Java's `blocks` and Bedrock's `block_indices` order it apart.
+///
+/// # Panics
+///
+/// When a cell it sets lies outside its dimensions, which none does.
+pub fn comparator_array(id: &str) -> BlockArray {
+    let mut palette = Palette::new_with_air();
+    let stone = palette.intern(BlockState::bare("minecraft:stone"));
+    let mut comparator = BlockState::bare(id);
+    for (key, value) in [("facing", "east"), ("mode", "compare"), ("powered", "true")] {
+        comparator
+            .properties
+            .insert(key.to_owned(), value.to_owned());
+    }
+    let comparator = palette.intern(comparator);
+    let dims = Dims { x: 2, y: 2, z: 3 };
+    let mut voxels = vec![PaletteIndex::AIR; dims.volume()];
+    for z in 0..dims.z {
+        for x in 0..dims.x {
+            voxels[dims.index(x, 0, z).expect("in dims")] = stone;
+        }
+    }
+    voxels[dims.index(1, 1, 1).expect("in dims")] = comparator;
+    BlockArray {
+        dims,
+        palette,
+        voxels,
+        block_entities: vec![BlockEntity {
+            pos: (1, 1, 1),
+            id: "minecraft:comparator".to_owned(),
+            fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+        }],
+        entities: vec![],
+        source_scope: "struct::comparator".to_owned(),
+    }
 }

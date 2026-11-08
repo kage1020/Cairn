@@ -539,29 +539,17 @@ impl Diagnostic {
     /// Render against `source`, with 1-based positions for the primary span and each located note.
     #[must_use]
     pub fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
-        let start = lines.position(source, self.span.start);
-        let end = lines.position(source, self.span.end);
         RenderedDiagnostic {
-            code: self.code,
-            severity: self.severity(),
-            line: start.line.get(),
-            col: start.col.get(),
-            end_line: end.line.get(),
-            end_col: end.col.get(),
-            primary: self.primary.clone(),
-            notes: self
-                .notes
-                .iter()
-                .map(|n| {
-                    let at = n.span.as_ref().map(|s| lines.position(source, s.start));
-                    RenderedNote {
-                        line: at.map(|p| p.line.get()),
-                        col: at.map(|p| p.col.get()),
-                        message: n.message.clone(),
-                    }
-                })
-                .collect(),
             data: self.data.clone(),
+            ..RenderedDiagnostic::new(
+                self.code.as_str(),
+                self.severity(),
+                &self.span,
+                &self.primary,
+                &self.notes,
+                source,
+                lines,
+            )
         }
     }
 }
@@ -574,8 +562,8 @@ pub(crate) fn sort_by_position(diagnostics: &mut [Diagnostic]) {
 /// JSON-friendly rendering of a [`Diagnostic`] with line/col populated.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RenderedDiagnostic {
-    /// Stable code identifying the kind of finding.
-    pub code: DiagnosticCode,
+    /// Stable code identifying the kind of finding, as its `E_*`/`W_*` string.
+    pub code: &'static str,
     /// Severity of the finding.
     pub severity: Severity,
     /// 1-based line of the primary span's first byte.
@@ -594,6 +582,45 @@ pub struct RenderedDiagnostic {
     /// [`Diagnostic::data`], carried over.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<DiagnosticData>,
+}
+
+impl RenderedDiagnostic {
+    /// A finding coded `code` at `span` in `source`, with no payload; a pass whose codes are not
+    /// [`DiagnosticCode`]s renders its findings through this.
+    #[must_use]
+    pub fn new(
+        code: &'static str,
+        severity: Severity,
+        span: &Span,
+        primary: &str,
+        notes: &[DiagnosticNote],
+        source: &str,
+        lines: &LineStarts,
+    ) -> Self {
+        let start = lines.position(source, span.start);
+        let end = lines.position(source, span.end);
+        Self {
+            code,
+            severity,
+            line: start.line.get(),
+            col: start.col.get(),
+            end_line: end.line.get(),
+            end_col: end.col.get(),
+            primary: primary.to_owned(),
+            notes: notes
+                .iter()
+                .map(|n| {
+                    let at = n.span.as_ref().map(|s| lines.position(source, s.start));
+                    RenderedNote {
+                        line: at.map(|p| p.line.get()),
+                        col: at.map(|p| p.col.get()),
+                        message: n.message.clone(),
+                    }
+                })
+                .collect(),
+            data: None,
+        }
+    }
 }
 
 /// JSON-friendly rendering of a [`DiagnosticNote`].

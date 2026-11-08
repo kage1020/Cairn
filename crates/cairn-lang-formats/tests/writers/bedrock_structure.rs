@@ -14,7 +14,8 @@ use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_nbt::tag::{Compound, Tag};
 
 use crate::common::{
-    block_palette, default_palette, dropped_shape, note_fields, states_for, structure_compound,
+    block_palette, comparator_array, default_palette, dropped_shape, note_fields, states_for,
+    structure_compound,
 };
 
 fn target_1_21_60() -> BedrockTarget {
@@ -825,4 +826,39 @@ fn the_tier0_parts_write_the_bedrock_blocks_and_states_of_their_java_ones() {
     ]
     .map(|(name, states)| (name, states.to_owned()));
     assert_eq!(written, expected);
+}
+
+#[test]
+fn a_block_entity_is_written_in_block_position_data_under_its_voxels_index() {
+    let (root, _) = build(&comparator_array("minecraft:powered_comparator")).expect("build");
+    let mut nbt = Compound::new();
+    nbt.insert("id", Tag::String("Comparator".to_owned()));
+    nbt.insert("OutputSignal", Tag::Int(3));
+    for axis in ["x", "y", "z"] {
+        nbt.insert(axis, Tag::Int(1));
+    }
+    let mut block = Compound::new();
+    block.insert("block_entity_data", Tag::Compound(nbt));
+    let mut expected = Compound::new();
+    // `block_indices` walks x, then y, then z: (1, 1, 1) is index (1 * 2 + 1) * 3 + 1.
+    expected.insert("10", Tag::Compound(block));
+    assert_eq!(
+        default_palette(&root).entries.get("block_position_data"),
+        Some(&Tag::Compound(expected)),
+    );
+}
+
+#[test]
+fn a_block_entity_without_a_bedrock_form_is_refused() {
+    let mut array = comparator_array("minecraft:powered_comparator");
+    array.block_entities[0].id = "minecraft:chest".to_owned();
+    match build(&array) {
+        Err(BedrockStructureError::UnmappedBlockEntity { id, known }) => {
+            assert_eq!(
+                (id.as_str(), known.as_str()),
+                ("minecraft:chest", "minecraft:comparator")
+            );
+        }
+        other => panic!("expected UnmappedBlockEntity, got {other:?}"),
+    }
 }

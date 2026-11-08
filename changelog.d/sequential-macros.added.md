@@ -6,8 +6,8 @@
 - *(redstone)* Each macro synthesizes to one gate carrying its stage count and to one cell of
   torches and repeaters on both editions, which keeps a `latch`'s or `counter`'s feedback inside
   it, so the Logic IR stays a DAG and a signal read back through a macro is still `E_LOGIC_CYCLE`.
-  `delay(x, n)` takes `n` ticks, `pulse(x, n)` `n + 2`, `edge_rising` 3, `edge_falling` 2, a
-  `counter` 3 and a `latch` 4 from `set` and 5 from `reset`, counted to the last change one change
-  at the port makes, and `assert latency` counts them on the path. Every one restores strength.
+  A stage is two ticks: `delay(x, n)` takes `2n` ticks, `pulse(x, n)` `2n + 2`, `edge_rising` 4,
+  `edge_falling` 3, a `counter` 3 and a `latch` 4 from `set` and 5 from `reset`, counted to the last
+  change one change at the port makes, and `assert latency` counts them on the path. Every one restores strength.
 - *(tree-sitter)* The grammar reads `latch` as a `call_expression` and the other macros as
   `apply_expression` nodes with `operand` and `stages` fields, each macro highlighted as a builtin.

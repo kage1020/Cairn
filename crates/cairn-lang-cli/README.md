@@ -16,7 +16,7 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 | `cairn parse <file.crn>` | Lex and parse, printing the AST. `--format json\|debug`. Runs no check passes. |
 | `cairn check <file.crn>` | Run the validation passes and print diagnostics. `--format text\|json`. Writes nothing. |
 | `cairn info <file.crn>` | Report the version range the file declares, per-edition portability, buildable targets, declared intended targets, and semantic-sensitive members. `--editions java,bedrock`, `--format text\|json`. |
-| `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot, which pins no edition, so it leaves out what `@edition` guards hold. |
+| `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--edition`, `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot: without `--edition` it pins no edition, so it leaves out what `@edition` guards hold and every struct's circuit. |
 | `cairn compile <file.crn> --edition <e>` | Write the structure artifacts and a lockfile. `--target`, `--out`, `--lock`. |
 | `cairn synth <file.crn>` | Print one redstone pipeline stage as JSON. Experimental; see below. |
 | `cairn docs [page] [title]` | Print a page of the documentation site as Markdown, from the copy embedded in the binary, or list the pages. `--toc` lists a page's headings. See below. |
@@ -64,9 +64,9 @@ Git Bash on Windows rewrites an argument that starts with `/` into a Windows pat
 
 ## `cairn synth` (experimental)
 
-`cairn synth --experimental-logic-synth --stage <s>` prints one stage of the redstone pipeline as JSON: `logic`, `netlist`, `edition`, `placement`, `route`, `delay`, or `crossing`. `--edition` is required from `edition` onwards and refused before it, because the earlier stages are edition-neutral by contract. Every cell of the placement-derived stages carries a `"stage"` key echoing the flag that produced it, so a consumer reads the stage off the output instead of inferring it from which optional keys are present.
+`cairn synth --experimental-logic-synth --stage <s>` prints one stage of the redstone pipeline as JSON: `logic`, `netlist`, `edition`, `placement`, `route`, `delay`, or `legalize`. `--edition` is required from `edition` onwards and refused before it, because the earlier stages are edition-neutral by contract. Each circuit of the four layout stages carries a `"stage"` key echoing the flag that produced it, so a consumer reads the stage off the output instead of inferring it from which keys are present.
 
-The output shape is **not** covered by the stable compatibility tier and may change at any time. The opt-in flag exists so a caller cannot come to depend on it by accident. Nothing from this pipeline reaches a compiled artifact yet.
+The output shape is **not** covered by the stable compatibility tier and may change at any time. The opt-in flag exists so a caller cannot come to depend on it by accident. `compile`, `check`, `info` and `lower --edition` run the same pipeline: `compile` lays each legalized circuit under its struct, which rises over it, and each of them reports the circuit's findings.
 
 ## License
 

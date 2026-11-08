@@ -265,7 +265,9 @@ impl<'a> Body<'a> {
                 sensor.member.span.clone(),
                 format!("{source} powers the cell above {named} from here"),
             )
-            .with_footer("bedrock has no quasi-connectivity, so the same source builds there")
+            .with_footer(
+                "bedrock has no quasi-connectivity, so this is no dependence on order there",
+            )
             .with_footer(format!(
                 "Fix: move {source} so that it powers no block beside the cell above {named}, \
                  or redesign the logic to be order-independent; or drop to Tier 0 with an \

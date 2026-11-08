@@ -20,8 +20,8 @@ sites: []
 structs:
   - name: crossbar
     size:
-      w: 6
-      h: 4
+      w: 12
+      h: 10
     args: {}
     members:
       - role:
@@ -147,7 +147,7 @@ structs:
             value: floor
           void:
             kind: Int
-            value: 2
+            value: 4
         intent_state: {}
     logic:
       - lhs:

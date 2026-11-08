@@ -10,7 +10,6 @@ use crate::logic_ir::{
     ScopedLogicIrEntry, SignalRef,
 };
 use crate::saturating_index;
-use crate::verify::latency_text;
 use cairn_lang_core::ast::{DottedRef, Expr, NamedOperand, SIGNAL_HEAD, Value, ValueKind};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
@@ -1783,4 +1782,9 @@ impl ScopeRef<'_> {
     fn label(self) -> String {
         format!("{}={}:", self.kind.label(), self.name)
     }
+}
+
+/// `assert latency(FROM -> TO) <= N`, as the source writes it.
+pub(crate) fn latency_text(from: &DottedRef, to: &DottedRef, bound: u32) -> String {
+    format!("`assert latency({from} -> {to}) <= {bound}`")
 }

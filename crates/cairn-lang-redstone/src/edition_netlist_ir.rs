@@ -23,15 +23,17 @@ pub enum EditionCell {
     BedrockTorchAnd,
     /// Java OR — two repeaters feeding a common dust line.
     JavaRepeaterOr,
-    /// Bedrock OR — a dust merge onto a common line.
-    BedrockTorchOr,
+    /// Bedrock OR — two repeaters feeding a common dust line.
+    BedrockRepeaterOr,
     /// Java NOT — a single inverter torch.
     JavaInverterTorch,
     /// Bedrock NOT — a single inverter torch.
     BedrockInverterTorch,
-    /// Java XOR — two torch NORs feeding a common dust line, each with one operand inverted.
+    /// Java XOR — the torch NORs of `a` and of `b`, each with the NOR of the two, onto a common
+    /// dust line.
     JavaTorchXor,
-    /// Bedrock XOR — two torch NORs feeding a common dust line, each with one operand inverted.
+    /// Bedrock XOR — the torch NORs of `a` and of `b`, each with the NOR of the two, onto a common
+    /// dust line.
     BedrockTorchXor,
     /// Java NAND — two inverter torches feeding a common dust line.
     JavaTorchNand,
@@ -47,33 +49,36 @@ pub enum EditionCell {
     /// Bedrock 2:1 MUX — two torch NORs feeding a common dust line, one of `sel` and inverted `a`,
     /// the other of inverted `sel` and inverted `b`.
     BedrockTorchMux,
-    /// Java DELAY — `stages` repeaters in series.
+    /// Java DELAY — repeaters in series, two ticks a stage.
     JavaRepeaterDelay {
-        /// Repeaters in series.
+        /// Stages the repeaters take in all.
         stages: u32,
     },
-    /// Bedrock DELAY — `stages` repeaters in series.
+    /// Bedrock DELAY — repeaters in series, two ticks a stage.
     BedrockRepeaterDelay {
-        /// Repeaters in series.
+        /// Stages the repeaters take in all.
         stages: u32,
     },
-    /// Java PULSE — the torch NOR of inverted `a` and of `a` through `stages + 1` repeaters.
+    /// Java PULSE — the torch NOR of inverted `a` and of `a` through repeaters of
+    /// `2 * stages + 1` ticks.
     JavaTorchPulse {
         /// Stages the pulse lasts at most.
         stages: u32,
     },
-    /// Bedrock PULSE — the torch NOR of inverted `a` and of `a` through `stages + 1` repeaters.
+    /// Bedrock PULSE — the torch NOR of inverted `a` and of `a` through repeaters of
+    /// `2 * stages + 1` ticks.
     BedrockTorchPulse {
         /// Stages the pulse lasts at most.
         stages: u32,
     },
-    /// Java rising-edge detector — the torch NOR of `a` inverted once and twice.
+    /// Java rising-edge detector — a one-stage PULSE.
     JavaTorchEdgeRising,
-    /// Bedrock rising-edge detector — the torch NOR of `a` inverted once and twice.
+    /// Bedrock rising-edge detector — a one-stage PULSE.
     BedrockTorchEdgeRising,
-    /// Java falling-edge detector — the torch NOR of `a` and inverted `a`.
+    /// Java falling-edge detector — the torch NOR of `a` and of inverted `a` through a repeater.
     JavaTorchEdgeFalling,
-    /// Bedrock falling-edge detector — the torch NOR of `a` and inverted `a`.
+    /// Bedrock falling-edge detector — the torch NOR of `a` and of inverted `a` through a
+    /// repeater.
     BedrockTorchEdgeFalling,
     /// Java LATCH — two torch NORs each powered by the other, `set` gated by a held `reset`.
     JavaTorchLatch,
@@ -110,7 +115,7 @@ impl EditionCell {
             | Self::JavaTorchLatch
             | Self::JavaRepeaterCounter { .. } => Edition::Java,
             Self::BedrockTorchAnd
-            | Self::BedrockTorchOr
+            | Self::BedrockRepeaterOr
             | Self::BedrockInverterTorch
             | Self::BedrockTorchXor
             | Self::BedrockTorchNand
@@ -131,8 +136,7 @@ impl EditionCell {
         match self {
             Self::JavaComparatorAnd => "ComparatorAND",
             Self::BedrockTorchAnd => "TorchAND",
-            Self::JavaRepeaterOr => "RepeaterOR",
-            Self::BedrockTorchOr => "TorchOR",
+            Self::JavaRepeaterOr | Self::BedrockRepeaterOr => "RepeaterOR",
             Self::JavaInverterTorch | Self::BedrockInverterTorch => "InverterTorch",
             Self::JavaTorchXor | Self::BedrockTorchXor => "TorchXOR",
             Self::JavaTorchNand | Self::BedrockTorchNand => "TorchNAND",
@@ -165,17 +169,21 @@ impl EditionCell {
                 PortName::Set => 4,
                 PortName::A | PortName::B | PortName::Sel | PortName::Reset => 5,
             },
-            Self::JavaRepeaterDelay { stages } | Self::BedrockRepeaterDelay { stages } => stages,
-            // The pulse ends once `a` is out of its repeaters, one more than its stages, and
+            Self::JavaRepeaterDelay { stages } | Self::BedrockRepeaterDelay { stages } => {
+                stages.saturating_mul(2)
+            }
+            // The pulse ends once `a` is out of its repeaters, a tick more than its stages, and
             // through the NOR.
             Self::JavaTorchPulse { stages } | Self::BedrockTorchPulse { stages } => {
-                stages.saturating_add(2)
+                stages.saturating_mul(2).saturating_add(2)
             }
-            Self::JavaTorchEdgeRising
-            | Self::BedrockTorchEdgeRising
-            | Self::JavaRepeaterCounter { .. }
-            | Self::BedrockRepeaterCounter { .. } => 3,
+            Self::JavaTorchEdgeRising | Self::BedrockTorchEdgeRising => 4,
+            Self::JavaRepeaterCounter { .. }
+            | Self::BedrockRepeaterCounter { .. }
+            | Self::JavaTorchEdgeFalling
+            | Self::BedrockTorchEdgeFalling => 3,
             Self::JavaRepeaterOr
+            | Self::BedrockRepeaterOr
             | Self::JavaInverterTorch
             | Self::BedrockInverterTorch
             | Self::JavaTorchNand
@@ -187,10 +195,7 @@ impl EditionCell {
             | Self::JavaTorchXor
             | Self::BedrockTorchXor
             | Self::JavaTorchMux
-            | Self::BedrockTorchMux
-            | Self::JavaTorchEdgeFalling
-            | Self::BedrockTorchEdgeFalling => 2,
-            Self::BedrockTorchOr => 0,
+            | Self::BedrockTorchMux => 2,
         }
     }
 
@@ -201,6 +206,7 @@ impl EditionCell {
     pub const fn regenerates(self) -> bool {
         match self {
             Self::JavaRepeaterOr
+            | Self::BedrockRepeaterOr
             | Self::JavaInverterTorch
             | Self::BedrockTorchAnd
             | Self::BedrockInverterTorch
@@ -224,7 +230,7 @@ impl EditionCell {
             | Self::BedrockTorchLatch
             | Self::JavaRepeaterCounter { .. }
             | Self::BedrockRepeaterCounter { .. } => true,
-            Self::JavaComparatorAnd | Self::BedrockTorchOr => false,
+            Self::JavaComparatorAnd => false,
         }
     }
 

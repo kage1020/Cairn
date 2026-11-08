@@ -66,7 +66,7 @@ fn redstone_door_java_maps_or_to_java_repeater_or() {
 }
 
 #[test]
-fn redstone_door_bedrock_maps_or_to_bedrock_torch_or() {
+fn redstone_door_bedrock_maps_or_to_bedrock_repeater_or() {
     let source = load_example("redstone-door.crn");
     let synth = synth_source(&source);
     let netlist = compile_netlist(&synth.scoped);
@@ -75,7 +75,7 @@ fn redstone_door_bedrock_maps_or_to_bedrock_torch_or() {
     let entry = &edition_netlist.scopes[0];
     assert_eq!(entry.ir.edition, Edition::Bedrock);
     assert_eq!(entry.ir.cells.len(), 1);
-    assert_eq!(entry.ir.cells[0].cell, EditionCell::BedrockTorchOr);
+    assert_eq!(entry.ir.cells[0].cell, EditionCell::BedrockRepeaterOr);
     assert_eq!(entry.ir.cells[0].drivers.len(), 2);
     assert_eq!(entry.ir.cells[0].drivers[0].port, PortName::A);
     assert_eq!(entry.ir.cells[0].drivers[1].port, PortName::B);
@@ -189,7 +189,7 @@ fn bedrock_mapping_is_exhaustive_over_logical_cells() {
     );
     assert_eq!(
         edition_cell_for(or, Edition::Bedrock),
-        EditionCell::BedrockTorchOr,
+        EditionCell::BedrockRepeaterOr,
     );
     assert_eq!(
         edition_cell_for(not_gate, Edition::Bedrock),
@@ -245,8 +245,8 @@ fn json_dump_carries_edition_and_snake_case_cells() {
         "Bedrock edition should render as \"bedrock\": {json}",
     );
     assert!(
-        json.contains("\"cell\":\"bedrock_torch_or\""),
-        "EditionCell::BedrockTorchOr should serialise as snake_case: {json}",
+        json.contains("\"cell\":\"bedrock_repeater_or\""),
+        "EditionCell::BedrockRepeaterOr should serialise as snake_case: {json}",
     );
 }
 

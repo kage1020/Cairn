@@ -3,6 +3,7 @@
 mod artifacts;
 mod atomicity;
 mod block_ids;
+mod circuit;
 mod edition_theme;
 mod lock_readback;
 mod roof_material;

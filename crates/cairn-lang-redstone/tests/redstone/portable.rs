@@ -70,7 +70,7 @@ fn quasi_connected(actuator: &str, keyword: &str) -> (String, String, Vec<String
         ),
         vec![
             format!("the lever `sw` powers the cell above {named} from here"),
-            "bedrock has no quasi-connectivity, so the same source builds there".to_owned(),
+            "bedrock has no quasi-connectivity, so this is no dependence on order there".to_owned(),
             format!(
                 "Fix: move the lever `sw` so that it powers no block beside the cell above \
                  {named}, or redesign the logic to be order-independent; or drop to Tier 0 with \

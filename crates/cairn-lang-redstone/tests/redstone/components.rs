@@ -2,24 +2,24 @@
 //! through a patch (`spec/redstone` "Signal binding", "Place-and-route").
 
 use cairn_lang_core::Edition;
-use cairn_lang_redstone::{DiagnosticCode, SynthOutput};
+use cairn_lang_redstone::{DiagnosticCode, NetRef, PadKind, SynthOutput, TileKind};
 
-use crate::common::{codes, legalized_from_source, only, synth_source};
+use crate::common::{codes, legalized, only, synth_source};
 
 /// A walled struct with one of each component, `extra` after them.
 fn panel(extra: &str) -> String {
     format!(
         "theme t:\n  slot wall -> @oak_planks\n\n\
-         struct panel size=9x7\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
-         lever id=lv at=inside.front offset=1 y=1 -> sig.power\n  \
-         button id=bt at=inside.front offset=2 y=1 -> sig.ring\n  \
-         daylight id=dl at=inside.back offset=1 y=1 -> sig.day\n  \
-         observer id=ob at=inside.back offset=2 y=1 facing=up -> sig.tick\n  \
-         dispenser id=ds at=inside.right offset=1 y=1 fired_by=sig.fire\n  \
-         lamp id=lp at=inside.left offset=1 y=2 lit_by=sig.day\n  \
-         piston id=pi at=inside.left offset=3 y=1 powered_by=sig.tick\n  \
+         struct panel size=15x13\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         lever id=lv at=inside.front offset=2 y=0 -> sig.power\n  \
+         button id=bt at=inside.front offset=6 y=0 -> sig.ring\n  \
+         daylight id=dl at=inside.back offset=2 y=0 -> sig.day\n  \
+         observer id=ob at=inside.back offset=6 y=1 facing=up -> sig.tick\n  \
+         dispenser id=ds at=inside.right offset=3 y=1 fired_by=sig.fire\n  \
+         lamp id=lp at=inside.left offset=2 y=1 lit_by=sig.day\n  \
+         piston id=pi at=inside.left offset=6 y=1 powered_by=sig.tick\n  \
          logic sig.fire = sig.power and sig.ring\n{extra}  \
-         circuit region=floor void=2\n"
+         circuit region=floor void=4\n"
     )
 }
 
@@ -33,30 +33,43 @@ fn outputs(out: &SynthOutput) -> Option<Vec<String>> {
 }
 
 #[test]
-fn every_sensor_feeds_an_input_pad_and_every_actuator_reads_an_output_pad() {
+fn every_sensor_feeds_a_pad_and_every_actuator_reads_a_riser() {
     for edition in [Edition::Java, Edition::Bedrock] {
-        let legalized = legalized_from_source(&panel(""), edition);
-        let ir = &legalized.scopes[0].ir;
-        let inputs: Vec<String> = ir.inputs.iter().map(|p| p.name.to_string()).collect();
-        assert_eq!(
-            inputs,
-            ["sig.power", "sig.ring", "sig.day", "sig.tick"],
-            "{edition:?}"
-        );
-        let width = ir.region.as_ref().expect("the reservation survives").width;
-        let outputs: Vec<(String, u32)> = ir
-            .outputs
+        let legalized = legalized(&panel(""), edition);
+        let layout = &legalized.scopes[0].ir;
+        let source = |net: Option<usize>| net.map(|net| layout.nets[net].source);
+        let pads: Vec<(PadKind, Option<NetRef>)> = layout
+            .tiles
             .iter()
-            .map(|p| (p.name.to_string(), p.pad.x))
+            .filter_map(|tile| match tile.kind {
+                TileKind::Pad { pad } => Some((pad, source(tile.output))),
+                _ => None,
+            })
             .collect();
         assert_eq!(
-            outputs,
+            pads,
             [
-                ("sig.fire".to_owned(), width - 1),
-                ("sig.day".to_owned(), width - 1),
-                ("sig.tick".to_owned(), width - 1),
+                (PadKind::Dust, Some(NetRef::Input(0))),
+                (PadKind::Dust, Some(NetRef::Input(1))),
+                (PadKind::Repeater, Some(NetRef::Input(2))),
+                (PadKind::Observer, Some(NetRef::Input(3))),
             ],
-            "{edition:?}: every actuator pad sits on the region's right edge",
+            "{edition:?}",
+        );
+        let risers: Vec<Option<NetRef>> = layout
+            .tiles
+            .iter()
+            .filter(|tile| tile.kind == TileKind::Riser)
+            .map(|tile| source(tile.inputs.first().map(|input| input.net)))
+            .collect();
+        assert_eq!(
+            risers,
+            [
+                Some(NetRef::Cell(0)),
+                Some(NetRef::Input(2)),
+                Some(NetRef::Input(3)),
+            ],
+            "{edition:?}",
         );
     }
 }
@@ -64,11 +77,11 @@ fn every_sensor_feeds_an_input_pad_and_every_actuator_reads_an_output_pad() {
 #[test]
 fn a_patch_binds_the_actuator_its_brackets_pick() {
     let src = panel(
-        "  lamp id=spare at=inside.left offset=2 y=2\n  \
+        "  lamp id=spare at=inside.left offset=4 y=1\n  \
          lamp[id=spare] lit_by=sig.tick\n  \
-         piston id=ram at=inside.right offset=2 y=1\n  \
+         piston id=ram at=inside.right offset=5 y=1\n  \
          piston[id=ram] powered_by=sig.day\n  \
-         dispenser id=gun at=inside.right offset=3 y=1\n  \
+         dispenser id=gun at=inside.right offset=7 y=1\n  \
          dispenser[id=gun] fired_by=sig.ring\n",
     );
     let out = synth_source(&src);

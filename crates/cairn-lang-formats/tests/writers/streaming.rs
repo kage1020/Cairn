@@ -19,7 +19,7 @@ use cairn_lang_nbt::NbtIoError;
 use cairn_lang_formats::registry::builtin_pack;
 
 use crate::common::{
-    block_palette, examples, latest, lower_source, states_for, supported_versions,
+    block_palette, comparator_array, examples, latest, lower_source, states_for, supported_versions,
 };
 
 /// Asserts two encodings match, reporting the first offset where they differ.
@@ -169,6 +169,13 @@ fn an_asymmetric_array_streams_the_bytes_its_tree_writes() {
     let array = asymmetric_array();
     assert_java_streams_the_tree("asymmetric", &array);
     assert_bedrock_streams_the_tree("asymmetric", &array, &latest_bedrock());
+}
+
+#[test]
+fn a_block_entity_streams_the_bytes_its_tree_writes() {
+    assert_java_streams_the_tree("comparator", &comparator_array("minecraft:comparator"));
+    let bedrock = comparator_array("minecraft:powered_comparator");
+    assert_bedrock_streams_the_tree("comparator", &bedrock, &latest_bedrock());
 }
 
 #[test]

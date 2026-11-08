@@ -12,23 +12,23 @@ theme works:
   slot roof  -> @spruce_stairs
   slot knob  -> @stone_button
 
-struct control_room size=9x7
+struct control_room size=17x13
   floor mat_slot=floor
   walls mat_slot=wall height=4
   door  id=entry side=front at=center
   roof  kind=gable mat_slot=roof overhang=1
 
   # sensors: a switch by the door, a detector outside, a bell and an observer watching upward
-  lever    id=power at=inside.front offset=2 y=2 -> sig.power
+  lever    id=power at=inside.front offset=2 y=0 -> sig.power
   daylight id=sun   at=back.outside offset=4 y=0 -> sig.day
-  button   id=bell  at=inside.front offset=6 y=2 mat_slot=knob -> sig.ring
+  button   id=bell  at=inside.front offset=6 y=0 mat_slot=knob -> sig.ring
   observer id=watch at=inside.left offset=3 y=1 facing=up -> sig.tick
 
   # the lamp lights while the power is on after dark
   logic sig.light = sig.power and not sig.day
-  lamp      id=light at=inside.back offset=4 y=3 lit_by=sig.light
-  dispenser id=chute at=front.outside offset=1 y=1 facing=out fired_by=sig.ring
+  lamp      id=light at=inside.back offset=4 y=1 lit_by=sig.light
+  dispenser id=chute at=front.outside offset=1 y=0 facing=out fired_by=sig.ring
   piston    id=ram   at=inside.right offset=3 y=1 facing=up sticky=true
   piston[id=ram] powered_by=sig.tick
 
-  circuit region=floor void=2
+  circuit region=floor void=4

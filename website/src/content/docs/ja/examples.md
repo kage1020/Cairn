@@ -5,7 +5,7 @@ description: 実際の .crn ファイル集。言語の書き方だけに集中�
 
 どのファイルも [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) にあり、あえて最小限の内容にしています。最初のグループの 4 つは、[チュートリアル](/ja/tutorial/)で順番に解説しています。
 
-> どのファイルも、現在のコンパイラでコンパイルできます。ただし、レッドストーンはまだコンパイル結果に含まれないので、`redstone-door.crn` と `control-room.crn` は、センサーとアクチュエーターを置くだけで、その間の回路なしで作られます。
+> どのファイルも、現在のコンパイラでコンパイルできます。`logic` を持つファイルは、床下に回路が組み上がります。
 
 ## まずはここから
 
@@ -45,4 +45,4 @@ description: 実際の .crn ファイル集。言語の書き方だけに集中�
 | ファイル | 内容 |
 |---|---|
 | [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | 両エディション共通のプリミティブがないスロットに、エディション別のテーマバリアントで対応する。エディションごとに綴りの違うブロックは `@edition` ガードで分ける。 |
-| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | 狭い領域に 4 つのネットを通す例。ルーターは各ネットをほかのネットを避けて敷き、`void=2` の範囲で 1 本をブリッジ層に持ち上げます。`void=1` では `E_ROUTE_CONGESTION` で拒否します。 |
+| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | 2 枚の感圧板が両方のゲートに入り、ゲートの出力が両端のドアを動かすので、2 本の配線が交差する例。`void=4` では一方が 1 層上でもう一方を越え、`void=3` ではルーターが `E_ROUTE_CONGESTION` で拒否します。 |

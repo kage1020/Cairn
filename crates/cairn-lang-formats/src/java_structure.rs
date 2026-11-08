@@ -1,7 +1,10 @@
-//! A [`BlockArray`] as a Java structure file: `size`, `palette`, `blocks`, an empty `entities`
-//! and `DataVersion`. Lowering never fills the IR's entities or block entities, so none is written.
+//! A [`BlockArray`] as a Java structure file: `size`, `palette`, `blocks`, each with its block
+//! entity's `nbt`, an empty `entities` and `DataVersion`. Lowering never fills the IR's entities,
+//! so none is written.
 
-use cairn_lang_core::block_array::{BlockArray, BlockState};
+use std::collections::HashMap;
+
+use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockState};
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
@@ -206,6 +209,7 @@ impl JavaStructure<'_> {
                 self.data_version,
             )),
         )?;
+        let entities = block_entities_at(block_array);
         root.list("blocks", 10, self.volume, |blocks| {
             // `blocks_list`'s (y, z, x) order.
             for y in 0..block_array.dims.y {
@@ -225,7 +229,11 @@ impl JavaStructure<'_> {
                                 pos.item(&Tag::Int(xi))?;
                                 pos.item(&Tag::Int(yi))?;
                                 pos.item(&Tag::Int(zi))
-                            })
+                            })?;
+                            match entities.get(&(x, y, z)) {
+                                Some(entity) => entry.compound_tag("nbt", &entity_nbt(entity)),
+                                None => Ok(()),
+                            }
                         })?;
                     }
                 }
@@ -351,8 +359,29 @@ fn palette_entry(state: &BlockState, (id_key, properties_key): (&str, &str)) -> 
     compound
 }
 
+/// Each block entity of `block_array`, by the voxel it sits at.
+fn block_entities_at(block_array: &BlockArray) -> HashMap<(u32, u32, u32), &BlockEntity> {
+    block_array
+        .block_entities
+        .iter()
+        .map(|entity| (entity.pos, entity))
+        .collect()
+}
+
+/// A block entity as the game saves one in a structure's `blocks`: its id and fields, without the
+/// position its block entry already gives.
+fn entity_nbt(entity: &BlockEntity) -> Compound {
+    let mut nbt = Compound::new();
+    nbt.insert("id", Tag::String(entity.id.clone()));
+    for (field, value) in &entity.fields {
+        nbt.insert(field.clone(), Tag::Int(*value));
+    }
+    nbt
+}
+
 fn blocks_list(block_array: &BlockArray) -> Result<List, JavaStructureError> {
     // Air is written too, as the game's structure blocks do, so placement can tell it from void.
+    let entities = block_entities_at(block_array);
     let mut entries: Vec<Compound> = Vec::with_capacity(block_array.dims.volume());
     for y in 0..block_array.dims.y {
         let yi = dim_to_i32(y, "y")?;
@@ -368,6 +397,9 @@ fn blocks_list(block_array: &BlockArray) -> Result<List, JavaStructureError> {
                 let mut entry = Compound::new();
                 entry.insert("state", Tag::Int(i32::from(palette_index.0)));
                 entry.insert("pos", Tag::List(List::of_ints([xi, yi, zi])));
+                if let Some(entity) = entities.get(&(x, y, z)) {
+                    entry.insert("nbt", Tag::Compound(entity_nbt(entity)));
+                }
                 entries.push(entry);
             }
         }

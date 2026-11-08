@@ -1,10 +1,11 @@
 //! A [`BlockArray`] as a Bedrock `.mcstructure`. Each `block_indices` layer runs z fastest,
 //! `(x * size_y + y) * size_z + z`, unlike Java's `blocks`; the second layer holds water where a
-//! waterlogged entry stands and `-1` everywhere else.
+//! waterlogged entry stands and `-1` everywhere else. A block entity is written under
+//! `block_position_data`, keyed by its voxel's place in that order.
 
 use std::collections::HashMap;
 
-use cairn_lang_core::block_array::{BlockArray, BlockState, PaletteIndex};
+use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockState, PaletteIndex};
 use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
@@ -90,6 +91,17 @@ pub enum BedrockStructureError {
         volume: usize,
         /// `voxels.len()`.
         voxels: usize,
+    },
+    /// A block entity Bedrock has no counterpart for in this writer.
+    #[error(
+        "block entity `{id}` has no Bedrock form this writer knows; it writes `{known}` only. Fix: \
+         compile with `--edition java`"
+    )]
+    UnmappedBlockEntity {
+        /// The block entity's id.
+        id: String,
+        /// The ids it maps, comma-joined.
+        known: String,
     },
     /// A palette string the NBT encoder cannot write, checked first since the file writes it last.
     #[error("palette entry `{id}`: {field} cannot be written as NBT: {source}")]
@@ -220,12 +232,13 @@ pub fn prepare_mcstructure<'a>(
     if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
     }
+    let position_data = position_data(block_array)?;
 
     let prepared = McStructure {
         block_array,
         size,
         volume,
-        palette: palette_compound(block_palette),
+        palette: palette_compound(block_palette, position_data),
         block_palette_len,
         slots,
         water,
@@ -235,6 +248,47 @@ pub fn prepare_mcstructure<'a>(
 
 /// The block a waterlogged cell's second layer holds.
 const WATER_ID: &str = "minecraft:water";
+
+/// Each block entity id the writer maps, with the id Bedrock saves it under.
+const BLOCK_ENTITY_IDS: [(&str, &str); 1] = [("minecraft:comparator", "Comparator")];
+
+/// `block_position_data`: each block entity's `block_entity_data`, keyed by its voxel's index in
+/// `block_indices`, its position the voxel's own.
+fn position_data(block_array: &BlockArray) -> Result<Compound, BedrockStructureError> {
+    let dims = block_array.dims;
+    let mut data = Compound::new();
+    for entity in &block_array.block_entities {
+        let (x, y, z) = entity.pos;
+        let Some(&(_, id)) = BLOCK_ENTITY_IDS.iter().find(|(java, _)| *java == entity.id) else {
+            return Err(BedrockStructureError::UnmappedBlockEntity {
+                id: entity.id.clone(),
+                known: BLOCK_ENTITY_IDS.map(|(java, _)| java).join(", "),
+            });
+        };
+        let index =
+            (u64::from(x) * u64::from(dims.y) + u64::from(y)) * u64::from(dims.z) + u64::from(z);
+        let mut block = Compound::new();
+        block.insert("block_entity_data", Tag::Compound(entity_data(entity, id)?));
+        data.insert(index.to_string(), Tag::Compound(block));
+    }
+    Ok(data)
+}
+
+/// A block entity as Bedrock saves one: `id`, its fields, and its position.
+fn entity_data(entity: &BlockEntity, id: &str) -> Result<Compound, BedrockStructureError> {
+    let (x, y, z) = entity.pos;
+    let mut nbt = Compound::new();
+    nbt.insert("id", Tag::String(id.to_owned()));
+    for (field, value) in &entity.fields {
+        nbt.insert(field.clone(), Tag::Int(*value));
+    }
+    for (axis, value) in [("x", x), ("y", y), ("z", z)] {
+        let value = i32::try_from(value)
+            .map_err(|_| BedrockStructureError::DimensionOverflow { axis, value })?;
+        nbt.insert(axis, Tag::Int(value));
+    }
+    Ok(nbt)
+}
 
 /// The `block_palette` being built, a set (`spec/compilation` "Within-phase conflicts and the
 /// palette"): an entry whose translation folds into an earlier one takes that slot, so air stays
@@ -439,13 +493,13 @@ fn palette_entry(id: &str, states: Compound, block_version: i32) -> Compound {
     compound
 }
 
-fn palette_compound(block_palette: Vec<Compound>) -> Compound {
+fn palette_compound(block_palette: Vec<Compound>, position_data: Compound) -> Compound {
     let mut default = Compound::new();
     default.insert(
         "block_palette",
         Tag::List(List::of_compounds(block_palette)),
     );
-    default.insert("block_position_data", Tag::Compound(Compound::new()));
+    default.insert("block_position_data", Tag::Compound(position_data));
 
     let mut palette = Compound::new();
     palette.insert("default", Tag::Compound(default));

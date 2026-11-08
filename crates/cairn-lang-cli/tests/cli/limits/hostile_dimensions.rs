@@ -237,62 +237,91 @@ fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
     ]
 }
 
-/// A `circuit region=` inside a struct whose `size=` is hostile, so the driver segment is too.
-fn circuit(size: &str) -> String {
+/// A struct of `size=` whose floor reserves `void=` layers for a circuit fed by two plates.
+fn circuit(size: &str, void: &str) -> String {
     let body = [
         format!("struct big size={size}"),
         "  floor mat_slot=floor".to_owned(),
-        "  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a".to_owned(),
-        "  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b".to_owned(),
+        "  walls mat_slot=wall height=3".to_owned(),
+        "  pressure_plate id=pa at=inside.front offset=1 y=0 -> sig.a".to_owned(),
+        "  pressure_plate id=pb at=inside.front offset=3 y=0 -> sig.b".to_owned(),
         "  logic sig.o = sig.a and sig.b".to_owned(),
         "  door id=d side=front at=center opened_by=sig.o".to_owned(),
-        "  circuit region=floor void=3".to_owned(),
+        format!("  circuit region=floor void={void}"),
     ]
     .join("\n");
     source(&format!("{body}\n"))
 }
 
-/// The same shapes put to place-and-route, which `--stage route` has to refuse by arithmetic.
-fn hostile_circuits() -> Vec<(&'static str, String)> {
-    vec![
-        ("circuit-size-in-range", circuit("4000000x4000000")),
-        ("circuit-size-i32-max", circuit("2147483647x2147483647")),
-        ("circuit-size-u32-max", circuit("4294967295x4294967295")),
-    ]
+/// `cairn synth --stage <stage> --edition java` on `source`, bounded by [`DEADLINE`].
+fn synth(dir: &Path, name: &str, source: &str, stage: &str) -> (Outcome, String, String, Duration) {
+    fs::create_dir_all(dir).expect("case dir");
+    let path = write(dir, name, source);
+    let file = path.to_str().unwrap();
+    run_bounded_with_stdout(
+        dir,
+        &[
+            "synth",
+            file,
+            "--stage",
+            stage,
+            "--edition",
+            "java",
+            "--experimental-logic-synth",
+        ],
+    )
 }
 
 #[test]
-fn routing_a_giant_reservation_answers_within_the_deadline() {
+fn a_struct_too_large_to_build_lays_no_circuit_without_searching() {
     let tmp = TempDir::new().expect("tempdir");
-    for (name, body) in hostile_circuits() {
-        let dir = tmp.path().join(name);
-        fs::create_dir_all(&dir).expect("case dir");
-        let path = write(&dir, name, &body);
-        let file = path.to_str().unwrap();
-        // Only `route`: the CLI stops at the first stage with an error.
-        let (outcome, stderr, elapsed) = run_bounded(
-            &dir,
-            &[
-                "synth",
-                file,
-                "--stage",
-                "route",
-                "--edition",
-                "java",
-                "--experimental-logic-synth",
-            ],
+    for size in [
+        "4000000x4000000",
+        "2147483647x2147483647",
+        "4294967295x4294967295",
+    ] {
+        let (outcome, stderr, stdout, elapsed) =
+            synth(&tmp.path().join(size), size, &circuit(size, "3"), "route");
+        assert_eq!(outcome, Outcome::Exited(0), "{size}\nstderr={stderr}");
+        assert_stream(&stderr, &[(9, 1, "warning", "W_STRUCTURE_TOO_LARGE")]);
+        assert_eq!(
+            stdout.trim(),
+            "[]",
+            "{size}: no struct is built, so no circuit is laid"
         );
-        // Not `Exited(0 | 1)`: a refusal demoted to a warning would put the same code on stderr.
-        assert!(
-            matches!(outcome, Outcome::Exited(1)),
-            "{name}: `synth --stage route` ended as {outcome:?}; a reservation the attenuation \
-             cap cannot span must be refused, not routed\nstderr={stderr}",
-        );
-        assert_stream(&stderr, &[(15, 3, "error", "E_ATTENUATION_LIMIT")]);
         assert!(
             elapsed < ANSWERED_WITHOUT_SEARCHING,
-            "{name}: `synth --stage route` took {elapsed:?}; refusing on the straight line is \
-             arithmetic, so anything near {ANSWERED_WITHOUT_SEARCHING:?} means a search ran",
+            "{size}: `synth --stage route` took {elapsed:?} over a struct it never builds",
+        );
+    }
+}
+
+#[test]
+fn a_reservation_past_the_structure_volume_is_refused_by_arithmetic() {
+    let tmp = TempDir::new().expect("tempdir");
+    for (size, void) in [
+        ("1000x1000", "13"),
+        ("31x31", "16777216"),
+        ("31x31", "4294967295"),
+    ] {
+        let name = format!("{size}-{void}");
+        let (outcome, stderr, _, elapsed) = synth(
+            &tmp.path().join(&name),
+            &name,
+            &circuit(size, void),
+            "placement",
+        );
+        assert_eq!(outcome, Outcome::Exited(1), "{name}\nstderr={stderr}");
+        assert_stream(&stderr, &[(16, 3, "error", "E_ROUTE_CONGESTION")]);
+        assert!(
+            stderr.contains(&format!(
+                "`void={void}` takes the struct past 16777216 blocks"
+            )),
+            "{name}: {stderr}",
+        );
+        assert!(
+            elapsed < ANSWERED_WITHOUT_SEARCHING,
+            "{name}: `synth --stage placement` took {elapsed:?} to refuse a volume it can count",
         );
     }
 }
@@ -654,9 +683,8 @@ fn a_long_north_south_walkway_lowers_within_the_deadline() {
     );
 }
 
-/// A sink walled in two blocks from its driver, in a reservation as large as `size=` and `void=`
-/// make it.
-fn walled_in_near_sink() -> String {
+/// A struct 2000 blocks long with a door at each end, the back one fed across its whole length.
+fn long_deep_reservation() -> String {
     let body = [
         "theme t:",
         "  slot wall -> @oak_planks",
@@ -664,9 +692,10 @@ fn walled_in_near_sink() -> String {
         "",
         "struct s size=31x2000",
         "  floor mat_slot=wall",
+        "  walls mat_slot=wall height=3",
         "  door id=d0 side=front at=center mat_slot=door",
         "  door id=d1 side=back at=center mat_slot=door",
-        "  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a",
+        "  pressure_plate id=pa at=inside.front offset=2 y=0 -> sig.a",
         "  logic sig.g0 = (sig.a or sig.a) or (sig.a and sig.a)",
         "  logic sig.g1 = sig.g0 and sig.a",
         "  door[id=d0] opened_by=sig.g0",
@@ -677,31 +706,15 @@ fn walled_in_near_sink() -> String {
 }
 
 #[test]
-fn a_walled_in_sink_is_refused_without_searching_the_reservation() {
+fn a_long_deep_reservation_is_laid_in_its_top_layers_within_the_deadline() {
     let tmp = TempDir::new().expect("tempdir");
-    let path = write(tmp.path(), "walled", &walled_in_near_sink());
-    let (outcome, stderr, elapsed) = run_bounded(
-        tmp.path(),
-        &[
-            "synth",
-            path.to_str().unwrap(),
-            "--stage",
-            "route",
-            "--edition",
-            "java",
-            "--experimental-logic-synth",
-        ],
-    );
-    assert!(
-        matches!(outcome, Outcome::Exited(1)),
-        "`synth --stage route` ended as {outcome:?}\nstderr={stderr}",
-    );
-    // Congestion, not distance: the sink is walled in whatever the cap allows.
-    assert_stream(&stderr, &[(14, 3, "error", "E_ROUTE_CONGESTION")]);
-    assert!(stderr.contains("cannot reach (5,0,1)"), "got {stderr:?}");
-    // 12.4 million coords of reservation: searched, it runs past `DEADLINE`.
-    assert!(
-        elapsed < ANSWERED_WITHOUT_SEARCHING,
-        "`synth --stage route` took {elapsed:?} to refuse a sink two blocks from its driver",
+    let (outcome, stderr, stdout, _) =
+        synth(tmp.path(), "long", &long_deep_reservation(), "legalize");
+    assert_eq!(outcome, Outcome::Exited(0), "stderr={stderr}");
+    assert_eq!(stderr, "");
+    let layouts: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(
+        layouts[0]["ir"]["region"],
+        serde_json::json!({"label": "floor", "void": 200, "layers": 5, "width": 31, "depth": 2000}),
     );
 }

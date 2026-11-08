@@ -6,8 +6,7 @@ description: Build up from a single cottage to a themed tower, a redstone gateho
 This page walks through the [examples](/examples/), one idea at a time. Read it top to bottom, since
 each section builds on the one before it.
 
-> The `cairn compile` commands on this page run with the current compiler. Redstone does not reach
-> compiled output yet, so the gatehouse in section 3 builds without its circuit.
+> The `cairn compile` commands on this page run with the current compiler.
 
 ## 1. A cottage
 
@@ -114,42 +113,46 @@ struct gatehouse size=7x5
   door  id=front side=front at=center
 
   pressure_plate id=plate at=front.outside offset=3 y=0 -> sig.step
-  pressure_plate id=inner at=inside.front  offset=3 y=1 -> sig.exit
+  pressure_plate id=inner at=inside.front  offset=2 y=1 -> sig.exit
 
   logic sig.open = sig.step or sig.exit
   door[id=front] opened_by=sig.open
 
-  circuit region=floor void=2
+  circuit region=floor void=3
 
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
-  assert latency(sig.step -> sig.open) <= 1
-  assert always(sig.step -> eventually sig.open within 2)
+  assert latency(sig.step -> sig.open) <= 3
+  assert always(sig.step -> eventually sig.open within 3)
 ```
 
 **A plate outside a wall stands under the roof's overhang.** `at=front.outside` takes the cell in
 front of the wall at `offset=3`, right outside the door, in the ring the roof's `overhang=1` adds.
 Without an overhang the struct ends at its walls, so the plate has nowhere to go and is refused with
 `E_INVALID_MEMBER`. `at=inside.front` takes the cell just inside, at `y=1`, on top of the floor:
-inside the walls row `y=0` is the floor itself, while outside it is the ground.
+inside the walls row `y=0` is the floor itself, while outside it is the ground. The inner plate
+stands one column aside of the door, since the dust under a plate right in front of it would lie
+beside the torch under the door that opens it.
 
 **Sensors emit, actuators consume.** `-> sig.step` is a sensor's output; `opened_by=sig.open` is an
 actuator's input. `logic` writes the dependency between them.
 
-**There is no tick arithmetic.** The logic expression carries no time at all. The `<= 1` and the
-`within 2` in the assertions are the only numbers that mean ticks, because delay is not known until
+**There is no tick arithmetic.** The logic expression carries no time at all. The `<= 3` and the
+`within 3` in the assertions are the only numbers that mean ticks, because delay is not known until
 the circuit has been placed and routed.
 
-**`circuit region=…` reserves space** for place-and-route. If routing does not fit you get
-`E_ROUTE_CONGESTION` with a suggested fix, never a silent overflow. For now only the experimental
-`cairn synth --experimental-logic-synth` runs the router, so `cairn compile` does not report it.
+**`circuit region=floor void=3` reserves three layers under the floor.** `cairn compile` builds
+the circuit there at full size, dust, torches and repeaters, and the gatehouse rises three layers
+over it. If the circuit does not fit you get `E_ROUTE_CONGESTION` with a suggested fix, never a
+silent overflow, and a sensor or actuator the circuit under the floor cannot reach, such as a lever
+high on a wall, is `E_ROUTE_UNREACHABLE_COMPONENT`.
 
 **Assertions come in three kinds:** `truth(…)` for combinational logic, `latency(in -> out) <= N`
 for bounded delay, and `always(in -> eventually out within N)` for bounded temporal. There is no
-full LTL by design, only what a per-tick simulator can decide cheaply. That simulator does not
-exist yet. A latency bound needs none: `cairn synth --experimental-logic-synth --stage crossing`
-counts the ticks of the placed circuit for the edition it builds and refuses a bound it misses
-with `E_SIM_ASSERTION_FAILED`. On Java the OR here is two repeaters, one tick; on Bedrock it is a
-dust merge, which takes none.
+full LTL by design, only what a per-tick simulator can decide cheaply. Nothing checks `truth` and
+`always` against the circuit yet. A latency bound needs no simulator: every command that builds
+the circuit counts the ticks of the laid circuit for the edition it builds and refuses a bound it
+misses with `E_SIM_ASSERTION_FAILED`. The OR here is two repeaters, one tick, and the two torches
+that carry the signal up to the door take two more.
 
 **The edition difference is in the cell library, not the language.** The same logic becomes a
 `ComparatorAND` cell on Java and a `TorchAND` on Bedrock. A circuit that depends on quasi-connectivity

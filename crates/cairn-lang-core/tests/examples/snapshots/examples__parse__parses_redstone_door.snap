@@ -120,7 +120,7 @@ items:
           - key: offset
             value:
               kind: Int
-              value: 3
+              value: 2
           - key: y
             value:
               kind: Int
@@ -172,7 +172,7 @@ items:
           - key: void
             value:
               kind: Int
-              value: 2
+              value: 3
       - kind: AssertTruth
         inputs:
           - - sig
@@ -198,7 +198,7 @@ items:
         to:
           - sig
           - open
-        bound: 1
+        bound: 3
       - kind: AssertAlways
         antecedent:
           - sig
@@ -206,4 +206,4 @@ items:
         consequent:
           - sig
           - open
-        within: 2
+        within: 3

@@ -29,8 +29,8 @@ sites: []
 structs:
   - name: control_room
     size:
-      w: 9
-      h: 7
+      w: 17
+      h: 13
     args: {}
     members:
       - role:
@@ -87,7 +87,7 @@ structs:
             value: 2
           y:
             kind: Int
-            value: 2
+            value: 0
         intent_state: {}
       - id: sun
         role:
@@ -130,7 +130,7 @@ structs:
             value: 6
           y:
             kind: Int
-            value: 2
+            value: 0
         intent_state: {}
       - id: watch
         role:
@@ -170,7 +170,7 @@ structs:
             value: 4
           y:
             kind: Int
-            value: 3
+            value: 1
           lit_by:
             kind: DotRef
             value:
@@ -191,7 +191,7 @@ structs:
             value: 1
           y:
             kind: Int
-            value: 1
+            value: 0
           fired_by:
             kind: DotRef
             value:
@@ -244,7 +244,7 @@ structs:
             value: floor
           void:
             kind: Int
-            value: 2
+            value: 4
         intent_state: {}
     logic:
       - lhs:

@@ -1,15 +1,18 @@
-//! Fixture builders and JSON helpers shared by the redstone integration tests.
+//! Fixture builders shared by the redstone integration tests.
 
-use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use cairn_lang_core::ast::DottedRef;
+use cairn_lang_core::block_array::{
+    BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, lower_to_block_array,
+};
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{Edition, IntentModule, lower, parse};
+use cairn_lang_core::{Edition, IntentModule, lower, parse, resolve};
 use cairn_lang_redstone::{
-    Diagnostic, DiagnosticCode, ScopedEditionNetlistIr, ScopedPlacementIr, SynthOutput,
-    compile_crossing, compile_delay, compile_edition_netlist, compile_netlist, compile_placement,
-    compile_routing, synthesize,
+    CellPortDriver, CircuitLayout, Diagnostic, DiagnosticCode, EditionCell, PlacementOutput,
+    ScopedCircuitLayout, ScopedEditionNetlistIr, SynthOutput, TileKind, TilePort, compile_delay,
+    compile_edition_netlist, compile_legalize, compile_netlist, compile_placement, compile_routing,
+    synthesize,
 };
 
 /// Reads `examples/<name>` from the workspace root.
@@ -21,6 +24,13 @@ pub fn load_example(name: &str) -> String {
         .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
 }
+
+/// The examples whose circuits build, each with its struct.
+pub const EXAMPLES: [(&str, &str); 3] = [
+    ("redstone-door.crn", "gatehouse"),
+    ("control-room.crn", "control_room"),
+    ("crossbar.crn", "crossbar"),
+];
 
 pub fn synth_source(source: &str) -> SynthOutput {
     let module = parse(source).expect("parse");
@@ -71,6 +81,65 @@ pub fn sig(name: &str) -> DottedRef {
     DottedRef::new(head, parts.collect())
 }
 
+/// A door opened through an `or` from a lever and a plate at the far end of a 40-wide floor, its
+/// wire long enough to need a buffer repeater.
+pub const LONG_WIRE_SOURCE: &str = "\
+theme t:
+  slot wall -> @oak_planks
+
+struct reach size=40x6
+  floor mat_slot=wall
+  walls mat_slot=wall height=3
+  door id=front side=front at=center
+  lever id=l at=inside.back offset=1 y=0 -> sig.a
+  pressure_plate id=p at=inside.front offset=1 y=0 -> sig.b
+  logic sig.c = sig.a or sig.b
+  door[id=front] opened_by=sig.c
+  circuit region=floor void=4
+";
+
+/// A door opened straight off a plate at the far end of a 40-wide floor: a wire and no cell.
+pub const IDENTITY_WIRE_SOURCE: &str = "\
+theme t:
+  slot wall -> @oak_planks
+
+struct pass size=40x6
+  floor mat_slot=wall
+  walls mat_slot=wall height=3
+  door id=d side=front at=center
+  pressure_plate id=p at=inside.front offset=1 y=0 -> sig.a
+  door[id=d] opened_by=sig.a
+  circuit region=floor void=3
+";
+
+/// One finding as `(code, spanned text, primary, notes)`, each note with the text its span covers.
+pub type Finding<'a> = (
+    &'static str,
+    &'a str,
+    String,
+    Vec<(Option<&'a str>, String)>,
+);
+
+/// `found` as [`Finding`]s over `source`.
+pub fn findings<'a>(source: &'a str, found: &[Diagnostic]) -> Vec<Finding<'a>> {
+    found
+        .iter()
+        .map(|d| {
+            let notes = d
+                .notes
+                .iter()
+                .map(|n| (n.span.clone().map(|s| &source[s]), n.message.clone()))
+                .collect();
+            (
+                d.code.as_str(),
+                &source[d.span.clone()],
+                d.primary.clone(),
+                notes,
+            )
+        })
+        .collect()
+}
+
 /// Compiles `source` to the Edition Netlist IR, failing on any front-end error.
 pub fn edition_netlist_from_source(
     source: &str,
@@ -79,164 +148,107 @@ pub fn edition_netlist_from_source(
     let module = parse(source).expect("parse");
     let intent = lower(&module);
     let synth = synthesize(&intent);
-    assert!(
-        synth
-            .diagnostics
-            .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "fixture must synth cleanly: {:?}",
-        synth.diagnostics,
-    );
+    assert_clean("synth", &synth.diagnostics);
     let netlist = compile_netlist(&synth.scoped);
     let edition_netlist = compile_edition_netlist(&netlist, edition);
     (edition_netlist, intent)
 }
 
-/// [`edition_netlist_from_source`] plus placement, which must run clean.
-pub fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
-    let (edition_netlist, intent) = edition_netlist_from_source(source, edition);
-    let placement = compile_placement(&edition_netlist, &intent);
-    assert!(
-        placement.diagnostics.is_empty(),
-        "fixture must place cleanly: {:?}",
-        placement.diagnostics,
-    );
-    placement.scoped
+/// A target that spells every token as the block of its name, so every member stands as written.
+pub struct Named;
+
+impl TargetRegistry for Named {
+    fn lookup(&self, token: &str) -> Option<BlockState> {
+        let name = token.split('.').next()?;
+        Some(BlockState::bare(format!("minecraft:{name}")))
+    }
+
+    fn known_tokens(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
+        None
+    }
 }
 
-/// [`placement_from_source`] plus routing, allowing only `W_ROUTE_CROSS_LAYER_CLEARANCE`.
-pub fn routed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
-    let routing = compile_routing(&placement_from_source(source, edition));
+/// `intent` built for `edition` against [`Named`].
+pub fn built(intent: &IntentModule, edition: Edition) -> BlockArrayIr {
+    lower_to_block_array(intent, &resolve(intent, Some(edition)), Some(&Named))
+}
+
+/// The placement pass over `source`, its findings kept.
+pub fn placement_of(source: &str, edition: Edition) -> PlacementOutput {
+    let (netlist, intent) = edition_netlist_from_source(source, edition);
+    compile_placement(&netlist, &intent, &built(&intent, edition))
+}
+
+/// `source`'s circuits placed, failing on any finding, the lowering's included.
+pub fn placed(source: &str, edition: Edition) -> ScopedCircuitLayout {
+    let (netlist, intent) = edition_netlist_from_source(source, edition);
+    let built = built(&intent, edition);
     assert!(
-        routing
+        built
             .diagnostics
             .iter()
-            .all(|d| d.code == DiagnosticCode::RouteCrossLayerClearance),
-        "fixture must route with only the cross-layer advisory: {:?}",
-        routing.diagnostics,
+            .all(|d| d.severity() != Severity::Error),
+        "the fixture must lower: {:#?}",
+        built.diagnostics,
     );
-    routing.scoped
+    let out = compile_placement(&netlist, &intent, &built);
+    assert_clean("placement", &out.diagnostics);
+    out.scoped
 }
 
-/// [`routed_from_source`] plus the delay pass, which must run clean.
-pub fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
-    let delay = compile_delay(&routed_from_source(source, edition));
+/// `source`'s circuits routed, failing on any finding.
+pub fn routed(source: &str, edition: Edition) -> ScopedCircuitLayout {
+    let out = compile_routing(&placed(source, edition));
+    assert_clean("routing", &out.diagnostics);
+    out.scoped
+}
+
+/// `source`'s circuits buffered, failing on any finding.
+pub fn delayed(source: &str, edition: Edition) -> ScopedCircuitLayout {
+    let out = compile_delay(&routed(source, edition));
+    assert_clean("delay", &out.diagnostics);
+    out.scoped
+}
+
+/// `source`'s circuits legalized with vanilla ids, failing on any finding.
+pub fn legalized(source: &str, edition: Edition) -> ScopedCircuitLayout {
+    let out = compile_legalize(&delayed(source, edition), None);
+    assert_clean("legalize", &out.diagnostics);
+    out.scoped
+}
+
+fn assert_clean(pass: &str, diagnostics: &[Diagnostic]) {
     assert!(
-        delay.diagnostics.is_empty(),
-        "fixture must delay cleanly: {:?}",
-        delay.diagnostics,
+        diagnostics.iter().all(|d| d.severity() != Severity::Error),
+        "the fixture must clear {pass}: {diagnostics:#?}",
     );
-    delay.scoped
 }
 
-/// [`delayed_from_source`] plus crossing legalization, which must run clean.
-pub fn legalized_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
-    let legalized = compile_crossing(&delayed_from_source(source, edition));
-    assert!(
-        legalized.diagnostics.is_empty(),
-        "fixture must legalize cleanly: {:?}",
-        legalized.diagnostics,
-    );
-    legalized.scoped
-}
-
-/// Sixteen chained cells reading `sig.b` off one trunk, long enough to need buffer repeaters.
-pub fn shared_bus_source() -> String {
-    let mut source = String::from(
-        r"
-theme t:
-  slot wall -> @oak_planks
-
-struct chain size=60x5
-  floor mat_slot=wall
-
-  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=pb at=inside.front  offset=1 y=0 -> sig.b
-
-  logic sig.s0 = sig.a and sig.b
-",
-    );
-    for i in 1..16 {
-        writeln!(
-            source,
-            "  logic sig.s{i} = sig.s{prev} and sig.b",
-            prev = i - 1
-        )
-        .expect("writing to a String cannot fail");
-    }
-    source.push_str(
-        r"
-  door id=d side=front at=center opened_by=sig.s15
-
-  circuit region=floor void=2
-",
-    );
-    source
-}
-
-/// One cell driving a door across a 40-wide floor, on a wire long enough to need buffer repeaters.
-pub const LONG_OUTWARD_WIRE_SOURCE: &str = "\
-theme t:
-  slot wall -> @oak_planks
-  slot door -> @oak_door
-
-struct reach size=40x6
-  floor mat_slot=wall
-  door id=front side=front at=center mat_slot=door
-  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
-  logic sig.c = sig.a or sig.b
-  door[id=front] opened_by=sig.c
-  circuit region=floor void=3
-";
-
-/// A door opened straight off a pressure plate across a 40-wide floor: a wire and no cell.
-pub const IDENTITY_WIRE_SOURCE: &str = "\
-theme t:
-  slot wall -> @oak_planks
-  slot door -> @oak_door
-
-struct pass size=40x6
-  floor mat_slot=wall
-  door id=d side=front at=center mat_slot=door
-  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  door[id=d] opened_by=sig.a
-  circuit region=floor void=2
-";
-
-/// Replaces every `"stage"` value with a placeholder, so adjacent stages' dumps compare equal.
-pub fn normalize_stage_tags(json: &str) -> String {
-    const KEY: &str = "\"stage\":";
-    let mut out = String::with_capacity(json.len());
-    let mut rest = json;
-    while let Some(idx) = rest.find(KEY) {
-        let (before, after) = rest.split_at(idx + KEY.len());
-        out.push_str(before);
-        let open = after.find('"').expect("stage tag value is a string");
-        let close = after[open + 1..]
-            .find('"')
-            .expect("stage tag value is a closed string");
-        out.push_str(&after[..open]);
-        out.push_str("\"<stage>\"");
-        rest = &after[open + close + 2..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Drops every `,"<key>":<unsigned int>` from compact JSON.
-pub fn strip_int_field(compact: &str, key: &str) -> String {
-    let pattern = format!(",\"{key}\":");
-    let mut out = String::with_capacity(compact.len());
-    let mut rest = compact;
-    while let Some(idx) = rest.find(&pattern) {
-        out.push_str(&rest[..idx]);
-        let after = &rest[idx + pattern.len()..];
-        let end = after
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(after.len());
-        rest = &after[end..];
-    }
-    out.push_str(rest);
-    out
+/// Each cell tile of `layout` with the netlist net on each of its ports.
+pub fn cells(layout: &CircuitLayout) -> Vec<(EditionCell, Vec<CellPortDriver>)> {
+    layout
+        .tiles
+        .iter()
+        .filter_map(|tile| {
+            let TileKind::Cell { cell } = tile.kind else {
+                return None;
+            };
+            let drivers = tile
+                .inputs
+                .iter()
+                .filter_map(|input| match input.port {
+                    TilePort::Cell(port) => Some(CellPortDriver {
+                        port,
+                        net: layout.nets[input.net].source,
+                    }),
+                    _ => None,
+                })
+                .collect();
+            Some((cell, drivers))
+        })
+        .collect()
 }

@@ -97,7 +97,7 @@ structs:
               - front
           offset:
             kind: Int
-            value: 3
+            value: 2
           y:
             kind: Int
             value: 1
@@ -123,7 +123,7 @@ structs:
             value: floor
           void:
             kind: Int
-            value: 2
+            value: 3
         intent_state: {}
     logic:
       - lhs:
@@ -169,7 +169,7 @@ structs:
         to:
           - sig
           - open
-        bound: 1
+        bound: 3
       - kind: Always
         antecedent:
           - sig
@@ -177,4 +177,4 @@ structs:
         consequent:
           - sig
           - open
-        within: 2
+        within: 3

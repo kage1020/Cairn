@@ -16,6 +16,37 @@ pub fn cargo_bin() -> PathBuf {
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
 pub const SHIPPED_EXAMPLES: usize = 15;
 
+/// A lever too high on the wall for the circuit under the floor to read, on either edition: line
+/// 8 is the lever's.
+pub const WALL_LEVER: &str = concat!(
+    "theme t:\n",
+    "  slot wall -> @oak_planks\n",
+    "\n",
+    "struct room size=9x7\n",
+    "  floor mat_slot=wall\n",
+    "  walls mat_slot=wall height=3\n",
+    "  door id=d side=front at=center\n",
+    "  lever id=l at=inside.back offset=2 y=2 -> sig.a\n",
+    "  door[id=d] opened_by=sig.a\n",
+    "  circuit region=floor void=3\n",
+);
+
+/// A dispenser Java powers through the cell above it, by a lever too high for Bedrock's circuit
+/// to read: Java refuses line 8, the dispenser's, and Bedrock line 9, the lever's.
+pub const QUASI_CONNECTED_DISPENSER: &str = concat!(
+    "theme t:\n",
+    "  slot wall -> @cobblestone\n",
+    "\n",
+    "struct s size=7x5\n",
+    "  floor mat_slot=wall\n",
+    "  walls mat_slot=wall height=4\n",
+    "  roof kind=flat mat_slot=wall overhang=1\n",
+    "  dispenser id=p at=inside.back offset=2 y=1 fired_by=sig.p\n",
+    "  lever id=sw at=inside.back offset=2 y=3 -> sig.a\n",
+    "  logic sig.p = not sig.a\n",
+    "  circuit region=floor void=4\n",
+);
+
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

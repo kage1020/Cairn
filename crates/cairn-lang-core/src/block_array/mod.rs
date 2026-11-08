@@ -5,6 +5,7 @@
 //! inward along x and z.
 
 mod args;
+mod attach;
 mod joins;
 mod lower;
 mod material;
@@ -17,6 +18,7 @@ mod wall_column;
 use indexmap::IndexMap;
 use serde::Serialize;
 
+pub use attach::{AttachError, LaidBlock};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{BUILTIN_BLOCK_IDS, findings_without_target, lower_to_block_array};
 pub use material::{
@@ -114,10 +116,10 @@ pub struct BlockArray {
     pub palette: Palette,
     /// Palette indices in `(y, z, x)` order, as [`Dims::index`] lays them out.
     pub voxels: Vec<PaletteIndex>,
-    /// Block entities on the grid; always empty, as no member lowers to one.
+    /// Block entities on the grid: a circuit's comparators, as no member lowers to one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
-    /// Free entities; always empty, like [`Self::block_entities`].
+    /// Free entities; always empty, as no member lowers to one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<Entity>,
     /// The [`crate::resolve::Resolution`] key this volume was lowered from (`struct::cottage`).
@@ -475,13 +477,16 @@ impl BlockState {
     }
 }
 
-/// A block entity on the grid, without its NBT payload.
+/// A block entity on the grid, with the integer fields of its NBT payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockEntity {
     /// Voxel coordinate the block entity sits at.
     pub pos: (u32, u32, u32),
-    /// Block entity id, e.g. `minecraft:chest`.
+    /// Block entity id, e.g. `minecraft:comparator`.
     pub id: String,
+    /// Integer fields of its payload, such as a comparator's `OutputSignal`.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub fields: IndexMap<String, i32>,
 }
 
 /// An entity (frames, paintings, item displays, ...), without its payload.

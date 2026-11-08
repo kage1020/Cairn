@@ -32,6 +32,7 @@ pub(crate) trait Finding {
     fn code_str(&self) -> &'static str;
     fn primary(&self) -> &str;
     fn notes(&self) -> &[Note];
+    fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic;
 }
 
 impl Finding for Diagnostic {
@@ -49,6 +50,9 @@ impl Finding for Diagnostic {
     }
     fn notes(&self) -> &[Note] {
         &self.notes
+    }
+    fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
+        Diagnostic::render(self, source, lines)
     }
 }
 
@@ -68,10 +72,59 @@ impl Finding for cairn_lang_redstone::Diagnostic {
     fn notes(&self) -> &[Note] {
         &self.notes
     }
+    fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
+        cairn_lang_redstone::Diagnostic::render(self, source, lines)
+    }
+}
+
+/// A finding of the core passes or of the circuit a struct is built with, for a list holding both.
+#[derive(Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a run reports a handful of findings, most of them core's"
+)]
+pub(crate) enum Found {
+    Core(Diagnostic),
+    Circuit(cairn_lang_redstone::Diagnostic),
+}
+
+impl Found {
+    fn finding(&self) -> &dyn Finding {
+        match self {
+            Self::Core(d) => d,
+            Self::Circuit(d) => d,
+        }
+    }
+}
+
+impl Finding for Found {
+    fn span_start(&self) -> usize {
+        self.finding().span_start()
+    }
+    fn severity(&self) -> Severity {
+        self.finding().severity()
+    }
+    fn code_str(&self) -> &'static str {
+        self.finding().code_str()
+    }
+    fn primary(&self) -> &str {
+        self.finding().primary()
+    }
+    fn notes(&self) -> &[Note] {
+        self.finding().notes()
+    }
+    fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
+        self.finding().render(source, lines)
+    }
 }
 
 /// Report one finding and its notes on stderr, gcc-style.
-pub(crate) fn report_diagnostic(file: &Path, source: &str, lines: &LineStarts, d: &impl Finding) {
+pub(crate) fn report_diagnostic(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    d: &(impl Finding + ?Sized),
+) {
     eprintln!(
         "{}:{}: {}[{}]: {}",
         file.display(),
@@ -110,7 +163,7 @@ pub(crate) fn report_parse_failure(file: &Path, source: &str, err: &ParseError) 
 pub(crate) fn render_diagnostics(
     source: &str,
     lines: &LineStarts,
-    diagnostics: &[Diagnostic],
+    diagnostics: &[impl Finding],
 ) -> Vec<RenderedDiagnostic> {
     diagnostics
         .iter()
@@ -143,7 +196,7 @@ pub(crate) fn report_failure_document(
     file: &Path,
     source: &str,
     report: FailureReport,
-    diagnostics: &[Diagnostic],
+    diagnostics: &[impl Finding],
 ) -> ExitCode {
     let lines = LineStarts::new(source);
     match report {

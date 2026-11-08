@@ -9,13 +9,13 @@ use cairn_lang_redstone::{
     CellPortDriver, EditionCell, GateKind, LogicIr, NetRef, PortName, SignalRef,
 };
 
-use crate::common::{legalized_from_source, sig, synth_source};
+use crate::common::{cells, legalized, sig, synth_source};
 
 /// The plates a primitive's operands come from, in input order.
 const PLATES: [&str; 3] = [
-    "at=front.outside offset=0",
-    "at=inside.front offset=1",
-    "at=front.outside offset=2",
+    "at=inside.back offset=1",
+    "at=inside.back offset=9",
+    "at=inside.back offset=17",
 ];
 
 /// A struct with a plate driving each of `inputs` and a door that `expression` opens.
@@ -27,10 +27,10 @@ fn source(inputs: &[&str], expression: &str) -> String {
     }
     format!(
         "theme t:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n\
-         struct s size=20x5\n  floor mat_slot=wall\n  \
+         struct s size=20x13\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
          door id=d side=front at=center mat_slot=door\n\
          {plates}  logic sig.out = {expression}\n  door[id=d] opened_by=sig.out\n  \
-         circuit region=floor void=2\n"
+         circuit region=floor void=4\n"
     )
 }
 
@@ -89,7 +89,7 @@ fn cases() -> [Case; 7] {
             truth: &[0, 1, 1, 1],
             gate: GateKind::Or2 { a: A, b: B },
             java: EditionCell::JavaRepeaterOr,
-            bedrock: EditionCell::BedrockTorchOr,
+            bedrock: EditionCell::BedrockRepeaterOr,
         },
         Case {
             expression: "not sig.a",
@@ -185,16 +185,9 @@ fn each_primitive_lays_out_as_its_cell_on_both_editions() {
             })
             .collect();
         for (edition, cell) in [(Edition::Java, case.java), (Edition::Bedrock, case.bedrock)] {
-            let legalized = legalized_from_source(&source, edition);
-            let cells: Vec<(EditionCell, &[CellPortDriver])> = legalized.scopes[0]
-                .ir
-                .cells
-                .iter()
-                .map(|placed| (placed.cell, placed.drivers.as_slice()))
-                .collect();
             assert_eq!(
-                cells,
-                [(cell, drivers.as_slice())],
+                cells(&legalized(&source, edition).scopes[0].ir),
+                [(cell, drivers.clone())],
                 "{} on {edition:?}",
                 case.expression,
             );

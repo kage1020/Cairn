@@ -80,6 +80,7 @@ fn both_packs_declare_the_tokens_that_redirect_the_member_defaults() {
         ("redstone_torch.default", "redstone torch"),
         ("redstone_torch.wall", "redstone wall torch"),
         ("redstone_dust.default", "redstone dust"),
+        ("circuit.block", "circuit block"),
     ] {
         for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
             for version in supported_versions(pack) {

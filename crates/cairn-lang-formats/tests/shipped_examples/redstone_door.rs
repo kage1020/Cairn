@@ -79,12 +79,13 @@ fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
 fn redstone_door_plates_sit_on_either_side_of_the_door() {
     let out = lower_redstone_door();
     let ba = out.structures.get("struct::gatehouse").unwrap();
-    // The door stands in (4, 1..=2, 5), in the front wall at z=5.
+    // The door stands in (4, 1..=2, 5), in the front wall at z=5; the inner plate one column
+    // aside, since the column in front of the door covers the riser that powers it.
     for (cell, id) in [
         ((4, 0, 6), "minecraft:oak_pressure_plate"),
         ((4, 1, 5), "minecraft:oak_door"),
-        ((4, 1, 4), "minecraft:oak_pressure_plate"),
-        ((4, 0, 4), "minecraft:oak_planks"),
+        ((3, 1, 4), "minecraft:oak_pressure_plate"),
+        ((3, 0, 4), "minecraft:oak_planks"),
     ] {
         let (x, y, z) = cell;
         assert_eq!(id_at(ba, x, y, z), Some(id), "{cell:?}");

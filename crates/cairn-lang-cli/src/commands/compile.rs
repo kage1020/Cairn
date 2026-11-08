@@ -31,18 +31,17 @@ pub(crate) fn run_compile(
     let Lowered {
         source,
         block_ir,
+        circuits,
         dropped_scopes,
         version_floors,
     } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
-    if report_diagnostics(
-        file,
-        &source,
-        &LineStarts::new(&source),
-        &block_ir.diagnostics,
-    ) {
+    let lines = LineStarts::new(&source);
+    if report_diagnostics(file, &source, &lines, &block_ir.diagnostics)
+        | report_diagnostics(file, &source, &lines, &circuits)
+    {
         return ExitCode::from(1);
     }
     // Every code that drops a scope is a warning, so this is what refuses a partial build.

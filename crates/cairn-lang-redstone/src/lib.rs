@@ -1,38 +1,40 @@
 //! Redstone for Cairn: lowers the Intent IR's `logic` to a Logic IR and a netlist, then places,
-//! routes, times and buffers it, in the order of `spec/redstone` "Place-and-route".
+//! routes, buffers and legalizes it under the struct, in the order of `spec/redstone`
+//! "Place-and-route".
 
-pub mod crossing;
+pub mod circuit;
+pub(crate) mod coupling;
 pub mod delay;
 pub mod diagnostic;
 pub mod edition_netlist;
 pub mod edition_netlist_ir;
+#[cfg(test)]
+pub(crate) mod fixtures;
+pub mod geometry;
 pub(crate) mod grid;
+pub mod legalize;
 pub mod logic_ir;
 pub mod netlist;
 pub mod netlist_ir;
-pub(crate) mod pass;
+pub mod part;
 pub mod placement;
 pub mod placement_ir;
 pub mod portable;
-pub(crate) mod repeater_sites;
 pub mod routing;
-pub(crate) mod routing_geometry;
+pub(crate) mod sim;
 pub mod synth;
-#[cfg(test)]
-pub(crate) mod test_fixtures;
+pub mod tile;
 pub mod verify;
 
-pub use crossing::{CrossingOutput, compile_crossing};
-pub use delay::{
-    BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, DelayOutput, MAX_ATTENUATION_SEGMENT,
-    compile_delay,
-};
+pub use circuit::build_circuits;
+pub use delay::{BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, DelayOutput, compile_delay};
 pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 pub use edition_netlist::compile_edition_netlist;
 pub use edition_netlist_ir::{
     EditionCell, EditionCellNode, EditionNetlistIr, ScopedEditionNetlistIr,
     ScopedEditionNetlistIrEntry,
 };
+pub use legalize::{LegalizeOutput, compile_legalize};
 pub use logic_ir::{
     GateKind, GateNode, InputPort, LogicIr, OutputPort, ScopeKind, Scoped, ScopedEntry,
     ScopedLogicIr, ScopedLogicIrEntry, SignalRef,
@@ -42,15 +44,15 @@ pub use netlist_ir::{
     CellNode, CellPortDriver, LogicalCell, NetRef, NetlistInput, NetlistOutput, PortName,
     ScopedNetlistIr, ScopedNetlistIrEntry,
 };
-pub use placement::{CELL_FOOTPRINT, PlacementOutput, compile_placement};
+pub use placement::{MIN_COUNTER_VOID, MIN_VOID, PlacementOutput, compile_placement};
 pub use placement_ir::{
-    BufferCoord, BufferSegment, CellCoord, CircuitRegionReservation, PlacedCellNode,
-    PlacedOutputNode, PlacementIr, PlacementPhase, PlacementPhaseTransitionError, PlacementStage,
-    RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
+    Buffer, CircuitBlock, CircuitLayout, CircuitNet, LayoutStage, NetSink, PlacedTile, Reservation,
+    ScopedCircuitLayout, ScopedCircuitLayoutEntry, TileInput, TileKind, Wire,
 };
 pub use portable::verify_portable;
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
+pub use tile::{PadKind, TilePort};
 pub use verify::verify_latency;
 
 pub(crate) fn saturating_index(len: usize) -> u32 {

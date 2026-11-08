@@ -1,9 +1,12 @@
 //! `cairn lower <file>` end to end: the IR in each format, and the findings on stderr.
 
+use std::collections::BTreeSet;
 use std::fs;
 use tempfile::TempDir;
 
-use crate::common::{Run, assert_stream, cairn, crn_examples, examples_dir, write_source};
+use crate::common::{
+    Run, WALL_LEVER, assert_stream, cairn, crn_examples, examples_dir, write_source,
+};
 
 #[test]
 fn cottage_exits_zero_and_names_the_struct() {
@@ -57,7 +60,7 @@ fn members_under_edition_guards_are_left_out_and_counted_in_a_note() {
     assert_eq!(
         stderr,
         "note: no edition is pinned here, so the 2 members under `@edition` guards are left out; \
-         `cairn compile --edition E` builds the ones E's guards hold\n",
+         `cairn lower --edition E` lowers the ones E's guards hold\n",
     );
     let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid JSON");
     let palette = parsed["structures"]["struct::shop"]["palette"]
@@ -78,6 +81,102 @@ fn members_under_edition_guards_are_left_out_and_counted_in_a_note() {
             "minecraft:stone_bricks",
         ],
     );
+}
+
+/// The distinct block ids of the struct `key` in the JSON IR `stdout`, sorted.
+fn palette_ids(stdout: &str, key: &str) -> Vec<String> {
+    let parsed: serde_json::Value = serde_json::from_str(stdout).expect("valid JSON");
+    let ids: BTreeSet<String> = parsed["structures"][key]["palette"]
+        .as_array()
+        .expect("palette is an array")
+        .iter()
+        .map(|p| p["id"].as_str().expect("id is a string").to_owned())
+        .collect();
+    ids.into_iter().collect()
+}
+
+#[test]
+fn an_edition_pin_lowers_the_members_its_guards_hold() {
+    let path = examples_dir().join("edition-fallback.crn");
+    let run = Run::from(cairn(
+        "lower",
+        &[
+            path.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--format",
+            "json",
+        ],
+    ));
+    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    assert_eq!(run.stderr, "");
+    assert_eq!(
+        palette_ids(&run.stdout, "struct::shop"),
+        [
+            "minecraft:air",
+            "minecraft:cobblestone",
+            "minecraft:light_block_15",
+            "minecraft:stone_bricks",
+            "minecraft:wall_sign",
+            "minecraft:wooden_door",
+        ],
+    );
+}
+
+#[test]
+fn a_struct_rises_over_its_circuit_only_where_an_edition_is_pinned() {
+    let path = examples_dir().join("redstone-door.crn");
+    let file = path.to_str().unwrap();
+    let dims = |stdout: &str| {
+        let parsed: serde_json::Value = serde_json::from_str(stdout).expect("valid JSON");
+        parsed["structures"]["struct::gatehouse"]["dims"].clone()
+    };
+    let unpinned = Run::from(cairn("lower", &[file, "--format", "json"]));
+    assert_eq!(unpinned.code, Some(0), "stderr={}", unpinned.stderr);
+    assert_eq!(
+        unpinned.stderr,
+        "note: no edition is pinned here, so the circuit of the scope with a `circuit` line is \
+         left out; `cairn lower --edition E` lays the ones E builds\n",
+    );
+    assert_eq!(
+        dims(&unpinned.stdout),
+        serde_json::json!({"x": 9, "y": 5, "z": 7})
+    );
+    for edition in ["java", "bedrock"] {
+        let pinned = Run::from(cairn(
+            "lower",
+            &[file, "--edition", edition, "--format", "json"],
+        ));
+        assert_eq!(pinned.code, Some(0), "{edition}: stderr={}", pinned.stderr);
+        assert_eq!(pinned.stderr, "", "{edition}");
+        assert_eq!(
+            dims(&pinned.stdout),
+            serde_json::json!({"x": 9, "y": 8, "z": 7}),
+            "{edition}"
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&pinned.stdout).expect("valid JSON");
+        assert_eq!(
+            parsed["members"]["struct::gatehouse"][0]["role"], "circuit",
+            "{edition}"
+        );
+    }
+}
+
+#[test]
+fn a_circuit_finding_fails_a_lower_pinned_to_an_edition() {
+    let tmp = TempDir::new().expect("tempdir");
+    let file = write_source(tmp.path(), "wall-lever.crn", WALL_LEVER);
+    let file = file.to_str().unwrap();
+    let pinned = Run::from(cairn("lower", &[file, "--edition", "java"]));
+    assert_eq!(pinned.code, Some(1), "stderr={}", pinned.stderr);
+    assert_stream(
+        &pinned.stderr,
+        &[(8, 3, "error", "E_ROUTE_UNREACHABLE_COMPONENT")],
+    );
+    assert_eq!(pinned.stdout, "");
+    let unpinned = Run::from(cairn("lower", &[file]));
+    assert_eq!(unpinned.code, Some(0), "stderr={}", unpinned.stderr);
+    assert_stream(&unpinned.stderr, &[]);
 }
 
 #[test]

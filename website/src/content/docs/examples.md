@@ -7,9 +7,8 @@ Every file lives in
 [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) and is intentionally minimal.
 The [Tutorial](/tutorial/) walks through the four in the first group.
 
-> Every file here compiles with the current compiler. Redstone does not reach compiled output yet,
-> so `redstone-door.crn` and `control-room.crn` place their sensors and actuators with no circuit
-> between them.
+> Every file here compiles with the current compiler, and a file with `logic` gets its circuit built
+> under its floor.
 
 ## Start here
 
@@ -49,4 +48,4 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 | File | Shows |
 |---|---|
 | [`edition-fallback.crn`](https://github.com/kage1020/Cairn/blob/main/examples/edition-fallback.crn) | Per-edition theme variants for a slot with no cross-edition primitive, and `@edition` guards around a block each edition spells differently. |
-| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | Four nets in a tight region: the router lays each one around the others and lifts one onto a bridge layer inside `void=2`; at `void=1` it refuses with `E_ROUTE_CONGESTION`. |
+| [`crossbar.crn`](https://github.com/kage1020/Cairn/blob/main/examples/crossbar.crn) | Two plates feed both gates, whose outputs drive doors at opposite ends, so two wires must cross: one runs over the other a layer up inside `void=4`, and at `void=3` the router refuses with `E_ROUTE_CONGESTION`. |

@@ -1,7 +1,7 @@
 //! The findings of the redstone passes, shaped like core's `check::Diagnostic` with a code enum of
 //! their own.
 
-use cairn_lang_core::check::Severity;
+use cairn_lang_core::check::{LineStarts, RenderedDiagnostic, Severity};
 use cairn_lang_core::error::Span;
 use serde::{Serialize, Serializer};
 
@@ -24,10 +24,10 @@ pub enum DiagnosticCode {
     NoCircuitRegion,
     /// A scope's netlist does not fit its `circuit region=` reservation.
     RouteCongestion,
-    /// Two of a scope's nets run within one step of each other across layers.
-    RouteCrossLayerClearance,
-    /// A driver segment runs past [`crate::delay::MAX_ATTENUATION_SEGMENT`], or a dust run past its
-    /// allowance has no coord a buffer repeater can take.
+    /// A sensor or actuator stands where the circuit under the floor cannot reach it.
+    RouteUnreachableComponent,
+    /// A macro has more stages than its dust carries, or a wire past
+    /// [`crate::delay::DUST_ATTENUATION_LIMIT`] blocks has nowhere a buffer repeater fits.
     AttenuationLimit,
     /// Lowering a `logic` binding descended past [`crate::synth::MAX_LOWERING_DEPTH`].
     LogicNestingTooDeep,
@@ -60,7 +60,7 @@ impl DiagnosticCode {
             Self::LogicUnusedSignal => "W_LOGIC_UNUSED_SIGNAL",
             Self::NoCircuitRegion => "E_NO_CIRCUIT_REGION",
             Self::RouteCongestion => "E_ROUTE_CONGESTION",
-            Self::RouteCrossLayerClearance => "W_ROUTE_CROSS_LAYER_CLEARANCE",
+            Self::RouteUnreachableComponent => "E_ROUTE_UNREACHABLE_COMPONENT",
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
             Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
             Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
@@ -73,7 +73,7 @@ impl DiagnosticCode {
         }
     }
 
-    /// Severity of this code. Errors set the `cairn synth` exit code; warnings do not.
+    /// Severity of this code: an error refuses the command that reports it, a warning does not.
     #[must_use]
     pub const fn severity(self) -> Severity {
         match self {
@@ -83,6 +83,7 @@ impl DiagnosticCode {
             | Self::LogicUnsupportedPrimitive
             | Self::NoCircuitRegion
             | Self::RouteCongestion
+            | Self::RouteUnreachableComponent
             | Self::AttenuationLimit
             | Self::LogicNestingTooDeep
             | Self::LogicMisplacedBinding
@@ -92,7 +93,7 @@ impl DiagnosticCode {
             | Self::LogicDuplicateBinding
             | Self::SimAssertionFailed
             | Self::NoPortableImpl => Severity::Error,
-            Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
+            Self::LogicUnusedSignal => Severity::Warning,
         }
     }
 }
@@ -158,6 +159,20 @@ impl Diagnostic {
             message: message.into(),
         });
         self
+    }
+
+    /// Render against `source` in the shape `spec/lint` "Machine-readable payload" gives.
+    #[must_use]
+    pub fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
+        RenderedDiagnostic::new(
+            self.code.as_str(),
+            self.severity(),
+            &self.span,
+            &self.primary,
+            &self.notes,
+            source,
+            lines,
+        )
     }
 }
 

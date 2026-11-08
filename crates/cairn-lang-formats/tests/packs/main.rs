@@ -9,6 +9,7 @@ mod aliases;
 mod connections;
 mod declared_elsewhere;
 mod ids_exist;
+mod spelling;
 mod state_domain;
 mod states;
 mod waterlogged;
