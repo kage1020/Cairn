@@ -504,6 +504,18 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// Whether the primary span or a note's span lies inside one of `lines`.
+    #[must_use]
+    pub fn touches(&self, lines: &[&Span]) -> bool {
+        std::iter::once(&self.span)
+            .chain(self.notes.iter().filter_map(|note| note.span.as_ref()))
+            .any(|span| {
+                lines
+                    .iter()
+                    .any(|line| line.start <= span.start && span.end <= line.end)
+            })
+    }
+
     /// Severity of this finding, read from [`DiagnosticCode::severity`].
     #[must_use]
     pub fn severity(&self) -> Severity {

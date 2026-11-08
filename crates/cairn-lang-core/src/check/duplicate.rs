@@ -335,7 +335,8 @@ impl FirstId {
     }
 }
 
-/// Two lines under guards for different editions never build together, so they may share an id.
+/// Report each repeated argument key and each `id=` two lines of one build declare in `body`, and
+/// in every body under it.
 fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut DiagnosticSink) {
     let mut seen_ids: IndexMap<String, Vec<FirstId>> = IndexMap::new();
     for (guard, stmt) in guarded_lines(body) {
@@ -361,7 +362,7 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
                     if !(owned_by_resolver && first.owned_by_resolver) {
                         sink.push(Diagnostic {
                             code: DiagnosticCode::DuplicateId,
-                            span: id_span,
+                            span: id_span.clone(),
                             primary: format!("`id={id}` is declared more than once in this scope"),
                             notes: vec![
                                 first_declaration_note(&first.span),
@@ -375,13 +376,13 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
                             data: None,
                         });
                     }
-                } else {
-                    seen_ids.entry(id).or_default().push(FirstId {
-                        span: id_span,
-                        owned_by_resolver,
-                        guard,
-                    });
                 }
+                // A repeat stays on record: a later line may share a build with it alone.
+                seen_ids.entry(id).or_default().push(FirstId {
+                    span: id_span,
+                    owned_by_resolver,
+                    guard,
+                });
             }
             check_body(children, PlaceIdOwner::ThisPass, sink);
         }

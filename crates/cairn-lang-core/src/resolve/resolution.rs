@@ -24,7 +24,8 @@ pub struct Resolution {
     /// Diagnostics found while resolving, in emission order.
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
-    /// The edition the theme variants were bound for, whose `@edition` guards lowering keeps.
+    /// The edition the theme variants were bound for, whose `@edition` guards resolution and
+    /// lowering both read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edition: Option<Edition>,
 }
