@@ -13,6 +13,7 @@ use super::binding::ThemeBinding;
 
 /// Resolution of one whole [`IntentModule`](crate::intent::IntentModule).
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Resolution {
     /// One entry per theme defined in the module, keyed by theme name.
     pub themes: IndexMap<String, ThemeBinding>,

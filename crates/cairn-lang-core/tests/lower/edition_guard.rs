@@ -83,11 +83,21 @@ fn a_conflict_a_guarded_line_loses_is_that_editions_finding_whichever_line_comes
     let guarded = "  @edition java\n    raw_block mat=minecraft:stone at=2,0,2\n";
     let bare = "  raw_block mat=minecraft:dirt at=2,0,2\n";
     for (body, later) in [
-        (format!("{guarded}{bare}"), "raw_block mat=minecraft:dirt at=2,0,2"),
-        (format!("{bare}{guarded}"), "raw_block mat=minecraft:stone at=2,0,2"),
+        (
+            format!("{guarded}{bare}"),
+            "raw_block mat=minecraft:dirt at=2,0,2",
+        ),
+        (
+            format!("{bare}{guarded}"),
+            "raw_block mat=minecraft:stone at=2,0,2",
+        ),
     ] {
         let source = format!("struct s size=5x5\n{body}");
-        assert_eq!(unpinned(&source, None), [("W_PHASE_CONFLICT", later)], "{body}");
+        assert_eq!(
+            unpinned(&source, None),
+            [("W_PHASE_CONFLICT", later)],
+            "{body}"
+        );
         assert_eq!(
             unpinned(&source, Some(Edition::Bedrock)),
             [],
@@ -103,7 +113,10 @@ fn a_guard_under_a_level_is_measured_from_the_level() {
         raw_blocks(&lowered_for(&source, Some(Edition::Java))),
         [("minecraft:stone".to_owned(), vec![(2, 1, 2)])],
     );
-    assert_eq!(raw_blocks(&lowered_for(&source, Some(Edition::Bedrock))), []);
+    assert_eq!(
+        raw_blocks(&lowered_for(&source, Some(Edition::Bedrock))),
+        []
+    );
 }
 
 #[test]

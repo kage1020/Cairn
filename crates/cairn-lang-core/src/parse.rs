@@ -24,9 +24,14 @@ const REQUIRES: &str = "requires";
 const EDITION: &str = "edition";
 
 /// The refusal for an `@edition` guard written outside every body.
-const GUARD_OUTSIDE_A_BODY: &str = "an `@edition` guard stands inside a `struct` or `def` body, \
-     around the raw members it guards: the items of a file are edition-neutral, so move the guard \
-     into the body that places those blocks";
+const GUARD_OUTSIDE_A_BODY: &str = "an `@edition` guard stands inside a `struct`, `def` or \
+     `site` body, around the raw members it guards: the items of a file are edition-neutral, so \
+     move the guard into the body that places those blocks";
+
+/// The refusal for an `@edition` guard written in a `theme` body.
+const GUARD_IN_A_THEME: &str = "an `@edition` guard stands inside a `struct`, `def` or `site` \
+     body, never in a `theme`: a theme is picked per edition by its name, so write this edition's \
+     slots in a `theme NAME_java` or a `theme NAME_bedrock`";
 
 /// Whether the body being parsed may carry `requires version>=X` lines, and what to say when it
 /// may not. A refusing body refuses only a line that reads as a floor.
@@ -40,6 +45,10 @@ enum RequiresPolicy {
     MemberOfAPart,
     /// A member's indented children inside a `struct` or `site`.
     MemberOfTheBuild,
+    /// The lines under an `@edition` guard inside a `def`.
+    GuardOfAPart,
+    /// The lines under an `@edition` guard inside a `struct` or `site`.
+    GuardOfTheBuild,
 }
 
 impl RequiresPolicy {
@@ -61,15 +70,55 @@ impl RequiresPolicy {
                  or `site` it is in: that is the build rather than a part of one, so the floor \
                  is the whole file's and is written `@requires version>=X` at the top of the file",
             ),
+            Self::GuardOfAPart => Some(
+                "an `@edition` guard may not hold `requires version>=X`: the floor belongs to the \
+                 whole part on every edition, so it goes at the `def` body's own level",
+            ),
+            Self::GuardOfTheBuild => Some(
+                "an `@edition` guard may not hold `requires version>=X`, and neither may the \
+                 `struct` or `site` it is in: the floor is the whole file's and is written \
+                 `@requires version>=X` at the top of the file",
+            ),
         }
     }
 
     /// The policy for the indented children of a member in this body.
     fn for_children(self) -> Self {
         match self {
-            Self::Accepted | Self::MemberOfAPart => Self::MemberOfAPart,
-            Self::NotAPart | Self::MemberOfTheBuild => Self::MemberOfTheBuild,
+            Self::Accepted | Self::MemberOfAPart | Self::GuardOfAPart => Self::MemberOfAPart,
+            Self::NotAPart | Self::MemberOfTheBuild | Self::GuardOfTheBuild => {
+                Self::MemberOfTheBuild
+            }
         }
+    }
+
+    /// The policy for the lines under an `@edition` guard in this body.
+    fn for_guard(self) -> Self {
+        match self {
+            Self::Accepted | Self::MemberOfAPart | Self::GuardOfAPart => Self::GuardOfAPart,
+            Self::NotAPart | Self::MemberOfTheBuild | Self::GuardOfTheBuild => {
+                Self::GuardOfTheBuild
+            }
+        }
+    }
+}
+
+/// The directives a file opens with, each after `@`.
+const FILE_DIRECTIVES: [&str; 3] = ["cairn", REQUIRES, "intended_targets"];
+
+/// The refusal for `@name` written inside a body whose policy is `policy`.
+fn not_a_guard(name: &str, policy: RequiresPolicy) -> String {
+    if name == REQUIRES && policy == RequiresPolicy::Accepted {
+        "a `def` or `theme` body's floor is written `requires version>=X`, without the `@`: \
+         inside a body, `@` opens only an `@edition` guard"
+            .into()
+    } else if FILE_DIRECTIVES.contains(&name) {
+        format!(
+            "`@{name}` is a file directive, which goes at the top of the file: inside a body, `@` \
+             opens only an `@edition` guard"
+        )
+    } else {
+        format!("unknown directive `@{name}`: inside a body, `@` opens only an `@edition` guard")
     }
 }
 
@@ -337,6 +386,19 @@ impl<'a> Parser<'a> {
                 if let Some(line) = self.requires_line_here(RequiresPolicy::Accepted)? {
                     requires.push(line);
                     continue;
+                }
+                if self.peek_is(&TokenKind::At) {
+                    let position = self.position();
+                    self.advance();
+                    let name = self.expect_ident()?;
+                    return Err(ParseError::Syntax {
+                        position,
+                        message: if name == EDITION {
+                            GUARD_IN_A_THEME.into()
+                        } else {
+                            not_a_guard(&name, RequiresPolicy::Accepted)
+                        },
+                    });
                 }
                 rules.push(self.parse_theme_rule()?);
             }
@@ -626,10 +688,7 @@ impl<'a> Parser<'a> {
         if name != EDITION {
             return Err(ParseError::Syntax {
                 position,
-                message: format!(
-                    "`@{name}` is a file directive, which goes at the top of the file: inside a \
-                     body, `@` opens only an `@edition` guard"
-                ),
+                message: not_a_guard(&name, policy),
             });
         }
         if self.in_guard {
@@ -678,13 +737,13 @@ impl<'a> Parser<'a> {
             return Err(ParseError::Syntax {
                 position,
                 message: format!(
-                    "nothing is indented under this `@edition {edition}` guard: the lines it guards \
-                     go on the lines below it, one indent deeper"
+                    "nothing is indented under this `@edition {edition}` guard: the lines it \
+                     guards go on the lines below it, one indent deeper"
                 ),
             });
         }
         let in_guard = std::mem::replace(&mut self.in_guard, true);
-        let children = self.nested(|p| p.parse_optional_command_body(policy.for_children()));
+        let children = self.nested(|p| p.parse_optional_command_body(policy.for_guard()));
         self.in_guard = in_guard;
         let (_, children) = children?;
         Ok(Statement::EditionGuard {

@@ -43,7 +43,7 @@ title: "11. Lint と制約検証"
 | `E_MISPLACED_MEMBER` | キーワードは既知だが、囲んでいる本体にそれを読むものがない。`level` の下にある `circuit` 行も対象。 |
 | `E_UNEXPECTED_POSITIONAL` | 位置引数を読まない行に、裸の値がある ([§5.1](/ja/spec/syntax/#51-字句))。 |
 | `E_UNSUPPORTED_NESTING` | 誰も読まない、インデントされた本体をメンバーが持っている。 |
-| `E_SEMANTIC_IN_EDITION_GUARD` | `@edition` ガードの下に、生のメンバーでない行がある。ほかのメンバー、`logic` の行、`assert` の行がこれにあたる ([§10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む))。 |
+| `E_SEMANTIC_IN_EDITION_GUARD` | `@edition` ガードの下に、生のメンバー以外の既知のメンバーがある。または、ガードの直下か、ガードの中の生のメンバーの下に、`logic` か `assert` の行がある ([§10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む))。 |
 | `E_TYPE_MISMATCH_LABEL` | ラベル型のキーの値が、識別子でも文字列でもない。 |
 | `E_TYPE_MISMATCH_SIZE` | `size=` の値が `WxH` リテラルではない。ただし `chest` の行の `size=` はブロックステートなので対象外 ([ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する))。 |
 | `E_CONNECT_ARITY` | `connect` 行が `FROM.PORT to TO.PORT` の形になっていない。 |
@@ -57,7 +57,7 @@ title: "11. Lint と制約検証"
 
 `E_UNSUPPORTED_NESTING`: メンバーをまとめられるのは、`struct` / `def` の中の `level y=N` だけです。`site` の本体は平坦なリストです。落としたサブツリーごとに、その根で 1 回報告します。
 
-`E_SEMANTIC_IN_EDITION_GUARD`: 意味層はエディションに中立なので、ガードが囲めるのはエスケープハッチだけです。拒否する最も外側の行で 1 回報告し、ガードの位置に注記を付けます。その行の下にインデントした行もまとめて扱います。ガードの下にある未知のキーワードは、代わりに `E_UNKNOWN_KEYWORD` になり、候補として `raw_block` と `raw_fill` を示します。
+`E_SEMANTIC_IN_EDITION_GUARD`: 意味層はエディションに中立なので、ガードが囲めるのはエスケープハッチだけです。拒否する最も外側の行で 1 回報告し、ガードの位置に注記を付けます。その行の下にインデントした行もまとめて扱います。ガードの下にある未知のキーワードは、代わりに `E_UNKNOWN_KEYWORD` になり、候補として `raw_block` と `raw_fill` を示します。`site` の本体ではどちらもビルドされないので、候補を示しません。
 
 `E_TYPE_MISMATCH_LABEL`: ラベル型のキーは `id=` / `class=` / `mat_slot=` / `use=` / `theme=` です。`use=` と `theme=` では、型の合わない値は、リゾルバから見るとキーがないのと区別がつきません。このコードは「キーは行にあるが使えない」を、`E_INCOMPLETE_PLACE` は「キーがない」を表します。
 

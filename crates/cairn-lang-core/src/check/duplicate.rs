@@ -358,24 +358,24 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
                 let first = seen_ids
                     .get(&id)
                     .and_then(|firsts| firsts.iter().find(|f| f.shares_a_build_with(guard)));
-                if let Some(first) = first {
-                    if !(owned_by_resolver && first.owned_by_resolver) {
-                        sink.push(Diagnostic {
-                            code: DiagnosticCode::DuplicateId,
-                            span: id_span.clone(),
-                            primary: format!("`id={id}` is declared more than once in this scope"),
-                            notes: vec![
-                                first_declaration_note(&first.span),
-                                DiagnosticNote {
-                                    span: None,
-                                    message: "give one of the two members another `id=`, or \
-                                              delete the one you do not mean"
-                                        .into(),
-                                },
-                            ],
-                            data: None,
-                        });
-                    }
+                if let Some(first) = first
+                    && !(owned_by_resolver && first.owned_by_resolver)
+                {
+                    sink.push(Diagnostic {
+                        code: DiagnosticCode::DuplicateId,
+                        span: id_span.clone(),
+                        primary: format!("`id={id}` is declared more than once in this scope"),
+                        notes: vec![
+                            first_declaration_note(&first.span),
+                            DiagnosticNote {
+                                span: None,
+                                message: "give one of the two members another `id=`, or delete \
+                                          the one you do not mean"
+                                    .into(),
+                            },
+                        ],
+                        data: None,
+                    });
                 }
                 // A repeat stays on record: a later line may share a build with it alone.
                 seen_ids.entry(id).or_default().push(FirstId {

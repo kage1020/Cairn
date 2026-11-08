@@ -95,6 +95,24 @@ fn a_logic_or_assert_line_under_a_guard_is_refused() {
 }
 
 #[test]
+fn a_logic_or_assert_line_under_a_guarded_raw_member_is_refused() {
+    let source = struct_with(
+        "  @edition java\n    raw_block mat=minecraft:stone at=1,0,1\n      \
+         logic sig.a = sig.b\n      assert always(sig.a -> eventually sig.b within 4)\n",
+    );
+    assert_eq!(
+        located(&source),
+        [
+            ("E_SEMANTIC_IN_EDITION_GUARD", "logic sig.a = sig.b"),
+            (
+                "E_SEMANTIC_IN_EDITION_GUARD",
+                "assert always(sig.a -> eventually sig.b within 4)",
+            ),
+        ],
+    );
+}
+
+#[test]
 fn a_refused_line_takes_what_is_indented_under_it_along() {
     let source = struct_with(
         "  @edition java\n    level y=1\n      walls mat_slot=f height=2\n      \
@@ -170,6 +188,29 @@ fn an_unknown_keyword_under_a_guard_is_offered_the_raw_members() {
         [
             "did you mean `raw_block`?",
             "expected one of: raw_block, raw_fill"
+        ],
+    );
+}
+
+#[test]
+fn an_unknown_keyword_under_a_guard_in_a_site_body_is_offered_nothing() {
+    let source = "site v\n  @edition java\n    raw_blok mat=minecraft:stone at=1,0,1\n";
+    let found = diagnose(source);
+    let [d] = found.as_slice() else {
+        panic!("expected one finding, got {found:#?}");
+    };
+    assert_eq!(
+        (d.code, slice(source, d)),
+        (
+            DiagnosticCode::UnknownKeyword,
+            "raw_blok mat=minecraft:stone at=1,0,1"
+        ),
+    );
+    assert_eq!(
+        notes(d),
+        [
+            "nothing builds under an `@edition` guard in a `site` body: the raw members a guard \
+          holds go in a `struct` or `def` body"
         ],
     );
 }
@@ -259,7 +300,10 @@ fn one_id_under_two_guards_is_one_port_to_each_edition() {
     // Lowering reads the same branch: its note names the edition's own `p`.
     for (edition, line) in [
         (Edition::Java, "raw_block id=p mat=minecraft:stone at=1,0,1"),
-        (Edition::Bedrock, "raw_block id=p mat=minecraft:stone at=0,0,0"),
+        (
+            Edition::Bedrock,
+            "raw_block id=p mat=minecraft:stone at=0,0,0",
+        ),
     ] {
         let built = lower_to_block_array(&ir, &resolve(&ir, Some(edition)), None);
         let noted: Vec<(&str, Vec<&str>)> = built

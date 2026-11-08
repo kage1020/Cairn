@@ -71,7 +71,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
-| `E_SEMANTIC_IN_EDITION_GUARD` | A line under an `@edition` guard that is not a raw member: any other member, a `logic` line or an `assert` line ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). |
+| `E_SEMANTIC_IN_EDITION_GUARD` | A known member other than a raw one under an `@edition` guard, or a `logic` or `assert` line under one, directly or under a guarded raw member ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
 | `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal, on any line but a `chest`'s, where `size=` is a blockstate ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). |
 | `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
@@ -97,7 +97,7 @@ body is a flat list. Reported once per dropped subtree, at its root.
 `E_SEMANTIC_IN_EDITION_GUARD`: the semantic layer is edition-neutral, so a guard holds only the
 escape hatch. Reported once at the outermost refused line, with a note at the guard, and anything
 indented under that line goes with it. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD`
-instead, offered `raw_block` and `raw_fill`.
+instead, offered `raw_block` and `raw_fill`, or nothing in a `site` body, where neither builds.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
 `theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.

@@ -67,8 +67,12 @@ fn resolver_findings(ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnos
     if edition.is_some() || !ir.has_edition_guards() {
         return crate::resolve::resolve(ir, edition).diagnostics;
     }
-    let branches = [Edition::Java, Edition::Bedrock]
-        .map(|edition| (edition, crate::resolve::resolve(ir, Some(edition)).diagnostics));
+    let branches = [Edition::Java, Edition::Bedrock].map(|edition| {
+        (
+            edition,
+            crate::resolve::resolve(ir, Some(edition)).diagnostics,
+        )
+    });
     let mut kept: Vec<Diagnostic> = Vec::new();
     for (i, (edition, found)) in branches.iter().enumerate() {
         let own = ir.lines_guarded_for(*edition);
