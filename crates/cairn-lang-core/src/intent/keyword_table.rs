@@ -38,14 +38,66 @@ pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 /// Keywords that may carry a `-> value` sensor tail (`spec/redstone` "Signal binding").
 pub const SENSOR_HOSTS: &[&str] = &["lever", "button", "daylight", "observer", "pressure_plate"];
 
-/// Each actuator argument key of `spec/redstone` "Signal binding", paired with the component
-/// keyword that carries it.
-pub const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
-    ("opened_by", "door"),
-    ("powered_by", "piston"),
-    ("lit_by", "lamp"),
-    ("fired_by", "dispenser"),
-];
+/// A component a signal drives, read from one key of its line (`spec/redstone` "Signal binding").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Actuator {
+    /// `door`, read from `opened_by=`.
+    Door,
+    /// `piston`, read from `powered_by=`.
+    Piston,
+    /// `lamp`, read from `lit_by=`.
+    Lamp,
+    /// `dispenser`, read from `fired_by=`.
+    Dispenser,
+}
+
+impl Actuator {
+    /// Every actuator, in the order `spec/redstone` "Signal binding" lists their keys.
+    pub const ALL: &'static [Self] = &[Self::Door, Self::Piston, Self::Lamp, Self::Dispenser];
+
+    /// The keyword its line starts with.
+    #[must_use]
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Door => "door",
+            Self::Piston => "piston",
+            Self::Lamp => "lamp",
+            Self::Dispenser => "dispenser",
+        }
+    }
+
+    /// The key its line reads the signal from.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Door => "opened_by",
+            Self::Piston => "powered_by",
+            Self::Lamp => "lit_by",
+            Self::Dispenser => "fired_by",
+        }
+    }
+
+    /// What the signal does to it, as a finding says it: `("opens", "open")` completes both "the
+    /// signal that opens the door" and "for it to open".
+    #[must_use]
+    pub const fn verbs(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Door => ("opens", "open"),
+            Self::Piston => ("powers", "power"),
+            Self::Lamp => ("lights", "light"),
+            Self::Dispenser => ("fires", "fire"),
+        }
+    }
+
+    /// The actuator whose line reads `key`, or `None` for a key no actuator reads.
+    #[must_use]
+    pub fn reading(key: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|actuator| actuator.key() == key)
+    }
+}
 
 /// Coarse classification of a member, derived from its source keyword.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -199,14 +251,40 @@ pub struct UnreadArgument {
 }
 
 impl MemberRole {
-    /// The actuator key this role reads its signal from, as `opened_by` on a `door`, or `None`
-    /// for a role that is no actuator.
+    /// The actuator a member of this role is, or `None` for a role no signal drives.
+    ///
+    /// Every role is spelled out, so a new one fails the compile here.
     #[must_use]
-    pub fn actuator_key(&self) -> Option<&'static str> {
-        ACTUATOR_BINDINGS
-            .iter()
-            .find(|(_, host)| *host == self.keyword())
-            .map(|(key, _)| *key)
+    pub const fn actuator(&self) -> Option<Actuator> {
+        match self {
+            Self::Door => Some(Actuator::Door),
+            Self::Piston => Some(Actuator::Piston),
+            Self::Lamp => Some(Actuator::Lamp),
+            Self::Dispenser => Some(Actuator::Dispenser),
+            Self::Floor
+            | Self::Walls
+            | Self::Fill
+            | Self::Window
+            | Self::Roof
+            | Self::Stair
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Lever
+            | Self::Button
+            | Self::Daylight
+            | Self::Observer
+            | Self::Chest
+            | Self::Repeater
+            | Self::Comparator
+            | Self::RedstoneTorch
+            | Self::RedstoneDust
+            | Self::Circuit
+            | Self::RawBlock
+            | Self::RawFill
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => None,
+        }
     }
 
     /// Whether this is a role of the escape-hatch layer, a raw member or a Tier 0 part, the only
@@ -330,9 +408,7 @@ impl MemberRole {
                     why: Unread::Unreached,
                 },
             ],
-            // A component with one block to be built from has no material to choose.
-            Self::Level
-            | Self::Lever
+            Self::Lever
             | Self::Daylight
             | Self::Observer
             | Self::Lamp
@@ -342,6 +418,7 @@ impl MemberRole {
             | Self::Comparator
             | Self::RedstoneTorch
             | Self::RedstoneDust
+            | Self::Level
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
