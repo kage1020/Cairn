@@ -42,8 +42,9 @@ stands against, into the struct from the inside and out of it from the outside. 
 line turns it: `in` toward the struct's inside, `out` toward its outside, and `left` or `right`
 along the wall, as seen from outside it, so `left` is toward `offset=0`. A chest pairs with the
 chest beside it ([Connections](#connections)), and `size=single` keeps it single. Any other
-identifier for `facing=` or `size=` is `E_INVALID_MEMBER`, and a value that is no identifier, such
-as `size=2x3`, is `W_IGNORED_ARGUMENT` and read as if the key were not written. The chest's
+identifier for `facing=` or `size=` is `E_INVALID_MEMBER`, and for a compass direction under
+`facing=` the message names the word that turns the chest that way from its wall. A value that is
+no identifier, such as `size=2x3`, is `W_IGNORED_ARGUMENT` and read as if the key were not written. The chest's
 `mat_slot=` names its block, and a chest without one is built from the registry pack's
 `@chest.default` ([Materials and Themes §7.2](/spec/materials-themes/#tier-1-tokens)). The block
 MUST be a chest: one the registry pack's `connections` component reads as a chest, a block whose
@@ -192,9 +193,9 @@ The two are named apart from Minecraft's own term "blockstate" on purpose. Keepi
 (derived or paint-origin) out of intent state (authored) is what makes edits stable.
 
 A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a `stair`,
-`half`, `facing`, `shape` and `waterlogged`, on a `door`, `hinge` and `open`, and on a `chest`,
-`facing`, `size`, the line's spelling of its `type`, and `waterlogged`. No other keyword names one
-yet. Every other `key=value` the line writes is one of the member's arguments, apart from `id`,
+`half`, `facing`, `shape` and `waterlogged`, on a `door`, `hinge` and `open`, on a `chest`,
+`facing`, `size`, the line's spelling of its `type`, and `waterlogged`, and on an `observer`,
+`piston` or `dispenser`, `facing`. No other keyword names one yet. Every other `key=value` the line writes is one of the member's arguments, apart from `id`,
 `class` and `mat_slot`, which become fields of their own. Where a key goes depends on the keyword:
 `shape=` on a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
 ([Entities §8.2](/spec/entities/#82-anchor-conventions)).

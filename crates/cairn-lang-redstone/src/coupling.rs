@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use cairn_lang_core::block_array::{BlockArray, Face, ResolvedBlock, ResolvedMember};
 use cairn_lang_core::error::Span;
-use cairn_lang_core::intent::{ACTUATOR_BINDINGS, Member, SENSOR_HOSTS};
+use cairn_lang_core::intent::{Actuator, Member, SENSOR_HOSTS};
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::edition_netlist_ir::EditionNetlistIr;
@@ -32,7 +32,10 @@ impl Painter {
     fn of(keyword: &str) -> Option<Self> {
         if SENSOR_HOSTS.contains(&keyword) {
             Some(Self::Sensor)
-        } else if ACTUATOR_BINDINGS.iter().any(|(_, host)| *host == keyword) {
+        } else if Actuator::ALL
+            .iter()
+            .any(|actuator| actuator.keyword() == keyword)
+        {
             Some(Self::Actuator)
         } else if matches!(
             keyword,

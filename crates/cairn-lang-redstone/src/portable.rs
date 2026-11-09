@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::{
     BlockArray, BlockArrayIr, Dims, Face, ResolvedBlock, ResolvedMember,
 };
 use cairn_lang_core::error::Span;
-use cairn_lang_core::intent::{ACTUATOR_BINDINGS, IntentModule, Member, SENSOR_HOSTS};
+use cairn_lang_core::intent::{Actuator, IntentModule, Member, SENSOR_HOSTS};
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::logic_ir::ScopeKind;
@@ -76,9 +76,7 @@ impl<'a> DeclaredLines<'a> {
                     .members
                     .insert(key_of(&member.span), (*member, scope.clone()));
                 for (key, value) in member.written_fields() {
-                    let drives = ACTUATOR_BINDINGS
-                        .iter()
-                        .any(|(k, host)| *k == key && *host == member.role.keyword());
+                    let drives = member.role.actuator().map(Actuator::key) == Some(key);
                     let Some(signal) = signal_named_by(&value.value).filter(|_| drives) else {
                         continue;
                     };
@@ -146,8 +144,7 @@ impl<'a> Body<'a> {
             .filter_map(|resolved| {
                 let (member, scope) = lines.members.get(&key_of(&resolved.span))?;
                 let keyword = member.role.keyword();
-                let actuator = ACTUATOR_BINDINGS.iter().any(|(_, host)| *host == keyword);
-                if !actuator && !SENSOR_HOSTS.contains(&keyword) {
+                if member.role.actuator().is_none() && !SENSOR_HOSTS.contains(&keyword) {
                     return None;
                 }
                 let first = resolved.resolved_state.first()?;

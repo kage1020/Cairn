@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
+use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation};
 use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH};
 use tree_sitter::Parser;
 
@@ -1786,49 +1786,51 @@ fn generated_at_the_bounds() -> impl Iterator<Item = (String, String)> {
         .map(|&(name, shape, depth)| (format!("{name}, one step shallower"), shape(depth - 1)))
 }
 
+/// The `logic` line whose value is `value`.
+fn logic_line(value: &str) -> String {
+    format!("struct s size=3x3\n  logic s.out = {value}\n")
+}
+
 /// Each primitive of core's built-in logic library in its notation, and each infix one where an
 /// operand belongs, so a primitive the library gains fails here until the grammar has it.
 fn library_primitives() -> impl Iterator<Item = (String, String, Verdict)> {
-    LogicPrimitive::ALL.into_iter().flat_map(|primitive| {
+    LogicPrimitive::ALL.iter().flat_map(|&primitive| {
         let word = primitive.name();
         match primitive.notation() {
             Notation::Prefix => vec![(
                 format!("library prefix `{word}`"),
-                library_logic(&format!("{word} a.b")),
+                logic_line(&format!("{word} a.b")),
                 Accept,
             )],
             Notation::Infix { .. } => vec![
                 (
                     format!("library infix `{word}`"),
-                    library_logic(&format!("a.b {word} c.d")),
+                    logic_line(&format!("a.b {word} c.d")),
                     Accept,
                 ),
                 (
                     format!("library infix `{word}` as an operand"),
-                    library_logic(word),
+                    logic_line(word),
                     Reject,
                 ),
             ],
-            Notation::Call { operands } => called_primitive(word, operands),
+            Notation::Call(signature) => library_calls(signature),
             Notation::Apply { counted } => applied_primitive(word, counted),
         }
     })
 }
 
-/// A `logic` line whose expression is `value`.
-fn library_logic(value: &str) -> String {
-    format!("struct s size=3x3\n  logic s.out = {value}\n")
-}
-
-/// The [`library_primitives`] cases of a primitive called with named operands.
-fn called_primitive(word: &str, operands: &[&str]) -> Vec<(String, String, Verdict)> {
+/// A call of `signature` naming its operands in each order, and each way of naming them that core
+/// refuses: one left out, named twice, named in another's place, given no value, or not named.
+fn library_calls(signature: CallSignature) -> Vec<(String, String, Verdict)> {
+    let (word, operands) = (signature.callee(), signature.operands());
     let call = |named: &[&str]| {
         let named: Vec<String> = named
             .iter()
             .enumerate()
             .map(|(i, name)| format!("{name}=s.v{i}"))
             .collect();
-        library_logic(&format!("{word}({})", named.join(", ")))
+        logic_line(&format!("{word}({})", named.join(", ")))
     };
     let mut out: Vec<_> = permutations(operands)
         .into_iter()
@@ -1855,12 +1857,36 @@ fn called_primitive(word: &str, operands: &[&str]) -> Vec<(String, String, Verdi
             call(&named),
             Reject,
         ));
+        let mut in_place = operands.to_vec();
+        in_place[i] = operands[(i + 1) % operands.len()];
+        out.push((
+            format!("library call `{word}` naming {in_place:?}"),
+            call(&in_place),
+            Reject,
+        ));
+        in_place[i] = "zz";
+        out.push((
+            format!("library call `{word}` naming `zz` for `{left_out}`"),
+            call(&in_place),
+            Reject,
+        ));
+        out.push((
+            format!("library call `{word}` with no value for `{left_out}`"),
+            call(operands).replace(&format!("{left_out}=s.v{i}"), &format!("{left_out}=")),
+            Reject,
+        ));
     }
     let positional: Vec<String> = (0..operands.len()).map(|i| format!("s.v{i}")).collect();
+    let with_zz = call(&[operands, &["zz"]].concat());
     out.extend([
         (
             format!("library call `{word}` with an operand it does not name"),
-            call(&[operands, &["zz"]].concat()),
+            with_zz.clone(),
+            Reject,
+        ),
+        (
+            format!("library call `{word}` naming one more without a comma"),
+            with_zz.replace(", zz=", " zz="),
             Reject,
         ),
         (
@@ -1869,8 +1895,18 @@ fn called_primitive(word: &str, operands: &[&str]) -> Vec<(String, String, Verdi
             Reject,
         ),
         (
+            format!("library call `{word}` naming no operand"),
+            call(&[]),
+            Reject,
+        ),
+        (
+            format!("library call `{word}` missing its first comma"),
+            call(operands).replacen(", ", " ", 1),
+            Reject,
+        ),
+        (
             format!("library call `{word}` with positional operands"),
-            library_logic(&format!("{word}({})", positional.join(", "))),
+            logic_line(&format!("{word}({})", positional.join(", "))),
             Reject,
         ),
         (
@@ -1885,7 +1921,7 @@ fn called_primitive(word: &str, operands: &[&str]) -> Vec<(String, String, Verdi
 /// The [`library_primitives`] cases of a primitive applied to one operand, and a stage count when
 /// it is `counted`.
 fn applied_primitive(word: &str, counted: bool) -> Vec<(String, String, Verdict)> {
-    let apply = |args: &str| library_logic(&format!("{word}({args})"));
+    let apply = |args: &str| logic_line(&format!("{word}({args})"));
     let (takes, other) = if counted {
         ("a.b, 2", "a.b")
     } else {
@@ -1929,12 +1965,12 @@ fn applied_primitive(word: &str, counted: bool) -> Vec<(String, String, Verdict)
         ),
         (
             format!("library application `{word}` with no parentheses"),
-            library_logic(&format!("{word} a.b")),
+            logic_line(&format!("{word} a.b")),
             Reject,
         ),
         (
             format!("library application `{word}` as an operand"),
-            library_logic(word),
+            logic_line(word),
             Reject,
         ),
     ]
@@ -1990,12 +2026,14 @@ fn both_parsers_reach_the_expected_verdict() {
 /// against each rank, so the grammar's precedences are held to the library's ranks.
 fn library_groupings() -> Vec<String> {
     let infix: Vec<&str> = LogicPrimitive::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|primitive| primitive.infix_rank().is_some())
         .map(LogicPrimitive::name)
         .collect();
     let prefix = LogicPrimitive::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|primitive| primitive.notation() == Notation::Prefix)
         .map(LogicPrimitive::name);
     let mut out = Vec::new();
@@ -2012,8 +2050,9 @@ fn library_groupings() -> Vec<String> {
         }
     }
     let called = LogicPrimitive::ALL
-        .into_iter()
-        .filter_map(|primitive| Some((primitive.name(), primitive.call_operands()?)));
+        .iter()
+        .filter_map(|primitive| primitive.call_signature())
+        .map(|signature| (signature.callee(), signature.operands()));
     for (word, operands) in called {
         for order in permutations(operands) {
             let named: Vec<String> = order
@@ -2025,7 +2064,7 @@ fn library_groupings() -> Vec<String> {
         }
     }
     let applied = LogicPrimitive::ALL
-        .into_iter()
+        .iter()
         .filter_map(|primitive| Some((primitive.name(), primitive.applied_counted()?)));
     for (word, counted) in applied {
         let count = if counted { ", 3" } else { "" };
@@ -2137,8 +2176,9 @@ fn grammar_grouping(node: tree_sitter::Node<'_>, source: &str) -> String {
         "call_expression" => {
             let word = word(0);
             let operands = LogicPrimitive::from_name(&word)
-                .and_then(LogicPrimitive::call_operands)
-                .expect("a called primitive of the library");
+                .and_then(LogicPrimitive::call_signature)
+                .expect("a called primitive of the library")
+                .operands();
             let mut cursor = node.walk();
             let mut named: Vec<(usize, String)> = node
                 .named_children(&mut cursor)

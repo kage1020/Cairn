@@ -62,8 +62,8 @@ is an application, so `delay(sig.a and sig.b, 2)` delays the `and`.
 
 `mux` is `a` while `sel` is off and `b` while it is on. A call that passes an operand by position,
 leaves one out, names one twice or names one the primitive does not take is `E_PARSE`, and the
-message names the operands still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`,
-expecting `a=` or `b=`.
+message names the operands the primitive takes, and for a positional or missing operand, the ones
+still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`, expecting `a=` or `b=`.
 
 An applied primitive refuses the reverse, a named operand: `pulse(in=sig.x, 4)` stops at `in`. A
 stage count is `E_PARSE` where it is wrong: missing, as `delay(sig.x)` stops at `)` expecting `,`;
@@ -204,9 +204,11 @@ instead, because the repair is on that member: a row that `walls` painting nothi
 nothing or `walls` under a `level` that is not placed would have reached, or an `at=<side>.outside`
 beside a `roof` with an `overhang=` that draws nothing ([Lint](/spec/lint/#lowering)). The plate's
 own line is judged first, so a line that puts it nowhere is the error even when such a member is
-missing too. Either way the component's binding, its `->` tail or its actuator key, is still read,
-since synthesis reads the member line and not the voxels, so the signal stays in the netlist with no
-component behind it, and the finding says so.
+missing too. Either way synthesis reads the member line and not the voxels, so a binding of the
+component still reaches the netlist with no component behind it, and the finding on its line says
+so. That binding is a sensor's `->` tail, an actuator's key, or the key of a patch that binds the
+actuator, wherever it names a `sig.` signal. One that synthesis refuses, such as a tail on an
+actuator or a value outside `sig.`, reaches no netlist, and the finding does not mention it.
 
 **How a component is turned.** A `lever` or `button` hangs on the face of the wall cell its anchor
 names (`face=wall`), looking away from that wall: into the struct from `inside.<side>`, out of it
@@ -231,9 +233,10 @@ those states is written on its line, and `facing=` is the one state promoted to 
 
 **What a component is built from.** A `button` reads `mat_slot=`, and the slot must bind a button:
 any other block is `E_INCOMPATIBLE_MATERIAL`, and the button is built from `@button.default` instead.
-With no `mat_slot=` it is built from `@button.default`. Every other component has one block to be
-built from, its tier-1 token ([Materials and Themes](/spec/materials-themes/#tier-1-tokens)), and a
-`mat_slot=` on it is `W_IGNORED_ARGUMENT`.
+With no `mat_slot=` it is built from `@button.default`. Every other component is built from its
+tier-1 tokens ([Materials and Themes](/spec/materials-themes/#tier-1-tokens)), a piston from
+`@piston.default` or, with `sticky=true`, `@piston.sticky`. No `mat_slot=` chooses among them, so
+one on it is `W_IGNORED_ARGUMENT`.
 
 **What a lever or button hangs on is not checked.** It is written against whatever the wall cell
 holds, and the build does not ask whether that block is one the game lets it hang on. Where no
@@ -268,7 +271,9 @@ patch whose selector has no `id=`, or whose id no component of its keyword carri
 `E_LOGIC_UNRESOLVED_PATCH`: it acts on no component, so a port for it would have no component behind
 it. An actuator patch is the only binding a selector line carries, so a `->` tail on
 `pressure_plate[id=p]` or `lever[id=sw]` is `E_MISPLACED_BINDING`, as it is on a member that is not
-a sensor.
+a sensor. Nor does a sensor take a patch of any other kind: a sensor line in the selector form, such
+as `lever[id=sw] at=inside.front offset=2 y=1`, places nothing, since its brackets pick a member
+declared elsewhere, and it is `E_INVALID_MEMBER`.
 
 **An actuator takes one binding per key.** A door carries one `opened_by=`, a lamp one `lit_by=`, a
 piston one `powered_by=` and a dispenser one `fired_by=`, whether it is written on the component's

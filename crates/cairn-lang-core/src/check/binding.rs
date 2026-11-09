@@ -5,6 +5,7 @@ use crate::ast::SIGNAL_HEAD;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{IntentModule, Member, MemberRole, SENSOR_HOSTS};
+use crate::prose::or_list;
 
 use super::DiagnosticSink;
 
@@ -70,16 +71,14 @@ fn misplaced_binding(keyword: &str, span: &Span) -> Diagnostic {
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(
-                "move the tail onto a sensor — `{hosts}` {verb} the sensor {noun} the surface \
-                 accepts today; `spec/redstone` \"Signal binding\" also lists `lever`, \
-                 `button`, `daylight`, and `observer`",
-                hosts = SENSOR_HOSTS.join("`, `"),
-                verb = if SENSOR_HOSTS.len() == 1 { "is" } else { "are" },
-                noun = if SENSOR_HOSTS.len() == 1 {
-                    "keyword"
-                } else {
-                    "keywords"
-                },
+                "move the tail onto a sensor, a {} line",
+                or_list(
+                    &SENSOR_HOSTS
+                        .iter()
+                        .map(|host| format!("`{host}`"))
+                        .collect::<Vec<_>>()
+                )
+                .unwrap_or_default(),
             ),
         }],
         data: None,
