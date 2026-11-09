@@ -1,6 +1,7 @@
 //! Rectilinear geometry shared by stages 2 to 4 of `spec/redstone` "Place-and-route": the net
 //! order, and the one answer to where each net's dust runs. A net goes round the blocks and round,
-//! or over, the dust of every net laid before it, so its tree depends on [`net_order`].
+//! or over, the dust of every net laid before it, so its tree depends on the order [`net_trees`]
+//! settles on.
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
@@ -631,17 +632,19 @@ pub(crate) fn collapsed_block(blocks: &[BlockSite]) -> Option<&BlockSite> {
 }
 
 /// The refusal for a sink the reservation cannot wire, anchored on a walled-in one first, or `None`
-/// when every sink is wired.
-pub(crate) fn unroutable<F>(
+/// when every sink is wired; `void_that_wires` is asked for the walled-in refusal's fix.
+pub(crate) fn unroutable<F, V>(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     trees: &HashMap<NetRef, NetTree>,
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
     region: &CircuitRegionReservation,
     source_of_net: F,
+    void_that_wires: V,
 ) -> Option<Diagnostic>
 where
     F: Fn(NetRef) -> CellCoord,
+    V: FnOnce() -> Option<u32>,
 {
     let order = net_order(nets);
     let stranded: Vec<(NetRef, CellCoord)> = order
@@ -681,12 +684,20 @@ where
         DiagnosticCode::RouteCongestion,
         region.span.clone(),
         primary,
-        format!(
-            "Fix: raise `void` above {void} so the wire has a layer to climb onto, enlarge `size=WxH`, or split the logic across several scopes, each with its own `circuit` line",
-            void = region.void,
-        ),
+        match void_that_wires() {
+            Some(void) => format!(
+                "Fix: raise `void` to {void}, which gives the wire a layer to climb onto, or split the logic across several scopes, each with its own `circuit` line"
+            ),
+            None => format!(
+                "Fix: split the logic across several scopes, each with its own `circuit` line, so fewer nets meet at each cell; no `void` up to {max} wires this one",
+                max = region.void.saturating_add(VOID_LOOKAHEAD),
+            ),
+        },
     ))
 }
+
+/// Layers above a scope's `void` the router tries before the fix for a walled-in sink names one.
+pub(crate) const VOID_LOOKAHEAD: u32 = 4;
 
 /// The crowding clause and the count of other stranded sinks both of [`unroutable`]'s refusals end
 /// with.
@@ -794,7 +805,9 @@ pub(crate) fn net_label(net: NetRef, ir: &PlacementIr) -> String {
 }
 
 /// The routed tree of every net, laid in [`net_order`] round the dust of the ones before it and the
-/// coords [`beside`] it.
+/// coords [`beside`] it. While an order strands a sink, the first stranded net moves to the front
+/// and every net is laid again, fewer times than there are nets; the first order that strands
+/// nothing is kept, and the first of all when none does.
 pub(crate) fn net_trees<F>(
     nets: &HashMap<NetRef, Vec<CellCoord>>,
     router: &Router,
@@ -803,9 +816,43 @@ pub(crate) fn net_trees<F>(
 where
     F: Fn(NetRef) -> CellCoord,
 {
+    let mut order = net_order(nets);
+    let first = lay_in_order(&order, nets, router, &source_of_net);
+    let mut laid = first.clone();
+    for _ in 1..order.len() {
+        let Some(stranded) = order
+            .iter()
+            .position(|net| !laid[net].unreachable().is_empty())
+        else {
+            return laid;
+        };
+        if stranded == 0 {
+            break;
+        }
+        let net = order.remove(stranded);
+        order.insert(0, net);
+        laid = lay_in_order(&order, nets, router, &source_of_net);
+    }
+    if laid.values().all(|tree| tree.unreachable().is_empty()) {
+        laid
+    } else {
+        first
+    }
+}
+
+/// Every net's tree, laid one at a time in `order`.
+fn lay_in_order<F>(
+    order: &[NetRef],
+    nets: &HashMap<NetRef, Vec<CellCoord>>,
+    router: &Router,
+    source_of_net: &F,
+) -> HashMap<NetRef, NetTree>
+where
+    F: Fn(NetRef) -> CellCoord,
+{
     let mut keep_out: HashSet<CellCoord> = HashSet::new();
     let mut trees: HashMap<NetRef, NetTree> = HashMap::with_capacity(nets.len());
-    for net in net_order(nets) {
+    for &net in order {
         let tree = router.tree(source_of_net(net), &nets[&net], &keep_out);
         let dust = router.dust(&tree);
         for coord in &dust {

@@ -18,7 +18,9 @@ use crate::block_array::{
 };
 
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
-use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
+use super::circuit::{
+    patched_actuator, recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector,
+};
 use super::connections::derive_connections;
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::door::{HungDoor, hang_doors, split_doors};
@@ -109,6 +111,7 @@ pub(super) fn lower_body_to_block_array<'a>(
     }
     let mut palette = ScopePalette::with_capacity(palette_capacity);
 
+    let (buckets, patched) = bucket_members(&flattened, &written_members, diagnostics);
     let ctx = StructCtx {
         scope,
         registry,
@@ -121,9 +124,8 @@ pub(super) fn lower_body_to_block_array<'a>(
         rise: roof_extra,
         wall_column,
         written: Written::of(&written_members, interior_w, interior_h),
+        patched,
     };
-
-    let buckets = bucket_members(&flattened, &written_members, diagnostics);
     let (canvas, split_doors) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
     // Before anything reads the grid: a voxel painted after the palette filled holds air.
@@ -309,24 +311,34 @@ struct PhaseBuckets<'a> {
     phases: Vec<Option<Phase>>,
 }
 
-/// File every member of the paint set under its phase, reporting the ones no phase reads.
+/// File every member of the paint set under its phase, reporting the ones no phase reads and the
+/// sensor selector lines, which place nothing; with the span starts of the members a well-formed
+/// actuator patch binds a signal to.
 ///
-/// An actuator patch picks its door among `written`, every member the body writes.
+/// An actuator patch picks its actuator among `written`, every member the body writes.
 fn bucket_members<'a>(
     flattened: &[(u32, &'a Member)],
     written: &[(Option<u32>, &Member)],
     diagnostics: &mut Vec<Diagnostic>,
-) -> PhaseBuckets<'a> {
+) -> (PhaseBuckets<'a>, HashSet<usize>) {
     let mut buckets = PhaseBuckets {
         by_phase: Default::default(),
         phases: Vec::with_capacity(flattened.len()),
     };
+    let mut patched = HashSet::new();
     for (index, &(y_offset, member)) in flattened.iter().enumerate() {
         let index = u32::try_from(index).expect("the paint set is far shorter than u32::MAX");
-        // An actuator patch overlays a door declared elsewhere, with no `side=`; only its shape is
-        // checked here (`spec/redstone` "Signal binding").
-        if is_actuator_patch(member) {
-            recognize_actuator_patch(member, written, diagnostics);
+        // An actuator patch binds a component declared elsewhere; only its shape is checked here
+        // (`spec/redstone` "Signal binding").
+        if let Some(patch) = patched_actuator(member) {
+            if let Some(target) = recognize_actuator_patch(member, patch, written, diagnostics) {
+                patched.insert(target.span.start);
+            }
+            buckets.phases.push(None);
+            continue;
+        }
+        if let Some(refusal) = refused_sensor_selector(member) {
+            diagnostics.push(refusal);
             buckets.phases.push(None);
             continue;
         }
@@ -344,7 +356,7 @@ fn bucket_members<'a>(
             MemberDisposition::NotLowered => diagnostics.push(diag_deferred_member(member)),
         }
     }
-    buckets
+    (buckets, patched)
 }
 
 /// Paint one phase's bucket, each member through its own [`MemberCanvas`] so its writes are

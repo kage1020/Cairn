@@ -3,12 +3,12 @@
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 
-use crate::block_array::PaletteIndex;
-
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::cell_box::Shape;
 use super::chest::fill_chest;
-use super::component::fill_component;
+use super::component::{
+    BUTTON, DAYLIGHT, DISPENSER, LAMP, LEVER, OBSERVER, PISTON, fill_component,
+};
 use super::door::{HungDoor, fill_door};
 use super::fill::fill_material;
 use super::members::{StructCtx, palette_index_for};
@@ -31,36 +31,9 @@ pub(super) fn paint_member(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &member.role {
-        MemberRole::Floor => {
-            // `flatten_members` drops a `floor` at a non-zero offset, so this is the ground plane.
-            let Some(idx) = palette_index_for(
-                member,
-                ctx.scope,
-                ctx.registry,
-                palette,
-                diagnostics,
-                ctx.theme_missing,
-            ) else {
-                return;
-            };
-            fill_floor(ctx, idx, canvas);
-        }
-        MemberRole::Walls => {
-            let Some(height) = wall_height(member, diagnostics) else {
-                return;
-            };
-            let Some(idx) = palette_index_for(
-                member,
-                ctx.scope,
-                ctx.registry,
-                palette,
-                diagnostics,
-                ctx.theme_missing,
-            ) else {
-                return;
-            };
-            fill_walls(ctx, height, y_offset, idx, canvas);
-        }
+        // `flatten_members` drops a `floor` at a non-zero offset, so this is the ground plane.
+        MemberRole::Floor => fill_floor(member, ctx, palette, canvas, diagnostics),
+        MemberRole::Walls => fill_walls(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Fill => fill_material(member, y_offset, ctx, palette, canvas, diagnostics),
         // `flatten_members` drops a `roof` at a non-zero offset, so this is the struct's plane.
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
@@ -72,14 +45,50 @@ pub(super) fn paint_member(
         MemberRole::PressurePlate => {
             fill_pressure_plate(member, y_offset, ctx, palette, canvas, diagnostics);
         }
-        MemberRole::Lever
-        | MemberRole::Button
-        | MemberRole::Daylight
-        | MemberRole::Observer
-        | MemberRole::Lamp
-        | MemberRole::Piston
-        | MemberRole::Dispenser => {
-            fill_component(member, y_offset, ctx, palette, canvas, diagnostics);
+        MemberRole::Lever => {
+            fill_component(&LEVER, member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Button => {
+            fill_component(&BUTTON, member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Daylight => {
+            fill_component(
+                &DAYLIGHT,
+                member,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
+        }
+        MemberRole::Observer => {
+            fill_component(
+                &OBSERVER,
+                member,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
+        }
+        MemberRole::Lamp => {
+            fill_component(&LAMP, member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Piston => {
+            fill_component(&PISTON, member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Dispenser => {
+            fill_component(
+                &DISPENSER,
+                member,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
         }
         MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::RawBlock => {
@@ -114,7 +123,23 @@ pub(super) fn paint_member(
     }
 }
 
-fn fill_floor(ctx: &StructCtx<'_>, idx: PaletteIndex, canvas: &mut MemberCanvas<'_>) {
+fn fill_floor(
+    member: &Member,
+    ctx: &StructCtx<'_>,
+    palette: &mut ScopePalette,
+    canvas: &mut MemberCanvas<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(idx) = palette_index_for(
+        member,
+        ctx.scope,
+        ctx.registry,
+        palette,
+        diagnostics,
+        ctx.theme_missing,
+    ) else {
+        return;
+    };
     let y = 0;
     for z_local in 0..ctx.interior_h {
         for x_local in 0..ctx.interior_w {
@@ -126,12 +151,26 @@ fn fill_floor(ctx: &StructCtx<'_>, idx: PaletteIndex, canvas: &mut MemberCanvas<
 }
 
 fn fill_walls(
-    ctx: &StructCtx<'_>,
-    height: u32,
+    member: &Member,
     y_offset: u32,
-    idx: PaletteIndex,
+    ctx: &StructCtx<'_>,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let Some(height) = wall_height(member, diagnostics) else {
+        return;
+    };
+    let Some(idx) = palette_index_for(
+        member,
+        ctx.scope,
+        ctx.registry,
+        palette,
+        diagnostics,
+        ctx.theme_missing,
+    ) else {
+        return;
+    };
     // One above the base plane the floor owns; the cap only guards a stray `height=`.
     let start = 1u32.saturating_add(y_offset);
     let end = height
