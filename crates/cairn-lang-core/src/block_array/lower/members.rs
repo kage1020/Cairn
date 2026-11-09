@@ -1,5 +1,7 @@
 //! The paint set of a body: its members, the phase that paints each, and the material each reads.
 
+use std::collections::HashSet;
+
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 use crate::resolve::ScopeResolution;
@@ -40,6 +42,8 @@ pub(super) struct StructCtx<'a> {
     pub(super) wall_column: WallColumn,
     /// The struct as written, which a member's own line is judged against.
     pub(super) written: Written,
+    /// The span start of each member a well-formed actuator patch binds a signal to.
+    pub(super) patched: HashSet<usize>,
 }
 
 impl StructCtx<'_> {

@@ -1,9 +1,14 @@
 //! The members block-array lowering checks but does not paint: a `circuit` region and an
 //! actuator patch.
 
+use indexmap::IndexMap;
+
 use crate::ast::{SIGNAL_HEAD, Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticNote};
-use crate::intent::{Member, MemberRole, PatchTargetError, actuator_patch_target};
+use crate::intent::{
+    Actuator, Member, PatchTargetError, SENSOR_HOSTS, ValueWithSpan, actuator_patch_target,
+};
+use crate::prose::or_list;
 
 use crate::block_array::args::{
     NonNegRead, diag_deferred_member_noted, diag_invalid_member, nonneg_int_or_refuse,
@@ -64,43 +69,53 @@ pub(super) fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Di
 /// The selector attributes an actuator patch reads.
 const ACTUATOR_PATCH_SELECTOR_KEYS: &[&str] = &["id"];
 
-/// What the signal an actuator reads does to it, completing "the signal that … the lamp" and "no
-/// lamp is built for it to …".
-fn what_the_signal_does(role: &MemberRole) -> (&'static str, &'static str) {
-    match role {
-        MemberRole::Door => ("opens", "open"),
-        MemberRole::Lamp => ("lights", "light"),
-        MemberRole::Piston => ("powers", "power"),
-        MemberRole::Dispenser => ("fires", "fire"),
-        other => unreachable!("`{}` reads no signal, so it has no patch", other.keyword()),
+/// The actuator a line patches: the selector form of an actuator, such as `door[…]`, which binds a
+/// signal to an actuator declared elsewhere (`spec/redstone` "Signal binding"); `None` for any
+/// other line.
+pub(super) fn patched_actuator(
+    member: &Member,
+) -> Option<(Actuator, &IndexMap<String, ValueWithSpan>)> {
+    Some((member.role.actuator()?, member.selector.as_ref()?))
+}
+
+/// The refusal of a sensor's line in the selector form, which places nothing, since only an
+/// actuator takes a patch (`spec/redstone` "Signal binding"); `None` for any other line.
+pub(super) fn refused_sensor_selector(member: &Member) -> Option<Diagnostic> {
+    let keyword = member.role.keyword();
+    if member.selector.is_none() || !SENSOR_HOSTS.contains(&keyword) {
+        return None;
     }
+    let actuators: Vec<String> = Actuator::ALL
+        .iter()
+        .map(|actuator| format!("`{}`", actuator.keyword()))
+        .collect();
+    Some(diag_invalid_member(
+        member,
+        format!(
+            "`{keyword}[…]` places nothing: the brackets pick a member declared elsewhere, and \
+             only an actuator, {}, takes a patch",
+            or_list(&actuators).unwrap_or_default(),
+        ),
+        vec![format!(
+            "declare the `{keyword}` on a line of its own, without brackets, as `{keyword} \
+             id=<label> at=… -> sig.<name>`"
+        )],
+    ))
 }
 
-/// Whether a line is an actuator patch: the selector form of an actuator, such as `door[…]`,
-/// which binds a signal to an actuator declared elsewhere (`spec/redstone` "Signal binding").
-pub(super) fn is_actuator_patch(member: &Member) -> bool {
-    member.role.actuator_key().is_some() && member.selector.is_some()
-}
-
-/// Check an actuator patch's shape, as `door[id=X] opened_by=sig.Y`, without emitting voxels.
+/// Check the shape of a patch of `actuator`, as `door[id=X] opened_by=sig.Y`, without emitting
+/// voxels; the member it binds a signal to when that shape holds.
 ///
 /// The `id=` must name exactly one physical member of the patch's keyword in `written`, each
 /// member with its level's offset, `None` under a `level` that is not placed.
-pub(super) fn recognize_actuator_patch(
+pub(super) fn recognize_actuator_patch<'w>(
     member: &Member,
-    written: &[(Option<u32>, &Member)],
+    (actuator, selector): (Actuator, &IndexMap<String, ValueWithSpan>),
+    written: &[(Option<u32>, &'w Member)],
     diagnostics: &mut Vec<Diagnostic>,
-) {
-    debug_assert!(
-        member.selector.is_some(),
-        "recognize_actuator_patch called on a member without a selector; \
-         is_actuator_patch invariant broken",
-    );
-    let (Some(selector), Some(key)) = (member.selector.as_ref(), member.role.actuator_key()) else {
-        return;
-    };
-    let keyword = member.role.keyword();
-    let (does, to_do) = what_the_signal_does(&member.role);
+) -> Option<&'w Member> {
+    let (keyword, key) = (actuator.keyword(), actuator.key());
+    let (does, to_do) = actuator.verbs();
     // Only keys the keyword accepts; `check::arguments` reports the rest (`E_UNKNOWN_ARGUMENT`).
     let vocabulary = member.role.accepted_arguments().unwrap_or_default();
     let unknown_selector_keys: Vec<&str> = selector
@@ -117,11 +132,11 @@ pub(super) fn recognize_actuator_patch(
             ),
             Vec::new(),
         ));
-        return;
+        return None;
     }
     // The redstone front end picks the actuator through this too, so the two agree.
-    let actuator = match actuator_patch_target(member, written.iter().map(|&(_, m)| m)) {
-        Ok(actuator) => actuator,
+    let target = match actuator_patch_target(member, written.iter().map(|&(_, m)| m)) {
+        Ok(target) => target,
         Err(reason) => {
             let mut diagnostic = diag_invalid_member(member, reason.to_string(), Vec::new());
             if let Some(fix) = patch_target_fix(&reason) {
@@ -131,7 +146,7 @@ pub(super) fn recognize_actuator_patch(
                 });
             }
             diagnostics.push(diagnostic);
-            return;
+            return None;
         }
     };
     let unknown_keys: Vec<&str> = member
@@ -150,7 +165,7 @@ pub(super) fn recognize_actuator_patch(
                 "move these onto the {keyword}'s own line, or drop them"
             )],
         ));
-        return;
+        return None;
     }
     let Some(bound) = member.arguments.get(key) else {
         diagnostics.push(diag_invalid_member(
@@ -162,15 +177,15 @@ pub(super) fn recognize_actuator_patch(
                 "write `{key}=sig.<name>`, the signal that {does} the {keyword}"
             )],
         ));
-        return;
+        return None;
     };
     if let Some(primary) = not_a_signal(keyword, key, &bound.value) {
         diagnostics.push(diag_invalid_member(member, primary, Vec::new()));
-        return;
+        return None;
     }
     let unplaced = written
         .iter()
-        .any(|&(y_offset, m)| y_offset.is_none() && std::ptr::eq(m, actuator));
+        .any(|&(y_offset, m)| y_offset.is_none() && std::ptr::eq(m, target));
     if unplaced {
         diagnostics.push(diag_deferred_member_noted(
             member,
@@ -181,14 +196,18 @@ pub(super) fn recognize_actuator_patch(
             &format!("the {keyword} is built once that `level` is placed"),
         ));
     }
+    Some(target)
+}
+
+/// Whether `value` names a signal, as `sig.<name>` (`spec/redstone` "Signal binding").
+pub(super) fn names_a_signal(value: &Value) -> bool {
+    matches!(&value.kind, ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD && dotref.tail().len() == 1)
 }
 
 /// Why an actuator patch's `key=` value names no signal, or `None` when it names one.
 fn not_a_signal(keyword: &str, key: &str, value: &Value) -> Option<String> {
     match &value.kind {
-        ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD && dotref.tail().len() == 1 => {
-            None
-        }
+        _ if names_a_signal(value) => None,
         ValueKind::DotRef(dotref) if dotref.head() == SIGNAL_HEAD => Some(format!(
             "{keyword} actuator patch `{key}=` must be a two-segment signal reference `sig.<name>`, got `{dotref}`",
         )),
