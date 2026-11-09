@@ -35,6 +35,18 @@ fn a_mat_slot_given_a_block_says_to_bind_it_in_the_theme() {
             "struct s size=1x1\n  walls mat_slot=3\n",
             "write the name of a slot the bound theme declares",
         ),
+        (
+            "struct s size=1x1\n  walls mat_slot=minecraft:oak_log[axis=x]\n",
+            "`mat_slot=` names a slot of the bound theme, not a block: bind its canonical token \
+             there (`slot NAME -> @oak_log[axis=x]`) and write `mat_slot=NAME`, or place \
+             `minecraft:oak_log[axis=x]` as written with a `raw_block` or `raw_fill`",
+        ),
+        (
+            "struct s size=1x1\n  walls mat_slot=my_mod:copper_lamp\n",
+            "`mat_slot=` names a slot of the bound theme, not a block: bind a canonical token \
+             there and write `mat_slot=NAME`, or place `my_mod:copper_lamp` as written with a \
+             `raw_block` or `raw_fill`",
+        ),
     ] {
         let found = of_code(src, DiagnosticCode::TypeMismatchLabel);
         assert_eq!(found.len(), 1, "for {src:?}, got {found:#?}");
@@ -64,6 +76,20 @@ fn a_coordinate_on_a_label_or_size_key_is_a_type_mismatch() {
             "for {src:?}",
         );
     }
+}
+
+#[test]
+fn a_block_id_on_a_size_key_is_a_type_mismatch() {
+    let src = "struct s size=minecraft:stone\n  floor mat_slot=m\n";
+    let found = of_code(src, DiagnosticCode::TypeMismatchSize);
+    assert_eq!(found.len(), 1, "got {found:#?}");
+    assert_eq!(
+        (slice(src, &found[0]), found[0].primary.as_str()),
+        (
+            "minecraft:stone",
+            "`size=` expects a `WxH` literal, got block id"
+        ),
+    );
 }
 
 #[test]

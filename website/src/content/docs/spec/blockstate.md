@@ -115,7 +115,9 @@ never joined by a face.
   is `right`. A chest that writes its `type`, as `size=single` does, pairs with none.
 
 A state the block's material or line writes is kept, and only the others are derived:
-`@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. The states are
+`@glass_pane[north=true]` keeps `north=true` and joins its other sides as above. A raw block keeps
+every state, written or not: its neighbours read it as they read any block, and none of its own is
+derived ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). The states are
 resolved state, never intent ([§6.2](#62-intent_state-and-resolved_state)).
 
 The blocks beside are those of the same `struct` or `place` body, and nothing outside its array
@@ -192,7 +194,7 @@ the box. Each is a coordinate triple, a cell of the struct
 ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). With a `mat_slot=`, the fill paints
 every cell of the box with that material in `massing`, and has no default block, so one whose
 material does not resolve leaves its cells as they are. With `fluid=water`, it pours water once
-every other member is painted, in `fluids` ([Compilation Model
+the blocks it may hold are placed, in `fluids` ([Compilation Model
 §4.1](/spec/compilation/#41-phase-evaluation)). A cell of the box that holds no block takes a water
 source, `minecraft:water[level=0]`. A waterloggable block whose state does not write `waterlogged`
 takes `waterlogged=true` and stays its own member's ([§6.2](#62-intent_state-and-resolved_state)).

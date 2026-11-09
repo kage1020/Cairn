@@ -931,6 +931,63 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=5x5\n  lever -> sig.a at=1,2,3\n",
         Accept,
     ),
+    // -- block ids --------------------------------------------------------
+    (
+        "block_id",
+        "struct s size=5x5\n  raw_block mat=minecraft:stone at=1,0,1\n",
+        Accept,
+    ),
+    (
+        "block_id_with_a_state_literal",
+        "struct s size=5x5\n  raw_block mat=minecraft:light[level=15] at=1,0,1\n",
+        Accept,
+    ),
+    (
+        "block_id_in_a_theme_selector",
+        "theme t:\n  window[mat=minecraft:glass] -> frame=minecraft:stone\n",
+        Accept,
+    ),
+    // A `:` ending a header line opens the body, so the name before it is no namespace.
+    (
+        "header_colon_after_a_value",
+        "def hut size=3x3 tag=small:\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "block_id_space_after_the_colon",
+        "struct s size=5x5\n  raw_block mat=minecraft: stone\n",
+        Reject,
+    ),
+    (
+        "block_id_space_before_the_colon",
+        "struct s size=5x5\n  raw_block mat=minecraft :stone\n",
+        Reject,
+    ),
+    (
+        "block_id_integer_path",
+        "struct s size=5x5\n  raw_block mat=minecraft:1\n",
+        Reject,
+    ),
+    (
+        "block_id_two_colons",
+        "struct s size=5x5\n  raw_block mat=minecraft:stone:x\n",
+        Reject,
+    ),
+    (
+        "block_id_malformed_state_literal",
+        "struct s size=5x5\n  raw_block mat=minecraft:light[level=]\n",
+        Reject,
+    ),
+    (
+        "block_id_as_a_positional",
+        "struct s size=5x5\n  raw_block minecraft:stone\n",
+        Reject,
+    ),
+    (
+        "block_id_in_a_slot_row",
+        "theme t:\n  slot wall -> minecraft:stone\n",
+        Reject,
+    ),
     // -- indentation ----------------------------------------------------
     (
         "dedent_two_levels",

@@ -87,7 +87,7 @@ semantic-sensitive:      (none)
 
 - `cairn parse` / `check` / `info` / `lower` / `compile`
 - 1 つのソースから Java の `.nbt` と Bedrock の `.mcstructure` を出力
-- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、感圧板、チェスト、マテリアルや水を満たす `fill`、`level` による階ごとのまとまり
+- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、感圧板、チェスト、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)

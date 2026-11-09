@@ -408,7 +408,7 @@ pub fn resolve_block_state(
                 unreachable!("classify_token reports Canonical only for ValueKind::Token");
             };
             let state = canonical_to_block_state(inner);
-            validated_id(state, registry, &IdOrigin::Authored)
+            validated_id(state, registry, &IdOrigin::Authored).map_err(MaterialDeferred::UnknownId)
         }
         TokenKind::Abstract => {
             let ValueKind::Token(inner) = &slot.value.kind else {
@@ -424,7 +424,8 @@ pub fn resolve_block_state(
                     &IdOrigin::Catalog {
                         token: inner.clone(),
                     },
-                );
+                )
+                .map_err(MaterialDeferred::UnknownId);
             }
             let pool = registry.known_tokens();
             let suggestion =
@@ -440,11 +441,15 @@ pub fn resolve_block_state(
 
 /// Refuse `state` when the pinned target does not declare its id; pass it when none is pinned,
 /// as a stand-in when no version the registry covers declares it.
+///
+/// # Errors
+///
+/// The [`UnknownId`] the pinned target refuses.
 pub(crate) fn validated_id(
     state: BlockState,
     registry: Option<&dyn TargetRegistry>,
     origin: &IdOrigin,
-) -> Result<BlockState, MaterialDeferred> {
+) -> Result<BlockState, Box<UnknownId>> {
     let Some(registry) = registry else {
         return Ok(state);
     };
@@ -462,7 +467,7 @@ pub(crate) fn validated_id(
     // aliases answer it either way, and only an id no version declares can carry both.
     let aliases = registry.aliases_for(&state.id);
     let elsewhere = registry.declared_elsewhere(&state.id);
-    Err(MaterialDeferred::UnknownId(Box::new(UnknownId {
+    Err(Box::new(UnknownId {
         suggestion: elsewhere
             .is_none()
             .then(|| nearest_namespaced_id(&state.id, ids.iter()))
@@ -472,7 +477,13 @@ pub(crate) fn validated_id(
         registry: ids.label().to_owned(),
         origin: origin.clone(),
         id: state.id,
-    })))
+    }))
+}
+
+/// The state a block id names as written, `minecraft:light[level=15]` with its literal's
+/// properties (`spec/materials-themes` "Raw blocks").
+pub(crate) fn block_id_state(id: &str) -> BlockState {
+    canonical_to_block_state(id)
 }
 
 /// Turn a canonical token body (`oak_planks`, `minecraft:oak_log[axis=x]`) into a [`BlockState`].

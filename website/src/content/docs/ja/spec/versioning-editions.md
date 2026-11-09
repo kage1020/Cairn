@@ -461,7 +461,7 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 
 ### 代替を書くとき
 
-**変更の余地あり。** `@edition` によるガード、`hologram`、`raw_block`、引数を取る `slot` のルールは、まだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
+**変更の余地あり。** `@edition` によるガード、`hologram`、引数を取る `slot` のルールは、まだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
 
 意味層で `@edition` による条件分岐を書くことは禁止です。代替が必要なときは、次の階層を上から順に検討します。
 
@@ -480,7 +480,7 @@ theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock のフ�
 @edition bedrock { raw_block mat=minecraft:light_block_15 at=4,3,2 }
 ```
 
-現時点のパーサがこのスニペットで受け付けるのは、`@requires` の行だけです。`hologram` はトップレベルにありますが、トップレベルで項目を始められるのは `theme`、`def`、`site`、`struct` だけなので `E_PARSE` になり、パースはそこで終わります。後続の行も、それぞれ単独で失敗します。`theme` のルールはヘッダの下にインデントして書くので、1 行の形は `slot` の位置で `E_PARSE` です。インデントしても、`slot` のルールが割り当てるのは 1 つのトークンで、その後には何も書けないので、`scale=2.0` と `glowing=true` は `E_PARSE` になります。`@edition` は未知のディレクティブ (`E_PARSE`) で、本体の中に書いた `hologram` と `raw_block` は `E_UNKNOWN_KEYWORD` です。`E_PARITY_UNSUPPORTED` も未実装です。
+現時点のパーサがこのスニペットで受け付けるのは、`@requires` の行だけです。`hologram` はトップレベルにありますが、トップレベルで項目を始められるのは `theme`、`def`、`site`、`struct` だけなので `E_PARSE` になり、パースはそこで終わります。後続の行も、それぞれ単独で失敗します。`theme` のルールはヘッダの下にインデントして書くので、1 行の形は `slot` の位置で `E_PARSE` です。インデントしても、`slot` のルールが割り当てるのは 1 つのトークンで、その後には何も書けないので、`scale=2.0` と `glowing=true` は `E_PARSE` になります。`@edition` は未知のディレクティブ (`E_PARSE`) なので、パーサはその波かっこの中の `raw_block` まで届きません。本体の中に 1 行として書いた `raw_block` は組み上がります ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。本体の中に書いた `hologram` は `E_UNKNOWN_KEYWORD` です。`E_PARITY_UNSUPPORTED` も未実装です。
 
 ### `@edition` はエディションを固定し、バージョンは固定しない
 

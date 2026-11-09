@@ -431,6 +431,8 @@ pub enum ValueKind {
     },
     /// Canonical or abstract token without its `@`: `@oak_planks` is `Token("oak_planks")`.
     Token(String),
+    /// Block id as Minecraft spells it, with its state literal if any: `minecraft:light[level=15]`.
+    BlockId(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(DottedRef),
     /// Double-quoted string literal.
@@ -489,6 +491,7 @@ impl Value {
             ValueKind::Size { w, h } => Some(format!("{w}x{h}")),
             ValueKind::Coord { x, y, z } => Some(format!("{x},{y},{z}")),
             ValueKind::Token(t) => Some(format!("@{t}")),
+            ValueKind::BlockId(id) => Some(id.clone()),
             ValueKind::DotRef(d) => Some(d.to_string()),
             ValueKind::List(_) => None,
         }
@@ -513,6 +516,7 @@ impl Value {
             ValueKind::Size { .. } => "size",
             ValueKind::Coord { .. } => "coordinate",
             ValueKind::Token(..) => "token",
+            ValueKind::BlockId(..) => "block id",
             ValueKind::DotRef(..) => "reference",
             ValueKind::Str(..) => "string",
             ValueKind::List(..) => "list",

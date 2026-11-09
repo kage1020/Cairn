@@ -6,11 +6,13 @@ use crate::intent::{Member, MemberRole};
 use crate::block_array::PaletteIndex;
 
 use super::canvas::{MemberCanvas, ScopePalette};
+use super::cell_box::Shape;
 use super::chest::fill_chest;
 use super::door::{HungDoor, fill_door};
 use super::fill::fill_material;
 use super::members::{StructCtx, palette_index_for};
 use super::plate::fill_pressure_plate;
+use super::raw::fill_raw;
 use super::roof_fill::fill_roof;
 use super::sizing::wall_height;
 use super::stair::fill_stair;
@@ -70,6 +72,28 @@ pub(super) fn paint_member(
             fill_pressure_plate(member, y_offset, ctx, palette, canvas, diagnostics);
         }
         MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::RawBlock => {
+            fill_raw(
+                member,
+                Shape::Cell,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
+        }
+        MemberRole::RawFill => {
+            fill_raw(
+                member,
+                Shape::Box,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
+        }
         MemberRole::Level
         | MemberRole::Circuit
         | MemberRole::Place

@@ -37,6 +37,10 @@
         "required": true,
         "types": [
           {
+            "type": "block_id",
+            "named": true
+          },
+          {
             "type": "boolean",
             "named": true
           },
@@ -147,6 +151,21 @@
           }
         ]
       }
+    }
+  },
+  {
+    "type": "block_id",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "state_literal",
+          "named": true
+        }
+      ]
     }
   },
   {

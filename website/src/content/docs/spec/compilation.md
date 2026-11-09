@@ -16,16 +16,17 @@ fluids      fill fluid= / water
 logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
 logic_place cell placement → Placement IR
 logic_route routing, delay insertion and crossing legalization over the Placement IR, delay determined
-raw         escape hatch
+raw         raw_block / raw_fill (the escape hatch)
 ```
 
 A `fill` is `massing` with a `mat_slot=` and `fluids` with a `fluid=`
 ([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)), so its water is poured once the blocks
 it may hold are placed.
 
-Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed`, `water` and `raw` are not
-keywords yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
-`envelope`, `openings`, `fixtures`, whose members are `pressure_plate` and `chest`, and `fluids`.
+Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `water` are not keywords
+yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
+`envelope`, `openings`, `fixtures` (whose members are `pressure_plate` and `chest`), `fluids` and
+`raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)).
 `cairn compile` does not run the three `logic_*` phases, so a `logic` line lays no redstone in the
 artifact; they are reached only through `cairn synth --experimental-logic-synth`.
 
@@ -221,10 +222,10 @@ Members inside a `level` count in all three, at their offset: `walls height=3` w
 gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`,
-`pressure_plate`, `chest` and `fill` read `N` as the base their geometry is measured from. A `floor`
-and a `roof` are planes a struct has one of, and what one under a raised `level` builds is reserved
-for a later extension: under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to
-nothing.
+`pressure_plate`, `chest`, `fill`, `raw_block` and `raw_fill` read `N` as the base their geometry is
+measured from. A `floor` and a `roof` are planes a struct has one of, and what one under a raised
+`level` builds is reserved for a later extension: under `level y=N` with `N > 0` each fires
+`W_DEFERRED_MEMBER` and lowers to nothing.
 
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under

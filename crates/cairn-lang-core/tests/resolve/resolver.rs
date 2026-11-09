@@ -549,6 +549,37 @@ fn connect_non_token_path_emits_e_missing_path_material() {
 }
 
 #[test]
+fn a_block_id_path_is_refused_as_no_token() {
+    let src = concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "def cottage size=3x3:\n",
+        "  walls mat_slot=wall height=2\n",
+        "  door id=entry side=front at=center\n",
+        "\n",
+        "site s:\n",
+        "  place id=a use=cottage theme=t at=origin\n",
+        "  place id=b use=cottage theme=t east_of=a gap=2\n",
+        "  connect a.entry to b.entry path=minecraft:gravel\n",
+    );
+    let r = resolve(&ir(src), None);
+    let found: Vec<(&str, &str)> = r
+        .diagnostics
+        .iter()
+        .map(|d| (d.code.as_str(), d.primary.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            "E_MISSING_PATH_MATERIAL",
+            "`connect path=` must be a material token like `@gravel`, got block id"
+        )],
+    );
+    assert!(r.connects.is_empty(), "a block id path must not resolve");
+}
+
+#[test]
 fn connect_unknown_place_emits_e_unresolved_place_ref() {
     let src = concat!(
         "theme t:\n",

@@ -1,13 +1,14 @@
 //! Intent IR → block-array IR lowering, total: what cannot lower is a warning, not a failure.
 //!
-//! Members paint in `spec/compilation` "Phase evaluation" order (massing, envelope, openings,
-//! fixtures), after [`flatten_members`] folds `level` blocks into one list.
+//! Members paint in `spec/compilation` "Phase evaluation" order, after [`flatten_members`] folds
+//! `level` blocks into one list.
 //!
 //! [`flatten_members`]: members::flatten_members
 
 mod anchor;
 mod body;
 mod canvas;
+mod cell_box;
 mod chest;
 mod circuit;
 mod connect;
@@ -21,6 +22,7 @@ mod members;
 mod paint;
 mod phase;
 mod plate;
+mod raw;
 mod roof_fill;
 mod roof_kind;
 mod site_floor;

@@ -38,6 +38,14 @@ const FIXTURES: &[(&str, &str)] = &[
         "connect",
         "site v:\n  place id=a use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=4\n  connect a.entry to b.entry path=@gravel mat_slot=%SLOT%\n",
     ),
+    (
+        "raw_block",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_block mat=minecraft:stone at=1,1,1 mat_slot=%SLOT%\n",
+    ),
+    (
+        "raw_fill",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_fill mat=minecraft:stone from=1,1,1 to=2,1,2 mat_slot=%SLOT%\n",
+    ),
     // The control: a `window` reads its `mat_slot=`, so it builds differently under the two names.
     (
         "window",

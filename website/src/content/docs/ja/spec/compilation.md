@@ -15,12 +15,12 @@ fluids      fill fluid= / water
 logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
 logic_place セルの配置 → Placement IR
 logic_route Placement IR 上での配線、遅延の挿入、交差の合法化。遅延が確定
-raw         エスケープハッチ
+raw         raw_block / raw_fill (エスケープハッチ)
 ```
 
 水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
 
-ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water`、`raw` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids` の 5 つで、`fixtures` に属するのは `pressure_plate` と `chest` です。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
+ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `pressure_plate` と `chest` です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
@@ -142,7 +142,7 @@ Dims.y = 1 + wall_top + roof_extra
 
 `level` の中のメンバーも、この 3 つの項すべてに、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 
-**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `pressure_plate` / `chest` / `fill` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
+**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `pressure_plate` / `chest` / `fill` / `raw_block` / `raw_fill` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
 
 **ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof` や `slope_to=` のない `shed` は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
 

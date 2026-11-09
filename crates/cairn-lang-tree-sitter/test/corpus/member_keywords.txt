@@ -15,6 +15,8 @@ struct s size=9x7
   circuit id=main region=floor
   place kind=lamp at=center
   connect west.east_corner to east.west_corner
+  raw_block mat=minecraft:stone at=1,0,1
+  raw_fill mat=minecraft:stone from=0,0,0 to=1,0,1
 
 ---
 
@@ -181,4 +183,30 @@ struct s size=9x7
           (command_arg
             (signal_ref
               (identifier)
-              (identifier))))))))
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (block_id)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (block_id)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate))))))))

@@ -15,6 +15,8 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "pressure_plate",
     "chest",
     "circuit",
+    "raw_block",
+    "raw_fill",
     "place",
     "connect",
 ];
@@ -60,6 +62,10 @@ pub enum MemberRole {
     Chest,
     /// `circuit` redstone region marker.
     Circuit,
+    /// `raw_block` escape hatch: one block id in one cell.
+    RawBlock,
+    /// `raw_fill` escape hatch: one block id in every cell of a box.
+    RawFill,
     /// `place` site placement.
     Place,
     /// `connect` site topology edge.
@@ -186,6 +192,8 @@ impl MemberRole {
             Self::PressurePlate => &["at", "offset", "y"],
             Self::Chest => &["at", "offset", "y", "facing", "size", "waterlogged"],
             Self::Circuit => &["region", "void"],
+            Self::RawBlock => &["mat", "at"],
+            Self::RawFill => &["mat", "from", "to"],
             // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
             // fix this set.
             Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
@@ -210,6 +218,8 @@ impl MemberRole {
             | Self::Level
             | Self::PressurePlate
             | Self::Circuit
+            | Self::RawBlock
+            | Self::RawFill
             | Self::Place
             | Self::Connect
             | Self::Other(_) => &[],
@@ -243,7 +253,12 @@ impl MemberRole {
                     why: Unread::Unreached,
                 },
             ],
-            Self::Level | Self::Circuit | Self::Place | Self::Connect => &[UnreadArgument {
+            Self::Level
+            | Self::Circuit
+            | Self::RawBlock
+            | Self::RawFill
+            | Self::Place
+            | Self::Connect => &[UnreadArgument {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
             }],
@@ -335,6 +350,8 @@ impl MemberRole {
             | Self::PressurePlate
             | Self::Chest
             | Self::Circuit
+            | Self::RawBlock
+            | Self::RawFill
             | Self::Connect
             | Self::Other(_) => &[],
         }
@@ -371,6 +388,8 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "pressure_plate" => MemberRole::PressurePlate,
         "chest" => MemberRole::Chest,
         "circuit" => MemberRole::Circuit,
+        "raw_block" => MemberRole::RawBlock,
+        "raw_fill" => MemberRole::RawFill,
         "place" => MemberRole::Place,
         "connect" => MemberRole::Connect,
         other => MemberRole::Other(other.to_owned()),

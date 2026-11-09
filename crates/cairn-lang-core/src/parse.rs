@@ -335,6 +335,9 @@ impl<'a> Parser<'a> {
         if kw == "slot" {
             let slot = self.expect_ident()?;
             self.expect(&TokenKind::Arrow)?;
+            if self.at_block_id() {
+                return Err(self.block_id_in_a_slot_row());
+            }
             let value = self.parse_value()?;
             let span = start_byte..self.last_byte();
             self.expect_newline()?;
@@ -961,11 +964,32 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::Eq)?;
         let value = if self.at_coordinate() {
             self.parse_coordinate()?
+        } else if self.at_block_id() {
+            self.parse_block_id()?
         } else {
-            self.parse_value()?
+            let value = self.parse_value()?;
+            if let ValueKind::Ident(namespace) = &value.kind {
+                self.refuse_a_spaced_block_id(namespace)?;
+            }
+            value
         };
         let span = start_byte..self.last_byte();
         Ok(Arg { key, value, span })
+    }
+
+    /// Refuse a name and a path a space parts from the `:` between them, which no value is.
+    fn refuse_a_spaced_block_id(&self, namespace: &str) -> Result<(), ParseError> {
+        let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        let (Some(TokenKind::Colon), Some(TokenKind::Ident(path))) = (kind(0), kind(1)) else {
+            return Ok(());
+        };
+        Err(ParseError::Syntax {
+            position: self.position(),
+            message: format!(
+                "a space parts `{namespace}` and `{path}` from the `:` between them; a block id \
+                 is `namespace:path` with nothing around the `:`, as `{namespace}:{path}`"
+            ),
+        })
     }
 
     /// Whether the next tokens are an integer, a `,` and another component, or a `-` before the
@@ -1082,6 +1106,79 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Whether the next tokens are a name and a `:` touching it, which only a block id puts after
+    /// `=`: a block header's `:` follows a name and then a space or the end of the line.
+    fn at_block_id(&self) -> bool {
+        let (Some(name), Some(colon)) = (self.tokens.get(self.pos), self.tokens.get(self.pos + 1))
+        else {
+            return false;
+        };
+        matches!(name.kind, TokenKind::Ident(_))
+            && colon.kind == TokenKind::Colon
+            && colon.span.start == name.span.end
+            && self.tokens.get(self.pos + 2).is_some_and(|path| {
+                path.span.start == colon.span.end && path.kind != TokenKind::Newline
+            })
+    }
+
+    /// The refusal of a block id a slot row binds, which binds a canonical token.
+    fn block_id_in_a_slot_row(&mut self) -> ParseError {
+        let position = self.position();
+        let id = match self.read_block_id() {
+            Ok(id) => id,
+            Err(err) => return err,
+        };
+        let repair = match id.strip_prefix("minecraft:") {
+            Some(token) => format!("write its canonical token, `@{token}`"),
+            None => "write a canonical token, as `@stone`".to_owned(),
+        };
+        ParseError::Syntax {
+            position,
+            message: format!(
+                "a slot row binds a canonical token, not the block id `{id}`; {repair}, or place \
+                 the block as written with a `raw_block` or `raw_fill`"
+            ),
+        }
+    }
+
+    /// Read a block id, `namespace:path` with its state literal if any.
+    fn parse_block_id(&mut self) -> Result<Value, ParseError> {
+        let start_byte = self.current_byte();
+        let id = self.read_block_id()?;
+        Ok(Value::new(
+            ValueKind::BlockId(id),
+            start_byte..self.last_byte(),
+        ))
+    }
+
+    /// Read a block id's text, its state literal folded in as a token's is.
+    fn read_block_id(&mut self) -> Result<String, ParseError> {
+        let mut text = self.expect_ident()?;
+        self.expect(&TokenKind::Colon)?;
+        let position = self.position();
+        let Some(TokenKind::Ident(path)) = self.peek().map(|t| t.kind.clone()) else {
+            let got = self.next_token_text();
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "a block id expected a path after `{text}:`, got {got}; a block id is \
+                     `namespace:path`, as `minecraft:stone`"
+                ),
+            });
+        };
+        self.advance();
+        text.push(':');
+        text.push_str(&path);
+        if self
+            .peek()
+            .is_some_and(|t| t.kind == TokenKind::LBracket && t.span.start == self.last_byte())
+        {
+            let literal = self.parse_state_literal(&text)?;
+            text.push_str(&literal);
+        }
+        Ok(text)
+    }
+
     /// Read an `@` token value whose `@` starts at `start_byte`, with its state literal if any.
     fn parse_token_value(&mut self, start_byte: usize) -> Result<Value, ParseError> {
         self.advance();
@@ -1099,7 +1196,7 @@ impl<'a> Parser<'a> {
                 .peek()
                 .is_some_and(|t| t.kind == TokenKind::LBracket && t.span.start == self.last_byte())
         {
-            text.push_str(&self.parse_state_literal(&text)?);
+            text.push_str(&self.parse_state_literal(&format!("@{text}"))?);
         }
         Ok(Value::new(
             ValueKind::Token(text),
@@ -1107,13 +1204,14 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    /// Read a block-state literal after `@token` as the text it folds into, spaces dropped. The
-    /// one place a malformed literal is refused: `block_array::material` reads it back leniently.
-    fn parse_state_literal(&mut self, token: &str) -> Result<String, ParseError> {
+    /// Read a block-state literal after `written`, a token or block id as written, as the text it
+    /// folds into, spaces dropped. The one place a malformed literal is refused:
+    /// `block_array::material` reads it back leniently.
+    fn parse_state_literal(&mut self, written: &str) -> Result<String, ParseError> {
         let refuse = |position, found: &str| ParseError::Syntax {
             position,
             message: format!(
-                "the state literal on `@{token}` expected {found}; a state literal is \
+                "the state literal on `{written}` expected {found}; a state literal is \
                  `[property=value]` pairs separated by `,`, as in `@oak_log[axis=x]`"
             ),
         };
@@ -1130,7 +1228,7 @@ impl<'a> Parser<'a> {
                 return Err(ParseError::Syntax {
                     position,
                     message: format!(
-                        "the state literal on `@{token}` sets `{property}` twice; a block \
+                        "the state literal on `{written}` sets `{property}` twice; a block \
                          state has one value per property"
                     ),
                 });

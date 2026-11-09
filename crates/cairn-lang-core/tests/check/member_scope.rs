@@ -18,6 +18,8 @@ const GEOMETRY_ROWS: &[&str] = &[
     "pressure_plate id=p at=front.outside",
     "chest id=c at=inside.front",
     "circuit region=floor void=1",
+    "raw_block mat=minecraft:stone at=1,0,1",
+    "raw_fill mat=minecraft:stone from=0,0,0 to=1,0,1",
 ];
 
 const SITE_ROWS: &[&str] = &[
@@ -189,7 +191,7 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
     assert!(
         notes(&geometry).contains(
-            &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, chest, circuit"
+            &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, chest, circuit, raw_block, raw_fill"
         ),
         "got {:#?}",
         notes(&geometry),

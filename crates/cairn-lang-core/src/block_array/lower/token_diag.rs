@@ -48,6 +48,8 @@ impl MemberFallback {
             | MemberRole::Chest => Self::DefaultBlock,
             MemberRole::Level
             | MemberRole::Circuit
+            | MemberRole::RawBlock
+            | MemberRole::RawFill
             | MemberRole::Place
             | MemberRole::Connect
             | MemberRole::Other(_) => {
@@ -169,7 +171,9 @@ pub(super) fn check_state_literal(
     registry: Option<&dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let (ValueKind::Token(text), Some(registry)) = (&value.value.kind, registry) else {
+    let (ValueKind::Token(text) | ValueKind::BlockId(text), Some(registry)) =
+        (&value.value.kind, registry)
+    else {
         return true;
     };
     if state.properties.is_empty() || !text.contains('[') {
@@ -374,11 +378,23 @@ fn diag_state_literal_unchecked(span: Span, state: &BlockState, target: &str) ->
     }
 }
 
+/// What named a material, which says how to name another.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum NamedBy {
+    /// The theme binding a member's `mat_slot=`, or the member's default.
+    Binding,
+    /// A raw member's `mat=`.
+    RawMat,
+    /// A walkway's `path=`.
+    Path,
+}
+
 /// Report `state`, built at `span`, when the pinned target's state map has no form for it.
 pub(super) fn diag_state_unmapped(
     span: Span,
     state: &BlockState,
     registry: &dyn TargetRegistry,
+    named_by: NamedBy,
 ) -> Option<Diagnostic> {
     let UnmappedState {
         registry: target,
@@ -399,6 +415,11 @@ pub(super) fn diag_state_unmapped(
             init.join(", ")
         ),
     };
+    let choose = match named_by {
+        NamedBy::Binding => "bind the material to",
+        NamedBy::RawMat => "set `mat=` to",
+        NamedBy::Path => "set `path=` to",
+    };
     Some(Diagnostic {
         code: DiagnosticCode::StateUnmapped,
         span,
@@ -406,8 +427,7 @@ pub(super) fn diag_state_unmapped(
         notes: vec![DiagnosticNote {
             span: None,
             message: format!(
-                "{pinned}bind the material to a block {target} has a form for, or build for the \
-                 other edition"
+                "{pinned}{choose} a block {target} has a form for, or build for the other edition"
             ),
         }],
         data: Some(DiagnosticData::StateUnmapped {

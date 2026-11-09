@@ -63,8 +63,11 @@ fn without_a_material(member: &Member) -> WithoutAMaterial {
         | MemberRole::Door
         | MemberRole::PressurePlate
         | MemberRole::Chest => WithoutAMaterial::PaintsAFallback,
-        // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`.
-        MemberRole::Connect => WithoutAMaterial::NamesItsMaterialElsewhere,
+        // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`, and `mat=`, whose absence is
+        // `E_INVALID_MEMBER`.
+        MemberRole::Connect | MemberRole::RawBlock | MemberRole::RawFill => {
+            WithoutAMaterial::NamesItsMaterialElsewhere
+        }
         MemberRole::Level | MemberRole::Circuit | MemberRole::Place | MemberRole::Other(_) => {
             WithoutAMaterial::PutsNothingDown
         }

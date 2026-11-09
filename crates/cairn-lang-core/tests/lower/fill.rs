@@ -3,80 +3,11 @@
 //! "`waterlogged`").
 
 use cairn_lang_core::DiagnosticCode;
-use cairn_lang_core::block_array::{BlockArray, BlockIdSet, BlockState, TargetRegistry};
 
 use crate::common::{
-    Finding, door_at, findings, lowered, lowered_with, oak_door, only_structure, state_at,
+    BIN_THEME, Finding, Wet, bin, door_at, findings, layer, lowered, lowered_with, oak_door,
+    only_structure, state_at,
 };
-
-/// A target on which panes, chests and stairs hold water and no other block does.
-struct Wet;
-
-impl TargetRegistry for Wet {
-    fn lookup(&self, _token: &str) -> Option<BlockState> {
-        None
-    }
-
-    fn known_tokens(&self) -> Vec<String> {
-        Vec::new()
-    }
-
-    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
-        None
-    }
-
-    fn holds_water(&self, state: &BlockState) -> Option<bool> {
-        let id = state.id.strip_prefix("minecraft:")?;
-        Some(matches!(id, "glass_pane" | "chest" | "oak_stairs"))
-    }
-}
-
-const THEME: &str = "theme t:\n  \
-                     slot wall  -> @cobblestone\n  \
-                     slot stone -> @stone\n  \
-                     slot pane  -> @glass_pane\n  \
-                     slot step  -> @oak_stairs\n\n";
-
-/// A 5x4 struct with 2-row cobblestone walls under a flat roof one voxel past them, `members`
-/// after the roof; the overhang shifts the footprint's cells one voxel along `x` and `z`.
-fn bin(members: &str) -> String {
-    format!(
-        "{THEME}struct s size=5x4\n  walls mat_slot=wall height=2\n  \
-         roof kind=flat mat_slot=wall overhang=1\n  {members}\n"
-    )
-}
-
-/// Row `y` of `array`, one string per `z`, one character per `x`: `.` air, `~` water, `#`
-/// cobblestone, `=` stone, `p` a pane, `c` a chest, `s` a stair, each upper-case when waterlogged.
-fn layer(array: &BlockArray, y: u32) -> Vec<String> {
-    (0..array.dims.z)
-        .map(|z| {
-            (0..array.dims.x)
-                .map(|x| {
-                    let state = state_at(array, x, y, z);
-                    let wet = state.properties.get("waterlogged").map(String::as_str);
-                    let mark = match state.id.as_str() {
-                        "air" | "minecraft:air" => '.',
-                        "minecraft:water" => '~',
-                        "minecraft:cobblestone" => '#',
-                        "minecraft:stone" => '=',
-                        "minecraft:glass_pane" => 'p',
-                        "minecraft:chest" => 'c',
-                        "minecraft:oak_stairs" => 's',
-                        other => {
-                            panic!("({x}, {y}, {z}) holds `{other}`, which `layer` has no mark for")
-                        }
-                    };
-                    if wet == Some("true") {
-                        mark.to_ascii_uppercase()
-                    } else {
-                        mark
-                    }
-                })
-                .collect()
-        })
-        .collect()
-}
 
 #[test]
 fn a_material_fill_paints_every_cell_of_its_box_with_its_corners_in_either_order() {
@@ -266,7 +197,7 @@ fn a_material_fill_over_the_walls_contests_them_in_their_phase() {
 fn walls_written_after_a_material_fill_paint_over_it_and_say_so() {
     let fill = "fill mat_slot=stone from=0,1,0 to=0,1,3";
     let walls = "walls mat_slot=wall height=2";
-    let src = format!("{THEME}struct s size=5x4\n  {fill}\n  {walls}\n");
+    let src = format!("{BIN_THEME}struct s size=5x4\n  {fill}\n  {walls}\n");
     let out = lowered(&src);
     assert_eq!(
         findings(&src, &out),
@@ -298,7 +229,7 @@ fn a_fill_painted_over_the_wall_beside_a_door_is_no_wall_to_its_hinge() {
     // The door is hinged toward the side with more `walls` blocks beside it.
     let walled = |fill: &str| {
         format!(
-            "{THEME}struct s size=5x3\n  walls mat_slot=wall height=3\n  \
+            "{BIN_THEME}struct s size=5x3\n  walls mat_slot=wall height=3\n  \
              door side=front at=center{fill}\n"
         )
     };
@@ -421,7 +352,7 @@ fn a_fill_above_the_struct_is_refused_and_one_a_roof_may_reach_is_deferred() {
     );
 
     let src = format!(
-        "{THEME}struct s size=5x4\n  walls mat_slot=wall height=2\n  roof mat_slot=wall\n  \
+        "{BIN_THEME}struct s size=5x4\n  walls mat_slot=wall height=2\n  roof mat_slot=wall\n  \
          level y=3\n    fill fluid=water from=1,0,1 to=1,0,1\n"
     );
     let out = lowered(&src);

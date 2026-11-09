@@ -232,11 +232,17 @@ module.exports = grammar({
     attribute: $ => seq(
       field('key', $.identifier),
       '=',
-      field('value', choice($.coordinate, $._value)),
+      field('value', choice($.coordinate, $.block_id, $._value)),
     ),
 
     // One token, so a selector's `y=2,side=front` still reads `2` and then a separator.
     coordinate: _ => token(/[0-9]+,[0-9]+,[0-9]+/),
+
+    // One token, so a space on either side of the `:` leaves a name and a stray `:`.
+    block_id: $ => seq(
+      token(/[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*/),
+      optional($.state_literal),
+    ),
 
     // Only an undotted token takes a state literal; a `[` after a space starts a nested list.
     material_ref: $ => choice(

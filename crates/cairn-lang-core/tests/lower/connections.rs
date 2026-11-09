@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::common::{chests, lowered_with, only_structure, state_at};
 
 /// A target whose connection table holds the blocks these tests build with, read as the game's
-/// rules read them.
+/// rules read them, and which pins no version.
 struct Rules;
 
 impl TargetRegistry for Rules {
@@ -423,6 +423,73 @@ fn a_connection_state_the_material_writes_is_kept() {
 }
 
 #[test]
+fn a_raw_block_keeps_its_state_and_a_neighbour_still_joins_it() {
+    // `spec/materials-themes` "Raw blocks".
+    let out = lowered_with(
+        &yard(
+            "@cobblestone",
+            1,
+            "window side=front offset=1 y=1 size=1x1 mat_slot=glass\n  \
+             raw_block mat=minecraft:glass_pane at=2,1,2\n  \
+             raw_block mat=minecraft:glass_pane[west=false] at=4,1,2",
+        ),
+        &Rules,
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    assert_eq!(
+        at(ba, 1, 1, 2),
+        "minecraft:glass_pane[east=true,north=false,south=false,west=true]",
+    );
+    assert_eq!(at(ba, 2, 1, 2), "minecraft:glass_pane[]");
+    assert_eq!(at(ba, 4, 1, 2), "minecraft:glass_pane[west=false]");
+}
+
+#[test]
+fn a_wall_under_a_raw_pane_reads_only_the_sides_the_pane_writes() {
+    // `spec/materials-themes` "Raw blocks".
+    let raw = lowered_with(
+        &yard(
+            "@cobblestone_wall",
+            2,
+            "raw_block mat=minecraft:glass_pane at=2,2,2",
+        ),
+        &Rules,
+    );
+    assert_eq!(raw.diagnostics, []);
+    let ba = only_structure(&raw);
+    assert_eq!(at(ba, 2, 2, 2), "minecraft:glass_pane[]");
+    let under = wall("low", "none", "none", true, "low");
+    assert_eq!(at(ba, 2, 1, 2), under);
+    assert_eq!(
+        set_into(
+            "@cobblestone_wall",
+            2,
+            "@glass_pane[east=false,west=false]",
+            2
+        )[1],
+        under,
+        "the same as a themed pane that writes those sides",
+    );
+}
+
+#[test]
+fn a_raw_wall_on_a_wall_stands_as_written_and_the_wall_under_reads_its_defaults() {
+    let out = lowered_with(
+        &yard(
+            "@cobblestone_wall",
+            2,
+            "raw_block mat=minecraft:cobblestone_wall at=2,2,2",
+        ),
+        &Rules,
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    assert_eq!(at(ba, 2, 2, 2), "minecraft:cobblestone_wall[]");
+    assert_eq!(at(ba, 2, 1, 2), wall("low", "none", "none", true, "low"));
+}
+
+#[test]
 fn a_block_beside_that_the_target_cannot_say_anything_of_is_joined_as_nothing() {
     let out = lowered_with(
         &yard(
@@ -535,6 +602,23 @@ fn a_chest_that_writes_its_type_faces_another_way_or_is_another_block_pairs_with
             (
                 (6, 1, 2),
                 "minecraft:trapped_chest[facing=south,type=single]".to_owned()
+            ),
+        ],
+    );
+}
+
+#[test]
+fn a_raw_chest_pairs_with_no_chest_beside_it() {
+    assert_eq!(
+        paired(&[
+            "chest at=inside.back offset=1 y=1",
+            "raw_block mat=minecraft:chest[facing=south] at=4,1,1",
+        ]),
+        [
+            ((5, 1, 2), "minecraft:chest[facing=south]".to_owned()),
+            (
+                (6, 1, 2),
+                "minecraft:chest[facing=south,type=single]".to_owned()
             ),
         ],
     );

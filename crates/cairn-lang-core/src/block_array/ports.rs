@@ -218,6 +218,8 @@ pub(super) fn port_world_position<S: BuildHasher>(
         | MemberRole::PressurePlate
         | MemberRole::Chest
         | MemberRole::Circuit
+        | MemberRole::RawBlock
+        | MemberRole::RawFill
         | MemberRole::Place
         | MemberRole::Connect
         | MemberRole::Other(_) => {

@@ -8,9 +8,8 @@ use crate::block_array::material::TargetRegistry;
 use crate::block_array::{BlockState, PaletteIndex};
 
 use super::canvas::{Canvas, ScopePalette};
-
-/// A cell, `(x, y, z)`.
-type Cell = (u32, u32, u32);
+use super::cell_box::Cell;
+use super::phase::Phase;
 
 /// How high a wall's side stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +61,8 @@ struct Joiner {
     cell: Cell,
     kind: JoinKind,
     state: BlockState,
-    /// Per [`Face::SIDES`], whether it joins the block on that side.
+    /// Per [`Face::SIDES`], whether it joins the block on that side; for a raw block, whether its
+    /// state says so.
     joined: [bool; 4],
     /// A wall's side heights per [`Face::SIDES`], once settled.
     heights: [Height; 4],
@@ -70,6 +70,8 @@ struct Joiner {
     up: Option<bool>,
     /// A chest's `type`, once settled.
     pair: Option<ChestType>,
+    /// Whether a raw member placed it, so it keeps its state and its neighbours read only that.
+    raw: bool,
 }
 
 /// What the rules read of a body: its cells' states and each palette slot's [`Joins`].
@@ -106,7 +108,8 @@ impl Grid<'_> {
 }
 
 /// Set the connection states of every pane, fence, wall, fence gate and chest on `canvas` that its
-/// state does not write, each repainted under the member that painted it.
+/// state does not write, each repainted under the member that painted it; a block a raw member
+/// placed keeps its state (`spec/materials-themes` "Raw blocks").
 pub(super) fn derive_connections(
     canvas: &mut Canvas,
     palette: &mut ScopePalette,
@@ -148,6 +151,7 @@ pub(super) fn derive_connections(
     pair_chests(&mut joiners, &at);
     let derived: Vec<(Cell, BlockState)> = joiners
         .iter()
+        .filter(|joiner| !joiner.raw)
         .filter_map(|joiner| {
             let state = derived_state(&grid, joiner);
             (state != joiner.state).then_some((joiner.cell, state))
@@ -171,9 +175,15 @@ fn gather(grid: &Grid<'_>) -> Vec<Joiner> {
             continue;
         };
         let state = grid.palette.state(usize::from(slot.0)).clone();
+        let raw = grid
+            .canvas
+            .owner_at(cell)
+            .and_then(|owner| grid.canvas.phase_of(owner))
+            == Some(Phase::Raw);
+        // A side a raw block's state leaves out stands as the block's default, which joins nothing.
         let joined = Face::SIDES.map(|side| match written_side(&state, kind, side) {
             Some(written) => written,
-            None => joins_toward(grid, cell, kind, side),
+            None => !raw && joins_toward(grid, cell, kind, side),
         });
         joiners.push(Joiner {
             cell,
@@ -183,6 +193,7 @@ fn gather(grid: &Grid<'_>) -> Vec<Joiner> {
             heights: [Height::None; 4],
             up: None,
             pair: None,
+            raw,
         });
     }
     joiners
@@ -294,6 +305,10 @@ fn raises_post(
     if let Some(written) = wall.state.properties.get("up").and_then(|v| v.parse().ok()) {
         return written;
     }
+    // A raw wall that leaves `up` out stands with the block's default, a raised post.
+    if wall.raw {
+        return true;
+    }
     let (above, joins) = grid.joins_beside(wall.cell, Face::Up);
     let above_wall = above.and_then(|above| at.get(&above)).map(|&i| &joiners[i]);
     if above_wall
@@ -312,11 +327,13 @@ fn raises_post(
     joins.raises_post || covered(grid, joiners, at, wall.cell, Under::Post)
 }
 
-/// Settle the `type` of every chest whose state writes none: a row of chests of one block and
-/// `facing`, side by side, pairs two by two from its end on the chests' own left.
+/// Settle the `type` of every chest whose state writes none and that no raw member placed: a row
+/// of chests of one block and `facing`, side by side, pairs two by two from its end on the chests'
+/// own left.
 fn pair_chests(joiners: &mut [Joiner], at: &HashMap<Cell, usize>) {
     let pairs = |joiner: &Joiner| {
         matches!(joiner.kind, JoinKind::Chest { .. })
+            && !joiner.raw
             && !joiner.state.properties.contains_key("type")
     };
     // The chest beside `i` toward its `turn`ed facing that pairs with it, if any.
