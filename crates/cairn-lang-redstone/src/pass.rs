@@ -11,7 +11,8 @@ use crate::placement_ir::{
     PlacementIr, PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    BlockSite, NetTree, Router, block_sites, collapsed_block, collect_nets, net_trees, unroutable,
+    BlockSite, NetTree, Router, VOID_LOOKAHEAD, block_sites, collapsed_block, collect_nets,
+    net_trees, unroutable,
 };
 use crate::saturating_index;
 
@@ -134,7 +135,28 @@ where
     let router = Router::new(region, blocks);
     let sinks = collect_nets(ir);
     let trees = net_trees(&sinks, &router, source_of_net);
-    if let Some(diagnostic) = unroutable(&sinks, &trees, entry, netlist, region, source_of_net) {
+    let void_that_wires = || {
+        (1..=VOID_LOOKAHEAD).find_map(|extra| {
+            let deeper = CircuitRegionReservation {
+                void: region.void.saturating_add(extra),
+                ..region.clone()
+            };
+            let trees = net_trees(&sinks, &Router::new(&deeper, blocks), source_of_net);
+            trees
+                .values()
+                .all(|tree| tree.unreachable().is_empty())
+                .then_some(deeper.void)
+        })
+    };
+    if let Some(diagnostic) = unroutable(
+        &sinks,
+        &trees,
+        entry,
+        netlist,
+        region,
+        source_of_net,
+        void_that_wires,
+    ) {
         return Err(diagnostic);
     }
     Ok(Nets {

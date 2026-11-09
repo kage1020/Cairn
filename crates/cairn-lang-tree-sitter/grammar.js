@@ -13,7 +13,8 @@ function permutations(items) {
     permutations([...items.slice(0, i), ...items.slice(i + 1)]).map(rest => [item, ...rest]));
 }
 
-// A call of `primitive` naming each of `operands` once, in any order, with commas between.
+// A call of `primitive` naming each of `operands` once, in any order, with commas between. Each
+// order is a rule of its own, n! of them, so a call of four operands or more needs another shape.
 function callOf($, primitive, operands) {
   const orders = permutations(operands).map(order => seq(...order.flatMap((name, i) => {
     const operand = alias($[`_${primitive}_${name}`], $.named_operand);
