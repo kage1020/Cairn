@@ -546,6 +546,7 @@ fn a_sealed_sink_stays_walled_in_beside_a_sink_that_is_searched_for() {
         "placed",
         &region,
         |_| source,
+        || None,
     )
     .expect("both sinks are stranded");
     assert_eq!(d.code, DiagnosticCode::RouteCongestion, "{}", d.primary);
@@ -607,6 +608,7 @@ fn a_walled_in_net_anchors_the_refusal_over_one_beyond_the_cap() {
         "placed",
         &region,
         source_of,
+        || None,
     )
     .expect("both sinks are stranded");
     assert_eq!(d.code, DiagnosticCode::RouteCongestion, "{}", d.primary);
@@ -667,6 +669,7 @@ fn a_sink_beyond_the_cap_is_refused_as_the_attenuation_limit() {
         "placed",
         &region,
         |_| source,
+        || None,
     )
     .expect("the sinks are stranded");
     assert_eq!(d.code, DiagnosticCode::AttenuationLimit);
@@ -726,6 +729,7 @@ fn a_sink_beyond_the_cap_keeps_the_nets_in_the_way() {
         "placed",
         &region,
         source_of,
+        || None,
     )
     .expect("the far sink is stranded");
     assert_eq!(d.code, DiagnosticCode::AttenuationLimit);

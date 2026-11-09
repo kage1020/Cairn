@@ -57,8 +57,8 @@ and sig.z` reads as `(not mux(…)) and sig.z`, and each operand inside it is a 
 
 `mux` is `a` while `sel` is off and `b` while it is on. A call that passes an operand by position,
 leaves one out, names one twice or names one the primitive does not take is `E_PARSE`, and the
-message names the operands still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`,
-expecting `a=` or `b=`.
+message names the operands the primitive takes, and for a positional or missing operand, the ones
+still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`, expecting `a=` or `b=`.
 
 The macros above are not in the library yet. A macro call such as `pulse(sig.ring, 4)` is `E_PARSE`
 at its `(`, and the message names the primitives that could stand there and the one the library
@@ -285,12 +285,13 @@ The internal algorithm runs five stages:
    dust in the coordinate beside it, so a lane of free coordinates carries one net however long it
    is; a cell against the edge has one lane, and the three nets touching a two-input gate cannot
    share it. One row in gives every cell a lane on each side, so with the clear columns either side
-   of it each cell has the four free neighbours a `mux` needs. That costs one row for the whole
-   netlist rather than one per cell, so unlike the column spacing it does not grow with the cell
-   count.
+   of it each cell is placed with four free neighbours, the number a `mux` needs. That costs one row
+   for the whole netlist rather than one per cell, so unlike the column spacing it does not grow
+   with the cell count.
 
-   Neither spacing is a guarantee of a wiring: a net passing through can still take the last free
-   face, and that scope is refused rather than shorted. Three kinds of region are refused here
+   Neither spacing is a guarantee of a wiring: a net passing through can still take a face a cell
+   needs. Stage 2 lays the nets again in another order when that strands a sink, and a scope no
+   order wires is refused rather than shorted. Three kinds of region are refused here
    rather than left to fail as an unreachable sink at stage 2: one that cannot hold the row
    (`2n + 1` columns for `n` cells, and three rows); one that cannot hold the rows its pads stand in
    (a row per sensor or actuator on the busier edge, and, in a scope with cells, one more for the
@@ -310,6 +311,13 @@ The internal algorithm runs five stages:
    measured: `wire_length` and the delay pass's tick count are both read off the routed tree. The
    order is fanout descending, then the net's own key. That is a total order, so one layout has one
    answer however many passes ask for it.
+
+   An earlier net's dust can wall in a later net's sink: a `mux` beside another cell needs four of
+   its faces, and a net on its way past takes one. So when the order strands a sink, the first net
+   with a stranded sink moves to the front and every net is laid again, fewer times in all than
+   there are nets. The first order that strands nothing is kept, so a scope the first order wires is
+   laid as before, and each order follows from the one before it, so a layout still has one answer.
+   A scope no order wires keeps the first order's trees and is refused on them.
 
    Beside is per-plane. Whether two strands a layer apart read each other depends on what is
    standing between them, which this model does not carry: the internal model is pseudo-2.5D and the
@@ -414,7 +422,10 @@ The internal algorithm runs five stages:
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
 whose every way out is walled in, by a component, by an earlier net's dust or the coordinates beside
 it, or by the edge of the reservation, earns the same refusal for a different reason, and the
-message says which two coordinates it could not join and which nets took the faces.
+message says which two coordinates it could not join and which nets took the faces. Its fix names
+the lowest `void` that wires the scope, trying up to four layers above the scope's own, since a
+layer to climb onto is what frees a face; when none of those does, it says to split the logic across
+scopes instead, and names the highest `void` it tried.
 
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:

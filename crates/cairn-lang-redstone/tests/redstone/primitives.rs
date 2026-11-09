@@ -1,13 +1,11 @@
-//! Each primitive of the built-in logic library synthesizes to one gate that computes its truth
-//! table, and that gate's cell lays out on both editions (`spec/redstone` "Two tiers, and the v1
+//! Each primitive of the built-in logic library synthesizes to its one gate, and that gate's cell
+//! lays out on both editions, alone and beside another (`spec/redstone` "Two tiers, and the v1
 //! boundary", "Edition differences").
 
 use std::fmt::Write as _;
 
 use cairn_lang_core::Edition;
-use cairn_lang_redstone::{
-    CellPortDriver, EditionCell, GateKind, LogicIr, NetRef, PortName, SignalRef,
-};
+use cairn_lang_redstone::{CellPortDriver, EditionCell, GateKind, NetRef, PortName, SignalRef};
 
 use crate::common::{legalized_from_source, sig, synth_source};
 
@@ -34,39 +32,14 @@ fn source(inputs: &[&str], expression: &str) -> String {
     )
 }
 
-/// `signal`'s value in `ir` while each input is on as `inputs` says, by input index.
-fn evaluate(ir: &LogicIr, inputs: &[bool], signal: SignalRef) -> bool {
-    let at = |index: u32| usize::try_from(index).expect("an index fits in usize");
-    let value = |signal| evaluate(ir, inputs, signal);
-    match signal {
-        SignalRef::Input(index) => inputs[at(index)],
-        SignalRef::Gate(index) => match ir.nodes[at(index)].kind {
-            GateKind::And2 { a, b } => value(a) && value(b),
-            GateKind::Or2 { a, b } => value(a) || value(b),
-            GateKind::Not { a } => !value(a),
-            GateKind::Xor2 { a, b } => value(a) != value(b),
-            GateKind::Nand2 { a, b } => !(value(a) && value(b)),
-            GateKind::Nor2 { a, b } => !(value(a) || value(b)),
-            GateKind::Mux { sel, a, b } => {
-                if value(sel) {
-                    value(b)
-                } else {
-                    value(a)
-                }
-            }
-            other => panic!("no truth table for {other:?}"),
-        },
-    }
-}
-
 struct Case {
     expression: &'static str,
     inputs: &'static [&'static str],
-    /// The output for each row, the first input the most significant bit.
-    truth: &'static [u8],
     gate: GateKind,
-    java: EditionCell,
-    bedrock: EditionCell,
+    /// The cell and its slowest port's ticks, from the table in `spec/redstone` "Edition
+    /// differences".
+    java: (EditionCell, u32),
+    bedrock: (EditionCell, u32),
 }
 
 const A: SignalRef = SignalRef::Input(0);
@@ -78,68 +51,61 @@ fn cases() -> [Case; 7] {
         Case {
             expression: "sig.a and sig.b",
             inputs: two,
-            truth: &[0, 0, 0, 1],
             gate: GateKind::And2 { a: A, b: B },
-            java: EditionCell::JavaComparatorAnd,
-            bedrock: EditionCell::BedrockTorchAnd,
+            java: (EditionCell::JavaComparatorAnd, 2),
+            bedrock: (EditionCell::BedrockTorchAnd, 2),
         },
         Case {
             expression: "sig.a or sig.b",
             inputs: two,
-            truth: &[0, 1, 1, 1],
             gate: GateKind::Or2 { a: A, b: B },
-            java: EditionCell::JavaRepeaterOr,
-            bedrock: EditionCell::BedrockTorchOr,
+            java: (EditionCell::JavaRepeaterOr, 1),
+            bedrock: (EditionCell::BedrockTorchOr, 0),
         },
         Case {
             expression: "not sig.a",
             inputs: &["sig.a"],
-            truth: &[1, 0],
             gate: GateKind::Not { a: A },
-            java: EditionCell::JavaInverterTorch,
-            bedrock: EditionCell::BedrockInverterTorch,
+            java: (EditionCell::JavaInverterTorch, 1),
+            bedrock: (EditionCell::BedrockInverterTorch, 1),
         },
         Case {
             expression: "sig.a xor sig.b",
             inputs: two,
-            truth: &[0, 1, 1, 0],
             gate: GateKind::Xor2 { a: A, b: B },
-            java: EditionCell::JavaTorchXor,
-            bedrock: EditionCell::BedrockTorchXor,
+            java: (EditionCell::JavaTorchXor, 2),
+            bedrock: (EditionCell::BedrockTorchXor, 2),
         },
         Case {
             expression: "sig.a nand sig.b",
             inputs: two,
-            truth: &[1, 1, 1, 0],
             gate: GateKind::Nand2 { a: A, b: B },
-            java: EditionCell::JavaTorchNand,
-            bedrock: EditionCell::BedrockTorchNand,
+            java: (EditionCell::JavaTorchNand, 1),
+            bedrock: (EditionCell::BedrockTorchNand, 1),
         },
         Case {
             expression: "sig.a nor sig.b",
             inputs: two,
-            truth: &[1, 0, 0, 0],
             gate: GateKind::Nor2 { a: A, b: B },
-            java: EditionCell::JavaTorchNor,
-            bedrock: EditionCell::BedrockTorchNor,
+            java: (EditionCell::JavaTorchNor, 1),
+            bedrock: (EditionCell::BedrockTorchNor, 1),
         },
         Case {
             expression: "mux(b=sig.b, sel=sig.s, a=sig.a)",
             inputs: &["sig.s", "sig.a", "sig.b"],
-            truth: &[0, 0, 1, 1, 0, 1, 0, 1],
             gate: GateKind::Mux {
                 sel: SignalRef::Input(0),
                 a: SignalRef::Input(1),
                 b: SignalRef::Input(2),
             },
-            java: EditionCell::JavaTorchMux,
-            bedrock: EditionCell::BedrockTorchMux,
+            java: (EditionCell::JavaTorchMux, 2),
+            bedrock: (EditionCell::BedrockTorchMux, 2),
         },
     ]
 }
 
 #[test]
-fn each_primitive_synthesizes_to_one_gate_that_computes_its_truth_table() {
+fn each_primitive_synthesizes_to_its_one_gate() {
     for case in cases() {
         let out = synth_source(&source(case.inputs, case.expression));
         assert_eq!(out.diagnostics, [], "{}", case.expression);
@@ -153,17 +119,6 @@ fn each_primitive_synthesizes_to_one_gate_that_computes_its_truth_table() {
             .collect();
         assert_eq!(names, case.inputs, "{}", case.expression);
         assert_eq!(ir.outputs[0].name, sig("sig.out"), "{}", case.expression);
-
-        let width = case.inputs.len();
-        let computed: Vec<u8> = (0..1_usize << width)
-            .map(|row| {
-                let inputs: Vec<bool> = (0..width)
-                    .map(|bit| row >> (width - 1 - bit) & 1 == 1)
-                    .collect();
-                u8::from(evaluate(ir, &inputs, ir.outputs[0].driver))
-            })
-            .collect();
-        assert_eq!(computed, case.truth, "{}", case.expression);
     }
 }
 
@@ -184,17 +139,25 @@ fn each_primitive_lays_out_as_its_cell_on_both_editions() {
                 net: NetRef::Input(input),
             })
             .collect();
-        for (edition, cell) in [(Edition::Java, case.java), (Edition::Bedrock, case.bedrock)] {
+        for (edition, (cell, ticks)) in
+            [(Edition::Java, case.java), (Edition::Bedrock, case.bedrock)]
+        {
             let legalized = legalized_from_source(&source, edition);
-            let cells: Vec<(EditionCell, &[CellPortDriver])> = legalized.scopes[0]
+            let cells: Vec<(EditionCell, &[CellPortDriver], Option<u32>)> = legalized.scopes[0]
                 .ir
                 .cells
                 .iter()
-                .map(|placed| (placed.cell, placed.drivers.as_slice()))
+                .map(|placed| {
+                    (
+                        placed.cell,
+                        placed.drivers.as_slice(),
+                        placed.local_delay_ticks(),
+                    )
+                })
                 .collect();
             assert_eq!(
                 cells,
-                [(cell, drivers.as_slice())],
+                [(cell, drivers.as_slice(), Some(ticks))],
                 "{} on {edition:?}",
                 case.expression,
             );
@@ -203,7 +166,7 @@ fn each_primitive_lays_out_as_its_cell_on_both_editions() {
 }
 
 #[test]
-fn a_commutative_primitive_shares_its_gate_whatever_order_its_operands_are_written_in() {
+fn only_a_commutative_primitive_shares_its_gate_across_operand_orders() {
     let (s, a, b) = (
         SignalRef::Input(0),
         SignalRef::Input(1),
@@ -256,5 +219,63 @@ fn a_commutative_primitive_shares_its_gate_whatever_order_its_operands_are_writt
             .map(|node| node.kind)
             .collect();
         assert_eq!(found, gates, "{written} / {flipped}");
+    }
+}
+
+/// A `mux` and an `xor`, each feeding the other, from the plates [`source`] lays.
+#[test]
+fn a_mux_lays_out_beside_another_cell_on_both_editions() {
+    let (s, a, b) = (NetRef::Input(0), NetRef::Input(1), NetRef::Input(2));
+    let mux = |sel: NetRef| {
+        [(PortName::Sel, sel), (PortName::A, a), (PortName::B, b)]
+            .map(|(port, net)| CellPortDriver { port, net })
+            .to_vec()
+    };
+    let xor = |a: NetRef, b: NetRef| {
+        [(PortName::A, a), (PortName::B, b)]
+            .map(|(port, net)| CellPortDriver { port, net })
+            .to_vec()
+    };
+    for (logic, cells) in [
+        (
+            "mux(sel=sig.s, a=sig.a, b=sig.b) xor sig.s",
+            [(true, mux(s)), (false, xor(s, NetRef::Cell(0)))],
+        ),
+        (
+            "mux(sel=sig.s xor sig.a, a=sig.a, b=sig.b)",
+            [(false, xor(s, a)), (true, mux(NetRef::Cell(0)))],
+        ),
+    ] {
+        let source = source(&["sig.s", "sig.a", "sig.b"], logic);
+        for (edition, mux_cell, xor_cell) in [
+            (
+                Edition::Java,
+                EditionCell::JavaTorchMux,
+                EditionCell::JavaTorchXor,
+            ),
+            (
+                Edition::Bedrock,
+                EditionCell::BedrockTorchMux,
+                EditionCell::BedrockTorchXor,
+            ),
+        ] {
+            let expected: Vec<(EditionCell, &[CellPortDriver])> = cells
+                .iter()
+                .map(|(is_mux, drivers)| {
+                    (
+                        if *is_mux { mux_cell } else { xor_cell },
+                        drivers.as_slice(),
+                    )
+                })
+                .collect();
+            let legalized = legalized_from_source(&source, edition);
+            let laid: Vec<(EditionCell, &[CellPortDriver])> = legalized.scopes[0]
+                .ir
+                .cells
+                .iter()
+                .map(|placed| (placed.cell, placed.drivers.as_slice()))
+                .collect();
+            assert_eq!(laid, expected, "{logic} on {edition:?}");
+        }
     }
 }

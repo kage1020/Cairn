@@ -372,7 +372,8 @@ fn logic_not_higher_than_and() {
 fn one_rank_groups_left_to_right() {
     let (a, b, c) = (name(&["a"]), name(&["b"]), name(&["c"]));
     let infixes = LogicPrimitive::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|primitive| primitive.infix_rank().is_some());
     for primitive in infixes {
         let word = primitive.name();
@@ -445,7 +446,7 @@ fn ranks_group_first_and_parentheses_group_as_written() {
 #[test]
 fn every_library_primitive_parses_in_its_notation() {
     let (a, b) = (name(&["sig", "a"]), name(&["sig", "b"]));
-    for primitive in LogicPrimitive::ALL {
+    for &primitive in LogicPrimitive::ALL {
         let word = primitive.name();
         let (expression, expected) = match primitive.notation() {
             Notation::Prefix => (
@@ -459,10 +460,11 @@ fn every_library_primitive_parses_in_its_notation() {
                 format!("sig.a {word} sig.b"),
                 infix(primitive, a.clone(), b.clone()),
             ),
-            Notation::Call { operands } => (
+            Notation::Call(signature) => (
                 format!(
                     "{word}({})",
-                    operands
+                    signature
+                        .operands()
                         .iter()
                         .map(|operand| format!("{operand}=sig.{operand}"))
                         .collect::<Vec<_>>()
@@ -470,7 +472,8 @@ fn every_library_primitive_parses_in_its_notation() {
                 ),
                 Expr::Call {
                     primitive,
-                    operands: operands
+                    operands: signature
+                        .operands()
                         .iter()
                         .map(|&operand| NamedOperand {
                             name: operand,

@@ -17,7 +17,7 @@ use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
     SiteIr, StructIr, ValueWithSpan, actuator_patch_target,
 };
-use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
+use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation};
 use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
 /// Each actuator argument key, paired with the component keyword that carries it.
@@ -1346,45 +1346,108 @@ fn lower_call<'a>(
             (operand.name, signal.ok())
         })
         .collect();
-    match (primitive, lowered.as_slice()) {
-        (LogicPrimitive::Mux, &[("sel", sel), ("a", a), ("b", b)]) => {
-            let (Some(sel), Some(a), Some(b)) = (sel, a, b) else {
-                return Err(LoweringFailed);
-            };
-            let gate = GateKind::Mux { sel, a, b };
-            Ok(intern_gate(ir, ctx, gate, binding_span.clone()))
-        }
-        (LogicPrimitive::Mux, _) => {
-            let names = quoted_list(lowered.iter().map(|(name, _)| *name));
-            let as_written = if names.is_empty() {
-                "with no operand".to_owned()
-            } else {
-                format!("with the operands {names}")
-            };
-            Err(no_gate(
+    let Some(signature) = primitive.call_signature() else {
+        return Err(no_gate(
+            primitive,
+            "called with named operands",
+            binding_span,
+            ctx,
+            diagnostics,
+        ));
+    };
+    let signals = match signals_by_name(signature, &lowered) {
+        Ok(signals) => signals,
+        Err(as_written) => {
+            return Err(no_gate(
                 primitive,
                 &as_written,
                 binding_span,
                 ctx,
                 diagnostics,
-            ))
+            ));
         }
+    };
+    let Some(signals) = signals.into_iter().collect::<Option<Vec<SignalRef>>>() else {
+        return Err(LoweringFailed);
+    };
+    let gate = match (primitive, signals.as_slice()) {
+        (LogicPrimitive::Mux, &[sel, a, b]) => GateKind::Mux { sel, a, b },
         (
             LogicPrimitive::And
             | LogicPrimitive::Or
             | LogicPrimitive::Not
             | LogicPrimitive::Xor
             | LogicPrimitive::Nand
-            | LogicPrimitive::Nor,
+            | LogicPrimitive::Nor
+            | LogicPrimitive::Mux,
             _,
-        ) => Err(no_gate(
-            primitive,
-            "called with named operands",
-            binding_span,
-            ctx,
-            diagnostics,
-        )),
+        ) => unreachable!(
+            "`{}` reaches here only with a call signature and one signal per operand it names",
+            primitive.name()
+        ),
+    };
+    Ok(intern_gate(ir, ctx, gate, binding_span.clone()))
+}
+
+/// The signal of each operand `signature` names, in its order, looked up by name in `lowered`, or
+/// how the call is written when it names one twice, names one the signature lacks, or leaves one out.
+fn signals_by_name(
+    signature: CallSignature,
+    lowered: &[(&str, Option<SignalRef>)],
+) -> Result<Vec<Option<SignalRef>>, String> {
+    let takes = signature.operands();
+    let count = |name: &str| lowered.iter().filter(|(named, _)| *named == name).count();
+    let mut unknown: Vec<&str> = Vec::new();
+    for (name, _) in lowered {
+        if !takes.contains(name) && !unknown.contains(name) {
+            unknown.push(name);
+        }
     }
+    let repeated: Vec<&str> = takes
+        .iter()
+        .copied()
+        .filter(|name| count(name) > 1)
+        .collect();
+    let missing: Vec<&str> = takes
+        .iter()
+        .copied()
+        .filter(|name| count(name) == 0)
+        .collect();
+    let mut defects = Vec::new();
+    if !unknown.is_empty() {
+        let operands = if unknown.len() == 1 {
+            "operand"
+        } else {
+            "operands"
+        };
+        defects.push(format!(
+            "with the unknown {operands} {}",
+            quoted_list(unknown)
+        ));
+    }
+    if !repeated.is_empty() {
+        defects.push(format!("naming {} more than once", quoted_list(repeated)));
+    }
+    if !missing.is_empty() {
+        let operands = if missing.len() == 1 {
+            "operand"
+        } else {
+            "operands"
+        };
+        defects.push(format!("without its {operands} {}", quoted_list(missing)));
+    }
+    if !defects.is_empty() {
+        return Err(prose_list(&defects));
+    }
+    Ok(takes
+        .iter()
+        .map(|name| {
+            lowered
+                .iter()
+                .find(|(named, _)| named == name)
+                .and_then(|(_, signal)| *signal)
+        })
+        .collect())
 }
 
 /// Reports `primitive` written `as_written`, a notation it has no gate in, once its operands are
@@ -1398,12 +1461,12 @@ fn no_gate(
 ) -> LoweringFailed {
     let label = ctx.scope.label();
     let name = primitive.name();
-    let written = match (primitive.notation(), primitive.call_template()) {
-        (Notation::Prefix, _) => "before its one operand".to_owned(),
-        (Notation::Infix { .. }, _) => "between its two operands".to_owned(),
-        (Notation::Call { .. }, template) => format!(
+    let written = match primitive.notation() {
+        Notation::Prefix => "before its one operand".to_owned(),
+        Notation::Infix { .. } => "between its two operands".to_owned(),
+        Notation::Call(signature) => format!(
             "with every operand named once, as in `{}`",
-            template.unwrap_or_default()
+            signature.template()
         ),
     };
     diagnostics.push(
@@ -1427,7 +1490,12 @@ fn library_words() -> String {
 /// `words`, each in backticks, as a prose list joined by `and`, or empty for none.
 fn quoted_list<'w>(words: impl IntoIterator<Item = &'w str>) -> String {
     let words: Vec<String> = words.into_iter().map(|word| format!("`{word}`")).collect();
-    match words.split_last() {
+    prose_list(&words)
+}
+
+/// `items` as a prose list joined by `and`, or empty for none.
+fn prose_list(items: &[String]) -> String {
+    match items.split_last() {
         Some((last, [])) => last.clone(),
         Some((last, head)) => format!("{} and {last}", head.join(", ")),
         None => String::new(),
