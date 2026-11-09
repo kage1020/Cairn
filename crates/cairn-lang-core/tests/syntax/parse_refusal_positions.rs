@@ -411,7 +411,8 @@ fn an_infix_primitive_is_not_read_as_a_signal() {
         ),
         (
             "mux(sel=xor, a=sig.x, b=sig.y)",
-            "2:25: expected a signal after `=`, got the infix primitive `xor`",
+            "2:25: expected a signal or expression after `sel=`, got the infix primitive `xor`: \
+             each operand of `mux` takes a value, as in `mux(sel=…, a=…, b=…)`",
         ),
         (
             "sig.a and or.x",
@@ -512,6 +513,28 @@ fn what_follows_an_operand_is_refused_with_the_primitives_that_could_stand_there
 }
 
 #[test]
+fn an_operand_with_no_value_is_refused_with_its_call() {
+    let takes = "each operand of `mux` takes a value, as in `mux(sel=…, a=…, b=…)`";
+    for (expression, expected) in [
+        (
+            "mux(sel=)",
+            format!("2:25: expected a signal or expression after `sel=`, got `)`: {takes}"),
+        ),
+        (
+            "mux(sel=sig.s, a=, b=sig.y)",
+            format!("2:34: expected a signal or expression after `a=`, got `,`: {takes}"),
+        ),
+        (
+            "mux(sel==sig.s, a=sig.x, b=sig.y)",
+            format!("2:25: expected a signal or expression after `sel=`, got `=`: {takes}"),
+        ),
+    ] {
+        let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");
+        assert_eq!(refusal(&source), expected, "{expression:?}");
+    }
+}
+
+#[test]
 fn a_call_is_refused_unless_it_names_each_of_its_operands_once() {
     let shape = "as in `mux(sel=…, a=…, b=…)`";
     let takes = "it takes `sel`, `a`, and `b`";
@@ -555,6 +578,12 @@ fn a_call_is_refused_unless_it_names_each_of_its_operands_once() {
             "mux(sel=sig.s, a=sig.x, b=sig.y,)",
             "2:48: expected `)`, got `,`: `mux` takes `sel`, `a`, and `b`, and every one is \
              named, so the call closes here"
+                .to_owned(),
+        ),
+        (
+            "mux(sel=sig.s, a=sig.x, b=sig.y c=sig.y)",
+            "2:49: expected `)`, got identifier `c`: `mux` takes `sel`, `a`, and `b`, and every \
+             one is named, so the call closes here"
                 .to_owned(),
         ),
         (

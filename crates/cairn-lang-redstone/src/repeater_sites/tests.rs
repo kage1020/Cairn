@@ -1306,6 +1306,30 @@ fn a_budget_refusal_of_a_net_on_both_ports_of_a_merge_names_both() {
     );
 }
 
+/// A `mux` restores strength, so stairs into all three of its ports end at the cell and are held
+/// to the limit rather than to what the cell can spare.
+#[test]
+fn stairs_on_every_port_of_a_mux_end_at_the_cell() {
+    for cell in [EditionCell::JavaTorchMux, EditionCell::BedrockTorchMux] {
+        let (ir, trees) = gate(
+            cell,
+            &stairs_into_the_gate(),
+            &[
+                (PortName::Sel, LONG),
+                (PortName::A, LONG),
+                (PortName::B, LONG),
+            ],
+        );
+        let sites =
+            sites_in_struct("mux", ir, &trees).unwrap_or_else(|d| panic!("{cell:?}: {d:?}"));
+        assert_eq!(
+            gate_sites(&sites),
+            [Some(Vec::new()), None, Some(Vec::new())],
+            "{cell:?}",
+        );
+    }
+}
+
 #[test]
 fn a_budget_refusal_of_a_net_on_both_ports_of_a_java_and_names_only_the_rear() {
     let (ir, trees) = gate(

@@ -1,7 +1,8 @@
 //! Every sensor feeds an input pad and every actuator reads an output pad, on its own line or
-//! through a patch (`spec/redstone` "Signal binding", "Place-and-route").
+//! through a patch, once per actuator (`spec/redstone` "Signal binding", "Place-and-route").
 
 use cairn_lang_core::Edition;
+use cairn_lang_redstone::synth::Actuator;
 use cairn_lang_redstone::{DiagnosticCode, SynthOutput};
 
 use crate::common::{codes, legalized_from_source, only, synth_source};
@@ -128,5 +129,58 @@ fn a_patch_that_picks_no_actuator_is_refused_by_both_passes_alike() {
             format!("struct=panel: {reason}, so its `{key}=` binding drives nothing"),
         );
         assert_eq!(outputs(&out), None, "{patch}: an error keeps the scope out");
+    }
+}
+
+#[test]
+fn an_actuator_bound_on_its_line_and_through_a_patch_is_refused_the_second_binding() {
+    for (actuator, id, first, second) in [
+        (Actuator::Lamp, "lp", "sig.day", "sig.ring"),
+        (Actuator::Piston, "pi", "sig.tick", "sig.day"),
+        (Actuator::Dispenser, "ds", "sig.fire", "sig.tick"),
+    ] {
+        let (keyword, key) = (actuator.keyword(), actuator.key());
+        let src = panel(&format!("  {keyword}[id={id}] {key}={second}\n"));
+        let out = synth_source(&src);
+        let refused = only(&out, DiagnosticCode::LogicDuplicateBinding);
+        let patch = src.find(&format!("{keyword}[id={id}]")).expect("the patch");
+        let declaration = src
+            .find(&format!("{keyword} id={id} "))
+            .expect("the declaration");
+        let span_of = |line: usize, value: &str| {
+            let start = line + src[line..].find(value).expect("the value");
+            start..start + value.len()
+        };
+        let notes: Vec<(Option<std::ops::Range<usize>>, String)> = refused
+            .notes
+            .iter()
+            .map(|note| (note.span.clone(), note.message.clone()))
+            .collect();
+        assert_eq!(codes(&out), ["E_LOGIC_DUPLICATE_BINDING"], "{keyword}");
+        assert_eq!(refused.span, span_of(patch, second), "{keyword}");
+        assert_eq!(
+            refused.primary,
+            format!(
+                "struct=panel: `{keyword}` `{id}` is already bound by `{key}={first}`, and a \
+                 second `{key}=` would drive it from two wires at once"
+            ),
+        );
+        assert_eq!(
+            notes,
+            [
+                (
+                    Some(span_of(declaration, first)),
+                    "first bound here".to_owned()
+                ),
+                (
+                    None,
+                    format!(
+                        "Fix: combine the signals in the logic layer, as in `logic sig.<name> = \
+                         {first} or {second}`, and bind `{key}=` once to `sig.<name>`."
+                    ),
+                ),
+            ],
+            "{keyword}",
+        );
     }
 }

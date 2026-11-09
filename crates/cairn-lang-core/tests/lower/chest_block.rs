@@ -84,23 +84,34 @@ fn size_single_writes_the_chests_type_and_both_are_recorded_as_intent() {
 
 #[test]
 fn an_unknown_facing_size_or_waterlogged_refuses_the_chest_and_each_is_reported() {
-    for (line, primary, note) in [
+    for (line, primary, notes) in [
         (
             "chest at=inside.back offset=2 y=1 facing=up",
             "unknown chest `facing=up`",
-            "`facing=` takes one of in, out, left, right",
+            vec!["`facing=` takes one of in, out, left, right"],
+        ),
+        (
+            "chest at=inside.back offset=2 y=1 facing=north",
+            "unknown chest `facing=north`",
+            vec![
+                "`facing=` takes one of in, out, left, right",
+                "`facing=` names a way from the wall the chest stands by, and `north` from the \
+                 back wall is `facing=out`",
+            ],
         ),
         (
             "chest at=inside.back offset=2 y=1 size=double",
             "unknown chest `size=double`",
-            "`size=` takes `single`, which keeps the chest from pairing; leave it out to let the \
-             chest pair with the one beside it",
+            vec![
+                "`size=` takes `single`, which keeps the chest from pairing; leave it out to let \
+                 the chest pair with the one beside it",
+            ],
         ),
     ] {
         let src = storeroom(line);
         let out = lowered(&src);
         let expected: Vec<Finding<'_>> =
-            vec![(DiagnosticCode::InvalidMember, line, primary, vec![note])];
+            vec![(DiagnosticCode::InvalidMember, line, primary, notes)];
         assert_eq!(findings(&src, &out), expected);
         assert_eq!(chests(only_structure(&out)), [], "{line}");
     }

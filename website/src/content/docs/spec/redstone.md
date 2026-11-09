@@ -57,8 +57,8 @@ and sig.z` reads as `(not mux(…)) and sig.z`, and each operand inside it is a 
 
 `mux` is `a` while `sel` is off and `b` while it is on. A call that passes an operand by position,
 leaves one out, names one twice or names one the primitive does not take is `E_PARSE`, and the
-message names the operands still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`,
-expecting `a=` or `b=`.
+message names the operands the primitive takes, and for a positional or missing operand, the ones
+still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`, expecting `a=` or `b=`.
 
 The macros above are not in the library yet. A macro call such as `pulse(sig.ring, 4)` is `E_PARSE`
 at its `(`, and the message names the primitives that could stand there and the one the library
@@ -130,9 +130,11 @@ instead, because the repair is on that member: a row that `walls` painting nothi
 nothing or `walls` under a `level` that is not placed would have reached, or an `at=<side>.outside`
 beside a `roof` with an `overhang=` that draws nothing ([Lint](/spec/lint/#lowering)). The plate's
 own line is judged first, so a line that puts it nowhere is the error even when such a member is
-missing too. Either way the component's binding, its `->` tail or its actuator key, is still read,
-since synthesis reads the member line and not the voxels, so the signal stays in the netlist with no
-component behind it, and the finding says so.
+missing too. Either way synthesis reads the member line and not the voxels, so a binding of the
+component still reaches the netlist with no component behind it, and the finding on its line says
+so. That binding is a sensor's `->` tail, an actuator's key, or the key of a patch that binds the
+actuator, wherever it names a `sig.` signal. One that synthesis refuses, such as a tail on an
+actuator or a value outside `sig.`, reaches no netlist, and the finding does not mention it.
 
 **How a component is turned.** A `lever` or `button` hangs on the face of the wall cell its anchor
 names (`face=wall`), looking away from that wall: into the struct from `inside.<side>`, out of it
@@ -157,9 +159,10 @@ those states is written on its line, and `facing=` is the one state promoted to 
 
 **What a component is built from.** A `button` reads `mat_slot=`, and the slot must bind a button:
 any other block is `E_INCOMPATIBLE_MATERIAL`, and the button is built from `@button.default` instead.
-With no `mat_slot=` it is built from `@button.default`. Every other component has one block to be
-built from, its tier-1 token ([Materials and Themes](/spec/materials-themes/#tier-1-tokens)), and a
-`mat_slot=` on it is `W_IGNORED_ARGUMENT`.
+With no `mat_slot=` it is built from `@button.default`. Every other component is built from its
+tier-1 tokens ([Materials and Themes](/spec/materials-themes/#tier-1-tokens)), a piston from
+`@piston.default` or, with `sticky=true`, `@piston.sticky`. No `mat_slot=` chooses among them, so
+one on it is `W_IGNORED_ARGUMENT`.
 
 **What a lever or button hangs on is not checked.** It is written against whatever the wall cell
 holds, and the build does not ask whether that block is one the game lets it hang on. Where no
@@ -194,7 +197,9 @@ patch whose selector has no `id=`, or whose id no component of its keyword carri
 `E_LOGIC_UNRESOLVED_PATCH`: it acts on no component, so a port for it would have no component behind
 it. An actuator patch is the only binding a selector line carries, so a `->` tail on
 `pressure_plate[id=p]` or `lever[id=sw]` is `E_MISPLACED_BINDING`, as it is on a member that is not
-a sensor.
+a sensor. Nor does a sensor take a patch of any other kind: a sensor line in the selector form, such
+as `lever[id=sw] at=inside.front offset=2 y=1`, places nothing, since its brackets pick a member
+declared elsewhere, and it is `E_INVALID_MEMBER`.
 
 **An actuator takes one binding per key.** A door carries one `opened_by=`, a lamp one `lit_by=`, a
 piston one `powered_by=` and a dispenser one `fired_by=`, whether it is written on the component's
@@ -285,12 +290,13 @@ The internal algorithm runs five stages:
    dust in the coordinate beside it, so a lane of free coordinates carries one net however long it
    is; a cell against the edge has one lane, and the three nets touching a two-input gate cannot
    share it. One row in gives every cell a lane on each side, so with the clear columns either side
-   of it each cell has the four free neighbours a `mux` needs. That costs one row for the whole
-   netlist rather than one per cell, so unlike the column spacing it does not grow with the cell
-   count.
+   of it each cell is placed with four free neighbours, the number a `mux` needs. That costs one row
+   for the whole netlist rather than one per cell, so unlike the column spacing it does not grow
+   with the cell count.
 
-   Neither spacing is a guarantee of a wiring: a net passing through can still take the last free
-   face, and that scope is refused rather than shorted. Three kinds of region are refused here
+   Neither spacing is a guarantee of a wiring: a net passing through can still take a face a cell
+   needs. Stage 2 lays the nets again in another order when that strands a sink, and a scope no
+   order wires is refused rather than shorted. Three kinds of region are refused here
    rather than left to fail as an unreachable sink at stage 2: one that cannot hold the row
    (`2n + 1` columns for `n` cells, and three rows); one that cannot hold the rows its pads stand in
    (a row per sensor or actuator on the busier edge, and, in a scope with cells, one more for the
@@ -310,6 +316,13 @@ The internal algorithm runs five stages:
    measured: `wire_length` and the delay pass's tick count are both read off the routed tree. The
    order is fanout descending, then the net's own key. That is a total order, so one layout has one
    answer however many passes ask for it.
+
+   An earlier net's dust can wall in a later net's sink: a `mux` beside another cell needs four of
+   its faces, and a net on its way past takes one. So when the order strands a sink, the first net
+   with a stranded sink moves to the front and every net is laid again, fewer times in all than
+   there are nets. The first order that strands nothing is kept, so a scope the first order wires is
+   laid as before, and each order follows from the one before it, so a layout still has one answer.
+   A scope no order wires keeps the first order's trees and is refused on them.
 
    Beside is per-plane. Whether two strands a layer apart read each other depends on what is
    standing between them, which this model does not carry: the internal model is pseudo-2.5D and the
@@ -414,7 +427,10 @@ The internal algorithm runs five stages:
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
 whose every way out is walled in, by a component, by an earlier net's dust or the coordinates beside
 it, or by the edge of the reservation, earns the same refusal for a different reason, and the
-message says which two coordinates it could not join and which nets took the faces.
+message says which two coordinates it could not join and which nets took the faces. Its fix names
+the lowest `void` that wires the scope, trying up to four layers above the scope's own, since a
+layer to climb onto is what frees a face; when none of those does, it says to split the logic across
+scopes instead, and names the highest `void` it tried.
 
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:

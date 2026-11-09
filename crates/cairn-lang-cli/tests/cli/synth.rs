@@ -598,7 +598,8 @@ fn stage_delay_attenuation_limit_exits_one() {
 
 #[test]
 fn stage_route_refuses_a_detour_past_the_attenuation_cap() {
-    // `sig.s2` detours round `sig.s1`'s dust: its straight line is `width`, its route `width + 2`.
+    // The two nets swap rows, so whichever is laid second climbs over the other: its straight line
+    // is `width`, its route `width + 2`.
     use cairn_lang_redstone::MAX_ATTENUATION_SEGMENT as CAP;
     let dir = tempfile::tempdir().expect("temp dir");
     for (width, refuses) in [(CAP - 2, false), (CAP - 1, true)] {
@@ -612,11 +613,9 @@ fn stage_route_refuses_a_detour_past_the_attenuation_cap() {
              door id=d1 side=back at=center mat_slot=door\n  \
              pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s0\n  \
              pressure_plate id=p1 at=back.outside offset=0 y=0 -> sig.s1\n  \
-             pressure_plate id=p2 at=front.outside offset=1 y=0 -> sig.s2\n  \
-             logic sig.g0 = sig.s0 and sig.s1\n  \
-             door[id=d0] opened_by=sig.g0\n  \
-             door[id=d1] opened_by=sig.s2\n  \
-             circuit region=floor void=1\n"
+             door[id=d0] opened_by=sig.s1\n  \
+             door[id=d1] opened_by=sig.s0\n  \
+             circuit region=floor void=2\n"
         );
         std::fs::write(&path, source).expect("write detour fixture");
         let out = cairn(
@@ -644,16 +643,16 @@ fn stage_route_refuses_a_detour_past_the_attenuation_cap() {
                 .collect();
             assert_eq!(
                 lengths,
-                [u64::from(CAP - 3), u64::from(CAP)],
-                "the far door's wire is exactly the cap",
+                [u64::from(CAP), u64::from(CAP - 2)],
+                "the wire laid second is exactly the cap",
             );
             continue;
         }
         assert_eq!(out.status.code(), Some(1), "width {width}: {stderr}");
         let expected = format!(
             "error[E_ATTENUATION_LIMIT]: placed netlist for struct `s` has no route from the \
-             driver at (0,0,3) to ({},0,2) within the v1 attenuation limit of {CAP} steps; the \
-             faces it could arrive through are taken by cell #0\n  note: Fix: give the wire a \
+             driver at (0,0,1) to ({},0,0) within the v1 attenuation limit of {CAP} steps; the \
+             faces it could arrive through are taken by sig.s0\n  note: Fix: give the wire a \
              shorter way round",
             width - 1,
         );

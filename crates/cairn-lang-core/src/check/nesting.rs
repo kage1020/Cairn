@@ -3,7 +3,8 @@
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::{BodyKind, IntentModule, Member, MemberRole};
+use crate::intent::{Actuator, BodyKind, IntentModule, Member, MemberRole};
+use crate::prose::or_list;
 
 use super::DiagnosticSink;
 
@@ -118,7 +119,18 @@ fn report(
     if scope == BodyKind::Geometry {
         notes.push(DiagnosticNote {
             span: None,
-            message: "these members are not gone: they still take a theme binding, and any `-> sig.NAME` or `logic` line still reaches redstone synthesis. What they do not produce is blocks".to_owned(),
+            message: format!(
+                "these members are not gone: they still take a theme binding, and any `-> sig.NAME` \
+                 tail, `logic` line, or binding under {} still reaches redstone synthesis. What \
+                 they do not produce is blocks",
+                or_list(
+                    &Actuator::ALL
+                        .iter()
+                        .map(|actuator| format!("`{}=`", actuator.key()))
+                        .collect::<Vec<_>>()
+                )
+                .unwrap_or_default(),
+            ),
         });
     }
     sink.push(Diagnostic {

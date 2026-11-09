@@ -1,6 +1,7 @@
 //! Stage 1 of `spec/redstone` "Place-and-route": lays each scope's cells in one row at `x = 1 +
 //! 2i`, `z = 1` of its `circuit region=` reservation, and gives each actuator its pad. The clear
-//! column and rows around each cell leave a two-input gate the three free faces its nets need.
+//! column and rows around each cell leave a two-input gate the three free faces its nets need, and
+//! a `mux` its four.
 
 use std::collections::HashMap;
 

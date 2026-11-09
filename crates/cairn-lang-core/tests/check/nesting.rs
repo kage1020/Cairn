@@ -62,15 +62,31 @@ fn a_member_nested_under_a_geometry_member_is_reported() {
         "`walls` does not group members: the 1 member indented under it produces no blocks",
     );
     assert_eq!(slice(&src, &d), "door id=d side=front at=center");
-    assert!(
-        advice(&d).contains("level"),
-        "the advice should point at the one construct that does group members, got: {}",
-        advice(&d),
-    );
-    assert!(
-        d.notes.iter().any(|n| n.message.contains("redstone")),
-        "a note should say what the members still take part in, got: {:#?}",
-        d.notes,
+    let notes: Vec<(Option<&str>, &str)> = d
+        .notes
+        .iter()
+        .map(|n| (n.span.clone().map(|span| &src[span]), n.message.as_str()))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            (
+                Some("walls class=outer mat_slot=wall height=3"),
+                "`walls` declared here"
+            ),
+            (
+                None,
+                "only `level y=N` groups members inside a `struct` or `def` body — move these out \
+                 to the enclosing body, or into a `level`",
+            ),
+            (
+                None,
+                "these members are not gone: they still take a theme binding, and any \
+                 `-> sig.NAME` tail, `logic` line, or binding under `opened_by=`, `powered_by=`, \
+                 `lit_by=`, or `fired_by=` still reaches redstone synthesis. What they do not \
+                 produce is blocks",
+            ),
+        ],
     );
 }
 

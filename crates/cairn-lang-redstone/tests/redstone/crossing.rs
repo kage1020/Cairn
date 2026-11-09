@@ -425,13 +425,14 @@ struct thin size=4x4
         "and names the net in the way: {}",
         refusal.primary,
     );
-    assert!(
-        refusal
-            .notes
-            .iter()
-            .any(|n| n.message.contains("raise `void` above 1")),
-        "and the fix names the layer that is missing: {:?}",
-        refusal.notes,
+    let notes: Vec<&str> = refusal.notes.iter().map(|n| n.message.as_str()).collect();
+    assert_eq!(
+        notes,
+        [
+            "Fix: raise `void` to 2, which gives the wire a layer to climb onto, or split the \
+             logic across several scopes, each with its own `circuit` line"
+        ],
+        "the fix names the layer that wires it",
     );
     assert!(
         routed.scoped.scopes.iter().all(|e| e.name != "thin"),
@@ -462,8 +463,8 @@ struct chain size=5x3
   door id=d0 side=front at=center mat_slot=door
   pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s0
   pressure_plate id=p1 at=inside.front offset=1 y=0 -> sig.s1
-  logic sig.c0 = sig.s0 and sig.s1
-  logic sig.c1 = sig.c0 and sig.s0
+  logic sig.c0 = sig.s0 xor sig.s1
+  logic sig.c1 = mux(sel=sig.c0, a=sig.s0, b=sig.s1)
   door[id=d0] opened_by=sig.c1
   circuit region=floor void=1
 ";
@@ -475,24 +476,31 @@ struct chain size=5x3
     };
 
     let routed = routed_at(source);
-    let refusal = routed
-        .diagnostics
-        .iter()
-        .find(|d| d.code == DiagnosticCode::RouteCongestion)
-        .unwrap_or_else(|| panic!("void=1 must refuse: {:?}", routed.diagnostics));
-    assert!(
-        refusal
-            .primary
-            .contains("cannot reach (3,0,1) from the driver at (1,0,1)"),
-        "the stranded sink is cell #1's body, reached from cell #0's: {}",
-        refusal.primary,
-    );
-    assert!(
-        refusal
-            .primary
-            .contains("the faces it could arrive through are taken by sig.s0 and cell #1"),
-        "and the refusal names the nets on its faces: {}",
-        refusal.primary,
+    let refusals: Vec<(DiagnosticCode, &str, Vec<&str>)> = errors(&routed.diagnostics)
+        .into_iter()
+        .map(|d| {
+            (
+                d.code,
+                d.primary.as_str(),
+                d.notes.iter().map(|n| n.message.as_str()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        refusals,
+        [(
+            DiagnosticCode::RouteCongestion,
+            "placed netlist for struct `chain` cannot reach (3,0,1) from the driver at (1,0,1) \
+             — every route between them is blocked by a cell body, an I/O pad, or another \
+             net's dust, on the coord or one step from it in the same plane, and a wire passes \
+             through none of the three; the faces it could arrive through are taken by sig.s0 \
+             and sig.s1 and cell #1",
+            vec![
+                "Fix: raise `void` to 2, which gives the wire a layer to climb onto, or split \
+                 the logic across several scopes, each with its own `circuit` line"
+            ],
+        )],
+        "the `mux`'s four nets leave the `xor`'s output no face, in any order they are laid",
     );
     assert!(
         routed.scoped.scopes.iter().all(|e| e.name != "chain"),

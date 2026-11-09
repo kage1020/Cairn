@@ -5,14 +5,14 @@ use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberRole};
+use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::{UnreadArgument, ident_or_ignore, read_or_ignore};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{
-    Fixture, Refusal, Toward, fixture_cell, outside_the_array, with_binding_note, written_facing,
+    Fixture, Refusal, Toward, fixture_cell, note_unbuilt_binding, outside_the_array, written_facing,
 };
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
@@ -39,7 +39,7 @@ enum Mount {
 }
 
 /// One kind of component, as its line is built.
-struct Component {
+pub(super) struct Component {
     fixture: Fixture,
     mount: Mount,
     /// The block it is built from when nothing chooses another.
@@ -50,7 +50,7 @@ struct Component {
     material: Option<Family>,
 }
 
-const LEVER: Component = Component {
+pub(super) const LEVER: Component = Component {
     fixture: Fixture {
         keyword: "lever",
         noun: "lever",
@@ -64,7 +64,7 @@ const LEVER: Component = Component {
     material: None,
 };
 
-const BUTTON: Component = Component {
+pub(super) const BUTTON: Component = Component {
     fixture: Fixture {
         keyword: "button",
         noun: "button",
@@ -78,7 +78,7 @@ const BUTTON: Component = Component {
     material: Some(Family::Button),
 };
 
-const DAYLIGHT: Component = Component {
+pub(super) const DAYLIGHT: Component = Component {
     fixture: Fixture {
         keyword: "daylight",
         noun: "daylight detector",
@@ -92,7 +92,7 @@ const DAYLIGHT: Component = Component {
     material: None,
 };
 
-const OBSERVER: Component = Component {
+pub(super) const OBSERVER: Component = Component {
     fixture: Fixture {
         keyword: "observer",
         noun: "observer",
@@ -106,7 +106,7 @@ const OBSERVER: Component = Component {
     material: None,
 };
 
-const LAMP: Component = Component {
+pub(super) const LAMP: Component = Component {
     fixture: Fixture {
         keyword: "lamp",
         noun: "lamp",
@@ -125,7 +125,7 @@ const STICKY_PISTON: Spelled = Spelled {
     base_id: "minecraft:sticky_piston",
 };
 
-const PISTON: Component = Component {
+pub(super) const PISTON: Component = Component {
     fixture: Fixture {
         keyword: "piston",
         noun: "piston",
@@ -139,7 +139,7 @@ const PISTON: Component = Component {
     material: None,
 };
 
-const DISPENSER: Component = Component {
+pub(super) const DISPENSER: Component = Component {
     fixture: Fixture {
         keyword: "dispenser",
         noun: "dispenser",
@@ -153,22 +153,6 @@ const DISPENSER: Component = Component {
     material: None,
 };
 
-impl Component {
-    /// The component a member of `role` builds, or `None` for a role that is none of them.
-    fn of(role: &MemberRole) -> Option<&'static Self> {
-        Some(match role {
-            MemberRole::Lever => &LEVER,
-            MemberRole::Button => &BUTTON,
-            MemberRole::Daylight => &DAYLIGHT,
-            MemberRole::Observer => &OBSERVER,
-            MemberRole::Lamp => &LAMP,
-            MemberRole::Piston => &PISTON,
-            MemberRole::Dispenser => &DISPENSER,
-            _ => return None,
-        })
-    }
-}
-
 /// The `facing=` and `sticky=` a component's line writes, read before anything can refuse it.
 #[derive(Debug, Clone, Copy)]
 struct WrittenStates<'m> {
@@ -176,8 +160,10 @@ struct WrittenStates<'m> {
     sticky: bool,
 }
 
-/// Set a component's block in the cell its anchor names, turned as its mount says.
+/// Set `component`'s block, as `member` writes it, in the cell its anchor names, turned as its
+/// mount says.
 pub(super) fn fill_component(
+    component: &Component,
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
@@ -185,24 +171,11 @@ pub(super) fn fill_component(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Some(component) = Component::of(&member.role) else {
-        debug_assert!(
-            false,
-            "fill_component called on a `{}`, which no component builds",
-            member.role.keyword(),
-        );
-        return;
-    };
     let noun = component.fixture.noun;
     // Read before anything can refuse the component, so every unreadable state is reported now.
     let mut unread: Vec<(UnreadArgument, String)> = Vec::new();
     let facing = if component.mount == Mount::Facing {
-        ident_or_ignore(
-            member,
-            "facing",
-            "`up`, `down`, `in`, `out`, `left` or `right`",
-        )
-        .unwrap_or_else(|argument| {
+        ident_or_ignore(member, "facing", Toward::ALL_WORDS).unwrap_or_else(|argument| {
             unread.push((
                 argument,
                 format!("the {noun} faces away from the wall it stands by"),
@@ -231,7 +204,8 @@ pub(super) fn fill_component(
         })
         .unwrap_or(false);
     let written = WrittenStates { facing, sticky };
-    let built = match place(
+    let raised = diagnostics.len();
+    let built = place(
         component,
         member,
         written,
@@ -240,13 +214,14 @@ pub(super) fn fill_component(
         palette,
         canvas,
         diagnostics,
-    ) {
-        Ok(()) => true,
-        Err(refusal) => {
-            diagnostics.push(with_binding_note(component.fixture, member, refusal));
-            false
-        }
-    };
+    )
+    .unwrap_or_else(|refusal| {
+        diagnostics.push(*refusal);
+        false
+    });
+    if !built {
+        note_unbuilt_binding(component.fixture, member, ctx, &mut diagnostics[raised..]);
+    }
     for (argument, consequence) in unread {
         diagnostics.push(argument.report(&if built {
             consequence
@@ -256,7 +231,7 @@ pub(super) fn fill_component(
     }
 }
 
-/// [`fill_component`], answering the finding that refuses the component.
+/// [`fill_component`], answering whether the component is built or the finding that refuses it.
 #[expect(
     clippy::too_many_arguments,
     reason = "the painter's context, plus the component and the states its line writes"
@@ -270,7 +245,7 @@ fn place(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), Refusal> {
+) -> Result<bool, Refusal> {
     let fixture = component.fixture;
     let toward = written_facing(fixture, member, written.facing, &Toward::ALL)?;
     let (anchor, cell) = fixture_cell(fixture, member, y_offset, ctx)?;
@@ -291,7 +266,7 @@ fn place(
             ) {
                 MemberState::Bound(state) => Some(state),
                 MemberState::Unbound => None,
-                MemberState::Refused => return Ok(()),
+                MemberState::Refused => return Ok(false),
             };
             geometry_material_id(
                 member,
@@ -325,7 +300,7 @@ fn place(
     let state = BlockState { id, properties };
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
-        Ok(())
+        Ok(true)
     } else {
         Err(Box::new(outside_the_array(fixture, member)))
     }

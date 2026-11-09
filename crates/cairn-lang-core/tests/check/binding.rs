@@ -27,15 +27,17 @@ fn the_finding_lands_on_the_tail_and_not_on_the_line() {
 }
 
 #[test]
-fn the_repair_names_the_hosts_that_exist_and_the_ones_reserved() {
+fn the_repair_names_every_sensor_keyword() {
     let d = exactly_one(diagnose(
         "struct s size=5x5\n  walls mat_slot=wall height=3 -> sig.w\n",
     ));
-    let note = notes(&d).join("\n");
-    assert!(note.contains("`pressure_plate`"), "got: {note}");
-    for reserved in ["`lever`", "`button`", "`daylight`", "`observer`"] {
-        assert!(note.contains(reserved), "{reserved} missing from: {note}");
-    }
+    assert_eq!(
+        notes(&d),
+        [
+            "move the tail onto a sensor, a `lever`, `button`, `daylight`, `observer`, or \
+             `pressure_plate` line"
+        ],
+    );
 }
 
 #[test]
