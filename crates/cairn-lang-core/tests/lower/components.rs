@@ -2,6 +2,7 @@
 //! (`spec/redstone` "Signal binding").
 
 use cairn_lang_core::DiagnosticCode;
+use cairn_lang_core::intent::{Actuator, SENSOR_HOSTS};
 
 use crate::common::{Finding, blocks_where, findings, lowered, only_structure};
 
@@ -275,18 +276,251 @@ fn a_button_bound_outside_the_button_family_is_refused_and_built_from_the_defaul
     );
 }
 
+/// The line that declares `actuator` as `id=it` in [`storeroom`], at [`BACK`] unless it is a door.
+fn declared(actuator: Actuator) -> String {
+    match actuator {
+        Actuator::Door => "door id=it side=front at=center".to_owned(),
+        Actuator::Piston | Actuator::Lamp | Actuator::Dispenser => {
+            format!("{} id=it at=inside.back offset=2 y=1", actuator.keyword())
+        }
+    }
+}
+
 #[test]
 fn a_patch_line_binds_without_building_a_second_block() {
-    for (keyword, key) in [
-        ("lamp", "lit_by"),
-        ("piston", "powered_by"),
-        ("dispenser", "fired_by"),
+    for (actuator, block) in [
+        (Actuator::Lamp, "minecraft:redstone_lamp"),
+        (Actuator::Piston, "minecraft:piston[facing=south]"),
+        (Actuator::Dispenser, "minecraft:dispenser[facing=south]"),
     ] {
-        let members =
-            format!("{keyword} id=it at=inside.back offset=2 y=1\n  {keyword}[id=it] {key}=sig.go");
-        let out = lowered(&storeroom(&members));
-        assert_eq!(out.diagnostics, [], "{keyword}");
-        assert_eq!(components(&out).len(), 1, "{keyword}");
+        let (keyword, key) = (actuator.keyword(), actuator.key());
+        let members = format!("{}\n  {keyword}[id=it] {key}=sig.go", declared(actuator));
+        assert_eq!(built(&members), [(BACK, block.to_owned())], "{keyword}");
+    }
+}
+
+#[test]
+fn a_malformed_patch_is_refused_in_its_actuators_words() {
+    for &actuator in Actuator::ALL {
+        let (keyword, key) = (actuator.keyword(), actuator.key());
+        let (does, _) = actuator.verbs();
+        let shape = format!("{keyword} actuator patch `{key}=` must be a");
+        for (patch, primary, notes) in [
+            (
+                format!("{keyword}[id=it,class=a] {key}=sig.go"),
+                format!(
+                    "{keyword} actuator patch `[selector]` accepts only `id=<label>`; unknown \
+                     attribute(s): class"
+                ),
+                vec![],
+            ),
+            (
+                format!("{keyword}[id=it] {key}=sig.go at=center"),
+                format!(
+                    "{keyword} actuator patch takes only `{key}=sig.<name>`; unknown \
+                     attribute(s): at"
+                ),
+                vec![format!(
+                    "move these onto the {keyword}'s own line, or drop them"
+                )],
+            ),
+            (
+                format!("{keyword}[id=it]"),
+                format!(
+                    "{keyword} actuator patch has no `{key}=`, so it binds no signal to the \
+                     {keyword}"
+                ),
+                vec![format!(
+                    "write `{key}=sig.<name>`, the signal that {does} the {keyword}"
+                )],
+            ),
+            (
+                format!("{keyword}[id=it] {key}=sig.go.now"),
+                format!("{shape} two-segment signal reference `sig.<name>`, got `sig.go.now`"),
+                vec![],
+            ),
+            (
+                format!("{keyword}[id=it] {key}=on.go"),
+                format!("{shape} signal reference `sig.<name>` (head must be `sig`), got `on.go`"),
+                vec![],
+            ),
+            (
+                format!("{keyword}[id=it] {key}=5"),
+                format!("{shape} signal reference `sig.<name>`, got integer"),
+                vec![],
+            ),
+        ] {
+            let src = storeroom(&format!("{}\n  {patch}", declared(actuator)));
+            let out = lowered(&src);
+            let notes: Vec<&str> = notes.iter().map(String::as_str).collect();
+            let expected: Vec<Finding<'_>> =
+                vec![(DiagnosticCode::InvalidMember, &patch, &primary, notes)];
+            assert_eq!(findings(&src, &out), expected, "{patch}");
+        }
+    }
+}
+
+#[test]
+fn a_patch_on_an_actuator_under_a_level_that_is_not_placed_waits_on_that_level() {
+    for &actuator in Actuator::ALL {
+        let (keyword, key) = (actuator.keyword(), actuator.key());
+        let (_, to_do) = actuator.verbs();
+        let patch = format!("{keyword}[id=it] {key}=sig.go");
+        let src = storeroom(&format!(
+            "{patch}\n\n  level id=l\n    {}",
+            declared(actuator)
+        ));
+        let out = lowered(&src);
+        let primary = format!(
+            "{keyword} actuator patch binds a `{keyword}` under a `level` that is not placed, so \
+             no {keyword} is built for it to {to_do}"
+        );
+        let note = format!("the {keyword} is built once that `level` is placed");
+        let expected: Vec<Finding<'_>> = vec![(
+            DiagnosticCode::DeferredMember,
+            &patch,
+            &primary,
+            vec![&note],
+        )];
+        assert_eq!(findings(&src, &out), expected, "{keyword}");
+    }
+}
+
+#[test]
+fn a_component_not_placed_says_its_binding_reaches_the_netlist_only_where_synthesis_reads_it() {
+    let past = |keyword: &str, noun: &str| {
+        (
+            format!("{keyword} `offset=9` runs past the back wall (length 7)"),
+            format!(
+                "an `at=inside.back` {noun} takes an `offset=` from 1 to 5, clear of the wall's \
+                 corners"
+            ),
+            keyword.to_owned(),
+        )
+    };
+    for (members, refused, binding) in [
+        (
+            "lamp id=l1 at=inside.back offset=9 y=1\n  lamp[id=l1] lit_by=sig.go",
+            past("lamp", "lamp"),
+            Some(
+                "the `lit_by=` binding the `lamp[id=l1]` patch gives it still reaches the \
+                 netlist, with no lamp placed for it to drive",
+            ),
+        ),
+        (
+            "piston id=p1 at=inside.back offset=9 y=1\n  piston[id=p1] powered_by=sig.go",
+            past("piston", "piston"),
+            Some(
+                "the `powered_by=` binding the `piston[id=p1]` patch gives it still reaches the \
+                 netlist, with no piston placed for it to drive",
+            ),
+        ),
+        (
+            "dispenser id=d1 at=inside.back offset=9 y=1 fired_by=sig.go",
+            past("dispenser", "dispenser"),
+            Some(
+                "its `fired_by=` binding still reaches the netlist, with no dispenser placed for \
+                 it to drive",
+            ),
+        ),
+        (
+            "daylight at=inside.back offset=9 y=1 -> sig.day",
+            past("daylight", "daylight detector"),
+            Some(
+                "its signal binding still reaches the netlist, with no daylight detector placed \
+                 to drive it",
+            ),
+        ),
+        (
+            "lamp at=inside.back offset=9 y=1 -> sig.go",
+            past("lamp", "lamp"),
+            None,
+        ),
+        (
+            "piston at=inside.back offset=9 y=1 powered_by=5",
+            past("piston", "piston"),
+            None,
+        ),
+        (
+            "lever at=inside.back offset=9 y=1 -> power",
+            past("lever", "lever"),
+            None,
+        ),
+    ] {
+        let src = storeroom(members);
+        let out = lowered(&src);
+        let (primary, range, keyword) = refused;
+        let mut notes = vec![range.as_str()];
+        notes.extend(binding);
+        let line = members.lines().next().expect("a line");
+        let expected: Vec<Finding<'_>> =
+            vec![(DiagnosticCode::InvalidMember, line, &primary, notes)];
+        assert_eq!(findings(&src, &out), expected, "{members}");
+        assert_eq!(components(&out), [], "{keyword}");
+    }
+}
+
+#[test]
+fn a_component_bound_only_by_a_refused_patch_says_nothing_of_a_binding() {
+    let lamp = "lamp id=l1 at=inside.back offset=9 y=1";
+    let patch = "lamp[id=l1] lit_by=sig.go.now";
+    let src = storeroom(&format!("{lamp}\n  {patch}"));
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [
+            (
+                DiagnosticCode::InvalidMember,
+                lamp,
+                "lamp `offset=9` runs past the back wall (length 7)",
+                vec![
+                    "an `at=inside.back` lamp takes an `offset=` from 1 to 5, clear of the \
+                     wall's corners",
+                ],
+            ),
+            (
+                DiagnosticCode::InvalidMember,
+                patch,
+                "lamp actuator patch `lit_by=` must be a two-segment signal reference \
+                 `sig.<name>`, got `sig.go.now`",
+                vec![],
+            ),
+        ],
+    );
+}
+
+#[test]
+fn a_sensor_line_in_the_selector_form_places_nothing() {
+    let mut lines: Vec<String> = SENSOR_HOSTS
+        .iter()
+        .map(|keyword| format!("{keyword}[id=sw] at=inside.back offset=2 y=1"))
+        .collect();
+    lines.push("observer[id=sw] facing=up".to_owned());
+    for line in lines {
+        let keyword = &line[..line.find('[').expect("a selector")];
+        let src = storeroom(&format!(
+            "lever id=sw at=inside.back offset=1 y=1\n  {line}"
+        ));
+        let out = lowered(&src);
+        let primary = format!(
+            "`{keyword}[…]` places nothing: the brackets pick a member declared elsewhere, and \
+             only an actuator, `door`, `piston`, `lamp`, or `dispenser`, takes a patch"
+        );
+        let note = format!(
+            "declare the `{keyword}` on a line of its own, without brackets, as `{keyword} \
+             id=<label> at=… -> sig.<name>`"
+        );
+        let expected: Vec<Finding<'_>> =
+            vec![(DiagnosticCode::InvalidMember, &line, &primary, vec![&note])];
+        assert_eq!(findings(&src, &out), expected, "{line}");
+        assert_eq!(
+            components(&out),
+            [(
+                (6, 1, 2),
+                "minecraft:lever[face=wall,facing=south]".to_owned()
+            )],
+            "{line}",
+        );
     }
 }
 

@@ -58,7 +58,7 @@ pub(super) fn fill_chest(
     };
     let facing = read(
         "facing",
-        "`in`, `out`, `left` or `right`",
+        Toward::HORIZONTAL_WORDS,
         "the chest faces away from the wall it stands by",
     );
     let size = read(
@@ -104,7 +104,7 @@ fn place_chest(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Refusal> {
-    let toward = written_facing(CHEST, member, written.facing, &Toward::LEVEL);
+    let toward = written_facing(CHEST, member, written.facing, &Toward::HORIZONTAL);
     let single = match written.size {
         None => Ok(false),
         Some("single") => Ok(true),

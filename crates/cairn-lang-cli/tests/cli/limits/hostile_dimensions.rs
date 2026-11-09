@@ -654,8 +654,8 @@ fn a_long_north_south_walkway_lowers_within_the_deadline() {
     );
 }
 
-/// A sink walled in two blocks from its driver, in a reservation as large as `size=` and `void=`
-/// make it.
+/// A sink walled in four blocks from its driver whatever order the nets are laid in, in a
+/// reservation as large as `size=` and `void=` make it.
 fn walled_in_near_sink() -> String {
     let body = [
         "theme t:",
@@ -664,13 +664,14 @@ fn walled_in_near_sink() -> String {
         "",
         "struct s size=31x2000",
         "  floor mat_slot=wall",
-        "  door id=d0 side=front at=center mat_slot=door",
-        "  door id=d1 side=back at=center mat_slot=door",
-        "  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a",
-        "  logic sig.g0 = (sig.a or sig.a) or (sig.a and sig.a)",
-        "  logic sig.g1 = sig.g0 and sig.a",
-        "  door[id=d0] opened_by=sig.g0",
-        "  door[id=d1] opened_by=sig.g1",
+        "  door id=d side=front at=center mat_slot=door",
+        "  pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s",
+        "  pressure_plate id=p1 at=inside.front offset=1 y=0 -> sig.a",
+        "  pressure_plate id=p2 at=front.outside offset=2 y=0 -> sig.b",
+        "  logic sig.x = mux(sel=sig.s, a=sig.a, b=sig.b)",
+        "  logic sig.y = mux(sel=sig.a, a=sig.s, b=sig.b)",
+        "  logic sig.out = sig.x xor sig.y",
+        "  door[id=d] opened_by=sig.out",
         "  circuit region=floor void=200",
     ];
     format!("{}\n", body.join("\n"))
@@ -697,7 +698,7 @@ fn a_walled_in_sink_is_refused_without_searching_the_reservation() {
         "`synth --stage route` ended as {outcome:?}\nstderr={stderr}",
     );
     // Congestion, not distance: the sink is walled in whatever the cap allows.
-    assert_stream(&stderr, &[(14, 3, "error", "E_ROUTE_CONGESTION")]);
+    assert_stream(&stderr, &[(15, 3, "error", "E_ROUTE_CONGESTION")]);
     assert!(stderr.contains("cannot reach (5,0,1)"), "got {stderr:?}");
     // 12.4 million coords of reservation: searched, it runs past `DEADLINE`.
     assert!(
