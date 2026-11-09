@@ -3,7 +3,7 @@
 
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticNote};
-use crate::intent::Member;
+use crate::intent::{Member, SENSOR_HOSTS};
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{
@@ -12,6 +12,7 @@ use crate::block_array::args::{
 use crate::block_array::joins::Face;
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 
+use super::circuit::names_a_signal;
 use super::members::{StructCtx, side_name, unplaced_walls_note};
 use super::stair::shift_outward;
 
@@ -24,32 +25,55 @@ pub(super) struct Fixture {
     pub(super) noun: &'static str,
 }
 
-/// `refusal`, with a note after its notes when the member carries a signal binding, which
-/// synthesis reads off the member line whether or not the fixture is placed.
-pub(super) fn with_binding_note(fixture: Fixture, member: &Member, refusal: Refusal) -> Diagnostic {
-    let mut refusal = *refusal;
-    let noun = fixture.noun;
-    let binding = if member.binding.is_some() {
-        Some(format!(
-            "its signal binding still reaches the netlist, with no {noun} placed to drive it"
-        ))
-    } else {
-        member
-            .role
-            .actuator_key()
-            .filter(|key| member.arguments.contains_key(*key))
-            .map(|key| {
-                format!(
-                    "its `{key}=` binding still reaches the netlist, with no {noun} placed for it \
-                     to drive"
-                )
-            })
+/// Note on the finding on `member`'s own line among `raised`, the findings its painting raised,
+/// that a binding of it still reaches the netlist, when synthesis reads one: its own `->` tail or
+/// actuator key, or the key of a patch that binds it, each naming a signal.
+pub(super) fn note_unbuilt_binding(
+    fixture: Fixture,
+    member: &Member,
+    ctx: &StructCtx<'_>,
+    raised: &mut [Diagnostic],
+) {
+    let Some(message) = binding_note(fixture, member, ctx) else {
+        return;
     };
-    refusal.notes.extend(binding.map(|message| DiagnosticNote {
-        span: None,
-        message,
-    }));
-    refusal
+    if let Some(finding) = raised.iter_mut().rev().find(|d| d.span == member.span) {
+        finding.notes.push(DiagnosticNote {
+            span: None,
+            message,
+        });
+    }
+}
+
+/// The note [`note_unbuilt_binding`] adds, or `None` when synthesis reads no binding of `member`.
+fn binding_note(fixture: Fixture, member: &Member, ctx: &StructCtx<'_>) -> Option<String> {
+    let noun = fixture.noun;
+    let sensor = SENSOR_HOSTS.contains(&member.role.keyword()) && member.selector.is_none();
+    if sensor && member.binding.as_ref().is_some_and(names_a_signal) {
+        return Some(format!(
+            "its signal binding still reaches the netlist, with no {noun} placed to drive it"
+        ));
+    }
+    let actuator = member.role.actuator()?;
+    let key = actuator.key();
+    if member
+        .arguments
+        .get(key)
+        .is_some_and(|raw| names_a_signal(&raw.value))
+    {
+        return Some(format!(
+            "its `{key}=` binding still reaches the netlist, with no {noun} placed for it to drive"
+        ));
+    }
+    let id = member
+        .id
+        .as_deref()
+        .filter(|_| ctx.patched.contains(&member.span.start))?;
+    Some(format!(
+        "the `{key}=` binding the `{}[id={id}]` patch gives it still reaches the netlist, with no \
+         {noun} placed for it to drive",
+        actuator.keyword(),
+    ))
 }
 
 /// Which way a fixture's front looks, relative to the wall it stands by.
@@ -70,8 +94,14 @@ pub(super) enum Toward {
 }
 
 impl Toward {
-    /// The four ways that stay level, in the order a finding lists them.
-    pub(super) const LEVEL: [Self; 4] = [Self::In, Self::Out, Self::Left, Self::Right];
+    /// The four horizontal ways, in the order a finding lists them.
+    pub(super) const HORIZONTAL: [Self; 4] = [Self::In, Self::Out, Self::Left, Self::Right];
+
+    /// [`Self::ALL`] as the finding on an unread `facing=` lists it.
+    pub(super) const ALL_WORDS: &str = "`up`, `down`, `in`, `out`, `left` or `right`";
+
+    /// [`Self::HORIZONTAL`] as the finding on an unread `facing=` lists it.
+    pub(super) const HORIZONTAL_WORDS: &str = "`in`, `out`, `left` or `right`";
 
     /// Every way, in the order a finding lists them.
     pub(super) const ALL: [Self; 6] = [
@@ -86,6 +116,17 @@ impl Toward {
     /// The way `name` spells.
     fn from_ident(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|toward| toward.name() == name)
+    }
+
+    /// `ways` as a finding lists them, each in backticks and the last after `or`.
+    #[cfg(test)]
+    fn listed(ways: &[Self]) -> String {
+        let words: Vec<String> = ways.iter().map(|way| format!("`{}`", way.name())).collect();
+        match words.split_last() {
+            Some((last, [])) => last.clone(),
+            Some((last, head)) => format!("{} or {last}", head.join(", ")),
+            None => String::new(),
+        }
     }
 
     /// The word `facing=` spells this way with.
@@ -768,6 +809,15 @@ mod tests {
     use super::Toward;
     use crate::block_array::joins::Face;
     use crate::block_array::openings::WallSide;
+
+    #[test]
+    fn each_list_of_ways_is_worded_as_its_array() {
+        assert_eq!(Toward::listed(&Toward::ALL), Toward::ALL_WORDS);
+        assert_eq!(
+            Toward::listed(&Toward::HORIZONTAL),
+            Toward::HORIZONTAL_WORDS
+        );
+    }
 
     /// `out` is each wall's outward normal, `right` the way its `offset=` grows, and `up` and
     /// `down` the same from every wall.

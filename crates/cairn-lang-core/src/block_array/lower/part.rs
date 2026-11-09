@@ -394,7 +394,7 @@ fn turn(
             ))),
         },
         (_, Stand::ByWall) => {
-            let toward = written_facing(fixture, member, facing, &Toward::LEVEL)?;
+            let toward = written_facing(fixture, member, facing, &Toward::HORIZONTAL)?;
             Ok((block, Some(Look::FromTheWall(toward))))
         }
         (_, Stand::Triple) => {
@@ -418,7 +418,10 @@ fn turn(
                 return Ok((block, Some(Look::Compass(face))));
             }
             let mut notes = vec![COMPASS.to_owned()];
-            if Toward::LEVEL.iter().any(|toward| toward.name() == word) {
+            if Toward::HORIZONTAL
+                .iter()
+                .any(|toward| toward.name() == word)
+            {
                 notes.push(format!(
                     "`{word}` names a way from a wall, and a part at a coordinate triple stands by \
                      none; anchor it by a wall with `at=<side>.outside` or `at=inside.<side>` to \

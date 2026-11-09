@@ -3,8 +3,9 @@
 
 use std::fmt::Write as _;
 
-use cairn_lang_core::ast::Expr;
+use cairn_lang_core::ast::{DottedRef, Expr, NamedOperand};
 use cairn_lang_core::check::Severity;
+use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::logic_library::LogicPrimitive;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef, synthesize};
@@ -615,32 +616,106 @@ fn a_primitive_in_a_notation_it_has_no_gate_in_still_reports_its_operands() {
     }
 }
 
-#[test]
-fn a_call_without_the_operands_its_primitive_names_still_reports_the_ones_it_has() {
-    let source = "struct s size=1x1\n  logic sig.out = mux(sel=sig.nope1, a=sig.nope2, b=sig.x)\n  \
-                  door id=front side=front at=center\n  door[id=front] opened_by=sig.out\n";
-    let mut intent = lower(&parse(source).expect("parse"));
-    let Expr::Call { operands, .. } = &mut intent.structs[0].logic[0].rhs else {
+/// The intent of `logic sig.out = mux(…)` feeding a door below `lines`, its call rebuilt with an
+/// operand per pair of `operands`, each valued its signal.
+fn hand_built_call(lines: &str, operands: &[(&'static str, &str)]) -> IntentModule {
+    let source = format!(
+        "struct s size=1x1\n{lines}  logic sig.out = mux(sel=sig.s, a=sig.a, b=sig.b)\n  \
+         door id=front side=front at=center\n  door[id=front] opened_by=sig.out\n"
+    );
+    let mut intent = lower(&parse(&source).expect("parse"));
+    let Expr::Call { operands: held, .. } = &mut intent.structs[0].logic[0].rhs else {
         panic!("expected a call");
     };
-    operands.pop();
+    *held = operands
+        .iter()
+        .map(|&(name, signal)| NamedOperand {
+            name,
+            value: Expr::Ref(DottedRef::new("sig".to_owned(), vec![signal.to_owned()])),
+        })
+        .collect();
+    intent
+}
+
+#[test]
+fn a_call_built_with_its_operands_out_of_order_lowers_each_by_name() {
+    let plates = "  pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s\n  \
+                  pressure_plate id=p1 at=inside.front offset=0 y=0 -> sig.a\n  \
+                  pressure_plate id=p2 at=inside.back offset=0 y=0 -> sig.b\n";
+    let intent = hand_built_call(plates, &[("b", "b"), ("a", "a"), ("sel", "s")]);
     let out = synthesize(&intent);
+    assert_eq!(codes(&out), Vec::<&str>::new());
+    let gates: Vec<GateKind> = out.scoped.scopes[0]
+        .ir
+        .nodes
+        .iter()
+        .map(|node| node.kind)
+        .collect();
+    assert_eq!(
+        gates,
+        [GateKind::Mux {
+            sel: SignalRef::Input(0),
+            a: SignalRef::Input(1),
+            b: SignalRef::Input(2),
+        }],
+    );
+}
+
+#[test]
+fn a_call_built_with_the_wrong_operands_is_refused_for_what_is_wrong_with_them() {
     let unbound = "E_LOGIC_UNBOUND_SIGNAL";
-    assert_eq!(
-        codes(&out),
-        [unbound, unbound, "E_LOGIC_UNSUPPORTED_PRIMITIVE"]
-    );
-    let finding = only(&out, DiagnosticCode::LogicUnsupportedPrimitive);
-    assert_eq!(
-        finding.primary,
-        "struct=s: logic expression applies `mux` with the operands `sel` and `a`, which the logic \
-         lowering has no gate for",
-    );
-    let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
-    assert_eq!(
-        notes,
-        ["Fix: write `mux` with every operand named once, as in `mux(sel=…, a=…, b=…)`"],
-    );
+    let unsupported = "E_LOGIC_UNSUPPORTED_PRIMITIVE";
+    for (operands, expected_codes, as_written) in [
+        (
+            &[("sel", "x0"), ("a", "x1")][..],
+            &[unbound, unbound, unsupported][..],
+            "without its operand `b`",
+        ),
+        (
+            &[][..],
+            &[unsupported][..],
+            "without its operands `sel`, `a` and `b`",
+        ),
+        (
+            &[("sel", "x0"), ("a", "x1"), ("a", "x2")][..],
+            &[unbound, unbound, unbound, unsupported][..],
+            "naming `a` more than once and without its operand `b`",
+        ),
+        (
+            &[("sel", "x0"), ("a", "x1"), ("c", "x2")][..],
+            &[unbound, unbound, unbound, unsupported][..],
+            "with the unknown operand `c` and without its operand `b`",
+        ),
+        (
+            &[
+                ("sel", "x0"),
+                ("a", "x1"),
+                ("b", "x2"),
+                ("c", "x3"),
+                ("a", "x4"),
+            ][..],
+            &[unbound, unbound, unbound, unbound, unbound, unsupported][..],
+            "with the unknown operand `c` and naming `a` more than once",
+        ),
+    ] {
+        let out = synthesize(&hand_built_call("", operands));
+        assert_eq!(codes(&out), expected_codes, "{operands:?}");
+        let finding = only(&out, DiagnosticCode::LogicUnsupportedPrimitive);
+        assert_eq!(
+            finding.primary,
+            format!(
+                "struct=s: logic expression applies `mux` {as_written}, which the logic lowering \
+                 has no gate for"
+            ),
+            "{operands:?}",
+        );
+        let notes: Vec<&str> = finding.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notes,
+            ["Fix: write `mux` with every operand named once, as in `mux(sel=…, a=…, b=…)`"],
+            "{operands:?}",
+        );
+    }
 }
 
 #[test]
