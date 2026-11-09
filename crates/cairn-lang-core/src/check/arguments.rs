@@ -10,8 +10,8 @@ use indexmap::IndexMap;
 use crate::ast::{Item, Module, ThemeRule, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{
-    ACTUATOR_BINDINGS, IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS,
-    Unread, ValueWithSpan, role_of,
+    Actuator, IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS, Unread,
+    ValueWithSpan, role_of,
 };
 use crate::prose::or_list;
 use crate::suggest::{did_you_mean_note, nearest_match, one_edit_match};
@@ -353,7 +353,7 @@ fn unknown_key(
 
 /// Where an actuator key belongs, when `key` is one (`spec/redstone` "Signal binding").
 fn actuator_host_note(key: &str) -> Option<DiagnosticNote> {
-    let (_, host) = ACTUATOR_BINDINGS.iter().find(|(k, _)| *k == key)?;
+    let host = Actuator::reading(key)?.keyword();
     Some(DiagnosticNote {
         span: None,
         message: format!("`{key}=` binds a signal to a `{host}`, so it belongs on a `{host}` line"),
