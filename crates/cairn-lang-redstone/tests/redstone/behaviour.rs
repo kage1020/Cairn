@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use cairn_lang_core::{Edition, lower, parse};
 use cairn_lang_redstone::{Diagnostic, verify_behaviour};
 
-use crate::common::{EXAMPLES, findings, legalized, load_example};
+use crate::common::{EXAMPLES, LONG_WIRE_SOURCE, findings, legalized, load_example};
 
 const EDITIONS: [Edition; 2] = [Edition::Java, Edition::Bedrock];
 
@@ -267,6 +267,57 @@ fn an_assertion_over_more_sensors_than_a_check_runs_is_left_unchecked_with_a_war
                         .to_owned(),
                 )],
             )],
+            "{edition:?}",
+        );
+    }
+}
+
+#[test]
+fn an_always_consequent_is_read_at_the_actuators_that_name_it() {
+    let at_cell = "assert always(sig.a -> eventually sig.c within 0)";
+    let at_door = "assert always(sig.a -> eventually sig.d within 0)";
+    let src = LONG_WIRE_SOURCE
+        .replace(
+            "  door[id=front] opened_by=sig.c\n",
+            "  logic sig.d = sig.c\n  door[id=front] opened_by=sig.d\n",
+        )
+        .replace("void=4\n", &format!("void=4\n  {at_cell}\n  {at_door}\n"));
+    let fix = |ticks: u32| {
+        format!(
+            "Fix: relax the bound to `within {ticks}`, or shorten the path; the logic is never \
+             rewritten to meet an assertion"
+        )
+    };
+    for edition in EDITIONS {
+        let failed = |line: &str, signal: &str, ticks: u32| {
+            format!(
+                "struct=reach: `{line}` fails on {}: with sig.a switched on, sig.a reads on at \
+                 tick 0 and {signal} not until tick {ticks}, {ticks} ticks later",
+                edition.as_str(),
+            )
+        };
+        assert_eq!(
+            findings(&src, &verified(&src, edition)),
+            [
+                (
+                    "E_SIM_ASSERTION_FAILED",
+                    at_cell,
+                    failed(at_cell, "sig.c", 2),
+                    vec![(None, fix(2))],
+                ),
+                (
+                    "E_SIM_ASSERTION_FAILED",
+                    at_door,
+                    failed(at_door, "sig.d", 4),
+                    vec![
+                        (
+                            Some("door id=front side=front at=center"),
+                            "sig.d is read at the torches under this actuator".to_owned(),
+                        ),
+                        (None, fix(4)),
+                    ],
+                ),
+            ],
             "{edition:?}",
         );
     }

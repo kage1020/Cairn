@@ -702,8 +702,8 @@ holds them, the others staying off; an `observer` is switched on for that one ti
 gives. A check makes one run for each combination of those sensors, so `k` of them take `2^k` runs.
 A signal is read where what drives it leaves it, a sensor at its pad and a cell at its output,
 except the consequent of an `always`, which is read where `assert latency` ends a path: at the
-upper torch of every riser under an actuator that reads it, or at the cell's output where none
-does.
+upper torch of every riser under an actuator that reads it by that name, or, where none does, where
+it is driven.
 
 - A **truth table** holds when each run, once the circuit rests, reads the output every row says
   whose pattern the inputs then read match. A combination of the inputs no run reaches is not
