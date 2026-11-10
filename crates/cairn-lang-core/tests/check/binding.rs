@@ -27,15 +27,17 @@ fn the_finding_lands_on_the_tail_and_not_on_the_line() {
 }
 
 #[test]
-fn the_repair_names_the_hosts_that_exist_and_the_ones_reserved() {
+fn the_repair_names_every_sensor_keyword() {
     let d = exactly_one(diagnose(
         "struct s size=5x5\n  walls mat_slot=wall height=3 -> sig.w\n",
     ));
-    let note = notes(&d).join("\n");
-    assert!(note.contains("`pressure_plate`"), "got: {note}");
-    for reserved in ["`lever`", "`button`", "`daylight`", "`observer`"] {
-        assert!(note.contains(reserved), "{reserved} missing from: {note}");
-    }
+    assert_eq!(
+        notes(&d),
+        [
+            "move the tail onto a sensor, a `lever`, `button`, `daylight`, `observer`, or \
+             `pressure_plate` line"
+        ],
+    );
 }
 
 #[test]
@@ -63,15 +65,14 @@ fn a_tail_on_the_wrong_host_naming_no_signal_is_still_one_finding() {
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
 }
 
-/// `spec/redstone` "Signal binding" lists `lever` as a sensor the surface has not reached.
 #[test]
 fn a_tail_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
     assert!(
-        !known_keywords().contains(&"lever"),
-        "`lever` became a keyword; this fixture needs another one",
+        !known_keywords().contains(&"torch"),
+        "`torch` became a keyword; this fixture needs another one",
     );
     assert_eq!(
-        codes("struct s size=5x5\n  lever id=v side=front offset=1 y=1 -> sig.w\n"),
+        codes("struct s size=5x5\n  torch id=v at=inside.front offset=1 y=1 -> sig.w\n"),
         ["E_UNKNOWN_KEYWORD"],
     );
 }
@@ -132,22 +133,27 @@ fn every_sensor_host_is_a_keyword_the_role_table_knows() {
 
 #[test]
 fn a_tail_on_a_sensor_keyword_in_the_selector_form_is_refused() {
-    let src = "struct s size=5x5\n  pressure_plate[id=nope] -> sig.b\n";
-    let d = exactly_one(diagnose(src));
-    assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
-    assert!(
-        d.primary.contains(
-            "`pressure_plate[...]` is the selector form, which carries no sensor binding"
-        ),
-        "got: {}",
-        d.primary,
-    );
-    assert_eq!(slice(src, &d), "sig.b");
-    let note = notes(&d).join("\n");
-    assert!(
-        note.contains("`door[id=<label>] opened_by=`"),
-        "got: {note}"
-    );
+    for keyword in ["pressure_plate", "lever"] {
+        let src = format!("struct s size=5x5\n  {keyword}[id=nope] -> sig.b\n");
+        let d = exactly_one(diagnose(&src));
+        assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
+        assert_eq!(
+            d.primary,
+            format!(
+                "`{keyword}[...]` is the selector form, which carries no sensor binding; only a \
+                 sensor's own line carries a `-> sig.<name>` tail"
+            ),
+        );
+        assert_eq!(slice(&src, &d), "sig.b");
+        assert_eq!(
+            notes(&d),
+            [format!(
+                "write the tail on the `{keyword}` line that declares the sensor, without \
+                 brackets; an actuator patch such as `door[id=<label>] opened_by=` is the only \
+                 binding a selector line carries"
+            )],
+        );
+    }
 }
 
 #[test]

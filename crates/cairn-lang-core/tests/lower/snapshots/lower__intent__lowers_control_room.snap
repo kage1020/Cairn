@@ -1,0 +1,270 @@
+---
+source: crates/cairn-lang-core/tests/lower/intent.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: works
+    slots:
+      floor:
+        kind: Token
+        value: floor.stone.smooth
+      wall:
+        kind: Token
+        value: cobblestone
+      roof:
+        kind: Token
+        value: spruce_stairs
+      knob:
+        kind: Token
+        value: stone_button
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: control_room
+    size:
+      w: 9
+      h: 7
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: floor
+        arguments: {}
+        intent_state: {}
+      - role:
+          kind: Walls
+        mat_slot: wall
+        arguments:
+          height:
+            kind: Int
+            value: 4
+        intent_state: {}
+      - id: entry
+        role:
+          kind: Door
+        arguments:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+        intent_state: {}
+      - role:
+          kind: Roof
+        mat_slot: roof
+        arguments:
+          kind:
+            kind: Ident
+            value: gable
+          overhang:
+            kind: Int
+            value: 1
+        intent_state: {}
+      - id: power
+        role:
+          kind: Lever
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - power
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - front
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 2
+        intent_state: {}
+      - id: sun
+        role:
+          kind: Daylight
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - day
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - back
+              - outside
+          offset:
+            kind: Int
+            value: 4
+          y:
+            kind: Int
+            value: 0
+        intent_state: {}
+      - id: bell
+        role:
+          kind: Button
+        mat_slot: knob
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - ring
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - front
+          offset:
+            kind: Int
+            value: 6
+          y:
+            kind: Int
+            value: 2
+        intent_state: {}
+      - id: watch
+        role:
+          kind: Observer
+        binding:
+          kind: DotRef
+          value:
+            - sig
+            - tick
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - left
+          offset:
+            kind: Int
+            value: 3
+          y:
+            kind: Int
+            value: 1
+        intent_state:
+          facing:
+            kind: Ident
+            value: up
+      - id: light
+        role:
+          kind: Lamp
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - back
+          offset:
+            kind: Int
+            value: 4
+          y:
+            kind: Int
+            value: 3
+          lit_by:
+            kind: DotRef
+            value:
+              - sig
+              - light
+        intent_state: {}
+      - id: chute
+        role:
+          kind: Dispenser
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - front
+              - outside
+          offset:
+            kind: Int
+            value: 1
+          y:
+            kind: Int
+            value: 1
+          fired_by:
+            kind: DotRef
+            value:
+              - sig
+              - ring
+        intent_state:
+          facing:
+            kind: Ident
+            value: out
+      - id: ram
+        role:
+          kind: Piston
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - right
+          offset:
+            kind: Int
+            value: 3
+          y:
+            kind: Int
+            value: 1
+          sticky:
+            kind: Bool
+            value: true
+        intent_state:
+          facing:
+            kind: Ident
+            value: up
+      - role:
+          kind: Piston
+        selector:
+          id:
+            kind: Ident
+            value: ram
+        arguments:
+          powered_by:
+            kind: DotRef
+            value:
+              - sig
+              - tick
+        intent_state: {}
+      - role:
+          kind: Circuit
+        arguments:
+          region:
+            kind: Ident
+            value: floor
+          void:
+            kind: Int
+            value: 2
+        intent_state: {}
+    logic:
+      - lhs:
+          - sig
+          - light
+        rhs:
+          kind: Infix
+          value:
+            primitive: and
+            lhs:
+              kind: Ref
+              value:
+                - sig
+                - power
+            rhs:
+              kind: Prefix
+              value:
+                primitive: not
+                operand:
+                  kind: Ref
+                  value:
+                    - sig
+                    - day

@@ -1,11 +1,16 @@
-//! Shipped examples through the Bedrock `.mcstructure` backend; roof stairs and doors carry states.
+//! Shipped examples through the Bedrock `.mcstructure` backend; roof stairs, doors and redstone
+//! components carry states.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag};
 use cairn_lang_formats::data_version::resolve_bedrock_target;
+use cairn_lang_formats::registry::builtin_pack;
 
-use crate::common::{block_palette, dropped_shape, latest, lower_example, note_fields, states_for};
+use crate::common::{
+    block_palette, dropped_shape, latest, lower_example, note_fields, states_for,
+    supported_versions,
+};
 
 /// An example lowered as `cairn compile --edition bedrock` lowers it.
 fn lower_bedrock(example: &str) -> BlockArrayIr {
@@ -179,4 +184,56 @@ fn themed_tower_drops_its_corner_stair_only_where_bedrock_has_no_corner_state() 
         [] as [&ParityNote; 0],
         "the latest version keeps the corner"
     );
+}
+
+#[test]
+fn control_room_components_carry_the_bedrock_states_of_each_target() {
+    for version in supported_versions(builtin_pack(Edition::Bedrock)) {
+        let out = lower_example("control-room.crn", Edition::Bedrock, Some(version));
+        let target = resolve_bedrock_target(version).expect("known target");
+        let ba = &out.structures["struct::control_room"];
+        let (root, notes) =
+            build_mcstructure_tag(ba, &target, &states_for(&target)).expect("build");
+        assert_eq!(notes, [] as [ParityNote; 0], "{version}");
+        let found: Vec<(&str, Vec<Vec<String>>)> = [
+            "minecraft:lever",
+            "minecraft:stone_button",
+            "minecraft:daylight_detector",
+            "minecraft:observer",
+            "minecraft:redstone_lamp",
+            "minecraft:sticky_piston",
+            "minecraft:dispenser",
+        ]
+        .map(|name| (name, bedrock_states_of(&root, name)))
+        .to_vec();
+        let states = |pairs: &[&str]| vec![pairs.iter().map(|&s| s.to_owned()).collect()];
+        assert_eq!(
+            found,
+            [
+                (
+                    "minecraft:lever",
+                    states(&["lever_direction=north", "open_bit=0"])
+                ),
+                (
+                    "minecraft:stone_button",
+                    states(&["button_pressed_bit=0", "facing_direction=2"]),
+                ),
+                (
+                    "minecraft:daylight_detector",
+                    states(&["redstone_signal=0"])
+                ),
+                (
+                    "minecraft:observer",
+                    states(&["minecraft:facing_direction=up", "powered_bit=0"]),
+                ),
+                ("minecraft:redstone_lamp", states(&[])),
+                ("minecraft:sticky_piston", states(&["facing_direction=1"])),
+                (
+                    "minecraft:dispenser",
+                    states(&["facing_direction=3", "triggered_bit=0"])
+                ),
+            ],
+            "{version}",
+        );
+    }
 }

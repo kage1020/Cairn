@@ -10,7 +10,7 @@ use cairn_lang_core::block_array::{
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
-pub const SHIPPED_EXAMPLES: usize = 14;
+pub const SHIPPED_EXAMPLES: usize = 15;
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
@@ -306,16 +306,27 @@ pub fn oak_door(facing: &str, hinge: &str) -> [String; 2] {
 
 /// Each chest of `array`, by its cell, as `id[properties]`, in `(x, y, z)` order.
 pub fn chests(array: &BlockArray) -> Vec<((u32, u32, u32), String)> {
+    blocks_where(array, |id| id.ends_with("chest"))
+}
+
+/// Each cell of `array` whose block id `keep` accepts, as `id[properties]` (or a bare `id`), in
+/// `(x, y, z)` order.
+pub fn blocks_where(
+    array: &BlockArray,
+    keep: impl Fn(&str) -> bool,
+) -> Vec<((u32, u32, u32), String)> {
     let mut found = Vec::new();
     for x in 0..array.dims.x {
         for y in 0..array.dims.y {
             for z in 0..array.dims.z {
                 let state = state_at(array, x, y, z);
-                if state.id.ends_with("chest") {
-                    found.push((
-                        (x, y, z),
-                        format!("{}[{}]", state.id, state.properties_text()),
-                    ));
+                if keep(&state.id) {
+                    let written = if state.properties.is_empty() {
+                        state.id.clone()
+                    } else {
+                        format!("{}[{}]", state.id, state.properties_text())
+                    };
+                    found.push(((x, y, z), written));
                 }
             }
         }

@@ -15,13 +15,13 @@ use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
-    SiteIr, StructIr, ValueWithSpan, actuator_patch_target, known_keywords,
+    SiteIr, StructIr, ValueWithSpan, actuator_patch_target,
 };
 use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation};
 use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
-/// Each actuator argument key, paired with the component keyword that carries it.
-pub use cairn_lang_core::intent::ACTUATOR_BINDINGS;
+/// The components a signal drives, each with the key its line reads it from.
+pub use cairn_lang_core::intent::Actuator;
 
 /// The component keywords that may carry a `->` sensor tail.
 pub use cairn_lang_core::intent::SENSOR_HOSTS;
@@ -152,7 +152,7 @@ struct PendingSensor {
 /// One accepted actuator binding, filed under the component it drives.
 #[derive(Debug)]
 struct BoundActuator<'a> {
-    /// The member the binding drives: itself, or the door a patch picks.
+    /// The member the binding drives: itself, or the actuator a patch picks.
     host: &'a Member,
     key: &'a str,
     driver_name: &'a DottedRef,
@@ -227,11 +227,16 @@ fn collect_member<'a>(
                         .push(diag_unknown_binding_key(m, key, vspan, scope));
                 }
             }
-            BindingClaim::Actuator(host) => {
-                if unknown_keyword || m.role.keyword() != host {
+            BindingClaim::Actuator(actuator) => {
+                if unknown_keyword || m.role.actuator() != Some(actuator) {
                     if !unknown_keyword {
-                        out.diagnostics
-                            .push(diag_misplaced_actuator(m, key, host, vspan, scope));
+                        out.diagnostics.push(diag_misplaced_actuator(
+                            m,
+                            key,
+                            actuator.keyword(),
+                            vspan,
+                            scope,
+                        ));
                     }
                 } else if let Some(dr) = named {
                     if accept_actuator(m, key, dr, vspan, candidates, scope, out) {
@@ -257,10 +262,12 @@ fn collect_member<'a>(
         if !unknown_keyword {
             // Report the fault that moving the pair out of the brackets would not fix.
             out.diagnostics.push(match claim {
-                BindingClaim::Actuator(host) if host == m.role.keyword() => {
+                BindingClaim::Actuator(actuator) if m.role.actuator() == Some(actuator) => {
                     diag_binding_inside_selector(m, key, vspan, scope)
                 }
-                BindingClaim::Actuator(host) => diag_misplaced_actuator(m, key, host, vspan, scope),
+                BindingClaim::Actuator(actuator) => {
+                    diag_misplaced_actuator(m, key, actuator.keyword(), vspan, scope)
+                }
                 BindingClaim::UnreadKey => diag_unknown_binding_key(m, key, vspan, scope),
             });
         }
@@ -344,7 +351,7 @@ fn patch_candidates(members: &[Member]) -> Vec<&Member> {
     out
 }
 
-/// The member an actuator binding on `m` drives: `m`, or the door its brackets pick.
+/// The member an actuator binding on `m` drives: `m`, or the actuator its brackets pick.
 fn actuator_host<'a>(
     m: &'a Member,
     candidates: &[&'a Member],
@@ -372,16 +379,16 @@ fn signal_named_by(value: &Value) -> Option<&DottedRef> {
 /// Why a `key=value` pair is read as a binding the author meant to write.
 #[derive(Debug, Clone, Copy)]
 enum BindingClaim {
-    /// The key is one of [`ACTUATOR_BINDINGS`]; carries the component it pairs with.
-    Actuator(&'static str),
+    /// The key is the one an [`Actuator`] reads; carries that actuator.
+    Actuator(Actuator),
     /// A signal value under a key nothing reads.
     UnreadKey,
 }
 
 /// Whether a pair claims to be a binding, by its key or by its signal value.
 fn binding_claim(key: &str, named: Option<&DottedRef>) -> Option<BindingClaim> {
-    if let Some((_, host)) = ACTUATOR_BINDINGS.iter().find(|(k, _)| *k == key) {
-        return Some(BindingClaim::Actuator(host));
+    if let Some(actuator) = Actuator::reading(key) {
+        return Some(BindingClaim::Actuator(actuator));
     }
     named.map(|_| BindingClaim::UnreadKey)
 }
@@ -541,9 +548,7 @@ fn diag_binding_inside_selector(
     scope: ScopeRef<'_>,
 ) -> Diagnostic {
     debug_assert!(
-        ACTUATOR_BINDINGS
-            .iter()
-            .any(|(k, host)| *k == key && *host == member.role.keyword()),
+        member.role.actuator().map(Actuator::key) == Some(key),
         "the `Fix:` below rebuilds the line with this key on this member, which only \
          compiles for a key `spec/redstone` \"Signal binding\" pairs with it",
     );
@@ -574,7 +579,6 @@ fn diag_misplaced_actuator(
     vspan: &ValueWithSpan,
     scope: ScopeRef<'_>,
 ) -> Diagnostic {
-    let known = known_keywords().contains(&host);
     Diagnostic::new(
         DiagnosticCode::LogicMisplacedBinding,
         vspan.span.clone(),
@@ -586,18 +590,12 @@ fn diag_misplaced_actuator(
         ),
     )
     .with_note(member.span.clone(), "declared here")
-    .with_footer(if known {
-        format!("Fix: move the `{key}=` argument onto the `{host}` it drives.")
-    } else {
-        format!(
-            "Fix: `{host}` is not a keyword the surface accepts yet, so `{key}=` has no \
-             member it can sit on. Drive a `door` with `opened_by=` instead, or drop the \
-             argument until `{host}` lands.",
-        )
-    })
+    .with_footer(format!(
+        "Fix: move the `{key}=` argument onto the `{host}` it drives."
+    ))
 }
 
-/// An actuator patch whose selector picks no single door, anchored on its `id=` when it has one.
+/// An actuator patch whose selector picks no single actuator, anchored on its `id=` when it has one.
 fn diag_unresolved_patch(
     member: &Member,
     key: &str,
@@ -702,7 +700,10 @@ fn diag_unknown_binding_key(
     vspan: &ValueWithSpan,
     scope: ScopeRef<'_>,
 ) -> Diagnostic {
-    let keys: Vec<&str> = ACTUATOR_BINDINGS.iter().map(|(k, _)| *k).collect();
+    let keys: Vec<&str> = Actuator::ALL
+        .iter()
+        .map(|actuator| actuator.key())
+        .collect();
     let diag = Diagnostic::new(
         DiagnosticCode::LogicUnknownBindingKey,
         vspan.span.clone(),

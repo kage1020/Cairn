@@ -156,6 +156,13 @@ impl MemberRole {
                 | Self::Stair
                 | Self::Level
                 | Self::PressurePlate
+                | Self::Lever
+                | Self::Button
+                | Self::Daylight
+                | Self::Observer
+                | Self::Lamp
+                | Self::Piston
+                | Self::Dispenser
                 | Self::Chest
                 | Self::Circuit
                 | Self::RawBlock
@@ -174,6 +181,13 @@ impl MemberRole {
                 | Self::Stair
                 | Self::Level
                 | Self::PressurePlate
+                | Self::Lever
+                | Self::Button
+                | Self::Daylight
+                | Self::Observer
+                | Self::Lamp
+                | Self::Piston
+                | Self::Dispenser
                 | Self::Chest
                 | Self::Circuit
                 | Self::RawBlock
@@ -196,6 +210,13 @@ impl MemberRole {
             Self::Stair => "stair",
             Self::Level => "level",
             Self::PressurePlate => "pressure_plate",
+            Self::Lever => "lever",
+            Self::Button => "button",
+            Self::Daylight => "daylight",
+            Self::Observer => "observer",
+            Self::Lamp => "lamp",
+            Self::Piston => "piston",
+            Self::Dispenser => "dispenser",
             Self::Chest => "chest",
             Self::Circuit => "circuit",
             Self::RawBlock => "raw_block",

@@ -8,7 +8,8 @@ Every file lives in
 The [Tutorial](/tutorial/) walks through the four in the first group.
 
 > Every file here compiles with the current compiler. Redstone does not reach compiled output yet,
-> so `redstone-door.crn` builds without its circuit.
+> so `redstone-door.crn` and `control-room.crn` place their sensors and actuators with no circuit
+> between them.
 
 ## Start here
 
@@ -40,6 +41,7 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 | File | Shows |
 |---|---|
 | [`storeroom.crn`](https://github.com/kage1020/Cairn/blob/main/examples/storeroom.crn) | `chest` against the walls: each faces away from its wall, two side by side pair, and `size=single` keeps two apart. |
+| [`control-room.crn`](https://github.com/kage1020/Cairn/blob/main/examples/control-room.crn) | Every sensor and actuator against the walls: a lever and a button hung facing away from theirs, a daylight detector, an observer and a sticky piston turned upward, a lamp, a dispenser facing out, and the piston bound through a patch. |
 | [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`: a sand bed painted with a material, then water poured around what stands in the tank, waterlogging a pane divider and a chest while `waterlogged=false` keeps another dry. |
 
 ## Edge cases

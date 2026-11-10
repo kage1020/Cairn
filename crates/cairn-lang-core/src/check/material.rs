@@ -46,6 +46,7 @@ enum WithoutAMaterial {
     PaintsNothing,
     Carves,
     PaintsAFallback,
+    BuildsItsOwnBlock,
     NamesItsMaterialElsewhere,
     PutsNothingDown,
 }
@@ -62,7 +63,15 @@ fn without_a_material(member: &Member) -> WithoutAMaterial {
         | MemberRole::Stair
         | MemberRole::Door
         | MemberRole::PressurePlate
+        | MemberRole::Button
         | MemberRole::Chest => WithoutAMaterial::PaintsAFallback,
+        // Each is built from its own tokens, which no `mat_slot=` chooses among.
+        MemberRole::Lever
+        | MemberRole::Daylight
+        | MemberRole::Observer
+        | MemberRole::Lamp
+        | MemberRole::Piston
+        | MemberRole::Dispenser => WithoutAMaterial::BuildsItsOwnBlock,
         // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`, and `mat=`, whose absence is
         // `E_INVALID_MEMBER`.
         MemberRole::Connect | MemberRole::RawBlock | MemberRole::RawFill => {

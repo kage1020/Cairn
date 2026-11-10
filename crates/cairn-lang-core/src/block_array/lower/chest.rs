@@ -8,11 +8,9 @@ use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, ident_or_ignore};
-use crate::block_array::joins::Face;
-use crate::block_array::openings::WallSide;
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::fixture::{Anchor, Fixture, Refusal, fixture_cell, outside_the_array};
+use super::fixture::{Fixture, Refusal, Toward, fixture_cell, outside_the_array, written_facing};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
 use super::waterlogged::{
@@ -31,51 +29,6 @@ const CHEST: Fixture = Fixture {
     keyword: "chest",
     noun: "chest",
 };
-
-/// The values `facing=` takes, as a finding lists them.
-const FACINGS: &str = "in, out, left, right";
-
-/// Which way a chest's front looks, relative to the wall it stands by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Toward {
-    /// Into the struct.
-    In,
-    /// Out of the struct.
-    Out,
-    /// Along the wall toward `offset=0`.
-    Left,
-    /// Along the wall away from `offset=0`.
-    Right,
-}
-
-impl Toward {
-    fn from_ident(name: &str) -> Option<Self> {
-        Some(match name {
-            "in" => Self::In,
-            "out" => Self::Out,
-            "left" => Self::Left,
-            "right" => Self::Right,
-            _ => return None,
-        })
-    }
-
-    /// The face a chest by `side` looks toward.
-    fn face(self, side: WallSide) -> Face {
-        // The wall's outward normal, and the way its `offset=` grows.
-        let (out, right) = match side {
-            WallSide::Front => (Face::South, Face::East),
-            WallSide::Back => (Face::North, Face::West),
-            WallSide::Left => (Face::West, Face::South),
-            WallSide::Right => (Face::East, Face::North),
-        };
-        match self {
-            Self::In => out.opposite(),
-            Self::Out => out,
-            Self::Left => right.opposite(),
-            Self::Right => right,
-        }
-    }
-}
 
 /// The `facing=`, `size=` and `waterlogged=` a chest's line writes, read before anything can
 /// refuse it.
@@ -105,7 +58,7 @@ pub(super) fn fill_chest(
     };
     let facing = read(
         "facing",
-        "`in`, `out`, `left` or `right`",
+        Toward::HORIZONTAL_WORDS,
         "the chest faces away from the wall it stands by",
     );
     let size = read(
@@ -151,15 +104,7 @@ fn place_chest(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Refusal> {
-    let toward = match written.facing.map(|name| (name, Toward::from_ident(name))) {
-        None => Ok(None),
-        Some((_, Some(toward))) => Ok(Some(toward)),
-        Some((other, None)) => Err(Box::new(diag_invalid_member(
-            member,
-            format!("unknown chest `facing={other}`"),
-            vec![format!("`facing=` takes one of {FACINGS}")],
-        ))),
-    };
+    let toward = written_facing(CHEST, member, written.facing, &Toward::HORIZONTAL);
     let single = match written.size {
         None => Ok(false),
         Some("single") => Ok(true),
@@ -193,10 +138,7 @@ fn place_chest(
     };
     let side = anchor.side();
     let facing = toward
-        .unwrap_or(match anchor {
-            Anchor::Inside(_) => Toward::In,
-            Anchor::Outside(_) => Toward::Out,
-        })
+        .unwrap_or_else(|| Toward::away_from_the_wall(anchor))
         .face(side);
     let mut properties = IndexMap::new();
     properties.insert("facing".to_owned(), facing.as_str().to_owned());
@@ -246,32 +188,4 @@ fn chest_block_id(
         diagnostics,
     )
     .map(Some)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Toward;
-    use crate::block_array::openings::WallSide;
-
-    /// `out` is each wall's outward normal and `right` the way its `offset=` grows.
-    #[test]
-    fn a_chest_turns_by_the_walls_own_axes() {
-        for side in [
-            WallSide::Front,
-            WallSide::Back,
-            WallSide::Left,
-            WallSide::Right,
-        ] {
-            let flat = |toward: Toward| {
-                let (dx, _, dz) = toward.face(side).step();
-                (dx, dz)
-            };
-            assert_eq!(flat(Toward::Out), side.outward_normal(), "{side:?}");
-            assert_eq!(flat(Toward::Right), side.along(), "{side:?}");
-            let (dx, dz) = side.outward_normal();
-            assert_eq!(flat(Toward::In), (-dx, -dz), "{side:?}");
-            let (dx, dz) = side.along();
-            assert_eq!(flat(Toward::Left), (-dx, -dz), "{side:?}");
-        }
-    }
 }

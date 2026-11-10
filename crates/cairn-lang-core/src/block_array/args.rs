@@ -151,12 +151,12 @@ pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
 /// The note [`diag_deferred_member_reason`] gives, listing the roles lowering draws.
 const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls, fill \
      (from=x,y,z to=x,y,z with mat_slot= or fluid=water), door, window, \
-     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate and chest \
-     (at=<side>.outside|inside.<side>), raw_block (mat=<namespace:path> at=x,y,z) and \
-     raw_fill (mat=<namespace:path> from=x,y,z to=x,y,z), and level y=N grouping, and \
-     recognises circuit region=<label> void=<N> (u32, N>=1) plus door[id=<name>] \
-     opened_by=sig.<name> actuator patches; other roles will be added as their lowering rules \
-     are spec'd";
+     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate, lever, button, \
+     daylight, observer, lamp, piston, dispenser and chest (at=<side>.outside|inside.<side>), \
+     raw_block (mat=<namespace:path> at=x,y,z) and raw_fill (mat=<namespace:path> from=x,y,z \
+     to=x,y,z), and level y=N grouping, and recognises circuit region=<label> void=<N> (u32, \
+     N>=1) plus actuator patches such as door[id=<name>] opened_by=sig.<name>; other roles will \
+     be added as their lowering rules are spec'd";
 
 /// The `W_DEFERRED_MEMBER` for a member lowering does not draw, with `reason` as its primary and
 /// the note listing the roles lowering draws.

@@ -298,7 +298,7 @@ fn opened_by_on_a_window_names_the_component_it_belongs_to() {
 }
 
 #[test]
-fn the_three_keys_with_no_keyword_to_host_them_say_so() {
+fn each_actuator_key_on_a_door_names_the_component_it_drives() {
     for (key, host) in [
         ("powered_by", "piston"),
         ("lit_by", "lamp"),
@@ -309,17 +309,19 @@ fn the_three_keys_with_no_keyword_to_host_them_say_so() {
              door id=front side=front at=center {key}=sig.a\n",
         )));
         let d = only(&out, DiagnosticCode::LogicMisplacedBinding);
-        assert!(
-            d.primary.contains(&format!("binds a signal to a `{host}`")),
-            "{}",
+        assert_eq!(
             d.primary,
+            format!(
+                "struct=gate: `{key}=` binds a signal to a `{host}`, and this member is a `door`"
+            ),
         );
-        assert!(
-            d.notes.iter().any(|n| n.message.contains(&format!(
-                "`{host}` is not a keyword the surface accepts yet"
-            ))),
-            "{:#?}",
-            d.notes,
+        let notes: Vec<&str> = d.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notes,
+            [
+                "declared here".to_owned(),
+                format!("Fix: move the `{key}=` argument onto the `{host}` it drives."),
+            ],
         );
     }
 }
@@ -343,21 +345,6 @@ fn a_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
         "  widget id=w1 lit_by=sig.a\n",
     )));
     assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
-}
-
-#[test]
-fn an_unknown_keyword_that_matches_a_future_host_is_still_skipped() {
-    // `lamp` names `lit_by=`'s host but is not a keyword, so only the role guard skips it.
-    let out = synth_source(&gate_source(concat!(
-        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
-        "  lamp id=l1 lit_by=sig.a\n",
-    )));
-    assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
-    assert!(
-        out.scoped.scopes[0].ir.outputs.is_empty(),
-        "a member the role table does not know carries no port: {:#?}",
-        out.scoped.scopes[0].ir.outputs,
-    );
 }
 
 // --- keys that read like a binding and are not one ----------------------

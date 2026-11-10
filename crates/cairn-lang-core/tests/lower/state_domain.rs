@@ -47,6 +47,14 @@ const PINNED: Table = &[
         ],
     ),
     ("minecraft:oak_log", &[("axis", &["x", "y", "z"])]),
+    (
+        "minecraft:oak_button",
+        &[
+            ("face", &["floor", "wall", "ceiling"]),
+            ("facing", &["north", "south", "west", "east"]),
+            ("powered", &["true", "false"]),
+        ],
+    ),
     ("minecraft:oak_planks", &[]),
     (
         "minecraft:oak_stairs",
@@ -342,6 +350,48 @@ fn a_door_whose_material_is_outside_its_block_is_not_set_in_the_wall() {
         only_structure(&lowered_at(walled, &Tables::pinned())),
         "no default door stands in the wall",
     );
+}
+
+#[test]
+fn a_button_whose_material_is_outside_its_block_is_not_hung() {
+    let walled = "theme t:\n  slot wall -> @cobblestone\n  slot knob -> @oak_log[axis=q]\n\n\
+                  struct s size=5x5\n  walls mat_slot=wall height=3\n";
+    let source = format!("{walled}  button at=inside.back offset=1 y=1 mat_slot=knob\n");
+    let out = lowered_at(&source, &Tables::pinned());
+    assert_eq!(
+        findings(&source, &out),
+        [(
+            DiagnosticCode::StateDomain,
+            "@oak_log[axis=q]",
+            "`minecraft:oak_log` takes no `axis=q` at test 2.0; `axis` takes x, y, z",
+            vec![
+                "did you mean `axis=x`?",
+                "correct the state literal to a value test 2.0 takes, or leave `axis` out for \
+                 the block's default",
+            ],
+        )],
+    );
+    assert_eq!(
+        only_structure(&out),
+        only_structure(&lowered_at(walled, &Tables::pinned())),
+        "no default button hangs on the wall",
+    );
+
+    // A literal the target takes falls back to the default button, a log being no button.
+    let source = source.replace("axis=q", "axis=x");
+    let out = lowered_at(&source, &Tables::pinned());
+    let found: Vec<(DiagnosticCode, &str)> = findings(&source, &out)
+        .into_iter()
+        .map(|(code, at, ..)| (code, at))
+        .collect();
+    assert_eq!(
+        found,
+        [(DiagnosticCode::IncompatibleMaterial, "@oak_log[axis=x]")]
+    );
+    assert!(painted(
+        &out,
+        "minecraft:oak_button[face=wall,facing=south]"
+    ));
 }
 
 #[test]

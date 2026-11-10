@@ -14,7 +14,7 @@ pub fn cargo_bin() -> PathBuf {
 }
 
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
-pub const SHIPPED_EXAMPLES: usize = 14;
+pub const SHIPPED_EXAMPLES: usize = 15;
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {

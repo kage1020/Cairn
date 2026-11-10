@@ -635,6 +635,7 @@ const DEFER_FREE_EXAMPLES: &[(&str, &str)] = &[
     ("cottage.crn", "cottage.nbt"),
     ("themed-tower.crn", "keep.nbt"),
     ("redstone-door.crn", "gatehouse.nbt"),
+    ("control-room.crn", "control_room.nbt"),
     ("roof-shed.crn", "roof_shed.nbt"),
     ("roof-hip.crn", "roof_hip.nbt"),
     ("roof-flat.crn", "roof_flat.nbt"),

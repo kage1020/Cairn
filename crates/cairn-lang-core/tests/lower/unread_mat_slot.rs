@@ -46,6 +46,30 @@ const FIXTURES: &[(&str, &str)] = &[
         "raw_fill",
         "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_fill mat=minecraft:stone from=1,1,1 to=2,1,2 mat_slot=%SLOT%\n",
     ),
+    (
+        "lever",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  lever at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+    ),
+    (
+        "daylight",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  daylight at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+    ),
+    (
+        "observer",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  observer at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+    ),
+    (
+        "lamp",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  lamp at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+    ),
+    (
+        "piston",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  piston at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+    ),
+    (
+        "dispenser",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  dispenser at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+    ),
     // The control: a `window` reads its `mat_slot=`, so it builds differently under the two names.
     (
         "window",

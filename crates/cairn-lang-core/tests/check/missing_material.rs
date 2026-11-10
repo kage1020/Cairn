@@ -268,6 +268,17 @@ const PAINTERS: &[(&str, &str, &str)] = &[
         "pressure_plate id=p at=inside.front offset=1 y=0",
         "",
     ),
+    ("lever", "lever id=l at=inside.front offset=1 y=0", ""),
+    ("button", "button id=b at=inside.front offset=1 y=0", ""),
+    ("daylight", "daylight id=d at=inside.front offset=1 y=0", ""),
+    ("observer", "observer id=o at=inside.front offset=1 y=0", ""),
+    ("lamp", "lamp id=l at=inside.front offset=1 y=0", ""),
+    ("piston", "piston id=p at=inside.front offset=1 y=0", ""),
+    (
+        "dispenser",
+        "dispenser id=d at=inside.front offset=1 y=0",
+        "",
+    ),
     ("chest", "chest id=c at=inside.front offset=1 y=0", ""),
     // A raw member names its block with `mat=` instead of a slot.
     ("raw_block", "raw_block mat=minecraft:stone at=1,1,1", ""),
@@ -356,6 +367,13 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Roof
             | MemberRole::Stair
             | MemberRole::PressurePlate
+            | MemberRole::Lever
+            | MemberRole::Button
+            | MemberRole::Daylight
+            | MemberRole::Observer
+            | MemberRole::Lamp
+            | MemberRole::Piston
+            | MemberRole::Dispenser
             | MemberRole::Chest
             | MemberRole::RawBlock
             | MemberRole::RawFill => true,
@@ -378,6 +396,13 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         MemberRole::Stair,
         MemberRole::Level,
         MemberRole::PressurePlate,
+        MemberRole::Lever,
+        MemberRole::Button,
+        MemberRole::Daylight,
+        MemberRole::Observer,
+        MemberRole::Lamp,
+        MemberRole::Piston,
+        MemberRole::Dispenser,
         MemberRole::Chest,
         MemberRole::Circuit,
         MemberRole::RawBlock,

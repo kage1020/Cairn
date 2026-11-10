@@ -225,8 +225,9 @@ lowers, with no target, and reports only the findings every target that reads th
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
 family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)), a `door` bound
-outside the door family ([Syntax §5.4](/spec/syntax/#54-selectors)), or a `chest` bound outside the
-chest family ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)).
+outside the door family ([Syntax §5.4](/spec/syntax/#54-selectors)), a `chest` bound outside the
+chest family ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)),
+or a `button` bound outside the button family ([Redstone §14.2](/spec/redstone/#142-signal-binding)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
@@ -248,11 +249,11 @@ from the `severity` field rather than from the first letter.
 something other than a material token resolves. A `floor` that names it is left air; a `fill` that
 names it paints none of its box; a `walls` that names it is not built and takes up no rows, so a
 `door` or `window` cut into it is deferred; a `window` that names it is not cut, so its wall stays;
-and a `roof`, eave `stair`, `door`, `pressure_plate` or `chest` that names it is built from its
-default block. Were it a warning, a theme whose slots are all mistyped would still build at exit 0
-every scope that keeps something to draw, such as a `roof`: shorter than asked, with no floor and no
-walls, and only default blocks, less any eave `stair`, `pressure_plate` or `chest` set higher than
-the shorter structure reaches.
+and a `roof`, eave `stair`, `door`, `pressure_plate`, `button` or `chest` that names it is built
+from its default block. Were it a warning, a theme whose slots are all mistyped would still build at
+exit 0 every scope that keeps something to draw, such as a `roof`: shorter than asked, with no floor
+and no walls, and only default blocks, less any eave `stair`, `chest`, sensor or actuator set higher
+than the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member earns
 both: the key is absent for the first and present-but-unusable for the second. They have different
@@ -267,8 +268,8 @@ and a `fill` with no `fluid=` reach the palette through the applied theme's slot
 default block, so a bare one contributes no voxel. A `fill` with a `fluid=` pours that fluid and is
 not reported. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
 reported; that is how a narrow slit is punched through a wall without choosing a species for it. A
-`roof`, `stair`, `door`, `pressure_plate` or `chest` paints a default block and is not reported
-either, and a `raw_block` or `raw_fill` names its block with `mat=`, whose absence is
+`roof`, `stair`, `door`, `pressure_plate`, `button` or `chest` paints a default block and is not
+reported either, and a `raw_block` or `raw_fill` names its block with `mat=`, whose absence is
 `E_INVALID_MEMBER`.
 `cairn check` raises it, before any lowering, and it needs no theme: a module that declares none is
 still told which of its members name no material.
@@ -305,24 +306,24 @@ without a pack. A front end with no target (the language server, or a `cairn che
 ([§11.3](#113-error-vs-warning)).
 
 The warning says how the member degrades. A `floor` leaves its cells air, a `fill` paints none of
-its box, and a `roof`, eave `stair`, `door`, `pressure_plate` or `chest` is built from its default
-block. A `walls` is not built and takes up no rows, so a `door` or `window` cut into it is deferred.
-A `window` is not cut, so its wall stays, and a port on it is refused with it
+its box, and a `roof`, eave `stair`, `door`, `pressure_plate`, `button` or `chest` is built from its
+default block. A `walls` is not built and takes up no rows, so a `door` or `window` cut into it is
+deferred. A `window` is not cut, so its wall stays, and a port on it is refused with it
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
 all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
 or takes up rows, so no `door` or `window` is cut and the structure is shorter than asked. A `floor`
 leaves its cells air, a `fill` with a `mat_slot=` paints none of its box, and a `roof` is still
-built from its default block, as is an eave `stair`, `pressure_plate` or `chest` that still fits the
-shorter structure. A `raw_block` or `raw_fill` needs no theme and is built where the shorter
-structure still holds it. Any of these set higher than it reaches is deferred. It is judged per
-scope: a scope with no theme bound that reads no `mat_slot=` is not reported, whatever the rest of
-the module reads. A `mat_slot=` on a keyword that reads none, such as a `level`'s, is not a read.
-Nor, for this warning, is one on a member a `level` drops ([Compilation Model
-§4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints nothing whatever
-the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body is
-`E_UNSUPPORTED_NESTING`.
+built from its default block, as is an eave `stair`, `pressure_plate`, `button` or `chest` that
+still fits the shorter structure. Any other sensor or actuator, a `raw_block` and a `raw_fill` need
+no theme and are built where the shorter structure still holds them. Any of these set higher than it
+reaches is deferred. It is judged per scope: a scope with no theme bound that reads no `mat_slot=`
+is not reported, whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none,
+such as a `level`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
+([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
+nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
+is `E_UNSUPPORTED_NESTING`.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A
@@ -507,8 +508,8 @@ under a `level` that is not placed, or an eave `stair` beside a `roof` that draw
 whose line writes what the pass does not lower yet: a `floor` or `roof` under a raised `level`, a
 `window` with `repeat=` above 1 and a `sym=` that is `true` or unreadable, or a `pressure_plate`
 whose slot binds a state literal. And part of a member that is built: the mirror of a `sym=true`
-window that would overlap it, or the states a `mat_slot=` binding carries onto a roof, door or
-chest that takes its own. The `place` and `connect` rows of a site it covers are in [Components, Editing, and
+window that would overlap it, or the states a `mat_slot=` binding carries onto a roof, door, chest
+or button that takes its own. The `place` and `connect` rows of a site it covers are in [Components, Editing, and
 Multi-building](/spec/components-editing-sites/).
 
 `E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
@@ -528,10 +529,11 @@ overhangs as its line says, and an unreadable value counts as the default its `W
 puts in its place. A `roof` whose `kind=` or `slope_to=` does not read may rise as far as any roof
 on its footprint, and `walls` under a `level` that is not placed may hold any row, so a member only
 they could hold is deferred to them. A `circuit` line that reserves no region and an actuator patch
-that binds no door are refused the same way. [Redstone §14.2](/spec/redstone/#142-signal-binding)
-lists the lines that put a `pressure_plate` nowhere, which put a `chest` nowhere too, and for a
-plate the drop reaches past the block array as well: its `->` binding is still read, so its signal
-stays in the netlist with no plate to drive it, and the finding says so in a note.
+that binds no component are refused the same way. [Redstone §14.2](/spec/redstone/#142-signal-binding)
+lists the lines that put a `pressure_plate` nowhere, which put a `chest` and every other sensor or
+actuator but `door` nowhere too, and for a sensor or actuator the drop reaches past the block array
+as well: its binding is still read, so its signal stays in the netlist with no component behind it,
+and the finding says so in a note.
 
 A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with a
 note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws nothing,
@@ -618,8 +620,8 @@ Beyond the codes above, lint covers:
 
 Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
 and no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
-holds only in part: a door, window, eave stair or pressure plate its own line puts outside its
-struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
+holds only in part: a door, window, eave stair, chest, sensor or actuator its own line puts outside
+its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
 keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
 `E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
 pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other
@@ -635,14 +637,14 @@ congestion is `E_ROUTE_CONGESTION`, which only the Internal-tier `cairn synth
 A diagnostic that rejects a name against a closed vocabulary attaches the nearest candidate when one
 sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2 for 4–6, and
 ≤ 3 beyond. The names are a keyword, an argument key, a `mat_slot=` name, a place, def, theme or
-port reference, an abstract token, a `pressure_plate` or `chest` side, a block id, a block state's
-property or value, and a `--target` version. The note reads ``did you mean `X`?``, with `X` written
-as the line would be (`home1.entry` for a port, `at=front.outside` for a plate or a chest, `axis=x`
-for a state). `E_UNKNOWN_ID` instead names the target's nearest block, or, when another version of
-the edition declares the ID, that version. The nearest block, and the nearest pair of
-`E_STATE_DOMAIN`, is carried as `data.suggestion` too ([§11.2](#112-machine-readable-payload)); on a
-state lowering derived, `E_STATE_DOMAIN` carries it there alone, since the source has no literal to
-correct.
+port reference, an abstract token, the side in the `at=` of a `pressure_plate`, `chest` or other
+member set by a wall, a block id, a block state's property or value, and a `--target` version. The
+note reads ``did you mean `X`?``, with `X` written as the line would be (`home1.entry` for a port,
+`at=front.outside` for a member set by a wall, `axis=x` for a state). `E_UNKNOWN_ID` instead names
+the target's nearest block, or, when another version of the edition declares the ID, that version.
+The nearest block, and the nearest pair of `E_STATE_DOMAIN`, is carried as `data.suggestion` too
+([§11.2](#112-machine-readable-payload)); on a state lowering derived, `E_STATE_DOMAIN` carries it
+there alone, since the source has no literal to correct.
 
 An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
 ...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
@@ -783,8 +785,8 @@ versions of the edition whose tables take the pair, oldest first; each is absent
 
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
-mapping is what to correct rather than the source line. `required` is `stair`, `door` or `chest`,
-named rather than implied so that a further family is a new value here, not a new code.
+mapping is what to correct rather than the source line. `required` is `stair`, `door`, `chest` or
+`button`, named rather than implied so that a further family is a new value here, not a new code.
 
 `W_TRUTH_TABLE_PARTIAL.missing` is a **sample** rather than the set: twenty inputs have a million
 combinations. Take the count from `2^inputs - covered`, never from `missing.len()`. `inputs` is
@@ -828,8 +830,8 @@ shipped version declares, are not deferred: each stands in for the block a targe
 it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no
 `W_PHASE_CONFLICT` between it and another block, and no `W_PALETTE_TOO_LARGE` that only it could
 cause, since the palette is counted without it. A stand-in overwritten by air, or air by a stand-in,
-is still a `W_PHASE_CONFLICT`, since no pack names air. A `door`, `pressure_plate` or `chest` built
-from its default block takes the pack's door, plate or chest, so it is such a block too, and a
+is still a `W_PHASE_CONFLICT`, since no pack names air. A `door`, `chest`, sensor or actuator built
+from its default block takes the block the pack names for it, so it is such a block too, and a
 `W_WALKWAY_BLOCKED` note says "a block" where a pinned check would name it. `E_UNKNOWN_ID`,
 `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`, `E_PARITY_UNSUPPORTED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the
 pack's verdicts and are not raised, nor are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned
@@ -978,8 +980,8 @@ Only the host is asked here, because only the host can be asked without the Logi
 tail's value names a signal, and whether that signal is driven twice or by nobody, are questions the
 redstone pipeline answers ([§14.2](/spec/redstone/#142-signal-binding)). The host is asked first, so
 a tail on a member that cannot emit earns this code and not also the value's. A member whose keyword
-is not in the known-keyword table is left to `E_UNKNOWN_KEYWORD`, which is why `lever -> sig.a`, a
-sensor this specification lists and the surface has not reached, is not told its host is wrong.
+is not in the known-keyword table is left to `E_UNKNOWN_KEYWORD`, which is why `torch -> sig.a` is
+told its keyword is unknown and not that its host cannot emit.
 
 ## 11.4 Constraint catalog
 

@@ -74,6 +74,14 @@ theme exact_oak:
 | `@door.default` | `mat_slot=` で割り当てていない `door` が置くドアのブロック |
 | `@chest.default` | `mat_slot=` で割り当てていない `chest` が置くチェストのブロック |
 | `@pressure_plate.default` | `mat_slot=` で割り当てていない `pressure_plate` が置くブロック |
+| `@lever.default` | `lever` が壁に掛けるレバー |
+| `@button.default` | `mat_slot=` で割り当てていない `button` が壁に掛けるボタン |
+| `@daylight.default` | `daylight` が置く日照センサー |
+| `@observer.default` | `observer` が置くオブザーバー |
+| `@lamp.default` | `lamp` が置くレッドストーンランプ |
+| `@piston.default` | `piston` が置くピストン |
+| `@piston.sticky` | `sticky=true` の `piston` が置く粘着ピストン |
+| `@dispenser.default` | `dispenser` が置くディスペンサー |
 
 tier-1 のトークンが解決するブロックは **tier-2** で、Evolving です。ターゲットごとにカタログで決まり、リリースによって変わることがあります。カタログにトークンを足しても何も壊れません。トークンの名前を変えたり廃止したりするのは Stable な面の破壊的変更なので、非推奨期間のあいだは古いトークンも `W_DEPRECATED` 付きで解決し続けます。正規ブロックトークンは tier-1 でも tier-2 でもありません。[§7.3](#73-バージョンとエディションをまたぐ対応付け) の対応付けを通じてブロックを指す名前で、ターゲットが受け付ける名前はそのレジストリパックで決まり、[互換性ティア](/ja/spec/compatibility/#evolving)で Evolving と定めています。
 

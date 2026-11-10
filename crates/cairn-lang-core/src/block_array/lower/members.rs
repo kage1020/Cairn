@@ -1,5 +1,7 @@
 //! The paint set of a body: its members, the phase that paints each, and the material each reads.
 
+use std::collections::HashSet;
+
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 use crate::resolve::ScopeResolution;
@@ -40,6 +42,8 @@ pub(super) struct StructCtx<'a> {
     pub(super) wall_column: WallColumn,
     /// The struct as written, which a member's own line is judged against.
     pub(super) written: Written,
+    /// The span start of each member a well-formed actuator patch binds a signal to.
+    pub(super) patched: HashSet<usize>,
 }
 
 impl StructCtx<'_> {
@@ -129,7 +133,15 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         }
         MemberRole::Roof | MemberRole::Stair => MemberDisposition::Paints(Phase::Envelope),
         MemberRole::Door | MemberRole::Window => MemberDisposition::Paints(Phase::Openings),
-        MemberRole::PressurePlate | MemberRole::Chest => MemberDisposition::Paints(Phase::Fixtures),
+        MemberRole::PressurePlate
+        | MemberRole::Lever
+        | MemberRole::Button
+        | MemberRole::Daylight
+        | MemberRole::Observer
+        | MemberRole::Lamp
+        | MemberRole::Piston
+        | MemberRole::Dispenser
+        | MemberRole::Chest => MemberDisposition::Paints(Phase::Fixtures),
         MemberRole::RawBlock | MemberRole::RawFill => MemberDisposition::Paints(Phase::Raw),
         MemberRole::Circuit => MemberDisposition::Reserves,
         MemberRole::Place | MemberRole::Connect | MemberRole::Other(_) => {
@@ -231,6 +243,13 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::Window
         | MemberRole::Stair
         | MemberRole::PressurePlate
+        | MemberRole::Lever
+        | MemberRole::Button
+        | MemberRole::Daylight
+        | MemberRole::Observer
+        | MemberRole::Lamp
+        | MemberRole::Piston
+        | MemberRole::Dispenser
         | MemberRole::Chest
         | MemberRole::Circuit
         | MemberRole::RawBlock

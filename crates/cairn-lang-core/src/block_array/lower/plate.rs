@@ -1,13 +1,13 @@
 //! Placing a `pressure_plate` member.
 
-use crate::diagnostic::{Diagnostic, DiagnosticNote};
+use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::diag_deferred_member_reason;
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::fixture::{Fixture, Refusal, fixture_cell, outside_the_array};
+use super::fixture::{Fixture, Refusal, fixture_cell, note_unbuilt_binding, outside_the_array};
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
 
 /// Catalog token a `pressure_plate`'s default material comes from; the pack spells it per edition.
@@ -23,23 +23,6 @@ const PLATE: Fixture = Fixture {
     noun: "plate",
 };
 
-/// The note on every plate left unplaced that carries a `->` binding.
-const BINDING_STILL_READ: &str =
-    "its signal binding still reaches the netlist, with no plate placed to drive it";
-
-/// `refusal`, with [`BINDING_STILL_READ`] after its notes when the plate has a `->` binding.
-fn with_binding_note(member: &Member, refusal: Refusal) -> Diagnostic {
-    let mut refusal = *refusal;
-    // Synthesis reads the binding off the member line, never the block array.
-    if member.binding.is_some() {
-        refusal.notes.push(DiagnosticNote {
-            span: None,
-            message: BINDING_STILL_READ.to_owned(),
-        });
-    }
-    refusal
-}
-
 /// Paint a `pressure_plate` fixture as a single plate voxel.
 pub(super) fn fill_pressure_plate(
     member: &Member,
@@ -49,12 +32,19 @@ pub(super) fn fill_pressure_plate(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Err(refusal) = place_plate(member, y_offset, ctx, palette, canvas, diagnostics) {
-        diagnostics.push(with_binding_note(member, refusal));
+    let raised = diagnostics.len();
+    let built = place_plate(member, y_offset, ctx, palette, canvas, diagnostics).unwrap_or_else(
+        |refusal| {
+            diagnostics.push(*refusal);
+            false
+        },
+    );
+    if !built {
+        note_unbuilt_binding(PLATE, member, ctx, &mut diagnostics[raised..]);
     }
 }
 
-/// [`fill_pressure_plate`], answering the finding that refuses the plate.
+/// [`fill_pressure_plate`], answering whether the plate is built or the finding that refuses it.
 fn place_plate(
     member: &Member,
     y_offset: u32,
@@ -62,14 +52,14 @@ fn place_plate(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), Refusal> {
+) -> Result<bool, Refusal> {
     let (_, cell) = fixture_cell(PLATE, member, y_offset, ctx)?;
     let Some(base_id) = plate_id_for_member(member, ctx, diagnostics)? else {
-        return Ok(());
+        return Ok(false);
     };
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(BlockState::bare(base_id))) {
-        Ok(())
+        Ok(true)
     } else {
         Err(Box::new(outside_the_array(PLATE, member)))
     }

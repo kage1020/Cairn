@@ -1,16 +1,18 @@
-//! Where a one-cell member set against a wall, a `pressure_plate` or a `chest`, stands
-//! (`spec/redstone` "Signal binding").
+//! Where a one-cell member set against a wall, a `pressure_plate`, another sensor or actuator, or
+//! a `chest`, stands and which way it looks (`spec/redstone` "Signal binding").
 
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticNote};
-use crate::intent::Member;
+use crate::intent::{Member, SENSOR_HOSTS};
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{
     diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member,
 };
+use crate::block_array::joins::Face;
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 
+use super::circuit::names_a_signal;
 use super::members::{StructCtx, side_name, unplaced_walls_note};
 use super::stair::shift_outward;
 
@@ -21,6 +23,195 @@ pub(super) struct Fixture {
     pub(super) keyword: &'static str,
     /// What a note calls it, such as `plate`.
     pub(super) noun: &'static str,
+}
+
+/// Note on the finding on `member`'s own line among `raised`, the findings its painting raised,
+/// that a binding of it still reaches the netlist, when synthesis reads one: its own `->` tail or
+/// actuator key, or the key of a patch that binds it, each naming a signal.
+pub(super) fn note_unbuilt_binding(
+    fixture: Fixture,
+    member: &Member,
+    ctx: &StructCtx<'_>,
+    raised: &mut [Diagnostic],
+) {
+    let Some(message) = binding_note(fixture, member, ctx) else {
+        return;
+    };
+    if let Some(finding) = raised.iter_mut().rev().find(|d| d.span == member.span) {
+        finding.notes.push(DiagnosticNote {
+            span: None,
+            message,
+        });
+    }
+}
+
+/// The note [`note_unbuilt_binding`] adds, or `None` when synthesis reads no binding of `member`.
+fn binding_note(fixture: Fixture, member: &Member, ctx: &StructCtx<'_>) -> Option<String> {
+    let noun = fixture.noun;
+    let sensor = SENSOR_HOSTS.contains(&member.role.keyword()) && member.selector.is_none();
+    if sensor && member.binding.as_ref().is_some_and(names_a_signal) {
+        return Some(format!(
+            "its signal binding still reaches the netlist, with no {noun} placed to drive it"
+        ));
+    }
+    let actuator = member.role.actuator()?;
+    let key = actuator.key();
+    if member
+        .arguments
+        .get(key)
+        .is_some_and(|raw| names_a_signal(&raw.value))
+    {
+        return Some(format!(
+            "its `{key}=` binding still reaches the netlist, with no {noun} placed for it to drive"
+        ));
+    }
+    let id = member
+        .id
+        .as_deref()
+        .filter(|_| ctx.patched.contains(&member.span.start))?;
+    Some(format!(
+        "the `{key}=` binding the `{}[id={id}]` patch gives it still reaches the netlist, with no \
+         {noun} placed for it to drive",
+        actuator.keyword(),
+    ))
+}
+
+/// Which way a fixture's front looks, relative to the wall it stands by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Toward {
+    /// Straight up.
+    Up,
+    /// Straight down.
+    Down,
+    /// Into the struct.
+    In,
+    /// Out of the struct.
+    Out,
+    /// Along the wall toward `offset=0`.
+    Left,
+    /// Along the wall away from `offset=0`.
+    Right,
+}
+
+impl Toward {
+    /// The four horizontal ways, in the order a finding lists them.
+    pub(super) const HORIZONTAL: [Self; 4] = [Self::In, Self::Out, Self::Left, Self::Right];
+
+    /// [`Self::ALL`] as the finding on an unread `facing=` lists it.
+    pub(super) const ALL_WORDS: &str = "`up`, `down`, `in`, `out`, `left` or `right`";
+
+    /// [`Self::HORIZONTAL`] as the finding on an unread `facing=` lists it.
+    pub(super) const HORIZONTAL_WORDS: &str = "`in`, `out`, `left` or `right`";
+
+    /// Every way, in the order a finding lists them.
+    pub(super) const ALL: [Self; 6] = [
+        Self::Up,
+        Self::Down,
+        Self::In,
+        Self::Out,
+        Self::Left,
+        Self::Right,
+    ];
+
+    /// The way `name` spells.
+    fn from_ident(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|toward| toward.name() == name)
+    }
+
+    /// `ways` as a finding lists them, each in backticks and the last after `or`.
+    #[cfg(test)]
+    fn listed(ways: &[Self]) -> String {
+        let words: Vec<String> = ways.iter().map(|way| format!("`{}`", way.name())).collect();
+        match words.split_last() {
+            Some((last, [])) => last.clone(),
+            Some((last, head)) => format!("{} or {last}", head.join(", ")),
+            None => String::new(),
+        }
+    }
+
+    /// The word `facing=` spells this way with.
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::In => "in",
+            Self::Out => "out",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    /// Away from the wall `anchor` stands by: into the struct from inside it, out from outside.
+    pub(super) fn away_from_the_wall(anchor: Anchor) -> Self {
+        match anchor {
+            Anchor::Inside(_) => Self::In,
+            Anchor::Outside(_) => Self::Out,
+        }
+    }
+
+    /// The face a fixture by `side` looks toward.
+    pub(super) fn face(self, side: WallSide) -> Face {
+        // The wall's outward normal, and the way its `offset=` grows.
+        let (out, right) = match side {
+            WallSide::Front => (Face::South, Face::East),
+            WallSide::Back => (Face::North, Face::West),
+            WallSide::Left => (Face::West, Face::South),
+            WallSide::Right => (Face::East, Face::North),
+        };
+        match self {
+            Self::Up => Face::Up,
+            Self::Down => Face::Down,
+            Self::In => out.opposite(),
+            Self::Out => out,
+            Self::Left => right.opposite(),
+            Self::Right => right,
+        }
+    }
+}
+
+/// The way a fixture's `facing=` names among `accepted`, `None` when it writes none, or the
+/// refusal of a word outside them.
+pub(super) fn written_facing(
+    fixture: Fixture,
+    member: &Member,
+    written: Option<&str>,
+    accepted: &[Toward],
+) -> Result<Option<Toward>, Refusal> {
+    let Some(word) = written else {
+        return Ok(None);
+    };
+    if let Some(toward) = Toward::from_ident(word).filter(|toward| accepted.contains(toward)) {
+        return Ok(Some(toward));
+    }
+    let names: Vec<&str> = accepted.iter().map(|toward| toward.name()).collect();
+    let mut notes = vec![format!("`facing=` takes one of {}", names.join(", "))];
+    // A compass word is what the game writes; the line names a way from its own wall instead.
+    if let Some(compass) = Face::from_name(word).filter(|face| Face::SIDES.contains(face)) {
+        let side = anchor_of(fixture, member).ok().map(Anchor::side);
+        let meant = side.and_then(|side| {
+            accepted
+                .iter()
+                .find(|toward| toward.face(side) == compass)
+                .map(|toward| (side, toward.name()))
+        });
+        notes.push(match meant {
+            Some((side, toward)) => format!(
+                "`facing=` names a way from the wall the {} stands by, and `{word}` from the {} \
+                 wall is `facing={toward}`",
+                fixture.noun,
+                side_name(side),
+            ),
+            None => format!(
+                "`facing=` names a way from the wall the {} stands by, not a compass direction",
+                fixture.noun,
+            ),
+        });
+    }
+    Err(Box::new(diag_invalid_member(
+        member,
+        format!("unknown {} `facing={word}`", fixture.keyword),
+        notes,
+    )))
 }
 
 /// The note on an `at=` that names no anchor, saying what one is.
@@ -611,4 +802,45 @@ fn inside_refusal(
             format!("grow {}{use_offset}{outside}", thin_growth(&thin)),
         ],
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Toward;
+    use crate::block_array::joins::Face;
+    use crate::block_array::openings::WallSide;
+
+    #[test]
+    fn each_list_of_ways_is_worded_as_its_array() {
+        assert_eq!(Toward::listed(&Toward::ALL), Toward::ALL_WORDS);
+        assert_eq!(
+            Toward::listed(&Toward::HORIZONTAL),
+            Toward::HORIZONTAL_WORDS
+        );
+    }
+
+    /// `out` is each wall's outward normal, `right` the way its `offset=` grows, and `up` and
+    /// `down` the same from every wall.
+    #[test]
+    fn a_fixture_turns_by_the_walls_own_axes() {
+        for side in [
+            WallSide::Front,
+            WallSide::Back,
+            WallSide::Left,
+            WallSide::Right,
+        ] {
+            let flat = |toward: Toward| {
+                let (dx, _, dz) = toward.face(side).step();
+                (dx, dz)
+            };
+            assert_eq!(flat(Toward::Out), side.outward_normal(), "{side:?}");
+            assert_eq!(flat(Toward::Right), side.along(), "{side:?}");
+            let (dx, dz) = side.outward_normal();
+            assert_eq!(flat(Toward::In), (-dx, -dz), "{side:?}");
+            let (dx, dz) = side.along();
+            assert_eq!(flat(Toward::Left), (-dx, -dz), "{side:?}");
+            assert_eq!(Toward::Up.face(side), Face::Up, "{side:?}");
+            assert_eq!(Toward::Down.face(side), Face::Down, "{side:?}");
+        }
+    }
 }

@@ -45,30 +45,40 @@ Verilog で言えば、v1 が許すのは `assign` に相当するものだけ�
 
 ```
 # センサー → 信号
-lever      id=sw   side=front offset=2 y=1 -> sig.power
-button     id=bt   side=front               -> sig.ring
-daylight   id=dl   at=..                     -> sig.day
-observer   id=ob   at=.. facing=down         -> sig.tick
-pressure_plate id=pp at=front.outside offset=0 y=0 -> sig.step
+lever          id=sw at=inside.front offset=2 y=1 -> sig.power
+button         id=bt at=front.outside offset=5 y=1 -> sig.ring
+daylight       id=dl at=back.outside offset=3 y=0 -> sig.day
+observer       id=ob at=inside.left offset=2 y=1 facing=down -> sig.tick
+pressure_plate id=pp at=front.outside offset=1 y=0 -> sig.step
 
 # アクチュエーター ← 信号
-lamp       id=l1   at=..  lit_by=sig.lamps
-piston     id=p1   at=..  powered_by=sig.mem facing=up sticky=true
-door       id=d1   ..     opened_by=sig.power
-dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
+lamp      id=l1 at=inside.back offset=3 y=2 lit_by=sig.lamps
+piston    id=p1 at=inside.right offset=2 y=1 powered_by=sig.mem facing=up sticky=true
+door      id=d1 side=front at=center opened_by=sig.power
+dispenser id=ds at=front.outside offset=6 y=1 fired_by=sig.pulse facing=out
 ```
 
 この対応は規範です。末尾の `-> sig.X` はセンサーのもので、アクチュエーターの各キーは、それを読む 1 種類のコンポーネントのものです。ほかの場所に書かれたバインディングは回路を何も記述しておらず、受け付けると、コンポーネントのないポートがネットリストに載ってしまいます。
 
 これをどのコードで報告するかは、判定に何が必要かで決まります。センサーでないメンバーに付いた末尾の `->` は `E_MISPLACED_BINDING` です。あるキーワードが信号を発せるかどうかはメンバー行についての事実なので、`check` が判定し、どのコマンドでも報告します。それを読まないコンポーネントに付いたアクチュエーターのキーも、メンバー行についての事実です。キーがそのメンバーの語彙にないので、`walls opened_by=sig.power` は `E_UNKNOWN_ARGUMENT` になり ([Lint](/ja/spec/lint/#構文と構造))、`check` が報告して、どのコマンドもそこで止まります。このとき、キーの持ち主のコンポーネントを注記で示します。同じコンポーネントを示す synth パイプラインの `E_LOGIC_MISPLACED_BINDING` に届くのは、`theme` のセレクタがそのキーをメンバーの語彙に加えた場合だけです ([Lint](/ja/spec/lint/#113-エラーと警告の区分))。
 
-上の例のうち、現在受け付けるのは `door` と `pressure_plate` だけです。 `lit_by=` / `powered_by=` / `fired_by=` にはまだそれを読むコンポーネントがなく、どこに書いても拒否されます。
+**`door` 以外のコンポーネントは、プレートと同じ方法で位置を決めます。** `lever`、`button`、`daylight`、`observer`、`lamp`、`piston`、`dispenser` は、どれも壁のそばに置く 1 つのブロックで、`pressure_plate` と同じ `at=`、`offset=`、`y=` で書きます。以下の規則はプレートについて述べますが、これらすべてに同じように当てはまります。どれも、プレートが置かれる場所に置かれ、プレートが拒否または保留される場所で拒否または保留されます。指摘には、そのコンポーネントの名前が出ます。
 
 **`at=<side>.outside` のプレートを置ける位置。** プレートは `offset=` の位置にある壁のセルを基準に、そこから 1 ボクセル外側、屋根の `overhang=` の分だけ壁の周りに広がるリングの中に置かれます ([コンパイルモデル §4.3](/ja/spec/compilation/#43-切妻屋根のボクセル規則))。struct の外側はこのリングだけなので、軒の出を描く屋根がなければ、床の段 `y = 0` を含むどの段にもプレートのセルはありません。代わりに壁自身の柱に置くことはしません。そこに置くと上の壁に埋もれ、信号が出ることはないからです。
 
 **`at=inside.<side>` のプレートを置ける位置。** プレートは `offset=` の位置にある壁のセルを基準に、そこから 1 ボクセル内側に置かれます。そのボクセルは、壁のリング (敷地の最も外側の行と列で、`walls` が各段を塗る場所) より厳密に内側でなければなりません。つまり `offset` は 1 から「壁の長さ − 2」までで (長さは `front` と `back` では `size.w`、`left` と `right` では `size.h`)、そもそも内側があるためには、両方の軸で `size` が 3 以上必要です。リングは `walls` メンバーが塗るかどうかに関係なく敷地から決まり、この規則は床の段 `y = 0` を含むすべての `y` で成り立ちます。範囲外のプレートは置かれません。
 
-**置けないプレート。** 自身の行の指定ではどのボクセルにも置けないプレートは `E_INVALID_MEMBER` になり、ビルドは止まります。行がそうなるのは、`at=` がないか `<side>.outside` でも `inside.<side>` でもない場合、`offset=` や `y=` が非負整数でない場合、`offset=` が壁の長さ以上の場合、段が、書かれたとおりの struct が届くどの段よりも上にある場合 ([コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出))、1 以上の `overhang=` を持つ屋根がない struct の `at=<side>.outside` の場合、`at=inside.<side>` が内側の外にある場合です。別のメンバーが建っていれば struct に収まったはずのプレートは、代わりに `W_DEFERRED_MEMBER` になります。直すべきなのはそのメンバーのほうだからです。何も塗らない `walls`、何も描かない `roof`、配置されない `level` の下の `walls` が建っていれば届いたはずの段や、何も描かない `overhang=` 付きの `roof` の脇の `at=<side>.outside` がその例です ([Lint](/ja/spec/lint/#lowering))。プレート自身の行を先に判定するので、行の指定がそもそもプレートをどこにも置けないなら、そうしたメンバーが欠けていてもエラーです。合成はボクセルではなくメンバー行を読むので、どちらの場合もプレートの `->` バインディングは読まれます。信号はそれを駆動するプレートがないままネットリストに残り、そのことは指摘に示されます。
+**置けないプレート。** 自身の行の指定ではどのボクセルにも置けないプレートは `E_INVALID_MEMBER` になり、ビルドは止まります。行がそうなるのは、`at=` がないか `<side>.outside` でも `inside.<side>` でもない場合、`offset=` や `y=` が非負整数でない場合、`offset=` が壁の長さ以上の場合、段が、書かれたとおりの struct が届くどの段よりも上にある場合 ([コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出))、1 以上の `overhang=` を持つ屋根がない struct の `at=<side>.outside` の場合、`at=inside.<side>` が内側の外にある場合です。別のメンバーが建っていれば struct に収まったはずのプレートは、代わりに `W_DEFERRED_MEMBER` になります。直すべきなのはそのメンバーのほうだからです。何も塗らない `walls`、何も描かない `roof`、配置されない `level` の下の `walls` が建っていれば届いたはずの段や、何も描かない `overhang=` 付きの `roof` の脇の `at=<side>.outside` がその例です ([Lint](/ja/spec/lint/#lowering))。プレート自身の行を先に判定するので、行の指定がそもそもプレートをどこにも置けないなら、そうしたメンバーが欠けていてもエラーです。合成はボクセルではなくメンバー行を読むので、どちらの場合もコンポーネントのバインディングはネットリストに届き、信号はコンポーネントのないまま残ります。そのことは、コンポーネントの行の指摘に示されます。このバインディングは、センサーの末尾の `->`、アクチュエーターのキー、アクチュエーターにバインディングを付けるパッチのキーのうち、`sig.` の信号を指すものです。アクチュエーターに付いた末尾や `sig.` の外の値のように、合成が拒否するバインディングはネットリストに届かず、指摘もそれには触れません。
+
+**コンポーネントの向き。** `lever` と `button` は、位置で指定した壁のセルの面に掛かり (`face=wall`)、その壁から離れる向きを向きます。`inside.<side>` なら struct の内側、`<side>.outside` なら外側です。`observer`、`piston`、`dispenser` も、`facing=` で向きを変えない限り壁から離れる向きを向きます。`in` と `out` は struct の内側と外側、`left` と `right` は壁に沿って `offset=0` に近づく向きと遠ざかる向き、`up` と `down` は上下です。これは前面が向く方向で、オブザーバーが見張るセル、ピストンが押す向き、ディスペンサーが発射する向きです。ほかの語は、方角も含めて `E_INVALID_MEMBER` になり、コンポーネントは置かれません。メッセージは使える語を挙げ、方角が書かれていれば、その壁からその方角を向く語を示します。方角は壁ごとに意味が変わってしまうからです。`daylight` と `lamp` には向きがなく、`facing=` を取りません。
+
+`sticky=true` の `piston` は粘着ピストンとして、`sticky=false` か `sticky=` のない `piston` は通常のピストンとして建ちます。語でない `facing=` や、`true` でも `false` でもない `sticky=` は `W_IGNORED_ARGUMENT` になり ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))、コンポーネントはそれを書かなかったものとして建ちます。
+
+どのコンポーネントも、動力のない状態で建ちます。レバーはオフ、ボタンは押されておらず、ランプは消え、ピストンは縮み、ディスペンサーは作動していません。ワールドで動力を与えるのは回路なので、こうした状態は行に書かず、意図 (intent) に昇格する状態は `facing=` だけです ([ブロックステートモデル §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。
+
+**コンポーネントの材料。** `button` は `mat_slot=` を読み、そのスロットはボタンに割り当てる必要があります。ほかのブロックなら `E_INCOMPATIBLE_MATERIAL` で、ボタンは代わりに `@button.default` で建ちます。`mat_slot=` がなければ `@button.default` で建ちます。ほかのコンポーネントは、それぞれの tier-1 のトークン ([マテリアルとテーマ](/ja/spec/materials-themes/#tier-1-のトークン)) で建ちます。ピストンは `@piston.default` で、`sticky=true` なら `@piston.sticky` で建ちます。そのどれを使うかを `mat_slot=` が選ぶことはないので、`mat_slot=` を書くと `W_IGNORED_ARGUMENT` になります。
+
+**レバーやボタンが掛かるブロックは検査しません。** レバーやボタンは、壁のセルに何があってもそこに掛けて書き出し、そのブロックにゲームが掛けさせるかどうかは確かめません。そのセルを `walls` が塗っていないか、それを支えられない面のブロックで塗っている場合、ブロック更新が届いた時点でゲームはレバーやボタンを落とします。
 
 **信号名。** センサーは `sig.` 名前空間へ信号を発し、アクチュエーターはそこから読むので、名前空間の外の名前は誰にも読まれません。`logic` 行の左辺でも、センサーの末尾の `->` でも、アクチュエーターのキーの値でも同じで、`E_LOGIC_INVALID_SIGNAL` になります。名前は `sig.` とそれに続く 1 つのセグメントです。`opened_by=a` は `a` という信号への配線にはならず、`opened_by=sig.a.b` も何も指しません。
 
@@ -76,9 +86,9 @@ dispenser  id=ds   at=..  fired_by=sig.pulse facing=south
 
 **バインディングは `[selector]` の後に書き、中には書きません。** `door[id=front] opened_by=sig.power` はバインディングになり、`door[id=front,opened_by=sig.power]` はなりません。角括弧は行が作用するメンバーを選ぶためのもので、その中に書いたものはバインディングとして読みません。括弧の中の組には、そのキーを括弧の外に出したときに付く指摘が付きます。メンバーの語彙にないキーなら `E_UNKNOWN_ARGUMENT`、メンバーが読むがアクチュエーターのキーではないキーに `sig.` の値が付いていれば、後述の `E_LOGIC_UNKNOWN_BINDING_KEY` です。コンポーネント自身のアクチュエーターのキーを角括弧の中に書いた場合は、値が何であっても、角括弧を指す `E_LOGIC_MISPLACED_BINDING` になります。
 
-**セレクタ行は、角括弧が選ぶメンバーにバインディングを付けます。** `door[id=front] opened_by=sig.power` は、同じスコープのトップレベルか `level` の直下に `door id=front ...` と宣言されたドアにバインディングを付けます。`id=` は、角括弧なしで書かれたそうしたドアをちょうど 1 つ指す必要があります。パッチは単独で 1 行を占め、対象のドアの前にも後ろにも、トップレベルにも `level` の直下にも書け、ドアがどこにあっても構いません。セレクタに `id=` がないパッチ、その id を持つドアがないパッチ、同じ id を持つドアが 2 つあるパッチは `E_LOGIC_UNRESOLVED_PATCH` です。どのドアにも作用しないので、受け付けるとコンポーネントのないポートがネットリストに載ってしまいます。セレクタ行が運ぶバインディングはドアのパッチだけなので、`pressure_plate[id=p]` に付いた末尾の `->` は、センサーでないメンバーの末尾と同じく `E_MISPLACED_BINDING` です。
+**セレクタ行は、角括弧が選ぶメンバーにバインディングを付けます。** `door[id=front] opened_by=sig.power` は、同じスコープのトップレベルか `level` の直下に `door id=front ...` と宣言されたドアにバインディングを付けます。`lamp[id=l1] lit_by=`、`piston[id=p1] powered_by=`、`dispenser[id=ds] fired_by=` も同じように、ランプ、ピストン、ディスペンサーにバインディングを付けます。`id=` は、角括弧なしで書かれた、パッチと同じキーワードのコンポーネントをちょうど 1 つ指す必要があります。パッチは単独で 1 行を占め、対象のコンポーネントの前にも後ろにも、トップレベルにも `level` の直下にも書け、コンポーネントがどこにあっても構いません。セレクタに `id=` がないパッチ、その id を持つ同じキーワードのコンポーネントがないパッチ、それが 2 つあるパッチは `E_LOGIC_UNRESOLVED_PATCH` です。どのコンポーネントにも作用しないので、受け付けるとコンポーネントのないポートがネットリストに載ってしまいます。セレクタ行が運ぶバインディングはアクチュエーターのパッチだけなので、`pressure_plate[id=p]` や `lever[id=sw]` に付いた末尾の `->` は、センサーでないメンバーの末尾と同じく `E_MISPLACED_BINDING` です。センサーはほかのどんなパッチも取りません。`lever[id=sw] at=inside.front offset=2 y=1` のようなセレクタ形式のセンサーの行は、角括弧がほかの場所で宣言されたメンバーを選ぶので何も置かず、`E_INVALID_MEMBER` になります。
 
-**アクチュエーターは、1 つのキーにつき 1 つのバインディングしか取りません。** ドアの `opened_by=` は、ドア自身の行に書いても、パッチで書いても、両方に書いても 1 つです。2 つ目は `E_LOGIC_DUPLICATE_BINDING` になります。バインディングが 2 つあると 1 つのドアへの配線が 2 本になり、論理層に書かれていないワイヤード OR になってしまうからです。信号は論理層で組み合わせます。`logic sig.open = sig.a or sig.x` と書き、ドアを `sig.open` に結び付けてください。
+**アクチュエーターは、1 つのキーにつき 1 つのバインディングしか取りません。** ドアの `opened_by=`、ランプの `lit_by=`、ピストンの `powered_by=`、ディスペンサーの `fired_by=` は、コンポーネント自身の行に書いても、パッチで書いても、両方に書いても 1 つです。2 つ目は `E_LOGIC_DUPLICATE_BINDING` になります。バインディングが 2 つあると 1 つのコンポーネントへの配線が 2 本になり、論理層に書かれていないワイヤード OR になってしまうからです。信号は論理層で組み合わせます。`logic sig.open = sig.a or sig.x` と書き、ドアを `sig.open` に結び付けてください。
 
 メンバーが読むキーのうち、4 つのアクチュエーターのキー以外のものに `sig.` の値が付いている場合は、synth パイプラインが出す `E_LOGIC_UNKNOWN_BINDING_KEY` です (`walls height=sig.power` など)。値は「信号を配線するつもりだった」と言い、キーは「このキーから信号を読むコンポーネントはない」と言っている状態です。`oepend_by=sig.power` のようにアクチュエーターのキーを打ち間違えた場合は、キーがメンバーの語彙にないので、`check` が先に `E_UNKNOWN_ARGUMENT` を報告します。
 

@@ -22,6 +22,14 @@
     { "token": "sign.oak_wall", "block": "oak_wall_sign" },
     { "token": "door.default", "block": "oak_door" },
     { "token": "chest.default", "block": "chest" },
-    { "token": "pressure_plate.default", "block": "oak_pressure_plate" }
+    { "token": "pressure_plate.default", "block": "oak_pressure_plate" },
+    { "token": "lever.default", "block": "lever" },
+    { "token": "button.default", "block": "oak_button" },
+    { "token": "daylight.default", "block": "daylight_detector" },
+    { "token": "observer.default", "block": "observer" },
+    { "token": "lamp.default", "block": "redstone_lamp" },
+    { "token": "piston.default", "block": "piston" },
+    { "token": "piston.sticky", "block": "sticky_piston" },
+    { "token": "dispenser.default", "block": "dispenser" }
   ]
 }

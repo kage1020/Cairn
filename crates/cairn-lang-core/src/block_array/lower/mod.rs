@@ -11,6 +11,7 @@ mod canvas;
 mod cell_box;
 mod chest;
 mod circuit;
+mod component;
 mod connect;
 mod connections;
 mod diag;

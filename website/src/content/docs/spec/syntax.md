@@ -220,12 +220,13 @@ lines stand in the body around it, and it holds only raw members ([Versioning an
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
-`pressure_plate`, `chest`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout:
-`place`, `connect`. The keyword table is global, so writing one in the other body parses and
-classifies and then reaches nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending
-row, taking anything indented under it along. A `level` groups the other members of a `struct` /
-`def` body, but not a `circuit` line, whose reservation spans the whole scope: a `circuit` line
-under a `level` reaches nothing either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
+`pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
+`circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The
+keyword table is global, so writing one in the other body parses and classifies and then reaches
+nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented
+under it along. A `level` groups the other members of a `struct` / `def` body, but not a `circuit`
+line, whose reservation spans the whole scope: a `circuit` line under a `level` reaches nothing
+either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
 §14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
