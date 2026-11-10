@@ -126,7 +126,8 @@ fn edition_wide_refusals(
             UnsupportedReason::StatesUnmapped { states, .. } => {
                 Some(palette_entry_name(&entry.id, states))
             }
-            UnsupportedReason::AbsentFromEdition { .. } => None,
+            UnsupportedReason::AbsentFromEdition { .. }
+            | UnsupportedReason::NoCounterpart { .. } => None,
         })
         .collect();
     if !states_unmapped.is_empty() {
@@ -203,10 +204,15 @@ fn edition_rows(
                 &block_ir,
                 pack.blocks(),
                 pack.aliases(),
+                pack.absent(),
             )),
-            Edition::Bedrock => {
-                portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases(), pack.states())
-            }
+            Edition::Bedrock => portability_for_bedrock(
+                &block_ir,
+                pack.blocks(),
+                pack.aliases(),
+                pack.absent(),
+                pack.states(),
+            ),
         };
         // A refused palette does not end the walk: the scope and version notes below still print.
         let portability = portability_figure(edition, portability);
@@ -373,6 +379,10 @@ fn unsupported_reason(reason: &UnsupportedReason) -> String {
                 ),
             }
         }
+        UnsupportedReason::NoCounterpart { detail } => format!(
+            "only the other edition has the block: {detail} — bind the slot to a block this \
+             edition has, or build for the other edition"
+        ),
         UnsupportedReason::StatesUnmapped { states, detail } => format!(
             "the edition has the block, but no version's state map has a form for `{states}`: \
              {detail} — bind the slot to another block, or build for the other edition"

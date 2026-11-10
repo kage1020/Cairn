@@ -59,6 +59,13 @@ pub trait TargetRegistry {
         None
     }
 
+    /// The other edition's block `id` names, when the pinned target's edition has no counterpart
+    /// for it; asked only for an id the target does not declare.
+    fn absent_concept(&self, id: &str) -> Option<AbsentConcept> {
+        let _ = id;
+        None
+    }
+
     /// What the pinned target's tables say about `state`'s properties, [`StateDomain::Unrecorded`]
     /// unless the registry overrides it
     /// (`spec/versioning-editions` "A state is checked against its block's states at the target").
@@ -284,12 +291,24 @@ pub struct UnknownId {
     /// Whether the author named the id or the pack's catalog did.
     pub origin: IdOrigin,
     /// Closest id the target does declare, within `nearest_match`'s edit cap; `None` when another
-    /// version of the edition declares the id.
+    /// version of the edition declares the id, or the id is a block only the other edition has.
     pub suggestion: Option<String>,
     /// The ids this target declares for the same block, from the registry's alias table.
     pub aliases: Vec<String>,
     /// The edition's versions nearest the target that do declare the id.
     pub elsewhere: Option<DeclaredElsewhere>,
+    /// Set when the id names a block only the other edition has.
+    pub absent: Option<AbsentConcept>,
+}
+
+/// A block of one edition that the other has no counterpart for
+/// (`spec/versioning-editions` "A block only the other edition has").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbsentConcept {
+    /// The edition that has the block.
+    pub declared_by: Edition,
+    /// What the block is and why the other edition has none, as the registry pack words it.
+    pub reason: String,
 }
 
 /// The versions of the pinned edition nearest the target that declare an id it does not, at
@@ -463,17 +482,18 @@ pub(crate) fn validated_id(
     if ids.contains(&state.id) {
         return Ok(state);
     }
-    // An id another version of the edition declares is no typo, so it gets no nearest spelling;
-    // aliases answer it either way, and only an id no version declares can carry both.
+    // An id another version or the other edition declares is no typo, so it gets no nearest
+    // spelling; aliases answer it either way, and only an id neither declares can carry both.
     let aliases = registry.aliases_for(&state.id);
     let elsewhere = registry.declared_elsewhere(&state.id);
+    let absent = registry.absent_concept(&state.id);
     Err(Box::new(UnknownId {
-        suggestion: elsewhere
-            .is_none()
+        suggestion: (elsewhere.is_none() && absent.is_none())
             .then(|| nearest_namespaced_id(&state.id, ids.iter()))
             .flatten(),
         aliases,
         elsewhere,
+        absent,
         registry: ids.label().to_owned(),
         origin: origin.clone(),
         id: state.id,

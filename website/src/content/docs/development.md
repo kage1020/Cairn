@@ -215,7 +215,9 @@ which is the `Minecraft` workflow's `Registry tables match the game` check. To a
 row to `data_versions.json` (and, for Bedrock, the pins of its palette and its state map to the
 script), run the extraction, and rerun the load check above. A Java property a state map drops
 needs a row in Bedrock's hand-written `sensitivity.json`, saying what dropping it costs, and the
-run refuses until it has one. The pack hash moves with every table, so the `builtin_*_pack_hash`
+run refuses until it has one. The edition's hand-written `absent.json` lists the other edition's
+blocks it lacks, so a new version that adds one of them makes the pack refuse to load until that
+row goes. The pack hash moves with every table, so the `builtin_*_pack_hash`
 snapshots in `cairn-lang-formats` move too.
 
 ## Conventions for Rust code

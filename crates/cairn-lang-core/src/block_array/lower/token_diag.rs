@@ -9,8 +9,8 @@ use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
 use crate::block_array::material::{
-    DeclaredElsewhere, DomainFault, IdOrigin, OutOfDomain, Sides, StateDomain, TargetRegistry,
-    UnknownId, UnmappedState,
+    AbsentConcept, DeclaredElsewhere, DomainFault, IdOrigin, OutOfDomain, Sides, StateDomain,
+    TargetRegistry, UnknownId, UnmappedState,
 };
 
 /// What becomes of a member whose `mat_slot=` resolves to no material.
@@ -438,8 +438,78 @@ pub(super) fn diag_state_unmapped(
     })
 }
 
+/// Where a block id was written, which decides what its finding may advise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum IdSite {
+    /// A `raw_block` or `raw_fill`'s `mat=`, which names an edition's own block.
+    Raw,
+    /// A semantic member's block, or a `connect` row's `path=`.
+    Semantic(TokenSite),
+}
+
+/// Report a block id the compile's target does not declare: `E_PARITY_UNSUPPORTED` when a semantic
+/// line named a block only the other edition has, and `E_UNKNOWN_ID` otherwise.
+pub(super) fn diag_undeclared_id(span: Span, unknown: &UnknownId, site: IdSite) -> Diagnostic {
+    match (site, &unknown.origin, &unknown.absent) {
+        (IdSite::Semantic(token_site), IdOrigin::Authored, Some(absent)) => {
+            diag_parity_unsupported(span, unknown, absent, token_site)
+        }
+        _ => diag_unknown_id(span, unknown, site),
+    }
+}
+
+/// Report a semantic line's block that only `absent.declared_by` has, with what the line can name
+/// instead (`spec/versioning-editions` "A block only the other edition has").
+fn diag_parity_unsupported(
+    span: Span,
+    unknown: &UnknownId,
+    absent: &AbsentConcept,
+    site: TokenSite,
+) -> Diagnostic {
+    let UnknownId { id, registry, .. } = unknown;
+    let has = absent.declared_by;
+    let lacks = has.other();
+    let instead = match site {
+        TokenSite::MemberSlot(_) => format!(
+            "the semantic layer is edition-neutral: bind this slot from a `theme NAME_{has}` and \
+             give `theme NAME_{lacks}` a block {} has, or place the block with a `raw_block` under \
+             `@edition {has}`, which only a {} build keeps",
+            lacks.title(),
+            has.title(),
+        ),
+        TokenSite::WalkwayPath => "a walkway is laid alike for every edition, and its `site` body \
+             binds no slot and builds nothing under a guard: set `path=` to a block both editions \
+             have, or to an abstract token each edition's materials catalog maps"
+            .to_owned(),
+    };
+    Diagnostic {
+        code: DiagnosticCode::ParityUnsupported,
+        span,
+        primary: format!(
+            "`{id}` is a block only {} has, so `{registry}` cannot build it",
+            has.title()
+        ),
+        notes: vec![
+            DiagnosticNote {
+                span: None,
+                message: absent.reason.clone(),
+            },
+            DiagnosticNote {
+                span: None,
+                message: instead,
+            },
+        ],
+        data: Some(DiagnosticData::ParityUnsupported {
+            id: id.clone(),
+            registry: registry.clone(),
+            declared_by: has.as_str().to_owned(),
+            reason: absent.reason.clone(),
+        }),
+    }
+}
+
 /// Report a block id the compile's target does not declare, worded for who chose the id.
-pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
+fn diag_unknown_id(span: Span, unknown: &UnknownId, site: IdSite) -> Diagnostic {
     let UnknownId {
         id,
         registry,
@@ -447,6 +517,7 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         suggestion,
         aliases,
         elsewhere,
+        absent,
     } = unknown;
     let mut notes = Vec::with_capacity(3);
     match origin {
@@ -469,6 +540,7 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         .map(|elsewhere| version_note(id, registry, origin, elsewhere));
     // An alias note wins; without one, the version note stands in for the nearest spelling.
     let candidate = match (aliases.as_slice(), &versions, suggestion) {
+        _ if absent.is_some() => None,
         ([], Some(_), _) => None,
         ([], None, None) => Some(format!(
             "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
@@ -481,10 +553,26 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             candidate_list(spellings),
         )),
     };
+    let absence = absent.as_ref().map(|absent| {
+        let has = absent.declared_by;
+        let keep = match site {
+            IdSite::Raw => format!(
+                "; put this line under `@edition {has}`, so that only a {} build keeps it",
+                has.title()
+            ),
+            IdSite::Semantic(_) => String::new(),
+        };
+        format!(
+            "`{id}` is a block only {} has: {}{keep}",
+            has.title(),
+            absent.reason
+        )
+    });
     notes.extend(
         candidate
             .into_iter()
             .chain(versions)
+            .chain(absence)
             .map(|message| DiagnosticNote {
                 span: None,
                 message,
@@ -508,6 +596,9 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             until: elsewhere
                 .as_ref()
                 .and_then(|e| e.until().map(str::to_owned)),
+            declared_by: absent
+                .as_ref()
+                .map(|absent| absent.declared_by.as_str().to_owned()),
         }),
     }
 }

@@ -196,8 +196,6 @@ dropping are forbidden. An error returns the closed set of candidates valid in t
 minimum version, and a suggested fix. That sends the model back to registry-derived candidates
 rather than to its memory.
 
-`E_PARITY_UNSUPPORTED` below is not implemented ([§10.7](#writing-an-alternative)).
-
 ```text
 E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
   First target that declares it: 1.21.4. Fix: --target 1.21.4, or @requires java version>=1.21.4
@@ -208,8 +206,9 @@ E_VERSION_CAP line 2: this file requires version>=1.21.4 (target 1.21).
 E_STATE_DOMAIN line 18: minecraft:creaking_heart has no state `active` at java 26.3. Valid: axis, creaking_heart_state, natural.
   `active=true` is valid at 1.21.4. Fix: --target 1.21.4, or correct the state literal
 
-E_PARITY_UNSUPPORTED line 8: text_display is Java-only (since 1.19.4); Bedrock has no display entity.
-  Suggested: sign side=front text="Inn", or slot+theme fallback, or @edition java guard
+E_PARITY_UNSUPPORTED line 2: minecraft:border_block is a block only Bedrock has, so java 26.3 cannot build it.
+  Bedrock uses it to wall players in; Java has no such block.
+  Fix: bind the slot from theme NAME_bedrock and give NAME_java a Java block, or raw_block under @edition bedrock
 ```
 
 ### A state is checked against its block's states at the target
@@ -264,7 +263,7 @@ would need no flag, and would answer a different question: `stone_bricks` is val
 Bedrock, so a build pinned to 1.21.0 would still be told nothing. The pin is what makes the answer
 true of the build being made.
 
-The suggested fix depends on which of three ways a wrong ID arrived. A **typo** is answered by a
+The suggested fix depends on which of four ways a wrong ID arrived. A **typo** is answered by a
 distance search over the same table: `oak_plank` is answered with `oak_planks`. A **rename** is not
 a typo. Bedrock spells Java's `light` as `light_block_0` … `light_block_15`, eight edits away, and
 no threshold that keeps the typo finder honest will ever connect the two. Renames are answered from
@@ -302,6 +301,11 @@ on Java 1.21 is answered with 1.21.4, not with `dark_oak_planks`. An alias answe
 beside it, and comes first, since both are true: `@stone_bricks` on Bedrock 1.21.0 is answered with
 both `stonebrick`, the spelling 1.21.0 declares, and 1.21.40, the first target that declares
 `stone_bricks`.
+
+The fourth is a block only the other edition has, which the pinned edition's pack lists as
+`absent` ([§10.7](#a-block-only-the-other-edition-has)). It is not a typo, a rename or a version,
+so it gets none of these answers: its note gives the reason the pack writes for it, and the fix is
+a block this edition has, or a build for the other edition.
 
 What the key cannot express is a spelling both editions declare meaning different blocks: Bedrock's
 `snow` is Java's `snow_block` while Java's `snow` is Bedrock's `snow_layer`. Such a pair gets no
@@ -661,14 +665,17 @@ The first is a question about IDs and the second about states. Only the second c
 `degraded`: a block that does not exist has nothing to lose detail from.
 
 Because two different repairs hide behind one figure, each counted entry is named on stderr with its
-reason. The ID case is answered by the two halves `E_UNKNOWN_ID` gives an ID no other version of
-the edition declares: the
-`aliases` component where it has a row, so an entry this edition has under another name is reported
-as that name rather than as a dead end (`standing_sign` on Java is `oak_sign`), and a `did you mean`
-where it has none. They are alternatives, not a sequence: a row is the pack's word about which block
-this is, and printing a distance guess beside it would ask the reader to choose between them. The
-alias question is asked of the edition here too: a spelling *some* supported version declares is an
-answer, where a pinned build would keep only its own version's. `--format json` carries them as
+reason. The ID case is answered by the two halves `E_UNKNOWN_ID` gives an ID no other version of the
+edition declares: the `aliases` component where it has a row, so an entry this edition has under
+another name is reported as that name rather than as a dead end (`standing_sign` on Java is
+`oak_sign`), and a `did you mean` where it has none. They are alternatives, not a sequence: a row is
+the pack's word about which block this is, and printing a distance guess beside it would ask the
+reader to choose between them. An entry the edition's `absent` component lists is answered with that
+row's reason instead, and neither half runs: the block is the other edition's, so the repair is a
+block this edition has or a build for the other ([§10.7](#a-block-only-the-other-edition-has)). Its
+JSON `reason` is `no_counterpart`, with the sentence as `detail`. The alias question is asked of the
+edition here too: a spelling *some* supported version declares is an answer, where a pinned build
+would keep only its own version's. `--format json` carries them as
 `edition_portability[].unsupported_entries`, one element per unit of the count, in palette order.
 
 Both questions are asked of the *edition* rather than of a version, because this row reports across
@@ -910,12 +917,53 @@ naming those versions instead ([§10.4](#a-state-is-checked-against-its-blocks-s
 The canonical vocabulary absorbs only ID, state, and serialization differences. **Concept absence
 and game-behaviour differences are not absorbed.** The cases that cannot be:
 
+- blocks only one edition has ([below](#a-block-only-the-other-edition-has))
 - display entities (absent on Bedrock)
 - stairs `shape` on Bedrock before 1.26.60 (no such state there)
 - armor_stand pose
 - redstone propagation
 - item components ↔ Bedrock item NBT
 - light block internal behaviour
+
+### A block only the other edition has
+
+Some blocks of one edition have no counterpart in the other under any ID: Bedrock's world-building
+blocks (`allow`, `deny`, `border_block`), its Education Edition blocks and chemistry, and its
+item-frame blocks, which Java places only as entities, and Java's test-framework blocks
+(`test_block`, `test_instance_block`). They are not renames, which `aliases` answers where it has a
+row ([§10.4](#which-registry-an-unknown-id-is-unknown-to)), and the block tables cannot tell them
+from one: Java's `snow_block` is Bedrock's `snow`, and Java's `comparator` is Bedrock's
+`powered_comparator` and `unpowered_comparator`, so a diff of the two tables would call each of
+them absent. Each pack therefore lists the other edition's blocks it lacks by hand, in an `absent`
+component, each row with the sentence a diagnostic prints for it:
+
+```json
+{ "ids": ["border_block"],
+  "reason": "the border block, which Bedrock uses to wall players in; Java has no such block" }
+```
+
+The loader refuses an `absent` ID that the pack's own `blocks` declare at some version, under that
+spelling or another of its `aliases` group, since the edition then has the block.
+
+A semantic member whose `mat_slot=` resolves to such a block, and a `connect … path=` that does, is
+`E_PARITY_UNSUPPORTED` ([Lint](/spec/lint/)) at the token, at a pinned target of the edition that
+lacks it. The block is no typo, so no nearest ID is offered. The notes give the pack's reason and
+what to write instead. For a member, that is a step down the hierarchy
+[below](#writing-an-alternative): a per-edition theme that binds the slot to a block each edition
+has, or a `raw_block` under the other edition's `@edition` guard. Neither is open to a walkway,
+since `path=` names its block with no slot to bind and nothing a guard holds builds in a `site`
+body ([§10.7](#an-edition-guard-holds-the-escape-hatch)). So for a `path=`, the note asks for a
+block both editions have, or an abstract token each edition's materials catalog maps.
+
+A `raw_block` or `raw_fill` that names such a block is `E_UNKNOWN_ID`, since a raw ID is
+edition-specific by nature, with a note giving the pack's reason and naming the guard that would
+keep the line. An ID the pack's own mapping reached stays `E_UNKNOWN_ID` too, with the reason and
+no guard: the mapping is the pack's to fix, and no line of the source is.
+
+Like `E_UNKNOWN_ID`, the finding needs a pinned target
+([§10.4](#which-registry-an-unknown-id-is-unknown-to)). `cairn info`'s `edition portability` row
+answers an entry the edition's `absent` lists with the same reason
+([§10.5](#the-edition-portability-row)).
 
 ### Writing an alternative
 
@@ -951,7 +999,8 @@ Of the snippet, the `@requires` line parses today, and so would all of the `stru
 though. A `theme` takes its rules on indented lines under its header, so the one-line form is
 `E_PARSE` at the first `slot`, and the parse ends there. Even indented, a `slot` rule binds one
 token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. Inside a body
-`hologram` is `E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is not implemented. The `edition-fallback`
+`hologram` is `E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is raised where a member is bound to a
+block only the other edition has ([above](#a-block-only-the-other-edition-has)). The `edition-fallback`
 example builds the steps that do exist: a per-edition theme, and the light block under its guards.
 
 ### An `@edition` guard holds the escape hatch

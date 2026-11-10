@@ -1,6 +1,7 @@
 //! Per-edition palette-entry portability for `cairn info`, counted over the lowered IR so each
 //! figure matches what `cairn compile --edition` emits. An id no version of the edition declares
-//! is unsupported; on Bedrock the rest go through the `.mcstructure` writer's state translation at
+//! is unsupported, answered by the pack's `absent` reason when it is the other edition's block; on
+//! Bedrock the rest go through the `.mcstructure` writer's state translation at
 //! every version that declares them, and are asked of the edition: a state some version maps is
 //! not unsupported, and a loss at some version is a degradation.
 
@@ -11,7 +12,7 @@ use cairn_lang_core::suggest::nearest_namespaced_id;
 use thiserror::Error;
 
 use crate::bedrock_state::{BedrockStateError, translate_states};
-use crate::registry::{AliasIndex, BlocksIndex, StateMapIndex};
+use crate::registry::{AbsentIndex, AliasIndex, BlocksIndex, StateMapIndex};
 
 /// One edition's portability counts and the entries behind them. The fields are private so each
 /// count always matches its list.
@@ -119,11 +120,12 @@ pub fn portability_for_java(
     ir: &BlockArrayIr,
     blocks: &BlocksIndex,
     aliases: &AliasIndex,
+    absent: &AbsentIndex,
 ) -> PortabilityReport {
     let mut report = PortabilityReport::default();
     for entry in non_air_entries(ir) {
         if absent_from_edition(blocks, entry) {
-            report.push_unsupported(absent_entry(blocks, aliases, entry));
+            report.push_unsupported(absent_entry(blocks, aliases, absent, entry));
             continue;
         }
         report.count_portable();
@@ -141,13 +143,14 @@ pub fn portability_for_bedrock(
     ir: &BlockArrayIr,
     blocks: &BlocksIndex,
     aliases: &AliasIndex,
+    absent: &AbsentIndex,
     states: Option<&StateMapIndex>,
 ) -> Result<PortabilityReport, InvalidPalette> {
     let mut report = PortabilityReport::default();
     let mut leaks = Vec::new();
     for entry in non_air_entries(ir) {
         if absent_from_edition(blocks, entry) {
-            report.push_unsupported(absent_entry(blocks, aliases, entry));
+            report.push_unsupported(absent_entry(blocks, aliases, absent, entry));
             continue;
         }
         let mut written = false;
@@ -218,16 +221,19 @@ fn merge_dropped(dropped: &mut Vec<DroppedIntent>, intent: DroppedIntent) {
     }
 }
 
-/// The entry for a block the tables refute, with the edition-wide aliases and nearest id
-/// `E_UNKNOWN_ID` would offer.
+/// The entry for a block the tables refute: the pack's reason when the block is the other
+/// edition's, or else the edition-wide aliases and nearest id `E_UNKNOWN_ID` would offer.
 fn absent_entry(
     blocks: &BlocksIndex,
     aliases: &AliasIndex,
+    absent: &AbsentIndex,
     state: &BlockState,
 ) -> UnsupportedEntry {
-    UnsupportedEntry {
-        id: state.id.clone(),
-        reason: UnsupportedReason::AbsentFromEdition {
+    let reason = match absent.reason_for(&state.id) {
+        Some(detail) => UnsupportedReason::NoCounterpart {
+            detail: detail.to_owned(),
+        },
+        None => UnsupportedReason::AbsentFromEdition {
             suggestion: nearest_namespaced_id(&state.id, blocks.declared_ids()),
             aliases: aliases
                 .spellings_of(&state.id)
@@ -236,6 +242,10 @@ fn absent_entry(
                 .cloned()
                 .collect(),
         },
+    };
+    UnsupportedEntry {
+        id: state.id.clone(),
+        reason,
     }
 }
 

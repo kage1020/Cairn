@@ -4,6 +4,7 @@
 #[path = "../common/mod.rs"]
 pub mod common;
 
+mod absent;
 mod aliases;
 mod connections;
 mod declared_elsewhere;

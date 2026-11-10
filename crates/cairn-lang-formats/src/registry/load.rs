@@ -6,8 +6,8 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, Joins, OutOfDomain, StateDomain,
-    TargetRegistry, UnmappedState,
+    AbsentConcept, BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, Joins, OutOfDomain,
+    StateDomain, TargetRegistry, UnmappedState,
 };
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{VersionOrder, compare_versions};
@@ -16,6 +16,7 @@ use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
+use super::absent::{AbsentError, AbsentIndex};
 use super::aliases::{AliasError, AliasIndex};
 use super::blocks::{BlocksError, BlocksIndex};
 use super::connections::{ConnectionIndex, ConnectionsError};
@@ -38,6 +39,7 @@ struct BuiltinFiles {
     materials: &'static str,
     blocks: &'static str,
     aliases: &'static str,
+    absent: &'static str,
     connections: &'static str,
     states: Option<&'static str>,
     sensitivity: Option<&'static str>,
@@ -73,6 +75,7 @@ macro_rules! builtin_files {
             materials: include_str!(concat!("../../registry-data/", $dir, "/materials.json")),
             blocks: include_str!(concat!("../../registry-data/", $dir, "/blocks.json")),
             aliases: include_str!(concat!("../../registry-data/", $dir, "/aliases.json")),
+            absent: include_str!(concat!("../../registry-data/", $dir, "/absent.json")),
             connections: include_str!(concat!("../../registry-data/", $dir, "/connections.json")),
             states: $states,
             sensitivity: $sensitivity,
@@ -108,6 +111,7 @@ pub struct RegistryPack {
     materials: MaterialsIndex,
     blocks: BlocksIndex,
     aliases: AliasIndex,
+    absent: AbsentIndex,
     states: Option<StateMapIndex>,
     connections: ConnectionIndex,
     bytes_hash: HashHex,
@@ -122,6 +126,7 @@ pub struct PackView<'a> {
     blocks: &'a BlocksIndex,
     /// Edition-wide; `ids` narrows a group to the spellings this target declares.
     aliases: &'a AliasIndex,
+    absent: &'a AbsentIndex,
     mc_version: Option<&'a str>,
     /// The pinned version's sorted ids; `None` unpinned or without a `blocks` component.
     ids: Option<&'a [String]>,
@@ -200,6 +205,13 @@ impl TargetRegistry for PackView<'_> {
             until.map(|version| (*version).to_owned()),
             since.map(|version| (*version).to_owned()),
         )
+    }
+
+    fn absent_concept(&self, id: &str) -> Option<AbsentConcept> {
+        self.absent.reason_for(id).map(|reason| AbsentConcept {
+            declared_by: self.edition.other(),
+            reason: reason.to_owned(),
+        })
     }
 
     fn state_domain(&self, state: &BlockState) -> StateDomain {
@@ -549,6 +561,26 @@ pub enum RegistryError {
         #[source]
         source: AliasError,
     },
+    /// The pack's `absent` catalog failed to validate.
+    #[error("registry pack `absent`: {source}")]
+    Absent {
+        /// The validation error.
+        #[source]
+        source: AbsentError,
+    },
+    /// An `absent` id, or a spelling of it in `aliases`, is one the pack's own `blocks` declares,
+    /// so the edition has the block.
+    #[error(
+        "registry pack `absent` lists `{id}`, but `blocks` declares `{declared}` at `{mc_version}`"
+    )]
+    AbsentDeclared {
+        /// The listed id.
+        id: String,
+        /// The id or alias spelling a version declares.
+        declared: String,
+        /// The first version declaring it.
+        mc_version: String,
+    },
     /// An alias group names no id any version of the pack's `blocks` declares, so it never answers.
     #[error(
         "registry pack aliases group [{spellings}] names no id any version of `blocks` declares"
@@ -597,6 +629,12 @@ impl From<AliasError> for RegistryError {
     }
 }
 
+impl From<AbsentError> for RegistryError {
+    fn from(source: AbsentError) -> Self {
+        Self::Absent { source }
+    }
+}
+
 /// The targetable row `mc_version` names: `1.21.0` names `1.21` (`spec/versioning-editions`
 /// "The target is a compile-time parameter").
 fn targetable_row_for<'a>(
@@ -639,6 +677,13 @@ impl RegistryPack {
     #[must_use]
     pub fn aliases(&self) -> &AliasIndex {
         &self.aliases
+    }
+
+    /// The other edition's blocks this edition has no counterpart for, empty without the
+    /// component.
+    #[must_use]
+    pub fn absent(&self) -> &AbsentIndex {
+        &self.absent
     }
 
     /// The state maps, which a Bedrock pack with block tables carries and a Java pack never does.
@@ -808,6 +853,7 @@ impl RegistryPack {
             materials: &self.materials,
             blocks: &self.blocks,
             aliases: &self.aliases,
+            absent: &self.absent,
             mc_version,
             ids,
             states: mc_version.and_then(|version| self.states.as_ref()?.at(version)),
@@ -885,6 +931,7 @@ enum Component {
     Materials,
     Blocks,
     Aliases,
+    Absent,
     States,
     Sensitivity,
     Connections,
@@ -898,6 +945,7 @@ impl Component {
             Component::Materials => "materials",
             Component::Blocks => "blocks",
             Component::Aliases => "aliases",
+            Component::Absent => "absent",
             Component::States => "states",
             Component::Sensitivity => "sensitivity",
             Component::Connections => "connections",
@@ -928,6 +976,7 @@ impl ComponentSource for BuiltinFiles {
             Component::Materials => self.materials,
             Component::Blocks => self.blocks,
             Component::Aliases => self.aliases,
+            Component::Absent => self.absent,
             Component::States => embedded(self.states, "states")?,
             Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
             Component::Connections => self.connections,
@@ -1002,6 +1051,14 @@ fn load_pack(
     validate_blocks_cover_versions(&blocks, &data_versions)?;
     validate_blocks_order(&blocks, &data_versions)?;
     validate_aliases_answerable(&aliases, &blocks)?;
+    let (absent, absent_text) = optional_component(
+        source,
+        Component::Absent,
+        manifest.files.absent.as_deref(),
+        AbsentIndex::from_catalog,
+        AbsentIndex::empty,
+    )?;
+    validate_absent_undeclared(&absent, &aliases, &blocks)?;
     let (states, states_text, sensitivity_text) = state_maps(source, &manifest, &blocks)?;
     match &states {
         Some(states) => validate_states_cover_versions(states, &data_versions)?,
@@ -1027,6 +1084,7 @@ fn load_pack(
         (&manifest.files.materials, &materials_text),
         (&manifest.files.blocks, &blocks_text),
         (&manifest.files.aliases, &aliases_text),
+        (&manifest.files.absent, &absent_text),
         (&manifest.files.states, &states_text),
         (&manifest.files.sensitivity, &sensitivity_text),
         (&manifest.files.connections, &connections_text),
@@ -1042,6 +1100,7 @@ fn load_pack(
         materials,
         blocks,
         aliases,
+        absent,
         states,
         connections,
         bytes_hash,
@@ -1134,6 +1193,28 @@ fn validate_aliases_answerable(
         return Err(RegistryError::AliasGroupUnanswerable {
             spellings: group.join(", "),
         });
+    }
+    Ok(())
+}
+
+/// Refuses an `absent` id that the edition declares at some version, under its own spelling or
+/// another in its alias group: the edition has that block, so a build of it is no parity gap.
+fn validate_absent_undeclared(
+    absent: &AbsentIndex,
+    aliases: &AliasIndex,
+    blocks: &BlocksIndex,
+) -> Result<(), RegistryError> {
+    for id in absent.ids() {
+        let declared = std::iter::once(id)
+            .chain(aliases.spellings_of(id).iter().map(String::as_str))
+            .find_map(|spelling| Some((spelling, blocks.since(spelling)?)));
+        if let Some((declared, mc_version)) = declared {
+            return Err(RegistryError::AbsentDeclared {
+                id: id.to_owned(),
+                declared: declared.to_owned(),
+                mc_version: mc_version.to_owned(),
+            });
+        }
     }
     Ok(())
 }

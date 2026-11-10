@@ -86,7 +86,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
     assert_eq!(axes.edition_portability[1].edition, Edition::Bedrock);
     assert_eq!(axes.edition_portability[1].portable, 1);
     assert_eq!(axes.edition_portability[1].degraded, 1);
-    assert_eq!(axes.edition_portability[1].unsupported, 2);
+    assert_eq!(axes.edition_portability[1].unsupported, 3);
     assert_eq!(
         axes.edition_portability[1].degraded as usize,
         axes.edition_portability[1].degraded_entries.len(),
@@ -136,6 +136,14 @@ fn one_entry_per_reason() -> Vec<UnsupportedEntry> {
             },
         },
         UnsupportedEntry {
+            id: "minecraft:border_block".to_owned(),
+            reason: UnsupportedReason::NoCounterpart {
+                detail: "the border block, which Bedrock uses to wall players in; Java has no \
+                         such block"
+                    .to_owned(),
+            },
+        },
+        UnsupportedEntry {
             id: "minecraft:camera".to_owned(),
             reason: UnsupportedReason::StatesUnmapped {
                 states: "facing_direction=1".to_owned(),
@@ -157,6 +165,12 @@ fn every_unsupported_reason_carries_its_own_wire_shape() {
                 "reason": "absent_from_edition",
                 "suggestion": "minecraft:oak_log",
                 "aliases": ["minecraft:standing_sign"],
+            },
+            {
+                "id": "minecraft:border_block",
+                "reason": "no_counterpart",
+                "detail": "the border block, which Bedrock uses to wall players in; Java has no \
+                           such block",
             },
             {
                 "id": "minecraft:camera",

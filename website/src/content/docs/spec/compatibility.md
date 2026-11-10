@@ -160,12 +160,11 @@ every later release, so a removed form never falls back to that other error. A f
 Evolving surface has no deprecation window and gets no `E_BREAKING`: it earns the error any source
 spelling it earns, and the CHANGELOG entry names the replacement.
 
-**Reserved codes.** The codes a stable command raises are the ones
-[Lint §11.1](/spec/lint/#111-diagnostic-codes) lists. The redstone pipeline's codes, which only the
+**Reserved codes.** The codes a stable command raises are the ones [Lint
+§11.1](/spec/lint/#111-diagnostic-codes) lists. The redstone pipeline's codes, which only the
 Internal `cairn synth` raises, are outside that catalog on purpose. Any other code the spec names,
-such as `E_PARITY_UNSUPPORTED` or `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it
-yet. A reserved code lands with the meaning the spec states for it, where it states one, and its
-row landing is adding a code.
+such as `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A reserved code lands
+with the meaning the spec states for it, where it states one, and its row landing is adding a code.
 
 **What a code means.** A code's severity, and the payload
 [Lint §11.2](/spec/lint/#112-machine-readable-payload) gives it, are part of what it means.
