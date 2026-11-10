@@ -673,18 +673,18 @@ several do; where none does, it ends where `<to>` is driven, at the output of it
 sensor's pad. The bound holds the slowest path: where a change at `<from>` reaches one cell by two
 ports, the slower port counts.
 
-A bound the slowest path exceeds is `E_SIM_ASSERTION_FAILED` on that edition: one source can meet
-a bound on Java, where an `and` entered by `a` passes a comparator alone, and miss it on Bedrock,
-where it passes two torches. The
-finding gives the ticks it measured and, in a note each, the cells the path enters, the port it
-enters each by, and the repeaters on each wire. A `<to>` that does not depend on `<from>` fails on
-every edition, since no path carries a change from one to the other, and synth refuses it with the
-same code before an edition is chosen. Dependence is read on the Logic IR, where a gate written
-twice is one gate and `logic sig.d = sig.c` gives both names one net: there, two names on one net
-depend on each other, and the path between them takes no ticks. Place-and-route does not read a
-bound, so it is met in the source: relaxed, or met by a path through fewer cells or along a wire
-with fewer repeaters. Every command that builds the circuit checks each bound once it is
-legalized, and refuses to build it when one fails ([§14.8](#148-connection-to-the-ir-and-phases)).
+A bound the slowest path exceeds is `E_SIM_ASSERTION_FAILED` on that edition: one source can meet a
+bound on Java, where an `and` entered by `a` passes a comparator alone, and miss it on Bedrock,
+where it passes two torches. The finding gives the ticks it measured and, in a note each, the cells
+the path enters, the port it enters each by, and the repeaters on each wire. A `<to>` that does not
+depend on `<from>` fails on every edition, since no path carries a change from one to the other, and
+synth refuses it with the same code before an edition is chosen. Dependence is read on the Logic IR,
+where a gate written twice is one gate and `logic sig.d = sig.c` gives both names one net: there,
+two names on one net depend on each other, and the path between them takes no ticks. Place-and-route
+does not read a bound, so it is met in the source: relaxed, or met by a path through fewer cells or
+along a wire with fewer repeaters. Every command that builds the circuit checks each bound once it
+is legalized, and refuses to build it when one fails
+([§14.8](#148-connection-to-the-ir-and-phases)).
 
 ```text
 reach.crn:13:3: error[E_SIM_ASSERTION_FAILED]: struct=reach: `assert latency(sig.a -> sig.c) <= 1` fails on java: its slowest path from sig.a to sig.c takes 4 ticks, 1 in buffer repeaters on the routed wire and 2 in the torches up to the actuator
