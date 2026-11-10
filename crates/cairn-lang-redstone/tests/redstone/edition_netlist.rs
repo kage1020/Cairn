@@ -149,19 +149,19 @@ fn java_mapping_is_exhaustive_over_logical_cells() {
     );
     assert_eq!(
         edition_cell_for(xor, Edition::Java),
-        EditionCell::JavaXorUnpinned,
+        EditionCell::JavaTorchXor,
     );
     assert_eq!(
         edition_cell_for(nand, Edition::Java),
-        EditionCell::JavaNandUnpinned,
+        EditionCell::JavaTorchNand,
     );
     assert_eq!(
         edition_cell_for(nor, Edition::Java),
-        EditionCell::JavaNorUnpinned,
+        EditionCell::JavaTorchNor,
     );
     assert_eq!(
         edition_cell_for(mux, Edition::Java),
-        EditionCell::JavaMuxUnpinned,
+        EditionCell::JavaTorchMux,
     );
 }
 
@@ -197,19 +197,19 @@ fn bedrock_mapping_is_exhaustive_over_logical_cells() {
     );
     assert_eq!(
         edition_cell_for(xor, Edition::Bedrock),
-        EditionCell::BedrockXorUnpinned,
+        EditionCell::BedrockTorchXor,
     );
     assert_eq!(
         edition_cell_for(nand, Edition::Bedrock),
-        EditionCell::BedrockNandUnpinned,
+        EditionCell::BedrockTorchNand,
     );
     assert_eq!(
         edition_cell_for(nor, Edition::Bedrock),
-        EditionCell::BedrockNorUnpinned,
+        EditionCell::BedrockTorchNor,
     );
     assert_eq!(
         edition_cell_for(mux, Edition::Bedrock),
-        EditionCell::BedrockMuxUnpinned,
+        EditionCell::BedrockTorchMux,
     );
 }
 
@@ -363,49 +363,29 @@ struct sim size=5x5
 }
 
 #[test]
-fn unpinned_variants_serialise_as_snake_case() {
-    let mut logic = LogicIr::new();
-    logic.inputs.push(InputPort {
-        name: sig("sig.a"),
-        span: 0..0,
-    });
-    logic.inputs.push(InputPort {
-        name: sig("sig.b"),
-        span: 0..0,
-    });
-    logic.nodes.push(GateNode {
-        kind: GateKind::Xor2 {
-            a: SignalRef::Input(0),
-            b: SignalRef::Input(1),
-        },
-        span: 0..0,
-    });
-    logic.outputs.push(OutputPort {
-        name: sig("sig.out"),
-        driver: SignalRef::Gate(0),
-        span: 0..0,
-    });
-
-    let mut scoped = ScopedLogicIr::new();
-    scoped.scopes.push(ScopedLogicIrEntry {
-        kind: ScopeKind::Struct,
-        name: "hand".into(),
-        ir: logic,
-    });
-
-    let netlist = compile_netlist(&scoped);
-    let java = compile_edition_netlist(&netlist, Edition::Java);
-    let json = serde_json::to_string(&java).expect("serialise");
-    assert!(
-        json.contains("\"cell\":\"java_xor_unpinned\""),
-        "Java XOR should serialise as its unpinned placeholder name: {json}",
-    );
-
-    let bedrock = compile_edition_netlist(&netlist, Edition::Bedrock);
-    let json = serde_json::to_string(&bedrock).expect("serialise");
-    assert!(
-        json.contains("\"cell\":\"bedrock_xor_unpinned\""),
-        "Bedrock XOR should serialise as its unpinned placeholder name: {json}",
+fn cells_serialise_by_their_snake_case_names() {
+    let names = |edition: Edition| -> Vec<serde_json::Value> {
+        [
+            GateKind::Xor2 {
+                a: SignalRef::Input(0),
+                b: SignalRef::Input(1),
+            },
+            GateKind::Mux {
+                sel: SignalRef::Input(0),
+                a: SignalRef::Input(1),
+                b: SignalRef::Input(2),
+            },
+        ]
+        .into_iter()
+        .map(|kind| serde_json::to_value(edition_cell_for(kind, edition)).expect("serialise"))
+        .collect()
+    };
+    assert_eq!(
+        [names(Edition::Java), names(Edition::Bedrock)],
+        [
+            ["java_torch_xor", "java_torch_mux"].map(serde_json::Value::from),
+            ["bedrock_torch_xor", "bedrock_torch_mux"].map(serde_json::Value::from),
+        ],
     );
 }
 

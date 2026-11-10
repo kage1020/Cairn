@@ -34,22 +34,35 @@ In Verilog terms, v1 allows the `assign` equivalent and no clocked assignment:
 
 **The built-in logic library.** Each entry is a primitive's name and its notation. A prefix
 primitive stands before its one operand. An infix primitive stands between its two, and its rank
-says how tightly it binds: a higher rank groups first, and one rank groups left to right. The parser
-takes an expression's shape from the library, so a prefix or infix primitive the library gains needs
-no new syntax. The library holds three primitives today:
+says how tightly it binds: a higher rank groups first, and one rank groups left to right. A called
+primitive takes its operands in parentheses after its name, each named once as `name=expression`,
+in any order, with a comma between two and none after the last. The parser takes an expression's
+shape from the library, so a primitive the library gains in one of these notations needs no new
+syntax. The library holds seven primitives:
 
 | Primitive | Notation |
 |---|---|
-| `or` | infix, rank 0 |
-| `and` | infix, rank 1 |
+| `or`, `nor` | infix, rank 0 |
+| `xor` | infix, rank 1 |
+| `and`, `nand` | infix, rank 2 |
 | `not` | prefix |
+| `mux` | called, `mux(sel=…, a=…, b=…)` |
 
-A prefix primitive binds tighter than any infix one, so `sig.a or sig.b and not sig.c` reads as
-`sig.a or (sig.b and (not sig.c))`. Parentheses group as written.
+The ranks follow the usual order of the bitwise operators, `and` before `xor` before `or`, and each
+negated form takes the rank of the primitive it negates. A prefix primitive binds tighter than any
+infix one, so `sig.a or sig.b and not sig.c` reads as `sig.a or (sig.b and (not sig.c))`, and
+`sig.a nor sig.b xor sig.c nand sig.d` as `sig.a nor (sig.b xor (sig.c nand sig.d))`. Parentheses
+group as written. A call is one operand, as a signal is, so `not mux(sel=sig.s, a=sig.x, b=sig.y)
+and sig.z` reads as `(not mux(…)) and sig.z`, and each operand inside it is a whole expression.
 
-The other primitives and macros above are not in the library yet. Written before an operand or
-between two, or called, each is `E_PARSE`, and the message names the primitives that could stand
-there: `sig.a xor sig.b` stops at `xor`, and a macro call such as `pulse(sig.ring, 4)` at its `(`.
+`mux` is `a` while `sel` is off and `b` while it is on. A call that passes an operand by position,
+leaves one out, names one twice or names one the primitive does not take is `E_PARSE`, and the
+message names the operands the primitive takes, and for a positional or missing operand, the ones
+still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`, expecting `a=` or `b=`.
+
+The macros above are not in the library yet. A macro call such as `pulse(sig.ring, 4)` is `E_PARSE`
+at its `(`, and the message names the primitives that could stand there and the one the library
+calls. So is a word the library does not hold: `sig.a xnor sig.b` stops at `xnor`.
 
 ## 14.2 Signal binding
 
@@ -170,7 +183,7 @@ logic sig.sel   = mux(sel=sig.s, a=sig.x, b=sig.y)
 ```
 
 The expression contains no time arithmetic. The `4` in `pulse(sig.ring, 4)` is a **stage count**,
-not a tick value. Of these lines only the first parses today; the macro calls are `E_PARSE`
+not a tick value. Of these lines the first and the last parse today; the macro calls are `E_PARSE`
 ([§14.1](#141-two-tiers-and-the-v1-boundary)).
 
 ## 14.4 Time model
@@ -185,7 +198,7 @@ zero-delay, but the tick count is known only after cell selection (`and → Comp
 and the actual post-placement wire length.
 
 A cell takes each operand on an input port of its own: `a` and `b` on a two-input cell, `a` on
-`not`, and on `mux` the `sel`, `a` and `b` its arguments name. A cell's delay is counted per input
+`not`, and on `mux` the `sel`, `a` and `b` its call names. A cell's delay is counted per input
 port, as the ticks from that port to the cell's output, since one input can pass through more of a
 cell than another. A signal's delay through a cell is the delay of the port it enters by.
 
@@ -220,9 +233,9 @@ The internal algorithm runs five stages:
    = 2`. Neither pad column carries a pad on the cell row, so an end cell that stands beside a pad
    column keeps the coordinate beside it there as a free neighbour. A cell body is a block, so a net
    reaches it through a neighbouring coordinate; a two-input gate has three distinct nets touching
-   it (its two drivers and its own output) and therefore needs three free neighbours. Packed against
-   each other the cells in the middle of a row have two, at any region size, so a row spaced like
-   this is what makes a short-free wiring possible at all.
+   it (its two drivers and its own output) and therefore needs three free neighbours, and a `mux`,
+   with three drivers, four. Packed against each other the cells in the middle of a row have two, at
+   any region size, so a row spaced like this is what makes a short-free wiring possible at all.
 
    The row also stands one row in from the near edge of the region. In a scope with cells the I/O
    pads step along `z` from `0`, skipping the cell row; a scope with no cells has no cell row, and
@@ -232,12 +245,14 @@ The internal algorithm runs five stages:
    actuator-pad column, no pad touches a cell at any width the row check accepts. Dust reads the
    dust in the coordinate beside it, so a lane of free coordinates carries one net however long it
    is; a cell against the edge has one lane, and the three nets touching a two-input gate cannot
-   share it. One row in gives every cell a lane on each side. That costs one row for the whole
-   netlist rather than one per cell, so unlike the column spacing it does not grow with the cell
-   count.
+   share it. One row in gives every cell a lane on each side, so with the clear columns either side
+   of it each cell is placed with four free neighbours, the number a `mux` needs. That costs one row
+   for the whole netlist rather than one per cell, so unlike the column spacing it does not grow
+   with the cell count.
 
-   Neither spacing is a guarantee of a wiring: a net passing through can still take the last free
-   face, and that scope is refused rather than shorted. Three kinds of region are refused here
+   Neither spacing is a guarantee of a wiring: a net passing through can still take a face a cell
+   needs. Stage 2 lays the nets again in another order when that strands a sink, and a scope no
+   order wires is refused rather than shorted. Three kinds of region are refused here
    rather than left to fail as an unreachable sink at stage 2: one that cannot hold the row
    (`2n + 1` columns for `n` cells, and three rows); one that cannot hold the rows its pads stand in
    (a row per sensor or actuator on the busier edge, and, in a scope with cells, one more for the
@@ -257,6 +272,13 @@ The internal algorithm runs five stages:
    measured: `wire_length` and the delay pass's tick count are both read off the routed tree. The
    order is fanout descending, then the net's own key. That is a total order, so one layout has one
    answer however many passes ask for it.
+
+   An earlier net's dust can wall in a later net's sink: a `mux` beside another cell needs four of
+   its faces, and a net on its way past takes one. So when the order strands a sink, the first net
+   with a stranded sink moves to the front and every net is laid again, fewer times in all than
+   there are nets. The first order that strands nothing is kept, so a scope the first order wires is
+   laid as before, and each order follows from the one before it, so a layout still has one answer.
+   A scope no order wires keeps the first order's trees and is refused on them.
 
    Beside is per-plane. Whether two strands a layer apart read each other depends on what is
    standing between them, which this model does not carry: the internal model is pseudo-2.5D and the
@@ -361,7 +383,10 @@ The internal algorithm runs five stages:
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
 whose every way out is walled in, by a component, by an earlier net's dust or the coordinates beside
 it, or by the edge of the reservation, earns the same refusal for a different reason, and the
-message says which two coordinates it could not join and which nets took the faces.
+message says which two coordinates it could not join and which nets took the faces. Its fix names
+the lowest `void` that wires the scope, trying up to four layers above the scope's own, since a
+layer to climb onto is what frees a face; when none of those does, it says to split the logic across
+scopes instead, and names the highest `void` it tried.
 
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:
@@ -414,6 +439,25 @@ entering by `b` passes the inverter and then the comparator, 2 ticks. Which oper
 the netlist puts on `a` is not specified; `assert latency` ([§14.7](#147-verification)), not the
 order written, pins a path's ticks through a `ComparatorAND`. `assert latency` is not parsed yet,
 so nothing pins them today.
+
+Every logical cell has one realisation per edition. A port's ticks count the slowest path from it
+to the output, and a cell either restores strength, so the wire into each of its ports ends there,
+or passes on what one of its inputs carries ([§14.5](#145-place-and-route)):
+
+| Logical cell | Java | Bedrock | Ticks per port | Strength |
+|---|---|---|---|---|
+| AND | `ComparatorAND` | `TorchAND`, two torches inverting an OR | Java `a` 1, `b` 2; Bedrock 2 | Java passes its rear on; Bedrock restores |
+| OR | `RepeaterOR`, two repeaters onto a common line | `TorchOR`, a dust merge | Java 1; Bedrock 0 | Java restores; Bedrock passes its strongest input on |
+| NOT | `InverterTorch` | `InverterTorch` | 1 | restores |
+| NAND | `TorchNAND`, two inverter torches onto a common line | the same | 1 | restores |
+| NOR | `TorchNOR`, one torch on a block both operands power | the same | 1 | restores |
+| XOR | `TorchXOR`, the torch NORs of `not a` and `b` and of `a` and `not b`, onto a common line | the same | 2 | restores |
+| MUX | `TorchMUX`, the torch NORs of `sel` and `not a` and of `not sel` and `not b`, onto a common line | the same | 2 | restores |
+
+An operand of `xor` reaches one of its NORs straight and the other through an inverter, so its
+output settles once the inverted path has, two torches after the operand changes. Each port of
+`mux` likewise passes an inverter and a NOR on its slowest path, `sel` on the NOR that takes it
+inverted.
 
 The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as a
 tile that conducts to neither **another net's** coordinate below it nor another net's coordinates

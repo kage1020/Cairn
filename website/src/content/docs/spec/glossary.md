@@ -133,8 +133,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   Java/Bedrock difference to the library. See [redstone §14.6](/spec/redstone/#146-edition-differences).
 - **Combinational vs sequential.** v1 ships closed-set combinational gates and curated sequential
   macros (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`). Arbitrary
-  FSMs / CPUs are out of scope for v1. Today a `logic` line accepts only `and`, `or` and `not`; no
-  sequential macro is parsed yet.
+  FSMs / CPUs are out of scope for v1. Today a `logic` line accepts the combinational primitives,
+  `and`, `or`, `not`, `xor`, `nand`, `nor` and `mux`; no sequential macro is parsed yet.
 - **Truth / latency / temporal assertion.** The three verification kinds. See
   [redstone §14.7](/spec/redstone/#147-verification). Temporal is bounded `eventually within N` only, not
   full LTL. `assert latency` is not parsed yet (`E_PARSE`), and no simulator checks the other two

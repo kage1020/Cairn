@@ -45,28 +45,28 @@ pub enum GateKind {
         /// Sole operand.
         a: SignalRef,
     },
-    /// `xor(a, b)`. Reserved: no surface syntax produces it.
+    /// `a xor b`.
     Xor2 {
         /// Left operand.
         a: SignalRef,
         /// Right operand.
         b: SignalRef,
     },
-    /// `nand(a, b)`. Reserved: no surface syntax produces it.
+    /// `a nand b`.
     Nand2 {
         /// Left operand.
         a: SignalRef,
         /// Right operand.
         b: SignalRef,
     },
-    /// `nor(a, b)`. Reserved: no surface syntax produces it.
+    /// `a nor b`.
     Nor2 {
         /// Left operand.
         a: SignalRef,
         /// Right operand.
         b: SignalRef,
     },
-    /// `mux(sel=..., a=..., b=...)`. Reserved: no surface syntax produces it.
+    /// `mux(sel=…, a=…, b=…)`.
     Mux {
         /// Select operand — chooses between `a` and `b`.
         sel: SignalRef,

@@ -101,7 +101,7 @@ semantic-sensitive:      (none)
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
 - `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
 - `.litematic` and `.schem` writers, and importing existing schematics.
-- Redstone in compiled output, gates and sequential macros beyond `and` / `or` / `not`, `assert latency`, and the tick simulator that verifies a circuit.
+- Redstone in compiled output, the sequential macros, `assert latency`, and the tick simulator that verifies a circuit.
 - The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas

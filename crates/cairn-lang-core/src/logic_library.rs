@@ -14,6 +14,14 @@ pub enum LogicPrimitive {
     Or,
     /// `not a`.
     Not,
+    /// `a xor b`.
+    Xor,
+    /// `a nand b`.
+    Nand,
+    /// `a nor b`.
+    Nor,
+    /// `mux(sel=s, a=x, b=y)`: `a` while `sel` is off, `b` while it is on.
+    Mux,
 }
 
 /// How a [`LogicPrimitive`] is written in an expression.
@@ -26,11 +34,53 @@ pub enum Notation {
         /// How tightly it binds: a higher rank groups first, and one rank groups left to right.
         rank: u8,
     },
+    /// Called with every operand named once, in any order: `mux(sel=s, a=x, b=y)`.
+    Call(CallSignature),
+}
+
+/// The name a called [`LogicPrimitive`] is called by and the operands a call names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallSignature {
+    callee: &'static str,
+    operands: &'static [&'static str],
+}
+
+impl CallSignature {
+    /// The word the call starts with.
+    #[must_use]
+    pub const fn callee(self) -> &'static str {
+        self.callee
+    }
+
+    /// The operands' names, in the order an [`Expr::Call`](crate::ast::Expr::Call) holds them.
+    #[must_use]
+    pub const fn operands(self) -> &'static [&'static str] {
+        self.operands
+    }
+
+    /// The call written naming every operand, such as `mux(sel=…, a=…, b=…)`.
+    #[must_use]
+    pub fn template(self) -> String {
+        let operands: Vec<String> = self
+            .operands
+            .iter()
+            .map(|operand| format!("{operand}=…"))
+            .collect();
+        format!("{}({})", self.callee, operands.join(", "))
+    }
 }
 
 impl LogicPrimitive {
     /// Every primitive the library holds.
-    pub const ALL: [Self; 3] = [Self::And, Self::Or, Self::Not];
+    pub const ALL: &'static [Self] = &[
+        Self::And,
+        Self::Or,
+        Self::Not,
+        Self::Xor,
+        Self::Nand,
+        Self::Nor,
+        Self::Mux,
+    ];
 
     /// The word that names the primitive in source.
     #[must_use]
@@ -39,6 +89,10 @@ impl LogicPrimitive {
             Self::And => "and",
             Self::Or => "or",
             Self::Not => "not",
+            Self::Xor => "xor",
+            Self::Nand => "nand",
+            Self::Nor => "nor",
+            Self::Mux => "mux",
         }
     }
 
@@ -46,9 +100,14 @@ impl LogicPrimitive {
     #[must_use]
     pub const fn notation(self) -> Notation {
         match self {
-            Self::And => Notation::Infix { rank: 1 },
-            Self::Or => Notation::Infix { rank: 0 },
+            Self::Or | Self::Nor => Notation::Infix { rank: 0 },
+            Self::Xor => Notation::Infix { rank: 1 },
+            Self::And | Self::Nand => Notation::Infix { rank: 2 },
             Self::Not => Notation::Prefix,
+            Self::Mux => Notation::Call(CallSignature {
+                callee: self.name(),
+                operands: &["sel", "a", "b"],
+            }),
         }
     }
 
@@ -56,16 +115,26 @@ impl LogicPrimitive {
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .find(|primitive| primitive.name() == name)
     }
 
-    /// The rank of an infix primitive, or `None` for a prefix one.
+    /// The rank of an infix primitive, or `None` for one written otherwise.
     #[must_use]
     pub const fn infix_rank(self) -> Option<u8> {
         match self.notation() {
             Notation::Infix { rank } => Some(rank),
-            Notation::Prefix => None,
+            Notation::Prefix | Notation::Call(_) => None,
+        }
+    }
+
+    /// The signature of a called primitive, or `None` for one written otherwise.
+    #[must_use]
+    pub const fn call_signature(self) -> Option<CallSignature> {
+        match self.notation() {
+            Notation::Call(signature) => Some(signature),
+            Notation::Prefix | Notation::Infix { .. } => None,
         }
     }
 }
@@ -79,7 +148,8 @@ impl Serialize for LogicPrimitive {
 /// The lowest infix rank the library holds above `rank`, or the lowest of all for `None`.
 pub(crate) fn infix_rank_above(rank: Option<u8>) -> Option<u8> {
     LogicPrimitive::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .filter_map(LogicPrimitive::infix_rank)
         .filter(|held| rank.is_none_or(|rank| *held > rank))
         .min()
@@ -111,9 +181,43 @@ mod tests {
     }
 
     #[test]
+    fn only_a_called_primitive_has_a_call_signature() {
+        assert_eq!(
+            LogicPrimitive::iter()
+                .filter_map(|primitive| {
+                    let signature = primitive.call_signature()?;
+                    Some((primitive, signature.callee(), signature.template()))
+                })
+                .collect::<Vec<_>>(),
+            [(
+                LogicPrimitive::Mux,
+                "mux",
+                "mux(sel=…, a=…, b=…)".to_owned()
+            )],
+        );
+    }
+
+    #[test]
+    fn a_call_signature_names_some_operands_each_once() {
+        for signature in LogicPrimitive::iter().filter_map(LogicPrimitive::call_signature) {
+            let operands = signature.operands();
+            assert!(!operands.is_empty(), "{signature:?}");
+            for (index, operand) in operands.iter().enumerate() {
+                assert!(!operands[..index].contains(operand), "{signature:?}");
+            }
+        }
+    }
+
+    #[test]
     fn the_ranks_climb_through_the_ones_the_library_holds() {
-        assert_eq!(infix_rank_above(None), Some(0));
-        assert_eq!(infix_rank_above(Some(0)), Some(1));
-        assert_eq!(infix_rank_above(Some(1)), None);
+        assert_eq!(
+            [
+                infix_rank_above(None),
+                infix_rank_above(Some(0)),
+                infix_rank_above(Some(1)),
+                infix_rank_above(Some(2)),
+            ],
+            [Some(0), Some(1), Some(2), None],
+        );
     }
 }
