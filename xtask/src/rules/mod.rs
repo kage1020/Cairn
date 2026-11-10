@@ -5,6 +5,7 @@ mod comment_length;
 mod diagnostic_catalog;
 mod editor_keywords;
 mod grammar_fields;
+mod logic_highlights;
 mod manifest;
 mod module_cycles;
 mod readme;
@@ -43,6 +44,7 @@ pub const RULES: &[Rule] = &[
     tier_1_tokens::RULE,
     grammar_fields::RULE,
     editor_keywords::RULE,
+    logic_highlights::RULE,
     comment_length::RULE,
     module_cycles::RULE,
     circuit_advice::RULE,

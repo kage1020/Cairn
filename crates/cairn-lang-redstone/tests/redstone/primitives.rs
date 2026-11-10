@@ -38,8 +38,8 @@ struct Case {
     gate: GateKind,
     /// The cell and its slowest port's ticks, from the table in `spec/redstone` "Edition
     /// differences".
-    java: (EditionCell, u32),
-    bedrock: (EditionCell, u32),
+    java: (EditionCell, u64),
+    bedrock: (EditionCell, u64),
 }
 
 const A: SignalRef = SignalRef::Input(0);
@@ -143,7 +143,7 @@ fn each_primitive_lays_out_as_its_cell_on_both_editions() {
             [(Edition::Java, case.java), (Edition::Bedrock, case.bedrock)]
         {
             let legalized = legalized_from_source(&source, edition);
-            let cells: Vec<(EditionCell, &[CellPortDriver], Option<u32>)> = legalized.scopes[0]
+            let cells: Vec<(EditionCell, &[CellPortDriver], Option<u64>)> = legalized.scopes[0]
                 .ir
                 .cells
                 .iter()

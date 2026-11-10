@@ -53,7 +53,7 @@ pub fn verify_latency(legalized: &ScopedPlacementIr, module: &IntentModule) -> V
             let Some(path) = path else {
                 continue;
             };
-            if path.ticks() > assertion.bound {
+            if path.ticks() > u64::from(assertion.bound) {
                 diagnostics.push(failure(&scope, &entry.ir, assertion, &path));
             }
         }
@@ -134,11 +134,11 @@ struct Path {
 
 impl Path {
     /// Every tick on the path, cells and buffer repeaters alike.
-    fn ticks(&self) -> u32 {
+    fn ticks(&self) -> u64 {
         self.hops
             .iter()
             .map(Hop::ticks)
-            .fold(0, u32::saturating_add)
+            .fold(0, u64::saturating_add)
     }
 
     /// The buffer repeaters on its wires.
@@ -157,7 +157,7 @@ enum Hop {
         cell: usize,
         port: PortName,
         buffers: u32,
-        ticks: u32,
+        ticks: u64,
     },
     /// Onto `outputs[output]`'s pad, over `buffers` repeaters.
     Pad { output: usize, buffers: u32 },
@@ -172,21 +172,19 @@ impl Hop {
     }
 
     /// The ticks of the wire into this hop and of the cell it enters.
-    fn ticks(&self) -> u32 {
+    fn ticks(&self) -> u64 {
         let through = match *self {
             Self::Cell { ticks, .. } => ticks,
             Self::Pad { .. } => 0,
         };
-        self.buffers()
-            .saturating_mul(BUFFER_REPEATER_TICKS)
-            .saturating_add(through)
+        u64::from(self.buffers().saturating_mul(BUFFER_REPEATER_TICKS)).saturating_add(through)
     }
 }
 
 /// When a change at a cell's output arrives, and the driver it came in by.
 #[derive(Clone, Copy)]
 struct Arrival {
-    ticks: u32,
+    ticks: u64,
     /// Index into the cell's `drivers`.
     via: usize,
 }
@@ -199,7 +197,7 @@ fn slowest_path(ir: &PlacementIr, from: &DottedRef, to: &DottedRef) -> Option<Pa
     let end = *ir.signal_defs.get(to)?;
 
     let mut arrivals: Vec<Option<Arrival>> = Vec::with_capacity(ir.cells.len());
-    let arrival_at = |net: NetRef, arrivals: &[Option<Arrival>]| -> Option<u32> {
+    let arrival_at = |net: NetRef, arrivals: &[Option<Arrival>]| -> Option<u64> {
         if net == start {
             return Some(0);
         }
@@ -216,9 +214,9 @@ fn slowest_path(ir: &PlacementIr, from: &DottedRef, to: &DottedRef) -> Option<Pa
                 continue;
             };
             let ticks = at
-                .saturating_add(
+                .saturating_add(u64::from(
                     port_buffers(cell, driver.port).saturating_mul(BUFFER_REPEATER_TICKS),
-                )
+                ))
                 .saturating_add(cell.cell.port_delay_ticks(driver.port));
             if best.is_none_or(|b| ticks > b.ticks) {
                 best = Some(Arrival { ticks, via: index });
@@ -274,7 +272,8 @@ fn port_buffers(cell: &PlacedCellNode, port: PortName) -> u32 {
     saturating_index(on_port.count())
 }
 
-fn plural(n: u32, one: &str, many: &str) -> String {
+fn plural(n: impl Into<u64>, one: &str, many: &str) -> String {
+    let n = n.into();
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
@@ -362,11 +361,20 @@ fn failure(
             repeaters(n),
         ),
     };
-    diagnostic.with_footer(wire).with_footer(format!(
-        "Fix: relax the bound to `<= {measured}`, or shorten the path; the logic is never \
-         rewritten to meet a bound",
-        measured = path.ticks(),
-    ))
+    let measured = path.ticks();
+    let fix = if u32::try_from(measured).is_ok() {
+        format!(
+            "Fix: relax the bound to `<= {measured}`, or shorten the path; the logic is never \
+             rewritten to meet a bound"
+        )
+    } else {
+        format!(
+            "Fix: shorten the path, which takes more ticks than a bound can name, at most {}; \
+             the logic is never rewritten to meet a bound",
+            u32::MAX
+        )
+    };
+    diagnostic.with_footer(wire).with_footer(fix)
 }
 
 /// `n buffer repeater(s)`.

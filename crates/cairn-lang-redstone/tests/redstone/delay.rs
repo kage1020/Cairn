@@ -297,7 +297,7 @@ struct chain size=40x5
     // A comparator passes on the strength its rear reads, so `sig.b`'s dust runs on through each
     // cell to the next one's side, and repeaters land on two cell-to-cell nets too.
     assert_eq!(entry.ir.cells.len(), 16);
-    let expected: [u32; 16] = [
+    let expected: [u64; 16] = [
         2, 2, 2, 2, 2, 2, 2, // i = 0..=6
         4, 3, 3, 3, 3, 3, 3, // i = 7..=13
         5, 4, // i = 14..=15

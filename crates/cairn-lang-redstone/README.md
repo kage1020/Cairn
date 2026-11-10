@@ -49,7 +49,7 @@ The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile
 ## v1 scope
 
 - **Combinational**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux` are synthesised end to end, each to a cell on both editions.
-- **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` are synthesised the same way, each to one cell of torches and repeaters on both editions that keeps its feedback inside it, so the Logic IR stays a DAG. A macro's stage count travels with its cell, and its ticks are its Edition Cell's.
+- **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` are synthesised the same way, each to one cell of torches and repeaters on both editions, and a `latch` or `counter` keeps its feedback inside its cell, so the Logic IR stays a DAG. A macro's stage count travels with its cell, and its ticks are its Edition Cell's.
 - **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; `verify_latency` checks each `assert latency` against the legalized circuit, and evaluating `truth` and `always` waits on the simulator.
 
 Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).

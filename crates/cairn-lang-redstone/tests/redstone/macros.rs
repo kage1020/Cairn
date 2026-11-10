@@ -1,9 +1,10 @@
-//! Each sequential macro synthesizes to one gate carrying its stage count, which lowers to one
-//! cell on each edition and keeps its feedback inside it (`spec/redstone` "Time model", "Edition
+//! Each sequential macro synthesizes to one gate, carrying the stage count of one that counts
+//! stages, which lowers to one cell on each edition (`spec/redstone` "Time model", "Edition
 //! differences").
 
 use std::fmt::Write as _;
 
+use cairn_lang_core::logic_library::StageCount;
 use cairn_lang_core::{Edition, lower, parse};
 use cairn_lang_redstone::{
     CellPortDriver, EditionCell, GateKind, LogicalCell, NetRef, PortName, SignalRef,
@@ -33,6 +34,8 @@ fn source(inputs: &[&str], expression: &str, tail: &str) -> String {
 struct Case {
     expression: &'static str,
     inputs: &'static [&'static str],
+    /// Each port the cell takes, with the input that drives it.
+    ports: &'static [(PortName, u32)],
     gate: GateKind,
     logical: LogicalCell,
     java: EditionCell,
@@ -41,28 +44,37 @@ struct Case {
 
 const A: SignalRef = SignalRef::Input(0);
 
+/// `count` stages.
+fn n(count: u32) -> StageCount {
+    StageCount::new(count).expect("a stage count is at least 1")
+}
+
 fn cases() -> [Case; 6] {
     let one = &["sig.a"][..];
+    let on_a = &[(PortName::A, 0)][..];
     [
         Case {
             expression: "delay(sig.a, 3)",
             inputs: one,
-            gate: GateKind::Delay { a: A, stages: 3 },
-            logical: LogicalCell::Delay { stages: 3 },
-            java: EditionCell::JavaRepeaterDelay { stages: 3 },
-            bedrock: EditionCell::BedrockRepeaterDelay { stages: 3 },
+            ports: on_a,
+            gate: GateKind::Delay { a: A, stages: n(3) },
+            logical: LogicalCell::Delay { stages: n(3) },
+            java: EditionCell::JavaRepeaterDelay { stages: n(3) },
+            bedrock: EditionCell::BedrockRepeaterDelay { stages: n(3) },
         },
         Case {
             expression: "pulse(sig.a, 4)",
             inputs: one,
-            gate: GateKind::Pulse { a: A, stages: 4 },
-            logical: LogicalCell::Pulse { stages: 4 },
-            java: EditionCell::JavaTorchPulse { stages: 4 },
-            bedrock: EditionCell::BedrockTorchPulse { stages: 4 },
+            ports: on_a,
+            gate: GateKind::Pulse { a: A, stages: n(4) },
+            logical: LogicalCell::Pulse { stages: n(4) },
+            java: EditionCell::JavaTorchPulse { stages: n(4) },
+            bedrock: EditionCell::BedrockTorchPulse { stages: n(4) },
         },
         Case {
             expression: "edge_rising(sig.a)",
             inputs: one,
+            ports: on_a,
             gate: GateKind::EdgeRising { a: A },
             logical: LogicalCell::EdgeRising,
             java: EditionCell::JavaTorchEdgeRising,
@@ -71,6 +83,7 @@ fn cases() -> [Case; 6] {
         Case {
             expression: "edge_falling(sig.a)",
             inputs: one,
+            ports: on_a,
             gate: GateKind::EdgeFalling { a: A },
             logical: LogicalCell::EdgeFalling,
             java: EditionCell::JavaTorchEdgeFalling,
@@ -78,10 +91,12 @@ fn cases() -> [Case; 6] {
         },
         Case {
             expression: "latch(reset=sig.r, set=sig.s)",
-            inputs: &["sig.s", "sig.r"],
+            // Declared against the operands' order, so a swap of the two shows.
+            inputs: &["sig.r", "sig.s"],
+            ports: &[(PortName::Set, 1), (PortName::Reset, 0)],
             gate: GateKind::Latch {
-                set: SignalRef::Input(0),
-                reset: SignalRef::Input(1),
+                set: SignalRef::Input(1),
+                reset: SignalRef::Input(0),
             },
             logical: LogicalCell::Latch,
             java: EditionCell::JavaTorchLatch,
@@ -90,10 +105,11 @@ fn cases() -> [Case; 6] {
         Case {
             expression: "counter(sig.a, 2)",
             inputs: one,
-            gate: GateKind::Counter { a: A, stages: 2 },
-            logical: LogicalCell::Counter { stages: 2 },
-            java: EditionCell::JavaRepeaterCounter { stages: 2 },
-            bedrock: EditionCell::BedrockRepeaterCounter { stages: 2 },
+            ports: on_a,
+            gate: GateKind::Counter { a: A, stages: n(2) },
+            logical: LogicalCell::Counter { stages: n(2) },
+            java: EditionCell::JavaRepeaterCounter { stages: n(2) },
+            bedrock: EditionCell::BedrockRepeaterCounter { stages: n(2) },
         },
     ]
 }
@@ -121,15 +137,10 @@ fn each_macro_is_one_gate_and_one_cell_on_each_edition() {
             .collect();
         assert_eq!(logical, [case.logical], "{}", case.expression);
 
-        let ports: &[PortName] = if case.inputs.len() == 2 {
-            &[PortName::Set, PortName::Reset]
-        } else {
-            &[PortName::A]
-        };
-        let drivers: Vec<CellPortDriver> = ports
+        let drivers: Vec<CellPortDriver> = case
+            .ports
             .iter()
-            .zip(0..)
-            .map(|(&port, input)| CellPortDriver {
+            .map(|&(port, input)| CellPortDriver {
                 port,
                 net: NetRef::Input(input),
             })
@@ -155,9 +166,10 @@ fn each_macro_is_one_gate_and_one_cell_on_each_edition() {
 #[test]
 fn a_macro_shares_its_gate_only_with_one_of_the_same_operand_and_stage_count() {
     let tail = "  logic sig.same = delay(sig.a, 2)\n  logic sig.more = delay(sig.a, 3)\n  \
-                logic sig.both = sig.same and sig.more\n  lamp id=lp at=inside.back offset=5 \
-                y=2 lit_by=sig.both\n";
-    let src = source(&["sig.a"], "delay(sig.a, 2)", tail);
+                logic sig.other = delay(sig.b, 2)\n  logic sig.wide = pulse(sig.a, 2)\n  \
+                logic sig.all = sig.same and sig.more and sig.other and sig.wide\n  \
+                lamp id=lp at=inside.back offset=5 y=2 lit_by=sig.all\n";
+    let src = source(&["sig.a", "sig.b"], "delay(sig.a, 2)", tail);
     let out = synth_source(&src);
     assert_eq!(out.diagnostics, [], "{src}");
     let gates: Vec<GateKind> = out.scoped.scopes[0]
@@ -169,11 +181,24 @@ fn a_macro_shares_its_gate_only_with_one_of_the_same_operand_and_stage_count() {
     assert_eq!(
         gates,
         [
-            GateKind::Delay { a: A, stages: 2 },
-            GateKind::Delay { a: A, stages: 3 },
+            GateKind::Delay { a: A, stages: n(2) },
+            GateKind::Delay { a: A, stages: n(3) },
+            GateKind::Delay {
+                a: SignalRef::Input(1),
+                stages: n(2),
+            },
+            GateKind::Pulse { a: A, stages: n(2) },
             GateKind::And2 {
                 a: SignalRef::Gate(0),
                 b: SignalRef::Gate(1),
+            },
+            GateKind::And2 {
+                a: SignalRef::Gate(2),
+                b: SignalRef::Gate(4),
+            },
+            GateKind::And2 {
+                a: SignalRef::Gate(3),
+                b: SignalRef::Gate(5),
             },
         ],
     );
@@ -189,16 +214,29 @@ fn a_signal_read_back_through_a_macro_is_still_a_cycle() {
         &src[out.diagnostics[0].span.clone()],
         "logic sig.out = latch(set=sig.a, reset=sig.out)",
     );
+    let notes: Vec<&str> = out.diagnostics[0]
+        .notes
+        .iter()
+        .map(|note| note.message.as_str())
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            "Fix: break the cycle by driving one of the signals from a sensor. A `latch` or \
+             `counter` holds its state inside its own cell, so it stands in for a loop of `logic` \
+             lines, and one that reads its own output back closes the loop again."
+        ],
+    );
 }
 
 #[test]
 fn a_latency_bound_counts_a_macro_by_the_port_it_enters() {
     let tail = "  assert latency(sig.s -> sig.out) <= 3\n  \
                 assert latency(sig.r -> sig.out) <= 4\n";
-    let src = source(&["sig.s", "sig.r"], "latch(set=sig.s, reset=sig.r)", tail);
+    let src = source(&["sig.r", "sig.s"], "latch(set=sig.s, reset=sig.r)", tail);
     let intent = lower(&parse(&src).expect("parse"));
     for edition in [Edition::Java, Edition::Bedrock] {
-        let found: Vec<String> = verify_latency(&intent, &legalized_from_source(&src, edition))
+        let found: Vec<String> = verify_latency(&legalized_from_source(&src, edition), &intent)
             .into_iter()
             .map(|d| d.primary)
             .collect();

@@ -296,10 +296,10 @@ fn the_buffer_count_matches_the_ticks_delay_charged() {
             .expect("stage 3 wrote the ticks")
             .saturating_sub(slowest_port_ticks(cell));
         let blocks: HashSet<CellCoord> = cell.buffer_coords().iter().map(|b| b.coord).collect();
-        let placed = u32::try_from(blocks.len()).expect("small");
+        let placed = u64::try_from(blocks.len()).expect("small");
         assert_eq!(
             charged,
-            placed.saturating_mul(BUFFER_REPEATER_TICKS),
+            placed * u64::from(BUFFER_REPEATER_TICKS),
             "cell #{index} was charged for {charged} ticks of buffer but got {placed} block(s)",
         );
     }
@@ -575,24 +575,24 @@ fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
 
     assert_eq!(
         cell.local_delay_ticks(),
-        Some(2 + 3 * BUFFER_REPEATER_TICKS),
+        Some(2 + 3 * u64::from(BUFFER_REPEATER_TICKS)),
         "the side port's 2 plus a charge for each of the three blocks",
     );
     let slowest = slowest_port_ticks(cell);
     let ticks = cell
         .local_delay_ticks()
         .expect("legalized cells carry Some(local_delay_ticks)");
-    let blocks = u32::try_from(distinct.len()).expect("three blocks fit in u32");
+    let blocks = u64::try_from(distinct.len()).expect("three blocks fit in u64");
     assert_eq!(
         ticks - slowest,
-        blocks * BUFFER_REPEATER_TICKS,
+        blocks * u64::from(BUFFER_REPEATER_TICKS),
         "every block stage 4 laid is a tick stage 3 charged",
     );
-    let widest = u32::try_from(per_port(PortName::A).max(per_port(PortName::B)))
-        .expect("two buffers fit in u32");
+    let widest = u64::try_from(per_port(PortName::A).max(per_port(PortName::B)))
+        .expect("two buffers fit in u64");
     assert_ne!(
         ticks - slowest,
-        widest * BUFFER_REPEATER_TICKS,
+        widest * u64::from(BUFFER_REPEATER_TICKS),
         "a max over the driving nets would drop the shorter segment's block",
     );
 }
@@ -641,7 +641,7 @@ fn ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust() {
     );
     assert_eq!(
         cell.local_delay_ticks(),
-        Some(2 + BUFFER_REPEATER_TICKS),
+        Some(2 + u64::from(BUFFER_REPEATER_TICKS)),
         "the side port's 2 plus the one repeater the signal passes through",
     );
     let buffers = cell.buffer_coords();
@@ -979,7 +979,10 @@ fn a_turn_at_the_limit_costs_the_route_a_second_repeater() {
     );
     assert_eq!(
         cell.local_delay_ticks(),
-        Some(EditionCell::JavaRepeaterOr.port_delay_ticks(PortName::A) + 2 * BUFFER_REPEATER_TICKS),
+        Some(
+            EditionCell::JavaRepeaterOr.port_delay_ticks(PortName::A)
+                + 2 * u64::from(BUFFER_REPEATER_TICKS)
+        ),
         "stage 3 charges for both blocks stage 4 lays",
     );
 }
@@ -1047,7 +1050,10 @@ fn a_repeater_due_on_a_straight_descent_steps_back_onto_the_bridge() {
             .collect::<Vec<_>>(),
         vec![CellCoord::new(16, 0, 3), CellCoord::new(28, 2, 3)],
     );
-    assert_eq!(output.local_delay_ticks(), Some(2 * BUFFER_REPEATER_TICKS));
+    assert_eq!(
+        output.local_delay_ticks(),
+        Some(2 * u64::from(BUFFER_REPEATER_TICKS))
+    );
 }
 
 #[test]
@@ -1894,19 +1900,19 @@ mod buffer_delay_invariant {
     struct Charge<'a> {
         /// The cell or pad, as a failure names it.
         node: CellIdentity<'a>,
-        local_delay_ticks: u32,
+        local_delay_ticks: u64,
         /// The delay of the cell's slowest driven port; zero for a pad, which has no delay
         /// of its own.
-        slowest_port_ticks: u32,
+        slowest_port_ticks: u64,
         /// Distinct coords, since a cell's two ports on one net name the same repeaters.
-        blocks: u32,
+        blocks: u64,
     }
 
     /// Every cell's [`Charge`], then every actuator pad's.
     fn charges(entry: &ScopedPlacementIrEntry) -> Vec<Charge<'_>> {
         let blocks = |buffers: &[BufferCoord]| {
             let coords: HashSet<CellCoord> = buffers.iter().map(|b| b.coord).collect();
-            u32::try_from(coords.len()).expect("buffer block count fits in u32")
+            u64::try_from(coords.len()).expect("buffer block count fits in u64")
         };
         let cells = entry
             .ir
@@ -1957,8 +1963,8 @@ mod buffer_delay_invariant {
                 delta,
                 charge
                     .blocks
-                    .checked_mul(BUFFER_REPEATER_TICKS)
-                    .expect("block count × BUFFER_REPEATER_TICKS fits in u32"),
+                    .checked_mul(u64::from(BUFFER_REPEATER_TICKS))
+                    .expect("block count × BUFFER_REPEATER_TICKS fits in u64"),
                 "{} charged {} ticks of buffer but its wire carries {} block(s) ({})",
                 charge.node,
                 delta,
@@ -1972,8 +1978,8 @@ mod buffer_delay_invariant {
     /// `Σ blocks × BUFFER_REPEATER_TICKS = Σ (local − slowest port)` over a scope's cells and pads.
     fn check_scope_total(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
         let charges = charges(entry);
-        let buffer_total: u32 = charges.iter().map(|charge| charge.blocks).sum();
-        let mut delta_total: u32 = 0;
+        let buffer_total: u64 = charges.iter().map(|charge| charge.blocks).sum();
+        let mut delta_total: u64 = 0;
         for charge in &charges {
             let delta = charge
                 .local_delay_ticks
@@ -1987,11 +1993,11 @@ mod buffer_delay_invariant {
             );
             delta_total = delta_total
                 .checked_add(delta.unwrap())
-                .expect("delta_total sum overflowed u32");
+                .expect("delta_total sum overflowed u64");
         }
         let lhs = buffer_total
-            .checked_mul(BUFFER_REPEATER_TICKS)
-            .expect("buffer_total × BUFFER_REPEATER_TICKS overflowed u32");
+            .checked_mul(u64::from(BUFFER_REPEATER_TICKS))
+            .expect("buffer_total × BUFFER_REPEATER_TICKS overflowed u64");
         prop_assert_eq!(
             lhs,
             delta_total,

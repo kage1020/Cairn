@@ -38,9 +38,9 @@ says how tightly it binds: a higher rank groups first, and one rank groups left 
 primitive takes its operands in parentheses after its name, each named once as `name=expression`,
 in any order, with a comma between two and none after the last. An applied primitive takes its one
 operand in parentheses after its name, by position, and one that counts stages takes a stage count
-after the operand and a comma, a whole number of at least 1. The parser takes an expression's shape
-from the library, so a primitive the library gains in one of these notations needs no new syntax.
-The library holds thirteen primitives:
+after the operand and a comma, a whole number from 1 to 4294967295. The parser takes an
+expression's shape from the library, so a primitive the library gains in one of these notations
+needs no new syntax. The library holds thirteen primitives:
 
 | Primitive | Notation |
 |---|---|
@@ -67,14 +67,15 @@ message names the operands the primitive takes, and for a positional or missing 
 still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`, expecting `a=` or `b=`.
 
 An applied primitive refuses the reverse, a named operand: `pulse(in=sig.x, 4)` stops at `in`. A
-stage count is `E_PARSE` where it is wrong: missing, as `delay(sig.x)` stops at `)` expecting `,`;
-given to a primitive that counts none, as `edge_rising(sig.x, 2)` stops at `,`; or below 1, as
-`pulse(sig.x, 0)` stops at `0`. What each macro computes is the time model's
-([§14.4](#144-time-model)).
+stage count is `E_PARSE` where it is wrong, and the message names the form the macro takes:
+missing, as `delay(sig.x)` stops at `)` expecting `,`; written without its comma, as
+`delay(sig.x 2)` stops at `2`; given to a primitive that counts none, as `edge_rising(sig.x, 2)`
+stops at `,`; or outside 1 to 4294967295, as `pulse(sig.x, 0)` stops at `0`. What each macro
+computes is the time model's ([§14.4](#144-time-model)).
 
 A word the library does not hold is `E_PARSE` where it stands, and the message names what could
 stand there: `sig.a xnor sig.b` stops at `xnor`, and `toggle(sig.x)` at its `(`, naming the
-primitives the library calls.
+primitives the library calls or applies.
 
 ## 14.2 Signal binding
 
@@ -249,23 +250,27 @@ topological order. A signal that reads itself back is still `E_LOGIC_CYCLE`, thr
 ## 14.4 Time model
 
 In v1 only the macros carry time: `delay`, `pulse`, `edge_rising`, `edge_falling`, `latch`, and
-`counter`. There is no tick operator to write. A macro's count is of the stages its cell is built
-from, never of ticks: `delay(sig.x, 3)` lowers to three repeaters in series. A stage is one repeater
-at its shortest setting, which takes one tick on both editions, and what a macro adds to a path is
+`counter`. There is no tick operator to write. A macro's count is of stages, never of ticks. A
+stage of `delay` or `pulse` is two ticks on both editions, so `delay(sig.x, 3)` lowers to repeaters
+in series that take six ticks in all, and the edges are on for one stage. A stage of `counter` is
+one flip-flop of its ring, so `counter(sig.x, 3)` is built of three. What a macro adds to a path is
 its Edition Cell's ticks, counted as every cell's are ([§14.6](#146-edition-differences)).
 
 | Macro | Its output |
 |---|---|
 | `delay(x, n)` | `x`, `n` stages later |
-| `pulse(x, n)` | on for the first `n` stages of each time `x` turns on, or until `x` turns off if that is sooner |
-| `edge_rising(x)` | on for one stage each time `x` turns on |
-| `edge_falling(x)` | on for one stage each time `x` turns off |
+| `pulse(x, n)` | on while `x` is on and was off `n` stages before: for the first `n` stages of each time `x` turns on after `n` stages off, or until `x` turns off if that is sooner |
+| `edge_rising(x)` | `pulse(x, 1)`: on for one stage each time `x` turns on after a stage off |
+| `edge_falling(x)` | on while `x` is off and was on a stage before: for one stage each time `x` turns off after a stage on |
 | `latch(set=s, reset=r)` | turns on while `s` is on and `r` is off, turns off while `r` is on, and holds while both are off |
 | `counter(x, n)` | turns on the `n`-th time `x` turns on and off the `2n`-th, toggling every `n` times, so `counter(x, 1)` is a toggle |
 
 `reset` wins: a `latch` whose `set` and `reset` are both on is off, and stays off when they turn off
-together. A `latch` and a `counter` start off, as every macro does when the structure is built: the
-tile tier writes each cell in the state it settles to with its operands off.
+together. A `latch` and a `counter` act on an operand that holds each change for at least a stage,
+and what they do with one that changes back sooner is not specified; an edge or `pulse(x, 1)` is on
+for a whole stage, so either can drive one. A `latch` and a `counter` start off, as every macro does
+when the structure is built: the tile tier writes each cell in the state it settles to with its
+operands off.
 
 **Delay is carried in neither the Logic IR nor the Netlist IR. It is determined for the first time
 in the Placement IR** ([§14.8](#148-connection-to-the-ir-and-phases)). `and` is logically
@@ -532,10 +537,10 @@ its inputs carries ([§14.5](#145-place-and-route)):
 | NOR | `TorchNOR`, one torch on a block both operands power | the same | 1 | restores |
 | XOR | `TorchXOR`, the torch NORs of `not a` and `b` and of `a` and `not b`, onto a common line | the same | 2 | restores |
 | MUX | `TorchMUX`, the torch NORs of `sel` and `not a` and of `not sel` and `not b`, onto a common line | the same | 2 | restores |
-| DELAY `n` | `RepeaterDelay`, `n` repeaters in series | the same | `n` | restores |
-| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through `n + 1` repeaters | the same | `n + 2` | restores |
-| EDGE_RISING | `TorchEdgeRising`, the torch NOR of `not a` and `not not a` | the same | 3 | restores |
-| EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and `not a` | the same | 2 | restores |
+| DELAY `n` | `RepeaterDelay`, repeaters in series of `2n` ticks in all | the same | `2n` | restores |
+| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through repeaters of `2n + 1` ticks | the same | `2n + 2` | restores |
+| EDGE_RISING | `TorchEdgeRising`, a `TorchPulse` of one stage | the same | 4 | restores |
+| EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and of `not a` through a repeater | the same | 3 | restores |
 | LATCH | `TorchLatch`, two torch NORs each powered by the other | the same | `set` 4, `reset` 5 | restores |
 | COUNTER `n` | `RepeaterCounter`, `n` flip-flops of locking repeaters in a twisted ring | the same | 3 | restores |
 
@@ -544,15 +549,20 @@ output settles once the inverted path has, two torches after the operand changes
 `mux` likewise passes an inverter and a NOR on its slowest path, `sel` on the NOR that takes it
 inverted.
 
-A macro's cell is built of torches and repeaters alone, the same on both editions, and holds its
-feedback inside itself:
+Nothing lays a cell out in blocks yet ([§14.8](#148-connection-to-the-ir-and-phases)), so the ticks
+above are the ones each cell's Physical Tile is to take, and no simulation checks them.
 
-- **`TorchPulse`** turns on once `not a` has turned off and off once `a` comes out of its `n + 1`
-  repeaters, one more than `n` to match the inverter, so it is on for `n` ticks. Its port counts to
-  that turning off: the repeaters and the NOR, `n + 2` ticks.
-- **`TorchEdgeRising`** has the same shape with two inverters for the repeaters, so it is on for one
-  tick, and its port counts the two inverters and the NOR. **`TorchEdgeFalling`** turns on once `a`
-  has turned off and off once `not a` has turned on: one tick on, two to the last change.
+A macro's cell is built of torches and repeaters alone, the same on both editions, and a `latch` or
+`counter` holds its feedback inside its own cell:
+
+- **`TorchPulse`** turns on once `not a` has turned off and off once `a` comes out of its
+  repeaters, which take a tick more than its `n` stages to match the inverter, so it is on for `n`
+  stages. Its port counts to that turning off: the repeaters and the NOR, `2n + 2` ticks. An
+  earlier `a` still in the repeaters holds the output off, so a full pulse needs `a` off for the `n`
+  stages before it turns on.
+- **`TorchEdgeRising`** is a `TorchPulse` of one stage, on for two ticks, its port counting four.
+  **`TorchEdgeFalling`** turns on once `a` has turned off and off once `not a` has come through its
+  one-tick repeater: one stage on, three ticks to the last change.
 - **`TorchLatch`**: the output torch is the NOR of `reset` and the second torch, and the second
   torch is the NOR of the output and of `set` gated by `reset`, which is the torch NOR of `not set`
   and of `reset` held on two ticks past its fall by a repeater beside it. A `set` turns the output

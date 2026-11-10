@@ -37,7 +37,7 @@ When redstone is described logically ([Redstone](/spec/redstone/)), four IR laye
 roles sit between the Intent IR and the block-array IR, the same separation HDL uses:
 
 ```
-Logic IR            logical expressions, dependency DAG. Edition-neutral, zero delay
+Logic IR            logical expressions, dependency DAG. Edition-neutral, no ticks
 Netlist IR          cells and nets. Logical cell selection. Still no delay
 Edition Netlist IR  the same cells and nets. Edition cell selection. Still no wire
 Placement IR        cell coordinates, then actual wire length. Delay and ticks determined here

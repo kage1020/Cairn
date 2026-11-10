@@ -17,7 +17,7 @@ use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
     SiteIr, StructIr, ValueWithSpan, actuator_patch_target,
 };
-use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation};
+use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation, StageCount};
 use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
 /// The components a signal drives, each with the key its line reads it from.
@@ -1580,7 +1580,7 @@ fn infix_gate(primitive: LogicPrimitive) -> Option<fn(SignalRef, SignalRef) -> G
 fn lower_apply<'a>(
     primitive: LogicPrimitive,
     operand: &'a Expr,
-    stages: Option<u32>,
+    stages: Option<StageCount>,
     binding_span: &Span,
     ir: &mut LogicIr,
     ctx: &mut LoweringCtx<'a>,
@@ -1590,22 +1590,35 @@ fn lower_apply<'a>(
     let gate = match (primitive, stages) {
         (LogicPrimitive::EdgeRising, None) => GateKind::EdgeRising { a: operand? },
         (LogicPrimitive::EdgeFalling, None) => GateKind::EdgeFalling { a: operand? },
-        (LogicPrimitive::Delay, Some(stages @ 1..)) => GateKind::Delay {
+        (LogicPrimitive::Delay, Some(stages)) => GateKind::Delay {
             a: operand?,
             stages,
         },
-        (LogicPrimitive::Pulse, Some(stages @ 1..)) => GateKind::Pulse {
+        (LogicPrimitive::Pulse, Some(stages)) => GateKind::Pulse {
             a: operand?,
             stages,
         },
-        (LogicPrimitive::Counter, Some(stages @ 1..)) => GateKind::Counter {
+        (LogicPrimitive::Counter, Some(stages)) => GateKind::Counter {
             a: operand?,
             stages,
         },
-        (_, stages) => {
+        // Only an intent built by hand gets here: the parser applies these to nothing else.
+        (
+            LogicPrimitive::And
+            | LogicPrimitive::Or
+            | LogicPrimitive::Not
+            | LogicPrimitive::Xor
+            | LogicPrimitive::Nand
+            | LogicPrimitive::Nor
+            | LogicPrimitive::Mux
+            | LogicPrimitive::Latch,
+            _,
+        )
+        | (LogicPrimitive::EdgeRising | LogicPrimitive::EdgeFalling, Some(_))
+        | (LogicPrimitive::Delay | LogicPrimitive::Pulse | LogicPrimitive::Counter, None) => {
             let as_written = match stages {
                 None => "to one operand".to_owned(),
-                Some(1) => "to one operand and 1 stage".to_owned(),
+                Some(StageCount::ONE) => "to one operand and 1 stage".to_owned(),
                 Some(stages) => format!("to one operand and {stages} stages"),
             };
             return Err(no_gate(
@@ -1631,17 +1644,22 @@ fn no_gate(
 ) -> LoweringFailed {
     let label = ctx.scope.label();
     let name = primitive.name();
-    let template = primitive.parenthesised_template().unwrap_or_default();
+    let template = || {
+        primitive
+            .parenthesised_template()
+            .expect("a called or applied primitive is written with parentheses")
+    };
     let written = match primitive.notation() {
         Notation::Prefix => "before its one operand".to_owned(),
         Notation::Infix { .. } => "between its two operands".to_owned(),
-        Notation::Call(_) => format!("with every operand named once, as in `{template}`"),
+        Notation::Call(_) => format!("with every operand named once, as in `{}`", template()),
         Notation::Apply { counted: false } => {
-            format!("applied to its one operand, as in `{template}`")
+            format!("applied to its one operand, as in `{}`", template())
         }
-        Notation::Apply { counted: true } => {
-            format!("applied to its operand and a stage count of at least 1, as in `{template}`")
-        }
+        Notation::Apply { counted: true } => format!(
+            "applied to its operand and a stage count of at least 1, as in `{}`",
+            template()
+        ),
     };
     diagnostics.push(
         Diagnostic::new(

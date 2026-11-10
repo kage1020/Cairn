@@ -8,7 +8,7 @@ use cairn_lang_core::ast::{
     Value, ValueKind,
 };
 use cairn_lang_core::error::IntContext;
-use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
+use cairn_lang_core::logic_library::{LogicPrimitive, Notation, StageCount};
 use cairn_lang_core::{ParseError, parse};
 
 use crate::pos;
@@ -516,7 +516,7 @@ fn every_library_primitive_parses_in_its_notation() {
                 Expr::Apply {
                     primitive,
                     operand: Box::new(a.clone()),
-                    stages: counted.then_some(3),
+                    stages: counted.then(|| StageCount::new(3)).flatten(),
                 },
             ),
         };
@@ -537,7 +537,7 @@ fn an_application_takes_a_whole_expression_and_is_an_operand() {
         apply(
             LogicPrimitive::Delay,
             infix(LogicPrimitive::And, signal("a"), signal("b")),
-            Some(2),
+            StageCount::new(2),
         ),
     );
     assert_eq!(
@@ -547,8 +547,8 @@ fn an_application_takes_a_whole_expression_and_is_an_operand() {
             not(apply(LogicPrimitive::EdgeRising, signal("a"), None)),
             apply(
                 LogicPrimitive::Counter,
-                apply(LogicPrimitive::Pulse, signal("b"), Some(4)),
-                Some(1),
+                apply(LogicPrimitive::Pulse, signal("b"), StageCount::new(4)),
+                Some(StageCount::ONE),
             ),
         ),
     );
@@ -577,7 +577,7 @@ fn a_stage_count_reaches_the_largest_u32_and_overflow_names_its_context() {
         Expr::Apply {
             primitive: LogicPrimitive::Delay,
             operand: Box::new(name(&["sig", "a"])),
-            stages: Some(u32::MAX),
+            stages: StageCount::new(u32::MAX),
         },
     );
     let err = parse("struct s size=3x3\n  logic sig.b = delay(sig.a, 4294967296)\n")
@@ -594,7 +594,8 @@ fn a_stage_count_reaches_the_largest_u32_and_overflow_names_its_context() {
         (
             pos(2, 30),
             IntContext::StageCount,
-            "invalid stage count `4294967296`: value out of range",
+            "invalid stage count `4294967296`: value out of range; a stage count is a whole \
+             number from 1 to 4294967295",
         ),
     );
 }

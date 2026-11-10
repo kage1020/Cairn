@@ -2,6 +2,7 @@ use std::mem::{Discriminant, discriminant};
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::error::Span;
+use cairn_lang_core::logic_library::StageCount;
 use strum::IntoEnumIterator;
 
 use super::{
@@ -15,6 +16,11 @@ use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
 use crate::placement_ir::{CellCoord, PlacementIr, PlacementPhase, ScopedPlacementIrEntry};
 use crate::routing::compile_routing;
 use crate::test_fixtures::{ROUTED, placed_cell, reservation, routed_output, scoped, staircase};
+
+/// `count` stages.
+fn n(count: u32) -> StageCount {
+    StageCount::new(count).expect("a stage count is at least 1")
+}
 
 #[test]
 fn attenuation_cap_measures_the_routed_output_segment() {
@@ -100,12 +106,12 @@ fn a_cell_is_charged_once_per_net_that_drives_it() {
         (
             "both ports on one net",
             NetRef::Input(0),
-            2 + BUFFER_REPEATER_TICKS,
+            2 + u64::from(BUFFER_REPEATER_TICKS),
         ),
         (
             "one port each on two nets",
             NetRef::Input(1),
-            2 + 2 * BUFFER_REPEATER_TICKS,
+            2 + 2 * u64::from(BUFFER_REPEATER_TICKS),
         ),
     ] {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -187,7 +193,7 @@ fn local_delay_is_the_wire_cost_not_the_arrival_time() {
     let recorded = ir.cells[0]
         .local_delay_ticks()
         .expect("delay insertion writes Some(_)");
-    let ticks = |segment| buffer_count_for_segment(segment) * BUFFER_REPEATER_TICKS;
+    let ticks = |segment| u64::from(buffer_count_for_segment(segment) * BUFFER_REPEATER_TICKS);
     assert_eq!(
         recorded,
         2 + ticks(SHORT) + ticks(LONG),
@@ -241,8 +247,8 @@ fn a_cell_is_charged_its_slowest_port_whichever_net_carries_the_buffers() {
         ],
         [
             Some(2),
-            Some(2 + BUFFER_REPEATER_TICKS),
-            Some(2 + BUFFER_REPEATER_TICKS),
+            Some(2 + u64::from(BUFFER_REPEATER_TICKS)),
+            Some(2 + u64::from(BUFFER_REPEATER_TICKS)),
         ],
         "no buffer, one on the rear's net, one on the side's",
     );
@@ -282,46 +288,11 @@ fn a_cell_is_charged_the_slowest_of_its_driven_ports_in_any_order() {
     );
 }
 
-/// The ports the netlist drives on `cell`; the match names every variant, so adding one stops
-/// this compiling.
-const fn ports(cell: EditionCell) -> &'static [PortName] {
-    match cell {
-        EditionCell::JavaComparatorAnd
-        | EditionCell::BedrockTorchAnd
-        | EditionCell::JavaRepeaterOr
-        | EditionCell::BedrockTorchOr
-        | EditionCell::JavaTorchXor
-        | EditionCell::BedrockTorchXor
-        | EditionCell::JavaTorchNand
-        | EditionCell::BedrockTorchNand
-        | EditionCell::JavaTorchNor
-        | EditionCell::BedrockTorchNor => &[PortName::A, PortName::B],
-        EditionCell::JavaInverterTorch
-        | EditionCell::BedrockInverterTorch
-        | EditionCell::JavaRepeaterDelay { .. }
-        | EditionCell::BedrockRepeaterDelay { .. }
-        | EditionCell::JavaTorchPulse { .. }
-        | EditionCell::BedrockTorchPulse { .. }
-        | EditionCell::JavaTorchEdgeRising
-        | EditionCell::BedrockTorchEdgeRising
-        | EditionCell::JavaTorchEdgeFalling
-        | EditionCell::BedrockTorchEdgeFalling
-        | EditionCell::JavaRepeaterCounter { .. }
-        | EditionCell::BedrockRepeaterCounter { .. } => &[PortName::A],
-        EditionCell::JavaTorchMux | EditionCell::BedrockTorchMux => {
-            &[PortName::Sel, PortName::A, PortName::B]
-        }
-        EditionCell::JavaTorchLatch | EditionCell::BedrockTorchLatch => {
-            &[PortName::Set, PortName::Reset]
-        }
-    }
-}
-
 /// Each port of every variant, a variant that counts stages standing for all of its counts.
 fn every_port() -> Vec<(Discriminant<EditionCell>, PortName)> {
     EditionCell::iter()
         .flat_map(|cell| {
-            ports(cell)
+            cell.ports()
                 .iter()
                 .map(move |&port| (discriminant(&cell), port))
         })
@@ -367,29 +338,41 @@ fn each_port_counts_the_stages_between_it_and_the_output() {
         (EditionCell::BedrockTorchMux, PortName::Sel, 2),
         (EditionCell::BedrockTorchMux, PortName::A, 2),
         (EditionCell::BedrockTorchMux, PortName::B, 2),
-        (EditionCell::JavaRepeaterDelay { stages: 3 }, PortName::A, 3),
         (
-            EditionCell::BedrockRepeaterDelay { stages: 1 },
+            EditionCell::JavaRepeaterDelay { stages: n(3) },
             PortName::A,
-            1,
+            6,
         ),
-        (EditionCell::JavaTorchPulse { stages: 4 }, PortName::A, 6),
-        (EditionCell::BedrockTorchPulse { stages: 1 }, PortName::A, 3),
-        (EditionCell::JavaTorchEdgeRising, PortName::A, 3),
-        (EditionCell::BedrockTorchEdgeRising, PortName::A, 3),
-        (EditionCell::JavaTorchEdgeFalling, PortName::A, 2),
-        (EditionCell::BedrockTorchEdgeFalling, PortName::A, 2),
+        (
+            EditionCell::BedrockRepeaterDelay { stages: n(1) },
+            PortName::A,
+            2,
+        ),
+        (
+            EditionCell::JavaTorchPulse { stages: n(4) },
+            PortName::A,
+            10,
+        ),
+        (
+            EditionCell::BedrockTorchPulse { stages: n(1) },
+            PortName::A,
+            4,
+        ),
+        (EditionCell::JavaTorchEdgeRising, PortName::A, 4),
+        (EditionCell::BedrockTorchEdgeRising, PortName::A, 4),
+        (EditionCell::JavaTorchEdgeFalling, PortName::A, 3),
+        (EditionCell::BedrockTorchEdgeFalling, PortName::A, 3),
         (EditionCell::JavaTorchLatch, PortName::Set, 4),
         (EditionCell::JavaTorchLatch, PortName::Reset, 5),
         (EditionCell::BedrockTorchLatch, PortName::Set, 4),
         (EditionCell::BedrockTorchLatch, PortName::Reset, 5),
         (
-            EditionCell::JavaRepeaterCounter { stages: 1 },
+            EditionCell::JavaRepeaterCounter { stages: n(1) },
             PortName::A,
             3,
         ),
         (
-            EditionCell::BedrockRepeaterCounter { stages: 9 },
+            EditionCell::BedrockRepeaterCounter { stages: n(9) },
             PortName::A,
             3,
         ),
@@ -404,6 +387,18 @@ fn each_port_counts_the_stages_between_it_and_the_output() {
         .map(|&(cell, port, _)| (cell, port, cell.port_delay_ticks(port)))
         .collect();
     assert_eq!(counted, table);
+}
+
+#[test]
+fn a_macro_of_the_most_stages_counts_its_ticks_exactly() {
+    let most = n(u32::MAX);
+    assert_eq!(
+        [
+            EditionCell::JavaRepeaterDelay { stages: most }.port_delay_ticks(PortName::A),
+            EditionCell::BedrockTorchPulse { stages: most }.port_delay_ticks(PortName::A),
+        ],
+        [8_589_934_590, 8_589_934_592],
+    );
 }
 
 #[test]
@@ -423,18 +418,48 @@ fn only_the_merge_and_the_comparator_pass_strength_on() {
         (EditionCell::BedrockTorchNor, true),
         (EditionCell::JavaTorchMux, true),
         (EditionCell::BedrockTorchMux, true),
-        (EditionCell::JavaRepeaterDelay { stages: 0 }, true),
-        (EditionCell::BedrockRepeaterDelay { stages: 0 }, true),
-        (EditionCell::JavaTorchPulse { stages: 0 }, true),
-        (EditionCell::BedrockTorchPulse { stages: 0 }, true),
+        (
+            EditionCell::JavaRepeaterDelay {
+                stages: StageCount::ONE,
+            },
+            true,
+        ),
+        (
+            EditionCell::BedrockRepeaterDelay {
+                stages: StageCount::ONE,
+            },
+            true,
+        ),
+        (
+            EditionCell::JavaTorchPulse {
+                stages: StageCount::ONE,
+            },
+            true,
+        ),
+        (
+            EditionCell::BedrockTorchPulse {
+                stages: StageCount::ONE,
+            },
+            true,
+        ),
         (EditionCell::JavaTorchEdgeRising, true),
         (EditionCell::BedrockTorchEdgeRising, true),
         (EditionCell::JavaTorchEdgeFalling, true),
         (EditionCell::BedrockTorchEdgeFalling, true),
         (EditionCell::JavaTorchLatch, true),
         (EditionCell::BedrockTorchLatch, true),
-        (EditionCell::JavaRepeaterCounter { stages: 0 }, true),
-        (EditionCell::BedrockRepeaterCounter { stages: 0 }, true),
+        (
+            EditionCell::JavaRepeaterCounter {
+                stages: StageCount::ONE,
+            },
+            true,
+        ),
+        (
+            EditionCell::BedrockRepeaterCounter {
+                stages: StageCount::ONE,
+            },
+            true,
+        ),
     ];
     let every: Vec<_> = EditionCell::iter()
         .map(|cell| (cell, cell.regenerates()))
@@ -477,18 +502,22 @@ fn a_port_restores_strength_where_its_cell_regenerates_and_on_the_comparator_sid
         (EditionCell::BedrockTorchMux, PortName::A, true),
         (EditionCell::BedrockTorchMux, PortName::B, true),
         (
-            EditionCell::JavaRepeaterDelay { stages: 2 },
+            EditionCell::JavaRepeaterDelay { stages: n(2) },
             PortName::A,
             true,
         ),
         (
-            EditionCell::BedrockRepeaterDelay { stages: 2 },
+            EditionCell::BedrockRepeaterDelay { stages: n(2) },
             PortName::A,
             true,
         ),
-        (EditionCell::JavaTorchPulse { stages: 2 }, PortName::A, true),
         (
-            EditionCell::BedrockTorchPulse { stages: 2 },
+            EditionCell::JavaTorchPulse { stages: n(2) },
+            PortName::A,
+            true,
+        ),
+        (
+            EditionCell::BedrockTorchPulse { stages: n(2) },
             PortName::A,
             true,
         ),
@@ -501,12 +530,12 @@ fn a_port_restores_strength_where_its_cell_regenerates_and_on_the_comparator_sid
         (EditionCell::BedrockTorchLatch, PortName::Set, true),
         (EditionCell::BedrockTorchLatch, PortName::Reset, true),
         (
-            EditionCell::JavaRepeaterCounter { stages: 2 },
+            EditionCell::JavaRepeaterCounter { stages: n(2) },
             PortName::A,
             true,
         ),
         (
-            EditionCell::BedrockRepeaterCounter { stages: 2 },
+            EditionCell::BedrockRepeaterCounter { stages: n(2) },
             PortName::A,
             true,
         ),
