@@ -814,7 +814,8 @@ fn latency_overflow_surfaces_invalid_int_variant() {
     assert_eq!(kind, IntErrorKind::PosOverflow);
     assert_eq!(
         message,
-        "invalid `latency` bound `4294967296`: value out of range"
+        "invalid `latency` bound `4294967296`: value out of range; a bound is a whole number of \
+         ticks up to 4294967295"
     );
 }
 
