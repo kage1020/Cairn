@@ -4,13 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, latency_text};
 use crate::logic_ir::{
     GateKind, GateNode, InputPort, LogicIr, OutputPort, ScopeKind, ScopedLogicIr,
     ScopedLogicIrEntry, SignalRef,
 };
 use crate::saturating_index;
-use crate::verify::latency_text;
 use cairn_lang_core::ast::{DottedRef, Expr, NamedOperand, SIGNAL_HEAD, Value, ValueKind};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
@@ -783,7 +782,14 @@ fn finish_scope(scope: ScopeRef<'_>, mut collected: ScopeCollected<'_>, out: &mu
         &mut diagnostics,
     );
 
-    check_latency_paths(&collected.asserts, &ir, scope, &mut diagnostics);
+    check_latency_paths(
+        &collected.asserts,
+        &ir,
+        &collected.bindings,
+        &bindings_by_lhs,
+        scope,
+        &mut diagnostics,
+    );
 
     // Into source order; stable, so findings on one span keep the order they were raised in.
     diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
@@ -964,6 +970,8 @@ fn check_assert_refs(
 fn check_latency_paths(
     asserts: &[&AssertIr],
     ir: &LogicIr,
+    bindings: &[PendingBinding<'_>],
+    bindings_by_lhs: &HashMap<DottedRef, usize>,
     scope: ScopeRef<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -984,9 +992,13 @@ fn check_latency_paths(
         if depends_on(ir, end, start) {
             continue;
         }
-        let driven_at = match end {
-            SignalRef::Input(i) => ir.inputs[i as usize].span.clone(),
-            SignalRef::Gate(j) => ir.nodes[j as usize].span.clone(),
+        // A merged gate or an alias carries the span of another name's line.
+        let driven_at = match bindings_by_lhs.get(to) {
+            Some(&binding) => bindings[binding].span.clone(),
+            None => match end {
+                SignalRef::Input(i) => ir.inputs[i as usize].span.clone(),
+                SignalRef::Gate(j) => ir.nodes[j as usize].span.clone(),
+            },
         };
         diagnostics.push(
             Diagnostic::new(

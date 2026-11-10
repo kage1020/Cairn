@@ -480,9 +480,9 @@ would still pass a rear input at 15 through.
 The `ComparatorAND` takes port `a` at its rear and inverts `b` onto its side. Counted per port
 ([§14.4](#144-time-model)), a signal entering by `a` passes the comparator alone, 1 tick, and one
 entering by `b` passes the inverter and then the comparator, 2 ticks. Which operand of `and` or `or`
-the netlist puts on `a` is not specified, so the order written does not bound a path's ticks
-through a `ComparatorAND`; `assert latency` ([§14.7](#147-verification)) does, counting the port the
-operand lands on.
+the netlist puts on `a` is not specified, so the order written does not decide a path's ticks
+through a `ComparatorAND`; `assert latency` ([§14.7](#147-verification)) checks them, counting the
+port the operand lands on.
 
 Every logical cell has one realisation per edition. A port's ticks count the slowest path from it
 to the output, and a cell either restores strength, so the wire into each of its ports ends there,
@@ -561,21 +561,23 @@ drives (`E_LOGIC_UNBOUND_SIGNAL`), and a truth table's rows are checked against 
 `<to>` is read. It takes `<=` and a whole number of ticks, and no other comparison, which is
 `E_PARSE` at the comparison: place-and-route only adds ticks to a path, so an upper bound is the one
 a layout can break. The ticks are counted per target edition on the legalized Placement IR
-([§14.8](#148-connection-to-the-ir-and-phases)), where delay is first determined. A path starts at
-what drives `<from>`, a sensor's pad or a cell's output, and runs through cells to `<to>`. Each cell
-it enters costs the ticks of the port it enters by ([§14.4](#144-time-model)), each buffer repeater
-on the routed wire it runs along costs a tick ([§14.5](#145-place-and-route)), and dust costs
-none. Where an actuator reads `<to>`, the path runs on to the actuator's pad, over the repeaters on
-that wire, to the slowest of them where several do; where none does, it ends at the output of the
-cell that drives `<to>`. The bound holds the slowest path: where a change at `<from>` reaches one
-cell by two ports, the slower port counts.
+([§14.8](#148-connection-to-the-ir-and-phases)), where every buffer repeater stands. A path starts
+at what drives `<from>`, a sensor's pad or a cell's output, and runs through cells to `<to>`. Each
+cell it enters costs the ticks of the port it enters by ([§14.4](#144-time-model)), each buffer
+repeater on the routed wire it runs along costs a tick ([§14.5](#145-place-and-route)), and dust
+costs none. Where an actuator reads `<to>` by that name, the path runs on to the actuator's pad,
+over the repeaters on that wire, to the slowest of them where several do; where none does, it ends
+where `<to>` is driven, at the output of its cell or at its sensor's pad. The bound holds the
+slowest path: where a change at `<from>` reaches one cell by two ports, the slower port counts.
 
 A bound the slowest path exceeds is `E_SIM_ASSERTION_FAILED` on that edition: one source can meet
 a bound on Bedrock, where an OR is a dust merge, and miss it on Java, where it is two repeaters. The
 finding gives the ticks it measured and, in a note each, the cells the path enters, the port it
 enters each by, and the repeaters on each wire. A `<to>` that does not depend on `<from>` fails on
 every edition, since no path carries a change from one to the other, and synth refuses it with the
-same code before an edition is chosen. Place-and-route does not read a bound, so it is met in the
+same code before an edition is chosen. Dependence is read on the Logic IR, where a gate written
+twice is one gate and `logic sig.d = sig.c` gives both names one net: there, two names on one net
+depend on each other, and the path between them takes no ticks. Place-and-route does not read a bound, so it is met in the
 source: relaxed, or met by a path through fewer cells or along a wire with fewer repeaters.
 `cairn synth --experimental-logic-synth --stage crossing` checks every bound after crossing
 legalization and prints no IR when one fails.
@@ -586,8 +588,9 @@ E_SIM_ASSERTION_FAILED line 13:
   sig.a to sig.c takes 2 ticks, 2 in buffer repeaters on the routed wire
   note: the path enters cell #0 (`TorchOR`) by port `a`: 0 ticks through the cell
   note: then the pad of the actuator reading sig.c: 2 buffer repeaters on the wire to it
-  note: the wire carries 2 buffer repeaters, one wherever it runs past 15 blocks of dust, so a
-  smaller `circuit` region, which puts the pads nearer what drives them, needs fewer
+  note: the path's wires carry 2 buffer repeaters, one wherever a wire runs past 15 blocks of
+  dust, so a smaller `circuit` region, which puts the pads and the cells closer together, needs
+  fewer
   note: Fix: relax the bound to `<= 2`, or shorten the path; the logic is never rewritten to
   meet a bound
 ```

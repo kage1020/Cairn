@@ -94,6 +94,14 @@ fn a_latency_bound_is_a_whole_number_of_ticks() {
         refusal("struct s size=3x3\n  assert latency(a -> b) <= 4 ticks\n"),
         "2:31: expected end of line, got identifier `ticks`",
     );
+    assert_eq!(
+        refusal("struct s size=3x3\n  assert latency(a -> b) <=\n"),
+        "2:28: expected integer literal, got end of line",
+    );
+    assert_eq!(
+        refusal("struct s size=3x3\n  assert latency(a -> b) <= 1.5\n"),
+        "2:30: expected end of line, got `.`",
+    );
 }
 
 #[test]

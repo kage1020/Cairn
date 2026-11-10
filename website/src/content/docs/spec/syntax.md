@@ -37,8 +37,8 @@ do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change))
 
 No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
 parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
-`within` bound of an `assert always` and the `<=` bound of an `assert latency`. A decimal such as `scale=1.5` ([Entities](/spec/entities/)) is
-therefore `E_PARSE` too until the parser reads one.
+`within` bound of an `assert always` and the `<=` bound of an `assert latency`. A decimal such as
+`scale=1.5` ([Entities](/spec/entities/)) is therefore `E_PARSE` too until the parser reads one.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
@@ -189,11 +189,11 @@ reported there and never at the first column of the next one.
 
 The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts seven forms the parser refuses, because tree-sitter cannot express their
+correctly. It also accepts eight forms the parser refuses, because tree-sitter cannot express their
 rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, alone or as a coordinate's component, a coordinate whose last component runs
-into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
-literal naming one property twice.
+integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within` or `<=` bound
+past 2^32 − 1, a coordinate whose last component runs into a size (`1,2,3x4`), a truth row whose
+width differs from the input count, and a block-state literal naming one property twice.
 
 ## 5.2 Nesting
 
