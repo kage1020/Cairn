@@ -13,7 +13,7 @@ const EDITIONS: [Edition; 2] = [Edition::Java, Edition::Bedrock];
 /// What the legalized `source` earns on `edition`.
 fn verified(source: &str, edition: Edition) -> Vec<Diagnostic> {
     let intent = lower(&parse(source).expect("parse"));
-    verify_behaviour(&intent, &legalized(source, edition))
+    verify_behaviour(&legalized(source, edition), &intent)
 }
 
 /// A struct of the prelude's walls and door, `body` its members after them.

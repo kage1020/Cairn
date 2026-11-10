@@ -163,8 +163,8 @@ fn dump_stage(
     let registry = builtin_pack(edition).view(None);
     let legalized = compile_legalize(&delay.scoped, Some(&registry));
     reporting.gate(&legalized.diagnostics)?;
-    reporting.gate(&verify_latency(ir, &legalized.scoped))?;
-    reporting.gate(&verify_behaviour(ir, &legalized.scoped))?;
+    reporting.gate(&verify_latency(&legalized.scoped, ir))?;
+    reporting.gate(&verify_behaviour(&legalized.scoped, ir))?;
     dump("Legalized Placement IR", &legalized.scoped)
 }
 

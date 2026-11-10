@@ -191,9 +191,10 @@ reported there and never at the first column of the next one.
 
 The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts seven forms the parser refuses, because tree-sitter cannot express their
+correctly. It also accepts nine forms the parser refuses, because tree-sitter cannot express their
 rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, alone or as a coordinate's component, a coordinate whose last component runs
+integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within` or `<=` bound
+or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last component runs
 into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
 literal naming one property twice.
 

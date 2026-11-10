@@ -37,9 +37,9 @@ says how tightly it binds: a higher rank groups first, and one rank groups left 
 primitive takes its operands in parentheses after its name, each named once as `name=expression`,
 in any order, with a comma between two and none after the last. An applied primitive takes its one
 operand in parentheses after its name, by position, and one that counts stages takes a stage count
-after the operand and a comma, a whole number of at least 1. The parser takes an expression's shape
-from the library, so a primitive the library gains in one of these notations needs no new syntax.
-The library holds thirteen primitives:
+after the operand and a comma, a whole number from 1 to 4294967295. The parser takes an
+expression's shape from the library, so a primitive the library gains in one of these notations
+needs no new syntax. The library holds thirteen primitives:
 
 | Primitive | Notation |
 |---|---|
@@ -66,14 +66,15 @@ message names the operands the primitive takes, and for a positional or missing 
 still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`, expecting `a=` or `b=`.
 
 An applied primitive refuses the reverse, a named operand: `pulse(in=sig.x, 4)` stops at `in`. A
-stage count is `E_PARSE` where it is wrong: missing, as `delay(sig.x)` stops at `)` expecting `,`;
-given to a primitive that counts none, as `edge_rising(sig.x, 2)` stops at `,`; or below 1, as
-`pulse(sig.x, 0)` stops at `0`. What each macro computes is the time model's
-([§14.4](#144-time-model)).
+stage count is `E_PARSE` where it is wrong, and the message names the form the macro takes:
+missing, as `delay(sig.x)` stops at `)` expecting `,`; written without its comma, as
+`delay(sig.x 2)` stops at `2`; given to a primitive that counts none, as `edge_rising(sig.x, 2)`
+stops at `,`; or outside 1 to 4294967295, as `pulse(sig.x, 0)` stops at `0`. What each macro
+computes is the time model's ([§14.4](#144-time-model)).
 
 A word the library does not hold is `E_PARSE` where it stands, and the message names what could
 stand there: `sig.a xnor sig.b` stops at `xnor`, and `toggle(sig.x)` at its `(`, naming the
-primitives the library calls.
+primitives the library calls or applies.
 
 ### Tier 0 parts
 
@@ -311,23 +312,27 @@ topological order. A signal that reads itself back is still `E_LOGIC_CYCLE`, thr
 ## 14.4 Time model
 
 In v1 only the macros carry time: `delay`, `pulse`, `edge_rising`, `edge_falling`, `latch`, and
-`counter`. There is no tick operator to write. A macro's count is of the stages its cell is built
-from, never of ticks: `delay(sig.x, 3)` lowers to repeaters in series that take six ticks in all.
-A stage is two ticks on both editions, and what a macro adds to a path is its Edition Cell's ticks,
-counted as every cell's are ([§14.6](#146-edition-differences)).
+`counter`. There is no tick operator to write. A macro's count is of stages, never of ticks. A
+stage of `delay` or `pulse` is two ticks on both editions, so `delay(sig.x, 3)` lowers to repeaters
+in series that take six ticks in all, and the edges are on for one stage. A stage of `counter` is
+one flip-flop of its ring, so `counter(sig.x, 3)` is built of three. What a macro adds to a path is
+its Edition Cell's ticks, counted as every cell's are ([§14.6](#146-edition-differences)).
 
 | Macro | Its output |
 |---|---|
 | `delay(x, n)` | `x`, `n` stages later |
-| `pulse(x, n)` | on for the first `n` stages of each time `x` turns on, or until `x` turns off if that is sooner |
-| `edge_rising(x)` | on for one stage each time `x` turns on |
-| `edge_falling(x)` | on for one stage each time `x` turns off |
+| `pulse(x, n)` | on while `x` is on and was off `n` stages before: for the first `n` stages of each time `x` turns on after `n` stages off, or until `x` turns off if that is sooner |
+| `edge_rising(x)` | `pulse(x, 1)`: on for one stage each time `x` turns on after a stage off |
+| `edge_falling(x)` | on while `x` is off and was on a stage before: for one stage each time `x` turns off after a stage on |
 | `latch(set=s, reset=r)` | turns on while `s` is on and `r` is off, turns off while `r` is on, and holds while both are off |
 | `counter(x, n)` | turns on the `n`-th time `x` turns on and off the `2n`-th, toggling every `n` times, so `counter(x, 1)` is a toggle |
 
 `reset` wins: a `latch` whose `set` and `reset` are both on is off, and stays off when they turn off
-together. A `latch` and a `counter` start off, as every macro does when the structure is built: the
-tile tier writes each cell in the state it settles to with its operands off.
+together. Every macro acts on an operand that holds each change for at least a stage, and what one
+does with an operand that changes back sooner is not specified; an edge and `pulse(x, 1)` are on for
+a whole stage, so either can drive any macro. A `latch` and a `counter` start off, as every macro
+does when the structure is built: the tile tier writes each cell in the state it settles to with its
+operands off.
 
 **Delay is carried in neither the Logic IR nor the Netlist IR. It is determined for the first time
 in the Placement IR** ([§14.8](#148-connection-to-the-ir-and-phases)). `and` is logically
@@ -440,9 +445,12 @@ left. Every choice in them is ordered, so one source lays one circuit.
    is kept. A cell with no free spot at any margin is `E_ROUTE_CONGESTION` at its `logic` line, and
    the message names the columns its tile needs.
 
-   A `pulse` of more than 25 stages or a `counter` of more than 4 is `E_ATTENUATION_LIMIT` at its
+   A `pulse` of more than 6 stages or a `counter` of more than 4 is `E_ATTENUATION_LIMIT` at its
    `logic` line before anything is laid. The one's operand runs a block of dust past each of its
-   repeaters, and the other's past every stage, on one strand that goes dark past 15 blocks.
+   repeaters, and the other's past every stage, on one strand that goes dark past 15 blocks; the
+   message offers `x and not delay(x, n)` for a longer pulse. A `delay` lays its repeaters in one
+   row, two for each stage, so one whose row with its port and output is longer than both sides of
+   the struct is `E_ROUTE_CONGESTION` at its `logic` line before its cells are laid.
 2. **Routing.** Each net's dust runs from the tile that drives it to every input it feeds, along a
    layer and up and down staircases. It takes the cheapest path from the net's dust so far to the
    nearest input it has not reached, a step along a layer costing 1 and a step up or down 2. A step
@@ -506,9 +514,9 @@ would still pass a rear input at 15 through.
 The `ComparatorAND` takes port `a` at its rear and inverts `b` onto its side. Counted per port
 ([§14.4](#144-time-model)), a signal entering by `a` passes the comparator alone, 1 tick, and one
 entering by `b` passes the inverter and then the comparator, 2 ticks. Which operand of `and` or `or`
-the netlist puts on `a` is not specified, so the order written does not bound a path's ticks
-through a `ComparatorAND`; `assert latency` ([§14.7](#147-verification)) does, counting the port the
-operand lands on.
+the netlist puts on `a` is not specified, so the order written does not decide a path's ticks
+through a `ComparatorAND`; `assert latency` ([§14.7](#147-verification)) checks them, counting the
+port the operand lands on.
 
 Every logical cell has one realisation per edition. A port's ticks count the slowest path from it
 to the output, or for a macro the last change it makes there ([§14.4](#144-time-model)), and a cell
@@ -524,8 +532,8 @@ its inputs carries ([§14.5](#145-place-and-route)):
 | NOR | `TorchNOR`, one torch on a block both operands power | the same | 1 | restores |
 | XOR | `TorchXOR`, the torch NORs of `a` and of `b`, each with the NOR of the two, onto a common line | the same | 2 | restores |
 | MUX | `TorchMUX`, the torch NORs of `sel` and `not a` and of `not sel` and `not b`, onto a common line | the same | 2 | restores |
-| DELAY `n` | `RepeaterDelay`, repeaters in series of `2n` ticks in all | the same | `2n` | restores |
-| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through repeaters of `2n + 1` ticks | the same | `2n + 2` | restores |
+| DELAY `n` | `RepeaterDelay`, `2n` one-tick repeaters in series | the same | `2n` | restores |
+| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through `2n + 1` one-tick repeaters | the same | `2n + 2` | restores |
 | EDGE_RISING | `TorchEdgeRising`, a `TorchPulse` of one stage | the same | 4 | restores |
 | EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and of `not a` through a repeater | the same | 3 | restores |
 | LATCH | `TorchLatch`, two torch NORs each powered by the other | the same | `set` 4, `reset` 5 | restores |
@@ -536,12 +544,19 @@ output settles once that path has, two torches after the operand changes. Each p
 `mux` likewise passes an inverter and a NOR on its slowest path, `sel` on the NOR that takes it
 inverted.
 
-A macro's cell is built of torches and repeaters alone, the same on both editions, and holds its
-feedback inside itself:
+A macro's cell is built of torches and repeaters alone, the same on both editions, and a `latch` or
+`counter` holds its feedback inside its own cell:
+
+- **`RepeaterDelay`**'s repeaters, and **`TorchPulse`**'s, take a tick each. A repeater stretches a
+  change shorter than its delay to its delay, and a change as long as its delay ends on the tick
+  the repeater would follow it, where the update order decides, so only one-tick repeaters pass
+  every change held for a stage as it came.
 
 - **`TorchPulse`** turns on once `not a` has turned off and off once `a` comes out of its
   repeaters, which take a tick more than its `n` stages to match the inverter, so it is on for `n`
-  stages. Its port counts to that turning off: the repeaters and the NOR, `2n + 2` ticks.
+  stages. Its port counts to that turning off: the repeaters and the NOR, `2n + 2` ticks. An
+  earlier `a` still in the repeaters holds the output off, so a full pulse needs `a` off for the `n`
+  stages before it turns on.
 - **`TorchEdgeRising`** is a `TorchPulse` of one stage, on for two ticks, its port counting four.
   **`TorchEdgeFalling`** turns on once `a` has turned off and off once `not a` has come through its
   one-tick repeater: one stage on, three ticks to the last change.
@@ -648,30 +663,34 @@ drives (`E_LOGIC_UNBOUND_SIGNAL`), and a truth table's rows are checked against 
 `<to>` is read. It takes `<=` and a whole number of ticks, and no other comparison, which is
 `E_PARSE` at the comparison: place-and-route only adds ticks to a path, so an upper bound is the one
 a layout can break. The ticks are counted per target edition on the legalized Placement IR
-([§14.8](#148-connection-to-the-ir-and-phases)), where delay is first determined. A path starts at
-what drives `<from>`, a sensor's pad or a cell's output, and runs through cells to `<to>`. Each cell
-it enters costs the ticks of the port it enters by ([§14.4](#144-time-model)), each buffer repeater
-on the routed wire it runs along costs a tick ([§14.5](#145-place-and-route)), and dust costs
-none. Where an actuator reads `<to>`, the path runs on over the repeaters on the wire to the
-actuator's riser and up its two torches, two ticks more, to the slowest of them where several do;
-where none does, it ends at the output of the cell that drives `<to>`. The bound holds the slowest
-path: where a change at `<from>` reaches one cell by two ports, the slower port counts.
+([§14.8](#148-connection-to-the-ir-and-phases)), where every buffer repeater stands. A path starts
+at what drives `<from>`, a sensor's pad or a cell's output, and runs through cells to `<to>`. Each
+cell it enters costs the ticks of the port it enters by ([§14.4](#144-time-model)), each buffer
+repeater on the routed wire it runs along costs a tick ([§14.5](#145-place-and-route)), and dust
+costs none. Where an actuator reads `<to>` by that name, the path runs on over the repeaters on the
+wire to the actuator's riser and up its two torches, two ticks more, to the slowest of them where
+several do; where none does, it ends where `<to>` is driven, at the output of its cell or at its
+sensor's pad. The bound holds the slowest path: where a change at `<from>` reaches one cell by two
+ports, the slower port counts.
 
-A bound the slowest path exceeds is `E_SIM_ASSERTION_FAILED` on that edition: one source can meet
-a bound on Java, where an `and` entered by `a` passes a comparator alone, and miss it on Bedrock,
+A bound the slowest path exceeds is `E_SIM_ASSERTION_FAILED` on that edition: one source can meet a
+bound on Java, where an `and` entered by `a` passes a comparator alone, and miss it on Bedrock,
 where it passes two torches. The finding gives the ticks it measured and, in a note each, the cells
-the path enters, the port it enters each by, and the repeaters on each wire. A `<to>` that does not depend on `<from>` fails on
-every edition, since no path carries a change from one to the other, and synth refuses it with the
-same code before an edition is chosen. Place-and-route does not read a bound, so it is met in the
-source: relaxed, or met by a path through fewer cells or along a wire with fewer repeaters. Every
-command that builds the circuit checks each bound once it is legalized, and refuses to build it
-when one fails ([§14.8](#148-connection-to-the-ir-and-phases)).
+the path enters, the port it enters each by, and the repeaters on each wire. A `<to>` that does not
+depend on `<from>` fails on every edition, since no path carries a change from one to the other, and
+synth refuses it with the same code before an edition is chosen. Dependence is read on the Logic IR,
+where a gate written twice is one gate and `logic sig.d = sig.c` gives both names one net: there,
+two names on one net depend on each other, and the path between them takes no ticks. Place-and-route
+does not read a bound, so it is met in the source: relaxed, or met by a path through fewer cells or
+along a wire with fewer repeaters. Every command that builds the circuit checks each bound once it
+is legalized, and refuses to build it when one fails
+([§14.8](#148-connection-to-the-ir-and-phases)).
 
 ```text
 reach.crn:13:3: error[E_SIM_ASSERTION_FAILED]: struct=reach: `assert latency(sig.a -> sig.c) <= 1` fails on java: its slowest path from sig.a to sig.c takes 4 ticks, 1 in buffer repeaters on the routed wire and 2 in the torches up to the actuator
 reach.crn:10:3:   note: the path enters cell #0 (`RepeaterOR`) by port `a`: 1 buffer repeater on the wire, then 1 tick through the cell
 reach.crn:7:3:   note: then the actuator reading sig.c: no buffer repeater on the wire to the torches under it, then 2 ticks up to it
-  note: the wire carries 1 buffer repeater, one wherever it runs past 15 blocks of dust, so laying what reads a signal nearer what drives it needs fewer
+  note: the path's wires carry 1 buffer repeater, one wherever a wire runs past 15 blocks of dust, so laying what reads a signal nearer what drives it needs fewer
   note: Fix: relax the bound to `<= 4`, or shorten the path; the logic is never rewritten to meet a bound
 ```
 

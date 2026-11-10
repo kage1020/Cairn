@@ -1,9 +1,10 @@
 //! Logic IR: the edition-neutral signal DAG, without ticks, the synth pass builds from sensor,
 //! actuator and `logic` bindings. Nodes are in topological order, so a cycle is not encodable; a
-//! macro's feedback stays inside its gate.
+//! `latch` or `counter` keeps its feedback inside its gate.
 
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
+use cairn_lang_core::logic_library::StageCount;
 use indexmap::IndexMap;
 use serde::de;
 use serde::ser::SerializeMap;
@@ -84,15 +85,15 @@ pub enum GateKind {
     Delay {
         /// Sole operand.
         a: SignalRef,
-        /// Repeaters in series.
-        stages: u32,
+        /// Stages `a` is delayed by.
+        stages: StageCount,
     },
     /// `pulse(a, stages)`.
     Pulse {
         /// Sole operand.
         a: SignalRef,
         /// Stages the pulse lasts at most.
-        stages: u32,
+        stages: StageCount,
     },
     /// `edge_rising(a)`.
     EdgeRising {
@@ -109,7 +110,7 @@ pub enum GateKind {
         /// Sole operand, counted as it turns on.
         a: SignalRef,
         /// Times `a` turns on between two toggles.
-        stages: u32,
+        stages: StageCount,
     },
 }
 
@@ -147,7 +148,7 @@ impl GateKind {
 /// One gate in the DAG of [`LogicIr::nodes`], a combinational primitive or a macro.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GateNode {
-    /// Boolean primitive this node computes, with its operands inline.
+    /// Primitive this node computes, with its operands and stage count inline.
     pub kind: GateKind,
     /// Byte range of the enclosing `logic` line; the AST has no per-expression spans.
     #[serde(skip)]

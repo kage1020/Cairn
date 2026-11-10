@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::logic_library::LogicPrimitive;
+use crate::logic_library::{LogicPrimitive, StageCount};
 
 /// A language version string captured verbatim from `@cairn`, its shape unchecked.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -603,7 +603,7 @@ pub enum Expr {
         operand: Box<Expr>,
         /// The stage count after the operand, `None` for a primitive that counts none.
         #[serde(skip_serializing_if = "Option::is_none")]
-        stages: Option<u32>,
+        stages: Option<StageCount>,
     },
 }
 

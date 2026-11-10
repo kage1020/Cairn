@@ -23,7 +23,7 @@ pub const MAX_DRIVEN_SENSORS: usize = 10;
 /// An `E_SIM_ASSERTION_FAILED` for each `assert truth` and `assert always` that some run of its
 /// scope's legalized circuit breaks, and a `W_SIM_ASSERTION_UNCHECKED` for each it cannot run.
 #[must_use]
-pub fn verify_behaviour(module: &IntentModule, legalized: &ScopedCircuitLayout) -> Vec<Diagnostic> {
+pub fn verify_behaviour(legalized: &ScopedCircuitLayout, module: &IntentModule) -> Vec<Diagnostic> {
     let asserts = scope_asserts(module);
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     for entry in &legalized.scopes {

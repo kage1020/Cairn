@@ -718,28 +718,6 @@ fn a_call_built_with_the_wrong_operands_is_refused_for_what_is_wrong_with_them()
     }
 }
 
-#[test]
-fn an_application_counting_no_stage_has_no_gate() {
-    let source = "struct s size=1x1\n  logic sig.out = pulse(sig.nope1, 3)\n  \
-                  door id=front side=front at=center\n  door[id=front] opened_by=sig.out\n";
-    let mut intent = lower(&parse(source).expect("parse"));
-    let Expr::Apply { stages, .. } = &mut intent.structs[0].logic[0].rhs else {
-        panic!("expected an application");
-    };
-    *stages = Some(0);
-    let out = synthesize(&intent);
-    assert_eq!(
-        codes(&out),
-        ["E_LOGIC_UNBOUND_SIGNAL", "E_LOGIC_UNSUPPORTED_PRIMITIVE"]
-    );
-    let finding = only(&out, DiagnosticCode::LogicUnsupportedPrimitive);
-    assert_eq!(
-        finding.primary,
-        "struct=s: logic expression applies `pulse` to one operand and 0 stages, which the logic \
-         lowering has no gate for",
-    );
-}
-
 /// The walk reaches the `level`-nested `assert` first, though it is written below.
 #[test]
 fn an_unbound_assert_signal_is_reported_at_its_first_use_in_the_file() {

@@ -258,10 +258,10 @@ pub(crate) enum Command {
             every other net's; `--stage delay` stands a buffer repeater in a net's dust wherever \
             it would run too weak for an input it feeds; `--stage legalize` turns every part into \
             the block it is built as, in the state the circuit rests in with its sensors off, \
-            then checks each `assert latency` against it. Each of the four layout stages carries \
-            a `\"stage\"` key echoing the flag value that produced it (`placement` / `route` / \
-            `delay` / `legalize`), so a consumer reads the stage off the output instead of \
-            inferring it from which keys are present. The `--edition <java|bedrock>` flag is \
+            then checks each `assert latency` against it and prints no IR when one fails. Each of \
+            the four layout stages carries a `\"stage\"` key echoing the flag value that produced \
+            it (`placement` / `route` / `delay` / `legalize`), so a consumer reads the stage off \
+            the output instead of inferring it from which keys are present. The `--edition <java|bedrock>` flag is \
             required in the `edition`, `placement`, `route`, `delay`, and `legalize` modes and \
             refused otherwise (the earlier stages are edition-neutral by contract). `cairn \
             compile` runs the same pipeline and lays the legalized circuit under the struct; this \
