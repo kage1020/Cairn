@@ -7,6 +7,8 @@
   - each cell's tile is laid at the free spot nearest the tiles its nets join, each net's dust runs
     up and down staircases apart from every other net's, and a buffer repeater goes in wherever an
     input would read its signal too weak;
+  - a `delay` or `pulse` runs its operand through repeaters of one tick each, so it passes every
+    change held for a stage as it came;
   - every part is written in the state the circuit rests in with its sensors off, its block the
     target's for `@redstone_dust.default`, `@redstone_torch.wall`, `@repeater.default`,
     `@comparator.default` or the new `@circuit.block`.

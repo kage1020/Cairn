@@ -273,7 +273,7 @@ fn a_cell_longer_than_the_struct_is_refused_at_that_cell() {
     let source = room(
         "  door id=d side=front at=center\n  \
          lever id=l at=inside.back offset=4 y=0 -> sig.a\n  \
-         logic sig.p = pulse(sig.a, 20)\n  \
+         logic sig.p = pulse(sig.a, 6)\n  \
          door[id=d] opened_by=sig.p\n  \
          circuit region=floor void=3\n",
     );
@@ -283,8 +283,8 @@ fn a_cell_longer_than_the_struct_is_refused_at_that_cell() {
         only_finding(&source, &out),
         (
             "E_ROUTE_CONGESTION",
-            "logic sig.p = pulse(sig.a, 20)",
-            "struct=room: the reservation has no room left for this `TorchPulse` cell: its tile needs 17x3 columns clear of the other tiles' (region 15x11, void=3)".to_owned(),
+            "logic sig.p = pulse(sig.a, 6)",
+            "struct=room: the reservation has no room left for this `TorchPulse` cell: its tile needs 19x3 columns clear of the other tiles' (region 15x11, void=3)".to_owned(),
             vec![(
                 None,
                 "Fix: widen the struct's `size=WxH`, increase `void`, or split the logic across several scopes, each with its own `circuit` line".to_owned(),
@@ -293,20 +293,56 @@ fn a_cell_longer_than_the_struct_is_refused_at_that_cell() {
     );
 }
 
+/// A lever through `logic` to a door in [`room`], over a reservation of `void=3`.
+fn lever_through(logic: &str) -> String {
+    room(&format!(
+        "  door id=d side=front at=center\n  \
+         lever id=l at=inside.back offset=4 y=0 -> sig.a\n  {logic}\n  \
+         door[id=d] opened_by=sig.p\n  circuit region=floor void=3\n"
+    ))
+}
+
+#[test]
+fn a_delay_whose_row_outruns_the_struct_is_refused_before_it_is_laid() {
+    let fits = lever_through("logic sig.p = delay(sig.a, 6)");
+    assert_eq!(java(&fits).diagnostics, []);
+    for (stages, columns) in [(7, 16), (u32::MAX, 8_589_934_592_u64)] {
+        let line = format!("logic sig.p = delay(sig.a, {stages})");
+        let source = lever_through(&line);
+        assert_eq!(
+            only_finding(&source, &java(&source)),
+            (
+                "E_ROUTE_CONGESTION",
+                line.as_str(),
+                format!(
+                    "struct=room: a `RepeaterDelay` of {stages} stages cannot be laid: its repeaters \
+                     run in one row of {columns} columns, longer than the 15x11 struct it lies under"
+                ),
+                vec![(
+                    None,
+                    "Fix: use fewer stages, or widen the struct's `size=WxH`".to_owned()
+                )],
+            ),
+        );
+    }
+}
+
 #[test]
 fn a_macro_of_more_stages_than_its_dust_carries_is_refused_at_its_line() {
-    for (macro_, line, what, max) in [
+    for (macro_, line, what, max, instead) in [
         (
             "pulse",
-            "logic sig.p = pulse(sig.a, 26)",
+            "logic sig.p = pulse(sig.a, 7)",
             "a `pulse`'s inverted operand runs one block of dust past each of its repeaters",
-            25,
+            6,
+            ", or write a longer pulse of `x` as `x and not delay(x, n)`",
         ),
         (
             "counter",
             "logic sig.p = counter(sig.a, 5)",
             "a `counter`'s operand and the operand inverted run past every stage on one strand of dust",
             4,
+            "",
         ),
     ] {
         let source = room(&format!(
@@ -328,12 +364,7 @@ fn a_macro_of_more_stages_than_its_dust_carries_is_refused_at_its_line() {
                 format!(
                     "struct=room: a {name} of {stages} stages cannot be built: {what}, so it holds at most {max} stages before the dust goes dark"
                 ),
-                vec![(
-                    None,
-                    format!(
-                        "Fix: use at most {max} stages, or chain two macros, each of at most {max}"
-                    )
-                )],
+                vec![(None, format!("Fix: use at most {max} stages{instead}"))],
             ),
         );
     }

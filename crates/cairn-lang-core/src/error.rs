@@ -103,8 +103,17 @@ fn render_unexpected_char(ch: char) -> String {
 }
 
 fn render_invalid_int(context: IntContext, lexeme: &str, kind: IntErrorKind) -> String {
+    let valid = match context {
+        IntContext::WithinBound | IntContext::LatencyBound => {
+            format!("; a bound is a whole number of ticks up to {}", u32::MAX)
+        }
+        IntContext::StageCount => {
+            format!("; a stage count is a whole number from 1 to {}", u32::MAX)
+        }
+        IntContext::SizeWidth | IntContext::SizeHeight | IntContext::IntLiteral => String::new(),
+    };
     format!(
-        "{} `{}`: {}",
+        "{} `{}`: {}{valid}",
         context.describe(),
         lexeme,
         describe_int_kind(kind),

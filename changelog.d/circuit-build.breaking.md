@@ -4,6 +4,8 @@
   - a struct or def with a cell to build or an actuator to drive and no `circuit` line is
     `E_NO_CIRCUIT_REGION`, where it built its components with no circuit between them;
   - a `void=` of 1 or 2, or of 3 with a `counter`, is `E_ROUTE_CONGESTION`;
+  - a `pulse` of more than 6 stages or a `counter` of more than 4 is `E_ATTENUATION_LIMIT`, and a
+    `delay` whose row of two repeaters a stage is longer than the struct is `E_ROUTE_CONGESTION`;
   - a sensor or actuator the circuit under the floor cannot reach, such as a lever above the floor
     row, is `E_ROUTE_UNREACHABLE_COMPONENT`;
   - an `assert latency` the laid circuit misses is `E_SIM_ASSERTION_FAILED`.

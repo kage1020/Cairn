@@ -1,4 +1,5 @@
 use cairn_lang_core::block_array::Face;
+use cairn_lang_core::logic_library::StageCount;
 
 use super::*;
 use crate::geometry::{Rotation, Voxel};
@@ -107,7 +108,7 @@ impl Bench {
     }
 
     /// Runs `ticks` ticks and the output after each.
-    fn run(&mut self, ticks: u32) -> Vec<bool> {
+    fn run(&mut self, ticks: u64) -> Vec<bool> {
         (0..ticks)
             .map(|_| {
                 self.sim.step();
@@ -115,6 +116,10 @@ impl Bench {
             })
             .collect()
     }
+}
+
+fn stage_count(n: u32) -> StageCount {
+    StageCount::new(n).expect("a stage count is at least 1")
 }
 
 fn a() -> TilePort {
@@ -133,12 +138,12 @@ fn variants() -> impl Iterator<Item = (Rotation, Order)> {
 }
 
 /// The tick, counted from the change, of the last change of the output, and the output after.
-fn last_change(trace: &[bool], before: bool) -> (u32, bool) {
+fn last_change(trace: &[bool], before: bool) -> (u64, bool) {
     let mut last = 0;
     let mut previous = before;
     for (tick, &value) in trace.iter().enumerate() {
         if value != previous {
-            last = u32::try_from(tick).expect("tick fits u32") + 1;
+            last = u64::try_from(tick).expect("tick fits u64") + 1;
             previous = value;
         }
     }
@@ -247,6 +252,18 @@ fn each_cell_port_takes_the_ticks_the_cell_library_gives_it() {
     }
 }
 
+#[test]
+fn a_macro_of_the_most_stages_counts_its_ticks_exactly() {
+    let most = stage_count(u32::MAX);
+    assert_eq!(
+        [
+            EditionCell::JavaRepeaterDelay { stages: most }.port_delay_ticks(PortName::A),
+            EditionCell::BedrockTorchPulse { stages: most }.port_delay_ticks(PortName::A),
+        ],
+        [8_589_934_590, 8_589_934_592],
+    );
+}
+
 /// `not` inverts within one tick.
 #[test]
 fn the_inverter_inverts_in_one_tick() {
@@ -330,9 +347,11 @@ fn the_comparator_and_passes_its_rear_strength_on() {
 fn delay_follows_its_operand_two_ticks_a_stage_later() {
     for stages in 1..=9 {
         for (rotation, order) in variants() {
-            let cell = EditionCell::JavaRepeaterDelay { stages };
+            let cell = EditionCell::JavaRepeaterDelay {
+                stages: stage_count(stages),
+            };
             let ticks = cell.port_delay_ticks(PortName::A);
-            assert_eq!(ticks, 2 * stages);
+            assert_eq!(ticks, 2 * u64::from(stages));
             let mut bench = Bench::cell(cell, rotation, order);
             bench.set(a(), true);
             let trace = bench.run(ticks + 2);
@@ -351,20 +370,22 @@ fn delay_follows_its_operand_two_ticks_a_stage_later() {
 /// `pulse(x, n)` is on from two ticks in for its first `n` stages, or until `x` turns off.
 #[test]
 fn pulse_is_on_for_its_stages_or_until_its_operand_falls() {
-    for stages in [1, 2, 3, 4, 5, 8, 15, MAX_PULSE_STAGES] {
+    for stages in [1, 2, 3, 4, 5, MAX_PULSE_STAGES] {
         for (rotation, order) in variants() {
-            let cell = EditionCell::JavaTorchPulse { stages };
+            let cell = EditionCell::JavaTorchPulse {
+                stages: stage_count(stages),
+            };
             let ticks = cell.port_delay_ticks(PortName::A);
             let mut bench = Bench::cell(cell, rotation, order);
             assert!(!bench.out());
             bench.set(a(), true);
             let trace = bench.run(ticks + 4);
-            let on: Vec<u32> = (1..)
+            let on: Vec<u64> = (1..)
                 .zip(&trace)
                 .filter(|(_, on)| **on)
                 .map(|(t, _)| t)
                 .collect();
-            let expected: Vec<u32> = (2..=2 * stages + 1).collect();
+            let expected: Vec<u64> = (2..=2 * u64::from(stages) + 1).collect();
             assert_eq!(on, expected, "{stages} held, {rotation:?} {order:?}");
             assert_eq!(last_change(&trace, false).0, ticks);
             bench.set(a(), false);
@@ -374,7 +395,7 @@ fn pulse_is_on_for_its_stages_or_until_its_operand_falls() {
                 let mut trace = bench.run(2);
                 bench.set(a(), false);
                 trace.extend(bench.run(ticks + 4));
-                let on: Vec<u32> = (1..)
+                let on: Vec<u64> = (1..)
                     .zip(&trace)
                     .filter(|(_, on)| **on)
                     .map(|(t, _)| t)
@@ -382,6 +403,103 @@ fn pulse_is_on_for_its_stages_or_until_its_operand_falls() {
                 assert_eq!(on, [2, 3], "{stages} cut short");
             }
         }
+    }
+}
+
+/// Asserts that `cell`, fed each of `patterns` as stages `x` is on and off by turns, puts out at
+/// every tick what `expected` says of the pattern and the tick, in every rotation and order.
+fn assert_follows(
+    cell: EditionCell,
+    patterns: &[Vec<u64>],
+    expected: impl Fn(&[u64], u64) -> bool,
+) {
+    for pattern in patterns {
+        for (rotation, order) in variants() {
+            let mut bench = Bench::cell(cell, rotation, order);
+            let mut trace = Vec::new();
+            for (index, &held) in pattern.iter().chain(&[16]).enumerate() {
+                bench.set(a(), index % 2 == 0 && index < pattern.len());
+                trace.extend(bench.run(2 * held));
+            }
+            let wanted: Vec<bool> = (1..=trace.len() as u64)
+                .map(|tick| expected(pattern, tick))
+                .collect();
+            assert_eq!(trace, wanted, "{cell:?} {pattern:?} {rotation:?} {order:?}");
+        }
+    }
+}
+
+/// Whether `x` was on `back` ticks before `tick` under `pattern`, as [`assert_follows`] feeds it.
+fn was_on(pattern: &[u64], tick: u64, back: u64) -> bool {
+    let Some(at) = tick.checked_sub(back) else {
+        return false;
+    };
+    let mut start = 0;
+    for (index, &held) in pattern.iter().enumerate() {
+        start += 2 * held;
+        if at < start {
+            return index % 2 == 0;
+        }
+    }
+    false
+}
+
+/// Operands that change every stage, or hold a change for a stage or two before turning back.
+fn patterns(stages: u32) -> [Vec<u64>; 4] {
+    let n = u64::from(stages);
+    [
+        vec![1, 1, 1, 1, n + 2],
+        vec![n + 2, 1, n + 2],
+        vec![1, n, 1, 2, 3],
+        vec![2, n + 1, 2],
+    ]
+}
+
+/// `delay(x, n)` passes every change of an `x` that holds each for a stage, unstretched.
+#[test]
+fn delay_passes_each_change_held_for_a_stage_as_it_came() {
+    for stages in [1, 2, 3, 5] {
+        let count = stage_count(stages);
+        let ticks = 2 * u64::from(stages);
+        for cell in [
+            EditionCell::JavaRepeaterDelay { stages: count },
+            EditionCell::BedrockRepeaterDelay { stages: count },
+        ] {
+            assert_follows(cell, &patterns(stages), |pattern, tick| {
+                was_on(pattern, tick, ticks)
+            });
+        }
+    }
+}
+
+/// `pulse(x, n)` is on two ticks later while `x` is on and was off `n` stages before, so an `x`
+/// that turns on again sooner gets only what is left of its pulse.
+#[test]
+fn pulse_is_on_while_its_operand_is_on_and_was_off_n_stages_before() {
+    for stages in [1, 2, 3, 5] {
+        let count = stage_count(stages);
+        let ticks = 2 * u64::from(stages) + 2;
+        for cell in [
+            EditionCell::JavaTorchPulse { stages: count },
+            EditionCell::BedrockTorchPulse { stages: count },
+        ] {
+            assert_follows(cell, &patterns(stages), |pattern, tick| {
+                was_on(pattern, tick, 2) && !was_on(pattern, tick, ticks)
+            });
+        }
+    }
+}
+
+/// `edge_falling(x)` is on a tick later while `x` is off and was on a stage before.
+#[test]
+fn edge_falling_is_on_while_its_operand_is_off_and_was_on_a_stage_before() {
+    for cell in [
+        EditionCell::JavaTorchEdgeFalling,
+        EditionCell::BedrockTorchEdgeFalling,
+    ] {
+        assert_follows(cell, &patterns(1), |pattern, tick| {
+            !was_on(pattern, tick, 1) && was_on(pattern, tick, 3)
+        });
     }
 }
 
@@ -447,7 +565,9 @@ fn latch_sets_resets_and_lets_reset_win() {
 fn counter_toggles_every_n_rises_three_ticks_after_each() {
     for stages in 1..=MAX_COUNTER_STAGES {
         for (rotation, order) in variants() {
-            let cell = EditionCell::JavaRepeaterCounter { stages };
+            let cell = EditionCell::JavaRepeaterCounter {
+                stages: stage_count(stages),
+            };
             let mut bench = Bench::cell(cell, rotation, order);
             let fed = bench
                 .at(bench.template.port(TilePort::Feedback).expect("fb").at)
@@ -535,7 +655,13 @@ fn a_port_rating_is_the_weakest_signal_that_drives_the_tile() {
         (EditionCell::JavaTorchXor, b(), &[(a(), true)]),
         (EditionCell::JavaTorchMux, sel, &[(a(), true)]),
         (EditionCell::JavaTorchMux, b(), &[(sel, true)]),
-        (EditionCell::JavaTorchPulse { stages: 3 }, a(), &[]),
+        (
+            EditionCell::JavaTorchPulse {
+                stages: stage_count(3),
+            },
+            a(),
+            &[],
+        ),
         (EditionCell::JavaTorchEdgeFalling, a(), &[]),
         (
             EditionCell::JavaTorchLatch,

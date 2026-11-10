@@ -23,7 +23,7 @@ pub const MAX_DRIVEN_SENSORS: usize = 10;
 /// An `E_SIM_ASSERTION_FAILED` for each `assert truth` and `assert always` that some run of its
 /// scope's legalized circuit breaks, and a `W_SIM_ASSERTION_UNCHECKED` for each it cannot run.
 #[must_use]
-pub fn verify_behaviour(module: &IntentModule, legalized: &ScopedCircuitLayout) -> Vec<Diagnostic> {
+pub fn verify_behaviour(legalized: &ScopedCircuitLayout, module: &IntentModule) -> Vec<Diagnostic> {
     let asserts = scope_asserts(module);
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     for entry in &legalized.scopes {
@@ -221,20 +221,18 @@ impl<'a> Circuit<'a> {
         self.outs[tile].iter().any(|at| sim.power(*at) > 0)
     }
 
-    /// The risers under the actuators reading `net`.
-    fn risers(&self, net: NetRef) -> Vec<usize> {
+    /// The risers under the actuators reading `signal` by that name.
+    fn risers(&self, signal: &DottedRef) -> Vec<usize> {
         self.layout
-            .nets
+            .riser_signals
             .iter()
-            .filter(|circuit_net| circuit_net.source == net)
-            .flat_map(|circuit_net| &circuit_net.sinks)
-            .map(|sink| sink.tile)
-            .filter(|&tile| self.layout.tiles[tile].kind == TileKind::Riser)
+            .filter(|(_, read)| *read == signal)
+            .map(|(&tile, _)| tile)
             .collect()
     }
 
-    /// Whether `net` reads on at the top of every riser reading it, or where what drives it
-    /// leaves it when no actuator reads it.
+    /// Whether `net` reads on at the top of every one of `risers`, or where what drives it leaves
+    /// it when there are none.
     fn reads_where_read(&self, sim: &Sim, net: NetRef, risers: &[usize], on: &[u32]) -> bool {
         if risers.is_empty() {
             return self.reads(sim, net, on);
@@ -358,7 +356,7 @@ impl<'a> Circuit<'a> {
         let to = *self.layout.signal_defs.get(consequent)?;
         let text =
             format!("`assert always({antecedent} -> eventually {consequent} within {within})`");
-        let risers = self.risers(to);
+        let risers = self.risers(consequent);
         let runs = match self.runs(&self.sensors(&[from, to]), &text, span) {
             Ok(runs) => runs,
             Err(diagnostic) => return Some(diagnostic),

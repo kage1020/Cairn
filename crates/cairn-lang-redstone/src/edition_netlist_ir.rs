@@ -4,6 +4,7 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
+use cairn_lang_core::logic_library::StageCount;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput, Por
 
 /// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum EditionCell {
@@ -52,24 +53,24 @@ pub enum EditionCell {
     /// Java DELAY — repeaters in series, two ticks a stage.
     JavaRepeaterDelay {
         /// Stages the repeaters take in all.
-        stages: u32,
+        stages: StageCount,
     },
     /// Bedrock DELAY — repeaters in series, two ticks a stage.
     BedrockRepeaterDelay {
         /// Stages the repeaters take in all.
-        stages: u32,
+        stages: StageCount,
     },
     /// Java PULSE — the torch NOR of inverted `a` and of `a` through repeaters of
     /// `2 * stages + 1` ticks.
     JavaTorchPulse {
         /// Stages the pulse lasts at most.
-        stages: u32,
+        stages: StageCount,
     },
     /// Bedrock PULSE — the torch NOR of inverted `a` and of `a` through repeaters of
     /// `2 * stages + 1` ticks.
     BedrockTorchPulse {
         /// Stages the pulse lasts at most.
-        stages: u32,
+        stages: StageCount,
     },
     /// Java rising-edge detector — a one-stage PULSE.
     JavaTorchEdgeRising,
@@ -87,12 +88,12 @@ pub enum EditionCell {
     /// Java COUNTER — `stages` flip-flops of locking repeaters in a twisted ring.
     JavaRepeaterCounter {
         /// Flip-flops in the ring.
-        stages: u32,
+        stages: StageCount,
     },
     /// Bedrock COUNTER — `stages` flip-flops of locking repeaters in a twisted ring.
     BedrockRepeaterCounter {
         /// Flip-flops in the ring.
-        stages: u32,
+        stages: StageCount,
     },
 }
 
@@ -156,7 +157,7 @@ impl EditionCell {
     /// Tick delay from input `port` to this cell's output, or for a macro to the last change one
     /// change at `port` makes there, excluding buffer repeaters.
     #[must_use]
-    pub const fn port_delay_ticks(self, port: PortName) -> u32 {
+    pub fn port_delay_ticks(self, port: PortName) -> u64 {
         match self {
             // The side operand passes the inverter before the comparator. Asked for a port an AND
             // does not have, it errs on the slow side.
@@ -164,18 +165,19 @@ impl EditionCell {
                 PortName::A => 1,
                 PortName::B | PortName::Sel | PortName::Set | PortName::Reset => 2,
             },
-            // A falling `reset` re-arms `set` through its two-tick hold and three torches.
+            // A falling `reset` re-arms `set` through its two-tick hold and three torches. Asked
+            // for a port a latch does not have, it errs on the slow side.
             Self::JavaTorchLatch | Self::BedrockTorchLatch => match port {
                 PortName::Set => 4,
                 PortName::A | PortName::B | PortName::Sel | PortName::Reset => 5,
             },
             Self::JavaRepeaterDelay { stages } | Self::BedrockRepeaterDelay { stages } => {
-                stages.saturating_mul(2)
+                2 * u64::from(stages.get())
             }
             // The pulse ends once `a` is out of its repeaters, a tick more than its stages, and
             // through the NOR.
             Self::JavaTorchPulse { stages } | Self::BedrockTorchPulse { stages } => {
-                stages.saturating_mul(2).saturating_add(2)
+                2 * u64::from(stages.get()) + 2
             }
             Self::JavaTorchEdgeRising | Self::BedrockTorchEdgeRising => 4,
             Self::JavaRepeaterCounter { .. }

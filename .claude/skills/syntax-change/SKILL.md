@@ -27,7 +27,8 @@ use. A syntax change lands in both, in one pull request, after the spec says wha
      `(field labels)` case that spells the label out, or `cargo xtask lint grammar-fields` fails.
    - Add the new forms, accepted and refused, to the fixtures in `tests/parser_parity.rs`, which
      feeds each one to both parsers.
-   - Update `queries/highlights.scm` when the new token should be highlighted.
+   - Update `queries/highlights.scm` when the new token should be highlighted;
+     `cargo xtask lint logic-highlights` holds its logic primitives to core's library.
 4. **Editors.** Add new keywords to `editors/vscode/syntaxes/cairn.tmLanguage.json`;
    `cargo xtask lint editor-keywords` holds its top-level and member keyword lists to core's. The
    LSP's completions read core's lists, so check `crates/cairn-lang-lsp/src/completion.rs` only
