@@ -9,6 +9,7 @@ use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement}
 use crate::diagnostic::RenderedDiagnostic;
 use crate::edition::Edition;
 use crate::error::{Position, Span};
+use crate::intent::guarded_lines;
 use crate::version::{FloorVerdict, VersionOrder, compare_versions, parse_min_version};
 
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
@@ -436,7 +437,7 @@ impl<'a> InstantiatedParts<'a> {
         declared_themes: &[&'a str],
         scope: FloorScope,
     ) {
-        for statement in body {
+        for (_, statement) in guarded_lines(body) {
             let Statement::Generic {
                 keyword,
                 args,

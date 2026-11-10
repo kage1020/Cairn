@@ -7,12 +7,14 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::ast::{Value, ValueKind};
+use crate::edition::Edition;
 use crate::error::Span;
 
 use super::{AssertIr, LogicBinding, MemberRole};
 
 /// One named member produced by lowering a body statement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Member {
     /// Explicit `id=` value, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -41,6 +43,10 @@ pub struct Member {
     /// Nested body indented under this member.
     #[serde(default, skip_serializing_if = "MemberBody::is_empty")]
     pub children: MemberBody,
+    /// The edition of the `@edition` guard the member's line stands under, if any
+    /// (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edition_guard: Option<Edition>,
     /// Byte range of the member's own line, children excluded.
     #[serde(skip)]
     pub span: Span,

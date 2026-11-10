@@ -22,6 +22,7 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
 /// Keeps the body kind: `flatten_members` splices a `level`'s children into the same buckets.
 fn walk(members: &[Member], body: BodyKind, inside_level: bool, sink: &mut DiagnosticSink) {
     for member in members {
+        // `keyword_allowlist` reports an unknown keyword.
         if matches!(member.role, MemberRole::Other(_)) {
             continue;
         }

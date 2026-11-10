@@ -72,12 +72,30 @@ module.exports = grammar({
     struct_body: $ => body(
       $,
       choice($.member_stmt, $.logic_decl, $.assert_stmt),
-      $.member_stmt_with_body,
+      choice($.member_stmt_with_body, $.edition_guard),
     ),
 
     def_body: $ => body(
       $,
       choice($.requires_stmt, $.member_stmt, $.logic_decl, $.assert_stmt),
+      choice($.member_stmt_with_body, $.edition_guard),
+    ),
+
+    // The grammar takes any line here; core's check refuses one other than a raw member.
+    edition_guard: $ => seq(
+      '@',
+      'edition',
+      field('edition', $.edition_name),
+      $._newline,
+      field('body', $.edition_guard_body),
+    ),
+
+    edition_name: _ => choice('java', 'bedrock'),
+
+    // A guard does not nest, so its own lines leave out `edition_guard`.
+    edition_guard_body: $ => body(
+      $,
+      choice($.member_stmt, $.logic_decl, $.assert_stmt),
       $.member_stmt_with_body,
     ),
 

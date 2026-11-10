@@ -211,6 +211,10 @@ which bind materials and open nothing, so a line indented under one is a syntax 
 nesting diagnostic. So is a line indented after a directive: a directive is one line, and the line
 under it belongs to no construct.
 
+An `@edition` guard indents the lines under it too, but it is not a member and groups nothing. Its
+lines stand in the body around it, and it holds only raw members ([Versioning and Editions
+§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
+
 [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what
 `y=N` means to each grouped member.
 
@@ -293,7 +297,9 @@ constraint rather than displacing one.
 A `def` or a `theme` may carry the same expression as a body line, spelled `requires` without the
 `@`. It is a floor on that part rather than on the file, inherited by every build that instantiates
 it. The sigil is what marks a file directive, and a part's floor is not one. See
-[Versioning and Editions](/spec/versioning-editions/).
+[Versioning and Editions](/spec/versioning-editions/). Inside a body the sigil opens only an
+`@edition` guard, which is not a directive either: it picks the edition whose build keeps the lines
+under it ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
 
 ## 5.4 Selectors
 

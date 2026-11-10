@@ -49,6 +49,66 @@ fn json_format_round_trips_as_block_array_ir() {
 }
 
 #[test]
+fn members_under_edition_guards_are_left_out_and_counted_in_a_note() {
+    let path = examples_dir().join("edition-fallback.crn");
+    let out = cairn("lower", &[path.to_str().unwrap(), "--format", "json"]);
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
+    assert_eq!(
+        stderr,
+        "note: no edition is pinned here, so the 2 members under `@edition` guards are left out; \
+         `cairn compile --edition E` builds the ones E's guards hold\n",
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid JSON");
+    let palette = parsed["structures"]["struct::shop"]["palette"]
+        .as_array()
+        .expect("palette is an array");
+    let mut ids: Vec<&str> = palette
+        .iter()
+        .map(|p| p["id"].as_str().expect("id is a string"))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(
+        ids,
+        [
+            "minecraft:air",
+            "minecraft:cobblestone",
+            "minecraft:oak_door",
+            "minecraft:oak_sign",
+            "minecraft:stone_bricks",
+        ],
+    );
+}
+
+#[test]
+fn the_note_counts_the_members_under_guards_and_not_the_guards() {
+    let source = "struct s size=5x5\n  raw_block mat=minecraft:dirt at=1,0,1\n  @edition java\n    \
+                  raw_block mat=minecraft:stone at=2,0,2\n    raw_block mat=minecraft:stone at=3,0,3\n";
+    let tmp = TempDir::new().expect("tempdir");
+    let src_path = write_source(tmp.path(), "guarded.crn", source);
+    let run = Run::from(cairn("lower", &[src_path.to_str().unwrap()]));
+    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    assert_eq!(
+        run.stderr,
+        "note: no edition is pinned here, so the 2 members under `@edition` guards are left out; \
+         `cairn compile --edition E` builds the ones E's guards hold\n",
+    );
+}
+
+#[test]
+fn a_guarded_line_check_refuses_fails_the_lowering_that_leaves_it_out() {
+    let source = "struct s size=5x5\n  @edition java\n    raw_block mat=minecraft:stone at=2,4,2\n  \
+                  raw_block mat=minecraft:dirt at=1,0,1\n";
+    let tmp = TempDir::new().expect("tempdir");
+    let src_path = write_source(tmp.path(), "guarded.crn", source);
+    let run = Run::from(cairn("lower", &[src_path.to_str().unwrap()]));
+    assert_eq!(run.code, Some(1), "stderr={}", run.stderr);
+    assert_stream(&run.stderr, &[(3, 5, "error", "E_INVALID_MEMBER")]);
+    assert_eq!(run.stdout, "");
+}
+
+#[test]
 fn deferred_member_warnings_print_to_stderr() {
     // Lowering has no roof under a raised `level`, so it defers.
     let source = concat!(

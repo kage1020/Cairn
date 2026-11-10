@@ -919,8 +919,8 @@ and game-behaviour differences are not absorbed.** The cases that cannot be:
 
 ### Writing an alternative
 
-**Subject to change.** `@edition` guards, `hologram` and `slot` rules that take arguments are not
-built yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
+**Subject to change.** `hologram` and `slot` rules that take arguments are not built yet
+([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 `@edition` conditionals in the semantic layer are forbidden. When an alternative is needed, work
 down this hierarchy:
@@ -935,30 +935,72 @@ down this hierarchy:
 ```
 @requires bedrock version>=1.21.40   # the Bedrock branch below is spelled for the flattened ids
 
-hologram id=shop_sign text="Weapon" mat_slot=floating_text   # the semantic layer is always neutral
 theme shop_java:    slot floating_text -> text_display scale=2.0
 theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
 
-@edition java    { raw_block mat=minecraft:light[level=15] at=4,3,2 }
-@edition bedrock { raw_block mat=minecraft:light_block_15 at=4,3,2 }
+struct shop size=9x7
+  hologram id=shop_sign text="Weapon" mat_slot=floating_text   # the semantic layer is always neutral
+  @edition java
+    raw_block mat=minecraft:light[level=15] at=4,3,2
+  @edition bedrock
+    raw_block mat=minecraft:light_block_15 at=4,3,2
 ```
 
-The parser accepts only the snippet's `@requires` line today. `hologram` stands at top level, where
-only `theme`, `def`, `site` and `struct` open an item, so it is `E_PARSE`, and the parse ends there.
-Each later line would fail on its own as well. A `theme` takes its rules on indented lines under its
-header, so the one-line form is `E_PARSE` at `slot`, and even indented, a `slot` rule binds one
-token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. `@edition` is an
-unknown directive (`E_PARSE`), so the parser never reaches the `raw_block` inside its braces, though
-one written on its own line in a body builds ([Materials and Themes
-§7.4](/spec/materials-themes/#74-raw-blocks)). Inside a body `hologram` is `E_UNKNOWN_KEYWORD`.
-`E_PARITY_UNSUPPORTED` is not implemented.
+Of the snippet, the `@requires` line parses today, and so would all of the `struct`: its header, the
+`hologram` line and the two guards with what they hold. The parse never reaches the `struct`,
+though. A `theme` takes its rules on indented lines under its header, so the one-line form is
+`E_PARSE` at the first `slot`, and the parse ends there. Even indented, a `slot` rule binds one
+token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. Inside a body
+`hologram` is `E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is not implemented. The `edition-fallback`
+example builds the steps that do exist: a per-edition theme, and the light block under its guards.
+
+### An `@edition` guard holds the escape hatch
+
+A guard is a line of its own: `@edition`, then `java` or `bedrock`, and nothing after it. The lines
+it guards are indented one level under it, and it stands in a `struct`, `def` or `site` body, or in
+the body of a member there. It shares the sigil with the file directives but is not one. The items
+of a file are edition-neutral, so a guard at top level is `E_PARSE`, and so is one in a `theme` body,
+where the `NAME_java` and `NAME_bedrock` variants say what differs
+([below](#the-build-picks-the-variant-not-the-source)). A guard that names no edition or another
+word, takes anything after its edition, holds its lines in braces or has nothing indented under it
+is `E_PARSE` too. A guard does not nest: the one around it already picks the edition, so a guard
+directly under a guard is `E_PARSE`. Deeper down, a line is judged by the line it stands under, as
+it would be outside the guard: a member under a raw member, guarded again or not, is
+`E_UNSUPPORTED_NESTING`, and anything under a refused line goes with that line.
+
+A guard opens no scope. Its lines are read as if written where the guard stands, so one under a
+`level` takes the level's `y=`, and a raw member gets every check under a guard that it would get
+outside one. What the guard adds is the edition whose build keeps the line.
+
+What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
+§7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
+§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary), which are not keywords yet, so one under
+a guard is `E_UNKNOWN_KEYWORD` as it is anywhere. Any other member, and a `logic` or `assert` line,
+is `E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking
+anything indented under it along. So is a `logic` or `assert` line under a guarded raw member,
+which outside a guard would still reach redstone synthesis. No build and no other check reads a
+refused line or what goes with it, so it draws that finding alone. A raw member in a `site` body is
+`E_MISPLACED_MEMBER`, with a guard around it or not, so a guard there holds nothing that builds.
+
+A pinned build keeps the lines under its own edition's guards and drops the other edition's.
+`cairn compile --edition java` builds the snippet's `minecraft:light` and never builds
+`light_block_15`. Lowering that pins no edition keeps neither: `cairn lower` prints the
+edition-neutral pivot, so it leaves every guarded line out and a note says how many. It still
+reports what each edition's branch finds on those lines, and exits 1 on an error there.
+
+Two lines under guards for different editions never build together, so they may share an `id=`.
+A guarded line and an unguarded one, or two under guards for one edition, are both built by that
+edition and are `E_DUPLICATE_ID`.
+
+A `cairn check` that pins no edition checks both branches. Each edition's resolution and lowering
+keep that edition's guards, and a finding whose span, or one of whose notes' spans, is on a line
+under that edition's guard is that edition's verdict, reported as it is for a line only one
+edition's theme variant reads ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Resolution pins no
+variant on either branch, so it binds each theme as it would in a source with no guard.
+`cairn info`'s portability and buildable-target rows ([§10.5](#105-which-version-is-it-for-has-three-answers))
+are per edition already, so each counts its own edition's branch and none of the other's.
 
 ### `@edition` pins an edition, not a version
-
-**Subject to change.** No `@edition` guard parses yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)). The rest of what this section
-leans on is current behaviour: the per-version id check, the `aliases` answer, `E_VERSION_CAP` and
-`E_INTENDED_TARGET_CAP`.
 
 The guard settles which branch is built and nothing else. The id inside it is still checked against
 the one `(edition, version)` the compile pinned

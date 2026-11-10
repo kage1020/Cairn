@@ -7,6 +7,7 @@ mod binding;
 mod cairn_version;
 mod connect_arity;
 mod duplicate;
+mod edition_guard;
 mod intended_targets;
 mod keyword_allowlist;
 mod material;
@@ -28,6 +29,7 @@ pub use intended_targets::weigh_intended_targets;
 pub use sink::DiagnosticSink;
 
 use crate::ast::Module;
+use crate::diagnostic::{EditionFindings, agreed};
 use crate::edition::Edition;
 use crate::intent::IntentModule;
 
@@ -40,6 +42,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     let mut sink = DiagnosticSink::new();
     cairn_version::run(module, &mut sink);
     duplicate::run(module, ir, &mut sink);
+    edition_guard::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(module, ir, &mut sink);
     binding::run(ir, &mut sink);
@@ -52,10 +55,29 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     struct_name::run(module, &mut sink);
     truth::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
-    for d in crate::resolve::resolve(ir, edition).diagnostics {
+    for d in resolver_findings(ir, edition) {
         sink.push(d);
     }
     sink.into_sorted()
+}
+
+/// The resolver's findings on `ir` under `edition`, or with none pinned and some line under an
+/// `@edition` guard, those [`agreed`] keeps of each edition's branch resolved with no variant pinned
+/// (`spec/lint` "Error vs warning").
+fn resolver_findings(ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
+    if edition.is_some() || !ir.has_edition_guards() {
+        return crate::resolve::resolve(ir, edition).diagnostics;
+    }
+    agreed(
+        [Edition::Java, Edition::Bedrock]
+            .into_iter()
+            .map(|edition| EditionFindings {
+                found: crate::resolve::findings_on_branch(ir, edition),
+                guarded: ir.lines_guarded_for(edition),
+                themes: Vec::new(),
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -89,6 +111,7 @@ mod tests {
             | C::DuplicateCircuit
             | C::UnsupportedNesting
             | C::MisplacedMember
+            | C::SemanticInEditionGuard
             | C::UnknownKeyword
             | C::UnknownArgument
             | C::MisplacedBinding
@@ -190,6 +213,7 @@ mod tests {
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
+                "E_SEMANTIC_IN_EDITION_GUARD",
                 "E_TRUTH_TABLE_CONFLICT",
                 "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",

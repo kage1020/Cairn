@@ -27,6 +27,12 @@ enum Context {
     SlotName { replace: Span },
     /// Right after `@` outside the header position: a material token.
     MaterialToken { replace: Span },
+    /// Right after the `@` that opens an indented line: `edition`, the only guard there is.
+    GuardWord { replace: Span },
+    /// The word after an indented line's `@edition`: an edition.
+    EditionName { replace: Span },
+    /// First word of a line indented under an `@edition` guard: a raw member keyword.
+    GuardedMemberKeyword { replace: Span },
 }
 
 /// A `slot NAME -> TARGET` declaration found by the document scan.
@@ -83,6 +89,29 @@ pub fn completions(
         ),
         Some(Context::SlotName { replace }) => slot_name_items(&index, source, &replace),
         Some(Context::MaterialToken { replace }) => material_items(&index, source, &replace),
+        Some(Context::GuardWord { replace }) => keyword_items(
+            &index,
+            source,
+            &replace,
+            std::iter::once(("edition", "edition guard")),
+        ),
+        Some(Context::EditionName { replace }) => keyword_items(
+            &index,
+            source,
+            &replace,
+            [Edition::Java, Edition::Bedrock]
+                .into_iter()
+                .map(|edition| (edition.as_str(), "edition")),
+        ),
+        Some(Context::GuardedMemberKeyword { replace }) => keyword_items(
+            &index,
+            source,
+            &replace,
+            cairn_lang_core::intent::known_keywords()
+                .iter()
+                .filter(|kw| role_of(kw).is_raw())
+                .map(|kw| (*kw, "raw member")),
+        ),
     })
 }
 
@@ -147,11 +176,21 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     let replace = token_start..token_end;
     let before_token = &source[line_start..token_start];
     if let Some(head) = before_token.strip_suffix('@') {
-        // `@` opening a line is a header directive.
+        // `@` opening a line is a header directive, or in a body an edition guard.
         if head.is_empty() {
             return None;
         }
+        if head.trim_start().is_empty() {
+            return guard_may_open(&outside, head.len()).then_some(Context::GuardWord { replace });
+        }
         return Some(Context::MaterialToken { replace });
+    }
+    if before_token.starts_with(char::is_whitespace)
+        && before_token.ends_with(char::is_whitespace)
+        && before_token.trim().strip_prefix('@').map(str::trim_start) == Some("edition")
+    {
+        let indent = before_token.len() - before_token.trim_start().len();
+        return guard_may_open(&outside, indent).then_some(Context::EditionName { replace });
     }
     if let Some(head) = before_token.strip_suffix('=') {
         return match &head[token_start_of(head)..] {
@@ -172,6 +211,11 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     let indent = before_token.len();
     if indent == 0 {
         return Some(Context::TopLevelKeyword { replace });
+    }
+    if parent_line(&outside, indent).is_some_and(opens_a_guard) {
+        // A raw member in a `site` body is misplaced, guarded or not.
+        return (enclosing_item_keyword(&outside) != Some("site"))
+            .then_some(Context::GuardedMemberKeyword { replace });
     }
     match enclosing_item_keyword(&outside) {
         Some("theme") => Some(Context::ThemeBodyKeyword { replace }),
@@ -230,6 +274,31 @@ fn truth_table_open_after(code: &str, mut open: bool) -> bool {
         }
     }
     open
+}
+
+/// Whether a guard may open on a line indented `indent` after `lines`: in a `struct`, `def` or
+/// `site` body, and not directly under another guard (`spec/versioning-editions` "An `@edition`
+/// guard holds the escape hatch").
+fn guard_may_open(lines: &[&str], indent: usize) -> bool {
+    matches!(
+        enclosing_item_keyword(lines),
+        Some("struct" | "def" | "site")
+    ) && !parent_line(lines, indent).is_some_and(opens_a_guard)
+}
+
+/// Whether `line`, trimmed, is an `@edition` guard's own.
+fn opens_a_guard(line: &str) -> bool {
+    line.strip_prefix('@')
+        .is_some_and(|rest| line_keyword(rest) == "edition")
+}
+
+/// The last non-blank, non-comment line of `lines` indented less than `indent`, trimmed.
+fn parent_line<'a>(lines: &[&'a str], indent: usize) -> Option<&'a str> {
+    lines.iter().rev().find_map(|line| {
+        let code = comment_start(line).map_or(*line, |i| &line[..i]);
+        let trimmed = code.trim_start();
+        (!trimmed.is_empty() && code.len() - trimmed.len() < indent).then_some(trimmed)
+    })
 }
 
 /// First word of the last non-blank, non-comment indent-0 line in `lines`.
@@ -855,6 +924,54 @@ mod tests {
         for item in &items {
             assert_eq!(edit_range(item), range(1, after_at, after_at + 3));
         }
+    }
+
+    #[test]
+    fn an_edition_guard_completes_its_word_its_edition_and_the_raw_members_under_it() {
+        let guard = "struct s size=3x3\n  @";
+        assert_eq!(labels(&complete(guard, "@")), ["edition"]);
+        let edition = "struct s size=3x3\n  @edition ";
+        assert_eq!(labels(&complete(edition, "@edition ")), ["java", "bedrock"]);
+        let under = "struct s size=3x3\n  floor mat_slot=f\n  @edition java\n    ";
+        assert_eq!(
+            labels(&complete(under, "@edition java\n    ")),
+            ["raw_block", "raw_fill"]
+        );
+        let after = "struct s size=3x3\n  @edition java\n    raw_block at=1,0,1\n  ";
+        assert_eq!(
+            labels(&complete(after, "at=1,0,1\n  ")),
+            [
+                "floor",
+                "walls",
+                "fill",
+                "door",
+                "window",
+                "roof",
+                "stair",
+                "level",
+                "pressure_plate",
+                "chest",
+                "circuit",
+                "raw_block",
+                "raw_fill",
+            ],
+        );
+        let in_site = "site town size=9x9\n  @";
+        assert_eq!(labels(&complete(in_site, "@")), ["edition"]);
+    }
+
+    #[test]
+    fn no_guard_is_offered_where_one_is_refused() {
+        let in_theme = "theme t\n  slot f -> @stone\n  @";
+        assert_eq!(complete(in_theme, "\n  @"), vec![]);
+        let in_theme_edition = "theme t\n  @edition ";
+        assert_eq!(complete(in_theme_edition, "@edition "), vec![]);
+        let in_guard = "struct s size=3x3\n  @edition java\n    @";
+        assert_eq!(complete(in_guard, "java\n    @"), vec![]);
+        let in_guard_edition = "struct s size=3x3\n  @edition java\n    @edition ";
+        assert_eq!(complete(in_guard_edition, "    @edition "), vec![]);
+        let under_in_site = "site town size=9x9\n  @edition java\n    ";
+        assert_eq!(complete(under_in_site, "java\n    "), vec![]);
     }
 
     #[test]

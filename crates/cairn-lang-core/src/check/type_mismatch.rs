@@ -4,7 +4,7 @@
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
-use crate::intent::role_of;
+use crate::intent::{guarded_lines, role_of};
 
 use super::DiagnosticSink;
 
@@ -43,7 +43,7 @@ fn check_theme_rule(rule: &ThemeRule, sink: &mut DiagnosticSink) {
 }
 
 fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
-    for stmt in body {
+    for (_, stmt) in guarded_lines(body) {
         if let Statement::Generic {
             keyword,
             args,

@@ -988,6 +988,119 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  slot wall -> minecraft:stone\n",
         Reject,
     ),
+    // -- edition guards ---------------------------------------------------
+    (
+        "edition_guard_in_a_struct_body",
+        "struct s size=3x3\n  @edition java\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n  walls mat_slot=w\n",
+        Accept,
+    ),
+    (
+        "edition_guard_in_a_def_body",
+        "def d size=3x3\n  @edition bedrock\n    raw_fill mat=minecraft:stone from=0,0,0 to=1,1,1\n",
+        Accept,
+    ),
+    (
+        "edition_guard_under_a_member",
+        "struct s size=3x3\n  level y=1\n    @edition java\n      raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    (
+        "edition_guard_in_a_site_body",
+        "site s\n  @edition java\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    (
+        "edition_guard_with_a_comment",
+        "struct s size=3x3\n  @edition java # light\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    (
+        "edition_guard_after_a_space",
+        "struct s size=3x3\n  @ edition java\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    // The parser takes any member line under a guard; core's check refuses one that is not raw.
+    (
+        "edition_guard_over_a_semantic_member",
+        "struct s size=3x3\n  @edition java\n    walls mat_slot=w\n",
+        Accept,
+    ),
+    (
+        "edition_guard_over_logic_and_assert",
+        "struct s size=3x3\n  @edition java\n    logic a.b = c\n    assert always(a.b -> eventually c.d within 2)\n",
+        Accept,
+    ),
+    (
+        "edition_guard_over_a_member_with_a_body",
+        "struct s size=3x3\n  @edition java\n    level y=1\n      raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Accept,
+    ),
+    (
+        "edition_guard_naming_no_edition",
+        "struct s size=3x3\n  @edition\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_naming_an_unknown_edition",
+        "struct s size=3x3\n  @edition pocket\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_with_a_trailing_word",
+        "struct s size=3x3\n  @edition java extra\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_with_a_colon",
+        "struct s size=3x3\n  @edition java:\n    raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    (
+        "edition_guard_with_nothing_under_it",
+        "struct s size=3x3\n  @edition java\n  walls mat_slot=w\n",
+        Reject,
+    ),
+    (
+        "edition_guard_in_braces",
+        "struct s size=3x3\n  @edition java { raw_block at=1,1,1 mat=minecraft:light[level=15] }\n",
+        Reject,
+    ),
+    (
+        "edition_guard_inside_a_guard",
+        "struct s size=3x3\n  @edition java\n    @edition bedrock\n      raw_block at=1,1,1 mat=minecraft:light[level=15]\n",
+        Reject,
+    ),
+    // Deeper down, a guard is judged by the line it stands under, as it is outside one.
+    (
+        "edition_guard_under_a_member_under_a_guard",
+        "struct s size=3x3\n  @edition java\n    level y=1\n      @edition bedrock\n        raw_block at=1,1,1 mat=minecraft:stone\n",
+        Accept,
+    ),
+    (
+        "edition_guard_under_a_raw_member_under_a_guard",
+        "struct s size=3x3\n  @edition java\n    raw_block at=1,1,1 mat=minecraft:stone\n      @edition bedrock\n        raw_block at=1,1,1 mat=minecraft:stone\n",
+        Accept,
+    ),
+    (
+        "member_requires_under_a_guard_in_a_def",
+        "def d size=2x2:\n  @edition java\n    requires version>=1.21\n",
+        Reject,
+    ),
+    (
+        "edition_guard_at_top_level",
+        "@edition java\nstruct s size=3x3\n  walls mat_slot=w\n",
+        Reject,
+    ),
+    (
+        "edition_guard_in_a_theme_body",
+        "theme t:\n  @edition java\n    slot a -> @b\n",
+        Reject,
+    ),
+    (
+        "file_directive_in_a_body",
+        "struct s size=3x3\n  @cairn 2026.06\n",
+        Reject,
+    ),
     // -- indentation ----------------------------------------------------
     (
         "dedent_two_levels",
@@ -2266,12 +2379,16 @@ fn core_statements(
 ) {
     use cairn_lang_core::ast::Statement;
     for statement in body {
-        if let Statement::Generic {
-            keyword, children, ..
-        } = statement
-        {
-            out.push((depth, keyword.clone()));
-            core_statements(children, depth + 1, out);
+        match statement {
+            Statement::Generic {
+                keyword, children, ..
+            } => {
+                out.push((depth, keyword.clone()));
+                core_statements(children, depth + 1, out);
+            }
+            // A guard's lines stand in the body around it, as `edition_guard_body` adds no depth.
+            Statement::EditionGuard { children, .. } => core_statements(children, depth, out),
+            _ => {}
         }
     }
 }

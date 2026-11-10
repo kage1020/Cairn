@@ -8,6 +8,8 @@ headers:
     version: "2026.06"
   - kind: Requires
     requirement: version>=1.20
+  - kind: Requires
+    requirement: bedrock version>=1.21.40
 themes:
   - name: shop_java
     slots:
@@ -86,3 +88,31 @@ structs:
               w: 1
               h: 1
         intent_state: {}
+      - role:
+          kind: RawBlock
+        arguments:
+          mat:
+            kind: BlockId
+            value: "minecraft:light[level=15]"
+          at:
+            kind: Coord
+            value:
+              x: 2
+              y: 2
+              z: 2
+        intent_state: {}
+        edition_guard: java
+      - role:
+          kind: RawBlock
+        arguments:
+          mat:
+            kind: BlockId
+            value: "minecraft:light_block_15"
+          at:
+            kind: Coord
+            value:
+              x: 2
+              y: 2
+              z: 2
+        intent_state: {}
+        edition_guard: bedrock

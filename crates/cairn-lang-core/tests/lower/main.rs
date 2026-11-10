@@ -10,6 +10,7 @@ mod connections;
 mod cottage;
 mod door_block;
 mod door_wall_fit;
+mod edition_guard;
 mod fill;
 mod intent;
 mod l_walkway;

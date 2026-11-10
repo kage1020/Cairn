@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::diagnostic::Diagnostic;
+use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName};
 use crate::intent::{StructIr, ValueWithSpan};
@@ -12,6 +13,7 @@ use super::binding::ThemeBinding;
 
 /// Resolution of one whole [`IntentModule`](crate::intent::IntentModule).
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Resolution {
     /// One entry per theme defined in the module, keyed by theme name.
     pub themes: IndexMap<String, ThemeBinding>,
@@ -23,6 +25,19 @@ pub struct Resolution {
     /// Diagnostics found while resolving, in emission order.
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
+    /// The edition the theme variants were bound for, whose `@edition` guards resolution and
+    /// lowering both read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) edition: Option<Edition>,
+}
+
+impl Resolution {
+    /// The edition the theme variants were bound for, whose `@edition` guards resolution and
+    /// lowering both read.
+    #[must_use]
+    pub fn edition(&self) -> Option<Edition> {
+        self.edition
+    }
 }
 
 /// One end of a `connect` row, resolved to a `(place, port)` pair.

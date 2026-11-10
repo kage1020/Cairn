@@ -6,6 +6,7 @@ use std::num::NonZeroU32;
 
 use serde::Serialize;
 
+use crate::edition::Edition;
 use crate::error::Span;
 use crate::logic_library::LogicPrimitive;
 
@@ -375,17 +376,29 @@ pub enum Statement {
         #[serde(skip)]
         span: Span,
     },
+    /// `@edition java` or `@edition bedrock`, holding the lines indented under it
+    /// (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
+    EditionGuard {
+        /// The edition whose build keeps the guarded lines.
+        edition: Edition,
+        /// Statements indented under the guard.
+        children: Vec<Statement>,
+        /// Byte range of the `@edition` line itself, without its children.
+        #[serde(skip)]
+        span: Span,
+    },
 }
 
 impl Statement {
-    /// Byte range covered by this statement; for `Generic`, the keyword line alone.
+    /// Byte range of this statement; for `Generic` and `EditionGuard`, the first line alone.
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {
             Self::Generic { span, .. }
             | Self::Logic { span, .. }
             | Self::AssertTruth { span, .. }
-            | Self::AssertAlways { span, .. } => span,
+            | Self::AssertAlways { span, .. }
+            | Self::EditionGuard { span, .. } => span,
         }
     }
 }

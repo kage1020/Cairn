@@ -12,6 +12,7 @@ pub mod common;
 
 mod block_ids;
 mod coordinates;
+mod edition_guards;
 mod lex;
 mod line_positions;
 mod nesting_depth;

@@ -1,5 +1,8 @@
 //! [`Diagnostic`] payload used by every `check` pass.
 
+mod agreement;
+pub(crate) use agreement::{EditionFindings, agreed};
+
 use serde::{Serialize, Serializer};
 
 use crate::error::{Position, Span};
@@ -55,6 +58,9 @@ pub enum DiagnosticCode {
     /// A known statement keyword whose enclosing body has no reader for it, or a `circuit` line
     /// under a `level`.
     MisplacedMember,
+    /// A known member other than a raw one, or a `logic` or `assert` line, under an `@edition`
+    /// guard.
+    SemanticInEditionGuard,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// A key outside the vocabulary of the member's role, or of a `struct` / `def` header.
@@ -193,6 +199,7 @@ impl DiagnosticCode {
             Self::DuplicateCircuit => "E_DUPLICATE_CIRCUIT",
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
+            Self::SemanticInEditionGuard => "E_SEMANTIC_IN_EDITION_GUARD",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
             Self::MisplacedBinding => "E_MISPLACED_BINDING",
@@ -265,6 +272,7 @@ impl DiagnosticCode {
             | Self::DuplicateId
             | Self::DuplicateCircuit
             | Self::MisplacedMember
+            | Self::SemanticInEditionGuard
             | Self::UnknownKeyword
             | Self::UnknownArgument
             | Self::MisplacedBinding
@@ -500,6 +508,18 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// Whether the primary span or a note's span lies inside one of `lines`.
+    #[must_use]
+    pub fn touches(&self, lines: &[&Span]) -> bool {
+        std::iter::once(&self.span)
+            .chain(self.notes.iter().filter_map(|note| note.span.as_ref()))
+            .any(|span| {
+                lines
+                    .iter()
+                    .any(|line| line.start <= span.start && span.end <= line.end)
+            })
+    }
+
     /// Severity of this finding, read from [`DiagnosticCode::severity`].
     #[must_use]
     pub fn severity(&self) -> Severity {

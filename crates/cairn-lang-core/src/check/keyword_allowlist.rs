@@ -25,7 +25,17 @@ fn walk(members: &[Member], body: BodyKind, sink: &mut DiagnosticSink) {
         if let MemberRole::Other(kw) = &m.role {
             // An empty keyword is `intent::lower`'s placeholder, not a word the author wrote.
             if !kw.is_empty() {
-                push_unknown_keyword(kw, &m.span, &body.allowed_keywords(), sink);
+                let candidates: Vec<&'static str> = match (&m.edition_guard, body) {
+                    // A raw member in a `site` body is misplaced, guarded or not.
+                    (Some(_), BodyKind::Site) => Vec::new(),
+                    (Some(_), _) => known_keywords()
+                        .iter()
+                        .copied()
+                        .filter(|keyword| role_of(keyword).is_raw())
+                        .collect(),
+                    (None, _) => body.allowed_keywords(),
+                };
+                push_unknown_keyword(kw, &m.span, &candidates, sink);
             }
         }
         walk(&m.children.members, body, sink);
@@ -42,7 +52,13 @@ fn push_unknown_keyword(
     notes.extend(nearest_match(keyword, candidates.iter().copied()).map(did_you_mean_note));
     notes.push(DiagnosticNote {
         span: None,
-        message: format!("expected one of: {}", candidates.join(", ")),
+        message: if candidates.is_empty() {
+            "nothing builds under an `@edition` guard in a `site` body: the raw members a guard \
+             holds go in a `struct` or `def` body"
+                .to_owned()
+        } else {
+            format!("expected one of: {}", candidates.join(", "))
+        },
     });
     sink.push(Diagnostic {
         code: DiagnosticCode::UnknownKeyword,
