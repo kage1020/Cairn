@@ -650,8 +650,8 @@ fn the_wire_out_to_an_actuator_carries_buffer_repeaters() {
         output.local_delay_ticks(),
     );
     assert_eq!(
-        u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
-            * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
+        u64::try_from(output.buffer_coords().len()).expect("buffer count fits")
+            * u64::from(cairn_lang_redstone::BUFFER_REPEATER_TICKS),
         output.local_delay_ticks().expect("delayed"),
         "every tick the delay pass counted must have a coord behind it",
     );
@@ -746,8 +746,8 @@ fn an_identity_wire_is_legalized_like_any_other_segment() {
         cairn_lang_redstone::PlacementStage::Crossing
     );
     assert_eq!(
-        u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
-            * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
+        u64::try_from(output.buffer_coords().len()).expect("buffer count fits")
+            * u64::from(cairn_lang_redstone::BUFFER_REPEATER_TICKS),
         output.local_delay_ticks().expect("delayed"),
         "every tick counted at stage 3 has a coord at stage 4",
     );

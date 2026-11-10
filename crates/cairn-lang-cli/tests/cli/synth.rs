@@ -350,7 +350,7 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
     let delayed = findings(&mut so_far, &delay.diagnostics);
     let crossing = compile_crossing(&delay.scoped);
     findings(&mut so_far, &crossing.diagnostics);
-    let crossed = findings(&mut so_far, &verify_latency(ir, &crossing.scoped));
+    let crossed = findings(&mut so_far, &verify_latency(&crossing.scoped, ir));
     vec![
         Dump {
             stage: "logic",
@@ -772,19 +772,20 @@ fn stage_crossing_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
         "the example carries the bound this test tightens"
     );
     let path = write_source(dir.path(), "tight.crn", &tight);
-    let run = |edition: &str| {
+    let at = |stage: &str, edition: &str| {
         cairn(
             "synth",
             &[
                 "--experimental-logic-synth",
                 "--stage",
-                "crossing",
+                stage,
                 "--edition",
                 edition,
                 path.to_str().unwrap(),
             ],
         )
     };
+    let run = |edition: &str| at("crossing", edition);
 
     // A `RepeaterOR` takes a tick on Java; a `TorchOR` is a dust merge and takes none.
     let java = run("java");
@@ -800,4 +801,15 @@ fn stage_crossing_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
         "{}",
         String::from_utf8_lossy(&bedrock.stderr)
     );
+
+    // Before crossing, the buffer repeaters are not yet placed, so no bound is checked.
+    for stage in ["route", "delay"] {
+        let early = at(stage, "java");
+        assert_eq!(
+            early.status.code(),
+            Some(0),
+            "--stage {stage}: {}",
+            String::from_utf8_lossy(&early.stderr)
+        );
+    }
 }

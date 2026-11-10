@@ -1,6 +1,7 @@
 //! The findings of the redstone passes, shaped like core's `check::Diagnostic` with a code enum of
 //! their own.
 
+use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
 use serde::{Serialize, Serializer};
@@ -154,6 +155,11 @@ impl Diagnostic {
         });
         self
     }
+}
+
+/// `assert latency(FROM -> TO) <= N`, each name in its canonical spelling.
+pub(crate) fn latency_text(from: &DottedRef, to: &DottedRef, bound: u32) -> String {
+    format!("`assert latency({from} -> {to}) <= {bound}`")
 }
 
 /// An error with one `Fix:` footer, the shape of every place-and-route refusal.

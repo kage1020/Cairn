@@ -2,63 +2,80 @@
 //! scope, counting the ticks of the slowest path from one signal to where the other is read.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{AssertIr, IntentModule, Member};
 
 use crate::delay::{BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT};
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, latency_text};
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{NetRef, PortName};
-use crate::placement_ir::{BufferSegment, PlacedCellNode, PlacementIr, ScopedPlacementIr};
+use crate::placement_ir::{
+    BufferSegment, PlacedCellNode, PlacedOutputNode, PlacementIr, PlacementStage, ScopedPlacementIr,
+};
 use crate::saturating_index;
 
 /// An `E_SIM_ASSERTION_FAILED` for each `assert latency` whose slowest path on its scope's
-/// legalized circuit takes more ticks than its bound.
+/// legalized circuit takes more ticks than its bound, each scope's in source order.
+///
+/// # Panics
+///
+/// On a cell or pad crossing legalization has not reached.
 #[must_use]
-pub fn verify_latency(module: &IntentModule, legalized: &ScopedPlacementIr) -> Vec<Diagnostic> {
-    let bounds = latency_bounds(module);
+pub fn verify_latency(legalized: &ScopedPlacementIr, module: &IntentModule) -> Vec<Diagnostic> {
+    let asserts = latency_asserts(module);
     let mut diagnostics = Vec::new();
     for entry in &legalized.scopes {
         let scope = format!("{}={}:", entry.kind.label(), entry.name);
-        for bound in bounds
+        assert!(
+            entry
+                .ir
+                .cells
+                .iter()
+                .map(PlacedCellNode::stage)
+                .chain(entry.ir.outputs.iter().map(PlacedOutputNode::stage))
+                .all(|stage| stage == PlacementStage::Crossing),
+            "{scope} latency is counted on the circuit crossing legalization produces",
+        );
+        for assertion in asserts
             .get(&(entry.kind, entry.name.as_str()))
             .into_iter()
             .flatten()
         {
-            let Some(path) = slowest_path(&entry.ir, bound.from, bound.to) else {
-                // Synth refuses a bound whose end does not depend on its start.
+            let path = slowest_path(&entry.ir, assertion.from, assertion.to);
+            debug_assert!(
+                path.is_some(),
+                "synth refuses a bound naming an undefined signal, or whose end does not depend \
+                 on its start",
+            );
+            let Some(path) = path else {
                 continue;
             };
-            if path.ticks > bound.bound {
-                diagnostics.push(failure(&scope, &entry.ir, bound, &path));
+            if path.ticks() > u64::from(assertion.bound) {
+                diagnostics.push(failure(&scope, &entry.ir, assertion, &path));
             }
         }
     }
     diagnostics
 }
 
-/// `assert latency(FROM -> TO) <= N`, as the source writes it.
-pub(crate) fn latency_text(from: &DottedRef, to: &DottedRef, bound: u32) -> String {
-    format!("`assert latency({from} -> {to}) <= {bound}`")
-}
-
 /// One `assert latency` line.
-struct LatencyBound<'a> {
+struct LatencyAssert<'a> {
     from: &'a DottedRef,
     to: &'a DottedRef,
     bound: u32,
     span: &'a Span,
 }
 
-/// Each scope's `assert latency` lines, those under its members included, keyed as a
-/// [`ScopedPlacementIr`] entry names its scope.
-fn latency_bounds(module: &IntentModule) -> HashMap<(ScopeKind, &str), Vec<LatencyBound<'_>>> {
+/// Each scope's `assert latency` lines in source order, those under its members included, keyed
+/// as a [`ScopedPlacementIr`] entry names its scope; a name given twice keeps the first scope.
+fn latency_asserts(module: &IntentModule) -> HashMap<(ScopeKind, &str), Vec<LatencyAssert<'_>>> {
     fn collect<'a>(
         asserts: &'a [AssertIr],
         members: &'a [Member],
-        out: &mut Vec<LatencyBound<'a>>,
+        out: &mut Vec<LatencyAssert<'a>>,
     ) {
         for assertion in asserts {
             if let AssertIr::Latency {
@@ -68,7 +85,7 @@ fn latency_bounds(module: &IntentModule) -> HashMap<(ScopeKind, &str), Vec<Laten
                 span,
             } = assertion
             {
-                out.push(LatencyBound {
+                out.push(LatencyAssert {
                     from,
                     to,
                     bound: *bound,
@@ -96,21 +113,41 @@ fn latency_bounds(module: &IntentModule) -> HashMap<(ScopeKind, &str), Vec<Laten
                 .iter()
                 .map(|s| (ScopeKind::Site, s.name.as_str(), &s.asserts, &s.placements)),
         );
-    let mut out: HashMap<(ScopeKind, &str), Vec<LatencyBound<'_>>> = HashMap::new();
+    let mut out: HashMap<(ScopeKind, &str), Vec<LatencyAssert<'_>>> = HashMap::new();
     for (kind, name, asserts, members) in scopes {
-        collect(asserts, members, out.entry((kind, name)).or_default());
+        let Entry::Vacant(slot) = out.entry((kind, name)) else {
+            continue;
+        };
+        let mut found = Vec::new();
+        collect(asserts, members, &mut found);
+        found.sort_by_key(|a| (a.span.start, a.span.end));
+        slot.insert(found);
     }
     out
 }
 
 /// The slowest path a change takes from one net to where another is read, hop by hop.
 struct Path {
-    /// Every tick on the path, cells and buffer repeaters alike.
-    ticks: u32,
-    /// The buffer repeaters on its wire.
-    buffers: u32,
     /// The cells it passes and the pad it ends at, in order.
     hops: Vec<Hop>,
+}
+
+impl Path {
+    /// Every tick on the path, cells and buffer repeaters alike.
+    fn ticks(&self) -> u64 {
+        self.hops
+            .iter()
+            .map(Hop::ticks)
+            .fold(0, u64::saturating_add)
+    }
+
+    /// The buffer repeaters on its wires.
+    fn buffers(&self) -> u32 {
+        self.hops
+            .iter()
+            .map(Hop::buffers)
+            .fold(0, u32::saturating_add)
+    }
 }
 
 /// One step of a [`Path`].
@@ -120,28 +157,47 @@ enum Hop {
         cell: usize,
         port: PortName,
         buffers: u32,
-        ticks: u32,
+        ticks: u64,
     },
     /// Onto `outputs[output]`'s pad, over `buffers` repeaters.
     Pad { output: usize, buffers: u32 },
 }
 
+impl Hop {
+    /// The buffer repeaters on the wire into this hop.
+    const fn buffers(&self) -> u32 {
+        match *self {
+            Self::Cell { buffers, .. } | Self::Pad { buffers, .. } => buffers,
+        }
+    }
+
+    /// The ticks of the wire into this hop and of the cell it enters.
+    fn ticks(&self) -> u64 {
+        let through = match *self {
+            Self::Cell { ticks, .. } => ticks,
+            Self::Pad { .. } => 0,
+        };
+        u64::from(self.buffers().saturating_mul(BUFFER_REPEATER_TICKS)).saturating_add(through)
+    }
+}
+
 /// When a change at a cell's output arrives, and the driver it came in by.
 #[derive(Clone, Copy)]
 struct Arrival {
-    ticks: u32,
+    ticks: u64,
     /// Index into the cell's `drivers`.
     via: usize,
 }
 
-/// The slowest path from the net defining `from` to each actuator pad reading `to`, or to the net
-/// defining `to` when no actuator reads it; `None` when either is undefined or no path joins them.
+/// The slowest path from the net defining `from` to the slowest actuator pad reading `to`, or to
+/// the net defining `to` when no actuator reads it; `None` when either is undefined or no path
+/// joins them.
 fn slowest_path(ir: &PlacementIr, from: &DottedRef, to: &DottedRef) -> Option<Path> {
     let start = *ir.signal_defs.get(from)?;
     let end = *ir.signal_defs.get(to)?;
 
     let mut arrivals: Vec<Option<Arrival>> = Vec::with_capacity(ir.cells.len());
-    let arrival_at = |net: NetRef, arrivals: &[Option<Arrival>]| -> Option<u32> {
+    let arrival_at = |net: NetRef, arrivals: &[Option<Arrival>]| -> Option<u64> {
         if net == start {
             return Some(0);
         }
@@ -158,9 +214,9 @@ fn slowest_path(ir: &PlacementIr, from: &DottedRef, to: &DottedRef) -> Option<Pa
                 continue;
             };
             let ticks = at
-                .saturating_add(
+                .saturating_add(u64::from(
                     port_buffers(cell, driver.port).saturating_mul(BUFFER_REPEATER_TICKS),
-                )
+                ))
                 .saturating_add(cell.cell.port_delay_ticks(driver.port));
             if best.is_none_or(|b| ticks > b.ticks) {
                 best = Some(Arrival { ticks, via: index });
@@ -168,11 +224,11 @@ fn slowest_path(ir: &PlacementIr, from: &DottedRef, to: &DottedRef) -> Option<Pa
         }
         arrivals.push(best);
     }
+    arrival_at(end, &arrivals)?;
 
-    let at_end = arrival_at(end, &arrivals)?;
     let mut pad: Option<(usize, u32)> = None;
     for (index, output) in ir.outputs.iter().enumerate() {
-        if output.driver != end {
+        if output.name != *to {
             continue;
         }
         let buffers = saturating_index(output.buffer_coords().len());
@@ -182,9 +238,7 @@ fn slowest_path(ir: &PlacementIr, from: &DottedRef, to: &DottedRef) -> Option<Pa
     }
 
     let mut hops = Vec::new();
-    let mut path_buffers = 0u32;
     if let Some((output, buffers)) = pad {
-        path_buffers = buffers;
         hops.push(Hop::Pad { output, buffers });
     }
     let mut net = end;
@@ -197,26 +251,16 @@ fn slowest_path(ir: &PlacementIr, from: &DottedRef, to: &DottedRef) -> Option<Pa
             .expect("a cell the path reaches arrived by one of its drivers")
             .via;
         let driver = &cell.drivers[via];
-        let buffers = port_buffers(cell, driver.port);
-        path_buffers = path_buffers.saturating_add(buffers);
         hops.push(Hop::Cell {
             cell: j as usize,
             port: driver.port,
-            buffers,
+            buffers: port_buffers(cell, driver.port),
             ticks: cell.cell.port_delay_ticks(driver.port),
         });
         net = driver.net;
     }
     hops.reverse();
-
-    let pad_ticks = pad.map_or(0, |(_, buffers)| {
-        buffers.saturating_mul(BUFFER_REPEATER_TICKS)
-    });
-    Some(Path {
-        ticks: at_end.saturating_add(pad_ticks),
-        buffers: path_buffers,
-        hops,
-    })
+    Some(Path { hops })
 }
 
 /// The buffer repeaters on the wire into `cell`'s `port`.
@@ -228,28 +272,35 @@ fn port_buffers(cell: &PlacedCellNode, port: PortName) -> u32 {
     saturating_index(on_port.count())
 }
 
-fn plural(n: u32, one: &str, many: &str) -> String {
+fn plural(n: impl Into<u64>, one: &str, many: &str) -> String {
+    let n = n.into();
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-/// The `E_SIM_ASSERTION_FAILED` for `bound`, which `path` takes longer than.
-fn failure(scope: &str, ir: &PlacementIr, bound: &LatencyBound<'_>, path: &Path) -> Diagnostic {
-    let split = match path.buffers.saturating_mul(BUFFER_REPEATER_TICKS) {
+/// The `E_SIM_ASSERTION_FAILED` for `assertion`, whose bound `path` takes longer than.
+fn failure(
+    scope: &str,
+    ir: &PlacementIr,
+    assertion: &LatencyAssert<'_>,
+    path: &Path,
+) -> Diagnostic {
+    let buffers = path.buffers();
+    let split = match buffers.saturating_mul(BUFFER_REPEATER_TICKS) {
         0 => "all in its cells".to_owned(),
         n => format!("{n} in buffer repeaters on the routed wire"),
     };
     let primary = format!(
         "{scope} {text} fails on {edition}: its slowest path from {from} to {to} takes {ticks}, \
          {split}",
-        text = latency_text(bound.from, bound.to, bound.bound),
+        text = latency_text(assertion.from, assertion.to, assertion.bound),
         edition = ir.edition.as_str(),
-        from = bound.from,
-        to = bound.to,
-        ticks = plural(path.ticks, "tick", "ticks"),
+        from = assertion.from,
+        to = assertion.to,
+        ticks = plural(path.ticks(), "tick", "ticks"),
     );
     let mut diagnostic = Diagnostic::new(
         DiagnosticCode::SimAssertionFailed,
-        bound.span.clone(),
+        assertion.span.clone(),
         primary,
     );
     for (index, hop) in path.hops.iter().enumerate() {
@@ -299,24 +350,37 @@ fn failure(scope: &str, ir: &PlacementIr, bound: &LatencyBound<'_>, path: &Path)
         };
         diagnostic = diagnostic.with_note(span, message);
     }
-    let wire = match path.buffers {
-        0 => "the wire carries no buffer repeater, so only fewer cells on the path take ticks off"
+    let wire = match buffers {
+        0 => "the path's wires carry no buffer repeater, so only a path through fewer or faster \
+              cells takes ticks off"
             .to_owned(),
         n => format!(
-            "the wire carries {}, one wherever it runs past {DUST_ATTENUATION_LIMIT} blocks of \
-             dust, so a smaller `circuit` region, which puts the pads nearer what drives them, \
-             needs fewer",
+            "the path's wires carry {}, one wherever a wire runs past {DUST_ATTENUATION_LIMIT} \
+             blocks of dust, so a smaller `circuit` region, which puts the pads and the cells \
+             closer together, needs fewer",
             repeaters(n),
         ),
     };
-    diagnostic.with_footer(wire).with_footer(format!(
-        "Fix: relax the bound to `<= {measured}`, or shorten the path; the logic is never \
-         rewritten to meet a bound",
-        measured = path.ticks,
-    ))
+    let measured = path.ticks();
+    let fix = if u32::try_from(measured).is_ok() {
+        format!(
+            "Fix: relax the bound to `<= {measured}`, or shorten the path; the logic is never \
+             rewritten to meet a bound"
+        )
+    } else {
+        format!(
+            "Fix: shorten the path, which takes more ticks than a bound can name, at most {}; \
+             the logic is never rewritten to meet a bound",
+            u32::MAX
+        )
+    };
+    diagnostic.with_footer(wire).with_footer(fix)
 }
 
 /// `n buffer repeater(s)`.
 fn repeaters(n: u32) -> String {
     plural(n, "buffer repeater", "buffer repeaters")
 }
+
+#[cfg(test)]
+mod tests;

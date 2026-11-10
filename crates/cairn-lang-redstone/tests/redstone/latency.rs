@@ -5,7 +5,8 @@ use cairn_lang_core::{Edition, lower, parse};
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, verify_latency};
 
 use crate::common::{
-    IDENTITY_WIRE_SOURCE, LONG_OUTWARD_WIRE_SOURCE, legalized_from_source, synth_source,
+    IDENTITY_WIRE_SOURCE, LONG_OUTWARD_WIRE_SOURCE, legalized_from_source, shared_bus_source,
+    synth_source,
 };
 
 /// One finding as `(code, spanned text, primary, notes)`, each note with the text its span covers.
@@ -38,7 +39,7 @@ fn findings<'a>(source: &'a str, found: &[Diagnostic]) -> Vec<Finding<'a>> {
 /// The `E_SIM_ASSERTION_FAILED` findings the legalized `source` earns on `edition`.
 fn verified(source: &str, edition: Edition) -> Vec<Diagnostic> {
     let intent = lower(&parse(source).expect("parse"));
-    verify_latency(&intent, &legalized_from_source(source, edition))
+    verify_latency(&legalized_from_source(source, edition), &intent)
 }
 
 /// Two levers through an `and`, a `not` and an `or` to a door, `asserts` after the region.
@@ -56,8 +57,17 @@ fn chain(asserts: &str) -> String {
     )
 }
 
-const NO_BUFFER: &str = "the wire carries no buffer repeater, so only fewer cells on the path \
-                         take ticks off";
+const NO_BUFFER: &str = "the path's wires carry no buffer repeater, so only a path through fewer \
+                         or faster cells takes ticks off";
+
+/// The footer of a path whose wires carry `n` buffer repeaters.
+fn buffered(n: u32) -> String {
+    format!(
+        "the path's wires carry {n} buffer repeaters, one wherever a wire runs past 15 blocks of \
+         dust, so a smaller `circuit` region, which puts the pads and the cells closer together, \
+         needs fewer"
+    )
+}
 
 fn fix(measured: u32) -> String {
     format!(
@@ -132,21 +142,24 @@ fn a_comparator_and_takes_its_side_operand_a_tick_later() {
         "  assert latency(sig.a -> sig.f) <= 1\n  \
          assert latency(sig.b -> sig.f) <= 1\n",
     );
-    let failed = |edition| -> Vec<String> {
+    // Which operand lands on which port is the netlist's to choose, so only the ports are pinned.
+    let entries = |edition| -> Vec<String> {
         verified(&src, edition)
             .iter()
-            .map(|d| src[d.span.clone()].to_owned())
+            .map(|d| d.notes[0].message.clone())
             .collect()
     };
     assert_eq!(
-        failed(Edition::Java),
-        ["assert latency(sig.b -> sig.f) <= 1"]
+        entries(Edition::Java),
+        ["the path enters cell #0 (`ComparatorAND`) by port `b`: 2 ticks through the cell"],
     );
+    let mut bedrock = entries(Edition::Bedrock);
+    bedrock.sort();
     assert_eq!(
-        failed(Edition::Bedrock),
+        bedrock,
         [
-            "assert latency(sig.a -> sig.f) <= 1",
-            "assert latency(sig.b -> sig.f) <= 1",
+            "the path enters cell #0 (`TorchAND`) by port `a`: 2 ticks through the cell",
+            "the path enters cell #0 (`TorchAND`) by port `b`: 2 ticks through the cell",
         ],
     );
 }
@@ -213,13 +226,7 @@ fn every_buffer_repeater_on_the_routed_wire_counts_a_tick() {
                          wire to it"
                             .to_owned(),
                     ),
-                    (
-                        None,
-                        "the wire carries 2 buffer repeaters, one wherever it runs past 15 blocks \
-                         of dust, so a smaller `circuit` region, which puts the pads nearer what \
-                         drives them, needs fewer"
-                            .to_owned(),
-                    ),
+                    (None, buffered(2)),
                     (None, fix(ticks)),
                 ],
             )],
@@ -230,21 +237,155 @@ fn every_buffer_repeater_on_the_routed_wire_counts_a_tick() {
 
 #[test]
 fn a_path_from_a_signal_to_itself_is_the_wire_to_its_actuator() {
-    for (bound, failed) in [(1, true), (2, false)] {
-        let line = format!("assert latency(sig.a -> sig.a) <= {bound}");
-        let src = format!("{IDENTITY_WIRE_SOURCE}  {line}\n");
+    let line = "assert latency(sig.a -> sig.a) <= 1";
+    let src = format!("{IDENTITY_WIRE_SOURCE}  {line}\n");
+    for (edition, name) in [(Edition::Java, "java"), (Edition::Bedrock, "bedrock")] {
+        assert_eq!(
+            findings(&src, &verified(&src, edition)),
+            [(
+                "E_SIM_ASSERTION_FAILED",
+                line,
+                format!(
+                    "struct=pass: `{line}` fails on {name}: its slowest path from sig.a to sig.a \
+                     takes 2 ticks, 2 in buffer repeaters on the routed wire"
+                ),
+                vec![
+                    (
+                        Some("sig.a"),
+                        "the path ends at the pad of the actuator reading sig.a: 2 buffer \
+                         repeaters on the wire to it"
+                            .to_owned(),
+                    ),
+                    (None, buffered(2)),
+                    (None, fix(2)),
+                ],
+            )],
+            "{edition:?}",
+        );
+        let met = format!("{IDENTITY_WIRE_SOURCE}  assert latency(sig.a -> sig.a) <= 2\n");
+        assert_eq!(verified(&met, edition), [], "{edition:?}");
+    }
+}
+
+/// [`LONG_OUTWARD_WIRE_SOURCE`] with the door reading `sig.d`, which `logic` gives the net of
+/// `sig.c`, and `assert` after the region.
+fn second_name(logic: &str, assert: &str) -> String {
+    LONG_OUTWARD_WIRE_SOURCE
+        .replace(
+            "  door[id=front] opened_by=sig.c\n",
+            &format!("  {logic}\n  door[id=front] opened_by=sig.d\n"),
+        )
+        .replace("void=3\n", &format!("void=3\n  {assert}\n"))
+}
+
+#[test]
+fn a_path_ends_at_the_pad_of_an_actuator_reading_its_end_by_name() {
+    for logic in ["logic sig.d = sig.c", "logic sig.d = sig.b or sig.a"] {
+        let src = second_name(logic, "assert latency(sig.a -> sig.c) <= 0");
         for edition in [Edition::Java, Edition::Bedrock] {
             let found = verified(&src, edition);
-            assert_eq!(found.is_empty(), !failed, "{line} {edition:?}: {found:#?}");
-            if let Some(failure) = found.first() {
-                let notes: Vec<&str> = failure.notes.iter().map(|n| n.message.as_str()).collect();
-                assert_eq!(
-                    notes[0],
-                    "the path ends at the pad of the actuator reading sig.a: 2 buffer repeaters \
-                     on the wire to it",
-                );
-            }
+            let expected: Vec<Finding<'_>> = match edition {
+                Edition::Bedrock => Vec::new(),
+                Edition::Java => vec![(
+                    "E_SIM_ASSERTION_FAILED",
+                    "assert latency(sig.a -> sig.c) <= 0",
+                    "struct=reach: `assert latency(sig.a -> sig.c) <= 0` fails on java: its \
+                     slowest path from sig.a to sig.c takes 1 tick, all in its cells"
+                        .to_owned(),
+                    vec![
+                        (
+                            Some("logic sig.c = sig.a or sig.b"),
+                            "the path enters cell #0 (`RepeaterOR`) by port `a`: 1 tick through \
+                             the cell"
+                                .to_owned(),
+                        ),
+                        (None, NO_BUFFER.to_owned()),
+                        (None, fix(1)),
+                    ],
+                )],
+            };
+            assert_eq!(findings(&src, &found), expected, "{logic} {edition:?}");
         }
+    }
+}
+
+#[test]
+fn buffer_repeaters_on_a_cells_input_wire_count_and_those_on_its_other_ports_do_not() {
+    let line = "assert latency(sig.a -> sig.s15) <= 0";
+    let src = format!("{}  {line}\n", shared_bus_source());
+    for (edition, ticks, buffers) in [(Edition::Java, 35, 4), (Edition::Bedrock, 33, 1)] {
+        let found = verified(&src, edition);
+        let primaries: Vec<&str> = found.iter().map(|d| d.primary.as_str()).collect();
+        let name = edition.as_str();
+        assert_eq!(
+            primaries,
+            [format!(
+                "struct=chain: `{line}` fails on {name}: its slowest path from sig.a to sig.s15 \
+                 takes {ticks} ticks, {buffers} in buffer repeaters on the routed wire"
+            )],
+        );
+    }
+}
+
+#[test]
+fn a_gate_end_that_does_not_depend_on_its_start_is_refused_at_its_own_line() {
+    let line = "assert latency(sig.g -> sig.f) <= 9";
+    let src = chain(&format!("  {line}\n"));
+    assert_eq!(
+        findings(&src, &synth_source(&src).diagnostics),
+        [(
+            "E_SIM_ASSERTION_FAILED",
+            line,
+            "struct=gate: `assert latency(sig.g -> sig.f) <= 9` fails on every edition: sig.f \
+             does not depend on sig.g, so no path carries a change at sig.g to it"
+                .to_owned(),
+            vec![
+                (
+                    Some("logic sig.f = sig.a and sig.b"),
+                    "sig.f is driven here".to_owned(),
+                ),
+                (
+                    None,
+                    "Fix: start the path at a signal sig.f is computed from, or delete the \
+                     assertion"
+                        .to_owned(),
+                ),
+            ],
+        )],
+    );
+}
+
+#[test]
+fn a_refused_end_on_a_shared_net_is_shown_at_the_line_that_names_it() {
+    for logic in ["logic sig.d = sig.c", "logic sig.d = sig.b or sig.a"] {
+        let src = second_name(
+            logic,
+            "logic sig.e = sig.d and sig.b\n  assert latency(sig.e -> sig.d) <= 4",
+        );
+        let refused: Vec<Finding<'_>> = findings(&src, &synth_source(&src).diagnostics)
+            .into_iter()
+            .filter(|(code, ..)| *code == "E_SIM_ASSERTION_FAILED")
+            .collect();
+        assert_eq!(
+            refused,
+            [(
+                "E_SIM_ASSERTION_FAILED",
+                "assert latency(sig.e -> sig.d) <= 4",
+                "struct=reach: `assert latency(sig.e -> sig.d) <= 4` fails on every edition: \
+                 sig.d does not depend on sig.e, so no path carries a change at sig.e to it"
+                    .to_owned(),
+                vec![
+                    (Some(logic), "sig.d is driven here".to_owned()),
+                    (
+                        None,
+                        "Fix: start the path at a signal sig.d is computed from, or delete the \
+                         assertion"
+                            .to_owned(),
+                    ),
+                ],
+            )],
+            "{logic}",
+        );
     }
 }
 
@@ -320,4 +461,56 @@ fn a_bound_naming_a_signal_nothing_drives_is_reported_unbound() {
             )],
         )],
     );
+}
+
+#[test]
+fn a_bound_starting_at_a_signal_nothing_drives_is_reported_unbound() {
+    let line = "assert latency(sig.nowhere -> sig.h) <= 4";
+    let src = chain(&format!("  {line}\n"));
+    let codes: Vec<(&str, &str)> = findings(&src, &synth_source(&src).diagnostics)
+        .into_iter()
+        .map(|(code, at, ..)| (code, at))
+        .collect();
+    assert_eq!(codes, [(DiagnosticCode::LogicUnboundSignal.as_str(), line)]);
+}
+
+/// A lever through a `not` to a door, the whole body of a scope.
+const NOT_BODY: &str = "  floor mat_slot=wall\n  door id=d side=front at=center\n  \
+                        lever id=l1 at=inside.back offset=1 y=1 -> sig.a\n  \
+                        logic sig.n = not sig.a\n  \
+                        door[id=d] opened_by=sig.n\n  \
+                        circuit region=floor void=2\n";
+
+#[test]
+fn a_def_and_a_struct_of_one_name_each_check_their_own_bounds() {
+    let src = format!(
+        "theme t:\n  slot wall -> @oak_planks\n\n\
+         struct twin size=9x7\n{NOT_BODY}  assert latency(sig.a -> sig.n) <= 1\n\n\
+         def twin size=9x7:\n{NOT_BODY}  assert latency(sig.a -> sig.n) <= 0\n"
+    );
+    let primaries: Vec<String> = verified(&src, Edition::Java)
+        .into_iter()
+        .map(|d| d.primary)
+        .collect();
+    assert_eq!(
+        primaries,
+        [
+            "def=twin: `assert latency(sig.a -> sig.n) <= 0` fails on java: its slowest path from \
+             sig.a to sig.n takes 1 tick, all in its cells"
+        ],
+    );
+}
+
+#[test]
+fn a_scopes_failures_are_in_source_order_with_those_under_its_members() {
+    let src = format!(
+        "theme t:\n  slot wall -> @oak_planks\n\n\
+         struct s size=9x7\n  level y=0\n    assert latency(sig.a -> sig.n) <= 0\n{NOT_BODY}  \
+         assert latency(sig.a -> sig.a) <= 0\n  assert latency(sig.a -> sig.n) <= 0\n"
+    );
+    let lines: Vec<usize> = verified(&src, Edition::Java)
+        .iter()
+        .map(|d| src[..d.span.start].lines().count())
+        .collect();
+    assert_eq!(lines, [6, 14]);
 }

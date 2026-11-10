@@ -129,11 +129,13 @@ fn attribute_local_delay_ticks<F>(
             let buffer_ticks = sum_over_driving_nets(&cell.drivers, |net| {
                 buffers_on(net, cell.coord, Fed::Cell(index)).saturating_mul(BUFFER_REPEATER_TICKS)
             });
-            slowest_port_ticks(cell).saturating_add(buffer_ticks)
+            slowest_port_ticks(cell).saturating_add(u64::from(buffer_ticks))
         },
         |index, output| {
-            buffers_on(output.driver, output.pad, Fed::Output(index))
-                .saturating_mul(BUFFER_REPEATER_TICKS)
+            u64::from(
+                buffers_on(output.driver, output.pad, Fed::Output(index))
+                    .saturating_mul(BUFFER_REPEATER_TICKS),
+            )
         },
         |phase, ticks, identity| phase.delay_at(ticks, identity),
     );
@@ -141,7 +143,7 @@ fn attribute_local_delay_ticks<F>(
 
 /// The largest [`crate::EditionCell::port_delay_ticks`] over the ports `cell`'s drivers feed, or 0
 /// for a cell with none.
-pub(crate) fn slowest_port_ticks(cell: &PlacedCellNode) -> u32 {
+pub(crate) fn slowest_port_ticks(cell: &PlacedCellNode) -> u64 {
     cell.drivers
         .iter()
         .map(|driver| cell.cell.port_delay_ticks(driver.port))

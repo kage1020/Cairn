@@ -4,13 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, latency_text};
 use crate::logic_ir::{
     GateKind, GateNode, InputPort, LogicIr, OutputPort, ScopeKind, ScopedLogicIr,
     ScopedLogicIrEntry, SignalRef,
 };
 use crate::saturating_index;
-use crate::verify::latency_text;
 use cairn_lang_core::ast::{DottedRef, Expr, NamedOperand, SIGNAL_HEAD, Value, ValueKind};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
@@ -18,7 +17,7 @@ use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
     SiteIr, StructIr, ValueWithSpan, actuator_patch_target,
 };
-use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation};
+use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation, StageCount};
 use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
 /// The components a signal drives, each with the key its line reads it from.
@@ -783,7 +782,14 @@ fn finish_scope(scope: ScopeRef<'_>, mut collected: ScopeCollected<'_>, out: &mu
         &mut diagnostics,
     );
 
-    check_latency_paths(&collected.asserts, &ir, scope, &mut diagnostics);
+    check_latency_paths(
+        &collected.asserts,
+        &ir,
+        &collected.bindings,
+        &bindings_by_lhs,
+        scope,
+        &mut diagnostics,
+    );
 
     // Into source order; stable, so findings on one span keep the order they were raised in.
     diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
@@ -964,6 +970,8 @@ fn check_assert_refs(
 fn check_latency_paths(
     asserts: &[&AssertIr],
     ir: &LogicIr,
+    bindings: &[PendingBinding<'_>],
+    bindings_by_lhs: &HashMap<DottedRef, usize>,
     scope: ScopeRef<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -984,9 +992,13 @@ fn check_latency_paths(
         if depends_on(ir, end, start) {
             continue;
         }
-        let driven_at = match end {
-            SignalRef::Input(i) => ir.inputs[i as usize].span.clone(),
-            SignalRef::Gate(j) => ir.nodes[j as usize].span.clone(),
+        // A merged gate or an alias carries the span of another name's line.
+        let driven_at = match bindings_by_lhs.get(to) {
+            Some(&binding) => bindings[binding].span.clone(),
+            None => match end {
+                SignalRef::Input(i) => ir.inputs[i as usize].span.clone(),
+                SignalRef::Gate(j) => ir.nodes[j as usize].span.clone(),
+            },
         };
         diagnostics.push(
             Diagnostic::new(
@@ -1568,7 +1580,7 @@ fn infix_gate(primitive: LogicPrimitive) -> Option<fn(SignalRef, SignalRef) -> G
 fn lower_apply<'a>(
     primitive: LogicPrimitive,
     operand: &'a Expr,
-    stages: Option<u32>,
+    stages: Option<StageCount>,
     binding_span: &Span,
     ir: &mut LogicIr,
     ctx: &mut LoweringCtx<'a>,
@@ -1578,22 +1590,35 @@ fn lower_apply<'a>(
     let gate = match (primitive, stages) {
         (LogicPrimitive::EdgeRising, None) => GateKind::EdgeRising { a: operand? },
         (LogicPrimitive::EdgeFalling, None) => GateKind::EdgeFalling { a: operand? },
-        (LogicPrimitive::Delay, Some(stages @ 1..)) => GateKind::Delay {
+        (LogicPrimitive::Delay, Some(stages)) => GateKind::Delay {
             a: operand?,
             stages,
         },
-        (LogicPrimitive::Pulse, Some(stages @ 1..)) => GateKind::Pulse {
+        (LogicPrimitive::Pulse, Some(stages)) => GateKind::Pulse {
             a: operand?,
             stages,
         },
-        (LogicPrimitive::Counter, Some(stages @ 1..)) => GateKind::Counter {
+        (LogicPrimitive::Counter, Some(stages)) => GateKind::Counter {
             a: operand?,
             stages,
         },
-        (_, stages) => {
+        // Only an intent built by hand gets here: the parser applies these to nothing else.
+        (
+            LogicPrimitive::And
+            | LogicPrimitive::Or
+            | LogicPrimitive::Not
+            | LogicPrimitive::Xor
+            | LogicPrimitive::Nand
+            | LogicPrimitive::Nor
+            | LogicPrimitive::Mux
+            | LogicPrimitive::Latch,
+            _,
+        )
+        | (LogicPrimitive::EdgeRising | LogicPrimitive::EdgeFalling, Some(_))
+        | (LogicPrimitive::Delay | LogicPrimitive::Pulse | LogicPrimitive::Counter, None) => {
             let as_written = match stages {
                 None => "to one operand".to_owned(),
-                Some(1) => "to one operand and 1 stage".to_owned(),
+                Some(StageCount::ONE) => "to one operand and 1 stage".to_owned(),
                 Some(stages) => format!("to one operand and {stages} stages"),
             };
             return Err(no_gate(
@@ -1619,17 +1644,22 @@ fn no_gate(
 ) -> LoweringFailed {
     let label = ctx.scope.label();
     let name = primitive.name();
-    let template = primitive.parenthesised_template().unwrap_or_default();
+    let template = || {
+        primitive
+            .parenthesised_template()
+            .expect("a called or applied primitive is written with parentheses")
+    };
     let written = match primitive.notation() {
         Notation::Prefix => "before its one operand".to_owned(),
         Notation::Infix { .. } => "between its two operands".to_owned(),
-        Notation::Call(_) => format!("with every operand named once, as in `{template}`"),
+        Notation::Call(_) => format!("with every operand named once, as in `{}`", template()),
         Notation::Apply { counted: false } => {
-            format!("applied to its one operand, as in `{template}`")
+            format!("applied to its one operand, as in `{}`", template())
         }
-        Notation::Apply { counted: true } => {
-            format!("applied to its operand and a stage count of at least 1, as in `{template}`")
-        }
+        Notation::Apply { counted: true } => format!(
+            "applied to its operand and a stage count of at least 1, as in `{}`",
+            template()
+        ),
     };
     diagnostics.push(
         Diagnostic::new(

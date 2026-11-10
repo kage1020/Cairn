@@ -29,7 +29,7 @@ raw のまま取り込んだだけでは、有効な Intent IR にはなりま�
 レッドストーンを論理で記述すると ([レッドストーン](/ja/spec/redstone/))、Intent IR と block-array IR の間に、役割の異なる 4 つの IR 層が入ります。HDL と同じ分け方です。
 
 ```
-Logic IR            論理式と依存関係の DAG。エディションに依存せず、遅延はゼロ
+Logic IR            論理式と依存関係の DAG。エディションに依存せず、tick を持たない
 Netlist IR          セルとネット。論理セルを選ぶ。まだ遅延はない
 Edition Netlist IR  同じセルとネット。エディションのセルを選ぶ。まだ配線はない
 Placement IR        セルの座標、続いて実際の配線長。ここで遅延と tick が決まる

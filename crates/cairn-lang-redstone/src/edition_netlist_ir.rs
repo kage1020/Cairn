@@ -4,6 +4,7 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
+use cairn_lang_core::logic_library::StageCount;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput, Por
 
 /// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum EditionCell {
@@ -47,33 +48,36 @@ pub enum EditionCell {
     /// Bedrock 2:1 MUX — two torch NORs feeding a common dust line, one of `sel` and inverted `a`,
     /// the other of inverted `sel` and inverted `b`.
     BedrockTorchMux,
-    /// Java DELAY — `stages` repeaters in series.
+    /// Java DELAY — repeaters in series, two ticks a stage.
     JavaRepeaterDelay {
-        /// Repeaters in series.
-        stages: u32,
+        /// Stages the repeaters take in all.
+        stages: StageCount,
     },
-    /// Bedrock DELAY — `stages` repeaters in series.
+    /// Bedrock DELAY — repeaters in series, two ticks a stage.
     BedrockRepeaterDelay {
-        /// Repeaters in series.
-        stages: u32,
+        /// Stages the repeaters take in all.
+        stages: StageCount,
     },
-    /// Java PULSE — the torch NOR of inverted `a` and of `a` through `stages + 1` repeaters.
+    /// Java PULSE — the torch NOR of inverted `a` and of `a` through repeaters of
+    /// `2 * stages + 1` ticks.
     JavaTorchPulse {
         /// Stages the pulse lasts at most.
-        stages: u32,
+        stages: StageCount,
     },
-    /// Bedrock PULSE — the torch NOR of inverted `a` and of `a` through `stages + 1` repeaters.
+    /// Bedrock PULSE — the torch NOR of inverted `a` and of `a` through repeaters of
+    /// `2 * stages + 1` ticks.
     BedrockTorchPulse {
         /// Stages the pulse lasts at most.
-        stages: u32,
+        stages: StageCount,
     },
-    /// Java rising-edge detector — the torch NOR of `a` inverted once and twice.
+    /// Java rising-edge detector — a one-stage PULSE.
     JavaTorchEdgeRising,
-    /// Bedrock rising-edge detector — the torch NOR of `a` inverted once and twice.
+    /// Bedrock rising-edge detector — a one-stage PULSE.
     BedrockTorchEdgeRising,
-    /// Java falling-edge detector — the torch NOR of `a` and inverted `a`.
+    /// Java falling-edge detector — the torch NOR of `a` and of inverted `a` through a repeater.
     JavaTorchEdgeFalling,
-    /// Bedrock falling-edge detector — the torch NOR of `a` and inverted `a`.
+    /// Bedrock falling-edge detector — the torch NOR of `a` and of inverted `a` through a
+    /// repeater.
     BedrockTorchEdgeFalling,
     /// Java LATCH — two torch NORs each powered by the other, `set` gated by a held `reset`.
     JavaTorchLatch,
@@ -82,12 +86,12 @@ pub enum EditionCell {
     /// Java COUNTER — `stages` flip-flops of locking repeaters in a twisted ring.
     JavaRepeaterCounter {
         /// Flip-flops in the ring.
-        stages: u32,
+        stages: StageCount,
     },
     /// Bedrock COUNTER — `stages` flip-flops of locking repeaters in a twisted ring.
     BedrockRepeaterCounter {
         /// Flip-flops in the ring.
-        stages: u32,
+        stages: StageCount,
     },
 }
 
@@ -149,10 +153,43 @@ impl EditionCell {
         }
     }
 
+    /// The input ports the netlist drives on this cell, in its port order.
+    #[must_use]
+    pub const fn ports(self) -> &'static [PortName] {
+        match self {
+            Self::JavaComparatorAnd
+            | Self::BedrockTorchAnd
+            | Self::JavaRepeaterOr
+            | Self::BedrockTorchOr
+            | Self::JavaTorchXor
+            | Self::BedrockTorchXor
+            | Self::JavaTorchNand
+            | Self::BedrockTorchNand
+            | Self::JavaTorchNor
+            | Self::BedrockTorchNor => &[PortName::A, PortName::B],
+            Self::JavaInverterTorch
+            | Self::BedrockInverterTorch
+            | Self::JavaRepeaterDelay { .. }
+            | Self::BedrockRepeaterDelay { .. }
+            | Self::JavaTorchPulse { .. }
+            | Self::BedrockTorchPulse { .. }
+            | Self::JavaTorchEdgeRising
+            | Self::BedrockTorchEdgeRising
+            | Self::JavaTorchEdgeFalling
+            | Self::BedrockTorchEdgeFalling
+            | Self::JavaRepeaterCounter { .. }
+            | Self::BedrockRepeaterCounter { .. } => &[PortName::A],
+            Self::JavaTorchMux | Self::BedrockTorchMux => {
+                &[PortName::Sel, PortName::A, PortName::B]
+            }
+            Self::JavaTorchLatch | Self::BedrockTorchLatch => &[PortName::Set, PortName::Reset],
+        }
+    }
+
     /// Tick delay from input `port` to this cell's output, or for a macro to the last change one
     /// change at `port` makes there, excluding buffer repeaters.
     #[must_use]
-    pub const fn port_delay_ticks(self, port: PortName) -> u32 {
+    pub fn port_delay_ticks(self, port: PortName) -> u64 {
         match self {
             // The side operand passes the inverter before the comparator. Asked for a port an AND
             // does not have, it errs on the slow side.
@@ -160,21 +197,25 @@ impl EditionCell {
                 PortName::A => 1,
                 PortName::B | PortName::Sel | PortName::Set | PortName::Reset => 2,
             },
-            // A falling `reset` re-arms `set` through its two-tick hold and three torches.
+            // A falling `reset` re-arms `set` through its two-tick hold and three torches. Asked
+            // for a port a latch does not have, it errs on the slow side.
             Self::JavaTorchLatch | Self::BedrockTorchLatch => match port {
                 PortName::Set => 4,
                 PortName::A | PortName::B | PortName::Sel | PortName::Reset => 5,
             },
-            Self::JavaRepeaterDelay { stages } | Self::BedrockRepeaterDelay { stages } => stages,
-            // The pulse ends once `a` is out of its repeaters, one more than its stages, and
+            Self::JavaRepeaterDelay { stages } | Self::BedrockRepeaterDelay { stages } => {
+                2 * u64::from(stages.get())
+            }
+            // The pulse ends once `a` is out of its repeaters, a tick more than its stages, and
             // through the NOR.
             Self::JavaTorchPulse { stages } | Self::BedrockTorchPulse { stages } => {
-                stages.saturating_add(2)
+                2 * u64::from(stages.get()) + 2
             }
-            Self::JavaTorchEdgeRising
-            | Self::BedrockTorchEdgeRising
-            | Self::JavaRepeaterCounter { .. }
-            | Self::BedrockRepeaterCounter { .. } => 3,
+            Self::JavaTorchEdgeRising | Self::BedrockTorchEdgeRising => 4,
+            Self::JavaRepeaterCounter { .. }
+            | Self::BedrockRepeaterCounter { .. }
+            | Self::JavaTorchEdgeFalling
+            | Self::BedrockTorchEdgeFalling => 3,
             Self::JavaRepeaterOr
             | Self::JavaInverterTorch
             | Self::BedrockInverterTorch
@@ -187,9 +228,7 @@ impl EditionCell {
             | Self::JavaTorchXor
             | Self::BedrockTorchXor
             | Self::JavaTorchMux
-            | Self::BedrockTorchMux
-            | Self::JavaTorchEdgeFalling
-            | Self::BedrockTorchEdgeFalling => 2,
+            | Self::BedrockTorchMux => 2,
             Self::BedrockTorchOr => 0,
         }
     }

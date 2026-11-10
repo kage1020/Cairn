@@ -18,9 +18,10 @@ is defined.
 
 Every code of the redstone pipeline is outside that promise: the `E_LOGIC_*` / `W_LOGIC_*` codes,
 and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT`,
-`W_ROUTE_CROSS_LAYER_CLEARANCE` and `E_SIM_ASSERTION_FAILED`. They are reachable only through `cairn synth
---experimental-logic-synth`, which is Internal tier ([Compatibility](/spec/compatibility/)). Nothing
-about those strings is guaranteed, so a row here would state a contract that does not exist.
+`W_ROUTE_CROSS_LAYER_CLEARANCE` and `E_SIM_ASSERTION_FAILED`. They are reachable only through
+`cairn synth --experimental-logic-synth`, which is Internal tier
+([Compatibility](/spec/compatibility/)). Nothing about those strings is guaranteed, so a row here
+would state a contract that does not exist.
 [Redstone and Logic](/spec/redstone/) names the ones its own rules turn on.
 
 ### Duplicates
