@@ -1,4 +1,5 @@
 use cairn_lang_core::block_array::Face;
+use cairn_lang_core::logic_library::StageCount;
 
 use super::*;
 use crate::geometry::{Rotation, Voxel};
@@ -107,7 +108,7 @@ impl Bench {
     }
 
     /// Runs `ticks` ticks and the output after each.
-    fn run(&mut self, ticks: u32) -> Vec<bool> {
+    fn run(&mut self, ticks: u64) -> Vec<bool> {
         (0..ticks)
             .map(|_| {
                 self.sim.step();
@@ -115,6 +116,10 @@ impl Bench {
             })
             .collect()
     }
+}
+
+fn stage_count(n: u32) -> StageCount {
+    StageCount::new(n).expect("a stage count is at least 1")
 }
 
 fn a() -> TilePort {
@@ -133,12 +138,12 @@ fn variants() -> impl Iterator<Item = (Rotation, Order)> {
 }
 
 /// The tick, counted from the change, of the last change of the output, and the output after.
-fn last_change(trace: &[bool], before: bool) -> (u32, bool) {
+fn last_change(trace: &[bool], before: bool) -> (u64, bool) {
     let mut last = 0;
     let mut previous = before;
     for (tick, &value) in trace.iter().enumerate() {
         if value != previous {
-            last = u32::try_from(tick).expect("tick fits u32") + 1;
+            last = u64::try_from(tick).expect("tick fits u64") + 1;
             previous = value;
         }
     }
@@ -247,6 +252,18 @@ fn each_cell_port_takes_the_ticks_the_cell_library_gives_it() {
     }
 }
 
+#[test]
+fn a_macro_of_the_most_stages_counts_its_ticks_exactly() {
+    let most = stage_count(u32::MAX);
+    assert_eq!(
+        [
+            EditionCell::JavaRepeaterDelay { stages: most }.port_delay_ticks(PortName::A),
+            EditionCell::BedrockTorchPulse { stages: most }.port_delay_ticks(PortName::A),
+        ],
+        [8_589_934_590, 8_589_934_592],
+    );
+}
+
 /// `not` inverts within one tick.
 #[test]
 fn the_inverter_inverts_in_one_tick() {
@@ -330,9 +347,11 @@ fn the_comparator_and_passes_its_rear_strength_on() {
 fn delay_follows_its_operand_two_ticks_a_stage_later() {
     for stages in 1..=9 {
         for (rotation, order) in variants() {
-            let cell = EditionCell::JavaRepeaterDelay { stages };
+            let cell = EditionCell::JavaRepeaterDelay {
+                stages: stage_count(stages),
+            };
             let ticks = cell.port_delay_ticks(PortName::A);
-            assert_eq!(ticks, 2 * stages);
+            assert_eq!(ticks, 2 * u64::from(stages));
             let mut bench = Bench::cell(cell, rotation, order);
             bench.set(a(), true);
             let trace = bench.run(ticks + 2);
@@ -353,18 +372,20 @@ fn delay_follows_its_operand_two_ticks_a_stage_later() {
 fn pulse_is_on_for_its_stages_or_until_its_operand_falls() {
     for stages in [1, 2, 3, 4, 5, 8, 15, MAX_PULSE_STAGES] {
         for (rotation, order) in variants() {
-            let cell = EditionCell::JavaTorchPulse { stages };
+            let cell = EditionCell::JavaTorchPulse {
+                stages: stage_count(stages),
+            };
             let ticks = cell.port_delay_ticks(PortName::A);
             let mut bench = Bench::cell(cell, rotation, order);
             assert!(!bench.out());
             bench.set(a(), true);
             let trace = bench.run(ticks + 4);
-            let on: Vec<u32> = (1..)
+            let on: Vec<u64> = (1..)
                 .zip(&trace)
                 .filter(|(_, on)| **on)
                 .map(|(t, _)| t)
                 .collect();
-            let expected: Vec<u32> = (2..=2 * stages + 1).collect();
+            let expected: Vec<u64> = (2..=2 * u64::from(stages) + 1).collect();
             assert_eq!(on, expected, "{stages} held, {rotation:?} {order:?}");
             assert_eq!(last_change(&trace, false).0, ticks);
             bench.set(a(), false);
@@ -374,7 +395,7 @@ fn pulse_is_on_for_its_stages_or_until_its_operand_falls() {
                 let mut trace = bench.run(2);
                 bench.set(a(), false);
                 trace.extend(bench.run(ticks + 4));
-                let on: Vec<u32> = (1..)
+                let on: Vec<u64> = (1..)
                     .zip(&trace)
                     .filter(|(_, on)| **on)
                     .map(|(t, _)| t)
@@ -447,7 +468,9 @@ fn latch_sets_resets_and_lets_reset_win() {
 fn counter_toggles_every_n_rises_three_ticks_after_each() {
     for stages in 1..=MAX_COUNTER_STAGES {
         for (rotation, order) in variants() {
-            let cell = EditionCell::JavaRepeaterCounter { stages };
+            let cell = EditionCell::JavaRepeaterCounter {
+                stages: stage_count(stages),
+            };
             let mut bench = Bench::cell(cell, rotation, order);
             let fed = bench
                 .at(bench.template.port(TilePort::Feedback).expect("fb").at)
@@ -535,7 +558,13 @@ fn a_port_rating_is_the_weakest_signal_that_drives_the_tile() {
         (EditionCell::JavaTorchXor, b(), &[(a(), true)]),
         (EditionCell::JavaTorchMux, sel, &[(a(), true)]),
         (EditionCell::JavaTorchMux, b(), &[(sel, true)]),
-        (EditionCell::JavaTorchPulse { stages: 3 }, a(), &[]),
+        (
+            EditionCell::JavaTorchPulse {
+                stages: stage_count(3),
+            },
+            a(),
+            &[],
+        ),
         (EditionCell::JavaTorchEdgeFalling, a(), &[]),
         (
             EditionCell::JavaTorchLatch,

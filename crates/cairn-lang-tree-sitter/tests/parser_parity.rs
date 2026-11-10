@@ -1564,6 +1564,17 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  logic s.out = delay(a.b, 4294967296)\n",
         Accept,
     ),
+    // An assertion's bound is a `u32`, which the grammar's `integer` does not narrow to.
+    (
+        "within_bound_out_of_range",
+        "struct s size=3x3\n  assert always(a.b -> eventually c.d within 4294967296)\n",
+        Accept,
+    ),
+    (
+        "latency_bound_out_of_range",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= 4294967296\n",
+        Accept,
+    ),
     // -- a size literal that runs into a word --------------------------
     // Ending the literal before the tail needs negative lookahead, which tree-sitter rejects.
     (

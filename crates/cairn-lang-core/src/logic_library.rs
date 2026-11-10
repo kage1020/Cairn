@@ -1,7 +1,10 @@
 //! The built-in logic library: each primitive a `logic` expression applies and its notation
 //! (`spec/redstone` "Two tiers, and the v1 boundary").
 
-use serde::{Serialize, Serializer};
+use std::fmt;
+use std::num::NonZeroU32;
+
+use serde::{Deserialize, Serialize, Serializer};
 
 /// A primitive of the built-in logic library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -201,6 +204,44 @@ impl LogicPrimitive {
 impl Serialize for LogicPrimitive {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.name())
+    }
+}
+
+/// The stage count a macro is applied with, a whole number of at least 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct StageCount(NonZeroU32);
+
+impl StageCount {
+    /// One stage, the fewest a macro counts.
+    pub const ONE: Self = Self(NonZeroU32::MIN);
+
+    /// `n` stages, or `None` for 0.
+    #[must_use]
+    pub const fn new(n: u32) -> Option<Self> {
+        match NonZeroU32::new(n) {
+            Some(n) => Some(Self(n)),
+            None => None,
+        }
+    }
+
+    /// The count as a number.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+/// [`StageCount::ONE`], for a cell enumerated with its fields left at their defaults.
+impl Default for StageCount {
+    fn default() -> Self {
+        Self::ONE
+    }
+}
+
+impl fmt::Display for StageCount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 

@@ -12,7 +12,7 @@ use crate::edition::Edition;
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
-use crate::logic_library::{CallSignature, LogicPrimitive, Notation, infix_rank_above};
+use crate::logic_library::{CallSignature, LogicPrimitive, Notation, StageCount, infix_rank_above};
 use crate::prose::{and_list, or_list};
 use crate::suggest::{did_you_mean, nearest_match};
 use crate::version::parse_requirement;
@@ -1158,9 +1158,11 @@ impl<'a> Parser<'a> {
         &mut self,
         primitive: LogicPrimitive,
         counted: bool,
-    ) -> Result<(Expr, Option<u32>, usize), ParseError> {
+    ) -> Result<(Expr, Option<StageCount>, usize), ParseError> {
         let name = primitive.name();
-        let shape = primitive.parenthesised_template().unwrap_or_default();
+        let shape = primitive
+            .parenthesised_template()
+            .expect("an applied primitive is written with parentheses");
         let takes = if counted {
             "its operand and a stage count"
         } else {
@@ -1203,6 +1205,13 @@ impl<'a> Parser<'a> {
                  `{shape}`"
             )));
         }
+        if let Some(TokenKind::Int { .. }) = self.peek().map(|token| &token.kind) {
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected `,` before the stage count, got {found}: `{name}` is applied to \
+                 {takes}, as in `{shape}`"
+            )));
+        }
         self.expect_operand_end(&[TokenKind::Comma])?;
         let position = self.position();
         let Some(TokenKind::Int { lexeme, .. }) = self.peek().map(|token| token.kind.clone())
@@ -1213,7 +1222,7 @@ impl<'a> Parser<'a> {
                  applied to {takes}, as in `{shape}`"
             )));
         };
-        let stages: u32 =
+        let count: u32 =
             lexeme
                 .parse()
                 .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
@@ -1222,14 +1231,25 @@ impl<'a> Parser<'a> {
                     lexeme: lexeme.clone(),
                     kind: *err.kind(),
                 })?;
-        if stages == 0 {
+        let Some(stages) = StageCount::new(count) else {
             return Err(self.syntax_here(&format!(
-                "expected a stage count of at least 1, got `0`: `{name}` with no stage builds \
-                 nothing"
+                "expected a stage count of at least 1, got `{lexeme}`: `{name}` with no stage \
+                 builds nothing, so write a count of 1 or more, as in `{shape}`"
+            )));
+        };
+        self.advance();
+        if !self.peek_is(&TokenKind::RParen) {
+            let found = self.found_here();
+            let why = match self.peek().map(|token| &token.kind) {
+                Some(TokenKind::Comma) => format!("`{name}` takes one stage count"),
+                Some(TokenKind::Dot) => "a stage count is a whole number of stages".to_owned(),
+                _ => format!("`{name}` is applied to {takes}"),
+            };
+            return Err(self.syntax_here(&format!(
+                "expected `)`, got {found}: {why}, as in `{shape}`"
             )));
         }
         self.advance();
-        self.expect(&TokenKind::RParen)?;
         Ok((operand, Some(stages), depth))
     }
 
@@ -1422,8 +1442,8 @@ impl<'a> Parser<'a> {
                     .collect();
                 let callable = or_list(&callable).unwrap_or_default();
                 format!(
-                    ": the built-in logic library has no primitive `{word}` to call, and calls \
-                     only {callable}"
+                    ": the built-in logic library has no primitive `{word}` to call or apply; \
+                     those it calls or applies are {callable}"
                 )
             }
             (Some(TokenKind::LParen), None) => between,

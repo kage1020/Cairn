@@ -18,7 +18,7 @@ Per [redstone](https://cairn.kage1020.com/spec/redstone/), the logical redstone 
 | Routing | `compile_routing(&ScopedCircuitLayout)` | Each net's dust from its driver to every input it feeds, up and down staircases, apart from every other net's |
 | Delay insertion | `compile_delay(&ScopedCircuitLayout)` | A buffer repeater in a net's dust wherever an input would read its signal weaker than it needs |
 | Legalization | `compile_legalize(&ScopedCircuitLayout, Option<&dyn TargetRegistry>)` | Every voxel as a block, in the state the circuit rests in with its sensors off |
-| Latency | `verify_latency(&IntentModule, &ScopedCircuitLayout)` | `E_SIM_ASSERTION_FAILED` for each `assert latency` the legalized circuit's slowest path exceeds |
+| Latency | `verify_latency(&ScopedCircuitLayout, &IntentModule)` | `E_SIM_ASSERTION_FAILED` for each `assert latency` the legalized circuit's slowest path exceeds |
 
 Each `CircuitLayout` records the last pass that filled it as a `LayoutStage`, dumped as a `"stage"` key in the vocabulary `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage off the output rather than inferring it from which keys are present.
 
@@ -48,8 +48,8 @@ The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile
 ## v1 scope
 
 - **Combinational**: `and` / `or` / `not` / `xor` / `nand` / `nor` / `mux` are synthesised end to end, each to a cell on both editions.
-- **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` are synthesised the same way, each to one cell of torches and repeaters on both editions that keeps its feedback inside it, so the Logic IR stays a DAG. A macro's stage count travels with its cell, and its ticks are its Edition Cell's.
-- **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines, and `assert latency` against the legalized circuit; evaluating `truth` and `always` waits on the simulator.
+- **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` are synthesised the same way, each to one cell of torches and repeaters on both editions, and a `latch` or `counter` keeps its feedback inside its cell, so the Logic IR stays a DAG. A macro's stage count travels with its cell, and its ticks are its Edition Cell's.
+- **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; `verify_latency` checks each `assert latency` against the legalized circuit, and evaluating `truth` and `always` waits on the simulator.
 
 Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits, which `verify_portable` refuses ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).
 

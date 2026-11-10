@@ -357,7 +357,7 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
     let delayed = findings(&mut so_far, &delay.diagnostics);
     let legalized = compile_legalize(&delay.scoped, Some(&registry));
     findings(&mut so_far, &legalized.diagnostics);
-    let verified = findings(&mut so_far, &verify_latency(ir, &legalized.scoped));
+    let verified = findings(&mut so_far, &verify_latency(&legalized.scoped, ir));
     vec![
         Dump {
             stage: "logic",
@@ -613,6 +613,17 @@ fn stage_legalize_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
         &[(15, 3, "error", "E_SIM_ASSERTION_FAILED")],
         "bedrock",
     );
+
+    // Only the legalized circuit is held to a bound.
+    for stage in ["placement", "route", "delay"] {
+        let early = synth_stage(&path, stage, "bedrock");
+        assert_eq!(
+            early.status.code(),
+            Some(0),
+            "--stage {stage}: {}",
+            String::from_utf8_lossy(&early.stderr)
+        );
+    }
 }
 
 #[test]

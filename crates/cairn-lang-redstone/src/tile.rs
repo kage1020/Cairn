@@ -266,16 +266,21 @@ pub(crate) fn cell_template(cell: EditionCell) -> Template {
         EditionCell::JavaTorchXor | EditionCell::BedrockTorchXor => xor(),
         EditionCell::JavaTorchMux | EditionCell::BedrockTorchMux => mux(),
         EditionCell::JavaRepeaterDelay { stages }
-        | EditionCell::BedrockRepeaterDelay { stages } => delay(stages),
+        | EditionCell::BedrockRepeaterDelay { stages } => delay(stages.get()),
         EditionCell::JavaTorchPulse { stages } | EditionCell::BedrockTorchPulse { stages } => {
-            pulse(stages)
+            pulse(stages.get())
         }
         EditionCell::JavaTorchEdgeRising | EditionCell::BedrockTorchEdgeRising => edge_rising(),
         EditionCell::JavaTorchEdgeFalling | EditionCell::BedrockTorchEdgeFalling => edge_falling(),
         EditionCell::JavaTorchLatch | EditionCell::BedrockTorchLatch => latch(),
         EditionCell::JavaRepeaterCounter { stages }
-        | EditionCell::BedrockRepeaterCounter { stages } => counter(stages),
+        | EditionCell::BedrockRepeaterCounter { stages } => counter(stages.get()),
     }
+}
+
+/// The columns a `delay` of `stages` takes in its one row: its port, its repeaters and its output.
+pub(crate) fn delay_columns(stages: u32) -> u64 {
+    (2 * u64::from(stages)).div_ceil(u64::from(MAX_REPEATER_DELAY)) + 2
 }
 
 /// Repeater delays, each at most [`MAX_REPEATER_DELAY`], that add up to `ticks`.
@@ -640,7 +645,7 @@ pub(crate) fn riser_template() -> Template {
 }
 
 /// The ticks a riser takes from its port to its torch.
-pub const RISER_TICKS: u32 = 2;
+pub const RISER_TICKS: u64 = 2;
 
 #[cfg(test)]
 mod tests;

@@ -256,6 +256,9 @@ pub struct CircuitLayout {
         serialize_with = "crate::logic_ir::serialize_signal_defs"
     )]
     pub signal_defs: IndexMap<DottedRef, NetRef>,
+    /// The signal each riser's actuator reads, by the riser's index into `tiles`.
+    #[serde(skip)]
+    pub(crate) riser_signals: IndexMap<usize, DottedRef>,
     /// The base plane over the reservation.
     #[serde(skip)]
     pub(crate) surface: Surface,

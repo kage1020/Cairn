@@ -57,7 +57,7 @@ pub fn build_circuits(
     if found.stop(legalized.diagnostics) {
         return found.all;
     }
-    if found.stop(verify_latency(module, &legalized.scoped)) {
+    if found.stop(verify_latency(&legalized.scoped, module)) {
         return found.all;
     }
     let mut attached = built.clone();

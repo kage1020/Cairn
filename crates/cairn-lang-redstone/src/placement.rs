@@ -4,9 +4,11 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
+use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::block_array::{BlockArrayIr, Dims, MAX_STRUCTURE_VOLUME};
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{self, IntentModule, Member};
+use indexmap::IndexMap;
 
 use crate::coupling::{self, Coupled};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
@@ -20,7 +22,7 @@ use crate::placement_ir::{
     TileInput, TileKind,
 };
 use crate::saturating_index;
-use crate::tile::{MAX_COUNTER_STAGES, MAX_PULSE_STAGES, Template, TilePort};
+use crate::tile::{self, MAX_COUNTER_STAGES, MAX_PULSE_STAGES, Template, TilePort};
 
 /// The fewest layers a reservation needs: the bottom one, the cells' and the one under the floor.
 pub const MIN_VOID: u32 = 3;
@@ -130,6 +132,10 @@ pub fn compile_placement(
                 depth: array.dims.z,
                 span: region.span.clone(),
             };
+            if let Some(diagnostic) = overlong(&scope, ir, &region) {
+                extend_unique(&mut out.diagnostics, vec![diagnostic]);
+                continue;
+            }
             match place(&scope, ir, &key, region, coupled) {
                 Ok(layout) => out.scoped.push(entry.kind, entry.name.clone(), layout),
                 Err(diagnostic) => extend_unique(&mut out.diagnostics, vec![diagnostic]),
@@ -137,6 +143,32 @@ pub fn compile_placement(
         }
     }
     out
+}
+
+/// The refusal of a `delay` whose row of repeaters is longer than the struct it lies under.
+fn overlong(scope: &str, ir: &EditionNetlistIr, region: &Reservation) -> Option<Diagnostic> {
+    let side = u64::from(region.width.max(region.depth));
+    ir.cells.iter().find_map(|cell| {
+        let (EditionCell::JavaRepeaterDelay { stages }
+        | EditionCell::BedrockRepeaterDelay { stages }) = cell.cell
+        else {
+            return None;
+        };
+        let columns = tile::delay_columns(stages.get());
+        (columns > side).then(|| {
+            error_with_footer(
+                DiagnosticCode::RouteCongestion,
+                cell.span.clone(),
+                format!(
+                    "{scope} a `{name}` of {stages} stages cannot be laid: its repeaters run in one row of {columns} columns, longer than the {width}x{depth} struct it lies under",
+                    name = cell.cell.name(),
+                    width = region.width,
+                    depth = region.depth,
+                ),
+                "Fix: use fewer stages, or widen the struct's `size=WxH`",
+            )
+        })
+    })
 }
 
 /// The refusal of a reservation that takes its struct past what one structure holds.
@@ -236,7 +268,7 @@ fn refusal(
             ),
             _ => continue,
         };
-        if stages > max {
+        if stages.get() > max {
             return Some(error_with_footer(
                 DiagnosticCode::AttenuationLimit,
                 cell.span.clone(),
@@ -281,7 +313,10 @@ fn refusal(
 }
 
 /// The tiles of `ir` and the nets between them, the cells first, in the netlist's order.
-fn tiles_and_nets(ir: &EditionNetlistIr, coupled: &Coupled) -> (Vec<PlacedTile>, Vec<CircuitNet>) {
+fn tiles_and_nets(
+    ir: &EditionNetlistIr,
+    coupled: &Coupled,
+) -> (Vec<PlacedTile>, Vec<CircuitNet>, IndexMap<usize, DottedRef>) {
     let mut tiles: Vec<PlacedTile> = ir
         .cells
         .iter()
@@ -332,7 +367,9 @@ fn tiles_and_nets(ir: &EditionNetlistIr, coupled: &Coupled) -> (Vec<PlacedTile>,
             ));
         }
     }
+    let mut riser_signals = IndexMap::new();
     for riser in &coupled.risers {
+        riser_signals.insert(tiles.len(), ir.outputs[riser.output].name.clone());
         sinks.push((
             ir.outputs[riser.output].driver,
             NetSink {
@@ -349,7 +386,17 @@ fn tiles_and_nets(ir: &EditionNetlistIr, coupled: &Coupled) -> (Vec<PlacedTile>,
             span: riser.span.clone(),
         });
     }
+    let nets = join(ir, &mut tiles, &drivers, &sinks);
+    (tiles, nets, riser_signals)
+}
 
+/// The nets from each driver to the sinks it feeds, inputs first, each tile told its own.
+fn join(
+    ir: &EditionNetlistIr,
+    tiles: &mut [PlacedTile],
+    drivers: &HashMap<NetRef, usize>,
+    sinks: &[(NetRef, NetSink)],
+) -> Vec<CircuitNet> {
     let order = (0..ir.inputs.len())
         .map(|i| NetRef::Input(saturating_index(i)))
         .chain((0..ir.cells.len()).map(|i| NetRef::Cell(saturating_index(i))));
@@ -381,7 +428,7 @@ fn tiles_and_nets(ir: &EditionNetlistIr, coupled: &Coupled) -> (Vec<PlacedTile>,
             wire: crate::placement_ir::Wire::default(),
         });
     }
-    (tiles, nets)
+    nets
 }
 
 /// The circuit of `ir` under the struct `structure`, its cells laid `margin` columns apart.
@@ -392,7 +439,7 @@ fn place(
     region: Reservation,
     coupled: Coupled,
 ) -> Result<CircuitLayout, Diagnostic> {
-    let (tiles, nets) = tiles_and_nets(ir, &coupled);
+    let (tiles, nets, riser_signals) = tiles_and_nets(ir, &coupled);
     let mut layout = CircuitLayout {
         edition: ir.edition,
         structure: structure.to_owned(),
@@ -402,6 +449,7 @@ fn place(
         nets,
         blocks: Vec::new(),
         signal_defs: ir.signal_defs.clone(),
+        riser_signals,
         surface: coupled.surface,
         margin: MARGINS[0],
     };
