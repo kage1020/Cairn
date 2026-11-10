@@ -186,7 +186,7 @@ fn dispatch_synth_stage(
     if report_diagnostics(file, source, lines, &crossing.diagnostics) {
         return Err(ExitCode::from(1));
     }
-    if report_diagnostics(file, source, lines, &verify_latency(ir, &crossing.scoped)) {
+    if report_diagnostics(file, source, lines, &verify_latency(&crossing.scoped, ir)) {
         return Err(ExitCode::from(1));
     }
     match stage {

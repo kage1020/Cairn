@@ -646,6 +646,7 @@ fn every_phase_round_trips_through_the_flat_wire_form() {
         bridged,
     ] {
         let mut cell = probe_cell(phase);
+        cell.cell = EditionCell::JavaTorchMux;
         cell.drivers = vec![
             CellPortDriver {
                 port: PortName::Sel,
@@ -833,6 +834,25 @@ fn malformed_dumps_are_refused_rather_than_guessed_at() {
                 r#"{{{crossing},"drivers":[{driver_a}],"buffer_coords":[{{"port":"a","coord":{{"x":0,"y":0,"z":2}},"junk":7}}],{coord}}}"#
             ),
             "unknown field `junk`",
+        ),
+        (
+            format!(
+                r#"{{"stage":"placement","cell":"java_torch_latch","drivers":[{driver_a}],{coord}}}"#
+            ),
+            "`drivers[0]` feeds port `a`, which a `TorchLatch` does not have; its ports are set, \
+             reset",
+        ),
+        (
+            format!(
+                r#"{{"stage":"placement","cell":{{"java_repeater_delay":{{"stages":0}}}},"drivers":[],{coord}}}"#
+            ),
+            "invalid value: integer `0`, expected a nonzero u32",
+        ),
+        (
+            format!(
+                r#"{{"stage":"placement","cell":{{"java_repeater_delay":{{"stages":3,"bogus":true}}}},"drivers":[],{coord}}}"#
+            ),
+            "unknown field `bogus`, expected `stages`",
         ),
     ] {
         let err = read_back(&json).expect_err(&json);

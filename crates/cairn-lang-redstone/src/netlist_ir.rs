@@ -3,6 +3,7 @@
 
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
+use cairn_lang_core::logic_library::StageCount;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -45,15 +46,15 @@ pub enum LogicalCell {
     Mux,
     /// RS latch whose `reset` wins over its `set`.
     Latch,
-    /// `stages` repeaters in series.
+    /// Its input, `stages` stages later.
     Delay {
-        /// Repeaters in series.
-        stages: u32,
+        /// Stages the input is delayed by.
+        stages: StageCount,
     },
     /// On for at most the first `stages` stages of each time its input is on.
     Pulse {
         /// Stages the pulse lasts at most.
-        stages: u32,
+        stages: StageCount,
     },
     /// On for one stage each time its input turns on.
     EdgeRising,
@@ -62,7 +63,7 @@ pub enum LogicalCell {
     /// Toggling every `stages` times its input turns on.
     Counter {
         /// Times the input turns on between two toggles.
-        stages: u32,
+        stages: StageCount,
     },
 }
 

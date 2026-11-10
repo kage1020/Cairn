@@ -242,7 +242,8 @@ pub(crate) enum Command {
             crossing legalization over the delayed IR and fills every cell's `buffer_coords` with \
             the coord of the buffer repeater each driver segment passes through (a repeater this \
             net already placed is recorded rather than duplicated, so one block can be named by \
-            several segments). Every cell of the four Placement IR stages carries a `\"stage\"` \
+            several segments), then checks every `assert latency` against the legalized circuit \
+            and prints no IR when one fails. Every cell of the four Placement IR stages carries a `\"stage\"` \
             key echoing the flag value that produced the dump (`placement` / `route` / `delay` / \
             `crossing`), so a consumer reads the stage off the output instead of inferring it from \
             which optional keys are present. The `--edition <java|bedrock>` flag is required in \
