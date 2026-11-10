@@ -651,8 +651,9 @@ enters each by, and the repeaters on each wire. A `<to>` that does not depend on
 every edition, since no path carries a change from one to the other, and synth refuses it with the
 same code before an edition is chosen. Dependence is read on the Logic IR, where a gate written
 twice is one gate and `logic sig.d = sig.c` gives both names one net: there, two names on one net
-depend on each other, and the path between them takes no ticks. Place-and-route does not read a bound, so it is met in the
-source: relaxed, or met by a path through fewer cells or along a wire with fewer repeaters.
+depend on each other, and the path between them takes no ticks. Place-and-route does not read a
+bound, so it is met in the source: relaxed, or met by a path through fewer cells or along a wire
+with fewer repeaters.
 `cairn synth --experimental-logic-synth --stage crossing` checks every bound after crossing
 legalization and prints no IR when one fails.
 
