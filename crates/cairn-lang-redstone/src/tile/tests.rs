@@ -370,7 +370,7 @@ fn delay_follows_its_operand_two_ticks_a_stage_later() {
 /// `pulse(x, n)` is on from two ticks in for its first `n` stages, or until `x` turns off.
 #[test]
 fn pulse_is_on_for_its_stages_or_until_its_operand_falls() {
-    for stages in [1, 2, 3, 4, 5, 8, 15, MAX_PULSE_STAGES] {
+    for stages in [1, 2, 3, 4, 5, MAX_PULSE_STAGES] {
         for (rotation, order) in variants() {
             let cell = EditionCell::JavaTorchPulse {
                 stages: stage_count(stages),
@@ -403,6 +403,103 @@ fn pulse_is_on_for_its_stages_or_until_its_operand_falls() {
                 assert_eq!(on, [2, 3], "{stages} cut short");
             }
         }
+    }
+}
+
+/// Asserts that `cell`, fed each of `patterns` as stages `x` is on and off by turns, puts out at
+/// every tick what `expected` says of the pattern and the tick, in every rotation and order.
+fn assert_follows(
+    cell: EditionCell,
+    patterns: &[Vec<u64>],
+    expected: impl Fn(&[u64], u64) -> bool,
+) {
+    for pattern in patterns {
+        for (rotation, order) in variants() {
+            let mut bench = Bench::cell(cell, rotation, order);
+            let mut trace = Vec::new();
+            for (index, &held) in pattern.iter().chain(&[16]).enumerate() {
+                bench.set(a(), index % 2 == 0 && index < pattern.len());
+                trace.extend(bench.run(2 * held));
+            }
+            let wanted: Vec<bool> = (1..=trace.len() as u64)
+                .map(|tick| expected(pattern, tick))
+                .collect();
+            assert_eq!(trace, wanted, "{cell:?} {pattern:?} {rotation:?} {order:?}");
+        }
+    }
+}
+
+/// Whether `x` was on `back` ticks before `tick` under `pattern`, as [`assert_follows`] feeds it.
+fn was_on(pattern: &[u64], tick: u64, back: u64) -> bool {
+    let Some(at) = tick.checked_sub(back) else {
+        return false;
+    };
+    let mut start = 0;
+    for (index, &held) in pattern.iter().enumerate() {
+        start += 2 * held;
+        if at < start {
+            return index % 2 == 0;
+        }
+    }
+    false
+}
+
+/// Operands that change every stage, or hold a change for a stage or two before turning back.
+fn patterns(stages: u32) -> [Vec<u64>; 4] {
+    let n = u64::from(stages);
+    [
+        vec![1, 1, 1, 1, n + 2],
+        vec![n + 2, 1, n + 2],
+        vec![1, n, 1, 2, 3],
+        vec![2, n + 1, 2],
+    ]
+}
+
+/// `delay(x, n)` passes every change of an `x` that holds each for a stage, unstretched.
+#[test]
+fn delay_passes_each_change_held_for_a_stage_as_it_came() {
+    for stages in [1, 2, 3, 5] {
+        let count = stage_count(stages);
+        let ticks = 2 * u64::from(stages);
+        for cell in [
+            EditionCell::JavaRepeaterDelay { stages: count },
+            EditionCell::BedrockRepeaterDelay { stages: count },
+        ] {
+            assert_follows(cell, &patterns(stages), |pattern, tick| {
+                was_on(pattern, tick, ticks)
+            });
+        }
+    }
+}
+
+/// `pulse(x, n)` is on two ticks later while `x` is on and was off `n` stages before, so an `x`
+/// that turns on again sooner gets only what is left of its pulse.
+#[test]
+fn pulse_is_on_while_its_operand_is_on_and_was_off_n_stages_before() {
+    for stages in [1, 2, 3, 5] {
+        let count = stage_count(stages);
+        let ticks = 2 * u64::from(stages) + 2;
+        for cell in [
+            EditionCell::JavaTorchPulse { stages: count },
+            EditionCell::BedrockTorchPulse { stages: count },
+        ] {
+            assert_follows(cell, &patterns(stages), |pattern, tick| {
+                was_on(pattern, tick, 2) && !was_on(pattern, tick, ticks)
+            });
+        }
+    }
+}
+
+/// `edge_falling(x)` is on a tick later while `x` is off and was on a stage before.
+#[test]
+fn edge_falling_is_on_while_its_operand_is_off_and_was_on_a_stage_before() {
+    for cell in [
+        EditionCell::JavaTorchEdgeFalling,
+        EditionCell::BedrockTorchEdgeFalling,
+    ] {
+        assert_follows(cell, &patterns(1), |pattern, tick| {
+            !was_on(pattern, tick, 1) && was_on(pattern, tick, 3)
+        });
     }
 }
 

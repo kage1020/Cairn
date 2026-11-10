@@ -10,14 +10,16 @@ use crate::part::Part;
 
 /// The most stages a `pulse` cell holds: its inverted operand runs one block of dust past each of
 /// its repeaters, and dust carries 15 blocks.
-pub const MAX_PULSE_STAGES: u32 = 25;
+pub const MAX_PULSE_STAGES: u32 = 6;
 
 /// The most stages a `counter` cell holds: its operand and the operand inverted each run along
 /// every stage on one strand of dust.
 pub const MAX_COUNTER_STAGES: u32 = 4;
 
-/// The most ticks one repeater delays.
-const MAX_REPEATER_DELAY: u32 = 4;
+/// The delay of each repeater a `delay` or `pulse` runs its operand through: a repeater stretches
+/// a change shorter than its delay, and one as long meets its own tick, so only a one-tick
+/// repeater passes a change held for a stage as it came under every update order.
+const MACRO_REPEATER_TICKS: u8 = 1;
 
 /// Which input a tile's port takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -280,19 +282,12 @@ pub(crate) fn cell_template(cell: EditionCell) -> Template {
 
 /// The columns a `delay` of `stages` takes in its one row: its port, its repeaters and its output.
 pub(crate) fn delay_columns(stages: u32) -> u64 {
-    (2 * u64::from(stages)).div_ceil(u64::from(MAX_REPEATER_DELAY)) + 2
+    (2 * u64::from(stages)).div_ceil(u64::from(MACRO_REPEATER_TICKS)) + 2
 }
 
-/// Repeater delays, each at most [`MAX_REPEATER_DELAY`], that add up to `ticks`.
-fn delays(ticks: u32) -> Vec<u8> {
-    let ticks = ticks.max(1);
-    let count = ticks.div_ceil(MAX_REPEATER_DELAY);
-    (0..count)
-        .map(|i| {
-            let left = ticks - i * MAX_REPEATER_DELAY;
-            u8::try_from(left.min(MAX_REPEATER_DELAY)).expect("a delay of at most 4 fits u8")
-        })
-        .collect()
+/// How many repeaters of [`MACRO_REPEATER_TICKS`] take `ticks` in all.
+fn repeaters(ticks: u32) -> i32 {
+    i32::try_from(ticks.div_ceil(u32::from(MACRO_REPEATER_TICKS))).unwrap_or(i32::MAX)
 }
 
 /// `count` as a coordinate.
@@ -461,22 +456,21 @@ fn mux() -> Template {
 fn delay(stages: u32) -> Template {
     let mut builder = Builder::default();
     builder.port(-1, 0, PortName::A, 1);
-    let delays = delays(stages.saturating_mul(2));
-    for (i, ticks) in delays.iter().enumerate() {
-        builder.repeater(coord(i), 0, Face::East, *ticks);
+    let r = repeaters(stages.saturating_mul(2));
+    for x in 0..r {
+        builder.repeater(x, 0, Face::East, MACRO_REPEATER_TICKS);
     }
-    builder.out(coord(delays.len()), 0, 0).done()
+    builder.out(r, 0, 0).done()
 }
 
 /// The NOR of `not a` and of `a` through repeaters of a tick more than `stages` stages, matching
 /// the inverter, so it is on for `stages` stages.
 fn pulse(stages: u32) -> Template {
-    let delays = delays(stages.saturating_mul(2).saturating_add(1));
-    let r = coord(delays.len());
+    let r = repeaters(stages.saturating_mul(2).saturating_add(1));
     let mut builder = Builder::default();
     builder.port(-1, 0, PortName::A, 3).dust(0, 0);
-    for (i, ticks) in delays.iter().enumerate() {
-        builder.repeater(coord(i) + 1, 0, Face::East, *ticks);
+    for x in 1..=r {
+        builder.repeater(x, 0, Face::East, MACRO_REPEATER_TICKS);
     }
     builder
         .dust(r + 1, 0)

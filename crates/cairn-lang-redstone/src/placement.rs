@@ -254,17 +254,19 @@ fn refusal(
     region: &intent::CircuitRegion,
 ) -> Option<Diagnostic> {
     for cell in &ir.cells {
-        let (stages, max, what) = match cell.cell {
+        let (stages, max, what, instead) = match cell.cell {
             EditionCell::JavaTorchPulse { stages } | EditionCell::BedrockTorchPulse { stages } => (
                 stages,
                 MAX_PULSE_STAGES,
                 "a `pulse`'s inverted operand runs one block of dust past each of its repeaters",
+                ", or write a longer pulse of `x` as `x and not delay(x, n)`",
             ),
             EditionCell::JavaRepeaterCounter { stages }
             | EditionCell::BedrockRepeaterCounter { stages } => (
                 stages,
                 MAX_COUNTER_STAGES,
                 "a `counter`'s operand and the operand inverted run past every stage on one strand of dust",
+                "",
             ),
             _ => continue,
         };
@@ -276,9 +278,7 @@ fn refusal(
                     "{scope} a {name} of {stages} stages cannot be built: {what}, so it holds at most {max} stages before the dust goes dark",
                     name = cell.cell.name(),
                 ),
-                format!(
-                    "Fix: use at most {max} stages, or chain two macros, each of at most {max}"
-                ),
+                format!("Fix: use at most {max} stages{instead}"),
             ));
         }
     }

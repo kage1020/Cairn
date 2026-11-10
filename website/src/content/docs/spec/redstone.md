@@ -328,10 +328,10 @@ its Edition Cell's ticks, counted as every cell's are ([§14.6](#146-edition-dif
 | `counter(x, n)` | turns on the `n`-th time `x` turns on and off the `2n`-th, toggling every `n` times, so `counter(x, 1)` is a toggle |
 
 `reset` wins: a `latch` whose `set` and `reset` are both on is off, and stays off when they turn off
-together. A `latch` and a `counter` act on an operand that holds each change for at least a stage,
-and what they do with one that changes back sooner is not specified; an edge or `pulse(x, 1)` is on
-for a whole stage, so either can drive one. A `latch` and a `counter` start off, as every macro does
-when the structure is built: the tile tier writes each cell in the state it settles to with its
+together. Every macro acts on an operand that holds each change for at least a stage, and what one
+does with an operand that changes back sooner is not specified; an edge and `pulse(x, 1)` are on for
+a whole stage, so either can drive any macro. A `latch` and a `counter` start off, as every macro
+does when the structure is built: the tile tier writes each cell in the state it settles to with its
 operands off.
 
 **Delay is carried in neither the Logic IR nor the Netlist IR. It is determined for the first time
@@ -445,12 +445,12 @@ left. Every choice in them is ordered, so one source lays one circuit.
    is kept. A cell with no free spot at any margin is `E_ROUTE_CONGESTION` at its `logic` line, and
    the message names the columns its tile needs.
 
-   A `pulse` of more than 25 stages or a `counter` of more than 4 is `E_ATTENUATION_LIMIT` at its
+   A `pulse` of more than 6 stages or a `counter` of more than 4 is `E_ATTENUATION_LIMIT` at its
    `logic` line before anything is laid. The one's operand runs a block of dust past each of its
-   repeaters, and the other's past every stage, on one strand that goes dark past 15 blocks. A
-   `delay` lays its repeaters in one row, a repeater for each two stages, so one whose row with its
-   port and output is longer than both sides of the struct is `E_ROUTE_CONGESTION` at its `logic`
-   line before its cells are laid.
+   repeaters, and the other's past every stage, on one strand that goes dark past 15 blocks; the
+   message offers `x and not delay(x, n)` for a longer pulse. A `delay` lays its repeaters in one
+   row, two for each stage, so one whose row with its port and output is longer than both sides of
+   the struct is `E_ROUTE_CONGESTION` at its `logic` line before its cells are laid.
 2. **Routing.** Each net's dust runs from the tile that drives it to every input it feeds, along a
    layer and up and down staircases. It takes the cheapest path from the net's dust so far to the
    nearest input it has not reached, a step along a layer costing 1 and a step up or down 2. A step
@@ -532,8 +532,8 @@ its inputs carries ([§14.5](#145-place-and-route)):
 | NOR | `TorchNOR`, one torch on a block both operands power | the same | 1 | restores |
 | XOR | `TorchXOR`, the torch NORs of `a` and of `b`, each with the NOR of the two, onto a common line | the same | 2 | restores |
 | MUX | `TorchMUX`, the torch NORs of `sel` and `not a` and of `not sel` and `not b`, onto a common line | the same | 2 | restores |
-| DELAY `n` | `RepeaterDelay`, repeaters in series of `2n` ticks in all | the same | `2n` | restores |
-| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through repeaters of `2n + 1` ticks | the same | `2n + 2` | restores |
+| DELAY `n` | `RepeaterDelay`, `2n` one-tick repeaters in series | the same | `2n` | restores |
+| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through `2n + 1` one-tick repeaters | the same | `2n + 2` | restores |
 | EDGE_RISING | `TorchEdgeRising`, a `TorchPulse` of one stage | the same | 4 | restores |
 | EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and of `not a` through a repeater | the same | 3 | restores |
 | LATCH | `TorchLatch`, two torch NORs each powered by the other | the same | `set` 4, `reset` 5 | restores |
@@ -546,6 +546,11 @@ inverted.
 
 A macro's cell is built of torches and repeaters alone, the same on both editions, and a `latch` or
 `counter` holds its feedback inside its own cell:
+
+- **`RepeaterDelay`**'s repeaters, and **`TorchPulse`**'s, take a tick each. A repeater stretches a
+  change shorter than its delay to its delay, and a change as long as its delay ends on the tick
+  the repeater would follow it, where the update order decides, so only one-tick repeaters pass
+  every change held for a stage as it came.
 
 - **`TorchPulse`** turns on once `not a` has turned off and off once `a` comes out of its
   repeaters, which take a tick more than its `n` stages to match the inverter, so it is on for `n`
