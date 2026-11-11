@@ -996,12 +996,19 @@ class BlockKind(unittest.TestCase):
         with self.assertRaises(load.Refused):
             registry.block_kind("cobblestone_wall", FENCE_STATES, TAGS)
 
-    def test_dust_is_the_block_whose_sides_climb(self):
+    def test_dust_is_redstone_wire_whatever_order_its_values_come_in(self):
         power = {"power": [str(level) for level in range(16)]}
         dust = {**registry.KIND_STATES["redstone_dust"], **power}
         self.assertEqual(registry.block_kind("redstone_wire", dust, TAGS), "redstone_dust")
+        reordered = {**{side: ["none", "side", "up"] for side in registry.SIDES}, **power}
+        self.assertEqual(registry.block_kind("redstone_wire", reordered, TAGS), "redstone_dust")
         flat = {side: ["side", "none"] for side in registry.SIDES}
         self.assertIsNone(registry.block_kind("tripwire", flat, TAGS))
+
+    def test_redstone_wire_without_dusts_states_is_refused(self):
+        flat = {side: ["side", "none"] for side in registry.SIDES}
+        with self.assertRaises(load.Refused):
+            registry.block_kind("redstone_wire", flat, TAGS)
 
 
 SOURCE_TAGS = {"buttons": {"oak_button"}, "pressure_plates": {"stone_pressure_plate"}}
@@ -1037,15 +1044,29 @@ class DustFaces(unittest.TestCase):
             registry.Lookup(
                 ("facing",),
                 (
-                    ("down", ("up",)),
+                    ("down", ()),
                     ("east", ("west",)),
                     ("north", ("south",)),
                     ("south", ("north",)),
-                    ("up", ("down",)),
+                    ("up", ()),
                     ("west", ("east",)),
                 ),
             ),
         )
+
+
+class DustNames(unittest.TestCase):
+    def report(self, names) -> dict:
+        return {f"minecraft:{name}": report_block({}, {}) for name in names}
+
+    def test_a_report_holding_every_named_block_and_a_lightning_rod_passes(self):
+        registry.check_dust_names(self.report((*registry.DUST_NAMED, "waxed_lightning_rod")))
+
+    def test_a_report_missing_a_named_block_or_every_lightning_rod_is_refused(self):
+        named = [name for name in registry.DUST_NAMED if name != "observer"]
+        for names in ((*named, "lightning_rod"), registry.DUST_NAMED):
+            with self.subTest(names=names), self.assertRaises(load.Refused):
+                registry.check_dust_names(self.report(names))
 
 
 FULL_MODEL = {

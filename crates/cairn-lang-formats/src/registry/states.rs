@@ -768,6 +768,9 @@ pub struct BedrockForm {
     pub waterlogged: bool,
     /// Each state the entry asks for that Bedrock does not carry.
     pub dropped: Vec<DroppedState>,
+    /// Each state the entry names that Bedrock does not carry because it works the state out
+    /// itself, which is lost where a member wrote it.
+    pub rederived: Vec<DroppedState>,
 }
 
 /// One Java state value a [`BedrockForm`] does not carry.
@@ -944,7 +947,7 @@ impl VersionStates<'_> {
         if unknown.is_none()
             && let Some((bedrock, at)) = forms.iter().find(|(_, at)| self.family(*at).holds(&full))
         {
-            return Ok(self.form(bedrock, id, self.family(*at), &full));
+            return Ok(self.form(bedrock, id, self.family(*at), &full, given));
         }
         // The refused pairs may hold these states, so no family's domain can rule them out.
         if self.map.refused_from.contains(id) {
@@ -1058,7 +1061,7 @@ impl VersionStates<'_> {
             };
             full.insert(key.clone(), value.clone());
         }
-        Ok(self.form(id, java, family, &full))
+        Ok(self.form(id, java, family, &full, given))
     }
 
     /// Why no Java block mapped onto `id` takes `given`: a property or value none has, else that
@@ -1123,6 +1126,7 @@ impl VersionStates<'_> {
         java: &str,
         family: &Family,
         full: &IndexMap<String, String>,
+        given: &IndexMap<String, String>,
     ) -> BedrockForm {
         let states = family
             .states
@@ -1140,26 +1144,34 @@ impl VersionStates<'_> {
                 (name.clone(), value)
             })
             .collect();
-        let dropped = family
-            .dropped
-            .iter()
-            .filter(|key| full[*key] != family.defaults[*key])
-            .filter_map(|key| {
-                // INVARIANT(dropped-classified): the loader refuses a dropped key without a row.
-                let (kind, reason) = self.index.sensitivity.get(key)?.row(java)?;
-                (*kind == SensitivityKind::MissingState).then(|| DroppedState {
-                    key: key.clone(),
-                    value: full[key].clone(),
-                    reason: reason.clone(),
-                })
-            })
-            .collect();
+        let mut dropped = Vec::new();
+        let mut rederived = Vec::new();
+        for key in &family.dropped {
+            // INVARIANT(dropped-classified): the loader refuses a dropped key without a row.
+            let Some((kind, reason)) = self.index.sensitivity.get(key).and_then(|k| k.row(java))
+            else {
+                continue;
+            };
+            let state = || DroppedState {
+                key: key.clone(),
+                value: full[key].clone(),
+                reason: reason.clone(),
+            };
+            match kind {
+                SensitivityKind::MissingState if full[key] != family.defaults[key] => {
+                    dropped.push(state());
+                }
+                SensitivityKind::Derived if given.contains_key(key) => rederived.push(state()),
+                SensitivityKind::MissingState | SensitivityKind::Derived => {}
+            }
+        }
         BedrockForm {
             id: bedrock.to_owned(),
             states,
             waterlogged: full.get(WATER_LAYER_STATE).is_some_and(|v| v == "true")
                 || self.index.in_water.contains(java),
             dropped,
+            rederived,
         }
     }
 }
@@ -1215,6 +1227,7 @@ fn bare_or(
             states: Vec::new(),
             waterlogged: false,
             dropped: Vec::new(),
+            rederived: Vec::new(),
         })
     } else {
         Err(StateRefusal::Unmapped { reason })

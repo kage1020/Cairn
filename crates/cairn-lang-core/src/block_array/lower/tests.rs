@@ -85,6 +85,7 @@ fn one_placed_row(
             block_entities: Vec::new(),
             entities: Vec::new(),
             source_scope: key.clone(),
+            derived: Vec::new(),
         },
     );
     let mut placed = IndexMap::new();

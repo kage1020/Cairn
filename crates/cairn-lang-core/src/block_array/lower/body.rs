@@ -1,7 +1,7 @@
 //! Lowering one `struct` or `place` body: sizing its volume, then painting
 //! its members phase by phase.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use indexmap::IndexMap;
 
@@ -13,11 +13,12 @@ use crate::resolve::ScopeResolution;
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{
-    BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex, ResolvedBlock,
+    BlockArray, Dims, MAX_STRUCTURE_VOLUME, Palette, PaletteFull, PaletteIndex, ResolvedBlock,
     ResolvedMember,
 };
 
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
+use super::cell_box::Cell;
 use super::circuit::{
     patched_actuator, recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector,
 };
@@ -126,7 +127,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         written: Written::of(&written_members, interior_w, interior_h),
         patched,
     };
-    let (canvas, split_doors) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
+    let (canvas, split_doors, derived) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
     // Before anything reads the grid: a voxel painted after the palette filled holds air.
     let mut palette = match palette.into_palette() {
@@ -164,16 +165,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         body.scope_label,
     );
 
-    let mut array = BlockArray {
-        dims,
-        palette,
-        voxels,
-        block_entities: Vec::new(),
-        entities: Vec::new(),
-        source_scope: body.source_scope,
-    };
-    // After the prune, so dropped entries are not sorted and the grid is renumbered once.
-    array.canonicalize_palette();
+    let array = finished_array(dims, palette, voxels, body.source_scope, &derived);
     let members = resolved_members(&flattened, canvas.owners(), &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));
@@ -185,6 +177,56 @@ pub(super) fn lower_body_to_block_array<'a>(
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// The body's array over the pruned `voxels`, its palette put in canonical order, with the keys
+/// `derived` set at its cells.
+fn finished_array(
+    dims: Dims,
+    palette: Palette,
+    voxels: Vec<PaletteIndex>,
+    source_scope: String,
+    derived: &HashMap<Cell, Vec<String>>,
+) -> BlockArray {
+    let mut array = BlockArray {
+        dims,
+        palette,
+        voxels,
+        block_entities: Vec::new(),
+        entities: Vec::new(),
+        source_scope,
+        derived: Vec::new(),
+    };
+    // After the prune, so dropped entries are not sorted and the grid is renumbered once.
+    array.canonicalize_palette();
+    array.derived = derived_by_slot(&array, derived);
+    array
+}
+
+/// Per slot of `array`, the keys `derived` set at every cell that holds it, without the run of
+/// slots past the last that has one.
+fn derived_by_slot(array: &BlockArray, derived: &HashMap<Cell, Vec<String>>) -> Vec<Vec<String>> {
+    if derived.is_empty() {
+        return Vec::new();
+    }
+    let mut by_slot: Vec<Option<Vec<String>>> = vec![None; array.palette.entries.len()];
+    for (index, slot) in array.voxels.iter().enumerate() {
+        let cell = array
+            .dims
+            .position(index)
+            .expect("a voxel's index lies in the dims it was laid out by");
+        let here = derived.get(&cell).map_or(&[][..], Vec::as_slice);
+        match &mut by_slot[usize::from(slot.0)] {
+            Some(keys) => keys.retain(|key| here.contains(key)),
+            unseen @ None => *unseen = Some(here.to_vec()),
+        }
+    }
+    let mut by_slot: Vec<Vec<String>> =
+        by_slot.into_iter().map(Option::unwrap_or_default).collect();
+    while by_slot.last().is_some_and(Vec::is_empty) {
+        by_slot.pop();
+    }
+    by_slot
 }
 
 /// The spans of the doors and windows of `flattened` that `wrote` says cut their opening.
@@ -268,13 +310,13 @@ fn resolved_members(
 
 /// Paint one body's members onto a fresh canvas, phase by phase in `spec/compilation` "Phase
 /// evaluation" order, then set the connection states the painted blocks derive; with the `door`
-/// members left holding one of their two cells.
+/// members left holding one of their two cells, and the keys derived at each cell.
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     diagnostics: &mut Vec<Diagnostic>,
-) -> (Canvas, Vec<u32>) {
+) -> (Canvas, Vec<u32>, HashMap<Cell, Vec<String>>) {
     let PhaseBuckets { by_phase, phases } = buckets;
     let walls: Vec<u32> = by_phase[Phase::Massing.index()]
         .iter()
@@ -296,11 +338,11 @@ fn paint_phases(
             Phase::Fluids => pour_fluids(bucket, ctx, palette, &mut canvas, diagnostics),
         }
     }
-    if let Some(registry) = ctx.registry {
-        derive_connections(&mut canvas, palette, registry);
-    }
+    let derived = ctx.registry.map_or_else(HashMap::new, |registry| {
+        derive_connections(&mut canvas, palette, registry)
+    });
     let split = split_doors(&hung, &canvas);
-    (canvas, split)
+    (canvas, split, derived)
 }
 
 /// The paint set filed by phase, each entry keeping its index in the flattened list.

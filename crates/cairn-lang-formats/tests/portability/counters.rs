@@ -160,6 +160,7 @@ fn one_block_array(scope: &str, states: Vec<BlockState>) -> BlockArray {
         block_entities: Vec::new(),
         entities: Vec::new(),
         source_scope: scope.to_owned(),
+        derived: Vec::new(),
     }
 }
 
@@ -214,7 +215,7 @@ fn a_state_some_version_maps_is_portable_for_the_edition() {
         properties: facing("north"),
     };
     let map = states();
-    let at = |version| translate_states(&map.at(version).expect("mapped"), &door);
+    let at = |version| translate_states(&map.at(version).expect("mapped"), &door, &[]);
     assert!(
         matches!(at("1.0"), Err(BedrockStateError::Unmapped { .. })),
         "premise: 1.0 has no form for the door",
@@ -767,14 +768,14 @@ fn a_value_only_a_later_versions_map_holds_is_unmapped_before_it_and_no_leak() {
     assert_eq!(
         report.counts(),
         PortabilityCounts {
-            portable: 1,
-            degraded: 0,
+            portable: 0,
+            degraded: 1,
             unsupported: 0,
         },
     );
     let map = states.at("1.0").expect("1.0 has a map");
     assert_eq!(
-        translate_states(&map, &note_block("trumpet")).expect_err("unmapped at 1.0"),
+        translate_states(&map, &note_block("trumpet"), &[]).expect_err("unmapped at 1.0"),
         BedrockStateError::Unmapped {
             id: "minecraft:noteblock".to_owned(),
             properties: "instrument=trumpet".to_owned(),
@@ -802,6 +803,45 @@ fn a_value_only_a_later_versions_map_holds_is_unmapped_before_it_and_no_leak() {
             key: "instrument".to_owned(),
             value: "kazoo".to_owned(),
             valid: "harp, bell, trumpet".to_owned(),
+        }],
+    );
+}
+
+#[test]
+fn a_state_bedrock_works_out_itself_degrades_an_entry_only_where_no_lowering_derived_it() {
+    let (blocks, states) = note_block_pack();
+    let report = |derived: Vec<Vec<String>>| {
+        let mut ir = one_state_ir(vec![note_block("bell")]);
+        ir.structures["struct::probe"].derived = derived;
+        portability_for_bedrock(
+            &ir,
+            &blocks,
+            &no_aliases(),
+            &AbsentIndex::empty(),
+            Some(&states),
+        )
+        .expect("bell is in every version's map")
+    };
+    assert_eq!(
+        report(vec![Vec::new(), vec!["instrument".to_owned()]]).counts(),
+        PortabilityCounts {
+            portable: 1,
+            degraded: 0,
+            unsupported: 0,
+        },
+    );
+    assert_eq!(
+        report(Vec::new()).degraded(),
+        [DegradedEntry {
+            id: "minecraft:noteblock".to_owned(),
+            states: "instrument=bell".to_owned(),
+            dropped: vec![DroppedIntent {
+                key: "instrument".to_owned(),
+                value: "bell".to_owned(),
+                mc_versions: vec!["1.0".to_owned(), "1.2".to_owned()],
+                reason: "the written `instrument=bell` is not kept: Bedrock reads the block below"
+                    .to_owned(),
+            }],
         }],
     );
 }

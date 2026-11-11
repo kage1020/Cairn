@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberRole};
+use crate::intent::Member;
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::BlockState;
@@ -67,7 +67,7 @@ const DUST: Spelled = Spelled {
 
 /// Which of the four parts a line places.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Part {
+pub(super) enum Part {
     Repeater,
     Comparator,
     Torch,
@@ -75,16 +75,6 @@ enum Part {
 }
 
 impl Part {
-    fn of(role: &MemberRole) -> Option<Self> {
-        Some(match role {
-            MemberRole::Repeater => Self::Repeater,
-            MemberRole::Comparator => Self::Comparator,
-            MemberRole::RedstoneTorch => Self::Torch,
-            MemberRole::RedstoneDust => Self::Dust,
-            _ => return None,
-        })
-    }
-
     fn fixture(self) -> Fixture {
         let (keyword, noun) = match self {
             Self::Repeater => ("repeater", "repeater"),
@@ -121,6 +111,7 @@ enum Stand {
 
 /// Place a Tier 0 part in its cell, its blockstate derived from where it stands.
 pub(super) fn fill_part(
+    part: Part,
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
@@ -128,14 +119,6 @@ pub(super) fn fill_part(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Some(part) = Part::of(&member.role) else {
-        debug_assert!(
-            false,
-            "fill_part called on a `{}`, which is no Tier 0 part",
-            member.role.keyword(),
-        );
-        return;
-    };
     let mut unread: Vec<UnreadArgument> = Vec::new();
     let written = read_written(part, member, &mut unread);
     let stand = match place(part, member, &written, y_offset, ctx, palette, canvas) {
@@ -167,10 +150,15 @@ fn unread_consequence(part: Part, key: &str, stand: Stand) -> String {
         ("facing", Part::Torch, Stand::ByWall) => {
             "the redstone torch hangs on the wall it stands by, pointing away from it".to_owned()
         }
-        ("facing", _, _) => format!("the {noun} drives away from the wall it stands by"),
-        ("delay", _, _) => "the repeater is built with `delay=1`".to_owned(),
-        ("mode", _, _) => "the comparator is built with `mode=compare`".to_owned(),
-        _ => "the redstone dust takes its sides from the blocks beside it".to_owned(),
+        ("facing", Part::Repeater | Part::Comparator, _) => {
+            format!("the {noun} drives away from the wall it stands by")
+        }
+        ("delay", Part::Repeater, _) => "the repeater is built with `delay=1`".to_owned(),
+        ("mode", Part::Comparator, _) => "the comparator is built with `mode=compare`".to_owned(),
+        ("connect", Part::Dust, _) => {
+            "the redstone dust takes its sides from the blocks beside it".to_owned()
+        }
+        _ => format!("the {noun} is built as if the line wrote no `{key}=`"),
     }
 }
 
@@ -196,7 +184,11 @@ fn read_written<'m>(
             );
         }
         Part::Torch => {
-            written.facing = ident("facing", "`north`, `south`, `east` or `west`");
+            written.facing = ident(
+                "facing",
+                "a compass face, `north`, `south`, `east` or `west`, at a triple (by a wall the \
+                 torch takes none)",
+            );
         }
         Part::Dust => written.connect = ident("connect", "`none` or `all`"),
     }
@@ -251,10 +243,6 @@ fn place(
         properties.insert("facing".to_owned(), game.as_str().to_owned());
     }
     properties.sort_keys();
-    let block = match (part, stand, facing) {
-        (Part::Torch, Stand::ByWall, _) | (Part::Torch, Stand::Triple, Some(_)) => WALL_TORCH,
-        _ => block,
-    };
     let id = default_block_id(member, ctx.registry, block.token, block.base_id)?;
     let state = BlockState { id, properties };
     // Interned only once the cell exists, so a refusal leaves no palette entry.
@@ -383,7 +371,7 @@ fn turn(
     match (part, stand) {
         (Part::Dust, _) => Ok((block, None)),
         (Part::Torch, Stand::ByWall) => match facing {
-            None => Ok((block, Some(Look::FromTheWall(None)))),
+            None => Ok((WALL_TORCH, Some(Look::FromTheWall(None)))),
             Some(word) => Err(Box::new(diag_invalid_member(
                 member,
                 format!(
@@ -415,13 +403,23 @@ fn turn(
                 )));
             };
             if let Some(face) = Face::from_name(word).filter(|face| COMPASS_FACES.contains(face)) {
+                let block = if part == Part::Torch {
+                    WALL_TORCH
+                } else {
+                    block
+                };
                 return Ok((block, Some(Look::Compass(face))));
             }
             let mut notes = vec![COMPASS.to_owned()];
-            if Toward::HORIZONTAL
+            let from_a_wall = Toward::HORIZONTAL
                 .iter()
-                .any(|toward| toward.name() == word)
-            {
+                .any(|toward| toward.name() == word);
+            if from_a_wall && part == Part::Torch {
+                notes.push(format!(
+                    "`{word}` names a way from a wall, which a redstone torch does not take: by a \
+                     wall it hangs on the wall and points away from it, with no `facing=`"
+                ));
+            } else if from_a_wall {
                 notes.push(format!(
                     "`{word}` names a way from a wall, and a part at a coordinate triple stands by \
                      none; anchor it by a wall with `at=<side>.outside` or `at=inside.<side>` to \

@@ -256,13 +256,13 @@ impl TargetRegistry for PackView<'_> {
         if let Some(version) = self.mc_version {
             return self.joins_at(version, state);
         }
-        // Unpinned, a state is read only as every version that can say agrees on it.
+        // Unpinned, each thing the rules ask is read as every version that can say agrees on it.
         let mut said = self
             .connections
             .versions()
             .filter_map(|version| self.joins_at(version, state));
         let first = said.next()?;
-        said.all(|joins| joins == first).then_some(first)
+        said.try_fold(first, agreed)
     }
 
     fn holds_water(&self, state: &BlockState) -> Option<bool> {
@@ -1480,6 +1480,22 @@ fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError>
         previous = Some(entry);
     }
     Ok(())
+}
+
+/// What `a` and `b` agree on, each thing they disagree on read as nothing, or `None` when they
+/// are different kinds of connecting block.
+fn agreed(a: Joins, b: Joins) -> Option<Joins> {
+    fn same<T: PartialEq + Default + Copy>(a: T, b: T) -> T {
+        if a == b { a } else { T::default() }
+    }
+    (a.kind == b.kind).then(|| Joins {
+        kind: a.kind,
+        sturdy: same(a.sturdy, b.sturdy),
+        covers: same(a.covers, b.covers),
+        never_joined_by_face: same(a.never_joined_by_face, b.never_joined_by_face),
+        raises_post: same(a.raises_post, b.raises_post),
+        dust: same(a.dust, b.dust),
+    })
 }
 
 #[cfg(test)]

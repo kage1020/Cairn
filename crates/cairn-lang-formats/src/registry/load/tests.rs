@@ -1708,7 +1708,10 @@ fn an_unpinned_view_reads_a_block_as_the_versions_declaring_it_agree_and_as_noth
         id: format!("minecraft:{id}"),
         properties: IndexMap::new(),
     };
-    assert_eq!(pack.view(None).joins(&state("oak_slab")), None);
+    assert_eq!(
+        pack.view(None).joins(&state("oak_slab")),
+        Some(Joins::default())
+    );
     assert_eq!(
         pack.view(Some("1.21.4")).joins(&state("oak_slab")),
         Some(Joins {
@@ -1859,4 +1862,30 @@ fn every_builtin_absence_lists_each_spelling_the_other_pack_declares_for_its_blo
             .collect();
         assert_eq!(missing, [] as [&str; 0], "{edition}'s absences");
     }
+}
+
+#[test]
+fn two_reads_agree_on_what_they_share_and_on_nothing_else() {
+    use cairn_lang_core::block_array::{Covers, Face, Faces, JoinKind};
+    let sides = Faces::NONE.with(Face::North).with(Face::South);
+    let read = |covers: Covers| Joins {
+        sturdy: sides,
+        covers,
+        raises_post: true,
+        dust: sides,
+        ..Joins::default()
+    };
+    let post = Covers::default()
+        .with("post")
+        .expect("`post` is a part of a wall");
+    assert_eq!(
+        agreed(read(post), read(Covers::default())),
+        Some(read(Covers::default())),
+    );
+    assert_eq!(agreed(read(post), read(post)), Some(read(post)));
+    let pane = Joins {
+        kind: Some(JoinKind::Pane),
+        ..Joins::default()
+    };
+    assert_eq!(agreed(pane, Joins::default()), None);
 }

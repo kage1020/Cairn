@@ -153,22 +153,28 @@ the Bedrock blocks GeyserMC always places in water (`kelp`, `seagrass`, `bubble_
 kin), whose Java blocks have no `waterlogged`.
 
 What dropping a property costs is not in GeyserMC's mappings, so `sensitivity` is written by hand,
-one row per property and the blocks it covers, or every other block that drops it. A
-`missing_state` loses a value other than the Java default (a stair's `shape` up to 1.21.60), and a
-`derived` one loses nothing, because Bedrock works it out itself (a fence's connections). Its
-`reason` is the sentence `W_INTENT_DEGRADED` prints ([§10.7](#107-java--bedrock-portability)). The
-loader refuses a dropped property no row classifies, and the extractor a row nothing drops.
+one row per property and the blocks it covers, or every other block that drops it. A `missing_state`
+loses a value other than the Java default (a stair's `shape` up to 1.21.60), and a `derived` one
+loses nothing the lowering derived, because Bedrock works it out itself (a fence's connections), but
+loses at any value one a member's material or line wrote ([Blockstate
+§6.1](/spec/blockstate/#connections)). Its `reason` is the sentence `W_INTENT_DEGRADED` prints
+([§10.7](#107-java--bedrock-portability)). The loader refuses a dropped property no row classifies,
+and the extractor a row nothing drops.
 
 Both packs carry a `connections` component: what each block is to the rules that join panes, fences,
-walls and chests to their neighbours ([Blockstate §6.1](/spec/blockstate/#connections)). It is read
-off the Java release each version's states follow, the version itself on Java and the release its
-state map follows on Bedrock, so `ids` names canonical blocks in both. The release's block tags say
-which blocks are walls, fences and fence gates, which fences are wooden, and which raise a wall's
-post, the tags of the feature packs its jar ships included. A pane is a block with a pane's states
-that is no fence, a chest is a block whose `type` is `single`, `left` or `right`, and the blocks
-never joined by a face are the ones the game names in code. Which faces of each state are sturdy,
-and which parts of a wall below its bottom covers, are read off the block models the release's
-client jar ships, each a lookup over the fewest properties that decide it where it varies:
+walls, chests and redstone dust to their neighbours ([Blockstate
+§6.1](/spec/blockstate/#connections)). It is read off the Java release each version's states follow,
+the version itself on Java and the release its state map follows on Bedrock, so `ids` names
+canonical blocks in both. The release's block tags say which blocks are walls, fences and fence
+gates, which fences are wooden, and which raise a wall's post, the tags of the feature packs its jar
+ships included. A pane is a block with a pane's states that is no fence, a chest is a block whose
+`type` is `single`, `left` or `right`, dust is the one block the game names `redstone_wire`, and the
+blocks never joined by a face are the ones the game names in code. Which faces dust beside a block
+joins is the game's code too: a repeater's two along its facing, an observer's back when that is a
+side, and every side of a block that gives off a signal from any side, the `buttons` and
+`pressure_plates` tags' and the rest by name. Which faces of each state are sturdy, and which parts
+of a wall below its bottom covers, are read off the block models the release's client jar ships,
+each a lookup over the fewest properties that decide it where it varies:
 
 ```json
 { "mc_versions": ["1.20.4", "1.21", "1.21.4", "26.3"], "ids": ["acacia_slab", "..."],
@@ -181,21 +187,23 @@ client jar ships, each a lookup over the fewest properties that decide it where 
                        "double": ["post", "north", "east", "south", "west"], "top": [] } } }
 ```
 
-A row's `kind` is `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate` or `chest`,
+A row's `kind` is `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate`, `chest` or `redstone_dust`,
 `never_joined_by_face` marks a block a pane, fence or wall never joins by a face, `raises_post` one
 in the `wall_post_override` tag, and `defaults` gives the default of each state the rules read,
 which a state that leaves it out takes, a fence gate's `facing` and `open` and a chest's `facing`
 among them. `covers` names `post` and the sides' directions, and a row with a `kind` has none, since
-the rules read a connecting block by its connection states. A block no row names is nothing to the
-rules. Every target postdates 1.16, where wall connections turned from booleans into `none` / `low`
-/ `tall` ([§10.5](#105-which-version-is-it-for-has-three-answers)), so a wall's sides are derived as
-those three values at every target.
+the rules read a connecting block by its connection states. `dust` names the sideways faces dust
+beside the block joins, as a list or a lookup like `sturdy`'s, a repeater's reading its `facing`; a
+row without it is joined by no dust. A block no row names is nothing to the rules. Every target
+postdates 1.16, where wall connections turned from booleans into `none` / `low` / `tall`
+([§10.5](#105-which-version-is-it-for-has-three-answers)), so a wall's sides are derived as those
+three values at every target.
 
 The loader refuses a component with no rows, a row that names no block or no version, a lookup that
 reads no property or maps no value, a default no rule reads, a fence gate whose default `facing` is
-no sideways face or whose `open` is no boolean, and a chest whose default `facing` is no sideways
-face. On Java it also refuses a row naming a block, or a value of a state, that the version's block
-table does not give.
+no sideways face or whose `open` is no boolean, a chest whose default `facing` is no sideways face,
+and a `dust` face that is no sideways face, since dust lies on the block under it. On Java it also
+refuses a row naming a block, or a value of a state, that the version's block table does not give.
 
 ## 10.4 Fail-loud and minimum-version inference
 
@@ -712,7 +720,7 @@ entry is `{id, states, dropped}`:
 |---|---|
 | `id` | The palette entry's block ID, verbatim as the lowering interned it. |
 | `states` | The entry's `key=value` pairs, comma-joined, the same spelling the `states_unmapped` reason uses. |
-| `dropped` | One `{key, value, mc_versions}` per intent some version has no form for: the canonical property, the value asked for, and the versions that lose it, oldest first. `key` is a property the pack's `sensitivity` classifies as `missing_state`. |
+| `dropped` | One `{key, value, mc_versions}` per intent some version has no form for: the canonical property, the value asked for, and the versions that lose it, oldest first. `key` is a property the pack's `sensitivity` classifies as `missing_state`, or as `derived` where a member wrote it. |
 
 Two lists rather than one under a category tag, and `states` rather than the ID alone. Degradation
 is a fact about the *state combination*, not about the block: one ID reaches this list once per
@@ -725,10 +733,13 @@ the structure's scope, so each warning is distinct and matches the note about th
 `unsupported` reasons do: a consumer that reads this should not have to parse English to learn which
 state was lost. A value the edition *can* express is not a loss and does not appear: a dropped
 property at its Java default loses nothing, so `shape=straight` drops without an entry, and neither
-does a `derived` one. The prose both the note and `W_INTENT_DEGRADED` print is the `sensitivity`
-row's `reason`, written per `key` and the blocks it covers rather than over the pair, because the
-sentence for a dropped `shape` talks about stairs and the one for a shulker box's `facing` about its
-block entity. The note adds the versions that lose it; the build names its own target already.
+does a `derived` one the lowering derived. One a member's material or line wrote is lost at any
+value, since Bedrock works it out again from the blocks around it. The prose both the note and
+`W_INTENT_DEGRADED` print is the `sensitivity` row's `reason`, written per `key` and the blocks it
+covers rather than over the pair, because the sentence for a dropped `shape` talks about stairs and
+the one for a shulker box's `facing` about its block entity; for a written `derived` one it follows
+``the written `key=value` is not kept:``. The note adds the versions that lose it; the build names
+its own target already.
 
 #### A blockstate the pack should have refused is not a figure
 
