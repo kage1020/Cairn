@@ -1,6 +1,6 @@
-//! A redstone tick simulator over a circuit's voxels, on Java's scheduling model: a torch and a
-//! comparator change a tick after their input does, a repeater its delay after, and dust at once
-//! (`spec/redstone` "Verification").
+//! A redstone tick simulator over a circuit's voxels: a torch and a comparator change a tick after
+//! their input does, a repeater its delay after, and dust at once, which legalization runs to find
+//! the state the circuit rests in (`spec/redstone` "Place-and-route").
 
 use std::collections::HashMap;
 
@@ -28,7 +28,7 @@ pub(crate) enum Order {
     Reverse,
 }
 
-/// How dust joins the cell on one side: not at all, along the floor, or up the block there.
+/// How dust joins the cell on one side: not at all, along its layer, or up the block there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Connection {
     /// Not joined.
@@ -151,6 +151,21 @@ impl Sim {
     pub(crate) fn sides(&self, voxel: Voxel) -> [Connection; 4] {
         self.index(voxel)
             .map_or([Connection::None; 4], |i| self.sides[i])
+    }
+
+    /// The most ticks the circuit takes to come to rest: twice its parts' ticks summed, plus one.
+    pub(crate) fn rest_ticks(&self) -> u32 {
+        // The logic is a DAG (`spec/redstone` "The logic layer is a dependency DAG"), so no change
+        // outlasts a pass through every part, even with each repeater holding a pulse for its delay.
+        self.components
+            .iter()
+            .map(|&i| match self.parts[i] {
+                Part::Repeater { delay, .. } => u32::from(delay.ticks()),
+                _ => 1,
+            })
+            .fold(0, u32::saturating_add)
+            .saturating_mul(2)
+            .saturating_add(1)
     }
 
     /// Whether no part has a tick pending.
@@ -442,7 +457,7 @@ impl Sim {
                 continue;
             }
             let delay = match self.parts[i] {
-                Part::Repeater { delay, .. } => u32::from(delay),
+                Part::Repeater { delay, .. } => u32::from(delay.ticks()),
                 _ => 1,
             };
             self.pending[i] = Some(self.now + delay);
@@ -473,7 +488,7 @@ impl Sim {
                     self.on[i] = true;
                     // Turned on, a repeater stays on for its delay at least.
                     if !input {
-                        self.pending[i] = Some(self.now + u32::from(delay));
+                        self.pending[i] = Some(self.now + u32::from(delay.ticks()));
                     }
                 }
                 true

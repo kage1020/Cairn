@@ -2,7 +2,6 @@
 //! routes, buffers and legalizes it under the struct, in the order of `spec/redstone`
 //! "Place-and-route".
 
-pub mod behaviour;
 pub mod circuit;
 pub(crate) mod coupling;
 pub mod delay;
@@ -27,7 +26,6 @@ pub mod synth;
 pub mod tile;
 pub mod verify;
 
-pub use behaviour::{MAX_DRIVEN_SENSORS, verify_behaviour};
 pub use circuit::build_circuits;
 pub use delay::{BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, DelayOutput, compile_delay};
 pub use diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -48,14 +46,15 @@ pub use netlist_ir::{
 };
 pub use placement::{MIN_COUNTER_VOID, MIN_VOID, PlacementOutput, compile_placement};
 pub use placement_ir::{
-    Buffer, CircuitBlock, CircuitLayout, CircuitNet, LayoutStage, NetSink, PlacedTile, Reservation,
-    ScopedCircuitLayout, ScopedCircuitLayoutEntry, TileInput, TileKind, Wire,
+    Buffer, CircuitBlock, CircuitEntity, CircuitLayout, CircuitNet, LayoutStage, NetSink,
+    PlacedTile, Reservation, ScopedCircuitLayout, ScopedCircuitLayoutEntry, TileInput, TileKind,
+    Wire,
 };
 pub use portable::verify_portable;
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
 pub use tile::{PadKind, TilePort};
-pub use verify::verify_latency;
+pub use verify::{MAX_ASSERTION_SENSORS, verify_latency, verify_truth_and_temporal};
 
 pub(crate) fn saturating_index(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)

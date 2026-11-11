@@ -258,7 +258,8 @@ pub(crate) enum Command {
             every other net's; `--stage delay` stands a buffer repeater in a net's dust wherever \
             it would run too weak for an input it feeds; `--stage legalize` turns every part into \
             the block it is built as, in the state the circuit rests in with its sensors off, \
-            then checks each `assert latency` against it and prints no IR when one fails. Each of \
+            then checks each `assert latency`, `assert truth` and `assert always` against it and \
+            prints no IR when one fails. Each of \
             the four layout stages carries a `\"stage\"` key echoing the flag value that produced \
             it (`placement` / `route` / `delay` / `legalize`), so a consumer reads the stage off \
             the output instead of inferring it from which keys are present. The `--edition <java|bedrock>` flag is \
@@ -397,13 +398,14 @@ pub(crate) enum SynthStage {
             `E_ATTENUATION_LIMIT`"
     )]
     Delay,
-    /// Legalized layout: every block of the reservation, then latency verification.
+    /// Legalized layout: every block of the reservation, then every assertion checked against it.
     #[value(
         help = "Legalized layout: every part of the reservation as the block it is built as, each \
             torch, repeater, comparator and dust in the state the circuit rests in with its \
             sensors off, against `--edition`; this is what `cairn compile` lays under the \
-            struct. Then checks each `assert latency` against the circuit, refusing with \
-            `E_SIM_ASSERTION_FAILED` one whose slowest path takes more ticks than its bound"
+            struct. Then checks each assertion against the circuit, refusing with \
+            `E_SIM_ASSERTION_FAILED` an `assert latency` whose slowest path takes more ticks than \
+            its bound, then an `assert truth` or `assert always` a run of the circuit breaks"
     )]
     Legalize,
 }

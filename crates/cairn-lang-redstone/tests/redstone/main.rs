@@ -4,7 +4,6 @@ mod common;
 
 mod actuator_patch_targets;
 mod actuator_schema;
-mod behaviour;
 mod binding_hosts;
 mod circuit;
 mod components;
@@ -22,3 +21,4 @@ mod primitives;
 mod routing;
 mod signal_drivers;
 mod source_order;
+mod truth_and_temporal;

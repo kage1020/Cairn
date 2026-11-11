@@ -165,7 +165,7 @@ to compare.
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member of the scopes the theme is bound to. A theme no scope binds is not checked. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
-| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
+| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)), or a struct's circuit is built of a circuit token it does not declare ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since the pinned target's pack records no states for its block to check it against ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
@@ -600,7 +600,9 @@ name a combination the table does assign.
 
 Every command that builds a struct's circuit reports these ([Redstone
 §14.8](/spec/redstone/#148-connection-to-the-ir-and-phases)), and most depend on the edition, so a
-command that pins none reports the ones every edition raises at the same place.
+command that pins none reports the ones every edition raises at the same place, once for each
+wording the editions give it, and an edition's own by the rule for its guards
+([§11.3](#113-error-vs-warning)).
 
 | Code | Meaning |
 |---|---|
@@ -616,12 +618,12 @@ command that pins none reports the ones every edition raises at the same place.
 | `E_LOGIC_UNRESOLVED_PATCH` | An actuator patch whose selector picks no single component of its keyword, under `cairn synth`; a command that lowers the struct refuses the patch as `E_INVALID_MEMBER` first. |
 | `E_LOGIC_DUPLICATE_BINDING` | A component carries a second binding under an actuator key it has. |
 | `E_NO_CIRCUIT_REGION` | A scope with a cell to build or an actuator to drive has no `circuit` line that reserves layers for them ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
-| `E_ROUTE_CONGESTION` | A scope's circuit does not fit the layers its `circuit` line reserves, or those layers take the struct past what one structure holds. |
+| `E_ROUTE_CONGESTION` | A scope's circuit does not fit the layers its `circuit` line reserves, or those layers take the struct past what one structure holds, or a stage finds the circuit laid wrong by one before it ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
 | `E_ROUTE_UNREACHABLE_COMPONENT` | A sensor or actuator the circuit wires stands where the circuit under the floor cannot reach it. |
 | `E_ATTENUATION_LIMIT` | A macro has more stages than its dust carries, or an input's wire runs too weak with nowhere for a buffer repeater. |
 | `E_NO_PORTABLE_IMPL` | A component of the built struct reads another through a block update, so what it does depends on update order ([Redstone §14.6](/spec/redstone/#146-edition-differences)). |
 | `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start, or an `assert truth` or `assert always` a run of the circuit breaks ([Redstone §14.7](/spec/redstone/#147-verification)). |
-| `W_SIM_ASSERTION_UNCHECKED` | An `assert truth` or `assert always` whose signals depend on more sensors than a check runs the circuit through every combination of, so it is not checked. |
+| `W_SIM_ASSERTION_UNCHECKED` | An `assert truth` or `assert always` no run of the circuit judges, so it is not checked: one in a scope that lays no circuit, one whose signals depend on more than 10 sensors, too many to run every combination of, or one a run is still changing at the end of; or a truth table with rows no run reaches ([Redstone §14.7](/spec/redstone/#147-verification)). |
 
 ### Semantic categories
 
@@ -636,7 +638,7 @@ Beyond the codes above, lint covers:
 | **fluid** | Consistency of water source, flow, and `waterlogged`. |
 | **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
-| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
+| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
 Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
@@ -650,8 +652,8 @@ edition has, `E_STATE_DOMAIN` a state its block does not take there,
 `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
 version cannot carry, while no entity schema is checked. The redstone row runs through codes of its
 own: the truth-table codes check a table against itself, and the codes of [Redstone](#redstone)
-check a truth table, a temporal assertion and a latency bound against the circuit, its routing, and
-its dependence on update order.
+check a truth table, a temporal assertion and a latency bound against the circuit, and check its
+routing and its dependence on update order.
 
 ### "did you mean"
 

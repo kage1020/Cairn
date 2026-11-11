@@ -4,7 +4,8 @@
 use std::fs;
 
 use crate::common::{
-    Fixture, Run, WALL_LEVER, assert_stream, bytes_contain, cairn, example_in_tempdir, nbt_body,
+    Fixture, Run, WALL_LEVER, assert_stream, bytes_contain, cairn, example_in_tempdir, int_tags,
+    nbt_body,
 };
 
 /// `example` compiled for `edition` and `flags` into a fresh directory, with the bytes of
@@ -82,13 +83,40 @@ fn a_bedrock_version_that_works_out_dust_itself_drops_the_circuits_sides_without
     assert!(bytes_contain(&bytes, "minecraft:redstone_wire"));
 }
 
+/// Two levers each through a `not` into a Java `and`, whose comparator rests lit.
+const RESTING_AND: &str = concat!(
+    "theme t:\n",
+    "  slot wall -> @oak_planks\n",
+    "\n",
+    "struct cmp size=12x10\n",
+    "  floor mat_slot=wall\n",
+    "  walls mat_slot=wall height=3\n",
+    "  door id=d side=front at=center\n",
+    "  lever id=l1 at=inside.back offset=2 y=0 -> sig.a\n",
+    "  lever id=l2 at=inside.back offset=6 y=0 -> sig.b\n",
+    "  logic sig.na = not sig.a\n",
+    "  logic sig.nb = not sig.b\n",
+    "  logic sig.f = sig.na and sig.nb\n",
+    "  door[id=d] opened_by=sig.f\n",
+    "  circuit region=floor void=4\n",
+);
+
 #[test]
 fn a_comparator_is_written_with_the_strength_it_rests_at() {
-    let (run, bytes) = compiled("crossbar.crn", "java", &[], "crossbar.nbt");
+    let fixture = Fixture::new(RESTING_AND);
+    let run = Run::from(cairn(
+        "compile",
+        &[
+            fixture.source().to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            fixture.out().to_str().unwrap(),
+        ],
+    ));
     assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
-    for tag in ["minecraft:comparator", "OutputSignal"] {
-        assert!(bytes_contain(&bytes, tag), "crossbar.nbt holds {tag}");
-    }
+    let body = nbt_body(&fixture.out().join("cmp.nbt"));
+    assert_eq!(int_tags(&body, "OutputSignal", false), [9]);
 }
 
 #[test]

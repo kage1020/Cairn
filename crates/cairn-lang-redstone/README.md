@@ -19,7 +19,7 @@ Per [redstone](https://cairn.kage1020.com/spec/redstone/), the logical redstone 
 | Delay insertion | `compile_delay(&ScopedCircuitLayout)` | A buffer repeater in a net's dust wherever an input would read its signal weaker than it needs |
 | Legalization | `compile_legalize(&ScopedCircuitLayout, Option<&dyn TargetRegistry>)` | Every voxel as a block, in the state the circuit rests in with its sensors off |
 | Latency | `verify_latency(&ScopedCircuitLayout, &IntentModule)` | `E_SIM_ASSERTION_FAILED` for each `assert latency` the legalized circuit's slowest path exceeds |
-| Behaviour | `verify_behaviour(&ScopedCircuitLayout, &IntentModule)` | `E_SIM_ASSERTION_FAILED` for each `assert truth` and `assert always` a run of the legalized circuit breaks, and `W_SIM_ASSERTION_UNCHECKED` for one whose signals depend on more than `MAX_DRIVEN_SENSORS` sensors |
+| Truth and temporal | `verify_truth_and_temporal(&ScopedCircuitLayout, &IntentModule, &BlockArrayIr)` | `E_SIM_ASSERTION_FAILED` for each `assert truth` and `assert always` a run of the legalized circuit breaks, and `W_SIM_ASSERTION_UNCHECKED` for one left unchecked: in a scope that lays no circuit, on more than `MAX_ASSERTION_SENSORS` sensors, or with a run still changing when its ticks run out, and for the rows of a truth table no run reaches |
 
 Each `CircuitLayout` records the last pass that filled it as a `LayoutStage`, dumped as a `"stage"` key in the vocabulary `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage off the output rather than inferring it from which keys are present.
 

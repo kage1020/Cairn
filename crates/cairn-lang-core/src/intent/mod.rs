@@ -290,7 +290,7 @@ pub struct CircuitRegion {
     pub scope_name: String,
     /// `region=<label>` value the circuit member declared.
     pub label: String,
-    /// `void=<N>` service-layer height, at least 1.
+    /// `void=<N>`: the layers it reserves under the base plane, at least 1.
     pub void: u32,
     /// Width of the enclosing scope's footprint, copied from `size=WxH`.
     pub width: u32,
@@ -383,7 +383,7 @@ pub enum CircuitRegionDefect {
         /// The value kind, as [`crate::ast::Value::kind_name`] names it.
         found: &'static str,
     },
-    /// `void=` is an integer below 1, which reserves no service layer.
+    /// `void=` is an integer below 1, which reserves no layer.
     #[non_exhaustive]
     VoidBelowOne {
         /// The integer written.
@@ -418,7 +418,10 @@ impl fmt::Display for CircuitRegionDefect {
                 write!(f, "its `void=` must be an integer, got {found}")
             }
             Self::VoidBelowOne { value } => {
-                write!(f, "its `void={value}` reserves no service layer")
+                write!(
+                    f,
+                    "its `void={value}` reserves no layer under the base plane"
+                )
             }
             Self::VoidTooLarge { value } => write!(
                 f,

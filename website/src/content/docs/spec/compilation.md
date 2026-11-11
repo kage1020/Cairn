@@ -221,8 +221,9 @@ Each term counts only the members that will paint:
 - `roof_extra`: the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
 - `1`: the base plane, which every struct has.
 - `void`: the layers a `circuit` line reserves under the base plane once the struct's logic lays a
-  circuit in them, lowering every other row by as many
-  ([Redstone §14.5](/spec/redstone/#145-place-and-route)), and `0` otherwise.
+  circuit in them, raising every other row by as many, while a `def` placed in a `site` has its
+  origin lowered by as many ([Redstone §14.5](/spec/redstone/#145-place-and-route)), and `0`
+  otherwise.
 
 Members inside a `level` count in all three, at their offset: `walls height=3` written directly
 gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).

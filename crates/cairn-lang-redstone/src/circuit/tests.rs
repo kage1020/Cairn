@@ -1,6 +1,11 @@
 use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::{AttachError, BlockState};
 
+use super::{laid, refused};
+use crate::diagnostic::{DiagnosticCode, compiler_bug, error_with_footer};
 use crate::fixtures;
+use crate::geometry::Voxel;
+use crate::placement_ir::CircuitBlock;
 
 fn example(name: &str) -> String {
     let path = format!("{}/../../examples/{name}", env!("CARGO_MANIFEST_DIR"));
@@ -86,5 +91,58 @@ fn each_example_rests_with_every_actuator_off() {
                 "{name} on {edition:?}: {lit:?}"
             );
         }
+    }
+}
+
+#[test]
+fn a_block_legalization_left_outside_the_reservation_is_refused_as_a_compiler_bug() {
+    let legalized = fixtures::legalized(&example("redstone-door.crn"), Edition::Java);
+    let layout = &legalized.scopes[0].ir;
+    let block = CircuitBlock {
+        at: Voxel::new(-1, 0, 2),
+        state: BlockState::bare("minecraft:stone"),
+        entity: None,
+    };
+    assert_eq!(
+        laid("struct=gatehouse:", layout, &block, 0),
+        Err(compiler_bug(
+            layout.region.span.clone(),
+            "struct=gatehouse: a block of the circuit under this struct lies at (-1, 0, 2), \
+             outside the reservation"
+                .to_owned(),
+        )),
+    );
+}
+
+#[test]
+fn an_attach_refusal_asks_for_fewer_layers_only_when_the_struct_outgrows_a_structure() {
+    let legalized = fixtures::legalized(&example("redstone-door.crn"), Edition::Java);
+    let layout = &legalized.scopes[0].ir;
+    let span = layout.region.span.clone();
+    let primary = |why: &str| {
+        format!("struct=gatehouse: the circuit cannot be laid under this struct: {why}")
+    };
+    assert_eq!(
+        refused("struct=gatehouse:", layout, &AttachError::TooLarge),
+        error_with_footer(
+            DiagnosticCode::RouteCongestion,
+            span.clone(),
+            primary(&AttachError::TooLarge.to_string()),
+            "Fix: lower `void`, or split the struct's members across more than one `struct`",
+        ),
+    );
+    for err in [
+        AttachError::NoStructure,
+        AttachError::OutOfBounds { at: (1, 5, 2) },
+        AttachError::Overlap { at: (1, 0, 2) },
+        AttachError::PositionedField {
+            at: (1, 0, 2),
+            field: "x".to_owned(),
+        },
+    ] {
+        assert_eq!(
+            refused("struct=gatehouse:", layout, &err),
+            compiler_bug(span.clone(), primary(&err.to_string())),
+        );
     }
 }

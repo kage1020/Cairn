@@ -6,10 +6,10 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use cairn_lang_core::block_array::Face;
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer, overlapping};
 use crate::geometry::{SIDES, Voxel};
-use crate::grid::{Grid, Label, Slot};
-use crate::part::Part;
+use crate::grid::{Collision, Grid, Label, Slot};
+use crate::part::{Part, RepeaterDelay};
 use crate::placement_ir::{Buffer, CircuitLayout, LayoutStage, ScopedCircuitLayout, TileKind};
 use crate::tile::Strength;
 
@@ -31,11 +31,20 @@ pub struct DelayOutput {
 
 /// Puts the buffer repeaters every circuit of `routed` needs, leaving out one where some input
 /// cannot be reached at the strength it needs.
+///
+/// # Panics
+///
+/// On a circuit routing has not produced.
 #[must_use]
 pub fn compile_delay(routed: &ScopedCircuitLayout) -> DelayOutput {
     let mut out = DelayOutput::default();
     for entry in &routed.scopes {
         let scope = format!("{}={}:", entry.kind.label(), entry.name);
+        assert_eq!(
+            entry.ir.stage,
+            LayoutStage::Routed,
+            "{scope} buffers go into the circuit routing produces",
+        );
         match buffer_layout(&scope, &entry.ir) {
             Ok(layout) => out.scoped.push(entry.kind, entry.name.clone(), layout),
             Err(diagnostic) => {
@@ -50,7 +59,8 @@ pub fn compile_delay(routed: &ScopedCircuitLayout) -> DelayOutput {
 
 fn buffer_layout(scope: &str, routed: &CircuitLayout) -> Result<CircuitLayout, Diagnostic> {
     let mut layout = routed.clone();
-    let mut grid = Grid::of(&layout).map_err(|_| unreachable_input(scope, &layout, 0, 0))?;
+    let mut grid = Grid::of(&layout)
+        .map_err(|Collision { at }| overlapping(scope, layout.region.span.clone(), at))?;
     let mut ports: HashMap<(usize, usize), u8> = HashMap::new();
     for net in 0..layout.nets.len() {
         loop {
@@ -323,7 +333,7 @@ impl Grid {
             buffer.at,
             Slot::Part(Part::Repeater {
                 facing: buffer.facing,
-                delay: 1,
+                delay: RepeaterDelay::ONE,
             }),
         );
     }

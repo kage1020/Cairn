@@ -120,11 +120,11 @@ fn each_example_lays_a_pad_per_sensor_a_riser_per_actuator_and_a_tile_per_cell()
             };
             let layout = &entry.ir;
             assert_eq!(layout.structure, format!("struct::{structure}"), "{name}");
-            assert_eq!(layout.stage, LayoutStage::Placed, "{name}");
+            assert_eq!(layout.stage(), LayoutStage::Placed, "{name}");
             assert_eq!(
                 (
                     layout.region.label.as_str(),
-                    layout.region.void,
+                    layout.region.void(),
                     layout.region.width,
                     layout.region.depth
                 ),
@@ -370,59 +370,107 @@ fn a_macro_of_more_stages_than_its_dust_carries_is_refused_at_its_line() {
     }
 }
 
-/// A component written where the circuit under the floor cannot reach it, and why.
+/// Components written where the circuit under the floor cannot reach them, and why.
 struct Unreachable {
     /// The members, after the door.
     body: &'static str,
-    /// The component's line.
-    line: &'static str,
-    /// The finding's text after `struct=room: `.
-    primary: &'static str,
+    /// Each refused component's line, the finding's text after `struct=room: `, and the lines its
+    /// notes point at.
+    refused: &'static [(&'static str, &'static str, &'static [&'static str])],
     fix: &'static str,
 }
 
-fn unreachable_cases() -> [Unreachable; 8] {
+/// Sensors that stand where no pad under the floor reaches them.
+fn sensors_out_of_reach() -> [Unreachable; 5] {
     [
         Unreachable {
             body: "  lever id=l at=inside.back offset=4 y=2 -> sig.a\n  door[id=d] opened_by=sig.a\n",
-            line: "lever id=l at=inside.back offset=4 y=2 -> sig.a",
-            primary: "the lever `l` at y=2 cannot reach the circuit under the floor: a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it",
+            refused: &[(
+                "lever id=l at=inside.back offset=4 y=2 -> sig.a",
+                "the lever `l` at y=2 cannot reach the circuit under the floor: a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it",
+                &[],
+            )],
             fix: "Fix: set `y=0` on it",
         },
         Unreachable {
             body: "  button id=b at=inside.back offset=4 y=1 -> sig.a\n  door[id=d] opened_by=sig.a\n",
-            line: "button id=b at=inside.back offset=4 y=1 -> sig.a",
-            primary: "the button `b` at y=1 cannot reach the circuit under the floor: a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it",
+            refused: &[(
+                "button id=b at=inside.back offset=4 y=1 -> sig.a",
+                "the button `b` at y=1 cannot reach the circuit under the floor: a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it",
+                &[],
+            )],
             fix: "Fix: set `y=0` on it",
         },
         Unreachable {
             body: "  daylight id=s at=inside.back offset=4 y=1 -> sig.a\n  door[id=d] opened_by=sig.a\n",
-            line: "daylight id=s at=inside.back offset=4 y=1 -> sig.a",
-            primary: "the daylight `s` at y=1 cannot reach the circuit under the floor: a daylight detector reaches the layer under the floor only from the floor row `y = 0`, the row over it",
+            refused: &[(
+                "daylight id=s at=inside.back offset=4 y=1 -> sig.a",
+                "the daylight `s` at y=1 cannot reach the circuit under the floor: a daylight detector reaches the layer under the floor only from the floor row `y = 0`, the row over it",
+                &[],
+            )],
             fix: "Fix: set `y=0` on it",
         },
         Unreachable {
             body: "  pressure_plate id=p at=inside.back offset=4 y=2 -> sig.a\n  door[id=d] opened_by=sig.a\n",
-            line: "pressure_plate id=p at=inside.back offset=4 y=2 -> sig.a",
-            primary: "the pressure_plate `p` at y=2 cannot reach the circuit under the floor: a pressure plate reaches the layer under the floor from the floor row `y = 0`, or from `y = 1` standing on a block, which it powers whole",
+            refused: &[(
+                "pressure_plate id=p at=inside.back offset=4 y=2 -> sig.a",
+                "the pressure_plate `p` at y=2 cannot reach the circuit under the floor: a pressure plate reaches the layer under the floor from the floor row `y = 0`, or from `y = 1` standing on a block, which it powers whole",
+                &[],
+            )],
             fix: "Fix: set `y=0` on the plate, or `y=1` over a floor block",
         },
         Unreachable {
             body: "  observer id=o at=inside.back offset=4 y=1 facing=out -> sig.a\n  door[id=d] opened_by=sig.a\n",
-            line: "observer id=o at=inside.back offset=4 y=1 facing=out -> sig.a",
-            primary: "the observer `o` at y=1 cannot reach the circuit under the floor: an observer reaches the layer under the floor only looking up, so that its back powers the cell under it, from the floor row `y = 0` or from `y = 1` over a block",
+            refused: &[(
+                "observer id=o at=inside.back offset=4 y=1 facing=out -> sig.a",
+                "the observer `o` at y=1 cannot reach the circuit under the floor: an observer reaches the layer under the floor only looking up, so that its back powers the cell under it, from the floor row `y = 0` or from `y = 1` over a block",
+                &[],
+            )],
             fix: "Fix: write `facing=up` on the observer, and set `y=0`, or `y=1` over a floor block",
         },
+    ]
+}
+
+/// Actuators that no riser under the floor can drive as they are written.
+fn actuators_out_of_reach() -> [Unreachable; 7] {
+    [
         Unreachable {
             body: "  lever id=l at=inside.back offset=4 y=0 -> sig.a\n  lamp id=m at=inside.left offset=4 y=3 lit_by=sig.a\n",
-            line: "lamp id=m at=inside.left offset=4 y=3 lit_by=sig.a",
-            primary: "the lamp `m` at y=3 cannot reach the circuit under the floor: an actuator is driven from the layer under the floor, so it must stand in the floor row `y = 0`, or at `y = 1` over a floor block",
+            refused: &[(
+                "lamp id=m at=inside.left offset=4 y=3 lit_by=sig.a",
+                "the lamp `m` at y=3 cannot reach the circuit under the floor: an actuator is driven from the layer under the floor, so it must stand in the floor row `y = 0`, or at `y = 1` over a floor block",
+                &[],
+            )],
             fix: "Fix: set `y=0` on it, or `y=1` over a floor block",
         },
         Unreachable {
+            body: "  lever id=l at=inside.back offset=4 y=0 -> sig.a\n  \
+                   lamp id=m at=inside.left offset=4 y=1 lit_by=sig.a\n  \
+                   raw_block mat=minecraft:air at=1,0,4\n",
+            refused: &[(
+                "lamp id=m at=inside.left offset=4 y=1 lit_by=sig.a",
+                "the lamp `m` at y=1 cannot reach the circuit under the floor: an actuator is driven from the layer under the floor, so it must stand in the floor row `y = 0`, or at `y = 1` over a floor block",
+                &[],
+            )],
+            fix: "Fix: set `y=0` on it, or `y=1` over a floor block",
+        },
+        Unreachable {
+            body: "  lever id=l at=inside.back offset=4 y=0 -> sig.a\n  door[id=d] opened_by=sig.a\n  \
+                   raw_block mat=minecraft:air at=7,0,10\n",
+            refused: &[(
+                "door id=d side=front at=center",
+                "the door `d` at y=1 cannot reach the circuit under the floor: a door is driven through the block under its lower half, so it must stand at `y = 1` over a floor block",
+                &[],
+            )],
+            fix: "Fix: stand the door on the floor row's blocks",
+        },
+        Unreachable {
             body: "  lever id=l at=inside.back offset=4 y=0 -> sig.a\n  piston id=r at=inside.left offset=4 y=2 facing=down powered_by=sig.a\n",
-            line: "piston id=r at=inside.left offset=4 y=2 facing=down powered_by=sig.a",
-            primary: "the piston `r` at y=2 cannot reach the circuit under the floor: a piston looking down would push into the torch that drives it from under the floor",
+            refused: &[(
+                "piston id=r at=inside.left offset=4 y=2 facing=down powered_by=sig.a",
+                "the piston `r` at y=2 cannot reach the circuit under the floor: a piston looking down would push into the torch that drives it from under the floor",
+                &[],
+            )],
             fix: "Fix: turn the piston with another `facing=`",
         },
         Unreachable {
@@ -430,8 +478,40 @@ fn unreachable_cases() -> [Unreachable; 8] {
                    lever id=k at=inside.back offset=8 y=0 -> sig.b\n  \
                    lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a\n  \
                    lamp id=n at=inside.left offset=5 y=0 lit_by=sig.b\n",
-            line: "lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a",
-            primary: "the lamp `m` at y=0 cannot reach the circuit under the floor: the block that drives it from under the floor would power the component beside that block too",
+            refused: &[
+                (
+                    "lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a",
+                    "the lamp `m` at y=0 cannot reach the circuit under the floor: the block that drives it from under the floor would power the component beside that block too",
+                    &["lamp id=n at=inside.left offset=5 y=0 lit_by=sig.b"],
+                ),
+                (
+                    "lamp id=n at=inside.left offset=5 y=0 lit_by=sig.b",
+                    "the lamp `n` at y=0 cannot reach the circuit under the floor: the block that drives it from under the floor would power the component beside that block too",
+                    &["lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a"],
+                ),
+            ],
+            fix: "Fix: move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
+        },
+        Unreachable {
+            body: "  lever id=l at=inside.back offset=4 y=0 -> sig.a\n  \
+                   lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a\n  \
+                   raw_block mat=minecraft:stone at=2,0,4\n",
+            refused: &[(
+                "lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a",
+                "the lamp `m` at y=0 cannot reach the circuit under the floor: the block that drives it from under the floor would power the component beside that block too",
+                &["raw_block mat=minecraft:stone at=2,0,4"],
+            )],
+            fix: "Fix: move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
+        },
+        Unreachable {
+            body: "  lever id=l at=inside.back offset=4 y=0 -> sig.a\n  \
+                   lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a\n  \
+                   redstone_dust at=2,0,4\n",
+            refused: &[(
+                "lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a",
+                "the lamp `m` at y=0 cannot reach the circuit under the floor: the block that drives it from under the floor would power the component beside that block too",
+                &["redstone_dust at=2,0,4"],
+            )],
             fix: "Fix: move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
         },
     ]
@@ -439,7 +519,10 @@ fn unreachable_cases() -> [Unreachable; 8] {
 
 #[test]
 fn a_component_the_circuit_cannot_reach_is_refused_on_its_line_with_its_reason() {
-    for case in unreachable_cases() {
+    for case in sensors_out_of_reach()
+        .into_iter()
+        .chain(actuators_out_of_reach())
+    {
         let source = room(&format!(
             "  door id=d side=front at=center\n{body}  circuit region=floor void=3\n",
             body = case.body,
@@ -447,17 +530,63 @@ fn a_component_the_circuit_cannot_reach_is_refused_on_its_line_with_its_reason()
         for edition in [Edition::Java, Edition::Bedrock] {
             let out = placement_of(&source, edition);
             assert!(out.scoped.scopes.is_empty(), "{source}");
-            assert_eq!(
-                findings(&source, &out.diagnostics).first().cloned(),
-                Some((
-                    "E_ROUTE_UNREACHABLE_COMPONENT",
-                    case.line,
-                    format!("struct=room: {}", case.primary),
-                    vec![(None, case.fix.to_owned())],
-                )),
-                "{source}",
-            );
+            let expected: Vec<_> = case
+                .refused
+                .iter()
+                .map(|(line, primary, beside)| {
+                    let notes = beside.iter().map(|line| {
+                        (
+                            Some(*line),
+                            "the block that drives it touches this member, which it would power too"
+                                .to_owned(),
+                        )
+                    });
+                    (
+                        "E_ROUTE_UNREACHABLE_COMPONENT",
+                        *line,
+                        format!("struct=room: {primary}"),
+                        notes
+                            .chain([(None, case.fix.to_owned())])
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect();
+            assert_eq!(findings(&source, &out.diagnostics), expected, "{source}");
         }
+    }
+}
+
+/// The lever beside the lamp takes no power from the block the riser lights, so the lamp is not
+/// refused for it, but the lever's pad and the riser's torches have no room side by side.
+#[test]
+fn a_pad_and_a_riser_side_by_side_have_no_room_under_the_floor() {
+    let source = room(
+        "  door id=d side=front at=center\n  \
+         lever id=l at=inside.left offset=5 y=0 -> sig.a\n  \
+         lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a\n  \
+         circuit region=floor void=3\n",
+    );
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let out = placement_of(&source, edition);
+        assert!(out.scoped.scopes.is_empty(), "{edition:?}");
+        assert_eq!(
+            findings(&source, &out.diagnostics),
+            [(
+                "E_ROUTE_CONGESTION",
+                "lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a",
+                "struct=room: the layers under this component have no room for the torches that \
+                 carry its signal up to it: each way of laying them leaves the reservation or \
+                 meets another component's"
+                    .to_owned(),
+                vec![(
+                    None,
+                    "Fix: move the component away from the struct's edge and from the other \
+                     components beside it"
+                        .to_owned(),
+                )],
+            )],
+            "{edition:?}",
+        );
     }
 }
 
@@ -535,7 +664,7 @@ fn rejected_lines() -> [RejectedLine; 10] {
             size: sized,
             levels: 0,
             line: "circuit region=floor void=0",
-            reason: "its `void=0` reserves no service layer",
+            reason: "its `void=0` reserves no layer under the base plane",
             fix: "Fix: set `void=` to an integer >= 3",
         },
         RejectedLine {
@@ -623,7 +752,7 @@ fn a_usable_circuit_line_beside_a_rejected_one_places_with_no_finding() {
             panic!("the scope places: {lines}{:?}", out.scoped.scopes);
         };
         assert_eq!(
-            (scope.ir.region.label.as_str(), scope.ir.region.void),
+            (scope.ir.region.label.as_str(), scope.ir.region.void()),
             ("basement", 3),
             "{lines}"
         );
@@ -644,6 +773,22 @@ fn a_scope_with_no_circuit_line_is_told_what_its_kind_can_do() {
                 "Fix: add a `circuit region=<label> void=<N>` line at the top level of the scope, with a non-empty label naming the reservation (`region=floor`, `region=basement`) and an integer `void=` >= 3. It reserves the layers under the scope's base plane".to_owned(),
             )],
         ),
+    );
+
+    let wired = room(
+        "  door id=d side=front at=center\n  \
+         lever id=l at=inside.back offset=4 y=0 -> sig.a\n  \
+         door[id=d] opened_by=sig.a\n",
+    );
+    let found = java(&wired).diagnostics;
+    let read = wired.find("opened_by=sig.a").expect("the binding") + "opened_by=".len();
+    assert_eq!(
+        found
+            .iter()
+            .map(|d| (d.code.as_str(), d.span.clone()))
+            .collect::<Vec<_>>(),
+        [("E_NO_CIRCUIT_REGION", read..read + "sig.a".len())],
+        "a scope with no cell is told at the signal its actuator reads",
     );
 
     // `check` refuses these rows in a `site`; a library caller reaches placement without it.

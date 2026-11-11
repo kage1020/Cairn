@@ -74,10 +74,10 @@ fn circuit() -> Vec<LaidBlock> {
     vec![
         block((1, 1, 0), wire()),
         LaidBlock {
-            entity: Some((
-                "minecraft:comparator".to_owned(),
-                IndexMap::from([("OutputSignal".to_owned(), 3)]),
-            )),
+            entity: Some(LaidEntity {
+                id: "minecraft:comparator".to_owned(),
+                fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+            }),
             ..block((0, 1, 1), comparator())
         },
         block((0, 0, 0), stone()),
@@ -195,21 +195,71 @@ fn a_refused_circuit_leaves_the_structure_as_it_was() {
         .palette
         .entries
         .extend((2..PALETTE_CAPACITY).map(|i| BlockState::bare(format!("test:b{i}"))));
-    for (mut ir, key, void, refusal) in [
-        (hut(), "struct::shed", 2, AttachError::NoStructure),
-        (hut(), KEY, u32::MAX, AttachError::TooLarge),
-        (hut(), KEY, 1 << 22, AttachError::TooLarge),
+    let with = |at: (u32, u32, u32), field: &str| {
+        let mut blocks = circuit();
+        blocks.push(LaidBlock {
+            at,
+            state: comparator(),
+            entity: Some(LaidEntity {
+                id: "minecraft:comparator".to_owned(),
+                fields: IndexMap::from([(field.to_owned(), 1)]),
+            }),
+        });
+        blocks
+    };
+    for (mut ir, key, void, blocks, refusal) in [
+        (
+            hut(),
+            "struct::shed",
+            2,
+            circuit(),
+            AttachError::NoStructure,
+        ),
+        (hut(), KEY, u32::MAX, circuit(), AttachError::TooLarge),
+        (hut(), KEY, 1 << 22, circuit(), AttachError::TooLarge),
         (
             full,
             KEY,
             2,
+            circuit(),
             AttachError::PaletteFull(PaletteFull {
                 capacity: PALETTE_CAPACITY,
             }),
         ),
+        (
+            hut(),
+            KEY,
+            2,
+            with((1, 2, 0), "OutputSignal"),
+            AttachError::OutOfBounds { at: (1, 2, 0) },
+        ),
+        (
+            hut(),
+            KEY,
+            2,
+            with((2, 0, 0), "OutputSignal"),
+            AttachError::OutOfBounds { at: (2, 0, 0) },
+        ),
+        (
+            hut(),
+            KEY,
+            2,
+            with((1, 1, 0), "OutputSignal"),
+            AttachError::Overlap { at: (1, 1, 0) },
+        ),
+        (
+            hut(),
+            KEY,
+            2,
+            with((1, 1, 1), "x"),
+            AttachError::PositionedField {
+                at: (1, 1, 1),
+                field: "x".to_owned(),
+            },
+        ),
     ] {
         let before = ir.clone();
-        assert_eq!(ir.attach_circuit(key, void, &circuit(), 0..0), Err(refusal));
+        assert_eq!(ir.attach_circuit(key, void, &blocks, 0..0), Err(refusal));
         assert_eq!(ir, before, "{key} void={void}");
     }
 }
