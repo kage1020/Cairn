@@ -150,13 +150,14 @@ impl Grid<'_> {
 }
 
 /// Set the connection states of every pane, fence, wall, fence gate, chest and dust on `canvas`
-/// that its state does not write, each repainted under the member that painted it; a block a raw
-/// member placed keeps its state (`spec/materials-themes` "Raw blocks").
+/// that its state does not write, each repainted under the member that painted it, and answer
+/// the keys set at each cell; a block a raw member placed keeps its state (`spec/materials-themes`
+/// "Raw blocks").
 pub(super) fn derive_connections(
     canvas: &mut Canvas,
     palette: &mut ScopePalette,
     registry: &dyn TargetRegistry,
-) {
+) -> HashMap<Cell, Vec<String>> {
     let joins: Vec<Joins> = (0..palette.len())
         .map(|slot| {
             let state = palette.state(slot);
@@ -170,7 +171,7 @@ pub(super) fn derive_connections(
     };
     let mut joiners = gather(&grid);
     if joiners.is_empty() {
-        return;
+        return HashMap::new();
     }
     let at: HashMap<Cell, usize> = joiners
         .iter()
@@ -196,22 +197,31 @@ pub(super) fn derive_connections(
             joiner.wires = wires(&grid, joiner.cell, &joiner.state);
         }
     }
-    let derived: Vec<(Cell, BlockState)> = joiners
+    let derived: Vec<(Cell, BlockState, Vec<String>)> = joiners
         .iter()
         .filter(|joiner| !joiner.raw)
         .filter_map(|joiner| {
             let state = derived_state(&grid, joiner);
-            (state != joiner.state).then_some((joiner.cell, state))
+            let keys: Vec<String> = state
+                .properties
+                .keys()
+                .filter(|key| !joiner.state.properties.contains_key(*key))
+                .cloned()
+                .collect();
+            (!keys.is_empty()).then_some((joiner.cell, state, keys))
         })
         .collect();
-    for (cell, state) in derived {
+    let mut set = HashMap::with_capacity(derived.len());
+    for (cell, state, keys) in derived {
         let Some(owner) = canvas.owner_at(cell) else {
             continue;
         };
         canvas
             .for_member(owner)
             .paint(cell, || palette.intern(state));
+        set.insert(cell, keys);
     }
+    set
 }
 
 /// Every connecting block of the body, each with the sides it joins.

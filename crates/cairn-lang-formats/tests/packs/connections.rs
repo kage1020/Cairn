@@ -1,5 +1,5 @@
 //! What the built-in packs' connection tables say a block is to the rules that join panes, fences,
-//! walls and chests (`spec/blockstate` "Connections").
+//! walls, chests and redstone dust (`spec/blockstate` "Connections").
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
@@ -156,6 +156,15 @@ fn an_unpinned_lowering_reads_what_every_version_declaring_the_block_agrees_on()
         joins(Edition::Java, None, &state("no_such_block", &[])),
         None
     );
+    // Its bottom covers the post alone from 1.21.4 on; the dust it joins never changes.
+    assert_eq!(
+        joins(Edition::Java, None, &state("redstone_torch", &[])),
+        Some(Joins {
+            raises_post: true,
+            dust: SIDES,
+            ..Joins::default()
+        }),
+    );
 }
 
 #[test]
@@ -243,7 +252,54 @@ fn dust_joins_a_signal_source_on_every_side_and_a_repeater_or_observer_only_wher
         Some(Faces::NONE.with(Face::West)),
     );
     assert_eq!(at("observer", &[]), Some(Faces::NONE.with(Face::North)));
+    assert_eq!(at("comparator", &[("facing", "east")]), Some(SIDES));
+    assert_eq!(
+        at("redstone_wall_torch", &[("facing", "east")]),
+        Some(SIDES)
+    );
+    assert_eq!(at("stone_pressure_plate", &[]), Some(SIDES));
+    assert_eq!(at("lightning_rod", &[("facing", "up")]), Some(SIDES));
     assert_eq!(at("stone", &[]), Some(Faces::NONE));
+}
+
+#[test]
+fn a_pinned_java_build_joins_dust_to_the_dust_and_signal_sources_beside_it() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+                  redstone_dust at=1,1,1\n  redstone_dust at=2,1,1\n  \
+                  repeater at=3,1,1 facing=east\n  raw_block mat=minecraft:lever at=1,1,2\n";
+    let out = lower_source(
+        source,
+        Edition::Java,
+        Some(crate::common::latest(Edition::Java)),
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = &out.structures["struct::s"];
+    let dust: Vec<((u32, u32, u32), String)> = ba
+        .voxels
+        .iter()
+        .enumerate()
+        .filter_map(|(i, slot)| {
+            let state = &ba.palette.entries[usize::from(slot.0)];
+            (state.id == "minecraft:redstone_wire").then(|| {
+                let cell = ba.dims.position(i).expect("a voxel of the array");
+                (cell, state.properties_text())
+            })
+        })
+        .collect();
+    assert_eq!(
+        dust,
+        [
+            (
+                (1, 1, 1),
+                "east=side,north=none,south=side,west=none".to_owned()
+            ),
+            (
+                (2, 1, 1),
+                "east=side,north=none,south=none,west=side".to_owned()
+            ),
+        ],
+    );
 }
 
 #[test]

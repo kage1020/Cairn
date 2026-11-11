@@ -12,7 +12,7 @@ use super::component::{
 use super::door::{HungDoor, fill_door};
 use super::fill::fill_material;
 use super::members::{StructCtx, palette_index_for};
-use super::part::fill_part;
+use super::part::{Part, fill_part};
 use super::plate::fill_pressure_plate;
 use super::raw::fill_raw;
 use super::roof_fill::fill_roof;
@@ -22,6 +22,10 @@ use super::window::fill_window;
 
 /// Paint one member of the paint set with the generator its role names; a `door` that stands is
 /// added to `hung`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per member role, each calling that role's generator"
+)]
 pub(super) fn paint_member(
     member: &Member,
     y_offset: u32,
@@ -92,11 +96,49 @@ pub(super) fn paint_member(
             );
         }
         MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
-        MemberRole::Repeater
-        | MemberRole::Comparator
-        | MemberRole::RedstoneTorch
-        | MemberRole::RedstoneDust => {
-            fill_part(member, y_offset, ctx, palette, canvas, diagnostics);
+        MemberRole::Repeater => {
+            fill_part(
+                Part::Repeater,
+                member,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
+        }
+        MemberRole::Comparator => {
+            fill_part(
+                Part::Comparator,
+                member,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
+        }
+        MemberRole::RedstoneTorch => {
+            fill_part(
+                Part::Torch,
+                member,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
+        }
+        MemberRole::RedstoneDust => {
+            fill_part(
+                Part::Dust,
+                member,
+                y_offset,
+                ctx,
+                palette,
+                canvas,
+                diagnostics,
+            );
         }
         MemberRole::RawBlock => {
             fill_raw(

@@ -47,6 +47,7 @@ fn cube(side: u32) -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::cube".to_owned(),
+        derived: Vec::new(),
     }
 }
 
