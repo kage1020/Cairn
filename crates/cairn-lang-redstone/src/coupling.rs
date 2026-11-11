@@ -7,7 +7,7 @@ use cairn_lang_core::block_array::{BlockArray, Face, ResolvedBlock, ResolvedMemb
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{Actuator, Member, SENSOR_HOSTS};
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition_netlist_ir::EditionNetlistIr;
 use crate::geometry::Voxel;
 use crate::netlist_ir::NetRef;
@@ -16,6 +16,13 @@ use crate::tile::PadKind;
 
 /// A cell of the built array, `(x, y, z)`, its `y = 0` the base plane.
 type Cell = (u32, u32, u32);
+
+/// What paints a cell, and the line of the member that does.
+#[derive(Debug, Clone, Copy)]
+struct Paint<'a> {
+    painter: Painter,
+    span: &'a Span,
+}
 
 /// What paints a cell of the base plane or the row over it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,7 +199,7 @@ pub(crate) fn couple(
                 span: component.span.clone(),
                 named: component.named.clone(),
             }),
-            Err(reason) => diagnostics.push(unreachable(&component, scope, &reason)),
+            Err(reason) => diagnostics.push(unreachable(&component, scope, &reason, &[])),
         }
     }
 
@@ -211,27 +218,38 @@ pub(crate) fn couple(
         let Some(component) = component(host, &built) else {
             continue;
         };
-        let shared = riser_for(&component, filled).and_then(|(x, z)| {
-            let beside = [
-                x.checked_sub(1).map(|x| (x, 0, z)),
-                Some((x + 1, 0, z)),
-                z.checked_sub(1).map(|z| (x, 0, z)),
-                Some((x, 0, z + 1)),
-                Some((x, 1, z)),
-            ];
-            let shares = beside.into_iter().flatten().any(|cell| {
-                !component.cells.contains(&cell)
-                    && matches!(painted.get(&cell), Some(Painter::Actuator | Painter::Unknown))
+        let shared = riser_for(&component, filled)
+            .map_err(|reason| (reason, Vec::new()))
+            .and_then(|(x, z)| {
+                let beside = [
+                    x.checked_sub(1).map(|x| (x, 0, z)),
+                    Some((x + 1, 0, z)),
+                    z.checked_sub(1).map(|z| (x, 0, z)),
+                    Some((x, 0, z + 1)),
+                    Some((x, 1, z)),
+                ];
+                let mut sharing: Vec<&Span> = beside
+                    .into_iter()
+                    .flatten()
+                    .filter(|cell| !component.cells.contains(cell))
+                    .filter_map(|cell| painted.get(&cell))
+                    .filter(|paint| matches!(paint.painter, Painter::Actuator | Painter::Unknown))
+                    .map(|paint| paint.span)
+                    .collect();
+                sharing.sort_by_key(|span| (span.start, span.end));
+                sharing.dedup();
+                if sharing.is_empty() {
+                    Ok((x, z))
+                } else {
+                    Err((
+                        Unreachable {
+                            reason: "the block that drives it from under the floor would power the component beside that block too",
+                            fix: "move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
+                        },
+                        sharing,
+                    ))
+                }
             });
-            if shares {
-                Err(Unreachable {
-                    reason: "the block that drives it from under the floor would power the component beside that block too",
-                    fix: "move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
-                })
-            } else {
-                Ok((x, z))
-            }
-        });
         match shared {
             Ok((x, z)) => coupled.risers.push(Riser {
                 output,
@@ -239,7 +257,9 @@ pub(crate) fn couple(
                 span: component.span.clone(),
                 named: component.named.clone(),
             }),
-            Err(reason) => diagnostics.push(unreachable(&component, scope, &reason)),
+            Err((reason, sharing)) => {
+                diagnostics.push(unreachable(&component, scope, &reason, &sharing));
+            }
         }
     }
     (coupled, diagnostics)
@@ -255,14 +275,20 @@ fn has_sinks(netlist: &EditionNetlistIr, net: NetRef) -> bool {
 }
 
 /// What paints each cell that a sensor, an actuator, a Tier 0 part or a raw member holds.
-fn painted(resolved: &[ResolvedMember]) -> HashMap<Cell, Painter> {
+fn painted(resolved: &[ResolvedMember]) -> HashMap<Cell, Paint<'_>> {
     let mut by_cell = HashMap::new();
     for member in resolved {
         let Some(painter) = Painter::of(&member.role) else {
             continue;
         };
         for cell in member.resolved_state.iter().flat_map(ResolvedBlock::cells) {
-            by_cell.insert(cell, painter);
+            by_cell.insert(
+                cell,
+                Paint {
+                    painter,
+                    span: &member.span,
+                },
+            );
         }
     }
     by_cell
@@ -276,7 +302,7 @@ fn filled(array: &BlockArray, (x, y, z): Cell) -> bool {
         .is_some_and(|slot| slot.0 != 0)
 }
 
-fn surface(array: &BlockArray, painted: &HashMap<Cell, Painter>) -> Surface {
+fn surface(array: &BlockArray, painted: &HashMap<Cell, Paint<'_>>) -> Surface {
     let (width, depth) = (array.dims.x, array.dims.z);
     let mut columns = Vec::new();
     for z in 0..depth {
@@ -293,7 +319,11 @@ fn surface(array: &BlockArray, painted: &HashMap<Cell, Painter>) -> Surface {
             let mut signalling: Vec<(i32, i32)> = beside
                 .into_iter()
                 .flatten()
-                .filter(|cell| painted.get(cell).is_some_and(|painter| painter.signals()))
+                .filter(|cell| {
+                    painted
+                        .get(cell)
+                        .is_some_and(|paint| paint.painter.signals())
+                })
                 .map(|(x, _, z)| (coord(x), coord(z)))
                 .collect();
             signalling.sort_unstable();
@@ -421,8 +451,14 @@ fn riser_for(
     }
 }
 
-fn unreachable(component: &Component<'_>, scope: &str, why: &Unreachable) -> Diagnostic {
-    error_with_footer(
+/// `component`'s refusal, with a note at each member in `sharing` that the block under it touches.
+fn unreachable(
+    component: &Component<'_>,
+    scope: &str,
+    why: &Unreachable,
+    sharing: &[&Span],
+) -> Diagnostic {
+    let diagnostic = Diagnostic::new(
         DiagnosticCode::RouteUnreachableComponent,
         component.span.clone(),
         format!(
@@ -431,8 +467,16 @@ fn unreachable(component: &Component<'_>, scope: &str, why: &Unreachable) -> Dia
             y = component.cell.1,
             reason = why.reason,
         ),
-        format!("Fix: {}", why.fix),
-    )
+    );
+    sharing
+        .iter()
+        .fold(diagnostic, |diagnostic, span| {
+            diagnostic.with_note(
+                (*span).clone(),
+                "the block that drives it touches this member, which it would power too",
+            )
+        })
+        .with_footer(format!("Fix: {}", why.fix))
 }
 
 fn coord(value: u32) -> i32 {

@@ -1,14 +1,14 @@
 //! Stage 2 of `spec/redstone` "Place-and-route": runs each net's dust from the tile that drives it
-//! to every input it feeds, along the floor and up and down staircases, apart from every other
-//! net's dust.
+//! to every input it feeds, along a layer and up and down staircases, apart from every other net's
+//! dust.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::coupling::Column;
-use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer, overlapping};
 use crate::geometry::{SIDES, Voxel};
-use crate::grid::{Grid, Label, Slot};
+use crate::grid::{Collision, Grid, Label, Slot};
 use crate::part::Part;
 use crate::placement::{CONGESTION_FIX, MARGINS, relay};
 use crate::placement_ir::{CircuitLayout, LayoutStage, ScopedCircuitLayout, TileKind, Wire};
@@ -29,13 +29,22 @@ pub struct RoutingOutput {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Routes every net of every circuit of `placed`, laying a circuit's cells further apart again
-/// when its nets do not all fit, and leaving out one that never fits.
+/// Routes every net of every circuit of `placed`, laying a circuit's cells again at the other
+/// margins when its nets do not all fit, and leaving out one that never fits.
+///
+/// # Panics
+///
+/// On a circuit placement has not produced.
 #[must_use]
 pub fn compile_routing(placed: &ScopedCircuitLayout) -> RoutingOutput {
     let mut out = RoutingOutput::default();
     for entry in &placed.scopes {
         let scope = format!("{}={}:", entry.kind.label(), entry.name);
+        assert_eq!(
+            entry.ir.stage,
+            LayoutStage::Placed,
+            "{scope} routing runs the nets of the circuit placement produces",
+        );
         match route_layout(&scope, &entry.ir) {
             Ok(layout) => out.scoped.push(entry.kind, entry.name.clone(), layout),
             Err(diagnostic) => {
@@ -49,31 +58,42 @@ pub fn compile_routing(placed: &ScopedCircuitLayout) -> RoutingOutput {
 }
 
 fn route_layout(scope: &str, placed: &CircuitLayout) -> Result<CircuitLayout, Diagnostic> {
-    let mut failed = None;
-    let others = MARGINS
+    let mut failed = match route_all(placed) {
+        Ok(routed) => return Ok(routed),
+        Err(Unrouted::Net(net)) => net,
+        Err(Unrouted::Overlap(Collision { at })) => {
+            return Err(overlapping(scope, placed.region.span.clone(), at));
+        }
+    };
+    for margin in MARGINS
         .into_iter()
-        .filter(|margin| *margin != placed.margin);
-    for (attempt, margin) in [placed.margin].into_iter().chain(others).enumerate() {
-        let layout = if attempt == 0 {
-            placed.clone()
-        } else {
-            match relay(scope, placed, margin) {
-                Ok(layout) => layout,
-                Err(diagnostic) => {
-                    return Err(failed.map_or(diagnostic, |net| unroutable(scope, placed, net)));
-                }
-            }
+        .filter(|margin| *margin != placed.margin)
+    {
+        // A margin whose cells do not fit is passed over.
+        let Ok(layout) = relay(scope, placed, margin) else {
+            continue;
         };
         match route_all(&layout) {
             Ok(routed) => return Ok(routed),
-            Err(net) => failed = Some(net),
+            Err(Unrouted::Net(net)) => failed = net,
+            Err(Unrouted::Overlap(Collision { at })) => {
+                return Err(overlapping(scope, placed.region.span.clone(), at));
+            }
         }
     }
-    Err(unroutable(scope, placed, failed.unwrap_or(0)))
+    Err(unroutable(scope, placed, failed))
 }
 
-/// `layout` with every net routed, or the net that found no way.
-pub(crate) fn route_all(layout: &CircuitLayout) -> Result<CircuitLayout, usize> {
+/// Why [`route_all`] laid no wires.
+enum Unrouted {
+    /// The net that found no way.
+    Net(usize),
+    /// Two tiles of the layout meet, so no grid holds it.
+    Overlap(Collision),
+}
+
+/// `layout` with every net routed.
+fn route_all(layout: &CircuitLayout) -> Result<CircuitLayout, Unrouted> {
     let mut order: Vec<usize> = (0..layout.nets.len()).collect();
     order.sort_by_key(|&net| (Reverse(layout.nets[net].sinks.len()), net));
     let mut last = 0;
@@ -82,7 +102,7 @@ pub(crate) fn route_all(layout: &CircuitLayout) -> Result<CircuitLayout, usize> 
         for net in &mut routed.nets {
             net.wire = Wire::default();
         }
-        let mut grid = Grid::of(&routed).map_err(|_| order.first().copied().unwrap_or(0))?;
+        let mut grid = Grid::of(&routed).map_err(Unrouted::Overlap)?;
         let mut stuck = None;
         for &net in &order {
             let Some(wire) = route_net(&grid, &routed, net) else {
@@ -103,7 +123,7 @@ pub(crate) fn route_all(layout: &CircuitLayout) -> Result<CircuitLayout, usize> 
         order.retain(|&n| n != net);
         order.insert(0, net);
     }
-    Err(last)
+    Err(Unrouted::Net(last))
 }
 
 /// The wire of `net` from its driver to every input it feeds, on `grid` as the nets before it
@@ -397,3 +417,6 @@ fn unroutable(scope: &str, layout: &CircuitLayout, net: usize) -> Diagnostic {
         CONGESTION_FIX,
     )
 }
+
+#[cfg(test)]
+mod tests;

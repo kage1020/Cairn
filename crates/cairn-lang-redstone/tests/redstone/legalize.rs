@@ -3,6 +3,7 @@
 //! (`spec/redstone` "Place-and-route").
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
@@ -11,7 +12,9 @@ use cairn_lang_redstone::{
     CircuitBlock, CircuitLayout, LayoutStage, ScopedCircuitLayout, TileKind, compile_legalize,
 };
 
-use crate::common::{EXAMPLES, delayed, load_example};
+use crate::common::{
+    COMPILER_BUG_FIX, EXAMPLES, LONG_WIRE_SOURCE, delayed, findings, load_example,
+};
 
 /// A target that spells every token `test:<token>`.
 struct Spelled;
@@ -23,6 +26,23 @@ impl TargetRegistry for Spelled {
 
     fn known_tokens(&self) -> Vec<String> {
         Vec::new()
+    }
+
+    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
+        None
+    }
+}
+
+/// A target that declares the circuit's block and none of its redstone.
+struct BlockOnly;
+
+impl TargetRegistry for BlockOnly {
+    fn lookup(&self, token: &str) -> Option<BlockState> {
+        (token == "circuit.block").then(|| BlockState::bare("test:circuit.block"))
+    }
+
+    fn known_tokens(&self) -> Vec<String> {
+        vec!["circuit.block".to_owned()]
     }
 
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
@@ -63,7 +83,7 @@ fn each_example_legalizes_to_one_block_per_part_inside_its_reservation() {
     for (name, _) in EXAMPLES {
         for edition in [Edition::Java, Edition::Bedrock] {
             let layout = legalized(&load_example(name), edition, None);
-            assert_eq!(layout.stage, LayoutStage::Legalized);
+            assert_eq!(layout.stage(), LayoutStage::Legalized);
             let voxels: BTreeSet<_> = layout.blocks.iter().map(|block| block.at).collect();
             assert_eq!(
                 voxels.len(),
@@ -90,7 +110,7 @@ fn each_example_legalizes_to_one_block_per_part_inside_its_reservation() {
             );
             for block in &layout.blocks {
                 assert_eq!(
-                    block.output_signal.is_some(),
+                    block.entity.is_some(),
                     block.state.id == "minecraft:comparator",
                     "{name}: {block:?}",
                 );
@@ -101,6 +121,61 @@ fn each_example_legalizes_to_one_block_per_part_inside_its_reservation() {
                 })
                 .all(|(x, z)| block_at(&layout, Voxel::new(x, 0, z)).state.id == "minecraft:stone");
             assert!(floor, "{name}: the bottom layer is laid whole");
+        }
+    }
+}
+
+/// `layout`'s blocks drawn layer by layer from the top, a row of text per `z` along `x`: `#` a
+/// circuit block, `-` dust and `=` powered dust, `*` a lit torch and `i` an unlit one, a repeater
+/// as the arrow it drives along, `c` or `s` a comparator comparing or subtracting, `.` air.
+fn drawn(layout: &CircuitLayout) -> String {
+    let mut out = String::new();
+    for y in (0..=layout.region.top()).rev() {
+        writeln!(out, "y={y}").expect("a String takes every write");
+        for z in 0..i32::try_from(layout.region.depth).expect("small") {
+            for x in 0..i32::try_from(layout.region.width).expect("small") {
+                let block = layout
+                    .blocks
+                    .iter()
+                    .find(|block| block.at == Voxel::new(x, y, z));
+                out.push(block.map_or('.', |block| {
+                    let state = &block.state;
+                    let property = |key: &str| state.properties.get(key).map(String::as_str);
+                    match state.id.as_str() {
+                        "minecraft:redstone_wire" if property("power") == Some("0") => '-',
+                        "minecraft:redstone_wire" => '=',
+                        "minecraft:redstone_wall_torch" if property("lit") == Some("true") => '*',
+                        "minecraft:redstone_wall_torch" => 'i',
+                        "minecraft:comparator" if property("mode") == Some("subtract") => 's',
+                        "minecraft:comparator" => 'c',
+                        "minecraft:repeater" => match property("facing") {
+                            Some("east") => '<',
+                            Some("west") => '>',
+                            Some("north") => 'v',
+                            _ => '^',
+                        },
+                        _ => '#',
+                    }
+                }));
+            }
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Every choice in the stages is ordered, so one source lays one circuit, the circuit block filling
+/// the top layer under the floor wherever it powers nothing and cuts no climb.
+#[test]
+fn each_example_lays_the_circuit_it_always_lays() {
+    for (name, _) in EXAMPLES {
+        let stem = name.trim_end_matches(".crn").replace('-', "_");
+        for edition in [Edition::Java, Edition::Bedrock] {
+            let layout = legalized(&load_example(name), edition, None);
+            insta::assert_snapshot!(
+                format!("lays_{stem}_on_{}", edition.as_str()),
+                drawn(&layout)
+            );
         }
     }
 }
@@ -185,6 +260,53 @@ fn every_block_takes_its_id_from_the_target() {
             "test:repeater.default",
         ]),
     );
+}
+
+#[test]
+fn a_target_lacking_a_circuit_token_refuses_the_circuit_naming_each_it_lacks() {
+    let source = load_example("control-room.crn");
+    let out = compile_legalize(&delayed(&source, Edition::Bedrock), Some(&BlockOnly));
+    assert_eq!(
+        findings(&source, &out.diagnostics),
+        [(
+            "E_UNKNOWN_ABSTRACT_TOKEN",
+            "circuit region=floor void=4",
+            "struct=control_room: the circuit under this struct is built of \
+             `@redstone_dust.default`, `@redstone_torch.wall`, `@repeater.default`, which the \
+             registry pack's materials catalog does not declare"
+                .to_owned(),
+            vec![(
+                None,
+                "Fix: declare each in the pack's `materials` catalog (see \
+                 `spec/materials-themes` \"Tier-1 tokens\")"
+                    .to_owned(),
+            )],
+        )],
+    );
+    assert_eq!(out.scoped, ScopedCircuitLayout::default());
+}
+
+#[test]
+fn a_buffer_on_another_net_dust_is_refused_as_a_compiler_bug_naming_where() {
+    let mut delayed = delayed(LONG_WIRE_SOURCE, Edition::Java);
+    let layout = &mut delayed.scopes[0].ir;
+    let at = layout.nets[1].wire.dust[0];
+    layout.nets[0].wire.buffers[0].at = at;
+    let out = compile_legalize(&delayed, None);
+    assert_eq!(
+        findings(LONG_WIRE_SOURCE, &out.diagnostics),
+        [(
+            "E_ROUTE_CONGESTION",
+            "circuit region=floor void=4",
+            format!(
+                "struct=reach: the circuit under this struct has a part at ({}, {}, {}) where none \
+                 fits",
+                at.x, at.y, at.z,
+            ),
+            vec![(None, COMPILER_BUG_FIX.to_owned())],
+        )],
+    );
+    assert_eq!(out.scoped, ScopedCircuitLayout::default());
 }
 
 #[test]

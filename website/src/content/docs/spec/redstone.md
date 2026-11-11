@@ -392,7 +392,8 @@ So a reservation needs three layers, and four when its logic holds a `counter`, 
 crosses its own wire a layer up. A `void=` of fewer is `E_ROUTE_CONGESTION` on the `circuit` line,
 and the message names the count. The circuit block is `@circuit.block` ([Materials and
 Themes](/spec/materials-themes/#tier-1-tokens)), and it also fills every voxel of the top layer
-the circuit leaves empty under a block of the floor.
+the circuit leaves empty under a block of the floor, except where a block would take a torch's
+power from under it or cut a climb of dust past it, which stays air.
 
 **Where the circuit meets the struct.** Each sensor whose signal something reads enters the
 circuit by a pad in the top layer under it, and each actuator a binding drives is driven by a
@@ -460,10 +461,10 @@ left. Every choice in them is ordered, so one source lays one circuit.
    routed most inputs first, then in the netlist's order. A net that finds no way is moved to the
    front and the nets routed again, up to three times, and then the cells are laid again at the
    other margins. A net that finds no way through any of them is `E_ROUTE_CONGESTION` at the line
-   that drives it.
+   that drives it, as the example `crossbar.crn` is with `void=3`:
 
    ```text
-   crossbar.crn:24:3: error[E_ROUTE_CONGESTION]: struct=crossbar: the sensor's signal finds no way to every input it feeds through the reservation (region 10x8, void=4) without running beside another signal's dust
+   crossbar.crn:25:3: error[E_ROUTE_CONGESTION]: struct=crossbar: the sensor's signal finds no way to every input it feeds through the reservation (region 14x12, void=3) without running beside another signal's dust
      note: Fix: widen the struct's `size=WxH`, increase `void`, or split the logic across several scopes, each with its own `circuit` line
    ```
 3. **Delay insertion.** A signal leaves a part that restores it, a pad, a torch, a repeater or a
@@ -479,20 +480,26 @@ left. Every choice in them is ordered, so one source lays one circuit.
    spot lifts far enough is `E_ATTENUATION_LIMIT` at the line of the tile that reads it, and the
    message says the dust runs past 15 blocks with no straight stretch for a repeater.
 4. **Legalization.** Every part becomes the block it is built as, its id the target's for the part's
-   token: `@redstone_dust.default` for dust, `@redstone_torch.wall` for a torch,
-   `@repeater.default` for a repeater, `@comparator.default` for a comparator, and
-   `@circuit.block` for every other block. Each is written in the state the circuit rests in with
-   every sensor off, which this stage finds by running the circuit until nothing changes: dust with
-   its power and the sides it joins, a torch lit or not, a repeater powered and locked or not,
-   and a comparator with the strength it outputs, which the structure keeps in its block entity. A
-   `latch`, a `counter` and every other macro start off ([§14.4](#144-time-model)). Bedrock keeps
-   an unlit torch and a powered repeater or comparator in blocks of their own, such as
-   `unlit_redstone_torch` and `powered_repeater`, and its build writes those. A circuit that never
-   rests is `E_ROUTE_CONGESTION` on the `circuit` line. No layout the stages before accept should
-   do that, so the message asks for the struct as a bug report.
+   token: `@redstone_dust.default` for dust, `@redstone_torch.wall` for a torch, `@repeater.default`
+   for a repeater, `@comparator.default` for a comparator, and `@circuit.block` for every other
+   block. Each is written in the state the circuit rests in with every sensor off, which this stage
+   finds by running the circuit until nothing changes: dust with its power and the sides it joins, a
+   torch lit or not, a repeater powered and locked or not, and a comparator, which only a Java
+   circuit lays ([§14.6](#146-edition-differences)), with the strength it outputs, which the
+   structure keeps in its block entity. A `latch`, a `counter` and every other macro start off
+   ([§14.4](#144-time-model)). Bedrock keeps an unlit torch and a powered repeater or comparator in
+   blocks of their own, such as `unlit_redstone_torch` and `powered_repeater`, and its build writes
+   those. A target whose pack declares no block for one of these tokens is
+   `E_UNKNOWN_ABSTRACT_TOKEN` on the `circuit` line, and the message names each it lacks.
 
 Routing is confined to the `circuit` reservation. A circuit that does not fit it is refused, never
 laid past it.
+
+A stage that finds the circuit laid wrong by one before it refuses it with `E_ROUTE_CONGESTION` on
+the `circuit` line: a part where none fits, which the message places, a block outside the
+reservation, a circuit that never rests, or a latency bound whose path the circuit no longer
+carries ([§14.7](#147-verification)). No layout the stages before accept should do any of these, so
+the message asks for the struct as a bug report.
 
 ## 14.6 Edition differences
 
@@ -790,10 +797,13 @@ a comparator's output strength goes into its block entity.
 `cairn compile` builds every circuit for the edition it compiles, and an error the passes report
 refuses the compile as an error of the lowering does. `cairn lower --edition` prints the struct with
 its circuit laid, and `cairn lower` without one lays none, since every pass after synthesis is per
-edition. `cairn check` and `cairn info` run the passes for each edition they read: pinned to one,
-they report its findings, and otherwise the ones every edition raises at the same place, while
-`info` reports each edition's own under that edition. `cairn synth --experimental-logic-synth`
-prints each IR on the way.
+edition. `cairn check` and `cairn info` run the passes for each edition they read, and pinned to one
+they report its findings. Otherwise they report the ones every edition raises at the same place,
+once for each wording the editions give it, as an `E_SIM_ASSERTION_FAILED` that fails "on java" and
+"on bedrock" is reported twice. `check` also reports an edition's own finding, whose span or one of
+whose notes' spans is on a line under that edition's guard
+([Lint](/spec/lint/#113-error-vs-warning)), and `info` reports each edition's own under that
+edition. `cairn synth --experimental-logic-synth` prints each IR on the way.
 
 The phase model ([Compilation Model](/spec/compilation/)) splits the step right after `fixtures` into
 `logic_synth → logic_place → logic_route`, because the I/O port coordinates are not fixed until

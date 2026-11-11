@@ -9,7 +9,8 @@ use crate::geometry::{Rotation, Voxel, serialize_face};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "part", rename_all = "snake_case")]
 pub enum Part {
-    /// A block that passes power on: the reservation's floor, a torch's block, the block under dust.
+    /// A block that passes power on: the reservation's bottom layer, a torch's block, the block
+    /// under dust.
     Block,
     /// Redstone dust.
     Dust,
@@ -24,8 +25,8 @@ pub enum Part {
         /// The way it drives.
         #[serde(serialize_with = "serialize_face")]
         facing: Face,
-        /// Its delay in ticks, 1 to 4.
-        delay: u8,
+        /// Its delay.
+        delay: RepeaterDelay,
     },
     /// A comparator reading the cell behind it and its sides, and driving the cell toward `facing`.
     Comparator {
@@ -35,6 +36,35 @@ pub enum Part {
         /// Whether it subtracts its sides from its rear.
         subtract: bool,
     },
+}
+
+/// A repeater's delay, 1 to 4 ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct RepeaterDelay(u8);
+
+impl RepeaterDelay {
+    /// One tick, the shortest.
+    pub const ONE: Self = Self::new(1);
+    /// Two ticks.
+    pub const TWO: Self = Self::new(2);
+
+    /// The delay of `ticks`.
+    ///
+    /// # Panics
+    ///
+    /// On `ticks` outside 1 to 4, which no repeater can be set to.
+    #[must_use]
+    pub const fn new(ticks: u8) -> Self {
+        assert!(matches!(ticks, 1..=4), "a repeater delays 1 to 4 ticks");
+        Self(ticks)
+    }
+
+    /// Its ticks.
+    #[must_use]
+    pub const fn ticks(self) -> u8 {
+        self.0
+    }
 }
 
 impl Part {

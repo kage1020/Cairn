@@ -46,8 +46,9 @@ pub use netlist_ir::{
 };
 pub use placement::{MIN_COUNTER_VOID, MIN_VOID, PlacementOutput, compile_placement};
 pub use placement_ir::{
-    Buffer, CircuitBlock, CircuitLayout, CircuitNet, LayoutStage, NetSink, PlacedTile, Reservation,
-    ScopedCircuitLayout, ScopedCircuitLayoutEntry, TileInput, TileKind, Wire,
+    Buffer, CircuitBlock, CircuitEntity, CircuitLayout, CircuitNet, LayoutStage, NetSink,
+    PlacedTile, Reservation, ScopedCircuitLayout, ScopedCircuitLayoutEntry, TileInput, TileKind,
+    Wire,
 };
 pub use portable::verify_portable;
 pub use routing::{RoutingOutput, compile_routing};

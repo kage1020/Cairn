@@ -270,8 +270,8 @@ fn edition_rows(
     Ok(rows)
 }
 
-/// The circuit findings every edition of `lowered` raises at the same place, each reported once, as
-/// the gate's findings are, rather than under each edition's header.
+/// The circuit findings every edition of `lowered` raises at the same place, each reported once
+/// outside any edition's header.
 fn report_shared_circuits(
     Reporting {
         file,

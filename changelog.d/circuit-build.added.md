@@ -14,8 +14,8 @@
     `@comparator.default` or the new `@circuit.block`.
 - *(cli)* `cairn lower --edition E` lowers the members E's guards hold and lays each struct's
   circuit, as `cairn compile --edition E` builds it.
-- *(formats)* Both writers write a block's block entity: a comparator's output strength, as
-  `OutputSignal`, goes into its `blocks` entry's `nbt` in a `.nbt` and into `block_position_data`
-  in a `.mcstructure`. Bedrock writes a lit or powered redstone state with the block that holds it,
-  such as `unlit_redstone_torch` and `powered_repeater`, through
+- *(formats)* Both writers write a block's block entity, into its `blocks` entry's `nbt` in a `.nbt`
+  and into `block_position_data` in a `.mcstructure`; the one a build writes is a Java circuit
+  comparator's output strength, as `OutputSignal`. Bedrock writes a lit or powered redstone state
+  with the block that holds it, such as `unlit_redstone_torch` and `powered_repeater`, through
   `TargetRegistry::spelling`.

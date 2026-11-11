@@ -19,8 +19,9 @@ version differences, is structured. Only one-off special NBT escapes through `nb
 
 None of these is a keyword yet, `spawn` included: each is `E_UNKNOWN_KEYWORD`, so no build places an
 entity. The one block entity a build writes is a circuit comparator's, which keeps the strength it
-outputs ([Redstone §14.5](/spec/redstone/#145-place-and-route)). Every other block that has a block
-entity, such as the one a `chest`, a `dispenser` or a `daylight` sets ([Blockstate Model
+outputs ([Redstone §14.5](/spec/redstone/#145-place-and-route)), and only a Java circuit lays a
+comparator. Every other block that has a block entity, such as the one a `chest`, a `dispenser` or a
+`daylight` sets ([Blockstate Model
 §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override), [Redstone
 §14.2](/spec/redstone/#142-signal-binding)), is placed with no data. The example below also uses
 syntax the parser does not accept yet: a decimal (`scale=1.5`) and an `nbt={...}` value are

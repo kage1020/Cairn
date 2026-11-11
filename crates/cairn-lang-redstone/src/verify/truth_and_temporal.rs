@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{AssertIr, IntentModule, Member, MemberRole};
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{COMPILER_BUG_FIX, Diagnostic, DiagnosticCode};
 use crate::geometry::Voxel;
 use crate::legalize::rest;
 use crate::logic_ir::ScopeKind;
@@ -672,9 +672,7 @@ impl<'a> Circuit<'a> {
                 ticks = ticks(usize::try_from(self.budget).unwrap_or(usize::MAX)),
             ),
         )
-        .with_footer(
-            "Fix: report this as a compiler bug, with the struct; meanwhile widen the struct's `size=WxH` so the circuit is laid differently",
-        )
+        .with_footer(COMPILER_BUG_FIX)
     }
 
     fn always(

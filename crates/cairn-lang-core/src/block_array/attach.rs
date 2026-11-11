@@ -1,12 +1,14 @@
 //! A circuit laid under a built structure: new layers under its base plane, which rises over
 //! them (`spec/redstone` "Place-and-route").
 
+use std::collections::HashSet;
+
 use indexmap::IndexMap;
 
 use crate::error::Span;
 
 use super::{
-    BlockArrayIr, BlockEntity, BlockState, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex,
+    BlockArrayIr, BlockEntity, BlockState, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex,
     ResolvedBlock, ResolvedMember,
 };
 
@@ -17,9 +19,21 @@ pub struct LaidBlock {
     pub at: (u32, u32, u32),
     /// What it is.
     pub state: BlockState,
-    /// Its block entity's integer fields, if it has one, such as a comparator's `OutputSignal`.
-    pub entity: Option<(String, IndexMap<String, i32>)>,
+    /// Its block entity, if it has one.
+    pub entity: Option<LaidEntity>,
 }
+
+/// The block entity of a [`LaidBlock`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaidEntity {
+    /// Its id, e.g. `minecraft:comparator`.
+    pub id: String,
+    /// Its integer fields, such as a comparator's `OutputSignal`, none named `id`, `x`, `y` or `z`.
+    pub fields: IndexMap<String, i32>,
+}
+
+/// The fields a writer fills from a block entity's own id and position.
+const POSITIONED_FIELDS: [&str; 4] = ["id", "x", "y", "z"];
 
 /// Why a circuit could not be laid under a structure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -34,16 +48,38 @@ pub enum AttachError {
     /// The structure's palette has no room for the circuit's states.
     #[error(transparent)]
     PaletteFull(PaletteFull),
+    /// A block lies outside the layers under the base plane.
+    #[error("a circuit block at {at:?} lies outside the layers under the floor")]
+    OutOfBounds {
+        /// Where it lies.
+        at: (u32, u32, u32),
+    },
+    /// Two blocks stand at one position.
+    #[error("two circuit blocks stand at {at:?}")]
+    Overlap {
+        /// Where they stand.
+        at: (u32, u32, u32),
+    },
+    /// A block entity names a field its id or position fills.
+    #[error(
+        "the circuit block entity at {at:?} names the field `{field}`, which its id or position fills"
+    )]
+    PositionedField {
+        /// Where the block stands.
+        at: (u32, u32, u32),
+        /// The field.
+        field: String,
+    },
 }
 
 impl BlockArrayIr {
     /// Lays `blocks` in `void` new layers under the structure `key`, which rises over them while a
-    /// placement's origin moves down, filing the blocks under the `circuit` line `span`.
+    /// placement's origin moves down, filing the blocks under the `circuit` line `span`, or leaves
+    /// the structure as it was.
     ///
     /// # Errors
     ///
-    /// When no structure is built under `key`, the layers make it too large, or its palette
-    /// cannot hold the circuit's states; the structure is then left as it was.
+    /// [`AttachError`] when no structure is built under `key` or the circuit does not fit it.
     pub fn attach_circuit(
         &mut self,
         key: &str,
@@ -69,13 +105,8 @@ impl BlockArrayIr {
             resolved_state: Vec::new(),
             span,
         };
-        let mut sorted: Vec<&LaidBlock> = blocks.iter().filter(|b| b.at.1 < void).collect();
-        sorted.sort_by_key(|b| (b.at.1, b.at.2, b.at.0));
-        for block in &sorted {
-            let (x, y, z) = block.at;
-            let Some(index) = dims.index(x, y, z) else {
-                continue;
-            };
+        let sorted = indexed(blocks, dims, void)?;
+        for &(index, block) in &sorted {
             let slot = palette
                 .try_intern(block.state.clone())
                 .map_err(AttachError::PaletteFull)?;
@@ -115,12 +146,12 @@ impl BlockArrayIr {
         for entity in &mut array.entities {
             entity.pos.1 += f64::from(void);
         }
-        for block in &sorted {
-            if let Some((id, fields)) = &block.entity {
+        for (_, block) in &sorted {
+            if let Some(entity) = &block.entity {
                 array.block_entities.push(BlockEntity {
                     pos: block.at,
-                    id: id.clone(),
-                    fields: fields.clone(),
+                    id: entity.id.clone(),
+                    fields: entity.fields.clone(),
                 });
             }
         }
@@ -140,6 +171,39 @@ impl BlockArrayIr {
         }
         Ok(())
     }
+}
+
+/// Each of `blocks` with its index into `dims`, in the order a structure lists its voxels.
+fn indexed(
+    blocks: &[LaidBlock],
+    dims: Dims,
+    void: u32,
+) -> Result<Vec<(usize, &LaidBlock)>, AttachError> {
+    let mut taken = HashSet::new();
+    let mut sorted = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        let (x, y, z) = block.at;
+        let Some(index) = dims.index(x, y, z).filter(|_| y < void) else {
+            return Err(AttachError::OutOfBounds { at: block.at });
+        };
+        if !taken.insert(block.at) {
+            return Err(AttachError::Overlap { at: block.at });
+        }
+        if let Some(field) = block
+            .entity
+            .iter()
+            .flat_map(|entity| entity.fields.keys())
+            .find(|field| POSITIONED_FIELDS.contains(&field.as_str()))
+        {
+            return Err(AttachError::PositionedField {
+                at: block.at,
+                field: field.clone(),
+            });
+        }
+        sorted.push((index, block));
+    }
+    sorted.sort_by_key(|(_, b)| (b.at.1, b.at.2, b.at.0));
+    Ok(sorted)
 }
 
 #[cfg(test)]

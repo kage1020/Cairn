@@ -391,7 +391,7 @@ fn rejected_lines() -> [RejectedLine; 10] {
             levels: 0,
             line: "circuit region=floor void=0",
             is: |d| matches!(d, Defect::VoidBelowOne { value: 0, .. }),
-            reason: "its `void=0` reserves no service layer",
+            reason: "its `void=0` reserves no layer under the base plane",
         },
         RejectedLine {
             size: sized,

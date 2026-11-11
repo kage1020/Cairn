@@ -4,7 +4,10 @@
 use cairn_lang_core::{Edition, lower, parse};
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, verify_latency};
 
-use crate::common::{IDENTITY_WIRE_SOURCE, LONG_WIRE_SOURCE, findings, legalized, synth_source};
+use crate::common::{
+    COMPILER_BUG_FIX, IDENTITY_WIRE_SOURCE, LONG_WIRE_SOURCE, findings, legalized, sig,
+    synth_source,
+};
 
 /// The `E_SIM_ASSERTION_FAILED` findings the legalized `source` earns on `edition`.
 fn verified(source: &str, edition: Edition) -> Vec<Diagnostic> {
@@ -540,4 +543,26 @@ fn a_signal_two_actuators_read_ends_at_the_one_with_more_buffer_repeaters() {
             "{edition:?}",
         );
     }
+}
+
+#[test]
+fn a_bound_whose_path_the_circuit_lost_is_refused_as_a_compiler_bug() {
+    let src = chain("  assert latency(sig.a -> sig.h) <= 9\n");
+    let intent = lower(&parse(&src).expect("parse"));
+    let mut legalized = legalized(&src, Edition::Java);
+    legalized.scopes[0]
+        .ir
+        .signal_defs
+        .shift_remove(&sig("sig.h"));
+    assert_eq!(
+        findings(&src, &verify_latency(&legalized, &intent)),
+        [(
+            "E_ROUTE_CONGESTION",
+            "circuit region=floor void=4",
+            "struct=gate: `assert latency(sig.a -> sig.h) <= 9` cannot be counted: the circuit \
+             under this struct carries no path from sig.a to where sig.h is read"
+                .to_owned(),
+            vec![(None, COMPILER_BUG_FIX.to_owned())],
+        )],
+    );
 }

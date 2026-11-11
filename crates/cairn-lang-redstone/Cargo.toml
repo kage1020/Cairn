@@ -19,6 +19,7 @@ workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+insta.workspace = true
 proptest = "1.11.0"
 serde_json.workspace = true
 strum = { workspace = true, features = ["derive"] }
