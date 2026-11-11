@@ -47,8 +47,7 @@ pub enum DiagnosticCode {
     /// An `assert truth` or `assert always` whose signals depend on more sensors than a check
     /// runs every combination of.
     SimAssertionUnchecked,
-    /// A component of the built struct reads another through a block update, so what it does
-    /// depends on update order.
+    /// A component of the built struct that reads another through a block update.
     NoPortableImpl,
 }
 

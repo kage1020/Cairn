@@ -889,6 +889,17 @@ fn dust_climbs_a_block_whose_top_is_whole_unless_a_block_over_it_cuts_the_diagon
             ((2, 1, 1), dust("none", "side", "none", "side")),
         ],
     );
+    assert_eq!(
+        wired(&[
+            "redstone_dust at=1,0,1",
+            "raw_block mat=minecraft:oak_slab[type=bottom] at=2,0,1",
+            "redstone_dust at=2,1,1",
+        ]),
+        [
+            ((1, 0, 1), dust("side", "side", "side", "side")),
+            ((2, 1, 1), dust("none", "side", "none", "side")),
+        ],
+    );
 }
 
 #[test]
@@ -909,4 +920,49 @@ fn dust_written_as_a_dot_or_a_cross_or_placed_raw_keeps_its_sides_and_is_still_j
             ((4, 0, 5), dust("side", "none", "side", "none")),
         ],
     );
+}
+
+/// The keys the array records the lowering derived for the block at `(x, y, z)`.
+fn derived_at(array: &BlockArray, x: u32, y: u32, z: u32) -> Vec<&str> {
+    let i = array.dims.index(x, y, z).expect("a cell of the array");
+    let slot = usize::from(array.voxels[i].0);
+    array
+        .derived
+        .get(slot)
+        .map_or_else(Vec::new, |keys| keys.iter().map(String::as_str).collect())
+}
+
+#[test]
+fn the_array_records_the_connection_states_the_lowering_derived_and_none_a_member_wrote() {
+    let out = lowered_with(
+        &yard(
+            "@cobblestone",
+            1,
+            "window side=front offset=1 y=1 size=1x1 mat_slot=north\n  \
+             window side=front offset=3 y=1 size=1x1 mat_slot=glass\n  \
+             raw_block mat=minecraft:glass_pane[west=true] at=2,1,1",
+        ),
+        &Rules,
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    assert_eq!(derived_at(ba, 1, 1, 2), ["east", "south", "west"]);
+    assert_eq!(derived_at(ba, 3, 1, 2), ["east", "north", "south", "west"]);
+    assert_eq!(derived_at(ba, 2, 1, 1), Vec::<&str>::new());
+
+    let out = lowered_with(
+        &bench(&[
+            "redstone_dust at=1,0,1",
+            "redstone_dust at=2,0,1",
+            "redstone_dust at=1,0,4 connect=all",
+            "redstone_dust at=4,0,4",
+        ]),
+        &Rules,
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    assert_eq!(derived_at(ba, 1, 0, 1), ["east", "north", "south", "west"]);
+    // The lone dust derives the cross the other wrote, and one slot holds both.
+    assert_eq!(derived_at(ba, 4, 0, 4), Vec::<&str>::new());
+    assert_eq!(state_at(ba, 4, 0, 4), state_at(ba, 1, 0, 4));
 }

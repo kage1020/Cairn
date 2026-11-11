@@ -268,7 +268,7 @@ Java の `ComparatorAND` は減算モードのコンパレーターで、一方�
 更新順序の意味論を必要とする論理は、気付かないうちに壊れるのではなく、コンパイルエラー `E_NO_PORTABLE_IMPL` になります。「変換ではなく再コンパイル」という方針と一致します。ライブラリのセルは、マクロのものも含めてどれも自分のタイミングを自分で保つので、回路が更新順序を必要とするのは、組み上げた構造物のあるコンポーネントが、別のコンポーネントをブロック更新を通して読む場合だけです。そうなる形は 2 つで、どちらもそのエディション向けに組み上げた構造物に照らして検査します。
 
 - **回路を読み返すオブザーバー (BUD)。どのエディションでも。** `->` の付いた `observer` で、その正面が、バインディングが駆動する `lamp`・`piston`・`dispenser`・`door`、または駆動されるピストンのヘッドが入るセルを見ているもの。その信号は回路自身の変化で、ブロック更新が届いた時点で現れます。指摘はオブザーバーの行に出し、バインディングを注記で示します。直し方には、同じパルスを順序に依存せずに書いた形 `edge_rising(sig.x) or edge_falling(sig.x)` を示します。
-- **上のセルを通して動力を受けるピストンとディスペンサー (QC)。Java で。** 駆動される `piston` か `dispenser` で、センサーが真上のセルを通して動力を与え、直接は与えていないもの。このとき、ブロック更新が届くまでその動力に反応しません。センサーが真上のセルに動力を与えるのは、そのセルの隣に立つとき、またはその隣のブロックを丸ごと動力源にするときです。`lever` と `button` は取り付いたブロックを、`pressure_plate` は真下のブロックを、`observer` は背面のブロックを丸ごと動力源にします。どのブロックが動力を伝えるかを記録した表はないので、空気、センサー、アクチュエーター以外のブロックはすべて伝えるものとみなします。ピストンは正面からは動力を受けません。Bedrock には疑似接続がないので、そこではこれは指摘になりません。
+- **上のセルを通して動力を受けるピストンとディスペンサー (QC)。Java で。** 駆動される `piston` か `dispenser` で、センサーが真上のセルを通して動力を与え、直接は与えていないもの。このとき、ブロック更新が届くまでその動力に反応しません。センサーが真上のセルに動力を与えるのは、そのセルへ信号を出すとき (`lever`・`button`・`pressure_plate`・`daylight` は隣のすべてのセルへ、`observer` は背面のセルへ出します)、またはそのセルの隣のブロックを丸ごと動力源にするときです。`lever` と `button` は取り付いたブロックを、`pressure_plate` は真下のブロックを、`observer` は背面のブロックを丸ごと動力源にします。どのブロックが動力を伝えるかを記録した表はないので、空気、センサー、`piston`、`door` 以外のブロックはすべて伝えるものとみなします。`lamp` と `dispenser` も伝えます。ピストンは正面からは動力を受けません。指摘はアクチュエーターの行に出し、センサーを注記で示します。Bedrock には疑似接続がないので、そこではこれは指摘になりません。
 
 [Tier 0 の部品](#tier-0-の部品)と生のメンバーは作者が責任を持つものなので、どちらも検査しません。センサーがコンポーネントに直接も動力を与えている場合は順序への依存ではないので、報告しません。回路を組み上げるどのコマンドも、配置配線の前にこれを検査します ([§14.8](#148-ir-とフェーズの関係))。次の例では、ディスペンサーの 2 段上のレバーが、ディスペンサーの真上のセルの隣に立っています。
 
@@ -290,7 +290,7 @@ struct s size=7x5
 dispenser.crn:8:3: error[E_NO_PORTABLE_IMPL]: struct=s: on java, the dispenser `p` also takes power from the lever `sw` through the cell above it, and acts on it only once a block update reaches it: this circuit requires update-order (quasi-connectivity) semantics
 dispenser.crn:9:3:   note: the lever `sw` powers the cell above the dispenser `p` from here
   note: bedrock has no quasi-connectivity, so this is no dependence on order there
-  note: Fix: move the lever `sw` so that it powers no block beside the cell above the dispenser `p`, or redesign the logic to be order-independent; or drop to Tier 0 with an `@edition java` guard
+  note: Fix: move the lever `sw` so that neither it nor a block it powers whole stands beside the cell above the dispenser `p`, or redesign the logic to be order-independent; or build it by hand as raw members under an `@edition java` guard
 ```
 
 Bedrock では、同じソースが配置配線で止まります。床の行から 3 段上のレバーは床下の回路に届かないからです (`E_ROUTE_UNREACHABLE_COMPONENT`、[§14.5](#145-配置配線-place-and-route))。

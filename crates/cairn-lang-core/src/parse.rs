@@ -26,8 +26,8 @@ const EDITION: &str = "edition";
 
 /// The refusal for an `@edition` guard written outside every body.
 const GUARD_OUTSIDE_A_BODY: &str = "an `@edition` guard stands inside a `struct`, `def` or \
-     `site` body, around the raw members it guards: the items of a file are edition-neutral, so \
-     move the guard into the body that places those blocks";
+     `site` body, around the raw members and Tier 0 parts it guards: the items of a file are \
+     edition-neutral, so move the guard into the body that places those blocks";
 
 /// The refusal for an `@edition` guard written in a `theme` body.
 const GUARD_IN_A_THEME: &str = "an `@edition` guard stands inside a `struct`, `def` or `site` \

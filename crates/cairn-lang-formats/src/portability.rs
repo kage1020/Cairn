@@ -148,7 +148,7 @@ pub fn portability_for_bedrock(
 ) -> Result<PortabilityReport, InvalidPalette> {
     let mut report = PortabilityReport::default();
     let mut leaks = Vec::new();
-    for entry in non_air_entries(ir) {
+    for (entry, derived) in entries_with_derived(ir) {
         if absent_from_edition(blocks, entry) {
             report.push_unsupported(absent_entry(blocks, aliases, absent, entry));
             continue;
@@ -168,7 +168,7 @@ pub fn portability_for_bedrock(
                 continue;
             };
             // No wildcard arm: a new refusal must be classified here.
-            match translate_states(&map, entry) {
+            match translate_states(&map, entry, derived) {
                 Ok(translated) => {
                     written = true;
                     for intent in translated.degraded {
@@ -251,10 +251,20 @@ fn absent_entry(
 
 /// Every non-air palette entry across the IR's structures, walkways included.
 fn non_air_entries(ir: &BlockArrayIr) -> impl Iterator<Item = &BlockState> {
+    entries_with_derived(ir).map(|(entry, _)| entry)
+}
+
+/// Each non-air palette entry, with the keys its array says the lowering derived for it.
+fn entries_with_derived(ir: &BlockArrayIr) -> impl Iterator<Item = (&BlockState, &[String])> {
     ir.structures
         .values()
-        .flat_map(|ba| ba.palette.entries.iter())
-        .filter(|entry| !is_air(entry))
+        .flat_map(|ba| {
+            ba.palette.entries.iter().enumerate().map(|(slot, entry)| {
+                let derived = ba.derived.get(slot).map_or(&[][..], Vec::as_slice);
+                (entry, derived)
+            })
+        })
+        .filter(|(entry, _)| !is_air(entry))
 }
 
 /// Whether the tables prove no version has this block; a pack without tables proves nothing.

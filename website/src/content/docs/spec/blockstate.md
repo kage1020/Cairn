@@ -159,14 +159,24 @@ resolved state, never intent ([§6.2](#62-intent_state-and-resolved_state)).
 The blocks beside are those of the same `struct` or `place` body, and nothing outside its array
 counts. What each block is to these rules comes from the target's registry pack ([Versioning and
 Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). A lowering with no version
-pinned reads a block as every version of the edition that declares it agrees, and as nothing where
-they disagree; without a pack nothing is derived. A Bedrock target reads its block as the canonical
-blocks its state map names that take the block's states, and its writer maps the derived states as
-it maps every other. A block the pack cannot answer for is nothing to the rules: one no canonical
-block becomes, such as Bedrock's `border_block`, or one the canonical blocks it may be disagree on.
-Bedrock keeps a chest's pairing in its block entity, which no writer fills yet, so a Bedrock build
-writes each half of a pair as a single chest and says so with `W_INTENT_DEGRADED` ([Versioning and
-Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
+pinned reads each thing the rules ask of a block, its kind, its sturdy faces, what its bottom covers
+and the faces dust joins among them, as every version of the edition that declares it agrees, and as
+nothing where they disagree, so a block they read as two kinds is nothing to the rules; without a
+pack nothing is derived. A Bedrock target reads its block as the canonical blocks its state map
+names that take the block's states, and its writer maps the derived states as it maps every other. A
+block the pack cannot answer for is nothing to the rules: one no canonical block becomes, such as
+Bedrock's `border_block`, or one the canonical blocks it may be disagree on. Bedrock keeps a chest's
+pairing in its block entity, which no writer fills yet, so a Bedrock build writes each half of a
+pair as a single chest and says so with `W_INTENT_DEGRADED` ([Versioning and Editions
+§10.7](/spec/versioning-editions/#107-java--bedrock-portability)). A version whose state map keeps
+none of a block's sides, such as Bedrock's panes, fences and dust before 1.26.60, has the game work
+them out from the blocks beside it: a side the lowering derived loses nothing there, and one a
+material or line writes, `@glass_pane[north=true]` or a dust's `connect=`, is not kept, which the
+build says with `W_INTENT_DEGRADED` too. The block array records, per palette entry, the states the
+lowering derived at every cell that holds it, which is how the writer tells the two apart. No line
+writes the blocks of a circuit laid under the struct ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)), so every state of an entry only the circuit holds is
+derived.
 
 A face, and what a block covers, are read off the block's model as the release's client draws it,
 while the game reads its collision shape. The two disagree for a few blocks. Honey, cactus and

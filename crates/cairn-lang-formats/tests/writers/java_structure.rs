@@ -26,6 +26,7 @@ fn unit_air() -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::unit_air".to_owned(),
+        derived: Vec::new(),
     }
 }
 
@@ -49,6 +50,7 @@ fn synthetic_cottage() -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::cottage".to_owned(),
+        derived: Vec::new(),
     }
 }
 
@@ -171,6 +173,7 @@ fn palette_entry_with_properties_keeps_them() {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::stairs".to_owned(),
+        derived: Vec::new(),
     };
     let root = build_structure_tag(&ba, &target_1_21_4()).expect("build");
     let Tag::List(palette) = &root.entries["palette"] else {
@@ -209,6 +212,7 @@ fn a_palette_entry_names_its_block_and_properties_in_lower_case_from_data_versio
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::stairs".to_owned(),
+        derived: Vec::new(),
     };
     let keys_of = |data_version: i32| {
         let target = JavaTarget {
@@ -300,6 +304,7 @@ fn abstract_palette_id_rejected() {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::abs".to_owned(),
+        derived: Vec::new(),
     };
     let err = build_structure_tag(&ba, &target_1_21_4()).expect_err("abstract");
     match err {

@@ -191,13 +191,14 @@ pub fn prepare_mcstructure<'a>(
     let mut slots: Vec<i32> = Vec::with_capacity(entries.len());
     let mut waterlogged: Vec<bool> = Vec::with_capacity(entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
-    for entry in entries {
+    for (slot, entry) in entries.iter().enumerate() {
         if !is_concrete_id(&entry.id) {
             return Err(BedrockStructureError::AbstractPaletteEntry {
                 id: entry.id.clone(),
             });
         }
-        let translated = translate_states(states, entry)?;
+        let derived = block_array.derived.get(slot).map_or(&[][..], Vec::as_slice);
+        let translated = translate_states(states, entry, derived)?;
         check_palette_strings(&translated.id, &translated.states)?;
         // Named by the canonical entry: several can share one Bedrock state once the intent drops.
         if !translated.degraded.is_empty() {
@@ -213,7 +214,7 @@ pub fn prepare_mcstructure<'a>(
         waterlogged.push(translated.waterlogged);
     }
     let water = if waterlogged.contains(&true) {
-        let water = translate_states(states, &BlockState::bare(WATER_ID))?;
+        let water = translate_states(states, &BlockState::bare(WATER_ID), &[])?;
         let slot = palette.slot(palette_entry(&water.id, water.states, target.block_version))?;
         waterlogged
             .iter()
