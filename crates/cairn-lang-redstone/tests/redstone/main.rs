@@ -10,6 +10,7 @@ mod crossing;
 mod delay;
 mod edition_netlist;
 mod front_end_cascades;
+mod latency;
 mod logic_synth;
 mod netlist;
 mod placement;

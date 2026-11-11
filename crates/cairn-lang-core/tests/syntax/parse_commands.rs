@@ -286,6 +286,31 @@ fn parses_assert_always() {
 }
 
 #[test]
+fn parses_assert_latency() {
+    let source = "struct s\n  assert latency(sig.step -> sig.open) <= 4\n";
+    let module = parse(source).expect("parse");
+    let Item::Struct { body, .. } = &module.items[0] else {
+        panic!("not a struct");
+    };
+    let Statement::AssertLatency {
+        from,
+        to,
+        bound,
+        span,
+    } = &body[0]
+    else {
+        panic!("expected AssertLatency, got {:?}", body[0]);
+    };
+    assert_eq!(from, &dr(&["sig", "step"]));
+    assert_eq!(to, &dr(&["sig", "open"]));
+    assert_eq!(*bound, 4);
+    assert_eq!(
+        &source[span.clone()],
+        "assert latency(sig.step -> sig.open) <= 4"
+    );
+}
+
+#[test]
 fn parses_connect_with_positional_to() {
     let module =
         parse("site hamlet:\n  connect home1.entry to home2.entry path=@gravel\n").expect("parse");
@@ -674,6 +699,29 @@ fn within_overflow_surfaces_invalid_int_variant() {
     assert_eq!(context, IntContext::WithinBound);
     assert_eq!(lexeme, "4294967296");
     assert_eq!(kind, IntErrorKind::PosOverflow);
+}
+
+#[test]
+fn latency_overflow_surfaces_invalid_int_variant() {
+    let err = parse("struct s\n  assert latency(a -> b) <= 4294967296\n").expect_err("overflow");
+    let message = err.user_message();
+    let ParseError::InvalidInt {
+        context,
+        lexeme,
+        kind,
+        ..
+    } = err
+    else {
+        panic!("expected ParseError::InvalidInt, got {err:?}");
+    };
+    assert_eq!(context, IntContext::LatencyBound);
+    assert_eq!(lexeme, "4294967296");
+    assert_eq!(kind, IntErrorKind::PosOverflow);
+    assert_eq!(
+        message,
+        "invalid `latency` bound `4294967296`: value out of range; a bound is a whole number of \
+         ticks up to 4294967295"
+    );
 }
 
 #[test]

@@ -242,7 +242,8 @@ pub(crate) enum Command {
             crossing legalization over the delayed IR and fills every cell's `buffer_coords` with \
             the coord of the buffer repeater each driver segment passes through (a repeater this \
             net already placed is recorded rather than duplicated, so one block can be named by \
-            several segments). Every cell of the four Placement IR stages carries a `\"stage\"` \
+            several segments), then checks every `assert latency` against the legalized circuit \
+            and prints no IR when one fails. Every cell of the four Placement IR stages carries a `\"stage\"` \
             key echoing the flag value that produced the dump (`placement` / `route` / `delay` / \
             `crossing`), so a consumer reads the stage off the output instead of inferring it from \
             which optional keys are present. The `--edition <java|bedrock>` flag is required in \
@@ -389,14 +390,17 @@ pub(crate) enum SynthStage {
             repeater can stand on"
     )]
     Delay,
-    /// Legalized Placement IR: crossing legalization, filling each cell's `buffer_coords`.
+    /// Legalized Placement IR: crossing legalization, filling each cell's `buffer_coords`, then
+    /// latency verification.
     #[value(
         help = "Legalized Placement IR: crossing legalization over the delayed Placement IR \
             against `--edition`. Stage 4 of the pipeline `spec/redstone` \"Place-and-route\" lays \
             out. Materialises the coord of every implicit buffer repeater the delay pass counted \
             into every cell's `buffer_coords`, one entry per driver segment that passes through it \
             — so a block serving several segments is named once per segment and a consumer \
-            counting blocks deduplicates by coord"
+            counting blocks deduplicates by coord. Then checks each `assert latency` against the \
+            legalized circuit, refusing with `E_SIM_ASSERTION_FAILED` one whose slowest path \
+            takes more ticks than its bound"
     )]
     Crossing,
 }

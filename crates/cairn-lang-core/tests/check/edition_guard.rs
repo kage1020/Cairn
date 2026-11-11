@@ -68,7 +68,8 @@ fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
 fn a_logic_or_assert_line_under_a_guard_is_refused() {
     let source = struct_with(
         "  @edition bedrock\n    logic sig.a = sig.b\n    \
-         assert always(sig.a -> eventually sig.b within 4)\n",
+         assert always(sig.a -> eventually sig.b within 4)\n    \
+         assert latency(sig.b -> sig.a) <= 2\n",
     );
     let found = diagnose(&source);
     let refused: Vec<(&str, &str, &str)> = found
@@ -90,6 +91,12 @@ fn a_logic_or_assert_line_under_a_guard_is_refused() {
                 "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
                  members: the semantic layer is edition-neutral",
             ),
+            (
+                "E_SEMANTIC_IN_EDITION_GUARD",
+                "assert latency(sig.b -> sig.a) <= 2",
+                "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
+                 members: the semantic layer is edition-neutral",
+            ),
         ],
     );
 }
@@ -98,7 +105,8 @@ fn a_logic_or_assert_line_under_a_guard_is_refused() {
 fn a_logic_or_assert_line_under_a_guarded_raw_member_is_refused() {
     let source = struct_with(
         "  @edition java\n    raw_block mat=minecraft:stone at=1,0,1\n      \
-         logic sig.a = sig.b\n      assert always(sig.a -> eventually sig.b within 4)\n",
+         logic sig.a = sig.b\n      assert always(sig.a -> eventually sig.b within 4)\n      \
+         assert latency(sig.b -> sig.a) <= 2\n",
     );
     assert_eq!(
         located(&source),
@@ -107,6 +115,10 @@ fn a_logic_or_assert_line_under_a_guarded_raw_member_is_refused() {
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "assert always(sig.a -> eventually sig.b within 4)",
+            ),
+            (
+                "E_SEMANTIC_IN_EDITION_GUARD",
+                "assert latency(sig.b -> sig.a) <= 2"
             ),
         ],
     );

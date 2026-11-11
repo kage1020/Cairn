@@ -645,6 +645,7 @@ fn an_assert_over_defined_signals_stays_silent() {
         "  door[id=front] opened_by=sig.x\n",
         "  assert always(sig.a -> eventually sig.x within 2)\n",
         "  assert truth(sig.a -> sig.x) { 0->1; 1->0 }\n",
+        "  assert latency(sig.a -> sig.x) <= 1\n",
     )));
     assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
 }

@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, latency_text};
 use crate::logic_ir::{
     GateKind, GateNode, InputPort, LogicIr, OutputPort, ScopeKind, ScopedLogicIr,
     ScopedLogicIrEntry, SignalRef,
@@ -782,6 +782,15 @@ fn finish_scope(scope: ScopeRef<'_>, mut collected: ScopeCollected<'_>, out: &mu
         &mut diagnostics,
     );
 
+    check_latency_paths(
+        &collected.asserts,
+        &ir,
+        &collected.bindings,
+        &bindings_by_lhs,
+        scope,
+        &mut diagnostics,
+    );
+
     // Into source order; stable, so findings on one span keep the order they were raised in.
     diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
 
@@ -954,6 +963,76 @@ fn check_assert_refs(
             ));
         }
     }
+}
+
+/// Refuses each `assert latency` whose end does not depend on its start: no circuit carries a
+/// change from one to the other, so the bound fails on every edition.
+fn check_latency_paths(
+    asserts: &[&AssertIr],
+    ir: &LogicIr,
+    bindings: &[PendingBinding<'_>],
+    bindings_by_lhs: &HashMap<DottedRef, usize>,
+    scope: ScopeRef<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for assertion in asserts {
+        let AssertIr::Latency {
+            from,
+            to,
+            bound,
+            span,
+        } = assertion
+        else {
+            continue;
+        };
+        // A name nothing defines is reported unbound instead.
+        let (Some(&start), Some(&end)) = (ir.signal_defs.get(from), ir.signal_defs.get(to)) else {
+            continue;
+        };
+        if depends_on(ir, end, start) {
+            continue;
+        }
+        // A merged gate or an alias carries the span of another name's line.
+        let driven_at = match bindings_by_lhs.get(to) {
+            Some(&binding) => bindings[binding].span.clone(),
+            None => match end {
+                SignalRef::Input(i) => ir.inputs[i as usize].span.clone(),
+                SignalRef::Gate(j) => ir.nodes[j as usize].span.clone(),
+            },
+        };
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::SimAssertionFailed,
+                span.clone(),
+                format!(
+                    "{label} {text} fails on every edition: {to} does not depend on {from}, so no \
+                     path carries a change at {from} to it",
+                    label = scope.label(),
+                    text = latency_text(from, to, *bound),
+                ),
+            )
+            .with_note(driven_at, format!("{to} is driven here"))
+            .with_footer(format!(
+                "Fix: start the path at a signal {to} is computed from, or delete the assertion"
+            )),
+        );
+    }
+}
+
+/// Whether `signal` is `source` or computed from it.
+fn depends_on(ir: &LogicIr, signal: SignalRef, source: SignalRef) -> bool {
+    let mut computed_from = vec![false; ir.nodes.len()];
+    let reaches = |s: SignalRef, gates: &[bool]| {
+        s == source || matches!(s, SignalRef::Gate(j) if gates[j as usize])
+    };
+    // Gates are in topological order, so every operand is decided before the gate reading it.
+    for (j, node) in ir.nodes.iter().enumerate() {
+        let mut any = false;
+        node.kind
+            .each_input(|input| any |= reaches(input, &computed_from));
+        computed_from[j] = any;
+    }
+    reaches(signal, &computed_from)
 }
 
 /// Registers each sensor that kept its signal as an [`InputPort`] with its `signal_defs` entry.

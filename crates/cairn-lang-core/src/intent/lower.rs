@@ -216,6 +216,17 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             within: *within,
             span: span.clone(),
         }),
+        Statement::AssertLatency {
+            from,
+            to,
+            bound,
+            span,
+        } => out.asserts.push(AssertIr::Latency {
+            from: from.clone(),
+            to: to.clone(),
+            bound: *bound,
+            span: span.clone(),
+        }),
         // The guard's lines join the body it stands in, but `check` alone reads a refused one.
         Statement::EditionGuard {
             edition, children, ..

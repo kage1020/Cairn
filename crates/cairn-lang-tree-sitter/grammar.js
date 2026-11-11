@@ -128,7 +128,7 @@ module.exports = grammar({
 
     requires_stmt: $ => seq('requires', field('arg', $.directive_literal)),
 
-    assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form)),
+    assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form, $.latency_form)),
 
     // A line break may stand between rows; the scanner measures no indent inside the braces.
     truth_form: $ => seq(
@@ -164,6 +164,16 @@ module.exports = grammar({
       'eventually',
       field('target', $._dotted_ref),
       'within',
+      field('bound', $.integer),
+    ),
+
+    latency_form: $ => seq(
+      'latency', '(',
+      field('from', $._dotted_ref),
+      '->',
+      field('to', $._dotted_ref),
+      ')',
+      '<=',
       field('bound', $.integer),
     ),
 

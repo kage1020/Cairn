@@ -99,6 +99,7 @@ struct gatehouse size=7x5
   circuit region=floor void=2
 
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
+  assert latency(sig.step -> sig.open) <= 1
   assert always(sig.step -> eventually sig.open within 2)
 ```
 
@@ -106,11 +107,11 @@ struct gatehouse size=7x5
 
 **センサーが信号を出し、アクチュエーターが受け取ります。** `-> sig.step` はセンサーの出力、`opened_by=sig.open` はアクチュエーターの入力です。その間の依存関係を書くのが `logic` です。
 
-**tick の計算は書きません。** 論理式は時間をいっさい持ちません。数値が tick を表すのは、アサーションの `within 2` だけです。遅延は、回路を配置して配線するまで分からないからです。
+**tick の計算は書きません。** 論理式は時間をいっさい持ちません。数値が tick を表すのは、アサーションの `<= 1` と `within 2` だけです。遅延は、回路を配置して配線するまで分からないからです。
 
 **`circuit region=…` は配置配線のための領域を確保します。** 配線が収まらなければ、修正案付きの `E_ROUTE_CONGESTION` が出ます。黙って領域からはみ出すことはありません。今のところ配線を行うのは実験的な `cairn synth --experimental-logic-synth` だけなので、`cairn compile` はこのエラーを出しません。
 
-**アサーションは 3 種類です。** 組み合わせ論理を検証する `truth(…)`、遅延の上限を検証する `latency(in -> out) <= N`、時間の範囲を区切った時相論理を検証する `always(in -> eventually out within N)` です。完全な LTL は意図的に持たず、tick 単位のシミュレータで安く判定できるものだけに絞っています。ただし、このシミュレータはまだなく、`latency` もまだパーサが受け付けません。
+**アサーションは 3 種類です。** 組み合わせ論理を検証する `truth(…)`、遅延の上限を検証する `latency(in -> out) <= N`、時間の範囲を区切った時相論理を検証する `always(in -> eventually out within N)` です。完全な LTL は意図的に持たず、tick 単位のシミュレータで安く判定できるものだけに絞っています。ただし、このシミュレータはまだありません。レイテンシの上限はシミュレータを必要とせず、`cairn synth --experimental-logic-synth --stage crossing` が、ビルドするエディションについて配置した回路の tick を数え、守れない上限を `E_SIM_ASSERTION_FAILED` で拒否します。ここの OR は Java ではリピーター 2 つで 1 tick、Bedrock ではダストの合流で 0 tick です。
 
 **エディションの違いは、言語ではなくセルライブラリが吸収します。** 同じ論理が、Java では `ComparatorAND` セルに、Bedrock では `TorchAND` セルになります。疑似接続 (quasi-connectivity) やブロック更新の順序に依存する回路は、気付かないうちに壊れる仕掛けを残すのではなく、コンパイルエラーにする方針です。ただし、回路がそれに依存しているかを検査するものは、まだありません。
 

@@ -376,6 +376,18 @@ pub enum Statement {
         #[serde(skip)]
         span: Span,
     },
+    /// `assert latency(FROM -> TO) <= N` — an upper bound on the ticks from one signal to another.
+    AssertLatency {
+        /// Signal reference the path starts at, before `->`.
+        from: DottedRef,
+        /// Signal reference the path ends at, after `->`.
+        to: DottedRef,
+        /// `<= N` bound in ticks.
+        bound: u32,
+        /// Byte range of the whole `assert latency(...) <= N` form.
+        #[serde(skip)]
+        span: Span,
+    },
     /// `@edition java` or `@edition bedrock`, holding the lines indented under it
     /// (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
     EditionGuard {
@@ -398,6 +410,7 @@ impl Statement {
             | Self::Logic { span, .. }
             | Self::AssertTruth { span, .. }
             | Self::AssertAlways { span, .. }
+            | Self::AssertLatency { span, .. }
             | Self::EditionGuard { span, .. } => span,
         }
     }

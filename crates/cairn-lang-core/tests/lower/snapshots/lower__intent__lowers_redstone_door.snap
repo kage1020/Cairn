@@ -162,6 +162,14 @@ structs:
             output: true
           - inputs: "11"
             output: true
+      - kind: Latency
+        from:
+          - sig
+          - step
+        to:
+          - sig
+          - open
+        bound: 1
       - kind: Always
         antecedent:
           - sig

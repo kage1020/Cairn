@@ -56,6 +56,8 @@ pub enum IntContext {
     IntLiteral,
     /// Bound of `assert always(... within N)`.
     WithinBound,
+    /// Bound of `assert latency(...) <= N`.
+    LatencyBound,
 }
 
 impl IntContext {
@@ -64,6 +66,7 @@ impl IntContext {
         match self {
             Self::SizeWidth | Self::SizeHeight | Self::IntLiteral => "invalid integer literal",
             Self::WithinBound => "invalid `within` bound",
+            Self::LatencyBound => "invalid `latency` bound",
         }
     }
 }
@@ -97,8 +100,14 @@ fn render_unexpected_char(ch: char) -> String {
 }
 
 fn render_invalid_int(context: IntContext, lexeme: &str, kind: IntErrorKind) -> String {
+    let valid = match context {
+        IntContext::WithinBound | IntContext::LatencyBound => {
+            format!("; a bound is a whole number of ticks up to {}", u32::MAX)
+        }
+        IntContext::SizeWidth | IntContext::SizeHeight | IntContext::IntLiteral => String::new(),
+    };
     format!(
-        "{} `{}`: {}",
+        "{} `{}`: {}{valid}",
         context.describe(),
         lexeme,
         describe_int_kind(kind),

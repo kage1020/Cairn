@@ -16,7 +16,8 @@ pub(crate) fn refused_under_guard(line: &Statement) -> bool {
         }
         Statement::Logic { .. }
         | Statement::AssertTruth { .. }
-        | Statement::AssertAlways { .. } => true,
+        | Statement::AssertAlways { .. }
+        | Statement::AssertLatency { .. } => true,
         // The parser refuses a guard directly under a guard.
         Statement::EditionGuard { .. } => false,
     }

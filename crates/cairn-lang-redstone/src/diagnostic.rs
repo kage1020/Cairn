@@ -1,6 +1,7 @@
 //! The findings of the redstone passes, shaped like core's `check::Diagnostic` with a code enum of
 //! their own.
 
+use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
 use serde::{Serialize, Serializer};
@@ -41,6 +42,8 @@ pub enum DiagnosticCode {
     LogicUnresolvedPatch,
     /// A component carries a second binding under an actuator key it already has.
     LogicDuplicateBinding,
+    /// An `assert` the circuit does not meet.
+    SimAssertionFailed,
 }
 
 impl DiagnosticCode {
@@ -63,6 +66,7 @@ impl DiagnosticCode {
             Self::LogicUnknownBindingKey => "E_LOGIC_UNKNOWN_BINDING_KEY",
             Self::LogicUnresolvedPatch => "E_LOGIC_UNRESOLVED_PATCH",
             Self::LogicDuplicateBinding => "E_LOGIC_DUPLICATE_BINDING",
+            Self::SimAssertionFailed => "E_SIM_ASSERTION_FAILED",
         }
     }
 
@@ -82,7 +86,8 @@ impl DiagnosticCode {
             | Self::LogicInvalidSignal
             | Self::LogicUnknownBindingKey
             | Self::LogicUnresolvedPatch
-            | Self::LogicDuplicateBinding => Severity::Error,
+            | Self::LogicDuplicateBinding
+            | Self::SimAssertionFailed => Severity::Error,
             Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
         }
     }
@@ -150,6 +155,11 @@ impl Diagnostic {
         });
         self
     }
+}
+
+/// `assert latency(FROM -> TO) <= N`, each name in its canonical spelling.
+pub(crate) fn latency_text(from: &DottedRef, to: &DottedRef, bound: u32) -> String {
+    format!("`assert latency({from} -> {to}) <= {bound}`")
 }
 
 /// An error with one `Fix:` footer, the shape of every place-and-route refusal.

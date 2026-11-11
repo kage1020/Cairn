@@ -7,7 +7,7 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, lower};
 use cairn_lang_redstone::{
     PlacementStage, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
-    compile_placement, compile_routing, synthesize,
+    compile_placement, compile_routing, synthesize, verify_latency,
 };
 use clap::ValueEnum;
 
@@ -178,6 +178,9 @@ fn dispatch_synth_stage(
 
     let crossing = compile_crossing(&delay.scoped);
     if report_diagnostics(file, source, lines, &crossing.diagnostics) {
+        return Err(ExitCode::from(1));
+    }
+    if report_diagnostics(file, source, lines, &verify_latency(&crossing.scoped, ir)) {
         return Err(ExitCode::from(1));
     }
     match stage {

@@ -7,7 +7,7 @@ use std::process::Output;
 use cairn_lang_core::{Edition, IntentModule, lower, parse};
 use cairn_lang_redstone::{
     Diagnostic, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
-    compile_placement, compile_routing, synthesize,
+    compile_placement, compile_routing, synthesize, verify_latency,
 };
 use serde_json::Value;
 
@@ -349,7 +349,8 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
     let delay = compile_delay(&routing.scoped);
     let delayed = findings(&mut so_far, &delay.diagnostics);
     let crossing = compile_crossing(&delay.scoped);
-    let crossed = findings(&mut so_far, &crossing.diagnostics);
+    findings(&mut so_far, &crossing.diagnostics);
+    let crossed = findings(&mut so_far, &verify_latency(&crossing.scoped, ir));
     vec![
         Dump {
             stage: "logic",
@@ -756,4 +757,59 @@ struct crossbar size=4x4
         "a refused scope must not reach stdout as a legalized IR dump, got: {}",
         String::from_utf8_lossy(&out.stdout),
     );
+}
+
+#[test]
+fn stage_crossing_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let door = fs::read_to_string(examples_dir().join("redstone-door.crn")).expect("read example");
+    let tight = door.replace(
+        "assert latency(sig.step -> sig.open) <= 1",
+        "assert latency(sig.step -> sig.open) <= 0",
+    );
+    assert_ne!(
+        tight, door,
+        "the example carries the bound this test tightens"
+    );
+    let path = write_source(dir.path(), "tight.crn", &tight);
+    let at = |stage: &str, edition: &str| {
+        cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                stage,
+                "--edition",
+                edition,
+                path.to_str().unwrap(),
+            ],
+        )
+    };
+    let run = |edition: &str| at("crossing", edition);
+
+    // A `RepeaterOR` takes a tick on Java; a `TorchOR` is a dust merge and takes none.
+    let java = run("java");
+    assert_eq!(java.status.code(), Some(1));
+    let stderr = String::from_utf8(java.stderr).expect("utf-8");
+    assert_stream(&stderr, &[(32, 3, "error", "E_SIM_ASSERTION_FAILED")]);
+    assert!(java.stdout.is_empty(), "a failed bound prints no dump");
+
+    let bedrock = run("bedrock");
+    assert_eq!(
+        bedrock.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&bedrock.stderr)
+    );
+
+    // Before crossing, the buffer repeaters are not yet placed, so no bound is checked.
+    for stage in ["route", "delay"] {
+        let early = at(stage, "java");
+        assert_eq!(
+            early.status.code(),
+            Some(0),
+            "--stage {stage}: {}",
+            String::from_utf8_lossy(&early.stderr)
+        );
+    }
 }

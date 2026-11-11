@@ -17,10 +17,11 @@ The row is what a reader with a code in hand needs to find, and the chapter is w
 is defined.
 
 Every code of the redstone pipeline is outside that promise: the `E_LOGIC_*` / `W_LOGIC_*` codes,
-and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT` and
-`W_ROUTE_CROSS_LAYER_CLEARANCE`. They are reachable only through `cairn synth
---experimental-logic-synth`, which is Internal tier ([Compatibility](/spec/compatibility/)). Nothing
-about those strings is guaranteed, so a row here would state a contract that does not exist.
+and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT`,
+`W_ROUTE_CROSS_LAYER_CLEARANCE` and `E_SIM_ASSERTION_FAILED`. They are reachable only through
+`cairn synth --experimental-logic-synth`, which is Internal tier
+([Compatibility](/spec/compatibility/)). Nothing about those strings is guaranteed, so a row here
+would state a contract that does not exist.
 [Redstone and Logic](/spec/redstone/) names the ones its own rules turn on.
 
 ### Duplicates
@@ -615,7 +616,7 @@ Beyond the codes above, lint covers:
 | **fluid** | Consistency of water source, flow, and `waterlogged`. |
 | **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
-| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
+| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
 Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
@@ -628,9 +629,10 @@ pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block
 edition has, `E_STATE_DOMAIN` a state its block does not take there,
 `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
 version cannot carry, while no entity schema is checked. The redstone row runs only in part as well:
-the truth-table codes check a table against itself, nothing simulates the circuit, and routing
-congestion is `E_ROUTE_CONGESTION`, which only the Internal-tier `cairn synth
---experimental-logic-synth` reaches.
+the truth-table codes check a table against itself, nothing simulates the circuit, and a latency
+bound the placed circuit misses (`E_SIM_ASSERTION_FAILED`) and routing congestion
+(`E_ROUTE_CONGESTION`) are reached only by the Internal-tier `cairn synth
+--experimental-logic-synth`.
 
 ### "did you mean"
 

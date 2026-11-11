@@ -71,6 +71,22 @@ impl EditionCell {
         }
     }
 
+    /// The cell's name in `spec/redstone` "Edition differences", such as `ComparatorAND`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::JavaComparatorAnd => "ComparatorAND",
+            Self::BedrockTorchAnd => "TorchAND",
+            Self::JavaRepeaterOr => "RepeaterOR",
+            Self::BedrockTorchOr => "TorchOR",
+            Self::JavaInverterTorch | Self::BedrockInverterTorch => "InverterTorch",
+            Self::JavaTorchXor | Self::BedrockTorchXor => "TorchXOR",
+            Self::JavaTorchNand | Self::BedrockTorchNand => "TorchNAND",
+            Self::JavaTorchNor | Self::BedrockTorchNor => "TorchNOR",
+            Self::JavaTorchMux | Self::BedrockTorchMux => "TorchMUX",
+        }
+    }
+
     /// Tick delay from input `port` to this cell's output, excluding buffer repeaters.
     #[must_use]
     pub const fn port_delay_ticks(self, port: PortName) -> u32 {

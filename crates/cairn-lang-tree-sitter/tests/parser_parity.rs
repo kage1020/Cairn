@@ -797,6 +797,48 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert always(a.b -> eventually c.d)\n",
         Reject,
     ),
+    (
+        "latency_bound",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= 4\n",
+        Accept,
+    ),
+    (
+        "latency_bare_names",
+        "struct s size=3x3\n  assert latency(a -> b) <= 0\n",
+        Accept,
+    ),
+    (
+        "latency_lower_bound",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) >= 4\n",
+        Reject,
+    ),
+    (
+        "latency_strict_bound",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) < 4\n",
+        Reject,
+    ),
+    (
+        "latency_no_bound",
+        "struct s size=3x3\n  assert latency(a.b -> c.d)\n",
+        Reject,
+    ),
+    (
+        "latency_negative_bound",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= -1\n",
+        Reject,
+    ),
+    (
+        "latency_two_sources",
+        "struct s size=3x3\n  assert latency(a.b, e.f -> c.d) <= 4\n",
+        Reject,
+    ),
+    // `latency` is a keyword only after `assert`, so a signal may still be named for it.
+    (
+        "latency_names_a_signal",
+        "struct s size=3x3\n  logic sig.latency = a.b\n  \
+         assert latency(latency.in -> sig.latency) <= 1\n",
+        Accept,
+    ),
     // -- literals ------------------------------------------------------
     (
         "size_leading_zero",
@@ -1487,6 +1529,17 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "coordinate_component_out_of_range",
         "struct s size=3x3\n  fill from=99999999999999999999,1,1\n",
+        Accept,
+    ),
+    // An assertion's bound is a `u32`, which the grammar's `integer` does not narrow to.
+    (
+        "within_bound_out_of_range",
+        "struct s size=3x3\n  assert always(a.b -> eventually c.d within 4294967296)\n",
+        Accept,
+    ),
+    (
+        "latency_bound_out_of_range",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= 4294967296\n",
         Accept,
     ),
     // -- a size literal that runs into a word --------------------------

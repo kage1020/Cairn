@@ -15,6 +15,7 @@
 "always" @keyword.operator
 "eventually" @keyword.operator
 "within" @keyword.operator
+"latency" @keyword.operator
 "or" @keyword.operator
 "nor" @keyword.operator
 "xor" @keyword.operator
@@ -31,7 +32,7 @@
 (directive_literal) @string.special
 
 ; operators
-["->" "="] @operator
+["->" "=" "<="] @operator
 
 ; punctuation
 ["[" "]" "(" ")" "{" "}"] @punctuation.bracket

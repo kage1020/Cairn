@@ -226,6 +226,18 @@ pub enum AssertIr {
         #[serde(skip)]
         span: Span,
     },
+    /// `assert latency(FROM -> TO) <= N`.
+    Latency {
+        /// Signal reference the path starts at.
+        from: DottedRef,
+        /// Signal reference the path ends at.
+        to: DottedRef,
+        /// `<= N` bound in ticks.
+        bound: u32,
+        /// Byte range of the originating `assert latency(...) <= N`.
+        #[serde(skip)]
+        span: Span,
+    },
 }
 
 impl AssertIr {
@@ -233,7 +245,9 @@ impl AssertIr {
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {
-            Self::Truth { span, .. } | Self::Always { span, .. } => span,
+            Self::Truth { span, .. } | Self::Always { span, .. } | Self::Latency { span, .. } => {
+                span
+            }
         }
     }
 
@@ -249,6 +263,7 @@ impl AssertIr {
                 consequent,
                 ..
             } => vec![antecedent, consequent],
+            Self::Latency { from, to, .. } => vec![from, to],
         }
     }
 }
