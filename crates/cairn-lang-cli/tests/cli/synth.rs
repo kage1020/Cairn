@@ -813,3 +813,81 @@ fn stage_crossing_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
         );
     }
 }
+
+#[test]
+fn every_edition_tagged_stage_refuses_a_java_dispenser_fired_through_the_cell_above_it() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = write_source(
+        dir.path(),
+        "qc.crn",
+        "theme t:\n  slot wall -> @cobblestone\n\n\
+         struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=4\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  \
+         dispenser id=p at=inside.back offset=2 y=1 fired_by=sig.p\n  \
+         lever id=sw at=inside.back offset=2 y=3 -> sig.a\n  logic sig.p = not sig.a\n  \
+         circuit region=floor void=2\n",
+    );
+    for stage in ["edition", "placement", "route", "delay", "crossing"] {
+        let run = |edition: &str| {
+            cairn(
+                "synth",
+                &[
+                    "--experimental-logic-synth",
+                    "--stage",
+                    stage,
+                    "--edition",
+                    edition,
+                    path.to_str().unwrap(),
+                ],
+            )
+        };
+        let java = run("java");
+        assert_eq!(java.status.code(), Some(1), "{stage}");
+        let stderr = String::from_utf8(java.stderr).expect("utf-8");
+        assert_stream(&stderr, &[(8, 3, "error", "E_NO_PORTABLE_IMPL")]);
+        assert!(
+            java.stdout.is_empty(),
+            "{stage}: a refused circuit prints no dump"
+        );
+
+        let bedrock = run("bedrock");
+        assert_eq!(
+            bedrock.status.code(),
+            Some(0),
+            "{stage}: {}",
+            String::from_utf8_lossy(&bedrock.stderr)
+        );
+    }
+}
+
+#[test]
+fn the_edition_stage_refuses_an_observer_reading_back_a_driven_lamp_on_both_editions() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = write_source(
+        dir.path(),
+        "bud.crn",
+        "theme t:\n  slot wall -> @cobblestone\n\n\
+         struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=4\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  \
+         lamp id=lp at=inside.back offset=2 y=2 lit_by=sig.l\n  \
+         observer id=ob at=inside.back offset=3 y=2 facing=left -> sig.o\n  \
+         lever id=sw at=inside.front offset=1 y=2 -> sig.a\n  \
+         logic sig.l = sig.a and not sig.o\n  circuit region=floor void=2\n",
+    );
+    for edition in ["java", "bedrock"] {
+        let out = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                "edition",
+                "--edition",
+                edition,
+                path.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(out.status.code(), Some(1), "{edition}");
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        assert_stream(&stderr, &[(9, 3, "error", "E_NO_PORTABLE_IMPL")]);
+    }
+}

@@ -339,7 +339,7 @@ fn accept_actuator<'a>(
 }
 
 /// The members a selector-form patch in this scope may pick: every member, at any depth.
-fn patch_candidates(members: &[Member]) -> Vec<&Member> {
+pub(crate) fn patch_candidates(members: &[Member]) -> Vec<&Member> {
     fn walk<'a>(members: &'a [Member], out: &mut Vec<&'a Member>) {
         for m in members {
             out.push(m);
@@ -352,7 +352,7 @@ fn patch_candidates(members: &[Member]) -> Vec<&Member> {
 }
 
 /// The member an actuator binding on `m` drives: `m`, or the actuator its brackets pick.
-fn actuator_host<'a>(
+pub(crate) fn actuator_host<'a>(
     m: &'a Member,
     candidates: &[&'a Member],
 ) -> Result<&'a Member, PatchTargetError> {
@@ -369,7 +369,7 @@ fn is_signal_name(dr: &DottedRef) -> bool {
 }
 
 /// The signal a value names, if any.
-fn signal_named_by(value: &Value) -> Option<&DottedRef> {
+pub(crate) fn signal_named_by(value: &Value) -> Option<&DottedRef> {
     match &value.kind {
         ValueKind::DotRef(dr) if is_signal_name(dr) => Some(dr),
         _ => None,

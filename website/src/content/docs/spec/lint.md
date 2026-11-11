@@ -18,8 +18,8 @@ is defined.
 
 Every code of the redstone pipeline is outside that promise: the `E_LOGIC_*` / `W_LOGIC_*` codes,
 and `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT`,
-`W_ROUTE_CROSS_LAYER_CLEARANCE` and `E_SIM_ASSERTION_FAILED`. They are reachable only through
-`cairn synth --experimental-logic-synth`, which is Internal tier
+`W_ROUTE_CROSS_LAYER_CLEARANCE`, `E_SIM_ASSERTION_FAILED` and `E_NO_PORTABLE_IMPL`. They are
+reachable only through `cairn synth --experimental-logic-synth`, which is Internal tier
 ([Compatibility](/spec/compatibility/)). Nothing about those strings is guaranteed, so a row here
 would state a contract that does not exist.
 [Redstone and Logic](/spec/redstone/) names the ones its own rules turn on.
@@ -631,9 +631,9 @@ edition has, `E_STATE_DOMAIN` a state its block does not take there,
 `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
 version cannot carry, while no entity schema is checked. The redstone row runs only in part as well:
 the truth-table codes check a table against itself, nothing simulates the circuit, and a latency
-bound the placed circuit misses (`E_SIM_ASSERTION_FAILED`) and routing congestion
-(`E_ROUTE_CONGESTION`) are reached only by the Internal-tier `cairn synth
---experimental-logic-synth`.
+bound the placed circuit misses (`E_SIM_ASSERTION_FAILED`), routing congestion
+(`E_ROUTE_CONGESTION`) and a circuit's dependence on update order (`E_NO_PORTABLE_IMPL`) are reached
+only by the Internal-tier `cairn synth --experimental-logic-synth`.
 
 ### "did you mean"
 

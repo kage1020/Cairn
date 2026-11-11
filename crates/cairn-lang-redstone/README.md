@@ -23,7 +23,9 @@ Two nets that would merge into one strand of dust never need legalizing: routing
 
 Every placed cell and output records which of the last four passes touched it as a `PlacementStage`, dumped as a `"stage"` key in the same vocabulary `cairn synth --stage <s>` accepts, so a JSON consumer reads the stage off the output rather than inferring it from which optional keys are present. A whole dump deserialises back to the `ScopedPlacementIr` it was written from, every node's phase included and source spans aside, and a cell or output whose keys disagree with its `"stage"` is refused as a deserialisation error rather than read as some other stage.
 
-Still to come: edition legalization, the tick simulator, and the QC/BUD refusal (`E_NO_PORTABLE_IMPL`).
+`verify_portable(&IntentModule, &BlockArrayIr, Edition)` reads the struct as built for an edition and refuses with `E_NO_PORTABLE_IMPL` the components that read one another through a block update: an observer watching what the circuit drives, and on Java a piston or dispenser a sensor powers through the cell above it ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).
+
+Still to come: edition legalization and the tick simulator.
 
 `local_delay_ticks` is a local cost, not a path latency: the delay of that cell's slowest driven port plus the buffer repeaters on every net that drives it, summed, which is what crossing legalization's buffer blocks are checked against. A cell counts its delay per input port (`EditionCell::port_delay_ticks`), and a combinational cell settles when the *last* of its inputs arrives, so an arrival time maxes over the ports, each the arrival on its net plus that port's delay, and walks back through the upstream cells. `verify_latency` computes it that way to check each `assert latency(sig.in -> sig.out)` ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)) against the legalized circuit, adding the buffer repeaters on the wire into each port and onto the actuator's pad.
 
@@ -52,7 +54,7 @@ The cell library is three-tier (`Logical Cell → Edition Cell → Physical Tile
 - **Curated sequential macros**: `latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter` are synthesised the same way, each to one cell of torches and repeaters on both editions, and a `latch` or `counter` keeps its feedback inside its cell, so the Logic IR stays a DAG. A macro's stage count travels with its cell, and its ticks are its Edition Cell's.
 - **Verification**: truth-table, latency, and bounded-eventually temporal assertions ([redstone "Verification"](https://cairn.kage1020.com/spec/redstone/)). An `assert` is checked for shape and for signals it names that nothing defines; `verify_latency` checks each `assert latency` against the legalized circuit, and evaluating `truth` and `always` waits on the simulator.
 
-Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).
+Out of scope for v1, and dropped to plain placement or `raw`: general FSMs, CPU-class clocked assignment, and quasi-connectivity / BUD / update-order sensitive circuits; `verify_portable` refuses the two shapes that reach the built struct ([redstone "Edition differences"](https://cairn.kage1020.com/spec/redstone/)).
 
 ## Verification loop
 

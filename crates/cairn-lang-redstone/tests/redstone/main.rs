@@ -16,6 +16,7 @@ mod macros;
 mod netlist;
 mod placement;
 mod placement_ir_roundtrip;
+mod portable;
 mod primitives;
 mod routing;
 mod signal_drivers;

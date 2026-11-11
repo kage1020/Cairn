@@ -659,15 +659,53 @@ rather than what is unresolved in it.
 - **Not absorbed**: QC (quasi-connectivity), BUD, update order. These depend on the implicit
   semantics of block-update order, for which no portable implementation exists.
 
-Logic that requires update-order semantics is a compile error rather than a silent footgun,
-consistent with "recompile, don't transcode". No pass checks for it yet, so `E_NO_PORTABLE_IMPL`
-below is not raised today.
+Logic that requires update-order semantics is a compile error, `E_NO_PORTABLE_IMPL`, rather than
+a silent footgun, consistent with "recompile, don't transcode". Every cell of the library, the
+macros' included, holds its own timing, so a circuit comes to need update order only where one
+component of the built structure reads another through a block update. Two shapes do, and each is
+checked against the structure as built for the edition:
+
+- **An observer reading the circuit back (BUD), on every edition.** An `observer` with a `->` tail
+  whose front watches a `lamp`, `piston`, `dispenser` or `door` that a binding drives, or the cell a
+  driven piston's head moves into. Its signal is the circuit's own change, arriving when the block
+  update reaches it. The finding is at the observer, with a note at the binding, and its fix names
+  the order-free form of the same pulse, `edge_rising(sig.x) or edge_falling(sig.x)`.
+- **A piston or dispenser powered through the cell above it (QC), on Java.** A driven `piston` or
+  `dispenser` that a sensor powers through the cell above it and not directly, so it acts on that
+  power only once a block update reaches it. A sensor powers the cell above when it gives off a
+  signal into that cell, a `lever`, `button`, `pressure_plate` or `daylight` into every cell beside
+  it and an `observer` into the cell behind it, or when it powers whole a block beside that cell: a
+  `lever` or `button` the block it hangs on, a `pressure_plate` the block under it, and an
+  `observer` the block behind it. Any block but air, a sensor, a `piston` and a `door` is taken to
+  pass that power on, a `lamp` and a `dispenser` among them, since no table records which blocks
+  conduct. A piston takes no power through its front. The finding is at the actuator, with a note at
+  the sensor. Bedrock has no quasi-connectivity, so the same source builds there.
+
+A [Tier 0 part](#tier-0-parts) and a raw member are the author's, so neither is checked, and a
+sensor that also powers the component directly is no dependence on order and is not reported.
+`cairn synth --experimental-logic-synth` runs the check at every edition-tagged stage. It reads the
+members that build for the edition; one that does not is the build's finding, which `cairn compile`
+reports. Here the lever two rows above the dispenser stands beside the cell above it:
+
+```
+theme t:
+  slot wall -> @cobblestone
+
+struct s size=7x5
+  floor mat_slot=wall
+  walls mat_slot=wall height=4
+  roof kind=flat mat_slot=wall overhang=1
+  dispenser id=p at=inside.back offset=2 y=1 fired_by=sig.p
+  lever id=sw at=inside.back offset=2 y=3 -> sig.a
+  logic sig.p = not sig.a
+  circuit region=floor void=2
+```
 
 ```text
-E_NO_PORTABLE_IMPL line 15:
-  this circuit requires update-order (quasi-connectivity / BUD) semantics.
-  No portable redstone implementation exists for the target edition.
-  Fix: redesign the logic to be order-independent, or drop to Tier 0 with an @edition guard.
+dispenser.crn:8:3: error[E_NO_PORTABLE_IMPL]: struct=s: on java, the dispenser `p` also takes power from the lever `sw` through the cell above it, and acts on it only once a block update reaches it: this circuit requires update-order (quasi-connectivity) semantics
+dispenser.crn:9:3:   note: the lever `sw` powers the cell above the dispenser `p` from here
+  note: bedrock has no quasi-connectivity, so the same source builds there
+  note: Fix: move the lever `sw` so that neither it nor a block it powers whole stands beside the cell above the dispenser `p`, or redesign the logic to be order-independent; or build it by hand as raw members under an `@edition java` guard
 ```
 
 Hand-placed redstone breaks across editions. With a logic description the compiler emits an

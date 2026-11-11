@@ -13,6 +13,7 @@ pub mod netlist_ir;
 pub(crate) mod pass;
 pub mod placement;
 pub mod placement_ir;
+pub mod portable;
 pub(crate) mod repeater_sites;
 pub mod routing;
 pub(crate) mod routing_geometry;
@@ -47,6 +48,7 @@ pub use placement_ir::{
     PlacedOutputNode, PlacementIr, PlacementPhase, PlacementPhaseTransitionError, PlacementStage,
     RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
+pub use portable::verify_portable;
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
 pub use verify::verify_latency;

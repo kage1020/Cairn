@@ -44,6 +44,8 @@ pub enum DiagnosticCode {
     LogicDuplicateBinding,
     /// An `assert` the circuit does not meet.
     SimAssertionFailed,
+    /// A component of the built struct that reads another through a block update.
+    NoPortableImpl,
 }
 
 impl DiagnosticCode {
@@ -67,6 +69,7 @@ impl DiagnosticCode {
             Self::LogicUnresolvedPatch => "E_LOGIC_UNRESOLVED_PATCH",
             Self::LogicDuplicateBinding => "E_LOGIC_DUPLICATE_BINDING",
             Self::SimAssertionFailed => "E_SIM_ASSERTION_FAILED",
+            Self::NoPortableImpl => "E_NO_PORTABLE_IMPL",
         }
     }
 
@@ -87,7 +90,8 @@ impl DiagnosticCode {
             | Self::LogicUnknownBindingKey
             | Self::LogicUnresolvedPatch
             | Self::LogicDuplicateBinding
-            | Self::SimAssertionFailed => Severity::Error,
+            | Self::SimAssertionFailed
+            | Self::NoPortableImpl => Severity::Error,
             Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
         }
     }
