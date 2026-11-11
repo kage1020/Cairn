@@ -192,6 +192,38 @@ fn a_part_whose_line_does_not_say_where_or_which_way_is_refused_and_not_placed()
 }
 
 #[test]
+fn a_part_outside_the_footprint_or_the_array_is_refused_and_leaves_no_palette_entry() {
+    let src = "theme t:\n  slot wall -> @cobblestone\n\n\
+               struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+               repeater at=9,1,1 facing=east\n  \
+               redstone_dust at=1,7,1\n  \
+               redstone_torch at=front.outside offset=1 y=1\n";
+    let out = lowered(src);
+    let found: Vec<String> = findings(src, &out)
+        .into_iter()
+        .map(|(code, at, primary, _)| format!("{}: {at}: {primary}", code.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            "E_INVALID_MEMBER: repeater at=9,1,1 facing=east: repeater `at=9,1,1` lies outside the \
+             struct's `size=7x5` footprint",
+            "E_INVALID_MEMBER: redstone_dust at=1,7,1: redstone_dust `at=1,7,1` does not fit in the \
+             struct (dims.y=4)",
+            "E_INVALID_MEMBER: redstone_torch at=front.outside offset=1 y=1: redstone_torch \
+             `at=front.outside` at y=1 has no exterior voxel to sit on",
+        ],
+    );
+    let ids: Vec<&str> = only_structure(&out)
+        .palette
+        .entries
+        .iter()
+        .map(|state| state.id.as_str())
+        .collect();
+    assert_eq!(ids, ["minecraft:air", "minecraft:cobblestone"]);
+}
+
+#[test]
 fn each_refusal_says_what_the_key_takes() {
     let notes_of = |line: &str| {
         let src = room(line);
@@ -215,6 +247,15 @@ fn each_refusal_says_what_the_key_takes() {
              anchor it by a wall with `at=<side>.outside` or `at=inside.<side>` to turn it that \
              way"
             .to_owned(),
+        ],
+    );
+    assert_eq!(
+        notes_of("redstone_torch at=3,1,2 facing=in"),
+        [
+            compass.to_owned(),
+            "`in` names a way from a wall, which a redstone torch does not take: by a wall it \
+             hangs on the wall and points away from it, with no `facing=`"
+                .to_owned(),
         ],
     );
     assert_eq!(
@@ -269,8 +310,8 @@ fn a_value_of_the_wrong_kind_is_ignored_and_the_part_built_without_it() {
         (
             "redstone_torch at=inside.back offset=2 y=2 facing=3",
             "3",
-            "`facing=` must be `north`, `south`, `east` or `west`, not integer `3`; the value was \
-             ignored",
+            "`facing=` must be a compass face, `north`, `south`, `east` or `west`, at a triple (by \
+             a wall the torch takes none), not integer `3`; the value was ignored",
             "the redstone torch hangs on the wall it stands by, pointing away from it",
             ((5, 2, 2), "minecraft:redstone_wall_torch[facing=south]"),
         ),

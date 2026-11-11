@@ -27,6 +27,7 @@ fn hut() -> BlockArrayIr {
             id: "minecraft:item_frame".to_owned(),
         }],
         source_scope: KEY.to_owned(),
+        derived: Vec::new(),
     };
     let floor = ResolvedMember {
         role: "floor".to_owned(),

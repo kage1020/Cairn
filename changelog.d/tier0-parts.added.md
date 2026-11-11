@@ -18,11 +18,17 @@
   joined on both sides of the other.
 - *(formats)* Both built-in packs declare `@repeater.default`, `@comparator.default`,
   `@redstone_torch.default`, `@redstone_torch.wall` and `@redstone_dust.default`. Their
-  `connections` component reads `redstone_wire` as dust and records, per state, the faces of each
-  block that dust beside it joins, extracted from the Java release's block tags.
+  `connections` component reads `redstone_wire` as dust and records, per state, the sideways faces
+  of each block that dust beside it joins, read from the `buttons` and `pressure_plates` tags and a
+  list the extraction keeps of the game's other signal sources, which it refuses to run without.
 - *(formats)* A Bedrock id that is a Java block's own and that other Java blocks map onto, such as
   `redstone_torch`, is read as the block whose states the entry carries, so a Java wall torch's
   `facing` writes Bedrock's `torch_facing_direction`.
+- *(formats)* A Bedrock build warns `W_INTENT_DEGRADED` for each state a member's material or line
+  wrote that its version works out itself from the blocks around it, such as
+  `@glass_pane[north=true]` or a dust's `connect=` before 1.26.60, whose value Bedrock would not
+  keep. A state the lowering derived still drops silently, and `cairn info` counts an entry that
+  loses a written one as degraded.
 - *(lsp)* Under an `@edition` guard, completion offers the four parts beside `raw_block` and
   `raw_fill`.
 - *(vscode)* The grammar highlights the four parts' keywords.

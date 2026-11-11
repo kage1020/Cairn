@@ -5,8 +5,9 @@
     reported at the observer, with a note at the binding and a fix naming the order-free
     `edge_rising(sig.x) or edge_falling(sig.x)`;
   - on Java, a driven `piston` or `dispenser` that a sensor powers through the cell above it and
-    not directly, by standing beside that cell or by powering a block beside it whole. It is
-    reported at the actuator, with a note at the sensor.
+    not directly, by giving off a signal into that cell or by powering whole a block beside it,
+    which any block but air, a sensor, a piston and a door passes on. It is reported at the
+    actuator, with a note at the sensor.
 
   Tier 0 parts and raw members are not checked.
 - *(cli)* `cairn synth --experimental-logic-synth` runs the check at every edition-tagged stage and

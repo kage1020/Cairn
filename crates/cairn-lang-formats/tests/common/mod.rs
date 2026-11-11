@@ -254,5 +254,6 @@ pub fn comparator_array(id: &str) -> BlockArray {
         }],
         entities: vec![],
         source_scope: "struct::comparator".to_owned(),
+        derived: Vec::new(),
     }
 }

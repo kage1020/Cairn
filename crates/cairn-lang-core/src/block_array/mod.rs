@@ -126,6 +126,10 @@ pub struct BlockArray {
     pub entities: Vec<Entity>,
     /// The [`crate::resolve::Resolution`] key this volume was lowered from (`struct::cottage`).
     pub source_scope: String,
+    /// Per palette slot, the state keys the lowering derived at every cell that holds it, which
+    /// no member wrote there (`spec/blockstate` "Connections"); a slot past the end derived none.
+    #[serde(skip)]
+    pub derived: Vec<Vec<String>>,
 }
 
 /// One member's `resolved_state`: each block state its cells hold, with those cells, as the
@@ -284,7 +288,7 @@ impl PaletteIndex {
 }
 
 impl BlockArray {
-    /// Put the palette in canonical order and renumber the grid onto it.
+    /// Put the palette in canonical order and renumber the grid and [`Self::derived`] onto it.
     ///
     /// A voxel outside the palette keeps its index, for [`Self::first_index_outside_palette`].
     pub fn canonicalize_palette(&mut self) {
@@ -294,6 +298,19 @@ impl BlockArray {
                 *index = *moved;
             }
         }
+        if self.derived.is_empty() {
+            return;
+        }
+        let mut derived = vec![Vec::new(); self.palette.entries.len()];
+        for (old, keys) in std::mem::take(&mut self.derived).into_iter().enumerate() {
+            if let Some(moved) = remap.get(old) {
+                derived[usize::from(moved.0)] = keys;
+            }
+        }
+        while derived.last().is_some_and(Vec::is_empty) {
+            derived.pop();
+        }
+        self.derived = derived;
     }
 
     /// The first voxel index that is not a slot of [`Self::palette`], as `(index, palette len)`.

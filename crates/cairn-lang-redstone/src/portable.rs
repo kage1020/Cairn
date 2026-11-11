@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, Dims, Face, ResolvedBlock, ResolvedMember,
+    BlockArray, BlockArrayIr, Dims, Face, PaletteIndex, ResolvedBlock, ResolvedMember,
 };
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{Actuator, IntentModule, Member, SENSOR_HOSTS};
@@ -103,8 +103,6 @@ struct Component<'a> {
     scope: &'a str,
     cells: Vec<Cell>,
     facing: Option<Face>,
-    /// The face a lever or button hangs by: `wall`, `floor` or `ceiling`.
-    face: Option<&'a str>,
     /// The signal that drives it and where it is bound, for an actuator a binding drives.
     driven_by: Option<(&'a str, &'a Span)>,
 }
@@ -148,7 +146,6 @@ impl<'a> Body<'a> {
                     return None;
                 }
                 let first = resolved.resolved_state.first()?;
-                let property = |key: &str| first.state.properties.get(key).map(String::as_str);
                 Some(Component {
                     member,
                     scope,
@@ -157,8 +154,12 @@ impl<'a> Body<'a> {
                         .iter()
                         .flat_map(ResolvedBlock::cells)
                         .collect(),
-                    facing: property("facing").and_then(Face::from_name),
-                    face: property("face"),
+                    facing: first
+                        .state
+                        .properties
+                        .get("facing")
+                        .map(String::as_str)
+                        .and_then(Face::from_name),
                     driven_by: lines
                         .driven
                         .get(&key_of(&member.span))
@@ -185,7 +186,8 @@ impl<'a> Body<'a> {
         found
     }
 
-    /// The observer `observer`'s finding when it watches a component the circuit drives.
+    /// The observer `observer`'s finding when it watches an actuator the circuit drives, or the
+    /// cell a driven piston's head moves into.
     fn read_back(&self, observer: &Component<'_>) -> Option<Diagnostic> {
         let senses = observer.member.selector.is_none()
             && observer
@@ -197,29 +199,44 @@ impl<'a> Body<'a> {
             return None;
         }
         let watched = step(observer.cell()?, observer.facing?, self.array.dims)?;
-        let actuator = self.components.iter().find(|actuator| {
-            actuator.driven_by.is_some()
-                && (actuator.cells.contains(&watched)
-                    || head_cell(actuator, self.array.dims) == Some(watched))
+        let (actuator, target) = self.components.iter().find_map(|actuator| {
+            if actuator.driven_by.is_none() {
+                None
+            } else if actuator.cells.contains(&watched) {
+                Some((
+                    actuator,
+                    format!("{}, which the circuit drives", actuator.named()),
+                ))
+            } else {
+                (head_cell(actuator, self.array.dims) == Some(watched)).then(|| {
+                    let head = format!("the cell {}'s head moves into", actuator.named());
+                    (
+                        actuator,
+                        format!("{head}, and the circuit drives that piston"),
+                    )
+                })
+            }
         })?;
         let (signal, bound) = actuator.driven_by?;
-        let named = actuator.named();
         Some(
             Diagnostic::new(
                 DiagnosticCode::NoPortableImpl,
                 observer.member.span.clone(),
                 format!(
-                    "{} this observer watches {named}, which the circuit drives, so its signal \
-                     is the circuit's own change read back through a block update: this circuit \
-                     requires update-order (BUD) semantics",
+                    "{} this observer watches {target}, so its signal is the circuit's own \
+                     change read back through a block update: this circuit requires update-order \
+                     (BUD) semantics",
                     observer.scope,
                 ),
             )
-            .with_note(bound.clone(), format!("{named} is driven by {signal} here"))
+            .with_note(
+                bound.clone(),
+                format!("{} is driven by {signal} here", actuator.named()),
+            )
             .with_footer(format!(
                 "Fix: redesign the logic to be order-independent: an observer pulses on each \
                  change, as `edge_rising({signal}) or edge_falling({signal})` does in `logic`; \
-                 or drop to Tier 0 with an `@edition` guard"
+                 or build the observer by hand as a raw member"
             )),
         )
     }
@@ -266,9 +283,9 @@ impl<'a> Body<'a> {
                 "bedrock has no quasi-connectivity, so this is no dependence on order there",
             )
             .with_footer(format!(
-                "Fix: move {source} so that it powers no block beside the cell above {named}, \
-                 or redesign the logic to be order-independent; or drop to Tier 0 with an \
-                 `@edition java` guard"
+                "Fix: move {source} so that neither it nor a block it powers whole stands beside \
+                 the cell above {named}, or redesign the logic to be order-independent; or build \
+                 it by hand as raw members under an `@edition java` guard"
             )),
         )
     }
@@ -286,14 +303,7 @@ impl<'a> Body<'a> {
             "observer" => (behind().into_iter().collect(), behind()),
             "daylight" => (beside(at, dims), None),
             "pressure_plate" => (beside(at, dims), step(at, Face::Down, dims)),
-            _ => {
-                let hangs_on = match sensor.face {
-                    Some("floor") => step(at, Face::Down, dims),
-                    Some("ceiling") => step(at, Face::Up, dims),
-                    _ => behind(),
-                };
-                (beside(at, dims), hangs_on)
-            }
+            _ => (beside(at, dims), behind()),
         };
         let mut sources = vec![(at, gives_off)];
         if let Some(block) = whole.filter(|&cell| self.conducts(cell)) {
@@ -303,23 +313,23 @@ impl<'a> Body<'a> {
     }
 
     /// Whether the block at `cell` passes on the power a sensor gives it: any block but air, a
-    /// sensor and an actuator, since no table records which blocks conduct.
+    /// sensor, a piston and a door.
     fn conducts(&self, cell: Cell) -> bool {
         let filled = self
             .array
             .dims
             .index(cell.0, cell.1, cell.2)
             .and_then(|i| self.array.voxels.get(i))
-            .is_some_and(|slot| slot.0 != 0);
+            .is_some_and(|slot| *slot != PaletteIndex::AIR);
         filled
-            && !self
-                .components
-                .iter()
-                .any(|component| component.cells.contains(&cell))
+            && !self.components.iter().any(|component| {
+                component.cells.contains(&cell)
+                    && !matches!(component.keyword(), "lamp" | "dispenser")
+            })
     }
 }
 
-/// The cell a driven piston's head moves into.
+/// The cell `actuator`'s head moves into, if it is a piston.
 fn head_cell(actuator: &Component<'_>, dims: Dims) -> Option<Cell> {
     if actuator.keyword() != "piston" {
         return None;

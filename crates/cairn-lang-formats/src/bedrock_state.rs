@@ -1,7 +1,8 @@
 //! A palette entry's Bedrock block and `states`, through the registry pack's state map for the
 //! target version (`spec/versioning-editions` "Java / Bedrock portability"). The entry's
-//! properties are the canonical vocabulary's; a state Bedrock does not carry drops with a
-//! degradation note, and one the map has no form for is refused.
+//! properties are the canonical vocabulary's; a state Bedrock does not carry drops, with a
+//! degradation note when that loses what the entry asks for, and one the map has no form for is
+//! refused.
 
 use cairn_lang_core::block_array::BlockState;
 use cairn_lang_core::resolve::DroppedIntent;
@@ -9,7 +10,7 @@ use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
 use thiserror::Error;
 
-use crate::registry::{BedrockForm, StateRefusal, StateValue, VersionStates};
+use crate::registry::{BedrockForm, DroppedState, StateRefusal, StateValue, VersionStates};
 
 /// One palette entry as Bedrock writes it, and the intents it had to drop.
 #[derive(Debug, Clone, PartialEq)]
@@ -21,7 +22,9 @@ pub struct StateTranslation {
     pub states: Compound,
     /// Whether the cell also holds water, which the `.mcstructure` carries as its second layer.
     pub waterlogged: bool,
-    /// One entry per intent Bedrock cannot express, each worded by its `reason`.
+    /// One entry per intent Bedrock cannot express, each worded by its `reason`: a state it does
+    /// not carry at a value other than the Java default, or one it works out itself that the
+    /// lowering did not derive.
     pub degraded: Vec<DroppedIntent>,
 }
 
@@ -76,7 +79,8 @@ pub enum BedrockStateError {
     },
 }
 
-/// How `state`, whose id is concrete, is written at `map`'s version.
+/// How `state`, whose id is concrete, is written at `map`'s version, `derived` naming the keys the
+/// lowering derived for it rather than a member writing them.
 ///
 /// # Errors
 ///
@@ -84,12 +88,14 @@ pub enum BedrockStateError {
 pub fn translate_states(
     map: &VersionStates<'_>,
     state: &BlockState,
+    derived: &[String],
 ) -> Result<StateTranslation, BedrockStateError> {
     let BedrockForm {
         id,
         states,
         waterlogged,
         dropped,
+        rederived,
     } = map.resolve(state).map_err(|refusal| match refusal {
         StateRefusal::Unmapped { reason } => BedrockStateError::Unmapped {
             id: state.id.clone(),
@@ -113,12 +119,23 @@ pub fn translate_states(
     for (name, value) in states {
         compound.insert(name, tag(value));
     }
+    let written = rederived
+        .into_iter()
+        .filter(|state| !derived.contains(&state.key))
+        .map(|state| DroppedState {
+            reason: format!(
+                "the written `{}={}` is not kept: {}",
+                state.key, state.value, state.reason
+            ),
+            ..state
+        });
     Ok(StateTranslation {
         id,
         states: compound,
         waterlogged,
         degraded: dropped
             .into_iter()
+            .chain(written)
             .map(|dropped| DroppedIntent {
                 key: dropped.key,
                 value: dropped.value,

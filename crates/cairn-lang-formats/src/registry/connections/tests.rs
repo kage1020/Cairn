@@ -217,6 +217,18 @@ fn a_covered_part_that_is_no_part_of_a_wall_is_refused() {
 }
 
 #[test]
+fn a_dust_face_that_is_no_side_is_refused() {
+    for face in ["up", "down", "middle"] {
+        assert_eq!(
+            malformed(&serde_json::json!({
+                "mc_versions": ["1.0"], "ids": ["stone"], "dust": ["north", face],
+            })),
+            format!("`{face}` is no sideways face: `north`, `south`, `east` or `west`"),
+        );
+    }
+}
+
+#[test]
 fn a_gate_whose_default_facing_or_open_is_unreadable_is_refused() {
     let gate = |facing: &str, open: &str| {
         malformed(&serde_json::json!({
