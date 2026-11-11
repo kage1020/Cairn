@@ -22,6 +22,7 @@ fn unit_ir(palette: Palette) -> BlockArrayIr {
             block_entities: vec![],
             entities: vec![],
             source_scope: "struct::unit".to_owned(),
+            derived: Vec::new(),
         },
     );
     BlockArrayIr {

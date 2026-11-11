@@ -374,6 +374,19 @@ fn faces_of(faces: &[String]) -> Result<Faces, String> {
         .collect()
 }
 
+/// `faces` as a set of sideways faces, or the first name that is none: dust lies on the block
+/// under it, so it joins a block beside it by a side only.
+fn sides_of(faces: &[String]) -> Result<Faces, String> {
+    faces
+        .iter()
+        .map(|name| {
+            side_named(name).ok_or_else(|| {
+                format!("`{name}` is no sideways face: `north`, `south`, `east` or `west`")
+            })
+        })
+        .collect()
+}
+
 /// `parts` as what a bottom covers, or the first name that is no part of a wall.
 fn covers_of(parts: &[String]) -> Result<Covers, String> {
     parts.iter().try_fold(Covers::default(), |covers, name| {
@@ -419,7 +432,7 @@ fn held<T: Default>(
 fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
     let sturdy = held("sturdy", row.sturdy.as_ref(), faces_of)?;
     let covers = held("covers", row.covers.as_ref(), covers_of)?;
-    let dust = held("dust", row.dust.as_ref(), faces_of)?;
+    let dust = held("dust", row.dust.as_ref(), sides_of)?;
     let mut needs: Vec<&str> = [&row.sturdy, &row.covers, &row.dust]
         .into_iter()
         .flatten()

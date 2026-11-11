@@ -388,6 +388,7 @@ pub fn build_walkway_array<S: BuildHasher>(
         block_entities: Vec::new(),
         entities: Vec::new(),
         source_scope: scope_key.as_str().to_owned(),
+        derived: Vec::new(),
     };
     // A no-op for one material; it keeps the documented palette order should walkways gain more.
     array.canonicalize_palette();

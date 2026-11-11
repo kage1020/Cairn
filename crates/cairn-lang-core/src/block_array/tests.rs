@@ -191,6 +191,7 @@ fn canonicalizing_a_block_array_renumbers_the_grid_onto_the_new_slots() {
         block_entities: Vec::new(),
         entities: Vec::new(),
         source_scope: "struct::t".to_owned(),
+        derived: Vec::new(),
     };
     array.canonicalize_palette();
     let read: Vec<&str> = array
@@ -218,6 +219,7 @@ fn canonicalizing_leaves_an_index_the_palette_does_not_have_alone() {
         block_entities: Vec::new(),
         entities: Vec::new(),
         source_scope: "struct::t".to_owned(),
+        derived: Vec::new(),
     };
     array.canonicalize_palette();
     assert_eq!(array.first_index_outside_palette(), Some((7, 1)));

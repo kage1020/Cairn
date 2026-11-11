@@ -23,6 +23,7 @@ fn translate(
             id: id.to_owned(),
             properties,
         },
+        &[],
     )
 }
 
@@ -146,12 +147,49 @@ fn a_dropped_state_at_its_default_is_no_loss() {
 }
 
 #[test]
-fn a_state_bedrock_works_out_itself_is_no_loss() {
+fn a_state_bedrock_works_out_itself_is_lost_only_where_a_member_wrote_it() {
     let connected = [("east", "true"), ("north", "true")];
     let t = translate("1.21.60", "minecraft:oak_fence", &connected).expect("fence");
     assert_eq!(t.id, "minecraft:oak_fence");
     assert_eq!(states(&t), []);
-    assert_eq!(t.degraded, []);
+    let neighbours = "Bedrock works the connection out from the neighbouring blocks";
+    assert_eq!(
+        t.degraded,
+        ["east", "north"].map(|key| dropped(
+            key,
+            "true",
+            "1.21.60",
+            &format!("the written `{key}=true` is not kept: {neighbours}"),
+        )),
+    );
+    let map = builtin_pack(Edition::Bedrock)
+        .states_at("1.21.60")
+        .expect("the built-in pack maps every targetable version");
+    let fence = BlockState {
+        id: "minecraft:oak_fence".to_owned(),
+        properties: connected
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
+    };
+    let east = ["east".to_owned()];
+    let t = translate_states(&map, &fence, &east).expect("fence");
+    assert_eq!(
+        t.degraded,
+        [dropped(
+            "north",
+            "true",
+            "1.21.60",
+            &format!("the written `north=true` is not kept: {neighbours}"),
+        )],
+    );
+    let both = ["east".to_owned(), "north".to_owned()];
+    assert_eq!(
+        translate_states(&map, &fence, &both)
+            .expect("fence")
+            .degraded,
+        []
+    );
 
     let t = translate("1.26.60", "minecraft:oak_fence", &connected).expect("fence");
     assert_eq!(

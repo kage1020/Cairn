@@ -95,9 +95,19 @@ impl BlockArrayIr {
                 member.resolved_state.push(resolved);
             }
         }
+        // No member writes a circuit's blocks, so a slot only the circuit holds derived every key.
+        let held = array.palette.entries.len();
+        let mut derived = array.derived.clone();
+        derived.resize(held, Vec::new());
+        derived.extend(
+            palette.entries[held..]
+                .iter()
+                .map(|state| state.properties.keys().cloned().collect()),
+        );
         voxels.append(&mut array.voxels);
         array.voxels = voxels;
         array.palette = palette;
+        array.derived = derived;
         array.dims = dims;
         for entity in &mut array.block_entities {
             entity.pos.1 += void;

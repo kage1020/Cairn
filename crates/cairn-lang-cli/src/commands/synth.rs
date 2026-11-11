@@ -180,7 +180,7 @@ fn dump(
     Ok((serde_json::to_string_pretty(ir), label))
 }
 
-/// `ir` built for `edition` on the built-in pack, for the passes that read the struct as it stands.
+/// `ir` lowered to the block array for `edition` on the built-in pack.
 fn built_for(ir: &IntentModule, edition: Edition) -> BlockArrayIr {
     lower_to_block_array(
         ir,

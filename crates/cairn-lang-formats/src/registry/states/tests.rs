@@ -272,6 +272,7 @@ fn form(id: &str, states: &[(&str, StateValue)]) -> BedrockForm {
             .collect(),
         waterlogged: false,
         dropped: Vec::new(),
+        rederived: Vec::new(),
     }
 }
 
@@ -703,14 +704,26 @@ fn a_missing_state_off_its_default_is_dropped_with_its_reason() {
 }
 
 #[test]
-fn a_derived_state_is_dropped_without_loss() {
+fn a_derived_state_the_entry_names_is_dropped_as_rederived() {
+    let mut expected = form("minecraft:oak_fence", &[]);
+    assert_eq!(
+        resolve("1.0", "minecraft:oak_fence", &[]),
+        Ok(expected.clone())
+    );
+    expected.rederived = ["east", "north"]
+        .map(|key| DroppedState {
+            key: key.to_owned(),
+            value: "true".to_owned(),
+            reason: "connections follow the neighbours".to_owned(),
+        })
+        .to_vec();
     assert_eq!(
         resolve(
             "1.0",
             "minecraft:oak_fence",
             &[("east", "true"), ("north", "true")]
         ),
-        Ok(form("minecraft:oak_fence", &[])),
+        Ok(expected),
     );
 }
 

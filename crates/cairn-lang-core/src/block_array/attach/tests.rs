@@ -27,6 +27,7 @@ fn hut() -> BlockArrayIr {
             id: "minecraft:item_frame".to_owned(),
         }],
         source_scope: KEY.to_owned(),
+        derived: Vec::new(),
     };
     let floor = ResolvedMember {
         role: "floor".to_owned(),
@@ -211,4 +212,34 @@ fn a_refused_circuit_leaves_the_structure_as_it_was() {
         assert_eq!(ir.attach_circuit(key, void, &circuit(), 0..0), Err(refusal));
         assert_eq!(ir, before, "{key} void={void}");
     }
+}
+
+#[test]
+fn a_slot_only_the_circuit_holds_records_every_key_of_its_state_as_derived() {
+    let mut ir = hut();
+    let dot = BlockState {
+        id: "minecraft:redstone_wire".to_owned(),
+        properties: ["east", "north", "power", "south", "west"]
+            .into_iter()
+            .map(|key| (key.to_owned(), "none".to_owned()))
+            .collect(),
+    };
+    let blocks = [
+        LaidBlock {
+            at: (0, 0, 0),
+            state: stone(),
+            entity: None,
+        },
+        LaidBlock {
+            at: (1, 0, 0),
+            state: dot,
+            entity: None,
+        },
+    ];
+    assert_eq!(ir.attach_circuit(KEY, 1, &blocks, 10..20), Ok(()));
+    let keys = ["east", "north", "power", "south", "west"].map(str::to_owned);
+    assert_eq!(
+        ir.structures[KEY].derived,
+        [Vec::new(), Vec::new(), keys.to_vec()]
+    );
 }
