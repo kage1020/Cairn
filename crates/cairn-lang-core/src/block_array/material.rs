@@ -51,6 +51,13 @@ pub trait TargetRegistry {
         None
     }
 
+    /// The id the target spells `state` with when its states make it another block there, as
+    /// Bedrock spells an unlit wall torch `unlit_redstone_torch`; `None` keeps `state.id`.
+    fn spelling(&self, state: &BlockState) -> Option<String> {
+        let _ = state;
+        None
+    }
+
     /// The nearest targetable versions of the pinned target's edition on either side of it that
     /// declare `id`, asked only for an id the target does not declare; `None` when no other does,
     /// or no version is pinned.

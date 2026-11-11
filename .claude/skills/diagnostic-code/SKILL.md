@@ -12,11 +12,10 @@ a reader with the code in hand looks it up. Both land in the same pull request a
    `website/src/content/docs/spec/lint.md` and `website/src/content/docs/ja/spec/lint.md`. When the
    rule belongs to another chapter, the row says what the code means and links there. When the
    code's severity does not follow from its `E_` / `W_` prefix, say why under "Error vs warning".
-   The redstone pipeline's codes (`crates/cairn-lang-redstone/src/diagnostic.rs`: `E_LOGIC_*` /
-   `W_LOGIC_*`, `E_NO_CIRCUIT_REGION`, `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT`,
-   `W_ROUTE_CROSS_LAYER_CLEARANCE`) are Internal tier and get no row. A code the CLI prints itself,
+   A code of the redstone pipeline gets its row under "Redstone". A code the CLI prints itself,
    as `error[E_…]`, `warning[W_…]` or `W_…:`, gets a row like core's, and skips step 2.
-2. **Enum.** In `crates/cairn-lang-core/src/diagnostic.rs`:
+2. **Enum.** In `crates/cairn-lang-core/src/diagnostic.rs`, or for a redstone code in
+   `crates/cairn-lang-redstone/src/diagnostic.rs`:
    - add the variant to `DiagnosticCode` with a one-line doc of what it reports;
    - add its string to `as_str` and its severity to `severity`. The severity follows `spec/lint`
      "Error vs warning", not the prefix;
@@ -28,9 +27,10 @@ a reader with the code in hand looks it up. Both land in the same pull request a
    a near spelling with `suggest::nearest_match` and attach it with `suggest::did_you_mean_note`.
 4. **Tests.**
    - `crates/cairn-lang-core/src/diagnostic/tests.rs` lists every code's string and its severity
-     partition. Add the new string to both lists.
-   - Pin the finding in the pass's integration tests, under `crates/cairn-lang-core/tests/`: the
-     exact codes, spans and messages for one source that raises it and one near miss that does not.
+     partition. Add the new string to both lists. The redstone crate's tests read every variant,
+     so a redstone code needs no entry.
+   - Pin the finding in the pass's integration tests, under the crate's `tests/`: the exact
+     codes, spans and messages for one source that raises it and one near miss that does not.
    - An `Error` raised by `check` also gets a fixture in
      `crates/cairn-lang-cli/tests/cli/check/parity.rs`, which shows every build command refuses it.
 5. Run `cargo xtask lint diagnostic-catalog`, then the `verify` skill.

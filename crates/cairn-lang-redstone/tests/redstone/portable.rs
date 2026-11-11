@@ -70,7 +70,7 @@ fn quasi_connected(actuator: &str, named: &str, source: &str) -> (String, String
         ),
         vec![
             format!("{source} powers the cell above {named} from here"),
-            "bedrock has no quasi-connectivity, so the same source builds there".to_owned(),
+            "bedrock has no quasi-connectivity, so this is no dependence on order there".to_owned(),
             format!(
                 "Fix: move {source} so that neither it nor a block it powers whole stands beside \
                  the cell above {named}, or redesign the logic to be order-independent; or build \

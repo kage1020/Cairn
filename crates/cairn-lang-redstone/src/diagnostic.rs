@@ -2,9 +2,11 @@
 //! their own.
 
 use cairn_lang_core::ast::DottedRef;
-use cairn_lang_core::check::Severity;
+use cairn_lang_core::check::{LineStarts, RenderedDiagnostic, Severity};
 use cairn_lang_core::error::Span;
 use serde::{Serialize, Serializer};
+
+use crate::geometry::Voxel;
 
 /// Stable identifier for a kind of redstone [`Diagnostic`]; its `E_*`/`W_*` string is the contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -23,12 +25,15 @@ pub enum DiagnosticCode {
     LogicUnusedSignal,
     /// A scope with something to place has no `circuit region=` reservation, or no `size=WxH`.
     NoCircuitRegion,
-    /// A scope's netlist does not fit its `circuit region=` reservation.
+    /// A scope's netlist does not fit its `circuit region=` reservation, the layers take the struct
+    /// past what one structure holds, or a stage lays the circuit wrong, which is a compiler bug.
     RouteCongestion,
-    /// Two of a scope's nets run within one step of each other across layers.
-    RouteCrossLayerClearance,
-    /// A driver segment runs past [`crate::delay::MAX_ATTENUATION_SEGMENT`], or a dust run past its
-    /// allowance has no coord a buffer repeater can take.
+    /// A sensor or actuator stands where the circuit under the floor cannot reach it.
+    RouteUnreachableComponent,
+    /// A part of a circuit is built of a token the target's pack declares no block for.
+    UnknownAbstractToken,
+    /// A macro has more stages than its dust carries, or a wire past
+    /// [`crate::delay::DUST_ATTENUATION_LIMIT`] blocks has nowhere a buffer repeater fits.
     AttenuationLimit,
     /// Lowering a `logic` binding descended past [`crate::synth::MAX_LOWERING_DEPTH`].
     LogicNestingTooDeep,
@@ -60,7 +65,8 @@ impl DiagnosticCode {
             Self::LogicUnusedSignal => "W_LOGIC_UNUSED_SIGNAL",
             Self::NoCircuitRegion => "E_NO_CIRCUIT_REGION",
             Self::RouteCongestion => "E_ROUTE_CONGESTION",
-            Self::RouteCrossLayerClearance => "W_ROUTE_CROSS_LAYER_CLEARANCE",
+            Self::RouteUnreachableComponent => "E_ROUTE_UNREACHABLE_COMPONENT",
+            Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
             Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
             Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
@@ -73,7 +79,7 @@ impl DiagnosticCode {
         }
     }
 
-    /// Severity of this code. Errors set the `cairn synth` exit code; warnings do not.
+    /// Severity of this code: an error refuses the command that reports it, a warning does not.
     #[must_use]
     pub const fn severity(self) -> Severity {
         match self {
@@ -83,6 +89,8 @@ impl DiagnosticCode {
             | Self::LogicUnsupportedPrimitive
             | Self::NoCircuitRegion
             | Self::RouteCongestion
+            | Self::RouteUnreachableComponent
+            | Self::UnknownAbstractToken
             | Self::AttenuationLimit
             | Self::LogicNestingTooDeep
             | Self::LogicMisplacedBinding
@@ -92,7 +100,7 @@ impl DiagnosticCode {
             | Self::LogicDuplicateBinding
             | Self::SimAssertionFailed
             | Self::NoPortableImpl => Severity::Error,
-            Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
+            Self::LogicUnusedSignal => Severity::Warning,
         }
     }
 }
@@ -159,11 +167,64 @@ impl Diagnostic {
         });
         self
     }
+
+    /// Whether the primary span or a note's span lies inside one of `lines`.
+    #[must_use]
+    pub fn touches(&self, lines: &[&Span]) -> bool {
+        std::iter::once(&self.span)
+            .chain(self.notes.iter().filter_map(|note| note.span.as_ref()))
+            .any(|span| {
+                lines
+                    .iter()
+                    .any(|line| line.start <= span.start && span.end <= line.end)
+            })
+    }
+
+    /// Render against `source` in the shape `spec/lint` "Machine-readable payload" gives.
+    #[must_use]
+    pub fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
+        RenderedDiagnostic::new(
+            self.code.as_str(),
+            self.severity(),
+            &self.span,
+            &self.primary,
+            &self.notes,
+            source,
+            lines,
+        )
+    }
 }
 
 /// `assert latency(FROM -> TO) <= N`, each name in its canonical spelling.
 pub(crate) fn latency_text(from: &DottedRef, to: &DottedRef, bound: u32) -> String {
     format!("`assert latency({from} -> {to}) <= {bound}`")
+}
+
+/// The fix of a refusal no layout the stages before accept should reach.
+pub(crate) const COMPILER_BUG_FIX: &str = "Fix: report this as a compiler bug, with the struct; meanwhile widen the struct's `size=WxH` so the circuit is laid differently";
+
+/// An `E_ROUTE_CONGESTION` at the `circuit` line `span` for a circuit an earlier stage laid wrong.
+pub(crate) fn compiler_bug(span: Span, primary: String) -> Diagnostic {
+    error_with_footer(
+        DiagnosticCode::RouteCongestion,
+        span,
+        primary,
+        COMPILER_BUG_FIX,
+    )
+}
+
+/// The finding of `scope`'s circuit, under the `circuit` line `span`, with a part at `at` where
+/// none fits.
+pub(crate) fn overlapping(scope: &str, span: Span, at: Voxel) -> Diagnostic {
+    compiler_bug(
+        span,
+        format!(
+            "{scope} the circuit under this struct has a part at ({x}, {y}, {z}) where none fits",
+            x = at.x,
+            y = at.y,
+            z = at.z,
+        ),
+    )
 }
 
 /// An error with one `Fix:` footer, the shape of every place-and-route refusal.

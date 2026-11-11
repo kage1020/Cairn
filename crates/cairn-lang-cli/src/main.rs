@@ -63,7 +63,11 @@ fn main() -> ExitCode {
             editions,
             format,
         }) => run_info(&file, &editions, format),
-        Some(Command::Lower { file, format }) => run_lower(&file, format),
+        Some(Command::Lower {
+            file,
+            edition,
+            format,
+        }) => run_lower(&file, edition, format),
         Some(Command::Synth {
             file,
             experimental_logic_synth,

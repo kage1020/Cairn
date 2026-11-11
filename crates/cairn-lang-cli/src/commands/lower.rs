@@ -7,66 +7,62 @@ use cairn_lang_core::block_array::{
     BlockArray, BlockArrayIr, findings_under_guards, lower_to_block_array,
 };
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::intent::{IntentModule, circuit_lines};
 use cairn_lang_core::resolve::resolve;
 use cairn_lang_core::{Edition, Severity, lower};
 use cairn_lang_formats::registry::builtin_pack;
 
 use crate::cli::LowerFormat;
-use crate::pipeline::{build_diagnostics, load_module, weighed_editions};
-use crate::report::{print_json, report_diagnostics, report_failure_document};
+use crate::pipeline::{build_diagnostics, lay_circuits, load_module, weighed_editions};
+use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
 
-pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
+pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerFormat) -> ExitCode {
     let (source, module) = match load_module(file, format.failure_report()) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
     let ir = lower(&module);
-    let resolution = resolve(&ir, None);
+    let resolution = resolve(&ir, edition);
     // No `--target`, so no version to check ids against.
-    let mut block_ir = lower_to_block_array(
-        &ir,
-        &resolution,
-        Some(&builtin_pack(Edition::Java).view(None)),
-    );
-    // This build leaves the guarded lines out, but an error on one still fails the command.
-    let declared = |edition, id: &str| builtin_pack(edition).may_declare(id);
-    block_ir
-        .diagnostics
-        .extend(findings_under_guards(&ir, &declared));
+    let registry = builtin_pack(edition.unwrap_or(Edition::Java)).view(None);
+    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
+    // With no edition pinned the guarded lines are left out, but an error on one still fails the
+    // command.
+    if edition.is_none() {
+        let declared = |edition, id: &str| builtin_pack(edition).may_declare(id);
+        block_ir
+            .diagnostics
+            .extend(findings_under_guards(&ir, &declared));
+    }
     // Check findings lead, ahead of the lowering deferrals they cascade into.
     block_ir.diagnostics = build_diagnostics(
         &module,
         &ir,
-        None,
-        &weighed_editions(None),
+        edition,
+        &weighed_editions(edition),
         std::mem::take(&mut block_ir.diagnostics),
     );
-
-    // Refuse before printing: `> ir.json` gets the failure document, not IR of a rejected source.
-    let has_error = block_ir
+    let circuits = edition.map_or_else(Vec::new, |edition| {
+        lay_circuits(&ir, &mut block_ir, edition, &registry)
+    });
+    let findings: Vec<Found> = block_ir
         .diagnostics
         .iter()
-        .any(|d| d.severity() == Severity::Error);
-    if has_error {
-        return report_failure_document(
-            file,
-            &source,
-            format.failure_report(),
-            &block_ir.diagnostics,
-        );
+        .cloned()
+        .map(Found::Core)
+        .chain(circuits.into_iter().map(Found::Circuit))
+        .collect();
+
+    // Refuse before printing: `> ir.json` gets the failure document, not IR of a rejected source.
+    if findings.iter().any(|d| d.severity() == Severity::Error) {
+        return report_failure_document(file, &source, format.failure_report(), &findings);
     }
 
     // Warnings go to stderr as text in every format.
     let lines = LineStarts::new(&source);
-    report_diagnostics(file, &source, &lines, &block_ir.diagnostics);
-    let guarded = ir.guarded_members().len();
-    if guarded > 0 {
-        eprintln!(
-            "note: no edition is pinned here, so the {guarded} {} under `@edition` guards {} \
-             left out; `cairn compile --edition E` builds the ones E's guards hold",
-            if guarded == 1 { "member" } else { "members" },
-            if guarded == 1 { "is" } else { "are" },
-        );
+    report_diagnostics(file, &source, &lines, &findings);
+    if edition.is_none() {
+        report_left_out(&ir);
     }
 
     match format {
@@ -82,6 +78,31 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             outln!("{block_ir:#?}");
             ExitCode::SUCCESS
         }
+    }
+}
+
+/// The notes saying what a lowering with no edition pinned leaves out.
+fn report_left_out(ir: &IntentModule) {
+    let guarded = ir.guarded_members().len();
+    if guarded > 0 {
+        eprintln!(
+            "note: no edition is pinned here, so the {guarded} {} under `@edition` guards {} \
+             left out; `cairn lower --edition E` lowers the ones E's guards hold",
+            if guarded == 1 { "member" } else { "members" },
+            if guarded == 1 { "is" } else { "are" },
+        );
+    }
+    let circuits = circuit_lines(ir).iter().filter(|line| line.is_ok()).count();
+    if circuits > 0 {
+        eprintln!(
+            "note: no edition is pinned here, so the {} left out; `cairn lower --edition E` lays \
+             the ones E builds",
+            if circuits == 1 {
+                "circuit of the scope with a `circuit` line is".to_owned()
+            } else {
+                format!("circuits of the {circuits} scopes with a `circuit` line are")
+            },
+        );
     }
 }
 

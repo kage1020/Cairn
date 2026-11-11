@@ -54,6 +54,11 @@ pub(crate) enum Command {
             on, plus the `E_PARTIAL_BUILD` a lost scope earns. Nothing is written either way — \
             `compile` remains the command that produces artifacts and the lockfile, and the only \
             one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`).\n\n\
+            When nothing else is an error, each struct's `logic` is built into its circuit as \
+            `cairn compile` builds it (`spec/redstone` \"Place-and-route\"), and the circuit's \
+            findings follow the lowering's: the pinned edition's, at the `--target` version when \
+            one is given, or without `--edition` the ones each edition raises at the same \
+            place.\n\n\
             The two run-level refusals — an unshipped `--target` and a lost scope — are reported \
             on stderr and by the exit code in both formats, never as elements of the `--format \
             json` array: neither is a finding at a span in the file, and inventing one would put a \
@@ -125,8 +130,9 @@ pub(crate) enum Command {
     #[command(
         long_about = "Report the three version axes (declared registry range, edition portability, \
             semantic-sensitive members) for a .crn source file. Exits 0 on success; 1 on a parse \
-            failure, on any `Error`-severity diagnostic (the check passes run here, and a range \
-            derived from a file `cairn check` rejects is a confident wrong answer), or on any \
+            failure, on any `Error`-severity diagnostic (the check passes run here, as does each \
+            requested edition's lowering with its circuits laid, and a range derived from a file \
+            `cairn check` rejects is a confident wrong answer), or on any \
             other I/O error (permission denied, non-UTF-8 contents); 2 when the file cannot be \
             located, and rejects an empty `--editions` value with exit 2"
     )]
@@ -151,18 +157,31 @@ pub(crate) enum Command {
     #[command(
         long_about = "Lower a .crn source file all the way to the block-array IR and print the \
             result. A debugging surface for the universal voxel pivot; `cairn compile` writes the \
-            same IR out as `.nbt` or `.mcstructure` files, per edition. No edition is pinned \
-            here, so a member under an `@edition` guard is left out, and a note says how many \
-            were. Lowering warnings \
+            same IR out as `.nbt` or `.mcstructure` files, per edition. Without `--edition` no \
+            edition is pinned, so a member under an `@edition` guard and every struct's circuit \
+            are left out, and a note says how many were. Lowering warnings \
             (deferred members, themeless scopes, abstract tokens) print to stderr but do not \
             affect the exit code. Exits 0 on success, 1 on a parse failure, on any \
-            `Error`-severity diagnostic (`E_UNKNOWN_ABSTRACT_TOKEN` among them; `E_UNKNOWN_ID` is \
-            not, since nothing here pins a target to check ids against), or on an I/O error, and 2 \
-            when the file cannot be located"
+            `Error`-severity diagnostic (`E_UNKNOWN_ABSTRACT_TOKEN` and the circuit's among them; \
+            `E_UNKNOWN_ID` is not, since nothing here pins a target to check ids against), or on \
+            an I/O error, and 2 when the file cannot be located"
     )]
     Lower {
         /// Path to the .crn file to lower.
         file: PathBuf,
+        /// Edition to lower for; omitted, guarded members and circuits are left out.
+        #[arg(
+            long,
+            value_parser = edition_parser(),
+            long_help = "Optional edition pin. When set, the members the edition's `@edition` \
+                guards hold are lowered, and each struct's `logic` is built into the circuit \
+                `cairn compile --edition E` lays in the layers under it, the struct rising over \
+                them (`spec/redstone` \"Place-and-route\"); the circuit's findings are reported \
+                after the lowering's, and an error among them exits 1 as one of the lowering's \
+                does. A source whose lowering holds an error lays no circuit, since a member that \
+                failed to lower is not there to wire"
+        )]
+        edition: Option<Edition>,
         /// Output format for the lowered block-array IR.
         #[arg(long, value_enum, default_value_t = LowerFormat::Ascii)]
         format: LowerFormat,
@@ -170,7 +189,10 @@ pub(crate) enum Command {
     /// Compile a .crn source file to its structure artifacts and write its lockfile.
     #[command(
         long_about = "Compile a .crn source file to its edition+version-pinned structure artifact \
-            set and write a lockfile next to the source. `--edition java` writes gzip `.nbt` \
+            set and write a lockfile next to the source. Each struct's `logic` is built into the \
+            circuit laid in the layers its `circuit` line reserves under it, the struct rising \
+            over them (`spec/redstone` \"Place-and-route\"), and an error that build reports refuses \
+            the compile as a lowering error does. `--edition java` writes gzip `.nbt` \
             structures; `--edition bedrock` writes uncompressed `.mcstructure` files, translating \
             each blockstate into the target version's Bedrock `states` through the registry \
             pack's state map; a state the map has no form for is a hard error \
@@ -230,35 +252,30 @@ pub(crate) enum Command {
             (default) prints the edition-neutral Logic IR DAG; `--stage netlist` prints the \
             Netlist IR of Logical Cells + nets derived from that DAG; `--stage edition` picks the \
             target-edition realisation of each cell and prints the Edition Netlist IR; `--stage \
-            placement` lays those edition-tagged cells out inside each scope's `circuit region=` \
-            reservation and prints the Placement IR; `--stage route` runs Steiner routing over the \
-            Placement IR and prints the routed layout with every cell's `wire_length` populated; \
-            `--stage delay` runs delay insertion over the routed IR and fills every \
-            cell's `local_delay_ticks` with the sum of the delay of the cell's slowest \
-            driven port and each implicit buffer repeater's `BUFFER_REPEATER_TICKS` \
-            contribution over every driving net's segment that carries more than \
-            `DUST_ATTENUATION_LIMIT` blocks of dust — from a fresh source, a segment \
-            of more than `DUST_ATTENUATION_LIMIT + 1` steps; `--stage crossing` runs \
-            crossing legalization over the delayed IR and fills every cell's `buffer_coords` with \
-            the coord of the buffer repeater each driver segment passes through (a repeater this \
-            net already placed is recorded rather than duplicated, so one block can be named by \
-            several segments), then checks every `assert latency` against the legalized circuit \
-            and prints no IR when one fails. Every cell of the four Placement IR stages carries a `\"stage\"` \
-            key echoing the flag value that produced the dump (`placement` / `route` / `delay` / \
-            `crossing`), so a consumer reads the stage off the output instead of inferring it from \
-            which optional keys are present. The `--edition <java|bedrock>` flag is required in \
-            the `edition`, `placement`, `route`, `delay`, and `crossing` modes and refused \
-            otherwise (the earlier stages are edition-neutral by contract). **Internal / \
-            experimental** — the shape of the output is not covered by the stable compatibility \
-            tier and may change at any time. Requires `--experimental-logic-synth` so a caller \
-            cannot end up depending on it accidentally.\n\n\
+            placement` lays each cell's tile, each sensor's pad and each actuator's riser in the \
+            layers each scope's `circuit` line reserves under the built struct; `--stage route` \
+            runs each net's dust from the tile that drives it to every input it feeds, apart from \
+            every other net's; `--stage delay` stands a buffer repeater in a net's dust wherever \
+            it would run too weak for an input it feeds; `--stage legalize` turns every part into \
+            the block it is built as, in the state the circuit rests in with its sensors off, \
+            then checks each `assert latency` against it and prints no IR when one fails. Each of \
+            the four layout stages carries a `\"stage\"` key echoing the flag value that produced \
+            it (`placement` / `route` / `delay` / `legalize`), so a consumer reads the stage off \
+            the output instead of inferring it from which keys are present. The `--edition <java|bedrock>` flag is \
+            required in the `edition`, `placement`, `route`, `delay`, and `legalize` modes and \
+            refused otherwise (the earlier stages are edition-neutral by contract). `cairn \
+            compile` runs the same pipeline and lays the legalized circuit under the struct; this \
+            command prints what it builds on the way. **Internal / experimental** — the shape of \
+            the output is not covered by the stable compatibility tier and may change at any \
+            time. Requires `--experimental-logic-synth` so a caller cannot end up depending on it \
+            accidentally.\n\n\
             Exits 0 when the requested stage produced a well-formed IR (warnings still allowed); 1 \
-            on a parse failure, on any `Error`-severity diagnostic (from `check` or from a \
-            redstone pass the stage runs), on a failure to serialise the IR as JSON, or on any \
-            other I/O error (permission denied, non-UTF-8 contents); 2 when the file cannot be \
-            located, and refuses a run without `--experimental-logic-synth`, a missing `--edition` \
-            on the stages that require it and a stray one on the edition-neutral stages with exit \
-            2, before the file is read."
+            on a parse failure, on any `Error`-severity diagnostic (from `check`, from lowering \
+            the struct for the edition, or from a redstone pass the stage runs), on a failure to \
+            serialise the IR as JSON, or on any other I/O error (permission denied, non-UTF-8 \
+            contents); 2 when the file cannot be located, and refuses a run without \
+            `--experimental-logic-synth`, a missing `--edition` on the stages that require it and \
+            a stray one on the edition-neutral stages with exit 2, before the file is read."
     )]
     Synth {
         /// Path to the .crn file to synthesise.
@@ -276,20 +293,19 @@ pub(crate) enum Command {
             long,
             value_enum,
             default_value_t = SynthStage::Logic,
-            long_help = "Which pipeline stage to print. For the four Placement IR stages the value \
-                chosen here is echoed back as every cell's `\"stage\"` key, so the flag and the \
-                dump share one vocabulary",
+            long_help = "Which pipeline stage to print. For the four layout stages the value chosen \
+                here is echoed back as the layout's `\"stage\"` key, so the flag and the dump \
+                share one vocabulary",
         )]
         stage: SynthStage,
         /// Target edition, for the stages after `netlist`.
         #[arg(
             long,
             value_parser = edition_parser(),
-            long_help = "Target edition for the Edition Netlist IR / Placement IR / routed \
-                Placement IR / delayed Placement IR / legalized Placement IR. Required when \
-                `--stage edition`, `--stage placement`, `--stage route`, `--stage delay`, or \
-                `--stage crossing` is set; refused for `logic` and `netlist`, which are \
-                edition-neutral by contract"
+            long_help = "Target edition for the Edition Netlist IR and the placed, routed, \
+                delayed and legalized layouts. Required when `--stage edition`, `--stage \
+                placement`, `--stage route`, `--stage delay`, or `--stage legalize` is set; \
+                refused for `logic` and `netlist`, which are edition-neutral by contract"
         )]
         edition: Option<Edition>,
     },
@@ -356,53 +372,40 @@ pub(crate) enum SynthStage {
             differences\" lays out. Still carries no delay"
     )]
     Edition,
-    /// Placement IR: coordinate assignment over the Edition Netlist IR.
+    /// Placement IR: every tile laid in the reservation.
     #[value(
-        help = "Placement IR: 1D coordinate assignment over the Edition Netlist IR against \
-            `--edition`. Stage 1 of the pipeline `spec/redstone` \"Place-and-route\" lays out. \
-            `wire_length` and `local_delay_ticks` stay `None` at this stage; `--stage route` and \
-            `--stage delay` fill them"
+        help = "Placement IR: each cell's tile, each sensor's pad and each actuator's riser laid \
+            against `--edition` in the layers the scope's `circuit` line reserves under the \
+            built struct (`spec/redstone` \"Place-and-route\"). Refuses a reservation the tiles \
+            do not fit with `E_ROUTE_CONGESTION`, a macro with more stages than its tile carries \
+            with `E_ATTENUATION_LIMIT`, and a sensor or actuator the layers under the floor cannot \
+            reach with `E_ROUTE_UNREACHABLE_COMPONENT`"
     )]
     Placement,
-    /// Routed Placement IR: Steiner routing, filling each cell's `wire_length`.
+    /// Routed layout: every net's dust.
     #[value(
-        help = "Routed Placement IR: Steiner routing over the Placement IR against `--edition`. \
-            Stage 2 of the pipeline `spec/redstone` \"Place-and-route\" lays out. Fills every \
-            cell's `wire_length` with the sum, over the nets driving it, of the routed length from \
-            that net's source into the cell; `local_delay_ticks` stays `None` until the \
-            delay-insertion pass (stage 3) runs. Refuses with `E_ATTENUATION_LIMIT` before laying \
-            a route when a sink is further from its driver, in a straight line, than \
-            `MAX_ATTENUATION_SEGMENT` steps: no route is shorter than that line, so stage 3 would \
-            refuse it anyway, after laying it"
+        help = "Routed layout: each net's dust from the tile that drives it to every input it \
+            feeds, apart from every other net's, against `--edition`. Refuses a net with \
+            nowhere left to run with `E_ROUTE_CONGESTION` on its driver"
     )]
     Route,
-    /// Delayed Placement IR: delay insertion, filling each cell's `local_delay_ticks`.
+    /// Delayed layout: the buffer repeaters each net's dust needs.
     #[value(
-        help = "Delayed Placement IR: delay insertion over the routed Placement IR against \
-            `--edition`. Stage 3 of the pipeline `spec/redstone` \"Place-and-route\" lays out. \
-            Fills every cell's `local_delay_ticks` with the sum (a per-cell wire cost, not an \
-            arrival time) of the delay of the cell's slowest driven port and each implicit buffer \
-            repeater's `BUFFER_REPEATER_TICKS` contribution implied by each driving net's segment \
-            that carries more than `DUST_ATTENUATION_LIMIT` blocks of dust — from a fresh \
-            source, a segment of more than `DUST_ATTENUATION_LIMIT + 1` steps; refuses with \
-            `E_ATTENUATION_LIMIT` when a segment's routed length in steps exceeds \
-            `MAX_ATTENUATION_SEGMENT`, or when a stretch of dust past the limit has no coord a \
-            repeater can stand on"
+        help = "Delayed layout: a buffer repeater in a net's dust wherever it would run too weak \
+            for an input it feeds, against `--edition`, each in a straight stretch of that net's \
+            own dust. Refuses a stretch with nowhere a repeater stands with \
+            `E_ATTENUATION_LIMIT`"
     )]
     Delay,
-    /// Legalized Placement IR: crossing legalization, filling each cell's `buffer_coords`, then
-    /// latency verification.
+    /// Legalized layout: every block of the reservation, then latency verification.
     #[value(
-        help = "Legalized Placement IR: crossing legalization over the delayed Placement IR \
-            against `--edition`. Stage 4 of the pipeline `spec/redstone` \"Place-and-route\" lays \
-            out. Materialises the coord of every implicit buffer repeater the delay pass counted \
-            into every cell's `buffer_coords`, one entry per driver segment that passes through it \
-            — so a block serving several segments is named once per segment and a consumer \
-            counting blocks deduplicates by coord. Then checks each `assert latency` against the \
-            legalized circuit, refusing with `E_SIM_ASSERTION_FAILED` one whose slowest path \
-            takes more ticks than its bound"
+        help = "Legalized layout: every part of the reservation as the block it is built as, each \
+            torch, repeater, comparator and dust in the state the circuit rests in with its \
+            sensors off, against `--edition`; this is what `cairn compile` lays under the \
+            struct. Then checks each `assert latency` against the circuit, refusing with \
+            `E_SIM_ASSERTION_FAILED` one whose slowest path takes more ticks than its bound"
     )]
-    Crossing,
+    Legalize,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

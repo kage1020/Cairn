@@ -185,6 +185,22 @@ impl TargetRegistry for PackView<'_> {
         })
     }
 
+    fn spelling(&self, state: &BlockState) -> Option<String> {
+        if let Some(pinned) = &self.states {
+            return pinned.spelling(state).map(str::to_owned);
+        }
+        // Unpinned: the spelling every targetable version agrees on.
+        let maps = self.state_maps?;
+        let mut spellings = self
+            .targetable
+            .iter()
+            .map(|version| maps.at(version).and_then(|map| map.spelling(state)));
+        let first = spellings.next()??;
+        spellings
+            .all(|other| other == Some(first))
+            .then(|| first.to_owned())
+    }
+
     fn declared_elsewhere(&self, id: &str) -> Option<DeclaredElsewhere> {
         self.ids?;
         let pinned = self.mc_version?;

@@ -2,14 +2,11 @@
 //! actuator and `logic` bindings. Nodes are in topological order, so a cycle is not encodable; a
 //! `latch` or `counter` keeps its feedback inside its gate.
 
-use std::fmt;
-use std::marker::PhantomData;
-
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::logic_library::StageCount;
 use indexmap::IndexMap;
-use serde::de::{self, MapAccess, Visitor};
+use serde::de;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -212,38 +209,6 @@ pub(crate) fn serialize_signal_defs<S: Serializer, V: Serialize>(
     map.end()
 }
 
-/// Reads `signal_defs` back from the object [`serialize_signal_defs`] writes, refusing a name
-/// given twice.
-pub(crate) fn deserialize_signal_defs<'de, D: Deserializer<'de>, V: Deserialize<'de>>(
-    deserializer: D,
-) -> Result<IndexMap<DottedRef, V>, D::Error> {
-    struct DefsVisitor<V>(PhantomData<V>);
-
-    impl<'de, V: Deserialize<'de>> Visitor<'de> for DefsVisitor<V> {
-        type Value = IndexMap<DottedRef, V>;
-
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("an object keyed by dotted signal name")
-        }
-
-        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-            let mut defs = IndexMap::new();
-            while let Some((name, value)) = map.next_entry::<String, V>()? {
-                let dotted =
-                    dotted_ref_from_segments(name.split('.').map(str::to_owned).collect())?;
-                if defs.insert(dotted, value).is_some() {
-                    return Err(de::Error::custom(format_args!(
-                        "`signal_defs` names `{name}` twice, and a signal has one definition"
-                    )));
-                }
-            }
-            Ok(defs)
-        }
-    }
-
-    deserializer.deserialize_map(DefsVisitor(PhantomData))
-}
-
 /// Reads back a [`DottedRef`] written as its list of segments.
 pub(crate) fn deserialize_dotted_ref<'de, D: Deserializer<'de>>(
     deserializer: D,
@@ -329,7 +294,7 @@ pub struct Scoped<T> {
     pub scopes: Vec<ScopedEntry<T>>,
 }
 
-// Not derived: the derive would require `T: Default`, which `PlacementIr` lacks.
+// Not derived: the derive would require `T: Default`, which `CircuitLayout` lacks.
 impl<T> Default for Scoped<T> {
     fn default() -> Self {
         Self { scopes: Vec::new() }

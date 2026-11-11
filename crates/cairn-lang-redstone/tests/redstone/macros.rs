@@ -11,23 +11,23 @@ use cairn_lang_redstone::{
     compile_netlist, verify_latency,
 };
 
-use crate::common::{legalized_from_source, synth_source};
+use crate::common::{cells, legalized, synth_source};
 
 /// A struct with a lever on each of `inputs` and a door that `expression` opens, then `tail`.
 fn source(inputs: &[&str], expression: &str, tail: &str) -> String {
     let mut levers = String::new();
-    for (input, offset) in inputs.iter().zip(1..) {
+    for (input, offset) in inputs.iter().zip((2..).step_by(4)) {
         writeln!(
             levers,
-            "  lever id=l{offset} at=inside.back offset={offset} y=1 -> {input}"
+            "  lever id=l{offset} at=inside.back offset={offset} y=0 -> {input}"
         )
         .expect("writing to a String");
     }
     format!(
         "theme t:\n  slot wall -> @oak_planks\n\n\
-         struct s size=11x7\n  floor mat_slot=wall\n  door id=d side=front at=center\n\
+         struct s size=21x15\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door id=d side=front at=center\n\
          {levers}  logic sig.out = {expression}\n  door[id=d] opened_by=sig.out\n  \
-         circuit region=floor void=2\n{tail}"
+         circuit region=floor void=4\n{tail}"
     )
 }
 
@@ -93,7 +93,7 @@ fn cases() -> [Case; 6] {
             expression: "latch(reset=sig.r, set=sig.s)",
             // Declared against the operands' order, so a swap of the two shows.
             inputs: &["sig.r", "sig.s"],
-            ports: &[(PortName::Set, 1), (PortName::Reset, 0)],
+            ports: &[(PortName::Reset, 0), (PortName::Set, 1)],
             gate: GateKind::Latch {
                 set: SignalRef::Input(1),
                 reset: SignalRef::Input(0),
@@ -146,16 +146,9 @@ fn each_macro_is_one_gate_and_one_cell_on_each_edition() {
             })
             .collect();
         for (edition, cell) in [(Edition::Java, case.java), (Edition::Bedrock, case.bedrock)] {
-            let legalized = legalized_from_source(&src, edition);
-            let cells: Vec<(EditionCell, &[CellPortDriver])> = legalized.scopes[0]
-                .ir
-                .cells
-                .iter()
-                .map(|placed| (placed.cell, placed.drivers.as_slice()))
-                .collect();
             assert_eq!(
-                cells,
-                [(cell, drivers.as_slice())],
+                cells(&legalized(&src, edition).scopes[0].ir),
+                [(cell, drivers.clone())],
                 "{} on {edition:?}",
                 case.expression,
             );
@@ -168,7 +161,7 @@ fn a_macro_shares_its_gate_only_with_one_of_the_same_operand_and_stage_count() {
     let tail = "  logic sig.same = delay(sig.a, 2)\n  logic sig.more = delay(sig.a, 3)\n  \
                 logic sig.other = delay(sig.b, 2)\n  logic sig.wide = pulse(sig.a, 2)\n  \
                 logic sig.all = sig.same and sig.more and sig.other and sig.wide\n  \
-                lamp id=lp at=inside.back offset=5 y=2 lit_by=sig.all\n";
+                lamp id=lp at=inside.back offset=5 y=1 lit_by=sig.all\n";
     let src = source(&["sig.a", "sig.b"], "delay(sig.a, 2)", tail);
     let out = synth_source(&src);
     assert_eq!(out.diagnostics, [], "{src}");
@@ -236,7 +229,7 @@ fn a_latency_bound_counts_a_macro_by_the_port_it_enters() {
     let src = source(&["sig.r", "sig.s"], "latch(set=sig.s, reset=sig.r)", tail);
     let intent = lower(&parse(&src).expect("parse"));
     for edition in [Edition::Java, Edition::Bedrock] {
-        let found: Vec<String> = verify_latency(&legalized_from_source(&src, edition), &intent)
+        let found: Vec<String> = verify_latency(&legalized(&src, edition), &intent)
             .into_iter()
             .map(|d| d.primary)
             .collect();
@@ -246,11 +239,13 @@ fn a_latency_bound_counts_a_macro_by_the_port_it_enters() {
             [
                 format!(
                     "struct=s: `assert latency(sig.s -> sig.out) <= 3` fails on {edition}: its \
-                     slowest path from sig.s to sig.out takes 4 ticks, all in its cells"
+                     slowest path from sig.s to sig.out takes 6 ticks, 2 in the torches up to the \
+                     actuator"
                 ),
                 format!(
                     "struct=s: `assert latency(sig.r -> sig.out) <= 4` fails on {edition}: its \
-                     slowest path from sig.r to sig.out takes 5 ticks, all in its cells"
+                     slowest path from sig.r to sig.out takes 7 ticks, 2 in the torches up to the \
+                     actuator"
                 ),
             ],
         );

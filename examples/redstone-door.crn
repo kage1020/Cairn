@@ -19,15 +19,15 @@ struct gatehouse size=7x5
 
   # one plate on each side of the door: outside in the overhang ring, inside on the floor
   pressure_plate id=plate at=front.outside offset=3 y=0 -> sig.step
-  pressure_plate id=inner at=inside.front  offset=3 y=1 -> sig.exit
+  pressure_plate id=inner at=inside.front  offset=2 y=1 -> sig.exit
 
   # any step opens the door
   logic sig.open = sig.step or sig.exit
   door[id=front] opened_by=sig.open
 
-  circuit region=floor void=2
+  circuit region=floor void=3
 
   # spec/redstone "Verification": truth, latency and bounded eventually
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
-  assert latency(sig.step -> sig.open) <= 1
-  assert always(sig.step -> eventually sig.open within 2)
+  assert latency(sig.step -> sig.open) <= 3
+  assert always(sig.step -> eventually sig.open within 3)

@@ -4,14 +4,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use cairn_lang_core::{Edition, IntentModule, lower, parse};
+use cairn_lang_core::block_array::lower_to_block_array;
+use cairn_lang_core::{Edition, IntentModule, lower, parse, resolve};
+use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{
-    Diagnostic, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
+    Diagnostic, compile_delay, compile_edition_netlist, compile_legalize, compile_netlist,
     compile_placement, compile_routing, synthesize, verify_latency,
 };
 use serde_json::Value;
 
-use crate::common::{assert_stream, cairn, examples_dir, stderr_stream, write_source};
+use crate::common::{
+    QUASI_CONNECTED_DISPENSER, assert_stream, cairn, examples_dir, stderr_stream, write_source,
+};
 
 /// The edition-tagged stage the usage tests run.
 const TAGGED_STAGE: &str = "placement";
@@ -251,7 +255,7 @@ const FINDING_SOURCES: [(&str, &str, &str); 4] = [
     (
         "warning.crn",
         "@cairn 2026.06\nstruct s size=3x3\n  \
-         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+         pressure_plate id=p at=inside.front offset=1 y=0 -> sig.a\n",
         "W_LOGIC_UNUSED_SIGNAL",
     ),
 ];
@@ -342,15 +346,18 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
     let logic = findings(&mut so_far, &synth.diagnostics);
     let netlist = compile_netlist(&synth.scoped);
     let edition_netlist = compile_edition_netlist(&netlist, edition);
-    let placement = compile_placement(&edition_netlist, ir);
+    let registry = builtin_pack(edition).view(None);
+    let built = lower_to_block_array(ir, &resolve(ir, Some(edition)), Some(&registry));
+    assert!(built.diagnostics.is_empty(), "{:?}", built.diagnostics);
+    let placement = compile_placement(&edition_netlist, ir, &built);
     let placed = findings(&mut so_far, &placement.diagnostics);
     let routing = compile_routing(&placement.scoped);
     let routed = findings(&mut so_far, &routing.diagnostics);
     let delay = compile_delay(&routing.scoped);
     let delayed = findings(&mut so_far, &delay.diagnostics);
-    let crossing = compile_crossing(&delay.scoped);
-    findings(&mut so_far, &crossing.diagnostics);
-    let crossed = findings(&mut so_far, &verify_latency(&crossing.scoped, ir));
+    let legalized = compile_legalize(&delay.scoped, Some(&registry));
+    findings(&mut so_far, &legalized.diagnostics);
+    let verified = findings(&mut so_far, &verify_latency(&legalized.scoped, ir));
     vec![
         Dump {
             stage: "logic",
@@ -389,10 +396,10 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
             findings: delayed,
         },
         Dump {
-            stage: "crossing",
+            stage: "legalize",
             tagged: true,
-            ir: json(&crossing.scoped),
-            findings: crossed,
+            ir: json(&legalized.scoped),
+            findings: verified,
         },
     ]
 }
@@ -436,227 +443,127 @@ fn every_stage_prints_the_ir_the_redstone_passes_build() {
     }
 }
 
-#[test]
-fn stage_placement_missing_region_exits_one() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("noregion.crn");
-    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
-        theme t:\n  slot wall -> @oak_planks\n\n\
-        struct noregion size=7x5\n  \
-        floor mat_slot=wall\n  \
-        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
-        logic sig.open = sig.a or sig.b\n  \
-        door id=d side=front at=center opened_by=sig.open\n";
-    std::fs::write(&path, source).expect("write missing-region fixture");
-    let out = cairn(
+/// Run `cairn synth --stage <stage> --edition <edition>` over `path`.
+fn synth_stage(path: &Path, stage: &str, edition: &str) -> Output {
+    cairn(
         "synth",
         &[
             "--experimental-logic-synth",
             "--stage",
-            "placement",
+            stage,
             "--edition",
-            "java",
+            edition,
             path.to_str().unwrap(),
         ],
-    );
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(&stderr, &[(11, 3, "error", "E_NO_CIRCUIT_REGION")]);
+    )
 }
 
-#[test]
-fn stage_placement_congestion_exits_one() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("tiny.crn");
-    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
-        theme t:\n  slot wall -> @oak_planks\n\n\
-        struct tiny size=3x3\n  \
-        floor mat_slot=wall\n  \
-        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
-        logic sig.and_ab   = sig.a and sig.b\n  \
-        logic sig.or_ab    = sig.a or sig.b\n  \
-        logic sig.combined = sig.and_ab and sig.or_ab\n  \
-        door id=d side=front at=center opened_by=sig.combined\n  \
-        circuit region=floor void=1\n";
-    std::fs::write(&path, source).expect("write congestion fixture");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "placement",
-            "--edition",
-            "java",
-            path.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(&stderr, &[(15, 3, "error", "E_ROUTE_CONGESTION")]);
-}
-
-#[test]
-fn stage_route_congestion_exits_one() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("pack.crn");
-    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
-        theme t:\n  slot wall -> @oak_planks\n\n\
-        struct pack size=5x3\n  \
-        floor mat_slot=wall\n  \
-        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        logic sig.c0 = not sig.a\n  \
-        logic sig.c1 = sig.c0 and sig.a\n  \
-        door id=d side=front at=center opened_by=sig.c1\n  \
-        circuit region=floor void=1\n";
-    std::fs::write(&path, source).expect("write congestion fixture");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "route",
-            "--edition",
-            "java",
-            path.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(&stderr, &[(13, 3, "error", "E_ROUTE_CONGESTION")]);
+/// Assert that `out` refused its run with `expected` alone, printing no dump.
+fn assert_refused(out: &Output, expected: &[(u64, u64, &str, &str)], context: &str) {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{context}: {stderr}");
+    assert_stream(&stderr, expected);
     assert!(
-        stderr.contains("routed netlist for struct `pack`"),
-        "primary should name the routing origin and failed scope, got: {stderr}",
+        out.stdout.is_empty(),
+        "{context}: a refused run prints no dump, got: {}",
+        String::from_utf8_lossy(&out.stdout),
     );
 }
 
+/// The layout stages, each of which runs placement first.
+const LAYOUT_STAGES: [&str; 4] = ["placement", "route", "delay", "legalize"];
+
 #[test]
-fn stage_delay_inherits_upstream_congestion_failure() {
+fn a_scope_with_logic_and_no_circuit_line_is_refused_at_placement() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("pack.crn");
-    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
-        theme t:\n  slot wall -> @oak_planks\n\n\
-        struct pack size=5x3\n  \
-        floor mat_slot=wall\n  \
-        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        logic sig.c0 = not sig.a\n  \
-        logic sig.c1 = sig.c0 and sig.a\n  \
-        door id=d side=front at=center opened_by=sig.c1\n  \
-        circuit region=floor void=1\n";
-    std::fs::write(&path, source).expect("write congestion fixture");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "delay",
-            "--edition",
-            "java",
-            path.to_str().unwrap(),
-        ],
+    let path = write_source(
+        dir.path(),
+        "noregion.crn",
+        "theme t:\n  slot wall -> @oak_planks\n\n\
+         struct noregion size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         pressure_plate id=p at=inside.back  offset=1 y=0 -> sig.a\n  \
+         pressure_plate id=q at=inside.front offset=1 y=0 -> sig.b\n  \
+         logic sig.open = sig.a or sig.b\n  \
+         door id=d side=front at=center opened_by=sig.open\n",
     );
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(&stderr, &[(13, 3, "error", "E_ROUTE_CONGESTION")]);
+    for stage in LAYOUT_STAGES {
+        let out = synth_stage(&path, stage, "java");
+        assert_refused(&out, &[(9, 3, "error", "E_NO_CIRCUIT_REGION")], stage);
+    }
 }
 
 #[test]
-fn stage_delay_attenuation_limit_exits_one() {
-    // The straight line alone is over the cap, so routing refuses it first: hence `placed`.
+fn a_reservation_shallower_than_a_circuit_is_refused_at_placement() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("wide.crn");
-    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
-        theme t:\n  slot wall -> @oak_planks\n\n\
-        struct wide_pack size=300x5\n  \
-        floor mat_slot=wall\n  \
-        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
-        logic sig.out = sig.a or sig.b\n  \
-        door id=d side=front at=center opened_by=sig.out\n  \
-        circuit region=floor void=3\n";
-    std::fs::write(&path, source).expect("write attenuation fixture");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "delay",
-            "--edition",
-            "java",
-            path.to_str().unwrap(),
-        ],
+    let path = write_source(
+        dir.path(),
+        "shallow.crn",
+        "theme t:\n  slot wall -> @oak_planks\n\n\
+         struct shallow size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         pressure_plate id=p at=inside.back  offset=1 y=0 -> sig.a\n  \
+         pressure_plate id=q at=inside.front offset=1 y=0 -> sig.b\n  \
+         logic sig.open = sig.a or sig.b\n  \
+         door id=d side=front at=center opened_by=sig.open\n  \
+         circuit region=floor void=2\n",
     );
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(&stderr, &[(13, 3, "error", "E_ATTENUATION_LIMIT")]);
+    let out = synth_stage(&path, "placement", "java");
+    assert_refused(&out, &[(11, 3, "error", "E_ROUTE_CONGESTION")], "placement");
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("placed netlist for struct `wide_pack`"),
-        "primary should name the stage that refused and the failed scope, got: {stderr}",
+        stderr.contains("struct=shallow: `void=2` reserves too few layers")
+            && stderr.contains("note: Fix: set `void=3` or more"),
+        "{stderr}",
     );
 }
 
 #[test]
-fn stage_route_refuses_a_detour_past_the_attenuation_cap() {
-    // The two nets swap rows, so whichever is laid second climbs over the other: its straight line
-    // is `width`, its route `width + 2`.
-    use cairn_lang_redstone::MAX_ATTENUATION_SEGMENT as CAP;
+fn a_signal_with_no_room_to_run_is_refused_from_the_route_stage_on() {
     let dir = tempfile::tempdir().expect("temp dir");
-    for (width, refuses) in [(CAP - 2, false), (CAP - 1, true)] {
-        let path = dir.path().join(format!("detour{width}.crn"));
-        let source = format!(
-            "@cairn 2026.06\n@requires version>=1.20\n\n\
-             theme t:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n\
-             struct s size={width}x6\n  \
-             floor mat_slot=wall\n  \
-             door id=d0 side=front at=center mat_slot=door\n  \
-             door id=d1 side=back at=center mat_slot=door\n  \
-             pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s0\n  \
-             pressure_plate id=p1 at=back.outside offset=0 y=0 -> sig.s1\n  \
-             door[id=d0] opened_by=sig.s1\n  \
-             door[id=d1] opened_by=sig.s0\n  \
-             circuit region=floor void=2\n"
+    let door = fs::read_to_string(examples_dir().join("crossbar.crn")).expect("read example");
+    let crowded = door.replace("struct crossbar size=12x10", "struct crossbar size=8x6");
+    assert_ne!(
+        crowded, door,
+        "the example carries the size this test shrinks"
+    );
+    let path = write_source(dir.path(), "crowded.crn", &crowded);
+    let placed = synth_stage(&path, "placement", "java");
+    assert_eq!(
+        placed.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&placed.stderr)
+    );
+    for stage in ["route", "delay", "legalize"] {
+        let out = synth_stage(&path, stage, "java");
+        assert_refused(&out, &[(24, 3, "error", "E_ROUTE_CONGESTION")], stage);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(
+                "struct=crossbar: the sensor's signal finds no way to every input it feeds \
+                 through the reservation (region 10x8, void=4)"
+            ),
+            "{stage}: {stderr}",
         );
-        std::fs::write(&path, source).expect("write detour fixture");
-        let out = cairn(
-            "synth",
-            &[
-                "--experimental-logic-synth",
-                "--stage",
-                "route",
-                "--edition",
-                "java",
-                path.to_str().unwrap(),
-            ],
-        );
-        let stderr = String::from_utf8(out.stderr).expect("utf-8");
-        if !refuses {
-            assert_eq!(out.status.code(), Some(0), "width {width}: {stderr}");
-            let stdout = String::from_utf8(out.stdout).expect("utf-8");
-            let value: serde_json::Value = serde_json::from_str(&stdout)
-                .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
-            let lengths: Vec<u64> = value[0]["ir"]["outputs"]
-                .as_array()
-                .expect("outputs array")
-                .iter()
-                .map(|output| output["wire_length"].as_u64().expect("routed"))
-                .collect();
-            assert_eq!(
-                lengths,
-                [u64::from(CAP), u64::from(CAP - 2)],
-                "the wire laid second is exactly the cap",
-            );
-            continue;
-        }
-        assert_eq!(out.status.code(), Some(1), "width {width}: {stderr}");
-        let expected = format!(
-            "error[E_ATTENUATION_LIMIT]: placed netlist for struct `s` has no route from the \
-             driver at (0,0,1) to ({},0,0) within the v1 attenuation limit of {CAP} steps; the \
-             faces it could arrive through are taken by sig.s0\n  note: Fix: give the wire a \
-             shorter way round",
-            width - 1,
-        );
-        assert!(stderr.contains(&expected), "width {width}: got {stderr}");
+    }
+}
+
+#[test]
+fn a_macro_longer_than_its_tile_carries_is_refused_at_placement() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = write_source(
+        dir.path(),
+        "pulse.crn",
+        "theme t:\n  slot wall -> @oak_planks\n\n\
+         struct timer size=40x9\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         door id=d side=front at=center\n  \
+         lever id=l at=inside.back offset=2 y=0 -> sig.a\n  \
+         logic sig.p = pulse(sig.a, 26)\n  \
+         door[id=d] opened_by=sig.p\n  \
+         circuit region=floor void=4\n",
+    );
+    for stage in LAYOUT_STAGES {
+        let out = synth_stage(&path, stage, "java");
+        assert_refused(&out, &[(9, 3, "error", "E_ATTENUATION_LIMIT")], stage);
     }
 }
 
@@ -675,136 +582,41 @@ fn unparseable_source_exits_one() {
 }
 
 #[test]
-fn stage_crossing_inherits_upstream_attenuation_failure() {
+fn stage_legalize_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
+    // A Java `ComparatorAND` takes a tick, the Bedrock `TorchAND` two.
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("wide.crn");
-    let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
-        theme t:\n  slot wall -> @oak_planks\n\n\
-        struct wide_pack size=300x5\n  \
-        floor mat_slot=wall\n  \
-        pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
-        pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b\n  \
-        logic sig.out = sig.a or sig.b\n  \
-        door id=d side=front at=center opened_by=sig.out\n  \
-        circuit region=floor void=3\n";
-    std::fs::write(&path, source).expect("write attenuation fixture");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "crossing",
-            "--edition",
-            "java",
-            path.to_str().unwrap(),
-        ],
+    let path = write_source(
+        dir.path(),
+        "chain.crn",
+        "theme t:\n  slot wall -> @oak_planks\n\n\
+         struct gate size=15x11\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         door id=d side=front at=center\n  \
+         lever id=l1 at=inside.back offset=2 y=0 -> sig.a\n  \
+         lever id=l2 at=inside.back offset=6 y=0 -> sig.b\n  \
+         logic sig.f = sig.a and sig.b\n  \
+         logic sig.g = not sig.f\n  \
+         logic sig.h = sig.g or sig.a\n  \
+         door[id=d] opened_by=sig.h\n  \
+         circuit region=floor void=4\n  \
+         assert latency(sig.a -> sig.h) <= 5\n",
     );
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(&stderr, &[(13, 3, "error", "E_ATTENUATION_LIMIT")]);
-}
-
-#[test]
-fn stage_crossing_two_nets_over_one_coord_exits_one() {
-    let source = "\
-theme cross:
-  slot wall -> @oak_planks
-  slot door -> @oak_door
-
-struct crossbar size=4x4
-  floor mat_slot=wall
-  door  id=front side=front at=center mat_slot=door
-  door  id=back  side=back  at=center mat_slot=door
-
-  pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=plate2 at=inside.front  offset=1 y=0 -> sig.b
-
-  logic sig.f = sig.a and sig.b
-
-  door[id=front] opened_by=sig.f
-  door[id=back]  opened_by=sig.a
-
-  circuit region=floor void=1
-";
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("crossbar.crn");
-    std::fs::write(&path, source).expect("write congestion fixture");
-    let out = cairn(
-        "synth",
-        &[
-            "--experimental-logic-synth",
-            "--stage",
-            "crossing",
-            "--edition",
-            "java",
-            path.to_str().unwrap(),
-        ],
-    );
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(&stderr, &[(18, 3, "error", "E_ROUTE_CONGESTION")]);
-    // `placed`, not `routed`: routing refuses the scope before the crossing pass runs.
-    assert!(
-        stderr.contains("placed netlist for struct `crossbar`")
-            && stderr.contains("another net's dust, on the coord or one step from it")
-            && stderr.contains("the faces it could arrive through are taken by sig.a"),
-        "the refusal names the scope, which of the three kinds of obstacle it \
-         means and how far it reaches, and the net standing in the way, got: \
-         {stderr}",
-    );
-    assert!(
-        out.stdout.is_empty(),
-        "a refused scope must not reach stdout as a legalized IR dump, got: {}",
-        String::from_utf8_lossy(&out.stdout),
-    );
-}
-
-#[test]
-fn stage_crossing_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let door = fs::read_to_string(examples_dir().join("redstone-door.crn")).expect("read example");
-    let tight = door.replace(
-        "assert latency(sig.step -> sig.open) <= 1",
-        "assert latency(sig.step -> sig.open) <= 0",
-    );
-    assert_ne!(
-        tight, door,
-        "the example carries the bound this test tightens"
-    );
-    let path = write_source(dir.path(), "tight.crn", &tight);
-    let at = |stage: &str, edition: &str| {
-        cairn(
-            "synth",
-            &[
-                "--experimental-logic-synth",
-                "--stage",
-                stage,
-                "--edition",
-                edition,
-                path.to_str().unwrap(),
-            ],
-        )
-    };
-    let run = |edition: &str| at("crossing", edition);
-
-    // A `RepeaterOR` takes a tick on Java; a `TorchOR` is a dust merge and takes none.
-    let java = run("java");
-    assert_eq!(java.status.code(), Some(1));
-    let stderr = String::from_utf8(java.stderr).expect("utf-8");
-    assert_stream(&stderr, &[(32, 3, "error", "E_SIM_ASSERTION_FAILED")]);
-    assert!(java.stdout.is_empty(), "a failed bound prints no dump");
-
-    let bedrock = run("bedrock");
+    let java = synth_stage(&path, "legalize", "java");
     assert_eq!(
-        bedrock.status.code(),
+        java.status.code(),
         Some(0),
         "{}",
-        String::from_utf8_lossy(&bedrock.stderr)
+        String::from_utf8_lossy(&java.stderr)
+    );
+    let bedrock = synth_stage(&path, "legalize", "bedrock");
+    assert_refused(
+        &bedrock,
+        &[(15, 3, "error", "E_SIM_ASSERTION_FAILED")],
+        "bedrock",
     );
 
-    // Before crossing, the buffer repeaters are not yet placed, so no bound is checked.
-    for stage in ["route", "delay"] {
-        let early = at(stage, "java");
+    // Only the legalized circuit is held to a bound.
+    for stage in ["placement", "route", "delay"] {
+        let early = synth_stage(&path, stage, "bedrock");
         assert_eq!(
             early.status.code(),
             Some(0),
@@ -817,47 +629,25 @@ fn stage_crossing_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
 #[test]
 fn every_edition_tagged_stage_refuses_a_java_dispenser_fired_through_the_cell_above_it() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = write_source(
-        dir.path(),
-        "qc.crn",
-        "theme t:\n  slot wall -> @cobblestone\n\n\
-         struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=4\n  \
-         roof kind=flat mat_slot=wall overhang=1\n  \
-         dispenser id=p at=inside.back offset=2 y=1 fired_by=sig.p\n  \
-         lever id=sw at=inside.back offset=2 y=3 -> sig.a\n  logic sig.p = not sig.a\n  \
-         circuit region=floor void=2\n",
-    );
-    for stage in ["edition", "placement", "route", "delay", "crossing"] {
-        let run = |edition: &str| {
-            cairn(
-                "synth",
-                &[
-                    "--experimental-logic-synth",
-                    "--stage",
-                    stage,
-                    "--edition",
-                    edition,
-                    path.to_str().unwrap(),
-                ],
-            )
-        };
-        let java = run("java");
-        assert_eq!(java.status.code(), Some(1), "{stage}");
-        let stderr = String::from_utf8(java.stderr).expect("utf-8");
-        assert_stream(&stderr, &[(8, 3, "error", "E_NO_PORTABLE_IMPL")]);
-        assert!(
-            java.stdout.is_empty(),
-            "{stage}: a refused circuit prints no dump"
-        );
-
-        let bedrock = run("bedrock");
-        assert_eq!(
-            bedrock.status.code(),
-            Some(0),
-            "{stage}: {}",
-            String::from_utf8_lossy(&bedrock.stderr)
-        );
+    let path = write_source(dir.path(), "qc.crn", QUASI_CONNECTED_DISPENSER);
+    for stage in ["edition", "placement", "route", "delay", "legalize"] {
+        let java = synth_stage(&path, stage, "java");
+        assert_refused(&java, &[(8, 3, "error", "E_NO_PORTABLE_IMPL")], stage);
     }
+    // Bedrock has no quasi-connectivity; the lever is still too high for the circuit to read.
+    let bedrock = synth_stage(&path, "edition", "bedrock");
+    assert_eq!(
+        bedrock.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&bedrock.stderr)
+    );
+    let placed = synth_stage(&path, "placement", "bedrock");
+    assert_refused(
+        &placed,
+        &[(9, 3, "error", "E_ROUTE_UNREACHABLE_COMPONENT")],
+        "bedrock placement",
+    );
 }
 
 #[test]

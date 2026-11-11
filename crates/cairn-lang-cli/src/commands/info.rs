@@ -16,6 +16,7 @@ use cairn_lang_formats::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
 };
 use cairn_lang_formats::registry::builtin_pack;
+use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
 use crate::cli::InfoFormat;
 use crate::floors::{
@@ -23,10 +24,11 @@ use crate::floors::{
     weigh_versions,
 };
 use crate::pipeline::{
-    RequestedEditions, build_diagnostics, dropped_scopes, load_module, requested_editions,
+    RequestedEditions, build_diagnostics, dropped_scopes, lay_circuits, load_module,
+    raised_by_each, requested_editions, same_place,
 };
 use crate::report::{
-    FailureReport, Reporting, palette_entry_name, print_json, report_diagnostic,
+    FailureReport, Finding, Found, Reporting, palette_entry_name, print_json, report_diagnostic,
     report_diagnostics, report_failure_document,
 };
 use crate::target::supported_versions;
@@ -148,44 +150,53 @@ fn backticked(names: &[String]) -> String {
         .join(", ")
 }
 
-/// Each requested edition's report row, from a dry-run lower per edition and per version.
+/// Each requested edition's report row, from a dry-run lower per edition, its circuits laid, and
+/// one per version.
 ///
 /// `Err` holds the errors the JSON failure document owes; it is empty under
 /// [`FailureReport::Text`], or when only a palette refused the run.
 fn edition_rows(
-    Reporting {
-        file,
-        source,
-        lines,
-        report,
-    }: Reporting<'_>,
+    reporting: Reporting<'_>,
     module: &Module,
     ir: &cairn_lang_core::intent::IntentModule,
     editions: &RequestedEditions,
     already_reported: &[Diagnostic],
-) -> Result<Vec<EditionReport>, Vec<Diagnostic>> {
+) -> Result<Vec<EditionReport>, Vec<Found>> {
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
         .iter()
         .map(|d| (d.code.as_str(), d.span.start, d.span.end))
         .collect();
     let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.as_slice().len());
-    let mut edition_specific_error = false;
-    let mut refused: Vec<Diagnostic> = Vec::new();
+    let mut error_found = false;
+    let mut refused: Vec<Found> = Vec::new();
 
-    for &edition in editions.as_slice() {
-        let resolution = resolve(ir, Some(edition));
+    let lowered: Vec<_> = editions
+        .as_slice()
+        .iter()
+        .map(|&edition| lowered_for(ir, edition, &already))
+        .collect();
+    let shared = report_shared_circuits(reporting, &lowered, &mut refused);
+    error_found |= shared.iter().any(|d| d.severity() == Severity::Error);
+    let Reporting {
+        file,
+        source,
+        lines,
+        report,
+    } = reporting;
+
+    for EditionLowering {
+        edition,
+        resolution,
+        block_ir,
+        found,
+    } in lowered
+    {
         let pack = builtin_pack(edition);
-        // Unpinned, as above: the whole range answers whether the edition has a block at all.
-        let block_ir = lower_to_block_array(ir, &resolution, Some(&pack.view(None)));
-
-        let only_here: Vec<_> = resolution
-            .diagnostics
-            .iter()
-            .chain(block_ir.diagnostics.iter())
-            .filter(|d| !already.contains(&(d.code.as_str(), d.span.start, d.span.end)))
-            .cloned()
+        let only_here: Vec<Found> = found
+            .into_iter()
+            .filter(|d| !matches!(d, Found::Circuit(d) if shared.iter().any(|s| same_place(s, d))))
             .collect();
-        edition_specific_error |= only_here.iter().any(|d| d.severity() == Severity::Error);
+        error_found |= only_here.iter().any(|d| d.severity() == Severity::Error);
         let mut edition_header_printed = false;
         for d in only_here {
             if d.severity() == Severity::Error && report == FailureReport::Json {
@@ -199,24 +210,9 @@ fn edition_rows(
             report_diagnostic(file, source, lines, &d);
         }
 
-        let portability = match edition {
-            Edition::Java => Ok(portability_for_java(
-                &block_ir,
-                pack.blocks(),
-                pack.aliases(),
-                pack.absent(),
-            )),
-            Edition::Bedrock => portability_for_bedrock(
-                &block_ir,
-                pack.blocks(),
-                pack.aliases(),
-                pack.absent(),
-                pack.states(),
-            ),
-        };
         // A refused palette does not end the walk: the scope and version notes below still print.
-        let portability = portability_figure(edition, portability);
-        edition_specific_error |= portability.is_none();
+        let portability = portability_figure(edition, edition_portability(edition, &block_ir));
+        error_found |= portability.is_none();
         if let Some(portability) = &portability {
             for note in degraded_notes(edition, portability.degraded()) {
                 eprintln!("{note}");
@@ -268,10 +264,113 @@ fn edition_rows(
     }
 
     // Not `refused.is_empty()`: a refused palette refuses the run without a finding.
-    if edition_specific_error {
+    if error_found {
         return Err(refused);
     }
     Ok(rows)
+}
+
+/// The circuit findings every edition of `lowered` raises at the same place, each reported once
+/// outside any edition's header.
+fn report_shared_circuits(
+    Reporting {
+        file,
+        source,
+        lines,
+        report,
+    }: Reporting<'_>,
+    lowered: &[EditionLowering],
+    refused: &mut Vec<Found>,
+) -> Vec<CircuitDiagnostic> {
+    let circuits: Vec<Vec<CircuitDiagnostic>> = lowered
+        .iter()
+        .map(|lowering| {
+            lowering
+                .found
+                .iter()
+                .filter_map(|d| match d {
+                    Found::Circuit(d) => Some(d.clone()),
+                    Found::Core(_) => None,
+                })
+                .collect()
+        })
+        .collect();
+    let shared = raised_by_each(&circuits);
+    for d in &shared {
+        if d.severity() == Severity::Error && report == FailureReport::Json {
+            refused.push(Found::Circuit(d.clone()));
+        } else {
+            report_diagnostic(file, source, lines, d);
+        }
+    }
+    shared
+}
+
+/// A dry-run lower for one edition, its circuits laid.
+struct EditionLowering {
+    edition: Edition,
+    resolution: Resolution,
+    block_ir: BlockArrayIr,
+    /// What the lowering finds beyond the gate's findings, then the circuits' findings.
+    found: Vec<Found>,
+}
+
+/// `ir` lowered for `edition` alone, its circuits laid, with what that finds beyond `already`: the
+/// lowering's findings, then the circuits' when none of those is an error.
+fn lowered_for(
+    ir: &cairn_lang_core::intent::IntentModule,
+    edition: Edition,
+    already: &std::collections::HashSet<(&str, usize, usize)>,
+) -> EditionLowering {
+    let resolution = resolve(ir, Some(edition));
+    // Unpinned, as the gate: the whole range answers whether the edition has a block at all.
+    let registry = builtin_pack(edition).view(None);
+    let mut block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
+    let mut only_here: Vec<Found> = resolution
+        .diagnostics
+        .iter()
+        .chain(block_ir.diagnostics.iter())
+        .filter(|d| !already.contains(&(d.code.as_str(), d.span.start, d.span.end)))
+        .cloned()
+        .map(Found::Core)
+        .collect();
+    // A member that failed to lower is not there for the circuit to wire.
+    if !only_here.iter().any(|d| d.severity() == Severity::Error) {
+        only_here.extend(
+            lay_circuits(ir, &mut block_ir, edition, &registry)
+                .into_iter()
+                .map(Found::Circuit),
+        );
+    }
+    EditionLowering {
+        edition,
+        resolution,
+        block_ir,
+        found: only_here,
+    }
+}
+
+/// How portable `block_ir`'s palette is on `edition`'s built-in pack.
+fn edition_portability(
+    edition: Edition,
+    block_ir: &BlockArrayIr,
+) -> Result<PortabilityReport, InvalidPalette> {
+    let pack = builtin_pack(edition);
+    match edition {
+        Edition::Java => Ok(portability_for_java(
+            block_ir,
+            pack.blocks(),
+            pack.aliases(),
+            pack.absent(),
+        )),
+        Edition::Bedrock => portability_for_bedrock(
+            block_ir,
+            pack.blocks(),
+            pack.aliases(),
+            pack.absent(),
+            pack.states(),
+        ),
+    }
 }
 
 /// One edition's portability figure, or `None` after reporting a palette whose blockstates a

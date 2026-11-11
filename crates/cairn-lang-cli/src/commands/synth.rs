@@ -8,7 +8,7 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, IntentModule, lower, resolve};
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{
-    PlacementStage, compile_crossing, compile_delay, compile_edition_netlist, compile_netlist,
+    LayoutStage, compile_delay, compile_edition_netlist, compile_legalize, compile_netlist,
     compile_placement, compile_routing, synthesize, verify_latency, verify_portable,
 };
 use clap::ValueEnum;
@@ -54,11 +54,15 @@ pub(crate) fn run_synth(
         return ExitCode::from(1);
     }
 
-    let (json, label) =
-        match dispatch_synth_stage(stage, edition, &synth, &ir, file, &source, &lines) {
-            Ok(pair) => pair,
-            Err(code) => return code,
-        };
+    let reporting = Reporting {
+        file,
+        source: &source,
+        lines: &lines,
+    };
+    let (json, label) = match dump_stage(stage, edition, &synth, &ir, reporting) {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
     match json {
         Ok(text) => {
             outln!("{text}");
@@ -68,6 +72,24 @@ pub(crate) fn run_synth(
             eprintln!("error: failed to serialise {label} as JSON: {err}");
             ExitCode::from(1)
         }
+    }
+}
+
+/// Where a stage reports what its passes found.
+#[derive(Clone, Copy)]
+struct Reporting<'a> {
+    file: &'a Path,
+    source: &'a str,
+    lines: &'a LineStarts,
+}
+
+impl Reporting<'_> {
+    /// Report `diagnostics`, and refuse the run when one of them is an error.
+    fn gate<D: crate::report::Finding>(self, diagnostics: &[D]) -> Result<(), ExitCode> {
+        if report_diagnostics(self.file, self.source, self.lines, diagnostics) {
+            return Err(ExitCode::from(1));
+        }
+        Ok(())
     }
 }
 
@@ -94,116 +116,66 @@ enum StageEdition {
     Tagged(Edition),
 }
 
-/// Run the pipeline up to `stage` and return its JSON and the label errors name it by.
-fn dispatch_synth_stage(
+/// The JSON of `stage`, the pipeline run up to it, and the label errors name it by.
+fn dump_stage(
     stage: SynthStage,
     edition: StageEdition,
     synth: &cairn_lang_redstone::SynthOutput,
     ir: &IntentModule,
-    file: &Path,
-    source: &str,
-    lines: &LineStarts,
+    reporting: Reporting<'_>,
 ) -> Result<(serde_json::Result<String>, &'static str), ExitCode> {
-    if matches!(stage, SynthStage::Logic) {
-        return Ok((serde_json::to_string_pretty(&synth.scoped), "Logic IR"));
-    }
-
     let netlist = compile_netlist(&synth.scoped);
-    // Matched on the stage too, so a new stage needs an arm of its own.
     let edition = match (stage, edition) {
-        (SynthStage::Netlist, StageEdition::Neutral) => {
-            return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
-        }
-        (
-            SynthStage::Edition
-            | SynthStage::Placement
-            | SynthStage::Route
-            | SynthStage::Delay
-            | SynthStage::Crossing,
-            StageEdition::Tagged(edition),
-        ) => edition,
-        (SynthStage::Logic, _) => unreachable!("the Logic guard above returns"),
-        (SynthStage::Netlist, StageEdition::Tagged(_)) => unreachable!(
-            "stage_requires_edition is false here, so synth_edition answered Neutral or refused"
-        ),
-        (
-            SynthStage::Edition
-            | SynthStage::Placement
-            | SynthStage::Route
-            | SynthStage::Delay
-            | SynthStage::Crossing,
-            StageEdition::Neutral,
-        ) => unreachable!(
-            "stage_requires_edition holds here, so synth_edition answered Tagged or refused"
+        (SynthStage::Logic, _) => return dump("Logic IR", &synth.scoped),
+        (SynthStage::Netlist, _) => return dump("Netlist IR", &netlist),
+        (_, StageEdition::Tagged(edition)) => edition,
+        (_, StageEdition::Neutral) => unreachable!(
+            "stage_requires_edition holds past `netlist`, so synth_edition answered Tagged or refused"
         ),
     };
     let edition_netlist = compile_edition_netlist(&netlist, edition);
-    // A member that does not build is `cairn compile`'s finding, so the check reads the rest.
-    let portable = verify_portable(ir, &built_for(ir, edition), edition);
-    if report_diagnostics(file, source, lines, &portable) {
-        return Err(ExitCode::from(1));
-    }
+    let built = built_for(ir, edition);
+    reporting.gate(&built.diagnostics)?;
+    reporting.gate(&verify_portable(ir, &built, edition))?;
     if matches!(stage, SynthStage::Edition) {
-        return Ok((
-            serde_json::to_string_pretty(&edition_netlist),
-            "Edition Netlist IR",
-        ));
+        return dump("Edition Netlist IR", &edition_netlist);
     }
 
-    let placement = compile_placement(&edition_netlist, ir);
-    if report_diagnostics(file, source, lines, &placement.diagnostics) {
-        return Err(ExitCode::from(1));
-    }
+    let placement = compile_placement(&edition_netlist, ir, &built);
+    reporting.gate(&placement.diagnostics)?;
     if matches!(stage, SynthStage::Placement) {
-        return Ok((
-            serde_json::to_string_pretty(&placement.scoped),
-            "Placement IR",
-        ));
+        return dump("Placement IR", &placement.scoped);
     }
 
     let routing = compile_routing(&placement.scoped);
-    if report_diagnostics(file, source, lines, &routing.diagnostics) {
-        return Err(ExitCode::from(1));
-    }
+    reporting.gate(&routing.diagnostics)?;
     if matches!(stage, SynthStage::Route) {
-        return Ok((
-            serde_json::to_string_pretty(&routing.scoped),
-            "Routed Placement IR",
-        ));
+        return dump("Routed Placement IR", &routing.scoped);
     }
 
     let delay = compile_delay(&routing.scoped);
-    if report_diagnostics(file, source, lines, &delay.diagnostics) {
-        return Err(ExitCode::from(1));
-    }
+    reporting.gate(&delay.diagnostics)?;
     if matches!(stage, SynthStage::Delay) {
-        return Ok((
-            serde_json::to_string_pretty(&delay.scoped),
-            "Delayed Placement IR",
-        ));
+        return dump("Delayed Placement IR", &delay.scoped);
     }
 
-    let crossing = compile_crossing(&delay.scoped);
-    if report_diagnostics(file, source, lines, &crossing.diagnostics) {
-        return Err(ExitCode::from(1));
-    }
-    if report_diagnostics(file, source, lines, &verify_latency(&crossing.scoped, ir)) {
-        return Err(ExitCode::from(1));
-    }
-    match stage {
-        SynthStage::Crossing => Ok((
-            serde_json::to_string_pretty(&crossing.scoped),
-            "Legalized Placement IR",
-        )),
-        SynthStage::Logic
-        | SynthStage::Netlist
-        | SynthStage::Edition
-        | SynthStage::Placement
-        | SynthStage::Route
-        | SynthStage::Delay => {
-            unreachable!("earlier guards return for non-Crossing stages")
-        }
-    }
+    let registry = builtin_pack(edition).view(None);
+    let legalized = compile_legalize(&delay.scoped, Some(&registry));
+    reporting.gate(&legalized.diagnostics)?;
+    reporting.gate(&verify_latency(&legalized.scoped, ir))?;
+    dump("Legalized Placement IR", &legalized.scoped)
+}
+
+/// A stage's IR as pretty-printed JSON, with the label errors name it by.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "each stage of `dump_stage` returns through it"
+)]
+fn dump(
+    label: &'static str,
+    ir: &impl serde::Serialize,
+) -> Result<(serde_json::Result<String>, &'static str), ExitCode> {
+    Ok((serde_json::to_string_pretty(ir), label))
 }
 
 /// `ir` lowered to the block array for `edition` on the built-in pack.
@@ -221,10 +193,10 @@ fn stage_cli_name(stage: SynthStage) -> &'static str {
         SynthStage::Logic => "logic",
         SynthStage::Netlist => "netlist",
         SynthStage::Edition => "edition",
-        SynthStage::Placement => PlacementStage::Placement.as_str(),
-        SynthStage::Route => PlacementStage::Route.as_str(),
-        SynthStage::Delay => PlacementStage::Delay.as_str(),
-        SynthStage::Crossing => PlacementStage::Crossing.as_str(),
+        SynthStage::Placement => LayoutStage::Placed.as_str(),
+        SynthStage::Route => LayoutStage::Routed.as_str(),
+        SynthStage::Delay => LayoutStage::Delayed.as_str(),
+        SynthStage::Legalize => LayoutStage::Legalized.as_str(),
     }
 }
 
@@ -236,7 +208,7 @@ fn stage_requires_edition(stage: SynthStage) -> bool {
         | SynthStage::Placement
         | SynthStage::Route
         | SynthStage::Delay
-        | SynthStage::Crossing => true,
+        | SynthStage::Legalize => true,
     }
 }
 

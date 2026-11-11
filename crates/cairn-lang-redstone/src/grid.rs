@@ -1,158 +1,318 @@
-//! The coordinate conventions every place-and-route pass shares: where the cell row and the pads
-//! stand, the orders nets and coords are walked in, neighbour steps, and the segment cap.
+//! The voxels of a `circuit` reservation as placement and routing see them: what stands in each,
+//! and what each must stay clear of (`spec/redstone` "Place-and-route").
 
-use crate::netlist_ir::NetRef;
-use crate::placement_ir::{CellCoord, CircuitRegionReservation, PlacementIr};
-use crate::saturating_index;
+use cairn_lang_core::block_array::Face;
 
-/// The row the cells stand on: one in from the near edge, leaving each cell a lane either side.
-pub(crate) const CELL_ROW: u32 = 1;
+use crate::geometry::{SIDES, Voxel};
+use crate::part::{Part, RepeaterDelay};
+use crate::placement_ir::{CircuitLayout, PlacedTile, Reservation, Wire};
+use crate::tile::Template;
 
-/// Whether a scope's edge pad columns step over the cell row, which they do whenever it has cells.
+/// Whose dust a voxel holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Label {
+    /// A net's, which its wire may join.
+    Net(usize),
+    /// A tile's own, between its ports and its output, which no wire may run beside.
+    Internal(usize),
+}
+
+/// What one voxel holds or must stay clear of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PadColumn {
-    steps_over_cell_row: bool,
+pub(crate) enum Slot {
+    /// Nothing, and free to take.
+    Open,
+    /// Nothing yet, and never dust or a diode: a torch or a powered block beside it would drive one.
+    NoDust,
+    /// Nothing, ever: a climb runs past it or a torch under it would power a block there.
+    Air,
+    /// A tile's part other than dust.
+    Part(Part),
+    /// A block laid under dust, or the bottom layer.
+    Support,
+    /// Dust, a tile's or a wire's.
+    Dust(Label),
 }
 
-impl PadColumn {
-    pub(crate) fn for_cell_count(cells: usize) -> Self {
-        Self {
-            steps_over_cell_row: cells > 0,
+impl Slot {
+    /// Whether the voxel holds a block that passes power on.
+    pub(crate) const fn conducts(self) -> bool {
+        matches!(self, Self::Support | Self::Part(Part::Block))
+    }
+}
+
+/// Why a tile or a wire cannot take the voxels it needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Collision {
+    pub(crate) at: Voxel,
+}
+
+/// Every voxel of one reservation.
+#[derive(Debug, Clone)]
+pub(crate) struct Grid {
+    pub(crate) region: Reservation,
+    slots: Vec<Slot>,
+    /// What each voxel held before [`Self::trial`] wrote it, while one runs.
+    journal: Option<Vec<(usize, Slot)>>,
+}
+
+impl Grid {
+    /// The reservation with its bottom layer laid and nothing else.
+    pub(crate) fn new(region: &Reservation) -> Self {
+        let size = (region.width as usize) * (region.layers as usize) * (region.depth as usize);
+        let mut grid = Self {
+            region: region.clone(),
+            slots: vec![Slot::Open; size],
+            journal: None,
+        };
+        for z in 0..region.depth {
+            for x in 0..region.width {
+                grid.set(Voxel::new(coord(x), 0, coord(z)), Slot::Support);
+            }
+        }
+        grid
+    }
+
+    /// The layout's tiles and its wires so far.
+    pub(crate) fn of(layout: &CircuitLayout) -> Result<Self, Collision> {
+        let mut grid = Self::new(&layout.region);
+        for (index, tile) in layout.tiles.iter().enumerate() {
+            grid.lay_tile(index, tile, &tile.kind.template(), &labels(layout, index))?;
+        }
+        for (net, circuit_net) in layout.nets.iter().enumerate() {
+            grid.lay_wire(net, &circuit_net.wire)?;
+        }
+        Ok(grid)
+    }
+
+    fn index(&self, at: Voxel) -> Option<usize> {
+        self.region.contains(at).then(|| {
+            let (width, layers) = (self.region.width as usize, self.region.layers as usize);
+            let [x, y, z] = [at.x, at.y, at.z].map(|c| c.unsigned_abs() as usize);
+            (z * layers + y) * width + x
+        })
+    }
+
+    /// What `at` holds, or `None` outside the reservation.
+    pub(crate) fn get(&self, at: Voxel) -> Option<Slot> {
+        self.index(at).and_then(|i| self.slots.get(i)).copied()
+    }
+
+    /// Puts `slot` at `at`, whatever it held.
+    pub(crate) fn replace(&mut self, at: Voxel, slot: Slot) {
+        self.set(at, slot);
+    }
+
+    fn set(&mut self, at: Voxel, slot: Slot) {
+        if let Some(i) = self.index(at) {
+            if let Some(journal) = &mut self.journal {
+                journal.push((i, self.slots[i]));
+            }
+            self.slots[i] = slot;
         }
     }
 
-    pub(crate) fn of(ir: &PlacementIr) -> Self {
-        Self::for_cell_count(ir.cells.len())
+    /// Whether `tile` lays as [`Self::lay_tile`] lays it and `holds` of the grid it leaves, the
+    /// grid put back as it was either way.
+    pub(crate) fn trial(
+        &mut self,
+        index: usize,
+        tile: &PlacedTile,
+        template: &Template,
+        labels: &[(crate::geometry::Rel, usize)],
+        holds: impl FnOnce(&Self) -> bool,
+    ) -> bool {
+        self.journal = Some(Vec::new());
+        let laid = self.lay_tile(index, tile, template, labels).is_ok();
+        let journal = self.journal.take().unwrap_or_default();
+        let held = laid && holds(self);
+        for (i, slot) in journal.into_iter().rev() {
+            self.slots[i] = slot;
+        }
+        held
     }
 
-    fn z(self, index: u32) -> u32 {
-        if self.steps_over_cell_row && index >= CELL_ROW {
-            index.saturating_add(1)
-        } else {
-            index
+    /// Whether `at` holds a block that passes power on.
+    pub(crate) fn conducts(&self, at: Voxel) -> bool {
+        self.get(at).is_some_and(Slot::conducts)
+    }
+
+    /// Keeps dust and diodes off `at`; outside the reservation nothing is kept.
+    fn keep_dust_off(&mut self, at: Voxel) -> Result<(), Collision> {
+        match self.get(at) {
+            Some(Slot::Open) => {
+                self.set(at, Slot::NoDust);
+                Ok(())
+            }
+            Some(Slot::Dust(_) | Slot::Part(Part::Repeater { .. } | Part::Comparator { .. })) => {
+                Err(Collision { at })
+            }
+            None | Some(_) => Ok(()),
         }
     }
 
-    /// Rows a column of `pads` pads needs.
-    pub(crate) fn rows(self, pads: usize) -> u32 {
-        match saturating_index(pads) {
-            0 => 0,
-            pads => self.z(pads - 1).saturating_add(1),
+    /// Keeps `at` empty; outside the reservation nothing is kept.
+    pub(crate) fn keep_empty(&mut self, at: Voxel) -> Result<(), Collision> {
+        match self.get(at) {
+            None | Some(Slot::Air) => Ok(()),
+            Some(Slot::Open | Slot::NoDust) => {
+                self.set(at, Slot::Air);
+                Ok(())
+            }
+            Some(_) => Err(Collision { at }),
         }
     }
 
-    /// The depth rule [`Self::rows`] computes, as a refusal's fix line states it.
-    pub(crate) fn depth_rule(self) -> &'static str {
-        if self.steps_over_cell_row {
-            "`depth >= max(inputs, outputs) + 1` once an edge carries two pads — one row per \
-             sensor or actuator, and one for the cell row the pads step over"
-        } else {
-            "`depth >= max(inputs, outputs)` — one row per sensor or actuator, since a scope \
-             with no cells has no cell row for the pads to step over"
+    /// Lays a block under dust at `at`.
+    pub(crate) fn lay_support(&mut self, at: Voxel) -> Result<(), Collision> {
+        match self.get(at) {
+            Some(Slot::Open | Slot::NoDust) => {
+                self.set(at, Slot::Support);
+                Ok(())
+            }
+            Some(slot) if slot.conducts() => Ok(()),
+            _ => Err(Collision { at }),
         }
     }
-}
 
-/// Input-pad coordinate: left edge, ground layer, z by input index. Saturates at `depth - 1`, an
-/// overlap the net-laying passes refuse.
-pub(crate) fn input_pad(
-    i: usize,
-    column: PadColumn,
-    region: &CircuitRegionReservation,
-) -> CellCoord {
-    edge_pad(i, 0, column, region)
-}
+    fn lay_part(&mut self, at: Voxel, part: Part, label: Label) -> Result<(), Collision> {
+        let slot = self.get(at).ok_or(Collision { at })?;
+        let fits = match part {
+            Part::Block | Part::Torch { .. } => matches!(slot, Slot::Open | Slot::NoDust),
+            Part::Dust | Part::Repeater { .. } | Part::Comparator { .. } => slot == Slot::Open,
+        };
+        if !fits {
+            return Err(Collision { at });
+        }
+        self.set(
+            at,
+            match part {
+                Part::Dust => Slot::Dust(label),
+                other => Slot::Part(other),
+            },
+        );
+        Ok(())
+    }
 
-/// Output-pad coordinate: right edge (`x=width-1`), z as in [`input_pad`].
-pub(crate) fn output_pad(
-    k: usize,
-    column: PadColumn,
-    region: &CircuitRegionReservation,
-) -> CellCoord {
-    edge_pad(k, region.width.saturating_sub(1), column, region)
-}
+    /// Lays `tile`, the layout's tile `index`, with the cells it keeps clear around it and the
+    /// blocks under its parts above the cells' layer; `labels` names each port's and output's net.
+    pub(crate) fn lay_tile(
+        &mut self,
+        index: usize,
+        tile: &PlacedTile,
+        template: &Template,
+        labels: &[(crate::geometry::Rel, usize)],
+    ) -> Result<(), Collision> {
+        let parts = tile.parts(template);
+        let mine: Vec<Voxel> = parts.iter().map(|(at, _)| *at).collect();
+        for ((rel, _), (at, part)) in template.parts.iter().zip(&parts) {
+            let label = labels
+                .iter()
+                .find_map(|(port, net)| (port == rel).then_some(Label::Net(*net)))
+                .unwrap_or(Label::Internal(index));
+            if *part == Part::Dust
+                && self.joins_dust(*at, |cell, other| !mine.contains(&cell) && other != label)
+            {
+                return Err(Collision { at: *at });
+            }
+            self.lay_part(*at, *part, label)?;
+        }
+        let keepout = template.keepout();
+        for rel in keepout.no_dust {
+            self.keep_dust_off(tile.at(rel))?;
+        }
+        for rel in keepout.air {
+            self.keep_empty(tile.at(rel))?;
+        }
+        for (at, part) in &parts {
+            if at.y >= 2 && !matches!(part, Part::Block | Part::Torch { .. }) {
+                let under = at.down();
+                if !parts.iter().any(|(v, _)| *v == under) {
+                    self.lay_support(under)?;
+                }
+            }
+        }
+        Ok(())
+    }
 
-fn edge_pad(
-    index: usize,
-    x: u32,
-    column: PadColumn,
-    region: &CircuitRegionReservation,
-) -> CellCoord {
-    let z = column.z(saturating_index(index));
-    CellCoord::new(x, 0, z.min(region.depth.saturating_sub(1)))
-}
+    /// Whether dust at `at` would join dust beside it, level or a step up or down, that `foreign`
+    /// holds is another signal's.
+    fn joins_dust(&self, at: Voxel, foreign: impl Fn(Voxel, Label) -> bool) -> bool {
+        SIDES.into_iter().any(|face| {
+            let beside = at.step(face);
+            [beside, beside.up(), beside.down()].into_iter().any(
+                |cell| matches!(self.get(cell), Some(Slot::Dust(label)) if foreign(cell, label)),
+            )
+        })
+    }
 
-pub(crate) fn net_ref_key(net: NetRef) -> (u8, u32) {
-    match net {
-        NetRef::Input(i) => (0, i),
-        NetRef::Cell(j) => (1, j),
+    /// Lays `wire`, the dust of net `net`, each buffer repeater in place of a block of that dust.
+    pub(crate) fn lay_wire(&mut self, net: usize, wire: &Wire) -> Result<(), Collision> {
+        for at in &wire.supports {
+            self.lay_support(*at)?;
+        }
+        for at in &wire.air {
+            self.keep_empty(*at)?;
+        }
+        for at in &wire.dust {
+            match self.get(*at) {
+                Some(Slot::Dust(Label::Net(own))) if own == net => {}
+                Some(Slot::Open) => self.set(*at, Slot::Dust(Label::Net(net))),
+                _ => return Err(Collision { at: *at }),
+            }
+        }
+        for buffer in &wire.buffers {
+            if self.get(buffer.at) != Some(Slot::Dust(Label::Net(net))) {
+                return Err(Collision { at: buffer.at });
+            }
+            self.set(
+                buffer.at,
+                Slot::Part(Part::Repeater {
+                    facing: buffer.facing,
+                    delay: RepeaterDelay::ONE,
+                }),
+            );
+        }
+        Ok(())
+    }
+
+    /// Whether a repeater or comparator drives into `at`.
+    pub(crate) fn driven(&self, at: Voxel) -> bool {
+        SIDES.into_iter().any(|face| {
+            let from = at.step(face);
+            matches!(self.get(from), Some(Slot::Part(part)) if part.drives_into(from, at))
+        })
+    }
+
+    /// Whether a torch stands at `at`.
+    pub(crate) fn torch(&self, at: Voxel) -> bool {
+        matches!(self.get(at), Some(Slot::Part(Part::Torch { .. })))
+    }
+
+    /// The face of `at` toward `to`, beside it in its own layer.
+    pub(crate) fn toward(at: Voxel, to: Voxel) -> Option<Face> {
+        SIDES.into_iter().find(|face| at.step(*face) == to)
     }
 }
 
-/// Coord order x, z, y: the axis order of [`STEPS`], so a sorted list reads as the router laid it.
-pub(crate) fn coord_key(coord: CellCoord) -> (u32, u32, u32) {
-    (coord.x, coord.z, coord.y)
+/// The nets the layout's tile `index` reads and drives, by the dust that carries each.
+pub(crate) fn labels(layout: &CircuitLayout, index: usize) -> Vec<(crate::geometry::Rel, usize)> {
+    let tile = &layout.tiles[index];
+    let template = tile.kind.template();
+    let mut labels = Vec::new();
+    for input in &tile.inputs {
+        if let Some(port) = template.port(input.port) {
+            labels.push((port.at, input.net));
+        }
+    }
+    if let Some(net) = tile.output {
+        for out in &template.outs {
+            labels.push((*out, net));
+        }
+    }
+    labels
 }
 
-/// Manhattan (L¹) distance between two cell coordinates.
-pub(crate) fn manhattan(a: CellCoord, b: CellCoord) -> u32 {
-    let dx = a.x.max(b.x) - a.x.min(b.x);
-    let dy = a.y.max(b.y) - a.y.min(b.y);
-    let dz = a.z.max(b.z) - a.z.min(b.z);
-    dx.saturating_add(dy).saturating_add(dz)
+fn coord(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
-
-/// The six rectilinear steps by axis, x, z, then y: the search's tie-break, so it lays the same
-/// L-shaped wire whichever way a net runs.
-pub(crate) const STEPS: [(i64, i64, i64); 6] = [
-    (-1, 0, 0),
-    (1, 0, 0),
-    (0, 0, -1),
-    (0, 0, 1),
-    (0, -1, 0),
-    (0, 1, 0),
-];
-
-/// The four of [`STEPS`] that stay in the coord's own plane.
-const IN_PLANE: [(i64, i64, i64); 4] = [(-1, 0, 0), (1, 0, 0), (0, 0, -1), (0, 0, 1)];
-
-/// The coord one step from `from`, or `None` off the `0` edge; the reservation is not checked.
-pub(crate) fn stepped(from: CellCoord, (dx, dy, dz): (i64, i64, i64)) -> Option<CellCoord> {
-    let axis = |value: u32, delta: i64| -> Option<u32> {
-        u32::try_from(i64::from(value).checked_add(delta)?).ok()
-    };
-    Some(CellCoord::new(
-        axis(from.x, dx)?,
-        axis(from.y, dy)?,
-        axis(from.z, dz)?,
-    ))
-}
-
-/// The six coords one step from `coord`: every face of a block on it.
-pub(crate) fn faces(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
-    STEPS
-        .into_iter()
-        .filter_map(move |delta| stepped(coord, delta))
-}
-
-/// The four in-plane coords dust on `coord` joins; up and down are left to the physical tile layer.
-pub(crate) fn beside(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
-    IN_PLANE
-        .into_iter()
-        .filter_map(move |delta| stepped(coord, delta))
-}
-
-/// The coords one layer under `coord` within one step of it: directly under and the four
-/// diagonals.
-pub(crate) fn under(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
-    std::iter::once((0, -1, 0))
-        .chain(IN_PLANE.map(|(dx, _, dz)| (dx, -1, dz)))
-        .filter_map(move |delta| stepped(coord, delta))
-}
-
-/// Sanity cap on the routed length of a single driver segment; a longer one is refused with
-/// `E_ATTENUATION_LIMIT`.
-pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
-
-#[cfg(test)]
-mod tests;

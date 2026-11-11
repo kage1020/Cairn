@@ -1,175 +1,869 @@
-//! Stage 1 of `spec/redstone` "Place-and-route": lays each scope's cells in one row at `x = 1 +
-//! 2i`, `z = 1` of its `circuit region=` reservation, and gives each actuator its pad. The clear
-//! column and rows around each cell leave a two-input gate the three free faces its nets need, and
-//! a `mux` its four.
+//! Stage 1 of `spec/redstone` "Place-and-route": couples each sensor and actuator to the layer
+//! under the floor, then lays each cell's tile at the free spot nearest the tiles its nets join.
 
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 
-use cairn_lang_core::intent::{self, IntentModule};
+use cairn_lang_core::ast::DottedRef;
+use cairn_lang_core::block_array::{BlockArrayIr, Dims, MAX_STRUCTURE_VOLUME};
+use cairn_lang_core::error::Span;
+use cairn_lang_core::intent::{self, IntentModule, Member};
+use indexmap::IndexMap;
 
+use crate::coupling::{self, Coupled};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
-use crate::edition_netlist_ir::{EditionNetlistIr, ScopedEditionNetlistIr};
-use crate::grid::{CELL_ROW, PadColumn, output_pad};
+use crate::edition_netlist_ir::{EditionCell, EditionNetlistIr, ScopedEditionNetlistIr};
+use crate::geometry::{Rel, Rotation, SIDES, Voxel};
+use crate::grid::{Grid, Label, Slot, labels};
 use crate::logic_ir::ScopeKind;
+use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
-    PlacementPhase, ScopedPlacementIr,
+    CircuitLayout, CircuitNet, LayoutStage, NetSink, PlacedTile, Reservation, ScopedCircuitLayout,
+    TileInput, TileKind,
 };
 use crate::saturating_index;
+use crate::tile::{self, MAX_COUNTER_STAGES, MAX_PULSE_STAGES, Template, TilePort};
 
-/// Per-cell footprint of the congestion estimate, in blocks: a cell and its input tails.
-pub const CELL_FOOTPRINT: u32 = 4;
+/// The fewest layers a reservation needs: the bottom one, the cells' and the one under the floor.
+pub const MIN_VOID: u32 = 3;
 
-/// Columns the row spends per cell: its own and the clear one beside it.
-const CELL_SPACING: u32 = 2;
+/// The fewest layers a reservation holding a `counter` needs, its feedback crossing a layer up.
+pub const MIN_COUNTER_VOID: u32 = 4;
 
-/// The `Fix:` footer of every area-budget refusal.
-pub(crate) const CONGESTION_FIX: &str = "Fix: increase `void`, enlarge region, or split the logic across several scopes, each with its own `circuit` line";
+/// The clear columns between the parts of a cell's tile and another tile's, widest first, that
+/// placement tries.
+pub(crate) const MARGINS: [i32; 3] = [2, 1, 0];
 
-/// `used / reserved` to one decimal place, as `(whole, tenths)`; `reserved` must be non-zero.
-pub(crate) fn area_ratio_tenths(used: u64, reserved: u64) -> (u64, u64) {
-    let ratio_x10 = used.saturating_mul(10) / reserved;
-    (ratio_x10 / 10, ratio_x10 % 10)
-}
+/// The `Fix:` footer of a reservation too small for its circuit.
+pub(crate) const CONGESTION_FIX: &str = "Fix: widen the struct's `size=WxH`, increase `void`, or split the logic across several scopes, each with its own `circuit` line";
 
-/// Output of a [`compile_placement`] run: the placed scopes and the findings.
+/// Output of a [`compile_placement`] run: the placed circuits and the findings.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct PlacementOutput {
-    /// Placement IR for every scope that placed successfully.
-    pub scoped: ScopedPlacementIr,
+    /// One circuit per built struct a scope's circuit lies under.
+    pub scoped: ScopedCircuitLayout,
     /// Findings raised by the pass, in scope order.
     pub diagnostics: Vec<Diagnostic>,
 }
 
-impl PlacementOutput {
-    /// An empty output.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-/// Lowers a [`ScopedEditionNetlistIr`] to a [`ScopedPlacementIr`], leaving out a scope that fails
-/// to place.
+/// Lays each scope of `scoped` under every struct `built` holds for it, leaving out a scope that
+/// fails to place.
 #[must_use]
 pub fn compile_placement(
     scoped: &ScopedEditionNetlistIr,
     module: &IntentModule,
+    built: &BlockArrayIr,
 ) -> PlacementOutput {
-    let mut out = PlacementOutput::new();
+    let mut out = PlacementOutput::default();
     let lines = intent::circuit_lines(module);
-    let region_index = build_region_index(&lines);
-    let rejected_index = build_rejected_index(&lines);
-
     for entry in &scoped.scopes {
-        let key = (map_scope_kind(entry.kind), entry.name.clone());
-        let region = match (region_index.get(&key), rejected_index.get(&key)) {
-            (Some(&region), _) => ScopeRegion::Reserved(region),
-            (None, Some(&rejected)) => ScopeRegion::Rejected(rejected),
-            (None, None) => ScopeRegion::Absent,
+        let ir = &entry.ir;
+        if ir.cells.is_empty() && ir.outputs.is_empty() {
+            continue;
+        }
+        let scope = format!("{}={}:", entry.kind.label(), entry.name);
+        let region = lines.iter().find(|line| match line {
+            Ok(region) => same_scope(
+                region.scope_kind,
+                &region.scope_name,
+                entry.kind,
+                &entry.name,
+            ),
+            Err(_) => false,
+        });
+        let Some(Ok(region)) = region else {
+            let rejected = lines.iter().find_map(|line| match line {
+                Err(rejected)
+                    if same_scope(
+                        rejected.scope_kind,
+                        &rejected.scope_name,
+                        entry.kind,
+                        &entry.name,
+                    ) =>
+                {
+                    Some(rejected)
+                }
+                _ => None,
+            });
+            out.diagnostics.push(match rejected {
+                Some(rejected) => rejected_region_diagnostic(rejected),
+                None => missing_region_diagnostic(entry.kind, ir),
+            });
+            continue;
         };
-        match compile_scope(entry.kind, &entry.ir, region) {
-            Ok(ir) => out.scoped.push(entry.kind, entry.name.clone(), ir),
-            Err(diagnostic) => out.diagnostics.push(diagnostic),
+        if let Some(diagnostic) = refusal(&scope, ir, region) {
+            out.diagnostics.push(diagnostic);
+            continue;
+        }
+        let Some(members) = scope_members(module, entry.kind, &entry.name) else {
+            continue;
+        };
+        for key in structures(built, entry.kind, &entry.name) {
+            let (Some(array), Some(resolved)) =
+                (built.structures.get(&key), built.members.get(&key))
+            else {
+                continue;
+            };
+            let grown = Dims {
+                y: array.dims.y.saturating_add(region.void),
+                ..array.dims
+            };
+            if !grown.fits_volume_budget() {
+                extend_unique(&mut out.diagnostics, vec![too_large(&scope, region)]);
+                continue;
+            }
+            let region = Reservation::new(
+                region.label.clone(),
+                region.void,
+                array.dims.x,
+                array.dims.z,
+                region.span.clone(),
+            );
+            let (coupled, findings) =
+                coupling::couple(ir, members, array, resolved, region.layers, &scope);
+            if !findings.is_empty() {
+                extend_unique(&mut out.diagnostics, findings);
+                continue;
+            }
+            if let Some(diagnostic) = overlong(&scope, ir, &region) {
+                extend_unique(&mut out.diagnostics, vec![diagnostic]);
+                continue;
+            }
+            match place(&scope, ir, &key, region, coupled) {
+                Ok(layout) => out.scoped.push(entry.kind, entry.name.clone(), layout),
+                Err(diagnostic) => extend_unique(&mut out.diagnostics, vec![diagnostic]),
+            }
         }
     }
-
     out
 }
 
-type ScopePlacement = Result<PlacementIr, Diagnostic>;
-
-/// What one scope's `circuit` lines come to.
-#[derive(Clone, Copy)]
-enum ScopeRegion<'a> {
-    /// The scope's first usable `circuit` line.
-    Reserved(&'a intent::CircuitRegion),
-    /// No usable line; the scope's first `circuit` line that reserves nothing.
-    Rejected(&'a intent::RejectedCircuitRegion),
-    /// No `circuit` line the walk found for the scope, which is always so for a site.
-    Absent,
+/// The refusal of a `delay` whose row of repeaters is longer than the struct it lies under.
+fn overlong(scope: &str, ir: &EditionNetlistIr, region: &Reservation) -> Option<Diagnostic> {
+    let side = u64::from(region.width.max(region.depth));
+    ir.cells.iter().find_map(|cell| {
+        let (EditionCell::JavaRepeaterDelay { stages }
+        | EditionCell::BedrockRepeaterDelay { stages }) = cell.cell
+        else {
+            return None;
+        };
+        let columns = tile::delay_columns(stages.get());
+        (columns > side).then(|| {
+            error_with_footer(
+                DiagnosticCode::RouteCongestion,
+                cell.span.clone(),
+                format!(
+                    "{scope} a `{name}` of {stages} stages cannot be laid: its repeaters run in one row of {columns} columns, longer than the {width}x{depth} struct it lies under",
+                    name = cell.cell.name(),
+                    width = region.width,
+                    depth = region.depth,
+                ),
+                "Fix: use fewer stages, or widen the struct's `size=WxH`",
+            )
+        })
+    })
 }
 
-fn compile_scope(
+/// The refusal of a reservation that takes its struct past what one structure holds.
+fn too_large(scope: &str, region: &intent::CircuitRegion) -> Diagnostic {
+    error_with_footer(
+        DiagnosticCode::RouteCongestion,
+        region.span.clone(),
+        format!(
+            "{scope} `void={void}` takes the struct past {MAX_STRUCTURE_VOLUME} blocks, the most one structure holds",
+            void = region.void,
+        ),
+        "Fix: lower `void`, or narrow the struct's `size=WxH`",
+    )
+}
+
+/// Adds each of `found` that `diagnostics` does not hold already, so one scope built twice
+/// reports once.
+fn extend_unique(diagnostics: &mut Vec<Diagnostic>, found: Vec<Diagnostic>) {
+    for diagnostic in found {
+        if !diagnostics.contains(&diagnostic) {
+            diagnostics.push(diagnostic);
+        }
+    }
+}
+
+fn same_scope(kind: intent::ScopeKind, name: &str, scope: ScopeKind, scope_name: &str) -> bool {
+    name == scope_name
+        && matches!(
+            (kind, scope),
+            (intent::ScopeKind::Struct, ScopeKind::Struct)
+                | (intent::ScopeKind::Def, ScopeKind::Def)
+        )
+}
+
+/// The members of the struct or def `name`.
+fn scope_members<'a>(
+    module: &'a IntentModule,
     kind: ScopeKind,
-    source: &EditionNetlistIr,
-    region: ScopeRegion<'_>,
-) -> ScopePlacement {
-    // Outputs alone still need the reservation, for their pads.
-    if source.cells.is_empty() && source.outputs.is_empty() {
-        return Ok(PlacementIr::new(source.edition));
+    name: &str,
+) -> Option<&'a [Member]> {
+    match kind {
+        ScopeKind::Struct => module
+            .structs
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s.members.as_slice()),
+        ScopeKind::Def => module
+            .defs
+            .iter()
+            .find(|d| d.name == name)
+            .map(|d| d.members.as_slice()),
+        ScopeKind::Site => None,
     }
+}
 
-    let mut ir = PlacementIr::new(source.edition);
-    ir.inputs.clone_from(&source.inputs);
-    ir.signal_defs.clone_from(&source.signal_defs);
+/// The keys of every built struct the scope's body lowered to: a struct's own, and each place of a
+/// def.
+pub(crate) fn structures(built: &BlockArrayIr, kind: ScopeKind, name: &str) -> Vec<String> {
+    match kind {
+        ScopeKind::Struct => {
+            let key = format!("struct::{name}");
+            built
+                .structures
+                .contains_key(&key)
+                .then_some(key)
+                .into_iter()
+                .collect()
+        }
+        ScopeKind::Def => built
+            .placements
+            .iter()
+            .filter(|(_, placement)| placement.source_def == name)
+            .map(|(key, _)| key.clone())
+            .collect(),
+        ScopeKind::Site => Vec::new(),
+    }
+}
 
-    let region = match region {
-        ScopeRegion::Reserved(region) => region,
-        ScopeRegion::Rejected(rejected) => return Err(rejected_region_diagnostic(rejected)),
-        ScopeRegion::Absent => return Err(missing_region_diagnostic(kind, source)),
+/// The first reason the scope's netlist cannot be built in a reservation `region` describes.
+fn refusal(
+    scope: &str,
+    ir: &EditionNetlistIr,
+    region: &intent::CircuitRegion,
+) -> Option<Diagnostic> {
+    for cell in &ir.cells {
+        let (stages, max, what, instead) = match cell.cell {
+            EditionCell::JavaTorchPulse { stages } | EditionCell::BedrockTorchPulse { stages } => (
+                stages,
+                MAX_PULSE_STAGES,
+                "a `pulse`'s inverted operand runs one block of dust past each of its repeaters",
+                ", or write a longer pulse of `x` as `x and not delay(x, n)`",
+            ),
+            EditionCell::JavaRepeaterCounter { stages }
+            | EditionCell::BedrockRepeaterCounter { stages } => (
+                stages,
+                MAX_COUNTER_STAGES,
+                "a `counter`'s operand and the operand inverted run past every stage on one strand of dust",
+                "",
+            ),
+            _ => continue,
+        };
+        if stages.get() > max {
+            return Some(error_with_footer(
+                DiagnosticCode::AttenuationLimit,
+                cell.span.clone(),
+                format!(
+                    "{scope} a {name} of {stages} stages cannot be built: {what}, so it holds at most {max} stages before the dust goes dark",
+                    name = cell.cell.name(),
+                ),
+                format!("Fix: use at most {max} stages{instead}"),
+            ));
+        }
+    }
+    let counter = ir.cells.iter().any(|cell| {
+        matches!(
+            cell.cell,
+            EditionCell::JavaRepeaterCounter { .. } | EditionCell::BedrockRepeaterCounter { .. }
+        )
+    });
+    let (needed, why) = if counter {
+        (
+            MIN_COUNTER_VOID,
+            "a `counter` crosses its feedback over its own wire a layer up, so its circuit needs the bottom layer, two layers of cells and the layer under the floor",
+        )
+    } else {
+        (
+            MIN_VOID,
+            "a circuit needs the bottom layer, a layer of cells and the layer under the floor that reaches its sensors and actuators",
+        )
     };
+    (region.void < needed).then(|| {
+        error_with_footer(
+            DiagnosticCode::RouteCongestion,
+            region.span.clone(),
+            format!(
+                "{scope} `void={void}` reserves too few layers: {why}, {needed} in all",
+                void = region.void,
+            ),
+            format!("Fix: set `void={needed}` or more"),
+        )
+    })
+}
 
-    let cell_count = saturating_index(source.cells.len());
-    let required_area = u64::from(cell_count) * u64::from(CELL_FOOTPRINT);
-    let reservation = CircuitRegionReservation {
-        label: region.label.clone(),
-        void: region.void,
-        width: region.width,
-        depth: region.depth,
-        span: region.span.clone(),
-    };
-    if required_area > reservation.reserved_area() {
-        return Err(congestion_diagnostic(&reservation, required_area));
-    }
-    let row_columns = u64::from(cell_count)
-        .saturating_mul(u64::from(CELL_SPACING))
-        .saturating_add(1);
-    if row_columns > u64::from(reservation.width) {
-        return Err(row_overflow_diagnostic(&reservation, cell_count));
-    }
-    if !source.inputs.is_empty() && !source.outputs.is_empty() && reservation.width < 2 {
-        return Err(pad_column_diagnostic(&reservation));
-    }
-    let row_depth = u64::from(CELL_ROW).saturating_add(2);
-    if cell_count > 0 && row_depth > u64::from(reservation.depth) {
-        return Err(row_depth_diagnostic(&reservation));
-    }
-    let column = PadColumn::for_cell_count(source.cells.len());
-    let required_pad_rows = column.rows(source.inputs.len().max(source.outputs.len()));
-    if required_pad_rows > reservation.depth {
-        return Err(pad_row_diagnostic(&reservation, column, required_pad_rows));
-    }
-
-    for (index, source_cell) in source.cells.iter().enumerate() {
-        let x = saturating_index(index)
-            .saturating_mul(CELL_SPACING)
-            .saturating_add(1);
-        ir.cells.push(PlacedCellNode {
-            cell: source_cell.cell,
-            drivers: source_cell.drivers.clone(),
-            coord: CellCoord::new(x, 0, CELL_ROW),
-            phase: PlacementPhase::Unrouted,
-            span: source_cell.span.clone(),
+/// The tiles of `ir` and the nets between them, the cells first, in the netlist's order.
+fn tiles_and_nets(
+    ir: &EditionNetlistIr,
+    coupled: &Coupled,
+) -> (Vec<PlacedTile>, Vec<CircuitNet>, IndexMap<usize, DottedRef>) {
+    let mut tiles: Vec<PlacedTile> = ir
+        .cells
+        .iter()
+        .map(|cell| PlacedTile {
+            kind: TileKind::Cell { cell: cell.cell },
+            origin: Voxel::new(0, 1, 0),
+            rotation: Rotation::East,
+            inputs: Vec::new(),
+            output: None,
+            span: cell.span.clone(),
+        })
+        .collect();
+    let mut drivers: HashMap<NetRef, usize> = (0..ir.cells.len())
+        .map(|index| (NetRef::Cell(saturating_index(index)), index))
+        .collect();
+    for pad in &coupled.pads {
+        drivers.insert(NetRef::Input(saturating_index(pad.input)), tiles.len());
+        tiles.push(PlacedTile {
+            kind: TileKind::Pad { pad: pad.kind },
+            origin: pad.origin,
+            rotation: Rotation::East,
+            inputs: Vec::new(),
+            output: None,
+            span: pad.span.clone(),
         });
     }
-    debug_assert!(
-        ir.cells.iter().all(|c| c.cell.edition() == source.edition),
-        "compile_scope placed a cell whose edition tag disagrees with the container's",
-    );
-
-    for (index, source_output) in source.outputs.iter().enumerate() {
-        ir.outputs.push(PlacedOutputNode::new(
-            source_output.name.clone(),
-            source_output.driver,
-            output_pad(index, column, &reservation),
-            source_output.span.clone(),
+    let mut sinks: Vec<(NetRef, NetSink)> = Vec::new();
+    for (index, cell) in ir.cells.iter().enumerate() {
+        for driver in &cell.drivers {
+            sinks.push((
+                driver.net,
+                NetSink {
+                    tile: index,
+                    port: TilePort::Cell(driver.port),
+                },
+            ));
+        }
+        if matches!(
+            cell.cell,
+            EditionCell::JavaRepeaterCounter { .. } | EditionCell::BedrockRepeaterCounter { .. }
+        ) {
+            sinks.push((
+                NetRef::Cell(saturating_index(index)),
+                NetSink {
+                    tile: index,
+                    port: TilePort::Feedback,
+                },
+            ));
+        }
+    }
+    let mut riser_signals = IndexMap::new();
+    for riser in &coupled.risers {
+        riser_signals.insert(tiles.len(), ir.outputs[riser.output].name.clone());
+        sinks.push((
+            ir.outputs[riser.output].driver,
+            NetSink {
+                tile: tiles.len(),
+                port: TilePort::Actuator,
+            },
         ));
+        tiles.push(PlacedTile {
+            kind: TileKind::Riser,
+            origin: riser.top,
+            rotation: Rotation::East,
+            inputs: Vec::new(),
+            output: None,
+            span: riser.span.clone(),
+        });
+    }
+    let nets = join(ir, &mut tiles, &drivers, &sinks);
+    (tiles, nets, riser_signals)
+}
+
+/// The nets from each driver to the sinks it feeds, inputs first, each tile told its own.
+fn join(
+    ir: &EditionNetlistIr,
+    tiles: &mut [PlacedTile],
+    drivers: &HashMap<NetRef, usize>,
+    sinks: &[(NetRef, NetSink)],
+) -> Vec<CircuitNet> {
+    let order = (0..ir.inputs.len())
+        .map(|i| NetRef::Input(saturating_index(i)))
+        .chain((0..ir.cells.len()).map(|i| NetRef::Cell(saturating_index(i))));
+    let mut nets = Vec::new();
+    for source in order {
+        let Some(&driver) = drivers.get(&source) else {
+            continue;
+        };
+        let feeds: Vec<NetSink> = sinks
+            .iter()
+            .filter(|(net, _)| *net == source)
+            .map(|(_, sink)| *sink)
+            .collect();
+        if feeds.is_empty() {
+            continue;
+        }
+        let net = nets.len();
+        tiles[driver].output = Some(net);
+        for sink in &feeds {
+            tiles[sink.tile].inputs.push(TileInput {
+                port: sink.port,
+                net,
+            });
+        }
+        nets.push(CircuitNet {
+            source,
+            driver,
+            sinks: feeds,
+            wire: crate::placement_ir::Wire::default(),
+        });
+    }
+    nets
+}
+
+/// The circuit of `ir` under the struct `structure`, its cells laid at each of [`MARGINS`] and the
+/// layout whose cells lie nearest the tiles they share nets with kept.
+fn place(
+    scope: &str,
+    ir: &EditionNetlistIr,
+    structure: &str,
+    region: Reservation,
+    coupled: Coupled,
+) -> Result<CircuitLayout, Diagnostic> {
+    let (tiles, nets, riser_signals) = tiles_and_nets(ir, &coupled);
+    let mut layout = CircuitLayout {
+        edition: ir.edition,
+        structure: structure.to_owned(),
+        stage: LayoutStage::Placed,
+        region,
+        tiles,
+        nets,
+        blocks: Vec::new(),
+        signal_defs: ir.signal_defs.clone(),
+        riser_signals,
+        surface: coupled.surface,
+        margin: MARGINS[0],
+    };
+    let mut grid = Grid::new(&layout.region);
+    let fixed: Vec<usize> = (0..layout.tiles.len())
+        .filter(|&i| !matches!(layout.tiles[i].kind, TileKind::Cell { .. }))
+        .collect();
+    lay_fixed(scope, &mut layout, &mut grid, &fixed)?;
+    let mut best: Option<(u32, CircuitLayout)> = None;
+    let mut refused = None;
+    for margin in MARGINS {
+        let mut laid = layout.clone();
+        match lay_cells(scope, &mut laid, grid.clone(), margin) {
+            Ok(()) => {
+                let spread = spread(&laid);
+                if best.as_ref().is_none_or(|(least, _)| spread < *least) {
+                    best = Some((spread, laid));
+                }
+            }
+            Err(diagnostic) => refused = refused.or(Some(diagnostic)),
+        }
+    }
+    match best {
+        Some((_, laid)) => Ok(laid),
+        None => Err(refused.unwrap_or_else(|| congestion(scope, &layout))),
+    }
+}
+
+/// How far, in all, every cell of `layout` lies from the tiles it shares nets with.
+fn spread(layout: &CircuitLayout) -> u32 {
+    let all: Vec<usize> = (0..layout.tiles.len()).collect();
+    layout
+        .tiles
+        .iter()
+        .filter(|tile| matches!(tile.kind, TileKind::Cell { .. }))
+        .map(|tile| pull(layout, &all, tile, &tile.kind.template()))
+        .fold(0, u32::saturating_add)
+}
+
+/// The most turns of pads and risers [`lay_fixed`] tries before it gives up.
+const FIXED_TRIALS: u32 = 1024;
+
+/// Turns every pad and riser of `fixed` a way that fits beside the others, each nearest the middle
+/// of the reservation that leaves the rest room.
+fn lay_fixed(
+    scope: &str,
+    layout: &mut CircuitLayout,
+    grid: &mut Grid,
+    fixed: &[usize],
+) -> Result<(), Diagnostic> {
+    let mut trials = FIXED_TRIALS;
+    match lay_from(layout, grid, fixed, &mut trials) {
+        Ok(laid) => {
+            *grid = laid;
+            Ok(())
+        }
+        Err(index) => {
+            let tile = &layout.tiles[index];
+            let what = match tile.kind {
+                TileKind::Riser => "the torches that carry its signal up to it",
+                _ => "the pad its signal enters the circuit by",
+            };
+            Err(error_with_footer(
+                DiagnosticCode::RouteCongestion,
+                tile.span.clone(),
+                format!(
+                    "{scope} the layers under this component have no room for {what}: each way of laying them leaves the reservation or meets another component's"
+                ),
+                "Fix: move the component away from the struct's edge and from the other components beside it",
+            ))
+        }
+    }
+}
+
+/// `grid` with the tiles of `fixed` laid on it in order, or the tile no turn of which fits.
+fn lay_from(
+    layout: &mut CircuitLayout,
+    grid: &Grid,
+    fixed: &[usize],
+    trials: &mut u32,
+) -> Result<Grid, usize> {
+    let Some((&index, rest)) = fixed.split_first() else {
+        return Ok(grid.clone());
+    };
+    let mut failed = index;
+    for (rotation, trial) in turns(layout, grid, index) {
+        if *trials == 0 {
+            break;
+        }
+        *trials -= 1;
+        layout.tiles[index].rotation = rotation;
+        match lay_from(layout, &trial, rest, trials) {
+            Ok(laid) => return Ok(laid),
+            Err(index) => failed = index,
+        }
+    }
+    Err(failed)
+}
+
+/// Every turn of the pad or riser `index` that fits on `grid`, nearest the middle first, with
+/// the grid it leaves.
+fn turns(layout: &CircuitLayout, grid: &Grid, index: usize) -> Vec<(Rotation, Grid)> {
+    let template = layout.tiles[index].kind.template();
+    let labels = labels(layout, index);
+    let middle = Voxel::new(
+        i32::try_from(layout.region.width / 2).unwrap_or(0),
+        layout.tiles[index].origin.y,
+        i32::try_from(layout.region.depth / 2).unwrap_or(0),
+    );
+    let lead = lead(&layout.tiles[index], &template);
+    let mut fits: Vec<(u32, Rotation, Grid)> = Vec::new();
+    for rotation in Rotation::ALL {
+        let mut tile = layout.tiles[index].clone();
+        tile.rotation = rotation;
+        if !fixed_fits(layout, &tile, &template) {
+            continue;
+        }
+        let mut trial = grid.clone();
+        if trial.lay_tile(index, &tile, &template, &labels).is_ok() {
+            fits.push((tile.at(lead).distance(middle), rotation, trial));
+        }
+    }
+    fits.sort_by_key(|(cost, _, _)| *cost);
+    fits.into_iter()
+        .map(|(_, rotation, trial)| (rotation, trial))
+        .collect()
+}
+
+/// The part of a tile that faces the rest of the circuit: a riser's input, a pad's output.
+fn lead(tile: &PlacedTile, template: &Template) -> Rel {
+    match tile.kind {
+        TileKind::Riser => template
+            .port(TilePort::Actuator)
+            .map_or(Rel::new(0, 0, 0), |port| port.at),
+        _ => template.outs.first().copied().unwrap_or(Rel::new(0, 0, 0)),
+    }
+}
+
+/// Whether a pad or riser turned as `tile` is keeps its parts inside the reservation, any part
+/// beside its origin in the top layer under columns quiet but for its own sensor, and a riser's
+/// upper block under a plain one.
+fn fixed_fits(layout: &CircuitLayout, tile: &PlacedTile, template: &Template) -> bool {
+    let top = layout.region.top();
+    template.parts.iter().all(|(rel, _)| {
+        let at = tile.at(*rel);
+        if !layout.region.contains(at) || at.y < 1 {
+            return false;
+        }
+        if at.y != top || (at.x == tile.origin.x && at.z == tile.origin.z) {
+            return true;
+        }
+        let Some(column) = layout.surface.column(at.x, at.z) else {
+            return false;
+        };
+        match tile.kind {
+            TileKind::Riser => column.plain,
+            _ => column.quiet_but_for((tile.origin.x, tile.origin.z)),
+        }
+    })
+}
+
+/// `layout` with its cells laid again, `margin` columns apart, around its pads and risers.
+pub(crate) fn relay(
+    scope: &str,
+    layout: &CircuitLayout,
+    margin: i32,
+) -> Result<CircuitLayout, Diagnostic> {
+    let mut layout = layout.clone();
+    for net in &mut layout.nets {
+        net.wire = crate::placement_ir::Wire::default();
+    }
+    let mut grid = Grid::new(&layout.region);
+    for index in 0..layout.tiles.len() {
+        if matches!(layout.tiles[index].kind, TileKind::Cell { .. }) {
+            continue;
+        }
+        let template = layout.tiles[index].kind.template();
+        grid.lay_tile(
+            index,
+            &layout.tiles[index],
+            &template,
+            &labels(&layout, index),
+        )
+        .map_err(|_| congestion(scope, &layout))?;
+    }
+    lay_cells(scope, &mut layout, grid, margin)?;
+    Ok(layout)
+}
+
+/// The 2D box a tile's parts cover, as `(x0, z0, x1, z1)`.
+pub(crate) type Bounds = (i32, i32, i32, i32);
+
+/// The [`Bounds`] of `tile`.
+pub(crate) fn footprint(tile: &PlacedTile, template: &Template) -> Bounds {
+    let cells = template.parts.iter().map(|(rel, _)| tile.at(*rel));
+    cells.fold((i32::MAX, i32::MAX, i32::MIN, i32::MIN), |b, at| {
+        (b.0.min(at.x), b.1.min(at.z), b.2.max(at.x), b.3.max(at.z))
+    })
+}
+
+fn overlaps(a: Bounds, b: Bounds, margin: i32) -> bool {
+    a.0 - margin <= b.2 && b.0 <= a.2 + margin && a.1 - margin <= b.3 && b.1 <= a.3 + margin
+}
+
+/// Lays every cell's tile, in the netlist's order, at the spot nearest the tiles its nets join,
+/// `margin` columns clear of every other tile.
+pub(crate) fn lay_cells(
+    scope: &str,
+    layout: &mut CircuitLayout,
+    mut grid: Grid,
+    margin: i32,
+) -> Result<(), Diagnostic> {
+    layout.margin = margin;
+    let cells: Vec<usize> = (0..layout.tiles.len())
+        .filter(|&i| matches!(layout.tiles[i].kind, TileKind::Cell { .. }))
+        .collect();
+    let mut placed: Vec<usize> = (0..layout.tiles.len())
+        .filter(|i| !cells.contains(i))
+        .collect();
+    let mut boxes: Vec<Bounds> = placed
+        .iter()
+        .map(|&i| footprint(&layout.tiles[i], &layout.tiles[i].kind.template()))
+        .collect();
+    let top = layout.region.top();
+    for index in cells {
+        let template = layout.tiles[index].kind.template();
+        let ends = labels(layout, index);
+        let mut tile = layout.tiles[index].clone();
+        let ties = Ties::of(layout, &placed, &tile, &template);
+        // Each spot as how far its nets run, then its `z`, `x` and turn, least first.
+        let mut candidates: Vec<Reverse<(u32, i32, i32, usize)>> = Vec::new();
+        for (turn, rotation) in Rotation::ALL.into_iter().enumerate() {
+            tile.origin = Voxel::new(0, 1, 0);
+            tile.rotation = rotation;
+            let (low, high) = extent(&tile, &template);
+            let (x0, z0, x1, z1) = footprint(&tile, &template);
+            for z in 0..coord(layout.region.depth) {
+                for x in 0..coord(layout.region.width) {
+                    let inside = layout
+                        .region
+                        .contains(Voxel::new(low.x + x, low.y, low.z + z))
+                        && layout
+                            .region
+                            .contains(Voxel::new(high.x + x, high.y, high.z + z))
+                        && high.y < top;
+                    if !inside {
+                        continue;
+                    }
+                    let bounds = (x0 + x, z0 + z, x1 + x, z1 + z);
+                    if boxes.iter().any(|other| overlaps(bounds, *other, margin)) {
+                        continue;
+                    }
+                    tile.origin = Voxel::new(x, 1, z);
+                    candidates.push(Reverse((ties.cost(&tile), z, x, turn)));
+                }
+            }
+        }
+        let mut candidates = BinaryHeap::from(candidates);
+        let best = std::iter::from_fn(|| candidates.pop()).find(|Reverse((_, z, x, turn))| {
+            tile.origin = Voxel::new(*x, 1, *z);
+            tile.rotation = Rotation::ALL[*turn];
+            grid.trial(index, &tile, &template, &ends, |trial| {
+                reachable(trial, &tile, &ends)
+                    && placed.iter().all(|&other| {
+                        reachable(trial, &layout.tiles[other], &labels(layout, other))
+                    })
+            })
+        });
+        if best.is_none() {
+            let TileKind::Cell { cell } = layout.tiles[index].kind else {
+                unreachable!("only cells are laid here")
+            };
+            return Err(error_with_footer(
+                DiagnosticCode::RouteCongestion,
+                layout.tiles[index].span.clone(),
+                format!(
+                    "{scope} the reservation has no room left for this `{name}` cell: its tile needs {w}x{d} columns clear of the other tiles' (region {width}x{depth}, void={void})",
+                    name = cell.name(),
+                    w = bounds_of(&template).0,
+                    d = bounds_of(&template).1,
+                    width = layout.region.width,
+                    depth = layout.region.depth,
+                    void = layout.region.void,
+                ),
+                CONGESTION_FIX,
+            ));
+        }
+        grid.lay_tile(index, &tile, &template, &ends)
+            .map_err(|_| congestion(scope, layout))?;
+        boxes.push(footprint(&tile, &template));
+        layout.tiles[index] = tile;
+        placed.push(index);
+    }
+    Ok(())
+}
+
+/// Whether every port and output of `tile`, its nets `labels`, still has a side a wire can reach
+/// it from: an open voxel beside it, level or a step up or down, that no other signal's dust
+/// touches, or its own net's dust.
+fn reachable(grid: &Grid, tile: &PlacedTile, labels: &[(Rel, usize)]) -> bool {
+    let near = |at: Voxel| {
+        SIDES.into_iter().flat_map(move |face| {
+            let beside = at.step(face);
+            [beside, beside.up(), beside.down()]
+        })
+    };
+    labels.iter().all(|(rel, net)| {
+        let end = tile.at(*rel);
+        near(end).any(|cell| match grid.get(cell) {
+            Some(Slot::Open) => near(cell).all(|other| {
+                other == end
+                    || !matches!(grid.get(other), Some(Slot::Dust(label)) if label != Label::Net(*net))
+            }),
+            Some(Slot::Dust(Label::Net(other))) => other == *net,
+            _ => false,
+        })
+    })
+}
+
+/// A tile's extent along `x` and `z` as laid east.
+fn bounds_of(template: &Template) -> (i32, i32) {
+    let tile = PlacedTile {
+        kind: TileKind::Riser,
+        origin: Voxel::new(0, 0, 0),
+        rotation: Rotation::East,
+        inputs: Vec::new(),
+        output: None,
+        span: Span::default(),
+    };
+    let (x0, z0, x1, z1) = footprint(&tile, template);
+    (x1 - x0 + 1, z1 - z0 + 1)
+}
+
+/// The lowest and highest corner of the box `tile`'s parts fill.
+fn extent(tile: &PlacedTile, template: &Template) -> (Voxel, Voxel) {
+    let cells = template.parts.iter().map(|(rel, _)| tile.at(*rel));
+    let far = Voxel::new(i32::MAX, i32::MAX, i32::MAX);
+    let near = Voxel::new(i32::MIN, i32::MIN, i32::MIN);
+    cells.fold((far, near), |(low, high), at| {
+        (
+            Voxel::new(low.x.min(at.x), low.y.min(at.y), low.z.min(at.z)),
+            Voxel::new(high.x.max(at.x), high.y.max(at.y), high.z.max(at.z)),
+        )
+    })
+}
+
+/// How far `tile` lies from the placed tiles it shares nets with, port to output.
+fn pull(layout: &CircuitLayout, placed: &[usize], tile: &PlacedTile, template: &Template) -> u32 {
+    Ties::of(layout, placed, tile, template).cost(tile)
+}
+
+/// Each net a tile shares with a placed tile: the tile's ends on it and the placed tile's.
+struct Ties(Vec<(Vec<Rel>, Vec<Voxel>)>);
+
+impl Ties {
+    fn of(
+        layout: &CircuitLayout,
+        placed: &[usize],
+        tile: &PlacedTile,
+        template: &Template,
+    ) -> Self {
+        let mut ties = Vec::new();
+        for input in &tile.inputs {
+            let net = &layout.nets[input.net];
+            let (Some(port), true) = (template.port(input.port), placed.contains(&net.driver))
+            else {
+                continue;
+            };
+            let driver = &layout.tiles[net.driver];
+            let outs = driver
+                .kind
+                .template()
+                .outs
+                .iter()
+                .map(|rel| driver.at(*rel))
+                .collect();
+            ties.push((vec![port.at], outs));
+        }
+        if let Some(net) = tile.output {
+            for sink in &layout.nets[net].sinks {
+                let other = &layout.tiles[sink.tile];
+                let port = other
+                    .kind
+                    .template()
+                    .port(sink.port)
+                    .map(|p| other.at(p.at));
+                if let (Some(port), true) = (port, placed.contains(&sink.tile)) {
+                    ties.push((template.outs.clone(), vec![port]));
+                }
+            }
+        }
+        Self(ties)
     }
 
-    ir.region = Some(reservation);
-    Ok(ir)
+    fn cost(&self, tile: &PlacedTile) -> u32 {
+        self.0
+            .iter()
+            .map(|(ends, others)| {
+                let gaps = ends
+                    .iter()
+                    .flat_map(|end| others.iter().map(|o| o.distance(tile.at(*end))));
+                gaps.min().unwrap_or(0)
+            })
+            .fold(0, u32::saturating_add)
+    }
+}
+
+fn congestion(scope: &str, layout: &CircuitLayout) -> Diagnostic {
+    error_with_footer(
+        DiagnosticCode::RouteCongestion,
+        layout.region.span.clone(),
+        format!(
+            "{scope} the circuit does not fit its reservation (region {width}x{depth}, void={void})",
+            width = layout.region.width,
+            depth = layout.region.depth,
+            void = layout.region.void,
+        ),
+        CONGESTION_FIX,
+    )
 }
 
 /// `E_NO_CIRCUIT_REGION` for a scope with something to place and no `circuit` line the walk found.
@@ -182,11 +876,11 @@ fn missing_region_diagnostic(kind: ScopeKind, source: &EditionNetlistIr) -> Diag
         .unwrap_or_default();
     let (primary, fix) = match kind {
         ScopeKind::Struct | ScopeKind::Def => (
-            "this scope has redstone cells or actuator pads to place but no `circuit` line at its top level to reserve room for them",
-            "Fix: add a `circuit region=<label> void=<N>` line at the top level of the scope, with a non-empty label naming the reservation (`region=floor`, `region=basement`) and an integer `void=` >= 1. It reserves within the footprint the scope's `size=WxH` header declares",
+            "this scope has redstone cells or actuators to build but no `circuit` line at its top level to reserve room for them",
+            "Fix: add a `circuit region=<label> void=<N>` line at the top level of the scope, with a non-empty label naming the reservation (`region=floor`, `region=basement`) and an integer `void=` >= 3. It reserves the layers under the scope's base plane",
         ),
         ScopeKind::Site => (
-            "this `site` has redstone cells or actuator pads to place, and a `site` has no `size=WxH` header to reserve room for them within",
+            "this `site` has redstone cells or actuators to build, and a `site` has no base plane of its own to reserve room under",
             "Fix: move the redstone into a `struct` or `def` with a `size=WxH` header and a `circuit region=<label> void=<N>` line at its top level",
         ),
     };
@@ -202,7 +896,7 @@ fn missing_region_diagnostic(kind: ScopeKind, source: &EditionNetlistIr) -> Diag
 fn rejected_region_diagnostic(rejected: &intent::RejectedCircuitRegion) -> Diagnostic {
     use intent::CircuitRegionDefect as Defect;
     let fix = match &rejected.defect {
-        Defect::NestedUnderLevel { .. } => "Fix: move the `circuit` line out of the `level` to the scope's top level. That changes nothing else about it: a reservation spans the scope's `size=WxH`, and no pass reads a `level`'s `y=` for a `circuit` line".to_owned(),
+        Defect::NestedUnderLevel { .. } => "Fix: move the `circuit` line out of the `level` to the scope's top level. That changes nothing else about it: a reservation lies under the scope's base plane, and no pass reads a `level`'s `y=` for a `circuit` line".to_owned(),
         Defect::NoSize { .. } => "Fix: give the enclosing scope a `size=WxH` header".to_owned(),
         Defect::RegionMissing { .. } => {
             "Fix: add `region=<label>` naming the reservation (`region=floor`, `region=basement`)"
@@ -216,155 +910,27 @@ fn rejected_region_diagnostic(rejected: &intent::RejectedCircuitRegion) -> Diagn
             "Fix: give `region=` a non-empty label (`region=floor`, `region=basement`)".to_owned()
         }
         Defect::VoidMissing { .. } => {
-            "Fix: add `void=<N>`, the height of the service layer, an integer >= 1".to_owned()
+            "Fix: add `void=<N>`, the layers under the base plane, an integer >= 3".to_owned()
         }
-        Defect::VoidNotInteger { .. } => "Fix: write `void=` as an integer >= 1".to_owned(),
-        Defect::VoidBelowOne { .. } => "Fix: set `void=` to an integer >= 1".to_owned(),
+        Defect::VoidNotInteger { .. } => "Fix: write `void=` as an integer >= 3".to_owned(),
+        Defect::VoidBelowOne { .. } => "Fix: set `void=` to an integer >= 3".to_owned(),
         Defect::VoidTooLarge { .. } => format!(
-            "Fix: set `void=` to an integer from 1 to {limit}",
+            "Fix: set `void=` to an integer from 3 to {limit}",
             limit = u32::MAX,
         ),
-        _ => "Fix: write the line as `circuit region=<label> void=<N>` at the top level of a `struct` or `def` with a `size=WxH` header, with a non-empty label and an integer `void=` >= 1".to_owned(),
+        _ => "Fix: write the line as `circuit region=<label> void=<N>` at the top level of a `struct` or `def` with a `size=WxH` header, with a non-empty label and an integer `void=` >= 3".to_owned(),
     };
     error_with_footer(
         DiagnosticCode::NoCircuitRegion,
         rejected.span.clone(),
         format!(
-            "this `circuit` line reserves no room for the scope's redstone cells or actuator pads: {reason}",
+            "this `circuit` line reserves no room for the scope's redstone cells or actuators: {reason}",
             reason = rejected.defect,
         ),
         fix,
     )
 }
 
-fn congestion_diagnostic(reservation: &CircuitRegionReservation, required_area: u64) -> Diagnostic {
-    let reserved_area = reservation.reserved_area();
-    debug_assert!(
-        reserved_area > 0,
-        "reservation.reserved_area() must be > 0 to compare against required_area",
-    );
-    let (whole, tenths) = area_ratio_tenths(required_area, reserved_area);
-    let primary = format!(
-        "synthesized netlist needs ~{whole}.{tenths}x the reserved area (void={void}, region {width}x{depth})",
-        void = reservation.void,
-        width = reservation.width,
-        depth = reservation.depth,
-    );
-    error_with_footer(
-        DiagnosticCode::RouteCongestion,
-        reservation.span.clone(),
-        primary,
-        CONGESTION_FIX,
-    )
+fn coord(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
-
-/// The reservation has the volume but not the `2n + 1`-column row.
-fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u32) -> Diagnostic {
-    let primary = format!(
-        "synthesized netlist needs {columns} columns for a row of {cell_count} cells, a clear column beside each and one past the end of the row, but the reserved region is only {width} wide (region {width}x{depth}, void={void})",
-        columns = u64::from(cell_count)
-            .saturating_mul(u64::from(CELL_SPACING))
-            .saturating_add(1),
-        width = reservation.width,
-        depth = reservation.depth,
-        void = reservation.void,
-    );
-    error_with_footer(
-        DiagnosticCode::RouteCongestion,
-        reservation.span.clone(),
-        primary,
-        "Fix: widen the enclosing `size=WxH` past twice the cell count, or split the logic across several scopes, each with its own `circuit` line. Raising `void` does not help — cells are laid in one row and `void` buys height, not length",
-    )
-}
-
-/// The reservation is one column wide, so the sensor and actuator pad columns collide.
-fn pad_column_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
-    let primary = format!(
-        "synthesized netlist needs 2 columns, one for its sensor pads at `x = 0` and one for its actuator pads at `x = width - 1`, but the reserved region is only {width} wide, so the two are one column (region {width}x{depth}, void={void})",
-        width = reservation.width,
-        depth = reservation.depth,
-        void = reservation.void,
-    );
-    error_with_footer(
-        DiagnosticCode::RouteCongestion,
-        reservation.span.clone(),
-        primary,
-        "Fix: widen the enclosing `size=WxH` to at least two columns. Raising `void` or deepening the region does not help — the pads collide in that one column at any height or depth",
-    )
-}
-
-/// The reservation has the row but not the clear rows beside it.
-fn row_depth_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
-    let primary = format!(
-        "synthesized netlist needs {rows} rows for its cell row and a clear row on either side of it, but the reserved region is only {depth} deep (region {width}x{depth}, void={void})",
-        rows = u64::from(CELL_ROW).saturating_add(2),
-        depth = reservation.depth,
-        width = reservation.width,
-        void = reservation.void,
-    );
-    error_with_footer(
-        DiagnosticCode::RouteCongestion,
-        reservation.span.clone(),
-        primary,
-        "Fix: deepen the enclosing `size=WxH` to at least three rows, or split the logic across several scopes, each with its own `circuit` line. Raising `void` does not help — a wire reaches a cell through a face in the cell's own plane, and `void` buys height above it",
-    )
-}
-
-/// The reservation has too few rows for the I/O pads the scope needs.
-fn pad_row_diagnostic(
-    reservation: &CircuitRegionReservation,
-    column: PadColumn,
-    required_pad_rows: u32,
-) -> Diagnostic {
-    let primary = format!(
-        "synthesized netlist needs {required_pad_rows} rows for its I/O pads but the reserved region is only {depth} deep (region {width}x{depth}, void={void})",
-        depth = reservation.depth,
-        width = reservation.width,
-        void = reservation.void,
-    );
-    error_with_footer(
-        DiagnosticCode::RouteCongestion,
-        reservation.span.clone(),
-        primary,
-        format!(
-            "Fix: deepen the enclosing `size=WxH` so {rule}, or split the logic across several scopes, each with its own `circuit` line. Raising `void` does not help — the pads stand at `y = 0`, and `void` buys layers above them",
-            rule = column.depth_rule(),
-        ),
-    )
-}
-
-/// The first usable `circuit` line of each scope.
-fn build_region_index(
-    lines: &[Result<intent::CircuitRegion, intent::RejectedCircuitRegion>],
-) -> HashMap<(intent::ScopeKind, String), &intent::CircuitRegion> {
-    let mut index = HashMap::new();
-    for region in lines.iter().filter_map(|line| line.as_ref().ok()) {
-        let key = (region.scope_kind, region.scope_name.clone());
-        index.entry(key).or_insert(region);
-    }
-    index
-}
-
-/// The first `circuit` line of each scope that reserves nothing. Not filtered against
-/// [`build_region_index`]: a scope may be in both, and the region index wins.
-fn build_rejected_index(
-    lines: &[Result<intent::CircuitRegion, intent::RejectedCircuitRegion>],
-) -> HashMap<(intent::ScopeKind, String), &intent::RejectedCircuitRegion> {
-    let mut index = HashMap::new();
-    for rejected in lines.iter().filter_map(|line| line.as_ref().err()) {
-        let key = (rejected.scope_kind, rejected.scope_name.clone());
-        index.entry(key).or_insert(rejected);
-    }
-    index
-}
-
-fn map_scope_kind(kind: ScopeKind) -> intent::ScopeKind {
-    match kind {
-        ScopeKind::Struct => intent::ScopeKind::Struct,
-        ScopeKind::Def => intent::ScopeKind::Def,
-        ScopeKind::Site => intent::ScopeKind::Site,
-    }
-}
-
-#[cfg(test)]
-mod tests;

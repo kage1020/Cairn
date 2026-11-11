@@ -23,8 +23,8 @@ items:
         value:
           kind: Size
           value:
-            w: 6
-            h: 4
+            w: 12
+            h: 10
     body:
       - kind: Generic
         keyword: floor
@@ -219,4 +219,4 @@ items:
           - key: void
             value:
               kind: Int
-              value: 2
+              value: 4

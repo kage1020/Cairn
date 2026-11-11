@@ -5,7 +5,7 @@ description: 1 棟のコテージから始めて、テーマ付きの塔、レ�
 
 [サンプル](/ja/examples/)を 1 つずつ順にたどり、考え方を 1 つずつ紹介します。各節は前の節の内容を前提にしているので、上から順に読んでください。
 
-> このページの `cairn compile` は、現在のコンパイラで実行できます。ただし、レッドストーンはまだコンパイル結果に含まれないので、3 節の門番小屋は回路なしで作られます。
+> このページの `cairn compile` は、現在のコンパイラで実行できます。
 
 ## 1. コテージを建てる
 
@@ -91,27 +91,27 @@ struct gatehouse size=7x5
   door  id=front side=front at=center
 
   pressure_plate id=plate at=front.outside offset=3 y=0 -> sig.step
-  pressure_plate id=inner at=inside.front  offset=3 y=1 -> sig.exit
+  pressure_plate id=inner at=inside.front  offset=2 y=1 -> sig.exit
 
   logic sig.open = sig.step or sig.exit
   door[id=front] opened_by=sig.open
 
-  circuit region=floor void=2
+  circuit region=floor void=3
 
   assert truth(sig.step, sig.exit -> sig.open) { 00->0; 01->1; 10->1; 11->1 }
-  assert latency(sig.step -> sig.open) <= 1
-  assert always(sig.step -> eventually sig.open within 2)
+  assert latency(sig.step -> sig.open) <= 3
+  assert always(sig.step -> eventually sig.open within 3)
 ```
 
-**壁の外のプレートは、屋根の軒の出の下に置かれます。** `at=front.outside` は、`offset=3` で壁の前にあるセル、つまりドアのすぐ外側を取ります。このセルは、屋根の `overhang=1` の分だけ壁の周りに広がるリングの中にあります。軒の出がなければ struct は壁で終わるので、プレートの置き場がなく、`E_INVALID_MEMBER` で拒否されます。`at=inside.front` はすぐ内側の、床の上に載る `y=1` のセルを取ります。壁の内側では段 `y=0` が床そのもので、外側では地面だからです。
+**壁の外のプレートは、屋根の軒の出の下に置かれます。** `at=front.outside` は、`offset=3` で壁の前にあるセル、つまりドアのすぐ外側を取ります。このセルは、屋根の `overhang=1` の分だけ壁の周りに広がるリングの中にあります。軒の出がなければ struct は壁で終わるので、プレートの置き場がなく、`E_INVALID_MEMBER` で拒否されます。`at=inside.front` はすぐ内側の、床の上に載る `y=1` のセルを取ります。壁の内側では段 `y=0` が床そのもので、外側では地面だからです。内側のプレートをドアから 1 列ずらしているのは、ドアの正面に置いたプレートの下のダストが、ドアを開けるトーチの隣に来てしまうからです。
 
 **センサーが信号を出し、アクチュエーターが受け取ります。** `-> sig.step` はセンサーの出力、`opened_by=sig.open` はアクチュエーターの入力です。その間の依存関係を書くのが `logic` です。
 
-**tick の計算は書きません。** 論理式は時間をいっさい持ちません。数値が tick を表すのは、アサーションの `<= 1` と `within 2` だけです。遅延は、回路を配置して配線するまで分からないからです。
+**tick の計算は書きません。** 論理式は時間をいっさい持ちません。数値が tick を表すのは、アサーションの `<= 3` と `within 3` だけです。遅延は、回路を配置して配線するまで分からないからです。
 
-**`circuit region=…` は配置配線のための領域を確保します。** 配線が収まらなければ、修正案付きの `E_ROUTE_CONGESTION` が出ます。黙って領域からはみ出すことはありません。今のところ配線を行うのは実験的な `cairn synth --experimental-logic-synth` だけなので、`cairn compile` はこのエラーを出しません。
+**`circuit region=floor void=3` は床下に 3 層を確保します。** `cairn compile` はそこにダスト、トーチ、リピーターを実寸で組み上げ、門番小屋はその上へ 3 層持ち上がります。回路が収まらなければ、修正案付きの `E_ROUTE_CONGESTION` が出ます。黙って領域からはみ出すことはありません。壁の高い位置のレバーのように、床下の回路が届かないセンサーやアクチュエーターは `E_ROUTE_UNREACHABLE_COMPONENT` になります。
 
-**アサーションは 3 種類です。** 組み合わせ論理を検証する `truth(…)`、遅延の上限を検証する `latency(in -> out) <= N`、時間の範囲を区切った時相論理を検証する `always(in -> eventually out within N)` です。完全な LTL は意図的に持たず、tick 単位のシミュレータで安く判定できるものだけに絞っています。ただし、このシミュレータはまだありません。レイテンシの上限はシミュレータを必要とせず、`cairn synth --experimental-logic-synth --stage crossing` が、ビルドするエディションについて配置した回路の tick を数え、守れない上限を `E_SIM_ASSERTION_FAILED` で拒否します。ここの OR は Java ではリピーター 2 つで 1 tick、Bedrock ではダストの合流で 0 tick です。
+**アサーションは 3 種類です。** 組み合わせ論理を検証する `truth(…)`、遅延の上限を検証する `latency(in -> out) <= N`、時間の範囲を区切った時相論理を検証する `always(in -> eventually out within N)` です。完全な LTL は意図的に持たず、tick 単位のシミュレータで安く判定できるものだけに絞っています。ただし、`truth` と `always` を回路と照合する仕組みはまだありません。レイテンシの上限はシミュレータを必要とせず、回路を組み上げるどのコマンドも、ビルドするエディションについて敷いた回路の tick を数え、守れない上限を `E_SIM_ASSERTION_FAILED` で拒否します。ここの OR はリピーター 2 つで 1 tick で、信号をドアまで持ち上げる 2 本のトーチがさらに 2 tick かかります。
 
 **エディションの違いは、言語ではなくセルライブラリが吸収します。** 同じ論理が、Java では `ComparatorAND` セルに、Bedrock では `TorchAND` セルになります。疑似接続 (quasi-connectivity) やブロック更新の順序に依存する回路は、気付かないうちに壊れる仕掛けを残すのではなく、コンパイルエラー `E_NO_PORTABLE_IMPL` になります。たとえば、回路が開けるドアを見張るオブザーバーや、Java でレバーが真上のセルを通して動力を与える、回路が駆動するピストンです。今のところ、これを検査するのは `cairn synth --experimental-logic-synth` だけです。
 

@@ -829,6 +829,40 @@ impl<'a> VersionStates<'a> {
         }
         ids
     }
+
+    /// The Bedrock id that writes `state` here when no family of its own id holds its states but
+    /// one of the Java block its properties name does, as `redstone_torch[facing=north,lit=false]`
+    /// is the unlit wall torch, `unlit_redstone_torch`; `None` otherwise.
+    #[must_use]
+    pub fn spelling(&self, state: &BlockState) -> Option<&'a str> {
+        if self.resolve(state).is_ok() {
+            return None;
+        }
+        let given = &state.properties;
+        let map: &'a VersionMap = self.map;
+        let mut named = map
+            .onto
+            .get(state.id.as_str())?
+            .iter()
+            .filter(|(_, at)| {
+                given
+                    .keys()
+                    .all(|key| self.family(*at).java.contains_key(key))
+            })
+            .map(|(java, _)| java.as_str());
+        let java = named.next()?;
+        if named.any(|other| other != java) {
+            return None;
+        }
+        let forms = map.from.get(java)?;
+        let &(_, first) = forms.first()?;
+        let mut full = self.family(first).defaults.clone();
+        full.extend(given.iter().map(|(k, v)| (k.clone(), v.clone())));
+        forms
+            .iter()
+            .find(|(_, at)| self.family(*at).holds(&full))
+            .map(|(bedrock, _)| bedrock.as_str())
+    }
 }
 
 impl VersionStates<'_> {

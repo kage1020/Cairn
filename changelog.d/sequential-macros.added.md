@@ -10,9 +10,7 @@
   still `E_LOGIC_CYCLE`. A stage of `delay` or `pulse` is two ticks: `delay(x, n)` takes `2n`
   ticks, `pulse(x, n)` `2n + 2`, `edge_rising` 4, `edge_falling` 3, a `counter` 3 and a `latch` 4
   from `set` and 5 from `reset`, counted to the last change one change at the port makes, and
-  `assert latency` counts them on the path. Every one restores strength. A Placement IR dump whose
-  cell counts no stage, carries an unknown field or is driven on a port it does not have is
-  refused.
+  `assert latency` counts them on the path. Every one restores strength.
 - *(tree-sitter)* The grammar reads `latch` as a `call_expression` and the other macros as
   `apply_expression` nodes with an `operand` field, and a `stages` field on those that count
   stages, each macro highlighted as a builtin.

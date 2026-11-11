@@ -11,5 +11,4 @@
 
   Tier 0 parts and raw members are not checked.
 - *(cli)* `cairn synth --experimental-logic-synth` runs the check at every edition-tagged stage and
-  prints no IR when it refuses. It reads the members that build for the edition, and leaves one
-  that does not to `cairn compile`, which reports it.
+  prints no IR when it refuses.

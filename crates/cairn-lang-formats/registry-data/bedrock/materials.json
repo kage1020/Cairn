@@ -43,6 +43,7 @@
     { "token": "comparator.default", "block": "unpowered_comparator" },
     { "token": "redstone_torch.default", "block": "redstone_torch" },
     { "token": "redstone_torch.wall", "block": "redstone_torch" },
-    { "token": "redstone_dust.default", "block": "redstone_wire" }
+    { "token": "redstone_dust.default", "block": "redstone_wire" },
+    { "token": "circuit.block", "block": "stone" }
   ]
 }

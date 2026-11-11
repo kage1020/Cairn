@@ -9,10 +9,12 @@ use cairn_lang_core::{Edition, Severity, diagnose_parse_failure, lower, parse};
 
 use crate::cli::CheckFormat;
 use crate::pipeline::{
-    CheckLowering, build_diagnostics, check_lowering, read_source, report_partial_build,
-    weighed_editions,
+    CheckLowering, build_diagnostics, check_circuits, check_lowering, read_source,
+    report_partial_build, weighed_editions,
 };
-use crate::report::{print_json, render_diagnostics, report_diagnostic, report_parse_failure};
+use crate::report::{
+    Finding, Found, print_json, render_diagnostics, report_diagnostic, report_parse_failure,
+};
 
 pub(crate) fn run_check(
     file: &Path,
@@ -52,7 +54,19 @@ pub(crate) fn run_check(
         built_scopes,
         unsupported,
     } = check_lowering(&ir, edition, target);
-    let diagnostics = build_diagnostics(&module, &ir, pin, &weighed_editions(pin), lowering);
+    let mut diagnostics: Vec<Found> =
+        build_diagnostics(&module, &ir, pin, &weighed_editions(pin), lowering)
+            .into_iter()
+            .map(Found::Core)
+            .collect();
+    // A member that failed to lower is not there for the circuit to wire.
+    if !diagnostics.iter().any(|d| d.severity() == Severity::Error) {
+        diagnostics.extend(
+            check_circuits(&ir, edition, target)
+                .into_iter()
+                .map(Found::Circuit),
+        );
+    }
     let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     let lines = LineStarts::new(&source);
 

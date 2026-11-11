@@ -6,14 +6,14 @@ use crate::cli::Cli;
 
 use super::*;
 
-/// The Placement IR stage `--stage <stage>` emits, or `None` for a stage before Placement IR.
-fn placement_counterpart(stage: SynthStage) -> Option<PlacementStage> {
+/// The layout stage `--stage <stage>` emits, or `None` for a stage before placement.
+fn placement_counterpart(stage: SynthStage) -> Option<LayoutStage> {
     match stage {
         SynthStage::Logic | SynthStage::Netlist | SynthStage::Edition => None,
-        SynthStage::Placement => Some(PlacementStage::Placement),
-        SynthStage::Route => Some(PlacementStage::Route),
-        SynthStage::Delay => Some(PlacementStage::Delay),
-        SynthStage::Crossing => Some(PlacementStage::Crossing),
+        SynthStage::Placement => Some(LayoutStage::Placed),
+        SynthStage::Route => Some(LayoutStage::Routed),
+        SynthStage::Delay => Some(LayoutStage::Delayed),
+        SynthStage::Legalize => Some(LayoutStage::Legalized),
     }
 }
 
@@ -31,7 +31,7 @@ fn placement_stage_names_match_clap() {
     }
 }
 
-/// `stage_cli_name`'s literal spellings, for the stages with no Placement IR counterpart.
+/// `stage_cli_name`'s literal spellings, for the stages with no layout counterpart.
 #[test]
 fn literal_stage_names_match_clap() {
     for stage in SynthStage::value_variants() {
@@ -53,7 +53,7 @@ fn edition_required_stages_match_the_documented_set() {
             .expect("no SynthStage variant is skipped");
         let expected = match name.get_name() {
             "logic" | "netlist" => false,
-            "edition" | "placement" | "route" | "delay" | "crossing" => true,
+            "edition" | "placement" | "route" | "delay" | "legalize" => true,
             other => panic!("unclassified --stage value `{other}`"),
         };
         assert_eq!(
@@ -70,7 +70,7 @@ fn stray_edition_message_lists_read_as_english() {
     assert_eq!(
         edition_required_stage_list(),
         "`--stage edition`, `--stage placement`, `--stage route`, \
-         `--stage delay`, or `--stage crossing`",
+         `--stage delay`, or `--stage legalize`",
     );
     assert_eq!(edition_neutral_stage_list(), "`logic` and `netlist`");
 }

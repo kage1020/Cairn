@@ -24,15 +24,17 @@ pub enum EditionCell {
     BedrockTorchAnd,
     /// Java OR — two repeaters feeding a common dust line.
     JavaRepeaterOr,
-    /// Bedrock OR — a dust merge onto a common line.
-    BedrockTorchOr,
+    /// Bedrock OR — two repeaters feeding a common dust line.
+    BedrockRepeaterOr,
     /// Java NOT — a single inverter torch.
     JavaInverterTorch,
     /// Bedrock NOT — a single inverter torch.
     BedrockInverterTorch,
-    /// Java XOR — two torch NORs feeding a common dust line, each with one operand inverted.
+    /// Java XOR — the torch NORs of `a` and of `b`, each with the NOR of the two, onto a common
+    /// dust line.
     JavaTorchXor,
-    /// Bedrock XOR — two torch NORs feeding a common dust line, each with one operand inverted.
+    /// Bedrock XOR — the torch NORs of `a` and of `b`, each with the NOR of the two, onto a common
+    /// dust line.
     BedrockTorchXor,
     /// Java NAND — two inverter torches feeding a common dust line.
     JavaTorchNand,
@@ -114,7 +116,7 @@ impl EditionCell {
             | Self::JavaTorchLatch
             | Self::JavaRepeaterCounter { .. } => Edition::Java,
             Self::BedrockTorchAnd
-            | Self::BedrockTorchOr
+            | Self::BedrockRepeaterOr
             | Self::BedrockInverterTorch
             | Self::BedrockTorchXor
             | Self::BedrockTorchNand
@@ -135,8 +137,7 @@ impl EditionCell {
         match self {
             Self::JavaComparatorAnd => "ComparatorAND",
             Self::BedrockTorchAnd => "TorchAND",
-            Self::JavaRepeaterOr => "RepeaterOR",
-            Self::BedrockTorchOr => "TorchOR",
+            Self::JavaRepeaterOr | Self::BedrockRepeaterOr => "RepeaterOR",
             Self::JavaInverterTorch | Self::BedrockInverterTorch => "InverterTorch",
             Self::JavaTorchXor | Self::BedrockTorchXor => "TorchXOR",
             Self::JavaTorchNand | Self::BedrockTorchNand => "TorchNAND",
@@ -150,39 +151,6 @@ impl EditionCell {
             Self::JavaRepeaterCounter { .. } | Self::BedrockRepeaterCounter { .. } => {
                 "RepeaterCounter"
             }
-        }
-    }
-
-    /// The input ports the netlist drives on this cell, in its port order.
-    #[must_use]
-    pub const fn ports(self) -> &'static [PortName] {
-        match self {
-            Self::JavaComparatorAnd
-            | Self::BedrockTorchAnd
-            | Self::JavaRepeaterOr
-            | Self::BedrockTorchOr
-            | Self::JavaTorchXor
-            | Self::BedrockTorchXor
-            | Self::JavaTorchNand
-            | Self::BedrockTorchNand
-            | Self::JavaTorchNor
-            | Self::BedrockTorchNor => &[PortName::A, PortName::B],
-            Self::JavaInverterTorch
-            | Self::BedrockInverterTorch
-            | Self::JavaRepeaterDelay { .. }
-            | Self::BedrockRepeaterDelay { .. }
-            | Self::JavaTorchPulse { .. }
-            | Self::BedrockTorchPulse { .. }
-            | Self::JavaTorchEdgeRising
-            | Self::BedrockTorchEdgeRising
-            | Self::JavaTorchEdgeFalling
-            | Self::BedrockTorchEdgeFalling
-            | Self::JavaRepeaterCounter { .. }
-            | Self::BedrockRepeaterCounter { .. } => &[PortName::A],
-            Self::JavaTorchMux | Self::BedrockTorchMux => {
-                &[PortName::Sel, PortName::A, PortName::B]
-            }
-            Self::JavaTorchLatch | Self::BedrockTorchLatch => &[PortName::Set, PortName::Reset],
         }
     }
 
@@ -217,6 +185,7 @@ impl EditionCell {
             | Self::JavaTorchEdgeFalling
             | Self::BedrockTorchEdgeFalling => 3,
             Self::JavaRepeaterOr
+            | Self::BedrockRepeaterOr
             | Self::JavaInverterTorch
             | Self::BedrockInverterTorch
             | Self::JavaTorchNand
@@ -229,7 +198,6 @@ impl EditionCell {
             | Self::BedrockTorchXor
             | Self::JavaTorchMux
             | Self::BedrockTorchMux => 2,
-            Self::BedrockTorchOr => 0,
         }
     }
 
@@ -240,6 +208,7 @@ impl EditionCell {
     pub const fn regenerates(self) -> bool {
         match self {
             Self::JavaRepeaterOr
+            | Self::BedrockRepeaterOr
             | Self::JavaInverterTorch
             | Self::BedrockTorchAnd
             | Self::BedrockInverterTorch
@@ -263,7 +232,7 @@ impl EditionCell {
             | Self::BedrockTorchLatch
             | Self::JavaRepeaterCounter { .. }
             | Self::BedrockRepeaterCounter { .. } => true,
-            Self::JavaComparatorAnd | Self::BedrockTorchOr => false,
+            Self::JavaComparatorAnd => false,
         }
     }
 

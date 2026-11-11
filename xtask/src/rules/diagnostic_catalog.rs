@@ -1,7 +1,7 @@
-//! Every code core's `DiagnosticCode` spells, and every code a CLI string literal prints itself,
-//! has a row of its own in the spec's catalog, in each language: a code is what a reader of the
-//! output, or a consumer of `--format json`, branches on. A code no literal spells out, such as
-//! one interpolated from a `const`, is not seen.
+//! Every code core's or the redstone crate's `DiagnosticCode` spells, and every code a CLI string
+//! literal prints itself, has a row of its own in the spec's catalog, in each language: a code is
+//! what a reader of the output, or a consumer of `--format json`, branches on. A code no literal
+//! spells out, such as one interpolated from a `const`, is not seen.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -16,14 +16,18 @@ use crate::repo::Repo;
 
 pub const RULE: Rule = Rule {
     name: "diagnostic-catalog",
-    summary: "every code core's DiagnosticCode spells, or a CLI string literal prints itself, has a \
-              row in spec/lint's catalog, in each language",
+    summary: "every code core's or the redstone crate's DiagnosticCode spells, or a CLI string \
+              literal prints itself, has a row in spec/lint's catalog, in each language",
     check,
 };
 
-const CORE_SRC: &str = "crates/cairn-lang-core/src";
+/// The crates whose `impl DiagnosticCode { fn as_str }` spells every code they raise.
+const CODE_SOURCES: &[&str] = &[
+    "crates/cairn-lang-core/src",
+    "crates/cairn-lang-redstone/src",
+];
 
-/// The CLI prints the codes of the checks it runs itself, outside core's enum.
+/// The CLI prints the codes of the checks it runs itself, outside the crates' enums.
 const CLI_SRC: &str = "crates/cairn-lang-cli/src";
 
 /// A code as the CLI prints one: `error[E_X]`, `warning[W_X]`, or `W_X:` opening a line.
@@ -187,17 +191,21 @@ fn visit_sources(
 
 fn check(repo: &Repo) -> Vec<Finding> {
     let mut findings = Vec::new();
-    let mut codes = Codes::default();
-    visit_sources(repo, CORE_SRC, false, &mut findings, |file| {
-        codes.visit_file(file);
-    });
-    if codes.found.is_empty() {
-        findings.push(Finding::new(
-            CORE_SRC,
-            None,
-            "found no `impl DiagnosticCode { fn as_str }` returning code strings",
-        ));
-        return findings;
+    let mut codes = BTreeSet::new();
+    for &dir in CODE_SOURCES {
+        let mut found = Codes::default();
+        visit_sources(repo, dir, false, &mut findings, |file| {
+            found.visit_file(file);
+        });
+        if found.found.is_empty() {
+            findings.push(Finding::new(
+                dir,
+                None,
+                "found no `impl DiagnosticCode { fn as_str }` returning code strings",
+            ));
+            return findings;
+        }
+        codes.append(&mut found.found);
     }
     let mut printed = Printed::default();
     visit_sources(repo, CLI_SRC, true, &mut findings, |file| {
@@ -210,7 +218,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
             "found no string literal printing a code as `error[E_…]`, `warning[W_…]` or `W_…:`",
         ));
     }
-    let mut codes = codes.found;
     codes.append(&mut printed.found);
 
     for (dir, title) in CATALOGS {

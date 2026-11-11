@@ -13,18 +13,18 @@ openings    door / window
 fixtures    sign / painting / frame / bed / chest / センサー / アクチュエーター / Tier 0 の部品
 fluids      fill fluid= / water
 logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
-logic_place セルの配置 → Placement IR
-logic_route Placement IR 上での配線、遅延の挿入、交差の合法化。遅延が確定
+logic_place 床下へのパッド、ライザー、セルの配置 → Placement IR
+logic_route Placement IR 上での配線、遅延の挿入、合法化。遅延が確定
 raw         raw_block / raw_fill (エスケープハッチ)
 ```
 
 水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
 
-ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。また、`cairn compile` は 3 つの `logic_*` フェーズを実行しないので、`logic` 行を書いても成果物にレッドストーンは置かれません。これらのフェーズを実行できるのは `cairn synth --experimental-logic-synth` だけです。
+ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
-`circuit` は配線のための領域を確保するだけで、ボクセルを書かないので、どのフェーズにも属しません。3 つの `logic_*` フェーズが `fixtures` の後にあるのは、センサーとアクチュエーターを 3D 空間に配置するまで、ポートの座標が決まらないからです。`fluids` の後にあるのは、水が届いた配線を押し流すからです ([レッドストーン](/ja/spec/redstone/))。
+`circuit` は回路を敷く層を確保するだけで、自分ではボクセルを書かないので、どのフェーズにも属しません。3 つの `logic_*` フェーズが `fixtures` の後にあるのは、センサーとアクチュエーターを 3D 空間に配置するまで、ポートの座標が決まらないからです。`fluids` の後にあるのは、水が届いた配線を押し流すからです ([レッドストーン](/ja/spec/redstone/))。
 
 後勝ちになるのは **同じフェーズの中での局所的な上書き** だけで、`raw` は常に最後に評価します。同じフェーズの中で別々のメンバーが 1 つのボクセルを取り合う場合も、同じ規則で決着し、そのことを報告します ([§4.8](#48-同一フェーズ内の衝突とパレット))。
 
@@ -130,7 +130,7 @@ struct が lowering される体積は、自分で書くものではなく、導
 ```
 Dims.x = size.W + 2 × overhang
 Dims.z = size.H + 2 × overhang
-Dims.y = 1 + wall_top + roof_extra
+Dims.y = void + 1 + wall_top + roof_extra
 ```
 
 それぞれの項が数えるのは、実際にブロックを置くメンバーだけです。
@@ -139,6 +139,7 @@ Dims.y = 1 + wall_top + roof_extra
 - `wall_top`: `mat_slot=` が解決できる walls の `N + height` のうち、最大の値。`N` はそれを囲む level のオフセットで、本体に直接書いた場合は `0` です。
 - `roof_extra`: 種類ごとの寄与 ([§4.3](#43-切妻屋根のボクセル規則)–[§4.6](#46-陸屋根のボクセル規則)) のうち、最大のもの。
 - `1`: どの struct にもある基準面。
+- `void`: struct のロジックが回路を敷くときに、`circuit` 行が基準面の下に確保する層の数。ほかのすべての行はその分だけ上がり、`site` に置いた `def` はその分だけ原点が下がります ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。回路を敷かないときは `0` です。
 
 `level` の中のメンバーも、この 3 つの項すべてに、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 

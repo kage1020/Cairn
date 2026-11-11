@@ -6,9 +6,9 @@ use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::java_structure::{
     JavaStructureError, OutputExt, build_structure_tag, output_filename, write_structure_gzip,
 };
-use cairn_lang_nbt::tag::Tag;
+use cairn_lang_nbt::tag::{Compound, Tag};
 
-use crate::common::{latest, lower_example};
+use crate::common::{comparator_array, latest, lower_example};
 
 fn target_1_21_4() -> JavaTarget {
     resolve_java_target("1.21.4").expect("known target")
@@ -436,4 +436,27 @@ fn the_check_lands_exactly_on_the_first_index_that_is_not_a_slot() {
             if usize::from(index) == len),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn a_block_entity_rides_on_its_voxels_blocks_entry_as_nbt() {
+    let root = build_structure_tag(&comparator_array("minecraft:comparator"), &target_1_21_4())
+        .expect("build");
+    let Tag::List(blocks) = &root.entries["blocks"] else {
+        unreachable!()
+    };
+    let carried: Vec<(usize, &Tag)> = blocks
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, block)| match block {
+            Tag::Compound(c) => c.entries.get("nbt").map(|nbt| (i, nbt)),
+            _ => panic!("block not compound"),
+        })
+        .collect();
+    let mut nbt = Compound::new();
+    nbt.insert("id", Tag::String("minecraft:comparator".to_owned()));
+    nbt.insert("OutputSignal", Tag::Int(3));
+    // `blocks` walks y, then z, then x: (1, 1, 1) is entry (1 * 3 + 1) * 2 + 1.
+    assert_eq!(carried, [(9, &Tag::Compound(nbt))]);
 }

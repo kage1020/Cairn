@@ -73,7 +73,7 @@ fn select_edition_cell(logical: LogicalCell, edition: Edition) -> EditionCell {
         (Edition::Java, LogicalCell::Nor) => EditionCell::JavaTorchNor,
         (Edition::Java, LogicalCell::Mux) => EditionCell::JavaTorchMux,
         (Edition::Bedrock, LogicalCell::And) => EditionCell::BedrockTorchAnd,
-        (Edition::Bedrock, LogicalCell::Or) => EditionCell::BedrockTorchOr,
+        (Edition::Bedrock, LogicalCell::Or) => EditionCell::BedrockRepeaterOr,
         (Edition::Bedrock, LogicalCell::Not) => EditionCell::BedrockInverterTorch,
         (Edition::Bedrock, LogicalCell::Xor) => EditionCell::BedrockTorchXor,
         (Edition::Bedrock, LogicalCell::Nand) => EditionCell::BedrockTorchNand,

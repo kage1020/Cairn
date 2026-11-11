@@ -16,6 +16,37 @@ pub fn cargo_bin() -> PathBuf {
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
 pub const SHIPPED_EXAMPLES: usize = 15;
 
+/// A lever too high on the wall for the circuit under the floor to read, on either edition: line
+/// 8 is the lever's.
+pub const WALL_LEVER: &str = concat!(
+    "theme t:\n",
+    "  slot wall -> @oak_planks\n",
+    "\n",
+    "struct room size=9x7\n",
+    "  floor mat_slot=wall\n",
+    "  walls mat_slot=wall height=3\n",
+    "  door id=d side=front at=center\n",
+    "  lever id=l at=inside.back offset=2 y=2 -> sig.a\n",
+    "  door[id=d] opened_by=sig.a\n",
+    "  circuit region=floor void=3\n",
+);
+
+/// A dispenser Java powers through the cell above it, by a lever too high for Bedrock's circuit
+/// to read: Java refuses line 8, the dispenser's, and Bedrock line 9, the lever's.
+pub const QUASI_CONNECTED_DISPENSER: &str = concat!(
+    "theme t:\n",
+    "  slot wall -> @cobblestone\n",
+    "\n",
+    "struct s size=7x5\n",
+    "  floor mat_slot=wall\n",
+    "  walls mat_slot=wall height=4\n",
+    "  roof kind=flat mat_slot=wall overhang=1\n",
+    "  dispenser id=p at=inside.back offset=2 y=1 fired_by=sig.p\n",
+    "  lever id=sw at=inside.back offset=2 y=3 -> sig.a\n",
+    "  logic sig.p = not sig.a\n",
+    "  circuit region=floor void=4\n",
+);
+
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -212,34 +243,56 @@ pub fn nbt_body(path: &Path) -> Vec<u8> {
     body
 }
 
-/// The value of every string tag named `name` in an uncompressed NBT `body`, in the order written;
-/// `little_endian` is Bedrock's byte order, as a `.mcstructure` writes it.
-pub fn string_tags(body: &[u8], name: &str, little_endian: bool) -> Vec<String> {
-    let length = |at: usize| {
-        let pair = [body[at], body[at + 1]];
-        usize::from(if little_endian {
-            u16::from_le_bytes(pair)
-        } else {
-            u16::from_be_bytes(pair)
-        })
-    };
+/// Where the payload of each tag of type `type_id` named `name` starts in an uncompressed NBT
+/// `body`, in the order written; `little_endian` is Bedrock's byte order.
+fn tag_payloads(body: &[u8], type_id: u8, name: &str, little_endian: bool) -> Vec<usize> {
     let name_length = u16::try_from(name.len()).expect("a tag name fits a u16");
-    let mut header = vec![8];
+    let mut header = vec![type_id];
     header.extend(if little_endian {
         name_length.to_le_bytes()
     } else {
         name_length.to_be_bytes()
     });
     header.extend(name.as_bytes());
-    let mut values = Vec::new();
-    let mut at = 0;
-    while let Some(found) = body[at..].windows(header.len()).position(|w| w == header) {
-        let start = at + found + header.len();
-        let end = start + 2 + length(start);
-        values.push(String::from_utf8(body[start + 2..end].to_vec()).expect("utf-8 string tag"));
-        at = end;
-    }
-    values
+    body.windows(header.len())
+        .enumerate()
+        .filter(|(_, window)| *window == header.as_slice())
+        .map(|(at, _)| at + header.len())
+        .collect()
+}
+
+/// The value of every string tag named `name` in an uncompressed NBT `body`, in the order written;
+/// `little_endian` is Bedrock's byte order, as a `.mcstructure` writes it.
+pub fn string_tags(body: &[u8], name: &str, little_endian: bool) -> Vec<String> {
+    tag_payloads(body, 8, name, little_endian)
+        .into_iter()
+        .map(|start| {
+            let pair = [body[start], body[start + 1]];
+            let length = usize::from(if little_endian {
+                u16::from_le_bytes(pair)
+            } else {
+                u16::from_be_bytes(pair)
+            });
+            String::from_utf8(body[start + 2..start + 2 + length].to_vec())
+                .expect("utf-8 string tag")
+        })
+        .collect()
+}
+
+/// The value of every int tag named `name` in an uncompressed NBT `body`, in the order written;
+/// `little_endian` is Bedrock's byte order.
+pub fn int_tags(body: &[u8], name: &str, little_endian: bool) -> Vec<i32> {
+    tag_payloads(body, 3, name, little_endian)
+        .into_iter()
+        .map(|start| {
+            let bytes: [u8; 4] = body[start..start + 4].try_into().expect("four bytes");
+            if little_endian {
+                i32::from_le_bytes(bytes)
+            } else {
+                i32::from_be_bytes(bytes)
+            }
+        })
+        .collect()
 }
 
 /// Whether `needle` occurs in `hay`; both writers store a block id as a string tag's bytes.

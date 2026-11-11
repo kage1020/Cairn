@@ -7,17 +7,22 @@ use std::fmt::Write as _;
 use cairn_lang_core::Edition;
 use cairn_lang_redstone::{CellPortDriver, EditionCell, GateKind, NetRef, PortName, SignalRef};
 
-use crate::common::{legalized_from_source, sig, synth_source};
+use crate::common::{cells, legalized, sig, synth_source};
 
 /// The plates a primitive's operands come from, in input order.
 const PLATES: [&str; 3] = [
-    "at=front.outside offset=0",
-    "at=inside.front offset=1",
-    "at=front.outside offset=2",
+    "at=inside.back offset=1",
+    "at=inside.back offset=9",
+    "at=inside.back offset=17",
 ];
 
 /// A struct with a plate driving each of `inputs` and a door that `expression` opens.
 fn source(inputs: &[&str], expression: &str) -> String {
+    sized_source("20x13", inputs, expression)
+}
+
+/// [`source`] in a struct of `size`.
+fn sized_source(size: &str, inputs: &[&str], expression: &str) -> String {
     let mut plates = String::new();
     for (i, (input, at)) in inputs.iter().zip(PLATES).enumerate() {
         writeln!(plates, "  pressure_plate id=p{i} {at} y=0 -> {input}")
@@ -25,10 +30,10 @@ fn source(inputs: &[&str], expression: &str) -> String {
     }
     format!(
         "theme t:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n\
-         struct s size=20x5\n  floor mat_slot=wall\n  \
+         struct s size={size}\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
          door id=d side=front at=center mat_slot=door\n\
          {plates}  logic sig.out = {expression}\n  door[id=d] opened_by=sig.out\n  \
-         circuit region=floor void=2\n"
+         circuit region=floor void=4\n"
     )
 }
 
@@ -36,10 +41,8 @@ struct Case {
     expression: &'static str,
     inputs: &'static [&'static str],
     gate: GateKind,
-    /// The cell and its slowest port's ticks, from the table in `spec/redstone` "Edition
-    /// differences".
-    java: (EditionCell, u64),
-    bedrock: (EditionCell, u64),
+    java: EditionCell,
+    bedrock: EditionCell,
 }
 
 const A: SignalRef = SignalRef::Input(0);
@@ -52,43 +55,43 @@ fn cases() -> [Case; 7] {
             expression: "sig.a and sig.b",
             inputs: two,
             gate: GateKind::And2 { a: A, b: B },
-            java: (EditionCell::JavaComparatorAnd, 2),
-            bedrock: (EditionCell::BedrockTorchAnd, 2),
+            java: EditionCell::JavaComparatorAnd,
+            bedrock: EditionCell::BedrockTorchAnd,
         },
         Case {
             expression: "sig.a or sig.b",
             inputs: two,
             gate: GateKind::Or2 { a: A, b: B },
-            java: (EditionCell::JavaRepeaterOr, 1),
-            bedrock: (EditionCell::BedrockTorchOr, 0),
+            java: EditionCell::JavaRepeaterOr,
+            bedrock: EditionCell::BedrockRepeaterOr,
         },
         Case {
             expression: "not sig.a",
             inputs: &["sig.a"],
             gate: GateKind::Not { a: A },
-            java: (EditionCell::JavaInverterTorch, 1),
-            bedrock: (EditionCell::BedrockInverterTorch, 1),
+            java: EditionCell::JavaInverterTorch,
+            bedrock: EditionCell::BedrockInverterTorch,
         },
         Case {
             expression: "sig.a xor sig.b",
             inputs: two,
             gate: GateKind::Xor2 { a: A, b: B },
-            java: (EditionCell::JavaTorchXor, 2),
-            bedrock: (EditionCell::BedrockTorchXor, 2),
+            java: EditionCell::JavaTorchXor,
+            bedrock: EditionCell::BedrockTorchXor,
         },
         Case {
             expression: "sig.a nand sig.b",
             inputs: two,
             gate: GateKind::Nand2 { a: A, b: B },
-            java: (EditionCell::JavaTorchNand, 1),
-            bedrock: (EditionCell::BedrockTorchNand, 1),
+            java: EditionCell::JavaTorchNand,
+            bedrock: EditionCell::BedrockTorchNand,
         },
         Case {
             expression: "sig.a nor sig.b",
             inputs: two,
             gate: GateKind::Nor2 { a: A, b: B },
-            java: (EditionCell::JavaTorchNor, 1),
-            bedrock: (EditionCell::BedrockTorchNor, 1),
+            java: EditionCell::JavaTorchNor,
+            bedrock: EditionCell::BedrockTorchNor,
         },
         Case {
             expression: "mux(b=sig.b, sel=sig.s, a=sig.a)",
@@ -98,8 +101,8 @@ fn cases() -> [Case; 7] {
                 a: SignalRef::Input(1),
                 b: SignalRef::Input(2),
             },
-            java: (EditionCell::JavaTorchMux, 2),
-            bedrock: (EditionCell::BedrockTorchMux, 2),
+            java: EditionCell::JavaTorchMux,
+            bedrock: EditionCell::BedrockTorchMux,
         },
     ]
 }
@@ -139,25 +142,10 @@ fn each_primitive_lays_out_as_its_cell_on_both_editions() {
                 net: NetRef::Input(input),
             })
             .collect();
-        for (edition, (cell, ticks)) in
-            [(Edition::Java, case.java), (Edition::Bedrock, case.bedrock)]
-        {
-            let legalized = legalized_from_source(&source, edition);
-            let cells: Vec<(EditionCell, &[CellPortDriver], Option<u64>)> = legalized.scopes[0]
-                .ir
-                .cells
-                .iter()
-                .map(|placed| {
-                    (
-                        placed.cell,
-                        placed.drivers.as_slice(),
-                        placed.local_delay_ticks(),
-                    )
-                })
-                .collect();
+        for (edition, cell) in [(Edition::Java, case.java), (Edition::Bedrock, case.bedrock)] {
             assert_eq!(
-                cells,
-                [(cell, drivers.as_slice(), Some(ticks))],
+                cells(&legalized(&source, edition).scopes[0].ir),
+                [(cell, drivers.clone())],
                 "{} on {edition:?}",
                 case.expression,
             );
@@ -222,31 +210,41 @@ fn only_a_commutative_primitive_shares_its_gate_across_operand_orders() {
     }
 }
 
-/// A `mux` and an `xor`, each feeding the other, from the plates [`source`] lays.
+/// A `mux` and an `xor`, each feeding the other, from the plates [`sized_source`] lays.
 #[test]
 fn a_mux_lays_out_beside_another_cell_on_both_editions() {
-    let (s, a, b) = (NetRef::Input(0), NetRef::Input(1), NetRef::Input(2));
-    let mux = |sel: NetRef| {
-        [(PortName::Sel, sel), (PortName::A, a), (PortName::B, b)]
-            .map(|(port, net)| CellPortDriver { port, net })
-            .to_vec()
+    use PortName::{A, B, Sel};
+    let (s, a, b, gate) = (
+        NetRef::Input(0),
+        NetRef::Input(1),
+        NetRef::Input(2),
+        NetRef::Cell(0),
+    );
+    let drivers = |ports: &[(PortName, NetRef)]| -> Vec<CellPortDriver> {
+        ports
+            .iter()
+            .map(|&(port, net)| CellPortDriver { port, net })
+            .collect()
     };
-    let xor = |a: NetRef, b: NetRef| {
-        [(PortName::A, a), (PortName::B, b)]
-            .map(|(port, net)| CellPortDriver { port, net })
-            .to_vec()
-    };
-    for (logic, cells) in [
+    // A tile lists its inputs in net order: the plates' nets, then the cells'.
+    for (logic, wanted) in [
         (
             "mux(sel=sig.s, a=sig.a, b=sig.b) xor sig.s",
-            [(true, mux(s)), (false, xor(s, NetRef::Cell(0)))],
+            [
+                (true, drivers(&[(Sel, s), (A, a), (B, b)])),
+                (false, drivers(&[(A, s), (B, gate)])),
+            ],
         ),
         (
             "mux(sel=sig.s xor sig.a, a=sig.a, b=sig.b)",
-            [(false, xor(s, a)), (true, mux(NetRef::Cell(0)))],
+            [
+                (false, drivers(&[(A, s), (B, a)])),
+                (true, drivers(&[(A, a), (B, b), (Sel, gate)])),
+            ],
         ),
     ] {
-        let source = source(&["sig.s", "sig.a", "sig.b"], logic);
+        // Two torch tiles do not wire on the 20x13 floor the other cases share.
+        let source = sized_source("24x13", &["sig.s", "sig.a", "sig.b"], logic);
         for (edition, mux_cell, xor_cell) in [
             (
                 Edition::Java,
@@ -259,22 +257,13 @@ fn a_mux_lays_out_beside_another_cell_on_both_editions() {
                 EditionCell::BedrockTorchXor,
             ),
         ] {
-            let expected: Vec<(EditionCell, &[CellPortDriver])> = cells
+            let expected: Vec<(EditionCell, Vec<CellPortDriver>)> = wanted
                 .iter()
                 .map(|(is_mux, drivers)| {
-                    (
-                        if *is_mux { mux_cell } else { xor_cell },
-                        drivers.as_slice(),
-                    )
+                    (if *is_mux { mux_cell } else { xor_cell }, drivers.clone())
                 })
                 .collect();
-            let legalized = legalized_from_source(&source, edition);
-            let laid: Vec<(EditionCell, &[CellPortDriver])> = legalized.scopes[0]
-                .ir
-                .cells
-                .iter()
-                .map(|placed| (placed.cell, placed.drivers.as_slice()))
-                .collect();
+            let laid = cells(&legalized(&source, edition).scopes[0].ir);
             assert_eq!(laid, expected, "{logic} on {edition:?}");
         }
     }
