@@ -4,7 +4,9 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArrayIr, Dims, PaletteIndex, ResolvedMember};
 use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{CircuitLayout, Diagnostic, build_circuits, compile_legalize};
+use cairn_lang_redstone::{
+    CircuitEntity, CircuitLayout, Diagnostic, build_circuits, compile_legalize,
+};
 
 use crate::common::{EXAMPLES, Named, built, delayed, findings, load_example};
 
@@ -49,7 +51,8 @@ fn comparators(layout: &CircuitLayout) -> Vec<((u32, u32, u32), i32)> {
                 coord(block.at.y) + under,
                 coord(block.at.z),
             );
-            Some((at, i32::from(block.output_signal?)))
+            let CircuitEntity::Comparator { output_signal } = block.entity?;
+            Some((at, i32::from(output_signal)))
         })
         .collect();
     found.sort_unstable();
@@ -65,7 +68,7 @@ fn each_example_lays_its_circuit_under_its_struct_which_rises_whole() {
             assert_eq!(found, [], "{name} on {edition:?}");
             let key = format!("struct::{structure}");
             let layout = circuit(&source, edition);
-            let void = layout.region.void;
+            let void = layout.region.void();
             let (was, now) = (&before.structures[&key], &after.structures[&key]);
             assert_eq!(
                 now.dims,
@@ -194,6 +197,39 @@ fn a_finding_in_any_phase_leaves_every_struct_as_it_was() {
                 "E_ROUTE_UNREACHABLE_COMPONENT",
                 "lever id=l at=inside.back offset=2 y=2 -> sig.a"
             )],
+        );
+        assert_eq!(after, before, "{edition:?}");
+    }
+}
+
+/// `alpha` lays its circuit whole; `beta`'s misses its bound only once legalized.
+#[test]
+fn a_finding_on_one_struct_leaves_every_struct_as_it_was() {
+    let source = "theme t:\n  slot wall -> @oak_planks\n\n\
+                  struct alpha size=9x7\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+                  door id=d side=front at=center\n  \
+                  pressure_plate id=p at=inside.front offset=2 y=0 -> sig.a\n  \
+                  logic sig.n = not sig.a\n  door[id=d] opened_by=sig.n\n  \
+                  circuit region=floor void=3\n\n\
+                  struct beta size=9x7\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+                  door id=d side=front at=center\n  \
+                  pressure_plate id=p at=inside.front offset=2 y=0 -> sig.b\n  \
+                  logic sig.m = not sig.b\n  door[id=d] opened_by=sig.m\n  \
+                  circuit region=floor void=3\n  \
+                  assert latency(sig.b -> sig.m) <= 0\n";
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let (before, after, found) = build(source, edition);
+        let codes: Vec<(&str, &str)> = findings(source, &found)
+            .into_iter()
+            .map(|(code, at, _, _)| (code, at))
+            .collect();
+        assert_eq!(
+            codes,
+            [(
+                "E_SIM_ASSERTION_FAILED",
+                "assert latency(sig.b -> sig.m) <= 0"
+            )],
+            "{edition:?}",
         );
         assert_eq!(after, before, "{edition:?}");
     }

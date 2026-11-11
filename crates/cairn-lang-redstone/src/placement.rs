@@ -30,10 +30,6 @@ pub const MIN_VOID: u32 = 3;
 /// The fewest layers a reservation holding a `counter` needs, its feedback crossing a layer up.
 pub const MIN_COUNTER_VOID: u32 = 4;
 
-/// The most layers a circuit lies in: the bottom one, the cells', two for wires to cross in and
-/// the one under the floor. A deeper reservation leaves the layers under these empty.
-pub const MAX_CIRCUIT_LAYERS: u32 = 5;
-
 /// The clear columns between the parts of a cell's tile and another tile's, widest first, that
 /// placement tries.
 pub(crate) const MARGINS: [i32; 3] = [2, 1, 0];
@@ -117,21 +113,19 @@ pub fn compile_placement(
                 extend_unique(&mut out.diagnostics, vec![too_large(&scope, region)]);
                 continue;
             }
-            let layers = region.void.min(MAX_CIRCUIT_LAYERS);
+            let region = Reservation::new(
+                region.label.clone(),
+                region.void,
+                array.dims.x,
+                array.dims.z,
+                region.span.clone(),
+            );
             let (coupled, findings) =
-                coupling::couple(ir, members, array, resolved, layers, &scope);
+                coupling::couple(ir, members, array, resolved, region.layers, &scope);
             if !findings.is_empty() {
                 extend_unique(&mut out.diagnostics, findings);
                 continue;
             }
-            let region = Reservation {
-                label: region.label.clone(),
-                void: region.void,
-                layers,
-                width: array.dims.x,
-                depth: array.dims.z,
-                span: region.span.clone(),
-            };
             if let Some(diagnostic) = overlong(&scope, ir, &region) {
                 extend_unique(&mut out.diagnostics, vec![diagnostic]);
                 continue;
@@ -431,7 +425,8 @@ fn join(
     nets
 }
 
-/// The circuit of `ir` under the struct `structure`, its cells laid `margin` columns apart.
+/// The circuit of `ir` under the struct `structure`, its cells laid at each of [`MARGINS`] and the
+/// layout whose cells lie nearest the tiles they share nets with kept.
 fn place(
     scope: &str,
     ir: &EditionNetlistIr,

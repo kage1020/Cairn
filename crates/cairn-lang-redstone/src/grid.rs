@@ -4,7 +4,7 @@
 use cairn_lang_core::block_array::Face;
 
 use crate::geometry::{SIDES, Voxel};
-use crate::part::Part;
+use crate::part::{Part, RepeaterDelay};
 use crate::placement_ir::{CircuitLayout, PlacedTile, Reservation, Wire};
 use crate::tile::Template;
 
@@ -194,8 +194,8 @@ impl Grid {
         Ok(())
     }
 
-    /// Lays `tile`, the layout's tile `index`, with its reservations around it and the blocks
-    /// under its parts above the bottom layers; `labels` names the net of each port and output.
+    /// Lays `tile`, the layout's tile `index`, with the cells it keeps clear around it and the
+    /// blocks under its parts above the cells' layer; `labels` names each port's and output's net.
     pub(crate) fn lay_tile(
         &mut self,
         index: usize,
@@ -246,7 +246,7 @@ impl Grid {
         })
     }
 
-    /// Lays `wire`, the dust of net `net`.
+    /// Lays `wire`, the dust of net `net`, each buffer repeater in place of a block of that dust.
     pub(crate) fn lay_wire(&mut self, net: usize, wire: &Wire) -> Result<(), Collision> {
         for at in &wire.supports {
             self.lay_support(*at)?;
@@ -262,11 +262,14 @@ impl Grid {
             }
         }
         for buffer in &wire.buffers {
+            if self.get(buffer.at) != Some(Slot::Dust(Label::Net(net))) {
+                return Err(Collision { at: buffer.at });
+            }
             self.set(
                 buffer.at,
                 Slot::Part(Part::Repeater {
                     facing: buffer.facing,
-                    delay: 1,
+                    delay: RepeaterDelay::ONE,
                 }),
             );
         }

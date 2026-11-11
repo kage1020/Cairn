@@ -8,10 +8,13 @@
     `delay` whose row of two repeaters a stage is longer than the struct is `E_ROUTE_CONGESTION`;
   - a sensor or actuator the circuit under the floor cannot reach, such as a lever above the floor
     row, is `E_ROUTE_UNREACHABLE_COMPONENT`;
-  - an `assert latency` the laid circuit misses is `E_SIM_ASSERTION_FAILED`.
+  - an `assert latency` the laid circuit misses is `E_SIM_ASSERTION_FAILED`;
+  - a target whose pack declares no block for a circuit token, such as the new `@circuit.block`, is
+    `E_UNKNOWN_ABSTRACT_TOKEN` on the `circuit` line.
 
-  Without a pinned edition, `check` and `info` report a circuit finding only when every edition
-  raises it at the same place, and `info` reports each edition's own under that edition.
+  Without a pinned edition, `check` and `info` report a circuit finding when every edition raises it
+  at the same place, or as an edition's own when it or one of its notes lies on a line under that
+  edition's guards, and `info` reports each edition's own under that edition.
 - *(core)* A struct with a circuit is `void` layers taller, every member standing over the circuit,
   and a `def` placed in a `site` has its origin lowered by as many, so its structure file, its
   `cairn lower` output and its lockfile hash differ from one built before.

@@ -49,6 +49,10 @@ impl Serialize for LayoutStage {
     }
 }
 
+/// The most layers a circuit lies in: the bottom one, the cells', two for wires to cross in and
+/// the one under the floor.
+pub const MAX_CIRCUIT_LAYERS: u32 = 5;
+
 /// The room a `circuit` line reserves: `void` layers under the whole footprint of the struct, the
 /// circuit in the top `layers` of them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -56,10 +60,10 @@ pub struct Reservation {
     /// `region=<label>`.
     pub label: String,
     /// `void=<N>`, the layers under the base plane.
-    pub void: u32,
+    pub(crate) void: u32,
     /// The layers the circuit lies in, the top ones: `void`, or at most
-    /// [`crate::placement::MAX_CIRCUIT_LAYERS`], the layers under them left empty.
-    pub layers: u32,
+    /// [`MAX_CIRCUIT_LAYERS`], the layers under them left empty.
+    pub(crate) layers: u32,
     /// The built struct's extent along `x`.
     pub width: u32,
     /// The built struct's extent along `z`.
@@ -70,6 +74,35 @@ pub struct Reservation {
 }
 
 impl Reservation {
+    /// The reservation `void` layers deep under a struct `width` by `depth`.
+    ///
+    /// # Panics
+    ///
+    /// On a `void` of 0, which lowering refuses.
+    pub(crate) fn new(label: String, void: u32, width: u32, depth: u32, span: Span) -> Self {
+        assert!(void > 0, "a `circuit` line reserves at least one layer");
+        Self {
+            label,
+            void,
+            layers: void.min(MAX_CIRCUIT_LAYERS),
+            width,
+            depth,
+            span,
+        }
+    }
+
+    /// `void=<N>`, the layers under the base plane.
+    #[must_use]
+    pub const fn void(&self) -> u32 {
+        self.void
+    }
+
+    /// The layers the circuit lies in, the top ones.
+    #[must_use]
+    pub const fn layers(&self) -> u32 {
+        self.layers
+    }
+
     /// The top layer, the one under the base plane.
     #[must_use]
     pub fn top(&self) -> i32 {
@@ -191,7 +224,7 @@ pub struct Wire {
     /// Every voxel of dust, a repeater's included.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dust: Vec<Voxel>,
-    /// The blocks laid under dust above the bottom layers.
+    /// The blocks laid under dust above the cells' layer.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub supports: Vec<Voxel>,
     /// The voxels a climb needs empty.
@@ -227,9 +260,20 @@ pub struct CircuitBlock {
     pub at: Voxel,
     /// What it is.
     pub state: BlockState,
-    /// A comparator's output strength, which its block entity holds.
+    /// Its block entity, if it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_signal: Option<u8>,
+    pub entity: Option<CircuitEntity>,
+}
+
+/// The block entity of a [`CircuitBlock`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CircuitEntity {
+    /// A comparator's, holding its output strength.
+    Comparator {
+        /// The strength it outputs.
+        output_signal: u8,
+    },
 }
 
 /// One scope's circuit, from placement to legalization.
@@ -240,7 +284,7 @@ pub struct CircuitLayout {
     /// The built struct the circuit lies under, keyed as the block array keys it.
     pub structure: String,
     /// How far place-and-route has come.
-    pub stage: LayoutStage,
+    pub(crate) stage: LayoutStage,
     /// The reservation.
     pub region: Reservation,
     /// Every tile: the cells', then the pads and the risers.
@@ -268,6 +312,12 @@ pub struct CircuitLayout {
 }
 
 impl CircuitLayout {
+    /// How far place-and-route has come.
+    #[must_use]
+    pub const fn stage(&self) -> LayoutStage {
+        self.stage
+    }
+
     /// The tile realising the netlist's cell `index`, the cells' tiles laid in the netlist's order.
     #[must_use]
     pub fn cell_tile(&self, index: usize) -> Option<&PlacedTile> {

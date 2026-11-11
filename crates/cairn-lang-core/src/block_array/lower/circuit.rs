@@ -14,10 +14,8 @@ use crate::block_array::args::{
     NonNegRead, diag_deferred_member_noted, diag_invalid_member, nonneg_int_or_refuse,
 };
 
-/// Check a `circuit region=<label> void=<N>` line's shape without emitting voxels
-/// (`spec/redstone` "Place-and-route").
-///
-/// `void=0` is refused too: an author who wants no headroom drops the line.
+/// Check a `circuit region=<label> void=<N>` line's shape without emitting voxels, a `void` that
+/// reserves no layer included (`spec/redstone` "Place-and-route").
 pub(super) fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Diagnostic>) {
     let Some(raw_region) = member.arguments.get("region") else {
         diagnostics.push(diag_invalid_member(
@@ -51,14 +49,16 @@ pub(super) fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Di
         NonNegRead::Valid(0) => {
             diagnostics.push(diag_invalid_member(
                 member,
-                "circuit `void=0` reserves no service layer; use a `u32` value >= 1".to_owned(),
+                "circuit `void=0` reserves no layer under the base plane; use a whole number of at least 1"
+                    .to_owned(),
                 Vec::new(),
             ));
         }
         NonNegRead::Absent => {
             diagnostics.push(diag_invalid_member(
                 member,
-                "circuit requires `void=<N>` (a `u32` service-layer height >= 1)".to_owned(),
+                "circuit requires `void=<N>`, the layers it reserves under the base plane, at least 1"
+                    .to_owned(),
                 Vec::new(),
             ));
         }

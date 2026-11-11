@@ -1,6 +1,7 @@
 use cairn_lang_core::block_array::Face;
 
 use super::*;
+use crate::part::RepeaterDelay;
 
 fn v(x: i32, y: i32, z: i32) -> Voxel {
     Voxel::new(x, y, z)
@@ -104,7 +105,7 @@ fn a_repeater_stretches_a_short_pulse_to_its_delay() {
             v(2, 1, 5),
             Part::Repeater {
                 facing: Face::East,
-                delay: 3,
+                delay: RepeaterDelay::new(3),
             },
         ),
         (v(3, 1, 5), Part::Dust),
@@ -131,7 +132,7 @@ fn a_repeater_driven_into_from_the_side_holds_its_output() {
             v(2, 1, 5),
             Part::Repeater {
                 facing: Face::East,
-                delay: 1,
+                delay: RepeaterDelay::ONE,
             },
         ),
         (v(3, 1, 5), Part::Dust),
@@ -140,7 +141,7 @@ fn a_repeater_driven_into_from_the_side_holds_its_output() {
             v(2, 1, 4),
             Part::Repeater {
                 facing: Face::South,
-                delay: 1,
+                delay: RepeaterDelay::ONE,
             },
         ),
     ];
@@ -200,4 +201,36 @@ fn a_torch_powers_the_block_over_it_whole() {
     assert!(sim.settle(4));
     assert!(!sim.is_on(v(2, 1, 5)));
     assert_eq!(sim.power(v(2, 3, 5)), 0);
+}
+
+/// A torch whose dust runs back round into the block it hangs on turns itself off a tick after it
+/// lights, so the circuit never rests.
+#[test]
+fn a_torch_that_powers_its_own_block_never_rests() {
+    let mut parts = vec![
+        (v(3, 1, 5), Part::Block),
+        (v(4, 1, 5), Part::Torch { facing: Face::East }),
+    ];
+    for at in [
+        v(5, 1, 5),
+        v(5, 1, 6),
+        v(5, 1, 7),
+        v(4, 1, 7),
+        v(3, 1, 7),
+        v(2, 1, 7),
+        v(1, 1, 7),
+        v(1, 1, 6),
+        v(1, 1, 5),
+        v(2, 1, 5),
+    ] {
+        parts.push((at, Part::Dust));
+    }
+    for x in 0..10 {
+        for z in 0..10 {
+            parts.push((v(x, 0, z), Part::Block));
+        }
+    }
+    let mut sim = Sim::new(parts, [], Order::Forward);
+    let ticks = sim.rest_ticks();
+    assert!(!sim.settle(ticks));
 }

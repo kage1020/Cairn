@@ -6,7 +6,7 @@ use cairn_lang_core::block_array::Face;
 use crate::edition_netlist_ir::EditionCell;
 use crate::geometry::{Rel, SIDES};
 use crate::netlist_ir::PortName;
-use crate::part::Part;
+use crate::part::{Part, RepeaterDelay};
 
 /// The most stages a `pulse` cell holds: its inverted operand runs one block of dust past each of
 /// its repeaters, and dust carries 15 blocks.
@@ -19,7 +19,7 @@ pub const MAX_COUNTER_STAGES: u32 = 4;
 /// The delay of each repeater a `delay` or `pulse` runs its operand through: a repeater stretches
 /// a change shorter than its delay, and one as long meets its own tick, so only a one-tick
 /// repeater passes a change held for a stage as it came under every update order.
-const MACRO_REPEATER_TICKS: u8 = 1;
+const MACRO_REPEATER: RepeaterDelay = RepeaterDelay::ONE;
 
 /// Which input a tile's port takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -91,7 +91,7 @@ pub(crate) struct Template {
     pub(crate) probe: Option<Rel>,
 }
 
-/// The reservations a template's parts need around them.
+/// The cells a template's parts keep clear around them.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Keepout {
     /// Cells no dust and no diode may take: a torch or a block it would power, the sides of
@@ -212,7 +212,7 @@ impl Builder {
         self.put(x, 0, z, Part::Torch { facing })
     }
 
-    fn repeater(&mut self, x: i32, z: i32, facing: Face, delay: u8) -> &mut Self {
+    fn repeater(&mut self, x: i32, z: i32, facing: Face, delay: RepeaterDelay) -> &mut Self {
         self.put(x, 0, z, Part::Repeater { facing, delay })
     }
 
@@ -282,12 +282,12 @@ pub(crate) fn cell_template(cell: EditionCell) -> Template {
 
 /// The columns a `delay` of `stages` takes in its one row: its port, its repeaters and its output.
 pub(crate) fn delay_columns(stages: u32) -> u64 {
-    (2 * u64::from(stages)).div_ceil(u64::from(MACRO_REPEATER_TICKS)) + 2
+    (2 * u64::from(stages)).div_ceil(u64::from(MACRO_REPEATER.ticks())) + 2
 }
 
-/// How many repeaters of [`MACRO_REPEATER_TICKS`] take `ticks` in all.
+/// How many repeaters of [`MACRO_REPEATER`] take `ticks` in all.
 fn repeaters(ticks: u32) -> i32 {
-    i32::try_from(ticks.div_ceil(u32::from(MACRO_REPEATER_TICKS))).unwrap_or(i32::MAX)
+    i32::try_from(ticks.div_ceil(u32::from(MACRO_REPEATER.ticks()))).unwrap_or(i32::MAX)
 }
 
 /// `count` as a coordinate.
@@ -362,9 +362,9 @@ fn torch_and() -> Template {
 fn repeater_or() -> Template {
     Builder::default()
         .port(-1, 0, PortName::A, 1)
-        .repeater(0, 0, Face::East, 1)
+        .repeater(0, 0, Face::East, RepeaterDelay::ONE)
         .out(1, 0, 0)
-        .repeater(1, 1, Face::North, 1)
+        .repeater(1, 1, Face::North, RepeaterDelay::ONE)
         .port(1, 2, PortName::B, 1)
         .done()
 }
@@ -458,7 +458,7 @@ fn delay(stages: u32) -> Template {
     builder.port(-1, 0, PortName::A, 1);
     let r = repeaters(stages.saturating_mul(2));
     for x in 0..r {
-        builder.repeater(x, 0, Face::East, MACRO_REPEATER_TICKS);
+        builder.repeater(x, 0, Face::East, MACRO_REPEATER);
     }
     builder.out(r, 0, 0).done()
 }
@@ -470,7 +470,7 @@ fn pulse(stages: u32) -> Template {
     let mut builder = Builder::default();
     builder.port(-1, 0, PortName::A, 3).dust(0, 0);
     for x in 1..=r {
-        builder.repeater(x, 0, Face::East, MACRO_REPEATER_TICKS);
+        builder.repeater(x, 0, Face::East, MACRO_REPEATER);
     }
     builder
         .dust(r + 1, 0)
@@ -502,7 +502,7 @@ fn edge_falling() -> Template {
         .dust(0, 1)
         .block(0, 2)
         .torch(1, 2, Face::East)
-        .repeater(2, 2, Face::East, 1)
+        .repeater(2, 2, Face::East, RepeaterDelay::ONE)
         .row(3, 4, 2)
         .dust(4, 1)
         .done()
@@ -530,7 +530,7 @@ fn latch() -> Template {
         .out(3, 0, 0)
         .out(2, 0, 0)
         .dust(2, 1)
-        .repeater(-1, 4, Face::North, 2)
+        .repeater(-1, 4, Face::North, RepeaterDelay::TWO)
         .dust(-1, 3)
         .port(-2, 5, PortName::Reset, 10)
         .row(-1, 5, 5)
@@ -563,7 +563,7 @@ fn counter(stages: u32) -> Template {
             0,
             Part::Repeater {
                 facing: Face::East,
-                delay: 1,
+                delay: RepeaterDelay::ONE,
             },
         )
         .put(-3, 1, 0, Part::Dust)
@@ -576,10 +576,10 @@ fn counter(stages: u32) -> Template {
     builder.template.air.push(Rel::new(-1, 1, 0));
     for i in 1..=n {
         builder
-            .repeater(2 * i, 0, Face::East, 1)
-            .repeater(2 * i + 1, 0, Face::East, 1)
-            .repeater(2 * i, -1, Face::South, 2)
-            .repeater(2 * i + 1, 1, Face::North, 1)
+            .repeater(2 * i, 0, Face::East, RepeaterDelay::ONE)
+            .repeater(2 * i + 1, 0, Face::East, RepeaterDelay::ONE)
+            .repeater(2 * i, -1, Face::South, RepeaterDelay::TWO)
+            .repeater(2 * i + 1, 1, Face::North, RepeaterDelay::ONE)
             .seed(2 * i + 1, 0, 1, true);
     }
     builder.seed(2, 0, 0, true).out(2 * n + 2, 0, 0).done()
@@ -614,7 +614,11 @@ pub(crate) fn pad_template(kind: PadKind) -> Template {
                 0,
                 Part::Repeater {
                     facing: Face::East,
-                    delay: if kind == PadKind::Observer { 2 } else { 1 },
+                    delay: if kind == PadKind::Observer {
+                        RepeaterDelay::TWO
+                    } else {
+                        RepeaterDelay::ONE
+                    },
                 },
             )
             .out(2, 0, 0),

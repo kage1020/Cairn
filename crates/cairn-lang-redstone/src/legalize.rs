@@ -1,17 +1,18 @@
 //! Stage 4 of `spec/redstone` "Place-and-route": every voxel of the reservation as a block, each
 //! torch, repeater, comparator and dust in the state the circuit rests in with its sensors off.
 
+use std::collections::BTreeSet;
+
 use cairn_lang_core::block_array::{BlockState, TargetRegistry};
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, compiler_bug, error_with_footer, overlapping};
 use crate::geometry::{SIDES, Voxel};
-use crate::grid::{Grid, Slot};
+use crate::grid::{Collision, Grid, Slot};
 use crate::part::Part;
-use crate::placement_ir::{CircuitBlock, CircuitLayout, LayoutStage, ScopedCircuitLayout};
+use crate::placement_ir::{
+    CircuitBlock, CircuitEntity, CircuitLayout, LayoutStage, ScopedCircuitLayout,
+};
 use crate::sim::{Connection, Order, Sim};
-
-/// The ticks a circuit is given to come to rest before legalization gives up on it.
-const REST_TICKS: u32 = 256;
 
 /// Output of a [`compile_legalize`] run: the legalized circuits and the findings.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -24,7 +25,11 @@ pub struct LegalizeOutput {
 }
 
 /// Writes every block of every circuit of `delayed`, its ids read from `registry`'s tokens, or
-/// the vanilla ones without it.
+/// the vanilla ones without it, leaving out one that never rests or whose tokens it lacks.
+///
+/// # Panics
+///
+/// On a circuit delay insertion has not produced.
 #[must_use]
 pub fn compile_legalize(
     delayed: &ScopedCircuitLayout,
@@ -33,14 +38,14 @@ pub fn compile_legalize(
     let mut out = LegalizeOutput::default();
     for entry in &delayed.scopes {
         let scope = format!("{}={}:", entry.kind.label(), entry.name);
-        match legalize(&entry.ir, registry) {
-            Some(layout) => out.scoped.push(entry.kind, entry.name.clone(), layout),
-            None => out.diagnostics.push(error_with_footer(
-                DiagnosticCode::RouteCongestion,
-                entry.ir.region.span.clone(),
-                format!("{scope} the circuit under this struct does not come to rest with its sensors off, so it has no state to be built in"),
-                "Fix: report this as a compiler bug, with the struct; meanwhile widen the struct's `size=WxH` so the circuit is laid differently",
-            )),
+        assert_eq!(
+            entry.ir.stage,
+            LayoutStage::Delayed,
+            "{scope} legalization builds the circuit delay insertion produces",
+        );
+        match legalize(&scope, &entry.ir, registry) {
+            Ok(layout) => out.scoped.push(entry.kind, entry.name.clone(), layout),
+            Err(diagnostic) => out.diagnostics.push(diagnostic),
         }
     }
     out
@@ -97,97 +102,149 @@ pub(crate) fn built(layout: &CircuitLayout) -> Option<Built> {
 pub(crate) fn rest(layout: &CircuitLayout) -> Option<Sim> {
     let Built { parts, seeds } = built(layout)?;
     let mut sim = Sim::new(parts, seeds, Order::Forward);
-    sim.settle(REST_TICKS).then_some(sim)
+    sim.settle(sim.rest_ticks()).then_some(sim)
 }
 
 fn legalize(
+    scope: &str,
     layout: &CircuitLayout,
     registry: Option<&dyn TargetRegistry>,
-) -> Option<CircuitLayout> {
-    let Built { parts, .. } = built(layout)?;
-    let sim = rest(layout)?;
-    let lookup = |token: &str, base: &str| {
-        registry.and_then(|r| r.lookup(token)).map_or_else(
-            || BlockState::bare(base),
-            |state| BlockState::bare(state.id),
-        )
+) -> Result<CircuitLayout, Diagnostic> {
+    let span = || layout.region.span.clone();
+    if let Err(Collision { at }) = Grid::of(layout) {
+        return Err(overlapping(scope, span(), at));
+    }
+    let (Some(Built { parts, .. }), Some(sim)) = (built(layout), rest(layout)) else {
+        return Err(compiler_bug(
+            span(),
+            format!(
+                "{scope} the circuit under this struct does not come to rest with its sensors \
+                 off, so it has no state to be built in"
+            ),
+        ));
     };
+    let mut missing = BTreeSet::new();
     let mut blocks = Vec::with_capacity(parts.len());
     for (at, part) in parts {
-        let (mut state, output) = match part {
-            Part::Block => (lookup("circuit.block", "minecraft:stone"), None),
-            Part::Dust => {
-                let mut state = lookup("redstone_dust.default", "minecraft:redstone_wire");
-                let sides = sim.sides(at);
-                for (face, side) in SIDES.into_iter().zip(sides) {
+        let Resting {
+            token,
+            vanilla,
+            properties,
+            entity,
+        } = resting(part, at, &sim);
+        let id = match registry.map(|r| r.lookup(token)) {
+            None => vanilla.to_owned(),
+            Some(Some(state)) => state.id,
+            Some(None) => {
+                missing.insert(token);
+                vanilla.to_owned()
+            }
+        };
+        let mut state = BlockState::bare(id);
+        for (key, value) in properties {
+            state.properties.insert(key.to_owned(), value);
+        }
+        state.properties.sort_keys();
+        if let Some(id) = registry.and_then(|r| r.spelling(&state)) {
+            state.id = id;
+        }
+        blocks.push(CircuitBlock { at, state, entity });
+    }
+    if !missing.is_empty() {
+        let tokens: Vec<String> = missing.iter().map(|token| format!("`@{token}`")).collect();
+        return Err(error_with_footer(
+            DiagnosticCode::UnknownAbstractToken,
+            span(),
+            format!(
+                "{scope} the circuit under this struct is built of {}, which the registry \
+                 pack's materials catalog does not declare",
+                tokens.join(", ")
+            ),
+            "Fix: declare each in the pack's `materials` catalog (see `spec/materials-themes` \
+             \"Tier-1 tokens\")",
+        ));
+    }
+    let mut layout = layout.clone();
+    layout.blocks = blocks;
+    layout.stage = LayoutStage::Legalized;
+    Ok(layout)
+}
+
+/// A part as the circuit rests: its token, its vanilla id, its properties and its block entity.
+struct Resting {
+    token: &'static str,
+    vanilla: &'static str,
+    properties: Vec<(&'static str, String)>,
+    entity: Option<CircuitEntity>,
+}
+
+/// `part` at `at` as `sim` rests.
+fn resting(part: Part, at: Voxel, sim: &Sim) -> Resting {
+    match part {
+        Part::Block => Resting {
+            token: "circuit.block",
+            vanilla: "minecraft:stone",
+            properties: Vec::new(),
+            entity: None,
+        },
+        Part::Dust => {
+            let mut properties: Vec<(&'static str, String)> = SIDES
+                .into_iter()
+                .zip(sim.sides(at))
+                .map(|(face, side)| {
                     let value = match side {
                         Connection::None => "none",
                         Connection::Side => "side",
                         Connection::Up => "up",
                     };
-                    state
-                        .properties
-                        .insert(face.as_str().to_owned(), value.to_owned());
-                }
-                state
-                    .properties
-                    .insert("power".to_owned(), sim.power(at).to_string());
-                (state, None)
+                    (face.as_str(), value.to_owned())
+                })
+                .collect();
+            properties.push(("power", sim.power(at).to_string()));
+            Resting {
+                token: "redstone_dust.default",
+                vanilla: "minecraft:redstone_wire",
+                properties,
+                entity: None,
             }
-            Part::Torch { facing } => {
-                let mut state = lookup("redstone_torch.wall", "minecraft:redstone_wall_torch");
-                state
-                    .properties
-                    .insert("facing".to_owned(), facing.as_str().to_owned());
-                state
-                    .properties
-                    .insert("lit".to_owned(), sim.is_on(at).to_string());
-                (state, None)
-            }
-            Part::Repeater { facing, delay } => {
-                let mut state = lookup("repeater.default", "minecraft:repeater");
-                state
-                    .properties
-                    .insert("delay".to_owned(), delay.to_string());
-                state
-                    .properties
-                    .insert("facing".to_owned(), facing.opposite().as_str().to_owned());
-                state
-                    .properties
-                    .insert("locked".to_owned(), sim.is_locked(at).to_string());
-                state
-                    .properties
-                    .insert("powered".to_owned(), sim.is_on(at).to_string());
-                (state, None)
-            }
-            Part::Comparator { facing, subtract } => {
-                let mut state = lookup("comparator.default", "minecraft:comparator");
-                let output = sim.output(at);
-                state
-                    .properties
-                    .insert("facing".to_owned(), facing.opposite().as_str().to_owned());
-                state.properties.insert(
-                    "mode".to_owned(),
-                    if subtract { "subtract" } else { "compare" }.to_owned(),
-                );
-                state
-                    .properties
-                    .insert("powered".to_owned(), (output > 0).to_string());
-                (state, Some(output))
-            }
-        };
-        state.properties.sort_keys();
-        if let Some(id) = registry.and_then(|r| r.spelling(&state)) {
-            state.id = id;
         }
-        blocks.push(CircuitBlock {
-            at,
-            state,
-            output_signal: output,
-        });
+        Part::Torch { facing } => Resting {
+            token: "redstone_torch.wall",
+            vanilla: "minecraft:redstone_wall_torch",
+            properties: vec![
+                ("facing", facing.as_str().to_owned()),
+                ("lit", sim.is_on(at).to_string()),
+            ],
+            entity: None,
+        },
+        Part::Repeater { facing, delay } => Resting {
+            token: "repeater.default",
+            vanilla: "minecraft:repeater",
+            properties: vec![
+                ("delay", delay.ticks().to_string()),
+                ("facing", facing.opposite().as_str().to_owned()),
+                ("locked", sim.is_locked(at).to_string()),
+                ("powered", sim.is_on(at).to_string()),
+            ],
+            entity: None,
+        },
+        Part::Comparator { facing, subtract } => {
+            let output = sim.output(at);
+            Resting {
+                token: "comparator.default",
+                vanilla: "minecraft:comparator",
+                properties: vec![
+                    ("facing", facing.opposite().as_str().to_owned()),
+                    (
+                        "mode",
+                        if subtract { "subtract" } else { "compare" }.to_owned(),
+                    ),
+                    ("powered", (output > 0).to_string()),
+                ],
+                entity: Some(CircuitEntity::Comparator {
+                    output_signal: output,
+                }),
+            }
+        }
     }
-    let mut layout = layout.clone();
-    layout.blocks = blocks;
-    layout.stage = LayoutStage::Legalized;
-    Some(layout)
 }

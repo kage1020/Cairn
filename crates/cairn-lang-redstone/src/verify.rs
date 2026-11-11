@@ -9,16 +9,17 @@ use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{AssertIr, IntentModule, Member};
 
 use crate::delay::{BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, NetGraph};
-use crate::diagnostic::{Diagnostic, DiagnosticCode, latency_text};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, compiler_bug, latency_text, overlapping};
 use crate::geometry::Voxel;
-use crate::grid::Grid;
+use crate::grid::{Collision, Grid};
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{NetRef, PortName};
 use crate::placement_ir::{CircuitLayout, LayoutStage, ScopedCircuitLayout, TileKind};
 use crate::tile::{RISER_TICKS, TilePort};
 
 /// An `E_SIM_ASSERTION_FAILED` for each `assert latency` whose slowest path on its scope's
-/// legalized circuit takes more ticks than its bound, each scope's in source order.
+/// legalized circuit takes more ticks than its bound, and an `E_ROUTE_CONGESTION` for a circuit
+/// laid wrong, each scope's in source order.
 ///
 /// # Panics
 ///
@@ -34,28 +35,36 @@ pub fn verify_latency(legalized: &ScopedCircuitLayout, module: &IntentModule) ->
             LayoutStage::Legalized,
             "{scope} latency is counted on the circuit legalization produces",
         );
-        let Ok(grid) = Grid::of(&entry.ir) else {
-            continue;
+        let grid = match Grid::of(&entry.ir) {
+            Ok(grid) => grid,
+            Err(Collision { at }) => {
+                diagnostics.push(overlapping(&scope, entry.ir.region.span.clone(), at));
+                continue;
+            }
         };
         for assertion in asserts
             .get(&(entry.kind, entry.name.as_str()))
             .into_iter()
             .flatten()
         {
-            let path = slowest_path(&grid, &entry.ir, assertion.from, assertion.to);
-            debug_assert!(
-                path.is_some(),
-                "synth refuses a bound naming an undefined signal, or whose end does not depend \
-                 on its start",
-            );
-            let Some(path) = path else {
-                continue;
+            let diagnostic = match slowest_path(&grid, &entry.ir, assertion.from, assertion.to) {
+                Some(path) if path.ticks() <= u64::from(assertion.bound) => continue,
+                Some(path) => failure(&scope, &entry.ir, assertion, &path),
+                // Synth refuses a bound whose end does not depend on its start, so the circuit
+                // lost the path.
+                None => compiler_bug(
+                    entry.ir.region.span.clone(),
+                    format!(
+                        "{scope} {} cannot be counted: the circuit under this struct carries no \
+                         path from {} to where {} is read",
+                        latency_text(assertion.from, assertion.to, assertion.bound),
+                        assertion.from,
+                        assertion.to,
+                    ),
+                ),
             };
-            if path.ticks() > u64::from(assertion.bound) {
-                let diagnostic = failure(&scope, &entry.ir, assertion, &path);
-                if !diagnostics.contains(&diagnostic) {
-                    diagnostics.push(diagnostic);
-                }
+            if !diagnostics.contains(&diagnostic) {
+                diagnostics.push(diagnostic);
             }
         }
     }

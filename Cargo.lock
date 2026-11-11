@@ -237,6 +237,7 @@ dependencies = [
  "cairn-lang-core",
  "criterion",
  "indexmap",
+ "insta",
  "proptest",
  "serde",
  "serde_json",

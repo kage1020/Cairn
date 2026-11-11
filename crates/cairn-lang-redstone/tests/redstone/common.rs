@@ -112,6 +112,11 @@ struct pass size=40x6
   circuit region=floor void=3
 ";
 
+/// The fix of a refusal no layout the stages before accept should reach.
+pub const COMPILER_BUG_FIX: &str = "Fix: report this as a compiler bug, with the struct; meanwhile \
+                                    widen the struct's `size=WxH` so the circuit is laid \
+                                    differently";
+
 /// One finding as `(code, spanned text, primary, notes)`, each note with the text its span covers.
 pub type Finding<'a> = (
     &'static str,
