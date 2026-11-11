@@ -152,10 +152,11 @@ with `E_SIM_ASSERTION_FAILED`. On Java the OR here is two repeaters, one tick; o
 dust merge, which takes none.
 
 **The edition difference is in the cell library, not the language.** The same logic becomes a
-`ComparatorAND` cell on Java and a `TorchAND` on Bedrock. A circuit that depends on quasi-connectivity
-or block-update order is a compile error, `E_NO_PORTABLE_IMPL`, rather than a silent footgun: an
-observer that watches the door the circuit opens, say, or on Java a piston a lever powers through
-the cell above it.
+`ComparatorAND` cell on Java and a `TorchAND` on Bedrock. A circuit that depends on
+quasi-connectivity or block-update order is a compile error, `E_NO_PORTABLE_IMPL`, rather than a
+silent footgun: an observer that watches the door the circuit opens, say, or on Java a driven piston
+a lever powers through the cell above it. For now only `cairn synth --experimental-logic-synth`
+checks for it.
 
 Read on: [Redstone](/spec/redstone/).
 

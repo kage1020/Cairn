@@ -138,6 +138,7 @@ fn dispatch_synth_stage(
         ),
     };
     let edition_netlist = compile_edition_netlist(&netlist, edition);
+    // A member that does not build is `cairn compile`'s finding, so the check reads the rest.
     let portable = verify_portable(ir, &built_for(ir, edition), edition);
     if report_diagnostics(file, source, lines, &portable) {
         return Err(ExitCode::from(1));
@@ -205,7 +206,7 @@ fn dispatch_synth_stage(
     }
 }
 
-/// `ir` built for `edition` on the built-in pack, for the checks that read the struct as it stands.
+/// `ir` lowered to the block array for `edition` on the built-in pack.
 fn built_for(ir: &IntentModule, edition: Edition) -> BlockArrayIr {
     lower_to_block_array(
         ir,
