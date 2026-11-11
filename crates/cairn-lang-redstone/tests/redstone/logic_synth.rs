@@ -532,33 +532,67 @@ fn a_primitive_in_a_notation_it_has_no_gate_in_still_reports_its_operands() {
             "sig.nope1 and sig.nope2",
             LogicPrimitive::Not,
             &[unbound, unbound, unsupported][..],
-            "struct=s: logic expression applies `not` between two operands, which the \
-             combinational lowering has no gate for",
+            "struct=s: logic expression applies `not` between two operands, which the logic \
+             lowering has no gate for",
             "Fix: write `not` before its one operand",
         ),
         (
             "not sig.nope1",
             LogicPrimitive::And,
             &[unbound, unsupported][..],
-            "struct=s: logic expression applies `and` before one operand, which the \
-             combinational lowering has no gate for",
+            "struct=s: logic expression applies `and` before one operand, which the logic \
+             lowering has no gate for",
             "Fix: write `and` between its two operands",
         ),
         (
             "sig.nope1 and sig.nope2",
             LogicPrimitive::Mux,
             &[unbound, unbound, unsupported][..],
-            "struct=s: logic expression applies `mux` between two operands, which the \
-             combinational lowering has no gate for",
+            "struct=s: logic expression applies `mux` between two operands, which the logic \
+             lowering has no gate for",
             "Fix: write `mux` with every operand named once, as in `mux(sel=…, a=…, b=…)`",
         ),
         (
             "mux(sel=sig.nope1, a=sig.nope2, b=sig.nope3)",
             LogicPrimitive::Or,
             &[unbound, unbound, unbound, unsupported][..],
-            "struct=s: logic expression applies `or` called with named operands, which the \
-             combinational lowering has no gate for",
+            "struct=s: logic expression applies `or` called with named operands, which the logic \
+             lowering has no gate for",
             "Fix: write `or` between its two operands",
+        ),
+        (
+            "delay(sig.nope1, 2)",
+            LogicPrimitive::EdgeRising,
+            &[unbound, unsupported][..],
+            "struct=s: logic expression applies `edge_rising` to one operand and 2 stages, which \
+             the logic lowering has no gate for",
+            "Fix: write `edge_rising` applied to its one operand, as in `edge_rising(…)`",
+        ),
+        (
+            "edge_rising(sig.nope1)",
+            LogicPrimitive::Delay,
+            &[unbound, unsupported][..],
+            "struct=s: logic expression applies `delay` to one operand, which the logic lowering \
+             has no gate for",
+            "Fix: write `delay` applied to its operand and a stage count of at least 1, as in \
+             `delay(…, N)`",
+        ),
+        (
+            "edge_falling(sig.nope1)",
+            LogicPrimitive::Latch,
+            &[unbound, unsupported][..],
+            "struct=s: logic expression applies `latch` to one operand, which the logic lowering \
+             has no gate for",
+            "Fix: write `latch` with every operand named once, as in `latch(set=…, reset=…)`",
+        ),
+        (
+            "latch(set=sig.nope1, reset=sig.nope2)",
+            LogicPrimitive::Counter,
+            &[unbound, unbound, unsupported][..],
+            "struct=s: logic expression applies `counter` called with named operands, which the \
+             logic lowering has no gate for",
+            "Fix: write `counter` applied to its operand and a stage count of at least 1, as in \
+             `counter(…, N)`",
         ),
     ] {
         let source = format!(
@@ -569,7 +603,8 @@ fn a_primitive_in_a_notation_it_has_no_gate_in_still_reports_its_operands() {
         match &mut intent.structs[0].logic[0].rhs {
             Expr::Infix { primitive: p, .. }
             | Expr::Prefix { primitive: p, .. }
-            | Expr::Call { primitive: p, .. } => *p = primitive,
+            | Expr::Call { primitive: p, .. }
+            | Expr::Apply { primitive: p, .. } => *p = primitive,
             other => panic!("{expression:?}: expected a primitive, got {other:?}"),
         }
         let out = synthesize(&intent);
@@ -669,8 +704,8 @@ fn a_call_built_with_the_wrong_operands_is_refused_for_what_is_wrong_with_them()
         assert_eq!(
             finding.primary,
             format!(
-                "struct=s: logic expression applies `mux` {as_written}, which the combinational \
-                 lowering has no gate for"
+                "struct=s: logic expression applies `mux` {as_written}, which the logic lowering \
+                 has no gate for"
             ),
             "{operands:?}",
         );

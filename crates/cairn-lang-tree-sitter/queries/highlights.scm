@@ -23,6 +23,12 @@
 "nand" @keyword.operator
 "not" @keyword.operator
 "mux" @function.builtin
+"latch" @function.builtin
+"delay" @function.builtin
+"pulse" @function.builtin
+"edge_rising" @function.builtin
+"edge_falling" @function.builtin
+"counter" @function.builtin
 
 ; directives
 (directive_name) @keyword.directive

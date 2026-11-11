@@ -1,11 +1,13 @@
-//! Logic IR: the edition-neutral, zero-delay signal DAG the synth pass builds from sensor,
-//! actuator and `logic` bindings. Nodes are in topological order, so a cycle is not encodable.
+//! Logic IR: the edition-neutral signal DAG, without ticks, the synth pass builds from sensor,
+//! actuator and `logic` bindings. Nodes are in topological order, so a cycle is not encodable; a
+//! `latch` or `counter` keeps its feedback inside its gate.
 
 use std::fmt;
 use std::marker::PhantomData;
 
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
+use cairn_lang_core::logic_library::StageCount;
 use indexmap::IndexMap;
 use serde::de::{self, MapAccess, Visitor};
 use serde::ser::SerializeMap;
@@ -21,7 +23,7 @@ pub enum SignalRef {
     Gate(u32),
 }
 
-/// Boolean primitive a [`GateNode`] represents, with its operands inline.
+/// Primitive a [`GateNode`] represents, with its operands and stage count inline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -75,10 +77,48 @@ pub enum GateKind {
         /// Value forwarded when `sel` is high.
         b: SignalRef,
     },
+    /// `latch(set=…, reset=…)`.
+    Latch {
+        /// Turns the latch on.
+        set: SignalRef,
+        /// Turns the latch off, winning over `set`.
+        reset: SignalRef,
+    },
+    /// `delay(a, stages)`.
+    Delay {
+        /// Sole operand.
+        a: SignalRef,
+        /// Stages `a` is delayed by.
+        stages: StageCount,
+    },
+    /// `pulse(a, stages)`.
+    Pulse {
+        /// Sole operand.
+        a: SignalRef,
+        /// Stages the pulse lasts at most.
+        stages: StageCount,
+    },
+    /// `edge_rising(a)`.
+    EdgeRising {
+        /// Sole operand.
+        a: SignalRef,
+    },
+    /// `edge_falling(a)`.
+    EdgeFalling {
+        /// Sole operand.
+        a: SignalRef,
+    },
+    /// `counter(a, stages)`.
+    Counter {
+        /// Sole operand, counted as it turns on.
+        a: SignalRef,
+        /// Times `a` turns on between two toggles.
+        stages: StageCount,
+    },
 }
 
 impl GateKind {
-    /// Passes each operand of this gate to `sink`, `sel` first for `Mux`.
+    /// Passes each operand of this gate to `sink`, `sel` first for `Mux` and `set` for `Latch`.
     pub fn each_input(self, mut sink: impl FnMut(SignalRef)) {
         match self {
             Self::And2 { a, b }
@@ -89,20 +129,29 @@ impl GateKind {
                 sink(a);
                 sink(b);
             }
-            Self::Not { a } => sink(a),
+            Self::Not { a }
+            | Self::Delay { a, .. }
+            | Self::Pulse { a, .. }
+            | Self::EdgeRising { a }
+            | Self::EdgeFalling { a }
+            | Self::Counter { a, .. } => sink(a),
             Self::Mux { sel, a, b } => {
                 sink(sel);
                 sink(a);
                 sink(b);
             }
+            Self::Latch { set, reset } => {
+                sink(set);
+                sink(reset);
+            }
         }
     }
 }
 
-/// One combinational gate in the DAG of [`LogicIr::nodes`].
+/// One gate in the DAG of [`LogicIr::nodes`], a combinational primitive or a macro.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GateNode {
-    /// Boolean primitive this node computes, with its operands inline.
+    /// Primitive this node computes, with its operands and stage count inline.
     pub kind: GateKind,
     /// Byte range of the enclosing `logic` line; the AST has no per-expression spans.
     #[serde(skip)]

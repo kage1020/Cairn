@@ -17,7 +17,7 @@ use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
     SiteIr, StructIr, ValueWithSpan, actuator_patch_target,
 };
-use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation};
+use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation, StageCount};
 use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
 /// The components a signal drives, each with the key its line reads it from.
@@ -1347,21 +1347,14 @@ fn lower_expr_inner<'a>(
             rhs,
         } => {
             let operands = lower_binary(lhs, rhs, binding_span, ir, ctx, diagnostics);
-            let gate: fn(SignalRef, SignalRef) -> GateKind = match primitive {
-                LogicPrimitive::And => |a, b| GateKind::And2 { a, b },
-                LogicPrimitive::Or => |a, b| GateKind::Or2 { a, b },
-                LogicPrimitive::Xor => |a, b| GateKind::Xor2 { a, b },
-                LogicPrimitive::Nand => |a, b| GateKind::Nand2 { a, b },
-                LogicPrimitive::Nor => |a, b| GateKind::Nor2 { a, b },
-                LogicPrimitive::Not | LogicPrimitive::Mux => {
-                    return Err(no_gate(
-                        *primitive,
-                        "between two operands",
-                        binding_span,
-                        ctx,
-                        diagnostics,
-                    ));
-                }
+            let Some(gate) = infix_gate(*primitive) else {
+                return Err(no_gate(
+                    *primitive,
+                    "between two operands",
+                    binding_span,
+                    ctx,
+                    diagnostics,
+                ));
             };
             let (a, b) = operands?;
             let (a, b) = canonicalize_pair(a, b);
@@ -1384,7 +1377,13 @@ fn lower_expr_inner<'a>(
                 | LogicPrimitive::Xor
                 | LogicPrimitive::Nand
                 | LogicPrimitive::Nor
-                | LogicPrimitive::Mux => Err(no_gate(
+                | LogicPrimitive::Mux
+                | LogicPrimitive::Latch
+                | LogicPrimitive::Delay
+                | LogicPrimitive::Pulse
+                | LogicPrimitive::EdgeRising
+                | LogicPrimitive::EdgeFalling
+                | LogicPrimitive::Counter => Err(no_gate(
                     *primitive,
                     "before one operand",
                     binding_span,
@@ -1397,6 +1396,19 @@ fn lower_expr_inner<'a>(
             primitive,
             operands,
         } => lower_call(*primitive, operands, binding_span, ir, ctx, diagnostics),
+        Expr::Apply {
+            primitive,
+            operand,
+            stages,
+        } => lower_apply(
+            *primitive,
+            operand,
+            *stages,
+            binding_span,
+            ir,
+            ctx,
+            diagnostics,
+        ),
         _ => {
             let label = ctx.scope.label();
             diagnostics.push(
@@ -1404,7 +1416,7 @@ fn lower_expr_inner<'a>(
                     DiagnosticCode::LogicUnsupportedPrimitive,
                     binding_span.clone(),
                     format!(
-                        "{label} logic expression uses a boolean primitive the combinational lowering has no gate for",
+                        "{label} logic expression uses a primitive the logic lowering has no gate for",
                     ),
                 )
                 .with_footer(format!(
@@ -1459,6 +1471,7 @@ fn lower_call<'a>(
     };
     let gate = match (primitive, signals.as_slice()) {
         (LogicPrimitive::Mux, &[sel, a, b]) => GateKind::Mux { sel, a, b },
+        (LogicPrimitive::Latch, &[set, reset]) => GateKind::Latch { set, reset },
         (
             LogicPrimitive::And
             | LogicPrimitive::Or
@@ -1466,7 +1479,13 @@ fn lower_call<'a>(
             | LogicPrimitive::Xor
             | LogicPrimitive::Nand
             | LogicPrimitive::Nor
-            | LogicPrimitive::Mux,
+            | LogicPrimitive::Mux
+            | LogicPrimitive::Latch
+            | LogicPrimitive::Delay
+            | LogicPrimitive::Pulse
+            | LogicPrimitive::EdgeRising
+            | LogicPrimitive::EdgeFalling
+            | LogicPrimitive::Counter,
             _,
         ) => unreachable!(
             "`{}` reaches here only with a call signature and one signal per operand it names",
@@ -1537,6 +1556,83 @@ fn signals_by_name(
         .collect())
 }
 
+/// The gate an infix `primitive` builds from its two operands, or `None` for one written
+/// otherwise.
+fn infix_gate(primitive: LogicPrimitive) -> Option<fn(SignalRef, SignalRef) -> GateKind> {
+    match primitive {
+        LogicPrimitive::And => Some(|a, b| GateKind::And2 { a, b }),
+        LogicPrimitive::Or => Some(|a, b| GateKind::Or2 { a, b }),
+        LogicPrimitive::Xor => Some(|a, b| GateKind::Xor2 { a, b }),
+        LogicPrimitive::Nand => Some(|a, b| GateKind::Nand2 { a, b }),
+        LogicPrimitive::Nor => Some(|a, b| GateKind::Nor2 { a, b }),
+        LogicPrimitive::Not
+        | LogicPrimitive::Mux
+        | LogicPrimitive::Latch
+        | LogicPrimitive::Delay
+        | LogicPrimitive::Pulse
+        | LogicPrimitive::EdgeRising
+        | LogicPrimitive::EdgeFalling
+        | LogicPrimitive::Counter => None,
+    }
+}
+
+/// Lowers an applied primitive, its operand before failing.
+fn lower_apply<'a>(
+    primitive: LogicPrimitive,
+    operand: &'a Expr,
+    stages: Option<StageCount>,
+    binding_span: &Span,
+    ir: &mut LogicIr,
+    ctx: &mut LoweringCtx<'a>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<SignalRef, LoweringFailed> {
+    let operand = lower_expr(operand, binding_span, ir, ctx, diagnostics);
+    let gate = match (primitive, stages) {
+        (LogicPrimitive::EdgeRising, None) => GateKind::EdgeRising { a: operand? },
+        (LogicPrimitive::EdgeFalling, None) => GateKind::EdgeFalling { a: operand? },
+        (LogicPrimitive::Delay, Some(stages)) => GateKind::Delay {
+            a: operand?,
+            stages,
+        },
+        (LogicPrimitive::Pulse, Some(stages)) => GateKind::Pulse {
+            a: operand?,
+            stages,
+        },
+        (LogicPrimitive::Counter, Some(stages)) => GateKind::Counter {
+            a: operand?,
+            stages,
+        },
+        // Only an intent built by hand gets here: the parser applies these to nothing else.
+        (
+            LogicPrimitive::And
+            | LogicPrimitive::Or
+            | LogicPrimitive::Not
+            | LogicPrimitive::Xor
+            | LogicPrimitive::Nand
+            | LogicPrimitive::Nor
+            | LogicPrimitive::Mux
+            | LogicPrimitive::Latch,
+            _,
+        )
+        | (LogicPrimitive::EdgeRising | LogicPrimitive::EdgeFalling, Some(_))
+        | (LogicPrimitive::Delay | LogicPrimitive::Pulse | LogicPrimitive::Counter, None) => {
+            let as_written = match stages {
+                None => "to one operand".to_owned(),
+                Some(StageCount::ONE) => "to one operand and 1 stage".to_owned(),
+                Some(stages) => format!("to one operand and {stages} stages"),
+            };
+            return Err(no_gate(
+                primitive,
+                &as_written,
+                binding_span,
+                ctx,
+                diagnostics,
+            ));
+        }
+    };
+    Ok(intern_gate(ir, ctx, gate, binding_span.clone()))
+}
+
 /// Reports `primitive` written `as_written`, a notation it has no gate in, once its operands are
 /// lowered.
 fn no_gate(
@@ -1548,12 +1644,21 @@ fn no_gate(
 ) -> LoweringFailed {
     let label = ctx.scope.label();
     let name = primitive.name();
+    let template = || {
+        primitive
+            .parenthesised_template()
+            .expect("a called or applied primitive is written with parentheses")
+    };
     let written = match primitive.notation() {
         Notation::Prefix => "before its one operand".to_owned(),
         Notation::Infix { .. } => "between its two operands".to_owned(),
-        Notation::Call(signature) => format!(
-            "with every operand named once, as in `{}`",
-            signature.template()
+        Notation::Call(_) => format!("with every operand named once, as in `{}`", template()),
+        Notation::Apply { counted: false } => {
+            format!("applied to its one operand, as in `{}`", template())
+        }
+        Notation::Apply { counted: true } => format!(
+            "applied to its operand and a stage count of at least 1, as in `{}`",
+            template()
         ),
     };
     diagnostics.push(
@@ -1561,7 +1666,7 @@ fn no_gate(
             DiagnosticCode::LogicUnsupportedPrimitive,
             binding_span.clone(),
             format!(
-                "{label} logic expression applies `{name}` {as_written}, which the combinational lowering has no gate for",
+                "{label} logic expression applies `{name}` {as_written}, which the logic lowering has no gate for",
             ),
         )
         .with_footer(format!("Fix: write `{name}` {written}")),
@@ -1629,7 +1734,7 @@ fn resolve_ref<'a>(
                 ),
             )
             .with_footer(
-                "Fix: break the cycle by adding a sensor driving one of the signals, or use a `latch(...)` macro once combinational synthesis grows sequential support.",
+                "Fix: break the cycle by driving one of the signals from a sensor. A `latch` or `counter` holds its state inside its own cell, so it stands in for a loop of `logic` lines, and one that reads its own output back closes the loop again.",
             ),
         );
         ctx.failed_lhs.insert(dr.clone());
@@ -1757,7 +1862,7 @@ fn collect_refs(expr: &Expr, out: &mut HashSet<DottedRef>) {
             collect_refs(lhs, out);
             collect_refs(rhs, out);
         }
-        Expr::Prefix { operand, .. } => collect_refs(operand, out),
+        Expr::Prefix { operand, .. } | Expr::Apply { operand, .. } => collect_refs(operand, out),
         Expr::Call { operands, .. } => {
             for operand in operands {
                 collect_refs(&operand.value, out);

@@ -12,7 +12,7 @@ use crate::edition::Edition;
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
-use crate::logic_library::{CallSignature, LogicPrimitive, Notation, infix_rank_above};
+use crate::logic_library::{CallSignature, LogicPrimitive, Notation, StageCount, infix_rank_above};
 use crate::prose::{and_list, or_list};
 use crate::suggest::{did_you_mean, nearest_match};
 use crate::version::parse_requirement;
@@ -1051,6 +1051,25 @@ impl<'a> Parser<'a> {
                 depth,
             ));
         }
+        if let Some((primitive, counted)) = self
+            .peek_primitive()
+            .and_then(|primitive| Some((primitive, primitive.applied_counted()?)))
+        {
+            self.advance();
+            let (operand, stages, operand_depth) =
+                self.nested(|p| p.parse_applied(primitive, counted))?;
+            let depth = operand_depth + 1;
+            self.charge_expr_depth(depth)?;
+            let operand = Box::new(operand);
+            return Ok((
+                Expr::Apply {
+                    primitive,
+                    operand,
+                    stages,
+                },
+                depth,
+            ));
+        }
         if self.peek_is(&TokenKind::LParen) {
             self.advance();
             let inner = self.nested(|p| p.parse_expr_at(infix_rank_above(None)))?;
@@ -1131,6 +1150,107 @@ impl<'a> Parser<'a> {
             .collect();
         let operands = operands.expect("the call closes only once every operand is named");
         Ok((operands, depth))
+    }
+
+    /// The parenthesised operand of the applied `primitive` and, when `counted`, the stage count
+    /// after it, with the operand's depth.
+    fn parse_applied(
+        &mut self,
+        primitive: LogicPrimitive,
+        counted: bool,
+    ) -> Result<(Expr, Option<StageCount>, usize), ParseError> {
+        let name = primitive.name();
+        let shape = primitive
+            .parenthesised_template()
+            .expect("an applied primitive is written with parentheses");
+        let takes = if counted {
+            "its operand and a stage count"
+        } else {
+            "its one operand"
+        };
+        if !self.peek_is(&TokenKind::LParen) {
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected `(` after `{name}`, got {found}: `{name}` is applied to {takes}, as in \
+                 `{shape}`"
+            )));
+        }
+        self.advance();
+        if self.is_at_key_eq()
+            && let Some(TokenKind::Ident(key)) = self.peek().map(|token| &token.kind)
+        {
+            return Err(self.syntax_here(&format!(
+                "`{name}` takes its operand by position, not as `{key}=`: write it as in `{shape}`"
+            )));
+        }
+        if self.peek_is(&TokenKind::RParen) {
+            return Err(self.syntax_here(&format!(
+                "expected an operand, got `)`: `{name}` is applied to {takes}, as in `{shape}`"
+            )));
+        }
+        let (operand, depth) = self.parse_expr_at(infix_rank_above(None))?;
+        if !counted {
+            if self.peek_is(&TokenKind::Comma) {
+                return Err(self.syntax_here(&format!(
+                    "expected `)`, got `,`: `{name}` counts no stages, so it is applied to its one \
+                     operand alone, as in `{shape}`"
+                )));
+            }
+            self.expect_operand_end(&[TokenKind::RParen])?;
+            return Ok((operand, None, depth));
+        }
+        if self.peek_is(&TokenKind::RParen) {
+            return Err(self.syntax_here(&format!(
+                "expected `,` and a stage count, got `)`: `{name}` is applied to {takes}, as in \
+                 `{shape}`"
+            )));
+        }
+        if let Some(TokenKind::Int { .. }) = self.peek().map(|token| &token.kind) {
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected `,` before the stage count, got {found}: `{name}` is applied to \
+                 {takes}, as in `{shape}`"
+            )));
+        }
+        self.expect_operand_end(&[TokenKind::Comma])?;
+        let position = self.position();
+        let Some(TokenKind::Int { lexeme, .. }) = self.peek().map(|token| token.kind.clone())
+        else {
+            let found = self.found_here();
+            return Err(self.syntax_here(&format!(
+                "expected a stage count, a whole number of at least 1, got {found}: `{name}` is \
+                 applied to {takes}, as in `{shape}`"
+            )));
+        };
+        let count: u32 =
+            lexeme
+                .parse()
+                .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
+                    position,
+                    context: IntContext::StageCount,
+                    lexeme: lexeme.clone(),
+                    kind: *err.kind(),
+                })?;
+        let Some(stages) = StageCount::new(count) else {
+            return Err(self.syntax_here(&format!(
+                "expected a stage count of at least 1, got `{lexeme}`: `{name}` with no stage \
+                 builds nothing, so write a count of 1 or more, as in `{shape}`"
+            )));
+        };
+        self.advance();
+        if !self.peek_is(&TokenKind::RParen) {
+            let found = self.found_here();
+            let why = match self.peek().map(|token| &token.kind) {
+                Some(TokenKind::Comma) => format!("`{name}` takes one stage count"),
+                Some(TokenKind::Dot) => "a stage count is a whole number of stages".to_owned(),
+                _ => format!("`{name}` is applied to {takes}"),
+            };
+            return Err(self.syntax_here(&format!(
+                "expected `)`, got {found}: {why}, as in `{shape}`"
+            )));
+        }
+        self.advance();
+        Ok((operand, Some(stages), depth))
     }
 
     /// Refuse what follows `name=` unless an operand can start there.
@@ -1306,19 +1426,24 @@ impl<'a> Parser<'a> {
         };
         let notation = |word: &str| LogicPrimitive::from_name(word).map(LogicPrimitive::notation);
         let is_prefix = |word: &str| notation(word) == Some(Notation::Prefix);
-        let is_call = |word: &str| matches!(notation(word), Some(Notation::Call(_)));
+        let is_call = |word: &str| {
+            matches!(
+                notation(word),
+                Some(Notation::Call(_) | Notation::Apply { .. })
+            )
+        };
         let between = ": two operands need an infix primitive between them".to_owned();
         match (found, bare_word_before) {
             (Some(TokenKind::LParen), Some(word)) => {
                 let callable: Vec<String> = LogicPrimitive::ALL
                     .iter()
-                    .filter(|primitive| primitive.call_signature().is_some())
+                    .filter(|primitive| primitive.parenthesised_template().is_some())
                     .map(|primitive| format!("`{}`", primitive.name()))
                     .collect();
                 let callable = or_list(&callable).unwrap_or_default();
                 format!(
-                    ": the built-in logic library has no primitive `{word}` to call, and calls \
-                     only {callable}"
+                    ": the built-in logic library has no primitive `{word}` to call or apply; \
+                     those it calls or applies are {callable}"
                 )
             }
             (Some(TokenKind::LParen), None) => between,

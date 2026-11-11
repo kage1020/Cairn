@@ -36,9 +36,11 @@ In Verilog terms, v1 allows the `assign` equivalent and no clocked assignment:
 primitive stands before its one operand. An infix primitive stands between its two, and its rank
 says how tightly it binds: a higher rank groups first, and one rank groups left to right. A called
 primitive takes its operands in parentheses after its name, each named once as `name=expression`,
-in any order, with a comma between two and none after the last. The parser takes an expression's
-shape from the library, so a primitive the library gains in one of these notations needs no new
-syntax. The library holds seven primitives:
+in any order, with a comma between two and none after the last. An applied primitive takes its one
+operand in parentheses after its name, by position, and one that counts stages takes a stage count
+after the operand and a comma, a whole number from 1 to 4294967295. The parser takes an
+expression's shape from the library, so a primitive the library gains in one of these notations
+needs no new syntax. The library holds thirteen primitives:
 
 | Primitive | Notation |
 |---|---|
@@ -47,22 +49,33 @@ syntax. The library holds seven primitives:
 | `and`, `nand` | infix, rank 2 |
 | `not` | prefix |
 | `mux` | called, `mux(sel=…, a=…, b=…)` |
+| `latch` | called, `latch(set=…, reset=…)` |
+| `edge_rising`, `edge_falling` | applied, `edge_rising(…)` |
+| `delay`, `pulse`, `counter` | applied with a stage count, `delay(…, N)` |
 
 The ranks follow the usual order of the bitwise operators, `and` before `xor` before `or`, and each
 negated form takes the rank of the primitive it negates. A prefix primitive binds tighter than any
 infix one, so `sig.a or sig.b and not sig.c` reads as `sig.a or (sig.b and (not sig.c))`, and
 `sig.a nor sig.b xor sig.c nand sig.d` as `sig.a nor (sig.b xor (sig.c nand sig.d))`. Parentheses
 group as written. A call is one operand, as a signal is, so `not mux(sel=sig.s, a=sig.x, b=sig.y)
-and sig.z` reads as `(not mux(…)) and sig.z`, and each operand inside it is a whole expression.
+and sig.z` reads as `(not mux(…)) and sig.z`, and each operand inside it is a whole expression. So
+is an application, so `delay(sig.a and sig.b, 2)` delays the `and`.
 
 `mux` is `a` while `sel` is off and `b` while it is on. A call that passes an operand by position,
 leaves one out, names one twice or names one the primitive does not take is `E_PARSE`, and the
 message names the operands the primitive takes, and for a positional or missing operand, the ones
 still to name: `mux(sel=sig.s, sig.x, sig.y)` stops at the second `sig`, expecting `a=` or `b=`.
 
-The macros above are not in the library yet. A macro call such as `pulse(sig.ring, 4)` is `E_PARSE`
-at its `(`, and the message names the primitives that could stand there and the one the library
-calls. So is a word the library does not hold: `sig.a xnor sig.b` stops at `xnor`.
+An applied primitive refuses the reverse, a named operand: `pulse(in=sig.x, 4)` stops at `in`. A
+stage count is `E_PARSE` where it is wrong, and the message names the form the macro takes:
+missing, as `delay(sig.x)` stops at `)` expecting `,`; written without its comma, as
+`delay(sig.x 2)` stops at `2`; given to a primitive that counts none, as `edge_rising(sig.x, 2)`
+stops at `,`; or outside 1 to 4294967295, as `pulse(sig.x, 0)` stops at `0`. What each macro
+computes is the time model's ([§14.4](#144-time-model)).
+
+A word the library does not hold is `E_PARSE` where it stands, and the message names what could
+stand there: `sig.a xnor sig.b` stops at `xnor`, and `toggle(sig.x)` at its `(`, naming the
+primitives the library calls or applies.
 
 ## 14.2 Signal binding
 
@@ -227,24 +240,50 @@ logic sig.sel   = mux(sel=sig.s, a=sig.x, b=sig.y)
 ```
 
 The expression contains no time arithmetic. The `4` in `pulse(sig.ring, 4)` is a **stage count**,
-not a tick value. Of these lines the first and the last parse today; the macro calls are `E_PARSE`
-([§14.1](#141-two-tiers-and-the-v1-boundary)).
+not a tick value.
+
+A macro is one node, and a `latch` or `counter` keeps the feedback it holds its state by inside its
+own cell ([§14.6](#146-edition-differences)), so the graph stays acyclic and placement keeps its
+topological order. A signal that reads itself back is still `E_LOGIC_CYCLE`, through a macro or not:
+`logic sig.q = latch(set=sig.a, reset=sig.q)` is a cycle the author wrote.
 
 ## 14.4 Time model
 
 In v1 only the macros carry time: `delay`, `pulse`, `edge_rising`, `edge_falling`, `latch`, and
-`counter`. `delay(3)` is a cell macro that lowers to three repeaters internally; no macro is parsed
-yet ([§14.1](#141-two-tiers-and-the-v1-boundary)). There is no tick operator to write.
+`counter`. There is no tick operator to write. A macro's count is of stages, never of ticks. A
+stage of `delay` or `pulse` is two ticks on both editions, so `delay(sig.x, 3)` lowers to repeaters
+in series that take six ticks in all, and the edges are on for one stage. A stage of `counter` is
+one flip-flop of its ring, so `counter(sig.x, 3)` is built of three. What a macro adds to a path is
+its Edition Cell's ticks, counted as every cell's are ([§14.6](#146-edition-differences)).
+
+| Macro | Its output |
+|---|---|
+| `delay(x, n)` | `x`, `n` stages later |
+| `pulse(x, n)` | on while `x` is on and was off `n` stages before: for the first `n` stages of each time `x` turns on after `n` stages off, or until `x` turns off if that is sooner |
+| `edge_rising(x)` | `pulse(x, 1)`: on for one stage each time `x` turns on after a stage off |
+| `edge_falling(x)` | on while `x` is off and was on a stage before: for one stage each time `x` turns off after a stage on |
+| `latch(set=s, reset=r)` | turns on while `s` is on and `r` is off, turns off while `r` is on, and holds while both are off |
+| `counter(x, n)` | turns on the `n`-th time `x` turns on and off the `2n`-th, toggling every `n` times, so `counter(x, 1)` is a toggle |
+
+`reset` wins: a `latch` whose `set` and `reset` are both on is off, and stays off when they turn off
+together. A `latch` and a `counter` act on an operand that holds each change for at least a stage,
+and what they do with one that changes back sooner is not specified; an edge or `pulse(x, 1)` is on
+for a whole stage, so either can drive one. A `latch` and a `counter` start off, as every macro does
+when the structure is built: the tile tier writes each cell in the state it settles to with its
+operands off.
 
 **Delay is carried in neither the Logic IR nor the Netlist IR. It is determined for the first time
 in the Placement IR** ([§14.8](#148-connection-to-the-ir-and-phases)). `and` is logically
 zero-delay, but the tick count is known only after cell selection (`and → ComparatorAND` on Java)
-and the actual post-placement wire length.
+and the actual post-placement wire length. A macro's stage count is carried in both, as part of
+which cell it is, and its ticks are not.
 
 A cell takes each operand on an input port of its own: `a` and `b` on a two-input cell, `a` on
-`not`, and on `mux` the `sel`, `a` and `b` its call names. A cell's delay is counted per input
-port, as the ticks from that port to the cell's output, since one input can pass through more of a
-cell than another. A signal's delay through a cell is the delay of the port it enters by.
+`not` and on each applied macro, and on `mux` and `latch` the operands their calls name. A cell's
+delay is counted per input port, as the ticks from that port to the cell's output, since one input
+can pass through more of a cell than another. A signal's delay through a cell is the delay of the
+port it enters by. One change at a macro's port can change its output more than once, as a `pulse`
+turns on and then off, so a macro's port counts the ticks to the last change it makes there.
 
 A number appears as ticks only in verification assertions ([§14.7](#147-verification)). You never do
 tick arithmetic inside a logic expression.
@@ -485,8 +524,9 @@ through a `ComparatorAND`; `assert latency` ([§14.7](#147-verification)) checks
 port the operand lands on.
 
 Every logical cell has one realisation per edition. A port's ticks count the slowest path from it
-to the output, and a cell either restores strength, so the wire into each of its ports ends there,
-or passes on what one of its inputs carries ([§14.5](#145-place-and-route)):
+to the output, or for a macro the last change it makes there ([§14.4](#144-time-model)), and a cell
+either restores strength, so the wire into each of its ports ends there, or passes on what one of
+its inputs carries ([§14.5](#145-place-and-route)):
 
 | Logical cell | Java | Bedrock | Ticks per port | Strength |
 |---|---|---|---|---|
@@ -497,11 +537,45 @@ or passes on what one of its inputs carries ([§14.5](#145-place-and-route)):
 | NOR | `TorchNOR`, one torch on a block both operands power | the same | 1 | restores |
 | XOR | `TorchXOR`, the torch NORs of `not a` and `b` and of `a` and `not b`, onto a common line | the same | 2 | restores |
 | MUX | `TorchMUX`, the torch NORs of `sel` and `not a` and of `not sel` and `not b`, onto a common line | the same | 2 | restores |
+| DELAY `n` | `RepeaterDelay`, repeaters in series of `2n` ticks in all | the same | `2n` | restores |
+| PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through repeaters of `2n + 1` ticks | the same | `2n + 2` | restores |
+| EDGE_RISING | `TorchEdgeRising`, a `TorchPulse` of one stage | the same | 4 | restores |
+| EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and of `not a` through a repeater | the same | 3 | restores |
+| LATCH | `TorchLatch`, two torch NORs each powered by the other | the same | `set` 4, `reset` 5 | restores |
+| COUNTER `n` | `RepeaterCounter`, `n` flip-flops of locking repeaters in a twisted ring | the same | 3 | restores |
 
 An operand of `xor` reaches one of its NORs straight and the other through an inverter, so its
 output settles once the inverted path has, two torches after the operand changes. Each port of
 `mux` likewise passes an inverter and a NOR on its slowest path, `sel` on the NOR that takes it
 inverted.
+
+Nothing lays a cell out in blocks yet ([§14.8](#148-connection-to-the-ir-and-phases)), so the ticks
+above are the ones each cell's Physical Tile is to take, and no simulation checks them.
+
+A macro's cell is built of torches and repeaters alone, the same on both editions, and a `latch` or
+`counter` holds its feedback inside its own cell:
+
+- **`TorchPulse`** turns on once `not a` has turned off and off once `a` comes out of its
+  repeaters, which take a tick more than its `n` stages to match the inverter, so it is on for `n`
+  stages. Its port counts to that turning off: the repeaters and the NOR, `2n + 2` ticks. An
+  earlier `a` still in the repeaters holds the output off, so a full pulse needs `a` off for the `n`
+  stages before it turns on.
+- **`TorchEdgeRising`** is a `TorchPulse` of one stage, on for two ticks, its port counting four.
+  **`TorchEdgeFalling`** turns on once `a` has turned off and off once `not a` has come through its
+  one-tick repeater: one stage on, three ticks to the last change.
+- **`TorchLatch`**: the output torch is the NOR of `reset` and the second torch, and the second
+  torch is the NOR of the output and of `set` gated by `reset`, which is the torch NOR of `not set`
+  and of `reset` held on two ticks past its fall by a repeater beside it. A `set` turns the output
+  on through four torches: `not set`, the gate, the second torch and the output. A `reset` turns it
+  off through the output torch alone, and its fall, while `set` is on, turns it back on five ticks
+  later, through the repeater and those three torches after it. The hold is what makes `reset` win:
+  while `reset` is on or has just fallen, `set` reaches nothing.
+- **`RepeaterCounter`**: each stage is a master–slave flip-flop of two repeaters, the master locked
+  while `a` is on and the slave while it is off. Each stage feeds the next and the last feeds the
+  first through an inverter, a twisted ring of `n` stages that steps through `2n` states from all
+  off, so its last stage, the output, changes every `n` times `a` turns on. The slave's lock lifts
+  two ticks after `a` turns on and its repeater passes the master on a tick later, three ticks in
+  all, and the master locks at two ticks, before any stage it reads from can change.
 
 The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as a
 tile that conducts to neither **another net's** coordinate below it nor another net's coordinates
@@ -611,7 +685,7 @@ them:
 ```
 Intent IR           logic declarations / circuit region / signal binding
    ↓ logic_synth
-Logic IR            logical expressions, dependency DAG. Edition-neutral, zero delay
+Logic IR            logical expressions, dependency DAG. Edition-neutral, no ticks
    ↓
 Netlist IR          cells and nets. Logical Cell selection. Still no delay
    ↓

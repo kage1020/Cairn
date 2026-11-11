@@ -55,14 +55,14 @@ pub enum PlacementPhase {
         wire_length: u32,
         /// The slowest driven port's delay plus buffer ticks on each distinct feeding net; not an
         /// arrival time.
-        local_delay_ticks: u32,
+        local_delay_ticks: u64,
     },
     /// After crossing legalization: the buffer repeaters have coords.
     Legalized {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
         /// Preserved from [`Self::Delayed`].
-        local_delay_ticks: u32,
+        local_delay_ticks: u64,
         /// The buffer repeaters the delay pass counted, possibly none.
         buffer_coords: Vec<BufferCoord>,
     },
@@ -82,7 +82,7 @@ impl PlacementPhase {
 
     /// Local delay ticks once delay insertion has run, `None` otherwise.
     #[must_use]
-    pub const fn local_delay_ticks(&self) -> Option<u32> {
+    pub const fn local_delay_ticks(&self) -> Option<u64> {
         match self {
             Self::Unrouted | Self::Routed { .. } => None,
             Self::Delayed {
@@ -160,7 +160,7 @@ impl PlacementPhase {
     ///
     /// If the phase is not [`Self::Routed`]; [`Self::try_delay`] returns an error instead.
     #[track_caller]
-    pub fn delay(&mut self, local_delay_ticks: u32) {
+    pub fn delay(&mut self, local_delay_ticks: u64) {
         or_panic(self.try_delay(local_delay_ticks), None);
     }
 
@@ -170,7 +170,7 @@ impl PlacementPhase {
     ///
     /// As [`Self::delay`].
     #[track_caller]
-    pub fn delay_at(&mut self, local_delay_ticks: u32, context: impl fmt::Display) {
+    pub fn delay_at(&mut self, local_delay_ticks: u64, context: impl fmt::Display) {
         or_panic(self.try_delay(local_delay_ticks), Some(&context));
     }
 
@@ -181,7 +181,7 @@ impl PlacementPhase {
     /// [`PlacementPhaseTransitionError::DelayOnNonRouted`] when the phase is not [`Self::Routed`].
     pub fn try_delay(
         &mut self,
-        local_delay_ticks: u32,
+        local_delay_ticks: u64,
     ) -> Result<(), PlacementPhaseTransitionError> {
         let wire_length = match self {
             Self::Routed { wire_length } => *wire_length,

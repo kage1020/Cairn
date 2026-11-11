@@ -3,6 +3,7 @@
 
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
+use cairn_lang_core::logic_library::StageCount;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,27 @@ pub enum LogicalCell {
     Nor,
     /// Two-to-one multiplexer (`sel` picks between `a` and `b`).
     Mux,
+    /// RS latch whose `reset` wins over its `set`.
+    Latch,
+    /// Its input, `stages` stages later.
+    Delay {
+        /// Stages the input is delayed by.
+        stages: StageCount,
+    },
+    /// On for at most the first `stages` stages of each time its input is on.
+    Pulse {
+        /// Stages the pulse lasts at most.
+        stages: StageCount,
+    },
+    /// On for one stage each time its input turns on.
+    EdgeRising,
+    /// On for one stage each time its input turns off.
+    EdgeFalling,
+    /// Toggling every `stages` times its input turns on.
+    Counter {
+        /// Times the input turns on between two toggles.
+        stages: StageCount,
+    },
 }
 
 /// Input-port name on a [`CellNode`], the union over every [`LogicalCell`].
@@ -57,6 +79,10 @@ pub enum PortName {
     B,
     /// `Mux` select line.
     Sel,
+    /// `Latch` set line.
+    Set,
+    /// `Latch` reset line.
+    Reset,
 }
 
 impl PortName {
@@ -66,6 +92,8 @@ impl PortName {
             Self::A => "a",
             Self::B => "b",
             Self::Sel => "sel",
+            Self::Set => "set",
+            Self::Reset => "reset",
         }
     }
 }
@@ -80,12 +108,13 @@ pub struct CellPortDriver {
     pub net: NetRef,
 }
 
-/// One combinational cell in the DAG of [`NetlistIr::cells`].
+/// One cell in the DAG of [`NetlistIr::cells`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CellNode {
     /// Logical cell this node computes.
     pub cell: LogicalCell,
-    /// Port → net drivers in canonical order: `[A, B]`, `[A]` for `Not`, `[Sel, A, B]` for `Mux`.
+    /// Port → net drivers in canonical order: `[A, B]`, `[Sel, A, B]` for `Mux`, `[Set, Reset]`
+    /// for `Latch`, and `[A]` for every other one-operand cell.
     pub drivers: Vec<CellPortDriver>,
     /// Byte range of the source [`crate::logic_ir::GateNode`].
     #[serde(skip)]

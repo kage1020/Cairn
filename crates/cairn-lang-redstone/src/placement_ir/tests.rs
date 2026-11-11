@@ -646,6 +646,7 @@ fn every_phase_round_trips_through_the_flat_wire_form() {
         bridged,
     ] {
         let mut cell = probe_cell(phase);
+        cell.cell = EditionCell::JavaTorchMux;
         cell.drivers = vec![
             CellPortDriver {
                 port: PortName::Sel,
@@ -797,7 +798,7 @@ fn malformed_dumps_are_refused_rather_than_guessed_at() {
             format!(
                 r#"{{{crossing},"drivers":[],"buffer_coords":[{{"port":"c","coord":{{"x":0,"y":0,"z":0}}}}],{coord}}}"#
             ),
-            "unknown variant `c`, expected one of `a`, `b`, `sel`, `out`",
+            "unknown variant `c`, expected one of `a`, `b`, `sel`, `set`, `reset`, `out`",
         ),
         (
             format!(r#"{{"stage":"placement","edition":"java",{cell},{coord}}}"#),
@@ -833,6 +834,25 @@ fn malformed_dumps_are_refused_rather_than_guessed_at() {
                 r#"{{{crossing},"drivers":[{driver_a}],"buffer_coords":[{{"port":"a","coord":{{"x":0,"y":0,"z":2}},"junk":7}}],{coord}}}"#
             ),
             "unknown field `junk`",
+        ),
+        (
+            format!(
+                r#"{{"stage":"placement","cell":"java_torch_latch","drivers":[{driver_a}],{coord}}}"#
+            ),
+            "`drivers[0]` feeds port `a`, which a `TorchLatch` does not have; its ports are set, \
+             reset",
+        ),
+        (
+            format!(
+                r#"{{"stage":"placement","cell":{{"java_repeater_delay":{{"stages":0}}}},"drivers":[],{coord}}}"#
+            ),
+            "invalid value: integer `0`, expected a nonzero u32",
+        ),
+        (
+            format!(
+                r#"{{"stage":"placement","cell":{{"java_repeater_delay":{{"stages":3,"bogus":true}}}},"drivers":[],{coord}}}"#
+            ),
+            "unknown field `bogus`, expected `stages`",
         ),
     ] {
         let err = read_back(&json).expect_err(&json);
@@ -1031,7 +1051,7 @@ fn an_output_buffer_off_the_out_segment_is_refused() {
         "{fine}",
     );
 
-    for port in ["a", "b", "sel"] {
+    for port in ["a", "b", "sel", "set", "reset"] {
         let json = format!(
             r#"{{{head},"buffer_coords":[{},{}]}}"#,
             on("out", 12),

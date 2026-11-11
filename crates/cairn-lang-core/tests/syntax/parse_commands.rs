@@ -8,7 +8,7 @@ use cairn_lang_core::ast::{
     Value, ValueKind,
 };
 use cairn_lang_core::error::IntContext;
-use cairn_lang_core::logic_library::{LogicPrimitive, Notation};
+use cairn_lang_core::logic_library::{LogicPrimitive, Notation, StageCount};
 use cairn_lang_core::{ParseError, parse};
 
 use crate::pos;
@@ -507,9 +507,97 @@ fn every_library_primitive_parses_in_its_notation() {
                         .collect(),
                 },
             ),
+            Notation::Apply { counted } => (
+                if counted {
+                    format!("{word}(sig.a, 3)")
+                } else {
+                    format!("{word}(sig.a)")
+                },
+                Expr::Apply {
+                    primitive,
+                    operand: Box::new(a.clone()),
+                    stages: counted.then(|| StageCount::new(3)).flatten(),
+                },
+            ),
         };
         assert_eq!(logic_rhs(&expression), expected, "{expression:?}");
     }
+}
+
+#[test]
+fn an_application_takes_a_whole_expression_and_is_an_operand() {
+    let signal = |segment| name(&["sig", segment]);
+    let apply = |primitive, operand, stages| Expr::Apply {
+        primitive,
+        operand: Box::new(operand),
+        stages,
+    };
+    assert_eq!(
+        logic_rhs("delay(sig.a and sig.b, 2)"),
+        apply(
+            LogicPrimitive::Delay,
+            infix(LogicPrimitive::And, signal("a"), signal("b")),
+            StageCount::new(2),
+        ),
+    );
+    assert_eq!(
+        logic_rhs("not edge_rising(sig.a) or counter( pulse(sig.b,4) , 1 )"),
+        infix(
+            LogicPrimitive::Or,
+            not(apply(LogicPrimitive::EdgeRising, signal("a"), None)),
+            apply(
+                LogicPrimitive::Counter,
+                apply(LogicPrimitive::Pulse, signal("b"), StageCount::new(4)),
+                Some(StageCount::ONE),
+            ),
+        ),
+    );
+    assert_eq!(
+        logic_rhs("latch(reset=edge_falling(sig.r), set=sig.s)"),
+        Expr::Call {
+            primitive: LogicPrimitive::Latch,
+            operands: vec![
+                NamedOperand {
+                    name: "set",
+                    value: signal("s"),
+                },
+                NamedOperand {
+                    name: "reset",
+                    value: apply(LogicPrimitive::EdgeFalling, signal("r"), None),
+                },
+            ],
+        },
+    );
+}
+
+#[test]
+fn a_stage_count_reaches_the_largest_u32_and_overflow_names_its_context() {
+    assert_eq!(
+        logic_rhs("delay(sig.a, 4294967295)"),
+        Expr::Apply {
+            primitive: LogicPrimitive::Delay,
+            operand: Box::new(name(&["sig", "a"])),
+            stages: StageCount::new(u32::MAX),
+        },
+    );
+    let err = parse("struct s size=3x3\n  logic sig.b = delay(sig.a, 4294967296)\n")
+        .expect_err("a stage count past u32 overflows");
+    let message = err.user_message();
+    let ParseError::InvalidInt {
+        position, context, ..
+    } = err
+    else {
+        panic!("expected InvalidInt, got {err:?}");
+    };
+    assert_eq!(
+        (position, context, message.as_str()),
+        (
+            pos(2, 30),
+            IntContext::StageCount,
+            "invalid stage count `4294967296`: value out of range; a stage count is a whole \
+             number from 1 to 4294967295",
+        ),
+    );
 }
 
 #[test]
@@ -575,6 +663,14 @@ fn an_expression_serialises_with_its_primitive_by_name() {
         (
             "mux(b=sig.y, sel=sig.s, a=sig.x)",
             r#"{"kind":"Call","value":{"primitive":"mux","operands":[{"name":"sel","value":{"kind":"Ref","value":["sig","s"]}},{"name":"a","value":{"kind":"Ref","value":["sig","x"]}},{"name":"b","value":{"kind":"Ref","value":["sig","y"]}}]}}"#,
+        ),
+        (
+            "pulse(sig.a, 4)",
+            r#"{"kind":"Apply","value":{"primitive":"pulse","operand":{"kind":"Ref","value":["sig","a"]},"stages":4}}"#,
+        ),
+        (
+            "edge_falling(sig.a)",
+            r#"{"kind":"Apply","value":{"primitive":"edge_falling","operand":{"kind":"Ref","value":["sig","a"]}}}"#,
         ),
     ] {
         assert_eq!(

@@ -58,6 +58,8 @@ pub enum IntContext {
     WithinBound,
     /// Bound of `assert latency(...) <= N`.
     LatencyBound,
+    /// Stage count of an applied macro, as in `pulse(x, N)`.
+    StageCount,
 }
 
 impl IntContext {
@@ -67,6 +69,7 @@ impl IntContext {
             Self::SizeWidth | Self::SizeHeight | Self::IntLiteral => "invalid integer literal",
             Self::WithinBound => "invalid `within` bound",
             Self::LatencyBound => "invalid `latency` bound",
+            Self::StageCount => "invalid stage count",
         }
     }
 }
@@ -103,6 +106,9 @@ fn render_invalid_int(context: IntContext, lexeme: &str, kind: IntErrorKind) -> 
     let valid = match context {
         IntContext::WithinBound | IntContext::LatencyBound => {
             format!("; a bound is a whole number of ticks up to {}", u32::MAX)
+        }
+        IntContext::StageCount => {
+            format!("; a stage count is a whole number from 1 to {}", u32::MAX)
         }
         IntContext::SizeWidth | IntContext::SizeHeight | IntContext::IntLiteral => String::new(),
     };

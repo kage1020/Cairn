@@ -472,10 +472,11 @@ fn what_follows_an_operand_is_refused_with_the_primitives_that_could_stand_there
             ),
         ),
         (
-            "pulse(sig.ring, 4)",
+            "toggle(sig.ring)",
             format!(
-                "2:22: {end_of_line}, got `(`: the built-in logic library has no primitive \
-                 `pulse` to call, and calls only `mux`"
+                "2:23: {end_of_line}, got `(`: the built-in logic library has no primitive \
+                 `toggle` to call or apply; those it calls or applies are `mux`, `latch`, \
+                 `delay`, `pulse`, `edge_rising`, `edge_falling`, or `counter`"
             ),
         ),
         (
@@ -513,6 +514,132 @@ fn what_follows_an_operand_is_refused_with_the_primitives_that_could_stand_there
         (
             "(sig.a",
             format!("2:23: expected {infixes}, or `)`, got end of line"),
+        ),
+    ] {
+        let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");
+        assert_eq!(refusal(&source), expected, "{expression:?}");
+    }
+}
+
+#[test]
+fn an_application_is_refused_unless_it_takes_its_operand_by_position_and_counts_as_it_must() {
+    let counted = |name: &str| {
+        format!("`{name}` is applied to its operand and a stage count, as in `{name}(…, N)`")
+    };
+    for (expression, expected) in [
+        (
+            "delay",
+            format!(
+                "2:22: expected `(` after `delay`, got end of line: {}",
+                counted("delay")
+            ),
+        ),
+        (
+            "edge_rising sig.a",
+            "2:29: expected `(` after `edge_rising`, got identifier `sig`: `edge_rising` is \
+             applied to its one operand, as in `edge_rising(…)`"
+                .to_owned(),
+        ),
+        (
+            "pulse(in=sig.x, 4)",
+            "2:23: `pulse` takes its operand by position, not as `in=`: write it as in \
+             `pulse(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x)",
+            format!(
+                "2:28: expected `,` and a stage count, got `)`: {}",
+                counted("delay")
+            ),
+        ),
+        (
+            "edge_falling(sig.x, 2)",
+            "2:35: expected `)`, got `,`: `edge_falling` counts no stages, so it is applied to \
+             its one operand alone, as in `edge_falling(…)`"
+                .to_owned(),
+        ),
+        (
+            "edge_rising()",
+            "2:29: expected an operand, got `)`: `edge_rising` is applied to its one operand, as \
+             in `edge_rising(…)`"
+                .to_owned(),
+        ),
+        (
+            "counter()",
+            format!("2:25: expected an operand, got `)`: {}", counted("counter")),
+        ),
+    ] {
+        let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");
+        assert_eq!(refusal(&source), expected, "{expression:?}");
+    }
+}
+
+#[test]
+fn a_stage_count_is_refused_where_it_is_wrong() {
+    let counted = |name: &str| {
+        format!("`{name}` is applied to its operand and a stage count, as in `{name}(…, N)`")
+    };
+    for (expression, expected) in [
+        (
+            "pulse(sig.x, 0)",
+            "2:30: expected a stage count of at least 1, got `0`: `pulse` with no stage builds \
+             nothing, so write a count of 1 or more, as in `pulse(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x, 00)",
+            "2:30: expected a stage count of at least 1, got `00`: `delay` with no stage builds \
+             nothing, so write a count of 1 or more, as in `delay(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x 2)",
+            format!(
+                "2:29: expected `,` before the stage count, got integer `2`: {}",
+                counted("delay")
+            ),
+        ),
+        (
+            "counter(sig.x, sig.n)",
+            format!(
+                "2:32: expected a stage count, a whole number of at least 1, got identifier \
+                 `sig`: {}",
+                counted("counter")
+            ),
+        ),
+        (
+            "delay(sig.x, -1)",
+            format!(
+                "2:30: expected a stage count, a whole number of at least 1, got `-`: {}",
+                counted("delay")
+            ),
+        ),
+        (
+            "pulse(sig.x sig.y, 2)",
+            "2:29: expected `and`, `or`, `xor`, `nand`, `nor`, or `,`, got identifier `sig`: two \
+             operands need an infix primitive between them"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x, 2, 3)",
+            "2:31: expected `)`, got `,`: `delay` takes one stage count, as in `delay(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x, 2,)",
+            "2:31: expected `)`, got `,`: `delay` takes one stage count, as in `delay(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x, 1.5)",
+            "2:31: expected `)`, got `.`: a stage count is a whole number of stages, as in \
+             `delay(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x, 2",
+            format!("2:31: expected `)`, got end of line: {}", counted("delay")),
         ),
     ] {
         let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");
@@ -634,6 +761,43 @@ fn a_call_is_refused_unless_it_names_each_of_its_operands_once() {
             "2:40: expected `and`, `or`, `xor`, `nand`, `nor`, `,`, or `)`, got identifier \
              `sig`: two operands need an infix primitive between them"
                 .to_owned(),
+        ),
+    ] {
+        let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");
+        assert_eq!(refusal(&source), expected, "{expression:?}");
+    }
+}
+
+#[test]
+fn a_latch_is_refused_unless_it_names_set_and_reset_once_each() {
+    let shape = "as in `latch(set=…, reset=…)`";
+    let takes = "it takes `set` and `reset`";
+    for (expression, expected) in [
+        (
+            "latch(sig.s, sig.r)",
+            format!(
+                "2:23: expected `set=` or `reset=`, got identifier `sig`: `latch` takes each \
+                 operand by name, {shape}"
+            ),
+        ),
+        (
+            "latch(set=sig.s, sig.r)",
+            format!(
+                "2:34: expected `reset=`, got identifier `sig`: `latch` takes each operand by \
+                 name, {shape}"
+            ),
+        ),
+        (
+            "latch(set=sig.s)",
+            format!("2:32: `latch` is missing its operand `reset`: {takes}, each named once"),
+        ),
+        (
+            "latch(set=sig.s, set=sig.r)",
+            format!("2:34: `latch` names `set` twice: {takes}, each named once"),
+        ),
+        (
+            "latch(set=sig.s, rest=sig.r)",
+            format!("2:34: `latch` has no operand `rest` (did you mean `reset`?): {takes}"),
         ),
     ] {
         let source = format!("struct s size=3x3\n  logic sig.x = {expression}\n");

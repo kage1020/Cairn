@@ -158,7 +158,7 @@ impl Serialize for BufferSegment {
 
 impl BufferSegment {
     /// Every segment word, for the error an unknown word earns.
-    const WORDS: &'static [&'static str] = &["a", "b", "sel", "out"];
+    const WORDS: &'static [&'static str] = &["a", "b", "sel", "set", "reset", "out"];
 
     /// The segment's word in the JSON form, one of [`Self::WORDS`].
     const fn as_str(self) -> &'static str {
@@ -244,7 +244,7 @@ macro_rules! phase_projections {
         /// Local delay ticks once delay insertion has run. See
         /// [`PlacementPhase::local_delay_ticks`].
         #[must_use]
-        pub const fn local_delay_ticks(&self) -> Option<u32> {
+        pub const fn local_delay_ticks(&self) -> Option<u64> {
             self.phase.local_delay_ticks()
         }
 
@@ -374,7 +374,7 @@ fn read_once<'de, T: Deserialize<'de>, A: MapAccess<'de>>(
 struct PhaseFields {
     stage: Option<PlacementStage>,
     wire_length: Option<u32>,
-    local_delay_ticks: Option<u32>,
+    local_delay_ticks: Option<u64>,
     buffer_coords: Option<Vec<BufferCoord>>,
 }
 
@@ -413,18 +413,16 @@ impl PhaseFields {
             }
         };
         // A payload key the tagged stage has been through and must carry.
-        let due = |key: &str, writer: PlacementStage, value: Option<u32>| {
-            value.ok_or_else(|| {
-                E::custom(format_args!(
-                    "{node} tagged `stage: \"{stage}\"` has been through the {writer} \
-                     stage and must carry `{key}`",
-                    writer = writer.as_str(),
-                    stage = stage.as_str(),
-                ))
-            })
+        let due = |key: &str, writer: PlacementStage| {
+            E::custom(format_args!(
+                "{node} tagged `stage: \"{stage}\"` has been through the {writer} \
+                 stage and must carry `{key}`",
+                writer = writer.as_str(),
+                stage = stage.as_str(),
+            ))
         };
-        let wire_length = |v| due("wire_length", Route, v);
-        let local_delay_ticks = |v| due("local_delay_ticks", Delay, v);
+        let wire_length = |v: Option<u32>| v.ok_or_else(|| due("wire_length", Route));
+        let local_delay_ticks = |v: Option<u64>| v.ok_or_else(|| due("local_delay_ticks", Delay));
         let buffer_coords = |present| early("buffer_coords", Crossing, present);
 
         Ok(match stage {
@@ -455,6 +453,27 @@ impl PhaseFields {
             },
         })
     }
+}
+
+/// Refuses a driver on a port `cell` does not have.
+fn check_drivers_feed_ports<E: de::Error>(
+    cell: EditionCell,
+    drivers: &[CellPortDriver],
+) -> Result<(), E> {
+    let ports = cell.ports();
+    for (i, driver) in drivers.iter().enumerate() {
+        if !ports.contains(&driver.port) {
+            let named: Vec<&str> = ports.iter().map(|port| port.as_str()).collect();
+            return Err(E::custom(format_args!(
+                "`drivers[{i}]` feeds port `{port}`, which a `{cell}` does not have; its ports \
+                 are {named}",
+                port = driver.port.as_str(),
+                cell = cell.name(),
+                named = named.join(", "),
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Refuses a buffer on a segment none of the cell's drivers feeds.
@@ -508,11 +527,13 @@ impl<'de> Deserialize<'de> for PlacedCellNode {
                         other => return Err(de::Error::unknown_field(other, PLACED_CELL_FIELDS)),
                     }
                 }
+                let cell = cell.ok_or_else(|| de::Error::missing_field("cell"))?;
                 let drivers = drivers.ok_or_else(|| de::Error::missing_field("drivers"))?;
+                check_drivers_feed_ports(cell, &drivers)?;
                 let phase = phase.into_phase(PlacedSubject::Cell)?;
                 check_buffers_stand_on_drivers(&phase, &drivers)?;
                 Ok(PlacedCellNode {
-                    cell: cell.ok_or_else(|| de::Error::missing_field("cell"))?,
+                    cell,
                     drivers,
                     coord: coord.ok_or_else(|| de::Error::missing_field("coord"))?,
                     phase,

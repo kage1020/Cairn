@@ -505,6 +505,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  logic s.out = mux (sel=a.b, a=c.d, b=e.f)\n",
         Accept,
     ),
+    (
+        "logic_macro_call",
+        "struct s size=3x3\n  logic s.out = pulse(sig.ring, 4)\n",
+        Accept,
+    ),
     // What the library does not hold, and two operands with no infix primitive between them.
     (
         "logic_word_the_library_lacks",
@@ -513,7 +518,7 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     (
         "logic_call",
-        "struct s size=3x3\n  logic s.out = pulse(sig.ring, 4)\n",
+        "struct s size=3x3\n  logic s.out = toggle(sig.ring)\n",
         Reject,
     ),
     (
@@ -831,6 +836,23 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "latency_two_sources",
         "struct s size=3x3\n  assert latency(a.b, e.f -> c.d) <= 4\n",
         Reject,
+    ),
+    // A macro's name is a keyword only where an operand starts.
+    (
+        "macro_names_a_signal",
+        "struct s size=3x3\n  logic sig.delay = sig.counter or sig.latch\n",
+        Accept,
+    ),
+    // At the head of an operand it is the primitive, which `.` cannot follow.
+    (
+        "macro_heads_no_signal",
+        "struct s size=3x3\n  logic sig.x = latch.pulse\n",
+        Reject,
+    ),
+    (
+        "macro_name_as_a_value",
+        "struct s size=3x3\n  floor at=counter mat=edge_rising\n",
+        Accept,
     ),
     // `latency` is a keyword only after `assert`, so a signal may still be named for it.
     (
@@ -1531,6 +1553,17 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  fill from=99999999999999999999,1,1\n",
         Accept,
     ),
+    // `parse_applied` refuses a stage count of 0 and one past `u32`.
+    (
+        "stage_count_zero",
+        "struct s size=3x3\n  logic s.out = pulse(a.b, 0)\n",
+        Accept,
+    ),
+    (
+        "stage_count_out_of_range",
+        "struct s size=3x3\n  logic s.out = delay(a.b, 4294967296)\n",
+        Accept,
+    ),
     // An assertion's bound is a `u32`, which the grammar's `integer` does not narrow to.
     (
         "within_bound_out_of_range",
@@ -1793,6 +1826,7 @@ fn library_primitives() -> impl Iterator<Item = (String, String, Verdict)> {
                 ),
             ],
             Notation::Call(signature) => library_calls(signature),
+            Notation::Apply { counted } => applied_primitive(word, counted),
         }
     })
 }
@@ -1895,6 +1929,64 @@ fn library_calls(signature: CallSignature) -> Vec<(String, String, Verdict)> {
     out
 }
 
+/// The [`library_primitives`] cases of a primitive applied to one operand, and a stage count when
+/// it is `counted`.
+fn applied_primitive(word: &str, counted: bool) -> Vec<(String, String, Verdict)> {
+    let apply = |args: &str| logic_line(&format!("{word}({args})"));
+    let (takes, other) = if counted {
+        ("a.b, 2", "a.b")
+    } else {
+        ("a.b", "a.b, 2")
+    };
+    vec![
+        (
+            format!("library application `{word}`"),
+            apply(takes),
+            Accept,
+        ),
+        (
+            format!("library application `{word}` of an infix expression"),
+            apply(&takes.replace("a.b", "a.b or c.d")),
+            Accept,
+        ),
+        (
+            format!("library application `{word}` as an infix operand"),
+            apply(takes).replace(" = ", " = a.b and "),
+            Accept,
+        ),
+        (
+            format!("library application `{word}` with the other stage count"),
+            apply(other),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` with a named operand"),
+            apply(&format!("x={takes}")),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` with a trailing comma"),
+            apply(&format!("{takes},")),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` with no operand"),
+            apply(""),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` with no parentheses"),
+            logic_line(&format!("{word} a.b")),
+            Reject,
+        ),
+        (
+            format!("library application `{word}` as an operand"),
+            logic_line(word),
+            Reject,
+        ),
+    ]
+}
+
 /// Every order of `items`.
 fn permutations<'a>(items: &[&'a str]) -> Vec<Vec<&'a str>> {
     if items.len() <= 1 {
@@ -1982,6 +2074,16 @@ fn library_groupings() -> Vec<String> {
             out.push(format!("{word}({}) {} z.z", named.join(", "), infix[0]));
         }
     }
+    let applied = LogicPrimitive::ALL
+        .iter()
+        .filter_map(|primitive| Some((primitive.name(), primitive.applied_counted()?)));
+    for (word, counted) in applied {
+        let count = if counted { ", 3" } else { "" };
+        for p in &infix {
+            out.push(format!("{word}(a.b {p} c.d{count}) {p} z.z"));
+            out.push(format!("not {word}(a.b{count}) {p} z.z"));
+        }
+    }
     out
 }
 
@@ -2040,6 +2142,14 @@ fn core_grouping(expr: &cairn_lang_core::ast::Expr) -> String {
                 .map(|operand| format!("{}={}", operand.name, core_grouping(&operand.value)))
                 .collect();
             format!("({} {})", primitive.name(), named.join(" "))
+        }
+        Expr::Apply {
+            primitive,
+            operand,
+            stages,
+        } => {
+            let count = stages.map(|n| format!(" {n}")).unwrap_or_default();
+            format!("({} {}{count})", primitive.name(), core_grouping(operand))
         }
         other => panic!("no grouping for {other:?}"),
     }
@@ -2103,6 +2213,17 @@ fn grammar_grouping(node: tree_sitter::Node<'_>, source: &str) -> String {
             named.sort();
             let named: Vec<String> = named.into_iter().map(|(_, text)| text).collect();
             format!("({word} {})", named.join(" "))
+        }
+        "apply_expression" => {
+            let count = node
+                .child_by_field_name("stages")
+                .map(|stages| format!(" {}", stages.utf8_text(source.as_bytes()).expect("utf-8")))
+                .unwrap_or_default();
+            format!(
+                "({} {}{count})",
+                word(0),
+                grammar_grouping(field("operand"), source)
+            )
         }
         _ => node.utf8_text(source.as_bytes()).expect("utf-8").to_owned(),
     }
