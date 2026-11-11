@@ -41,6 +41,24 @@ fn the_repair_names_every_sensor_keyword() {
 }
 
 #[test]
+fn a_tail_on_a_tier0_part_is_refused() {
+    for line in [
+        "repeater at=1,1,1 facing=east",
+        "comparator at=1,1,1 facing=east",
+        "redstone_torch at=1,1,1",
+        "redstone_dust at=1,1,1",
+    ] {
+        let src = format!("struct s size=5x5\n  {line} -> sig.w\n");
+        let d = exactly_one(diagnose(&src));
+        assert_eq!(
+            (d.code.as_str(), slice(&src, &d)),
+            ("E_MISPLACED_BINDING", "sig.w"),
+            "{line}",
+        );
+    }
+}
+
+#[test]
 fn a_tail_on_a_sensor_is_accepted() {
     assert_eq!(
         codes("struct s size=5x5\n  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n"),

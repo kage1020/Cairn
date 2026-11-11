@@ -1,5 +1,6 @@
 //! The `connections` component of a registry pack: what each block is, per version, to the rules
-//! that join panes, fences, walls and chests to their neighbours (`spec/blockstate` "Connections").
+//! that join panes, fences, walls, chests and redstone dust to their neighbours (`spec/blockstate`
+//! "Connections").
 
 use std::collections::HashMap;
 
@@ -56,6 +57,9 @@ pub struct ConnectionRow {
     /// What their bottoms cover of a wall below: `post`, and the directions of its sides.
     #[serde(default)]
     pub covers: Option<ByState>,
+    /// The faces redstone dust beside them joins.
+    #[serde(default)]
+    pub dust: Option<ByState>,
 }
 
 /// The kind of connecting block a [`ConnectionRow`] describes.
@@ -74,6 +78,8 @@ pub enum ConnectionKind {
     FenceGate,
     /// A chest, which pairs with a chest of the same block and facing beside it.
     Chest,
+    /// Redstone dust.
+    RedstoneDust,
 }
 
 /// Names that hold of a [`ConnectionRow`]'s blocks, in every state alike or by state.
@@ -158,6 +164,7 @@ struct Row {
     defaults: IndexMap<String, String>,
     sturdy: Held<Faces>,
     covers: Held<Covers>,
+    dust: Held<Faces>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -299,6 +306,7 @@ impl ConnectionIndex {
                     .map(|(key, value)| (key.as_str(), value.as_str()))
                     .chain(row.sturdy.named())
                     .chain(row.covers.named())
+                    .chain(row.dust.named())
                     .map(move |(key, value)| (id.as_str(), key, value))
             })
     }
@@ -348,6 +356,7 @@ impl ConnectionIndex {
             covers: row.covers.at(value),
             never_joined_by_face: row.never_joined_by_face,
             raises_post: row.raises_post,
+            dust: row.dust.at(value),
         })
     }
 }
@@ -362,6 +371,19 @@ fn faces_of(faces: &[String]) -> Result<Faces, String> {
     faces
         .iter()
         .map(|name| Face::from_name(name).ok_or_else(|| format!("`{name}` is no face")))
+        .collect()
+}
+
+/// `faces` as a set of sideways faces, or the first name that is none: dust lies on the block
+/// under it, so it joins a block beside it by a side only.
+fn sides_of(faces: &[String]) -> Result<Faces, String> {
+    faces
+        .iter()
+        .map(|name| {
+            side_named(name).ok_or_else(|| {
+                format!("`{name}` is no sideways face: `north`, `south`, `east` or `west`")
+            })
+        })
         .collect()
 }
 
@@ -410,7 +432,8 @@ fn held<T: Default>(
 fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
     let sturdy = held("sturdy", row.sturdy.as_ref(), faces_of)?;
     let covers = held("covers", row.covers.as_ref(), covers_of)?;
-    let mut needs: Vec<&str> = [&row.sturdy, &row.covers]
+    let dust = held("dust", row.dust.as_ref(), sides_of)?;
+    let mut needs: Vec<&str> = [&row.sturdy, &row.covers, &row.dust]
         .into_iter()
         .flatten()
         .flat_map(|written| match written {
@@ -444,6 +467,7 @@ fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
         Some(ConnectionKind::Wall) => Some(RowKind::Joins(JoinKind::Wall)),
         Some(ConnectionKind::Fence) => Some(RowKind::Joins(JoinKind::Fence { wooden: false })),
         Some(ConnectionKind::WoodenFence) => Some(RowKind::Joins(JoinKind::Fence { wooden: true })),
+        Some(ConnectionKind::RedstoneDust) => Some(RowKind::Joins(JoinKind::Dust)),
         Some(ConnectionKind::FenceGate) => {
             let facing = &row.defaults["facing"];
             let open = &row.defaults["open"];
@@ -470,6 +494,7 @@ fn parse_row(row: &ConnectionRow) -> Result<Row, String> {
         defaults: row.defaults.clone(),
         sturdy,
         covers,
+        dust,
     })
 }
 

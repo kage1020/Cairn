@@ -1,5 +1,5 @@
-//! Panes, fences, walls, fence gates and chests take their connection states from the blocks
-//! beside them once every member is painted (`spec/blockstate` "Connections").
+//! Panes, fences, walls, fence gates, chests and redstone dust take their connection states from
+//! the blocks beside them once every member is painted (`spec/blockstate` "Connections").
 
 use cairn_lang_core::block_array::{
     BlockArray, BlockIdSet, BlockState, Covers, Face, Faces, JoinKind, Joins, StateDomain,
@@ -7,7 +7,7 @@ use cairn_lang_core::block_array::{
 };
 use serde_json::json;
 
-use crate::common::{chests, lowered_with, only_structure, state_at};
+use crate::common::{blocks_where, chests, lowered_with, only_structure, state_at};
 
 /// A target whose connection table holds the blocks these tests build with, read as the game's
 /// rules read them, and which pins no version.
@@ -89,6 +89,28 @@ impl TargetRegistry for Rules {
             },
             // Bedrock's, which no Java block becomes, so the table cannot say what it is.
             "border_block" => return None,
+            "oak_slab" if value("type", "bottom") == "top" => Joins {
+                sturdy: Faces::NONE.with(Face::Up),
+                ..Joins::default()
+            },
+            "redstone_wire" => kind(JoinKind::Dust),
+            "repeater" => {
+                let facing = Face::from_name(value("facing", "north"))?;
+                Joins {
+                    sturdy: Faces::NONE.with(Face::Down),
+                    dust: Faces::NONE.with(facing).with(facing.opposite()),
+                    ..Joins::default()
+                }
+            }
+            "observer" => Joins {
+                sturdy: Faces::ALL,
+                dust: Faces::NONE.with(Face::from_name(value("facing", "south"))?.opposite()),
+                ..Joins::default()
+            },
+            "lever" => Joins {
+                dust: Face::SIDES.into_iter().collect(),
+                ..Joins::default()
+            },
             _ => Joins::default(),
         })
     }
@@ -750,4 +772,197 @@ fn a_block_the_target_reads_as_no_chest_is_refused_and_one_it_cannot_say_of_goes
         chests(only_structure(&out)),
         [((4, 1, 1), "minecraft:ender_chest[facing=south]".to_owned())],
     );
+}
+
+/// A 7x7 struct of 3-row cobblestone walls, then `members`.
+fn bench(members: &[&str]) -> String {
+    let mut src =
+        "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=7x7\n  walls mat_slot=wall height=3\n"
+            .to_owned();
+    for member in members {
+        src.push_str("  ");
+        src.push_str(member);
+        src.push('\n');
+    }
+    src
+}
+
+/// Each redstone dust `members` sets in [`bench`], by its cell, as `id[properties]`.
+fn wired(members: &[&str]) -> Vec<((u32, u32, u32), String)> {
+    let out = lowered_with(&bench(members), &Rules);
+    assert_eq!(out.diagnostics, [], "{members:#?}");
+    blocks_where(only_structure(&out), |id| id == "minecraft:redstone_wire")
+}
+
+/// A dust whose sides toward north, east, south and west are each `none`, `side` or `up`.
+fn dust(north: &str, east: &str, south: &str, west: &str) -> String {
+    format!("minecraft:redstone_wire[east={east},north={north},south={south},west={west}]")
+}
+
+#[test]
+fn dust_runs_straight_through_a_line_and_a_lone_dust_is_a_cross() {
+    assert_eq!(
+        wired(&[
+            "redstone_dust at=1,0,1",
+            "redstone_dust at=2,0,1",
+            "redstone_dust at=3,0,1",
+            "redstone_dust at=5,0,5",
+        ]),
+        [
+            ((1, 0, 1), dust("none", "side", "none", "side")),
+            ((2, 0, 1), dust("none", "side", "none", "side")),
+            ((3, 0, 1), dust("none", "side", "none", "side")),
+            ((5, 0, 5), dust("side", "side", "side", "side")),
+        ],
+    );
+}
+
+#[test]
+fn dust_turns_a_corner_and_joins_a_signal_source_on_any_side() {
+    assert_eq!(
+        wired(&[
+            "redstone_dust at=1,0,1",
+            "redstone_dust at=2,0,1",
+            "redstone_dust at=2,0,2",
+            "raw_block mat=minecraft:lever at=3,0,2",
+        ]),
+        [
+            ((1, 0, 1), dust("none", "side", "none", "side")),
+            ((2, 0, 1), dust("none", "none", "side", "side")),
+            ((2, 0, 2), dust("side", "side", "none", "none")),
+        ],
+    );
+}
+
+#[test]
+fn dust_joins_a_repeater_along_its_line_and_an_observer_only_at_its_back() {
+    assert_eq!(
+        wired(&[
+            "redstone_dust at=1,0,1",
+            "repeater at=2,0,1 facing=east",
+            "repeater at=1,0,2 facing=east",
+            "redstone_dust at=4,0,4",
+            "raw_block mat=minecraft:observer[facing=east] at=5,0,4",
+            "raw_block mat=minecraft:observer[facing=north] at=4,0,5",
+        ]),
+        [
+            ((1, 0, 1), dust("none", "side", "none", "side")),
+            ((4, 0, 4), dust("none", "side", "none", "side")),
+        ],
+    );
+}
+
+#[test]
+fn dust_climbs_a_block_whose_top_is_whole_unless_a_block_over_it_cuts_the_diagonal() {
+    let climb = [
+        "redstone_dust at=1,0,1",
+        "redstone_dust at=1,0,2",
+        "raw_block mat=minecraft:cobblestone at=2,0,1",
+        "redstone_dust at=2,1,1",
+    ];
+    assert_eq!(
+        wired(&climb),
+        [
+            ((1, 0, 1), dust("none", "up", "side", "none")),
+            ((1, 0, 2), dust("side", "none", "side", "none")),
+            ((2, 1, 1), dust("none", "side", "none", "side")),
+        ],
+    );
+    let mut cut = climb.to_vec();
+    cut.push("raw_block mat=minecraft:cobblestone at=1,1,1");
+    assert_eq!(
+        wired(&cut),
+        [
+            ((1, 0, 1), dust("side", "none", "side", "none")),
+            ((1, 0, 2), dust("side", "none", "side", "none")),
+            ((2, 1, 1), dust("side", "side", "side", "side")),
+        ],
+    );
+    assert_eq!(
+        wired(&[
+            "redstone_dust at=1,0,1",
+            "raw_block mat=minecraft:oak_slab[type=top] at=2,0,1",
+            "redstone_dust at=2,1,1",
+        ]),
+        [
+            ((1, 0, 1), dust("none", "side", "none", "side")),
+            ((2, 1, 1), dust("none", "side", "none", "side")),
+        ],
+    );
+    assert_eq!(
+        wired(&[
+            "redstone_dust at=1,0,1",
+            "raw_block mat=minecraft:oak_slab[type=bottom] at=2,0,1",
+            "redstone_dust at=2,1,1",
+        ]),
+        [
+            ((1, 0, 1), dust("side", "side", "side", "side")),
+            ((2, 1, 1), dust("none", "side", "none", "side")),
+        ],
+    );
+}
+
+#[test]
+fn dust_written_as_a_dot_or_a_cross_or_placed_raw_keeps_its_sides_and_is_still_joined() {
+    assert_eq!(
+        wired(&[
+            "redstone_dust at=1,0,1 connect=none",
+            "redstone_dust at=2,0,1",
+            "redstone_dust at=1,0,2 connect=all",
+            "raw_block mat=minecraft:redstone_wire at=4,0,4",
+            "redstone_dust at=4,0,5",
+        ]),
+        [
+            ((1, 0, 1), dust("none", "none", "none", "none")),
+            ((1, 0, 2), dust("side", "side", "side", "side")),
+            ((2, 0, 1), dust("none", "side", "none", "side")),
+            ((4, 0, 4), "minecraft:redstone_wire".to_owned()),
+            ((4, 0, 5), dust("side", "none", "side", "none")),
+        ],
+    );
+}
+
+/// The keys the array records the lowering derived for the block at `(x, y, z)`.
+fn derived_at(array: &BlockArray, x: u32, y: u32, z: u32) -> Vec<&str> {
+    let i = array.dims.index(x, y, z).expect("a cell of the array");
+    let slot = usize::from(array.voxels[i].0);
+    array
+        .derived
+        .get(slot)
+        .map_or_else(Vec::new, |keys| keys.iter().map(String::as_str).collect())
+}
+
+#[test]
+fn the_array_records_the_connection_states_the_lowering_derived_and_none_a_member_wrote() {
+    let out = lowered_with(
+        &yard(
+            "@cobblestone",
+            1,
+            "window side=front offset=1 y=1 size=1x1 mat_slot=north\n  \
+             window side=front offset=3 y=1 size=1x1 mat_slot=glass\n  \
+             raw_block mat=minecraft:glass_pane[west=true] at=2,1,1",
+        ),
+        &Rules,
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    assert_eq!(derived_at(ba, 1, 1, 2), ["east", "south", "west"]);
+    assert_eq!(derived_at(ba, 3, 1, 2), ["east", "north", "south", "west"]);
+    assert_eq!(derived_at(ba, 2, 1, 1), Vec::<&str>::new());
+
+    let out = lowered_with(
+        &bench(&[
+            "redstone_dust at=1,0,1",
+            "redstone_dust at=2,0,1",
+            "redstone_dust at=1,0,4 connect=all",
+            "redstone_dust at=4,0,4",
+        ]),
+        &Rules,
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    assert_eq!(derived_at(ba, 1, 0, 1), ["east", "north", "south", "west"]);
+    // The lone dust derives the cross the other wrote, and one slot holds both.
+    assert_eq!(derived_at(ba, 4, 0, 4), Vec::<&str>::new());
+    assert_eq!(state_at(ba, 4, 0, 4), state_at(ba, 1, 0, 4));
 }

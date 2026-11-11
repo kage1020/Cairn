@@ -165,6 +165,35 @@ fn a_bedrock_state_is_checked_against_the_canonical_states_its_map_reads() {
 }
 
 #[test]
+fn a_bedrock_id_that_is_its_own_java_block_takes_the_states_of_every_block_it_reads_as() {
+    assert_eq!(
+        domain(
+            Edition::Bedrock,
+            "1.21.60",
+            "redstone_torch",
+            &[("facing", "north"), ("lit", "true")],
+        ),
+        StateDomain::Checked(Vec::new()),
+    );
+    assert_eq!(
+        domain(
+            Edition::Bedrock,
+            "1.21.60",
+            "redstone_torch",
+            &[("facing", "up")]
+        ),
+        outside(
+            "facing",
+            "up",
+            DomainFault::ValueOutside {
+                values: owned(&["north", "south", "west", "east"]),
+            },
+            &[],
+        ),
+    );
+}
+
+#[test]
 fn a_bedrock_block_its_map_names_no_states_for_is_left_to_the_state_map() {
     let refused = state("cherry_wood", &[("axis", "x")]);
     let pinned = builtin_pack(Edition::Bedrock).view(Some("1.21.40"));

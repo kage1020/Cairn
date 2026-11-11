@@ -75,6 +75,11 @@ fn both_packs_declare_the_tokens_that_redirect_the_member_defaults() {
         ("piston.default", "piston"),
         ("piston.sticky", "sticky piston"),
         ("dispenser.default", "dispenser"),
+        ("repeater.default", "repeater"),
+        ("comparator.default", "comparator"),
+        ("redstone_torch.default", "redstone torch"),
+        ("redstone_torch.wall", "redstone wall torch"),
+        ("redstone_dust.default", "redstone dust"),
     ] {
         for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
             for version in supported_versions(pack) {
@@ -112,6 +117,9 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
         ("pressure_plate.default", "minecraft:wooden_pressure_plate"),
         ("door.default", "minecraft:wooden_door"),
         ("button.default", "minecraft:wooden_button"),
+        ("repeater.default", "minecraft:unpowered_repeater"),
+        ("comparator.default", "minecraft:unpowered_comparator"),
+        ("redstone_torch.wall", "minecraft:redstone_torch"),
     ] {
         assert_eq!(
             bedrock.materials().lookup_id(token),
@@ -127,6 +135,9 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
         ("pressure_plate.default", "minecraft:oak_pressure_plate"),
         ("door.default", "minecraft:oak_door"),
         ("button.default", "minecraft:oak_button"),
+        ("repeater.default", "minecraft:repeater"),
+        ("comparator.default", "minecraft:comparator"),
+        ("redstone_torch.wall", "minecraft:redstone_wall_torch"),
     ] {
         assert_eq!(
             java.materials().lookup_id(token),

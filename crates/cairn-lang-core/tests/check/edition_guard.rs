@@ -1,5 +1,5 @@
-//! `E_SEMANTIC_IN_EDITION_GUARD`: an `@edition` guard holds raw members only, since the semantic
-//! layer is edition-neutral
+//! `E_SEMANTIC_IN_EDITION_GUARD`: an `@edition` guard holds only raw members and Tier 0 parts,
+//! since the semantic layer is edition-neutral
 //! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
 use cairn_lang_core::block_array::lower_to_block_array;
@@ -33,6 +33,16 @@ fn a_guard_of_raw_members_is_clean() {
 }
 
 #[test]
+fn a_guard_of_tier0_parts_is_clean() {
+    let source = struct_with(
+        "  @edition java\n    repeater at=1,1,1 facing=east delay=2\n    \
+         comparator at=2,1,1 facing=east\n  @edition bedrock\n    redstone_torch at=3,1,1\n    \
+         redstone_dust at=1,1,2\n",
+    );
+    assert_eq!(located(&source), []);
+}
+
+#[test]
 fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
     let source = struct_with(
         "  @edition java\n    walls mat_slot=f height=2\n    \
@@ -46,8 +56,8 @@ fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
     assert_eq!(slice(&source, d), "walls mat_slot=f height=2");
     assert_eq!(
         d.primary,
-        "a `walls` stands under an `@edition java` guard, which holds only raw members: the \
-         semantic layer is edition-neutral",
+        "a `walls` stands under an `@edition java` guard, which holds only raw members and Tier 0 \
+         parts: the semantic layer is edition-neutral",
     );
     assert_eq!(
         notes(d),
@@ -55,7 +65,8 @@ fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
             "the guard opens here",
             "dedent the line out of the guard so that every edition builds it, and bind what \
              differs per edition from a `theme NAME_java` and a `theme NAME_bedrock`; the guard is \
-             for `raw_block` and `raw_fill`",
+             for `raw_block`, `raw_fill` and the Tier 0 parts `repeater`, `comparator`, \
+             `redstone_torch` and `redstone_dust`",
         ],
     );
     assert_eq!(
@@ -83,19 +94,19 @@ fn a_logic_or_assert_line_under_a_guard_is_refused() {
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "logic sig.a = sig.b",
                 "a `logic` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members: the semantic layer is edition-neutral",
+                 members and Tier 0 parts: the semantic layer is edition-neutral",
             ),
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "assert always(sig.a -> eventually sig.b within 4)",
                 "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members: the semantic layer is edition-neutral",
+                 members and Tier 0 parts: the semantic layer is edition-neutral",
             ),
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "assert latency(sig.b -> sig.a) <= 2",
                 "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members: the semantic layer is edition-neutral",
+                 members and Tier 0 parts: the semantic layer is edition-neutral",
             ),
         ],
     );
@@ -125,6 +136,17 @@ fn a_logic_or_assert_line_under_a_guarded_raw_member_is_refused() {
 }
 
 #[test]
+fn a_logic_line_under_a_guarded_tier0_part_is_refused() {
+    let source = struct_with(
+        "  @edition java\n    repeater at=1,1,1 facing=east delay=2\n      logic sig.a = sig.b\n",
+    );
+    assert_eq!(
+        located(&source),
+        [("E_SEMANTIC_IN_EDITION_GUARD", "logic sig.a = sig.b")],
+    );
+}
+
+#[test]
 fn a_logic_line_in_a_guard_under_a_guarded_raw_member_is_refused_and_lowered_into_no_body() {
     let source = struct_with(
         "  @edition java\n    raw_block mat=minecraft:stone at=1,0,1\n      @edition bedrock\n        \
@@ -142,13 +164,13 @@ fn a_logic_line_in_a_guard_under_a_guarded_raw_member_is_refused_and_lowered_int
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "logic sig.a = sig.b",
                 "a `logic` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members: the semantic layer is edition-neutral",
+                 members and Tier 0 parts: the semantic layer is edition-neutral",
             ),
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "assert always(sig.a -> eventually sig.b within 4)",
                 "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members: the semantic layer is edition-neutral",
+                 members and Tier 0 parts: the semantic layer is edition-neutral",
             ),
         ],
     );
@@ -345,7 +367,7 @@ fn in_a_site_body_a_place_is_refused_for_its_guard_and_a_raw_member_for_its_body
 }
 
 #[test]
-fn an_unknown_keyword_under_a_guard_is_offered_the_raw_members() {
+fn an_unknown_keyword_under_a_guard_is_offered_what_a_guard_body_holds() {
     let source = struct_with("  @edition java\n    raw_blok mat=minecraft:stone at=1,0,1\n");
     let found = diagnose(&source);
     let [d] = found.as_slice() else {
@@ -363,7 +385,8 @@ fn an_unknown_keyword_under_a_guard_is_offered_the_raw_members() {
         notes(d),
         [
             "did you mean `raw_block`?",
-            "expected one of: raw_block, raw_fill"
+            "expected one of: repeater, comparator, redstone_torch, redstone_dust, raw_block, \
+             raw_fill"
         ],
     );
 }
@@ -385,8 +408,8 @@ fn an_unknown_keyword_under_a_guard_in_a_site_body_is_offered_nothing() {
     assert_eq!(
         notes(d),
         [
-            "nothing builds under an `@edition` guard in a `site` body: the raw members a guard \
-          holds go in a `struct` or `def` body"
+            "nothing builds under an `@edition` guard in a `site` body: the raw members and Tier \
+             0 parts a guard holds go in a `struct` or `def` body"
         ],
     );
 }

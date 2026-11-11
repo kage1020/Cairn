@@ -161,6 +161,7 @@ fn asymmetric_array() -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::asymmetric".to_owned(),
+        derived: Vec::new(),
     }
 }
 
@@ -181,6 +182,7 @@ fn an_empty_array_streams_the_bytes_its_tree_writes() {
             block_entities: vec![],
             entities: vec![],
             source_scope: "struct::empty".to_owned(),
+            derived: Vec::new(),
         };
         let label = format!("empty {}x{}x{}", dims.x, dims.y, dims.z);
         assert_java_streams_the_tree(&label, &array);
@@ -197,6 +199,7 @@ fn grid(dims: Dims, voxels: usize) -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::grid".to_owned(),
+        derived: Vec::new(),
     }
 }
 

@@ -24,6 +24,10 @@ const GEOMETRY_ROWS: &[&str] = &[
     "piston id=pi at=inside.front",
     "dispenser id=ds at=inside.front",
     "chest id=c at=inside.front",
+    "repeater at=1,0,1 facing=east",
+    "comparator at=1,0,1 facing=east",
+    "redstone_torch at=1,0,1",
+    "redstone_dust at=1,0,1",
     "circuit region=floor void=1",
     "raw_block mat=minecraft:stone at=1,0,1",
     "raw_fill mat=minecraft:stone from=0,0,0 to=1,0,1",
@@ -199,8 +203,8 @@ fn the_candidate_list_is_scoped_to_the_body() {
     assert!(
         notes(&geometry).contains(
             &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, \
-             lever, button, daylight, observer, lamp, piston, dispenser, chest, circuit, raw_block, \
-             raw_fill"
+             lever, button, daylight, observer, lamp, piston, dispenser, chest, repeater, \
+             comparator, redstone_torch, redstone_dust, circuit, raw_block, raw_fill"
         ),
         "got {:#?}",
         notes(&geometry),

@@ -19,12 +19,15 @@ family is checked against the release's palette. Reading a mapping takes its Jav
 `--reports`, so the Bedrock run needs Java too. A Java property no Bedrock state reads must be
 classified by hand in the pack's `sensitivity.json`.
 
-Both packs get a connection table: what each block is to the rules that join panes, fences and
-walls to their neighbours, read off the Java release each version's states follow. Which blocks
-are walls, fences and fence gates, and which raise a wall's post, are the server jar's block tags;
-a pane is a block with a pane's states that is no fence, and the blocks never joined by a face are
-those `Block.isExceptionForConnection` names. Which faces of each state are whole comes from the
-block models the release's client jar ships.
+Both packs get a connection table: what each block is to the rules that join panes, fences, walls,
+chests and redstone dust to their neighbours, read off the Java release each version's states
+follow. Which blocks are walls, fences and fence gates, and which raise a wall's post, are the
+server jar's block tags; a pane is a block with a pane's states that is no fence, and the blocks
+never joined by a face are those `Block.isExceptionForConnection` names. Dust joins a repeater
+along its facing, an observer at its back when that is a side, and every block whose class
+answers `isSignalSource`: by the `buttons` and `pressure_plates` tags, and by name for the rest,
+which no tag lists, so those names are the game's code as read here. Which faces of each state
+are whole comes from the block models the release's client jar ships.
 
 The run rewrites the edition's `blocks.json`, the targetable rows' integers and `latest` in
 `data_versions.json`, Bedrock's `states.json`, both packs' `connections.json`, and the `extracted`
@@ -592,6 +595,39 @@ CONNECTION_TAGS = ("walls", "fences", "wooden_fences", "fence_gates", "wall_post
 EXCEPTION_TAGS = ("leaves", "shulker_boxes")
 EXCEPTION_BLOCKS = ("barrier", "carved_pumpkin", "jack_o_lantern", "melon", "pumpkin")
 BOOLEAN = ["true", "false"]
+# What `RedStoneWireBlock.shouldConnectTo` joins dust to on any side: the blocks whose class
+# answers `isSignalSource`, by tag where one lists them and else by name. A repeater and an
+# observer are joined on some sides only, and dust itself is a kind.
+SIGNAL_SOURCE_TAGS = ("buttons", "pressure_plates")
+SIGNAL_SOURCE_BLOCKS = (
+    "calibrated_sculk_sensor",
+    "comparator",
+    "daylight_detector",
+    "detector_rail",
+    "jukebox",
+    "lectern",
+    "lever",
+    "redstone_block",
+    "redstone_torch",
+    "redstone_wall_torch",
+    "sculk_sensor",
+    "target",
+    "trapped_chest",
+    "tripwire_hook",
+)
+# Every lightning rod, the weathering copper ones among them, is named so.
+LIGHTNING_ROD = "lightning_rod"
+# The blocks the dust rules name, each of which every release's report must hold.
+DUST_NAMED = ("redstone_wire", "repeater", "observer", *SIGNAL_SOURCE_BLOCKS)
+SIDES = ("north", "south", "west", "east")
+OPPOSITE = {
+    "down": "up",
+    "up": "down",
+    "north": "south",
+    "south": "north",
+    "west": "east",
+    "east": "west",
+}
 # The states each kind of connecting block holds, with the values the rules read and write.
 KIND_STATES = {
     "pane": {side: BOOLEAN for side in ("east", "north", "south", "west")},
@@ -609,6 +645,7 @@ KIND_STATES = {
         "facing": ["north", "south", "west", "east"],
         "type": ["single", "left", "right"],
     },
+    "redstone_dust": {side: ["up", "side", "none"] for side in SIDES},
 }
 # A pane is any block holding exactly these states that is no fence: the game has no tag for them.
 PANE_STATES = {**KIND_STATES["pane"], WATER_LAYER_STATE: BOOLEAN}
@@ -641,8 +678,8 @@ class Lookup:
 class Joins:
     """What one block is to the connection rules at one release."""
 
-    # `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate` or `chest`; `None` for one that only
-    # has faces.
+    # `pane`, `wall`, `fence`, `wooden_fence`, `fence_gate`, `chest` or `redstone_dust`; `None` for
+    # one that only has faces.
     kind: str | None
     never_joined_by_face: bool
     # Whether the game's `wall_post_override` tag holds it.
@@ -654,6 +691,8 @@ class Joins:
     covers: Lookup | None = None
     # The default state's value of each property the rules read of the block, by name.
     defaults: tuple[tuple[str, str], ...] = ()
+    # The faces dust beside them joins; `None` for none.
+    dust: Lookup | None = None
 
 
 def nested_jar(jar: Path) -> zipfile.ZipFile:
@@ -957,6 +996,8 @@ def block_kind(name: str, states: dict, tags: dict[str, set[str]]) -> str | None
             ("pane", states == PANE_STATES and name not in tags["fences"]),
             # No tag names them: a chest is any block whose `type` takes these values.
             ("chest", states.get("type") == KIND_STATES["chest"]["type"]),
+            # Nor dust, which is the one block the game names so.
+            ("redstone_dust", name == "redstone_wire"),
         )
         if held
     ]
@@ -965,18 +1006,61 @@ def block_kind(name: str, states: dict, tags: dict[str, set[str]]) -> str | None
     if not kinds:
         return None
     kind = kinds[0]
-    if any(states.get(key) != values for key, values in KIND_STATES[kind].items()):
+    held = KIND_STATES[kind].items()
+    if any(sorted(states.get(key, ())) != sorted(values) for key, values in held):
         raise Refused(f"`{name}` is a {kind} without a {kind}'s states")
     if kind == "fence" and name in tags["wooden_fences"]:
         return "wooden_fence"
     return kind
 
 
+def dust_faces(name: str, states: dict, tags: dict[str, set[str]]) -> Lookup | None:
+    """The faces of `name` that dust beside them joins, or `None` for none."""
+
+    def per_facing(faces) -> Lookup:
+        # Dust lies on the block under it, so it joins a block by a side only.
+        table = (
+            (facing, tuple(face for face in FACES if face in faces(facing) and face in SIDES))
+            for facing in states["facing"]
+        )
+        return Lookup(("facing",), tuple(sorted(table)))
+
+    if name == "repeater":
+        return per_facing(lambda facing: (facing, OPPOSITE[facing]))
+    if name == "observer":
+        return per_facing(lambda facing: (OPPOSITE[facing],))
+    if (
+        name in SIGNAL_SOURCE_BLOCKS
+        or name.endswith(LIGHTNING_ROD)
+        or any(name in tags[tag] for tag in SIGNAL_SOURCE_TAGS)
+    ):
+        return Lookup((), (("", tuple(face for face in FACES if face in SIDES)),))
+    return None
+
+
+def check_dust_names(report: dict) -> None:
+    """Refuse a `--reports` `blocks.json` that holds no block the dust rules name, or no lightning
+    rod, since a renamed or removed block would otherwise leave dust joining nothing there."""
+    names = {bare(identifier) for identifier in report}
+    missing = [name for name in DUST_NAMED if name not in names]
+    if not any(name.endswith(LIGHTNING_ROD) for name in names):
+        missing.append(f"*{LIGHTNING_ROD}")
+    if missing:
+        listed = ", ".join(f"`{name}`" for name in missing)
+        raise Refused(
+            f"the blocks report holds no {listed}, which the dust rules name: update "
+            "`DUST_NAMED` and `dust_faces` to the game's blocks"
+        )
+
+
 def connection_table(
     report: dict, server: zipfile.ZipFile, client: zipfile.ZipFile
 ) -> dict[str, Joins]:
     """What each block of a `--reports` `blocks.json` that the connection rules read is to them."""
-    tags = {tag: tag_members(server, tag) for tag in (*CONNECTION_TAGS, *EXCEPTION_TAGS)}
+    tags = {
+        tag: tag_members(server, tag)
+        for tag in (*CONNECTION_TAGS, *EXCEPTION_TAGS, *SIGNAL_SOURCE_TAGS)
+    }
     exceptions = set(EXCEPTION_BLOCKS).union(*(tags[tag] for tag in EXCEPTION_TAGS))
     cache: dict = {}
     table = {}
@@ -985,9 +1069,11 @@ def connection_table(
         states = {k: list(v) for k, v in block.get("properties", {}).items()}
         kind = block_kind(name, states, tags)
         sturdy, covers = block_shapes(client, name, block, cache, kind is not None)
+        dust = dust_faces(name, states, tags)
         reads = {
             *(sturdy.reads if sturdy else ()),
             *(covers.reads if covers else ()),
+            *(dust.reads if dust else ()),
             *KIND_READS.get(kind, ()),
         }
         default = next(dict(s.get("properties", {})) for s in block["states"] if s.get("default"))
@@ -998,6 +1084,7 @@ def connection_table(
             sturdy=sturdy,
             covers=covers,
             defaults=tuple(sorted((key, default[key]) for key in reads)),
+            dust=dust,
         )
         if joins != Joins(None, False, False, None):
             table[name] = joins
@@ -1011,6 +1098,7 @@ def extract_connections(
     by_release: dict[str, dict[str, Joins]] = {}
     for release in dict.fromkeys(releases.values()):
         report = java_report(release, java, cache, work)
+        check_dust_names(report.blocks)
         jar, _ = server_jar(release, cache)
         with nested_jar(jar) as server, zipfile.ZipFile(client_jar(release, cache)) as client:
             by_release[release] = connection_table(report.blocks, server, client)
@@ -1029,7 +1117,7 @@ def joins_json(joins: Joins, versions: list[str], ids: list[str]) -> dict:
         row["raises_post"] = True
     if joins.defaults:
         row["defaults"] = dict(joins.defaults)
-    for field, held in (("sturdy", joins.sturdy), ("covers", joins.covers)):
+    for field, held in (("sturdy", joins.sturdy), ("covers", joins.covers), ("dust", joins.dust)):
         if held is None:
             continue
         if held.reads:

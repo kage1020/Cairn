@@ -1,8 +1,10 @@
 //! The Bedrock `.mcstructure` tag tree and bytes, against wiki.bedrock.dev's "mcstructure" page.
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockArray, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
 };
+use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_state::BedrockStateError;
 use cairn_lang_formats::bedrock_structure::{
     BedrockStructureError, McStructure, ParityNote, build_mcstructure_tag, prepare_mcstructure,
@@ -68,6 +70,7 @@ fn asymmetric_array() -> (BlockArray, PaletteIndex) {
             block_entities: vec![],
             entities: vec![],
             source_scope: "struct::asym".to_owned(),
+            derived: Vec::new(),
         },
         planks,
     )
@@ -180,6 +183,7 @@ fn single_stateful_array(state: BlockState) -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::stateful".to_owned(),
+        derived: Vec::new(),
     }
 }
 
@@ -428,6 +432,48 @@ fn non_straight_stair_shape_degrades() {
 }
 
 #[test]
+fn a_connection_the_lowering_derived_drops_silently_and_a_written_one_degrades() {
+    let pane = |north: &str| BlockState {
+        id: "minecraft:glass_pane".to_owned(),
+        properties: [
+            ("east", "false"),
+            ("north", north),
+            ("south", "false"),
+            ("west", "false"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect(),
+    };
+    let sides = ["east", "north", "south", "west"]
+        .map(str::to_owned)
+        .to_vec();
+    let mut ba = row_of(&[pane("true"), pane("false")]);
+    ba.derived = vec![Vec::new(), sides.clone(), sides];
+    let (_, notes) = build(&ba).expect("build");
+    assert_eq!(note_fields(&notes), []);
+
+    ba.derived[1].retain(|key| key != "north");
+    let (_, notes) = build(&ba).expect("build");
+    let lost = DroppedIntent {
+        key: "north".to_owned(),
+        value: "true".to_owned(),
+        mc_versions: vec!["1.21.60".to_owned()],
+        reason: "the written `north=true` is not kept: Bedrock works the connection out from the \
+                 neighbouring blocks"
+            .to_owned(),
+    };
+    assert_eq!(
+        note_fields(&notes),
+        [(
+            "minecraft:glass_pane",
+            "east=false,north=true,south=false,west=false",
+            &lost,
+        )],
+    );
+}
+
+#[test]
 fn abstract_palette_entry_fails_loud() {
     let mut palette = Palette::new_with_air();
     let idx = palette.intern(BlockState::bare("@cobblestone"));
@@ -438,6 +484,7 @@ fn abstract_palette_entry_fails_loud() {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::abstract".to_owned(),
+        derived: Vec::new(),
     };
     let err = build(&ba).expect_err("abstract entry");
     assert!(matches!(
@@ -503,6 +550,7 @@ fn row_of(states: &[BlockState]) -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::row".to_owned(),
+        derived: Vec::new(),
     }
 }
 
@@ -687,6 +735,7 @@ fn capacity_blocks_then<const N: usize>(rest: [BlockState; N]) -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::capacity_blocks".to_owned(),
+        derived: Vec::new(),
     }
 }
 
@@ -780,4 +829,90 @@ fn a_state_map_of_another_version_is_a_caller_bug() {
     let (ba, _) = asymmetric_array();
     let latest = resolve_bedrock_target("1.26.60").expect("known target");
     let _ = build_mcstructure_tag(&ba, &target_1_21_60(), &states_for(&latest));
+}
+
+#[test]
+fn the_tier0_parts_write_the_bedrock_blocks_and_states_of_their_java_ones() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+                  repeater at=1,1,1 facing=east delay=3\n  \
+                  comparator at=2,1,1 facing=north mode=subtract\n  \
+                  redstone_torch at=3,1,1\n  \
+                  redstone_torch at=inside.back offset=1 y=2\n  \
+                  redstone_dust at=1,1,3\n  redstone_dust at=2,1,3\n";
+    let ir = crate::common::lower_source(source, Edition::Bedrock, Some("1.21.60"));
+    assert_eq!(ir.diagnostics, []);
+    let ba = ir.structures.values().next().expect("one structure");
+    let (root, notes) = build(ba).expect("build");
+    assert_eq!(note_fields(&notes), []);
+    let written: Vec<(&str, String)> = block_palette(&root)
+        .iter()
+        .map(|entry| {
+            let states: Vec<String> = states_of(entry)
+                .entries
+                .iter()
+                .map(|(key, value)| format!("{key}={value:?}"))
+                .collect();
+            (name_of(entry), states.join(","))
+        })
+        .filter(|(name, _)| !matches!(*name, "minecraft:air" | "minecraft:cobblestone"))
+        .collect();
+    let expected = [
+        ("minecraft:redstone_torch", r#"torch_facing_direction=String("top")"#),
+        // GeyserMC's mapping: a Bedrock wall torch looks the opposite way to Java's `facing`.
+        ("minecraft:redstone_torch", r#"torch_facing_direction=String("north")"#),
+        ("minecraft:redstone_wire", "redstone_signal=Int(0)"),
+        (
+            "minecraft:unpowered_comparator",
+            r#"minecraft:cardinal_direction=String("south"),output_lit_bit=Byte(0),output_subtract_bit=Byte(1)"#,
+        ),
+        (
+            "minecraft:unpowered_repeater",
+            r#"minecraft:cardinal_direction=String("west"),repeater_delay=Int(2)"#,
+        ),
+    ]
+    .map(|(name, states)| (name, states.to_owned()));
+    assert_eq!(written, expected);
+}
+
+#[test]
+fn a_dust_written_as_a_dot_or_a_cross_loses_its_sides_where_bedrock_works_them_out() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+                  redstone_dust at=1,1,1 connect=all\n  redstone_dust at=5,1,1 connect=none\n  \
+                  redstone_dust at=2,1,3\n  redstone_dust at=3,1,3\n";
+    let ir = crate::common::lower_source(source, Edition::Bedrock, Some("1.21.60"));
+    assert_eq!(ir.diagnostics, []);
+    let ba = ir.structures.values().next().expect("one structure");
+    let (_, notes) = build(ba).expect("build");
+    let lost = |key: &str, value: &str| DroppedIntent {
+        key: key.to_owned(),
+        value: value.to_owned(),
+        mc_versions: vec!["1.21.60".to_owned()],
+        reason: format!(
+            "the written `{key}={value}` is not kept: Bedrock works the connection out from the \
+             neighbouring blocks"
+        ),
+    };
+    let sides = ["east", "north", "south", "west"];
+    let dot = sides.map(|side| lost(side, "none"));
+    let cross = sides.map(|side| lost(side, "side"));
+    let expected: Vec<(&str, &str, &DroppedIntent)> = dot
+        .iter()
+        .map(|d| {
+            (
+                "minecraft:redstone_wire",
+                "east=none,north=none,south=none,west=none",
+                d,
+            )
+        })
+        .chain(cross.iter().map(|d| {
+            (
+                "minecraft:redstone_wire",
+                "east=side,north=side,south=side,west=side",
+                d,
+            )
+        }))
+        .collect();
+    assert_eq!(note_fields(&notes), expected);
 }

@@ -1,5 +1,6 @@
-//! Setting the connection states of one body's panes, fences, walls, fence gates and chests from
-//! the blocks beside them once every member is painted (`spec/blockstate` "Connections").
+//! Setting the connection states of one body's panes, fences, walls, fence gates, chests and
+//! redstone dust from the blocks beside them once every member is painted (`spec/blockstate`
+//! "Connections").
 
 use std::collections::HashMap;
 
@@ -38,6 +39,33 @@ impl Height {
     }
 }
 
+/// How a redstone dust's side joins the block toward it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wire {
+    None,
+    Side,
+    Up,
+}
+
+impl Wire {
+    fn from_value(value: &str) -> Option<Self> {
+        Some(match value {
+            "none" => Self::None,
+            "side" => Self::Side,
+            "up" => Self::Up,
+            _ => return None,
+        })
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Side => "side",
+            Self::Up => "up",
+        }
+    }
+}
+
 /// A chest's `type`: single, or the half of a pair it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChestType {
@@ -70,6 +98,8 @@ struct Joiner {
     up: Option<bool>,
     /// A chest's `type`, once settled.
     pair: Option<ChestType>,
+    /// A dust's sides per [`Face::SIDES`], once settled.
+    wires: [Wire; 4],
     /// Whether a raw member placed it, so it keeps its state and its neighbours read only that.
     raw: bool,
 }
@@ -105,16 +135,29 @@ impl Grid<'_> {
                 (Some(next), self.joins[usize::from(slot.0)])
             })
     }
+
+    /// Whether `cell` holds no block: air, or a cell outside the body.
+    fn holds_nothing(&self, cell: Option<Cell>) -> bool {
+        cell.and_then(|cell| self.canvas.slot_at(cell))
+            .is_none_or(|slot| slot == PaletteIndex::AIR)
+    }
+
+    /// Whether `cell` holds redstone dust.
+    fn holds_dust(&self, cell: Option<Cell>) -> bool {
+        cell.and_then(|cell| self.canvas.slot_at(cell))
+            .is_some_and(|slot| self.joins[usize::from(slot.0)].kind == Some(JoinKind::Dust))
+    }
 }
 
-/// Set the connection states of every pane, fence, wall, fence gate and chest on `canvas` that its
-/// state does not write, each repainted under the member that painted it; a block a raw member
-/// placed keeps its state (`spec/materials-themes` "Raw blocks").
+/// Set the connection states of every pane, fence, wall, fence gate, chest and dust on `canvas`
+/// that its state does not write, each repainted under the member that painted it, and answer
+/// the keys set at each cell; a block a raw member placed keeps its state (`spec/materials-themes`
+/// "Raw blocks").
 pub(super) fn derive_connections(
     canvas: &mut Canvas,
     palette: &mut ScopePalette,
     registry: &dyn TargetRegistry,
-) {
+) -> HashMap<Cell, Vec<String>> {
     let joins: Vec<Joins> = (0..palette.len())
         .map(|slot| {
             let state = palette.state(slot);
@@ -128,7 +171,7 @@ pub(super) fn derive_connections(
     };
     let mut joiners = gather(&grid);
     if joiners.is_empty() {
-        return;
+        return HashMap::new();
     }
     let at: HashMap<Cell, usize> = joiners
         .iter()
@@ -149,22 +192,36 @@ pub(super) fn derive_connections(
         joiners[i].up = Some(raises_post(&grid, &joiners, &at, &joiners[i]));
     }
     pair_chests(&mut joiners, &at);
-    let derived: Vec<(Cell, BlockState)> = joiners
+    for joiner in &mut joiners {
+        if joiner.kind == JoinKind::Dust {
+            joiner.wires = wires(&grid, joiner.cell, &joiner.state);
+        }
+    }
+    let derived: Vec<(Cell, BlockState, Vec<String>)> = joiners
         .iter()
         .filter(|joiner| !joiner.raw)
         .filter_map(|joiner| {
             let state = derived_state(&grid, joiner);
-            (state != joiner.state).then_some((joiner.cell, state))
+            let keys: Vec<String> = state
+                .properties
+                .keys()
+                .filter(|key| !joiner.state.properties.contains_key(*key))
+                .cloned()
+                .collect();
+            (!keys.is_empty()).then_some((joiner.cell, state, keys))
         })
         .collect();
-    for (cell, state) in derived {
+    let mut set = HashMap::with_capacity(derived.len());
+    for (cell, state, keys) in derived {
         let Some(owner) = canvas.owner_at(cell) else {
             continue;
         };
         canvas
             .for_member(owner)
             .paint(cell, || palette.intern(state));
+        set.insert(cell, keys);
     }
+    set
 }
 
 /// Every connecting block of the body, each with the sides it joins.
@@ -193,6 +250,7 @@ fn gather(grid: &Grid<'_>) -> Vec<Joiner> {
             heights: [Height::None; 4],
             up: None,
             pair: None,
+            wires: [Wire::None; 4],
             raw,
         });
     }
@@ -205,6 +263,7 @@ fn written_side(state: &BlockState, kind: JoinKind, side: Face) -> Option<bool> 
     match kind {
         JoinKind::Pane | JoinKind::Fence { .. } => value.parse().ok(),
         JoinKind::Wall => Height::from_value(value).map(|height| height != Height::None),
+        JoinKind::Dust => Wire::from_value(value).map(|wire| wire != Wire::None),
         JoinKind::FenceGate { .. } | JoinKind::Chest { .. } => None,
     }
 }
@@ -225,7 +284,51 @@ fn joins_toward(grid: &Grid<'_>, cell: Cell, kind: JoinKind, side: Face) -> bool
         JoinKind::Wall => {
             by_face || gate || matches!(other.kind, Some(JoinKind::Pane | JoinKind::Wall))
         }
-        JoinKind::FenceGate { .. } | JoinKind::Chest { .. } => false,
+        JoinKind::FenceGate { .. } | JoinKind::Chest { .. } | JoinKind::Dust => false,
+    }
+}
+
+/// A dust's sides: each its line does not write joins what the game joins dust to, and a dust
+/// joined on neither side of one axis then joins both sides of the other.
+fn wires(grid: &Grid<'_>, cell: Cell, state: &BlockState) -> [Wire; 4] {
+    let open_above = grid.holds_nothing(stepped(cell, Face::Up));
+    let mut wires = Face::SIDES.map(|side| {
+        state
+            .properties
+            .get(side.as_str())
+            .and_then(|value| Wire::from_value(value))
+            .unwrap_or_else(|| wire_toward(grid, cell, side, open_above))
+    });
+    let [north, east, south, west] = wires.map(|wire| wire != Wire::None);
+    let (across, along) = (!north && !south, !east && !west);
+    for (i, wire) in wires.iter_mut().enumerate() {
+        let east_west = i % 2 == 1;
+        if *wire == Wire::None && (if east_west { across } else { along }) {
+            *wire = Wire::Side;
+        }
+    }
+    wires
+}
+
+/// How dust at `cell` joins the block toward `side`, read as `RedStoneWireBlock` does, with a
+/// block in the way of a diagonal taken to cut it.
+fn wire_toward(grid: &Grid<'_>, cell: Cell, side: Face, open_above: bool) -> Wire {
+    let Some(next) = stepped(cell, side) else {
+        return Wire::None;
+    };
+    let (_, beside) = grid.joins_beside(cell, side);
+    if open_above && beside.sturdy.contains(Face::Up) && grid.holds_dust(stepped(next, Face::Up)) {
+        return if beside.sturdy.contains(side.opposite()) {
+            Wire::Up
+        } else {
+            Wire::Side
+        };
+    }
+    let joins_it = beside.kind == Some(JoinKind::Dust) || beside.dust.contains(side.opposite());
+    if joins_it || (grid.holds_nothing(Some(next)) && grid.holds_dust(stepped(next, Face::Down))) {
+        Wire::Side
+    } else {
+        Wire::None
     }
 }
 
@@ -257,7 +360,9 @@ fn covered(
         };
     };
     match (above.kind, under) {
-        (JoinKind::FenceGate { open: true, .. } | JoinKind::Chest { .. }, _) => false,
+        (JoinKind::FenceGate { open: true, .. } | JoinKind::Chest { .. } | JoinKind::Dust, _) => {
+            false
+        }
         (JoinKind::FenceGate { .. } | JoinKind::Pane | JoinKind::Fence { .. }, Under::Post) => true,
         (JoinKind::Wall, Under::Post) => above.up == Some(true) || above.joined.contains(&true),
         (JoinKind::FenceGate { facing, .. }, Under::Side(side)) => {
@@ -406,6 +511,11 @@ fn derived_state(grid: &Grid<'_>, joiner: &Joiner) -> BlockState {
         JoinKind::Chest { .. } => {
             if let Some(pair) = joiner.pair {
                 set("type", pair.as_str().to_owned());
+            }
+        }
+        JoinKind::Dust => {
+            for (side, wire) in Face::SIDES.iter().zip(joiner.wires) {
+                set(side.as_str(), wire.as_str().to_owned());
             }
         }
     }

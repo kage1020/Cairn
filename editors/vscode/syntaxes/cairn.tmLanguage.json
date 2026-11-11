@@ -51,7 +51,7 @@
       }
     },
     "member-keyword": {
-      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|level|pressure_plate|lever|button|daylight|observer|lamp|piston|dispenser|chest|circuit|raw_block|raw_fill|place|connect)\\b",
+      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|level|pressure_plate|lever|button|daylight|observer|lamp|piston|dispenser|chest|repeater|comparator|redstone_torch|redstone_dust|circuit|raw_block|raw_fill|place|connect)\\b",
       "captures": {
         "1": { "name": "keyword.other.member.cairn" }
       }

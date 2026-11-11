@@ -1,5 +1,5 @@
-//! What a block is to the rules that join panes, fences, walls and chests to their neighbours
-//! (`spec/blockstate` "Connections").
+//! What a block is to the rules that join panes, fences, walls, chests and redstone dust to their
+//! neighbours (`spec/blockstate` "Connections").
 
 /// A face of a block, named for the direction it looks toward.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -156,6 +156,8 @@ pub enum JoinKind {
         /// The way its front faces, a sideways face.
         facing: Face,
     },
+    /// Redstone dust.
+    Dust,
 }
 
 /// The parts of a wall that the bottom of the block above it covers, which stand them tall.
@@ -195,6 +197,8 @@ pub struct Joins {
     pub never_joined_by_face: bool,
     /// Whether the game's `wall_post_override` tag holds it.
     pub raises_post: bool,
+    /// The faces of it that redstone dust beside them joins.
+    pub dust: Faces,
 }
 
 #[cfg(test)]

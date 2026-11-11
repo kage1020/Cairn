@@ -21,6 +21,7 @@ mod fixture;
 mod geometry_material;
 mod members;
 mod paint;
+mod part;
 mod phase;
 mod plate;
 mod raw;

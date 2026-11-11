@@ -164,6 +164,10 @@ impl MemberRole {
                 | Self::Piston
                 | Self::Dispenser
                 | Self::Chest
+                | Self::Repeater
+                | Self::Comparator
+                | Self::RedstoneTorch
+                | Self::RedstoneDust
                 | Self::Circuit
                 | Self::RawBlock
                 | Self::RawFill,
@@ -189,6 +193,10 @@ impl MemberRole {
                 | Self::Piston
                 | Self::Dispenser
                 | Self::Chest
+                | Self::Repeater
+                | Self::Comparator
+                | Self::RedstoneTorch
+                | Self::RedstoneDust
                 | Self::Circuit
                 | Self::RawBlock
                 | Self::RawFill,
@@ -218,6 +226,10 @@ impl MemberRole {
             Self::Piston => "piston",
             Self::Dispenser => "dispenser",
             Self::Chest => "chest",
+            Self::Repeater => "repeater",
+            Self::Comparator => "comparator",
+            Self::RedstoneTorch => "redstone_torch",
+            Self::RedstoneDust => "redstone_dust",
             Self::Circuit => "circuit",
             Self::RawBlock => "raw_block",
             Self::RawFill => "raw_fill",

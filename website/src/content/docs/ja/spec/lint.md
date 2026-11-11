@@ -43,7 +43,7 @@ title: "11. Lint と制約検証"
 | `E_MISPLACED_MEMBER` | キーワードは既知だが、囲んでいる本体にそれを読むものがない。`level` の下にある `circuit` 行も対象。 |
 | `E_UNEXPECTED_POSITIONAL` | 位置引数を読まない行に、裸の値がある ([§5.1](/ja/spec/syntax/#51-字句))。 |
 | `E_UNSUPPORTED_NESTING` | 誰も読まない、インデントされた本体をメンバーが持っている。 |
-| `E_SEMANTIC_IN_EDITION_GUARD` | `@edition` ガードの下に、生のメンバー以外の既知のメンバーがある。または、ガードの直下か、ガードの中の生のメンバーの下に、`logic` か `assert` の行がある ([§10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む))。 |
+| `E_SEMANTIC_IN_EDITION_GUARD` | `@edition` ガードの下に、生のメンバーと Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) 以外の既知のメンバーがある。または、ガードの直下か、ガードの中の生のメンバーや Tier 0 の部品の下に、`logic` か `assert` の行がある ([§10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む))。 |
 | `E_TYPE_MISMATCH_LABEL` | ラベル型のキーの値が、識別子でも文字列でもない。 |
 | `E_TYPE_MISMATCH_SIZE` | `size=` の値が `WxH` リテラルではない。ただし `chest` の行の `size=` はブロックステートなので対象外 ([ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する))。 |
 | `E_CONNECT_ARITY` | `connect` 行が `FROM.PORT to TO.PORT` の形になっていない。 |
@@ -57,7 +57,7 @@ title: "11. Lint と制約検証"
 
 `E_UNSUPPORTED_NESTING`: メンバーをまとめられるのは、`struct` / `def` の中の `level y=N` だけです。`site` の本体は平坦なリストです。落としたサブツリーごとに、その根で 1 回報告します。
 
-`E_SEMANTIC_IN_EDITION_GUARD`: 意味層はエディションに中立なので、ガードが囲めるのはエスケープハッチだけです。拒否する最も外側の行で 1 回報告し、ガードの位置に注記を付けます。その行の下にインデントした行もまとめて扱います。拒否した行とそれにまとめた行はほかのどの検査も読まないので、それ以外の指摘は出ません。ガードの下にある未知のキーワードは、代わりに `E_UNKNOWN_KEYWORD` になり、候補として `raw_block` と `raw_fill` を示します。`site` の本体ではどちらもビルドされないので、候補を示しません。
+`E_SEMANTIC_IN_EDITION_GUARD`: 意味層はエディションに中立なので、ガードが囲めるのはエスケープハッチだけです。拒否する最も外側の行で 1 回報告し、ガードの位置に注記を付けます。その行の下にインデントした行もまとめて扱います。拒否した行とそれにまとめた行はほかのどの検査も読まないので、それ以外の指摘は出ません。ガードの下にある未知のキーワードは、代わりに `E_UNKNOWN_KEYWORD` になり、候補として `raw_block`、`raw_fill`、`repeater`、`comparator`、`redstone_torch`、`redstone_dust` を示します。`site` の本体ではどれもビルドされないので、候補を示しません。
 
 `E_TYPE_MISMATCH_LABEL`: ラベル型のキーは `id=` / `class=` / `mat_slot=` / `use=` / `theme=` です。`use=` と `theme=` では、型の合わない値は、リゾルバから見るとキーがないのと区別がつきません。このコードは「キーは行にあるが使えない」を、`E_INCOMPLETE_PLACE` は「キーがない」を表します。
 
@@ -100,7 +100,7 @@ title: "11. Lint と制約検証"
 | `W_STATE_LITERAL_UNCHECKED` | 正規トークンのステートリテラル (`@oak_log[axis=x]`) を書かれたまま使った。固定したターゲットのパックがそのブロックのステートを記録しておらず、照らし合わせる先がない ([バージョンとエディション](/ja/spec/versioning-editions/#ステートはターゲットでのブロックのステートと照らし合わせる))。 |
 | `W_NO_THEME_BOUND` | `mat_slot=` を読むスコープにテーマが割り当てられていないので、そこで読む `mat_slot=` はどれもブロックに解決されない。 |
 | `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定したエディションでは別のバリアントを割り当てた ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
-| `W_INTENT_DEGRADED` | パレットのエントリが、固定したバージョンでは表せない意図を失った。1.26.60 より前の Bedrock での階段の `shape` がその例で、パックの `sensitivity` の文言で、エントリごとに 1 行出る ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
+| `W_INTENT_DEGRADED` | パレットのエントリが、固定したバージョンでは表せない意図を失った。1.26.60 より前の Bedrock での階段の `shape` や、そのバージョンが自分で導くのにメンバーが書いたステート (そこでのダストの `connect=` など) がその例で、パックの `sensitivity` の文言で、失った意図ごとに 1 行出る ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | 置き換えるロックが、別の `(edition, version)` を検証していた。行には両方が示される ([バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。 |
 | `W_SEMANTIC_SENSITIVITY` | `W_PREVIOUSLY_VERIFIED_TARGET` に続けて、前のロックの `member_version_sensitivity` が挙げるメンバーを、新しいターゲットでは解決が変わりうるものとして示す ([§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。制約カタログをまだ同梱していないので、コンパイラが書くロックはメンバーを 1 つも挙げておらず、そうしたロックの上でビルドしても、現時点ではこの警告は出ない。 |
 

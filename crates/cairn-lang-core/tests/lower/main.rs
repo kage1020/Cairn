@@ -32,6 +32,7 @@ mod state_unmapped;
 mod struct_as_written;
 mod structure_volume;
 mod the_volume_is_what_gets_painted;
+mod tier0_parts;
 mod unknown_id_versions;
 mod unplaceable_plate;
 mod unreached_keys;

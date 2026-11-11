@@ -5,7 +5,7 @@
 use cairn_lang_core::block_array::{BlockArrayIr, findings_without_target, lower_to_block_array};
 use cairn_lang_core::{Edition, lower, parse, resolve};
 
-use crate::common::{bin, slice};
+use crate::common::{bin, blocks_where, only_structure, slice};
 
 /// `source` lowered for `edition`, or for none, with no registry pack.
 fn lowered_for(source: &str, edition: Option<Edition>) -> BlockArrayIr {
@@ -52,6 +52,29 @@ fn a_build_keeps_the_guards_for_its_edition_and_a_build_of_none_keeps_none() {
         [("minecraft:light_block_15".to_owned(), vec![(3, 1, 2)])],
     );
     assert_eq!(built(None), []);
+}
+
+#[test]
+fn a_build_keeps_the_tier0_parts_of_its_editions_guard_and_a_build_of_none_keeps_none() {
+    let source = bin("@edition java\n    repeater at=1,1,1 facing=east\n  \
+         @edition bedrock\n    redstone_torch at=1,1,1");
+    let parts = |edition| {
+        blocks_where(only_structure(&lowered_for(&source, edition)), |id| {
+            id == "minecraft:repeater" || id == "minecraft:redstone_torch"
+        })
+    };
+    assert_eq!(
+        parts(Some(Edition::Java)),
+        [(
+            (2, 1, 2),
+            "minecraft:repeater[delay=1,facing=west]".to_owned()
+        )],
+    );
+    assert_eq!(
+        parts(Some(Edition::Bedrock)),
+        [((2, 1, 2), "minecraft:redstone_torch".to_owned())],
+    );
+    assert_eq!(parts(None), []);
 }
 
 #[test]

@@ -19,6 +19,10 @@ struct s size=9x7
   piston id=p1 at=inside.right offset=2 sticky=true
   dispenser id=ds at=front.outside offset=6 fired_by=sig.pulse
   chest id=store at=inside.back offset=2 size=single
+  repeater at=1,1,1 facing=east delay=2
+  comparator at=2,1,1 facing=east mode=subtract
+  redstone_torch at=inside.back offset=2
+  redstone_dust at=3,1,1 connect=none
   circuit id=main region=floor
   place kind=lamp at=center
   connect west.east_corner to east.west_corner
@@ -294,6 +298,60 @@ struct s size=9x7
             (attribute
               (identifier)
               (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
           (command_arg
             (attribute
               (identifier)

@@ -280,6 +280,10 @@ const PAINTERS: &[(&str, &str, &str)] = &[
         "",
     ),
     ("chest", "chest id=c at=inside.front offset=1 y=0", ""),
+    ("repeater", "repeater at=1,1,1 facing=east", ""),
+    ("comparator", "comparator at=inside.front offset=1 y=1", ""),
+    ("redstone_torch", "redstone_torch at=1,1,1", ""),
+    ("redstone_dust", "redstone_dust at=1,1,1", ""),
     // A raw member names its block with `mat=` instead of a slot.
     ("raw_block", "raw_block mat=minecraft:stone at=1,1,1", ""),
     (
@@ -375,6 +379,10 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Piston
             | MemberRole::Dispenser
             | MemberRole::Chest
+            | MemberRole::Repeater
+            | MemberRole::Comparator
+            | MemberRole::RedstoneTorch
+            | MemberRole::RedstoneDust
             | MemberRole::RawBlock
             | MemberRole::RawFill => true,
             // None of these lays a block of its own material.
@@ -404,6 +412,10 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         MemberRole::Piston,
         MemberRole::Dispenser,
         MemberRole::Chest,
+        MemberRole::Repeater,
+        MemberRole::Comparator,
+        MemberRole::RedstoneTorch,
+        MemberRole::RedstoneDust,
         MemberRole::Circuit,
         MemberRole::RawBlock,
         MemberRole::RawFill,

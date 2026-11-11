@@ -52,6 +52,7 @@ title: "用語集"
 
 ## レッドストーン
 
+- **Tier 0 の部品 (Tier 0 part)**: 手で置くレッドストーンの部品 (`repeater`、`comparator`、`redstone_torch`、`redstone_dust`) で、ブロックステートは導出し、挙動はモデル化しません。[レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品) を参照してください。
 - **論理セル、エディションセル、物理タイル (Logical cell / edition cell / physical tile)**: 3 段のセルライブラリです。Logic IR が論理セルを選び、エディションごとのセルライブラリがそれを物理タイルに lowering します。Java 版と Bedrock 版の違いは、このライブラリの中に閉じ込めます。[レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い) を参照してください。
 - **組み合わせ回路と順序回路 (Combinational vs sequential)**: v1 が提供するのは、決まった種類の組み合わせゲートと、厳選した順序回路のマクロ (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`) です。任意の FSM や CPU は v1 の範囲外です。`logic` の行はその両方を受け付けます。組み合わせ回路のプリミティブ (`and`、`or`、`not`、`xor`、`nand`、`nor`、`mux`) と、それぞれ 1 つのセルとなるマクロです。`latch` と `counter` は帰還をそのセルの内側に閉じています。[レッドストーン §14.4](/ja/spec/redstone/#144-時間モデル) を参照してください。
 - **真理値、レイテンシ、時相のアサーション (Truth / latency / temporal assertion)**: 3 種類の検証です。時相のアサーションは、範囲を区切った `eventually within N` だけで、完全な LTL ではありません。`assert latency` は配置した回路で数えた tick と照合します。残りの 2 つを組み上がった回路に照らして検査するシミュレータは、まだありません。[レッドストーン §14.7](/ja/spec/redstone/#147-検証) を参照してください。
@@ -68,7 +69,7 @@ title: "用語集"
 ## エディションとバージョン
 
 - **エディション (Edition)**: `java` または `bedrock` です。コンパイル時にだけ使い、DSL の意味の層には決して現れません。[バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性) を参照してください。
-- **`@edition` ガード (`@edition` guard)**: 本体の中の行で、その下にインデントした生のメンバーを 1 つのエディションのビルドだけに残します。本体の中で、行を 1 つのエディションのビルドだけに残す唯一の行で、意味層を囲むことはありません。[バージョンとエディション §10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む) を参照してください。
+- **`@edition` ガード (`@edition` guard)**: 本体の中の行で、その下にインデントした生のメンバーと Tier 0 の部品を 1 つのエディションのビルドだけに残します。本体の中で、行を 1 つのエディションのビルドだけに残す唯一の行で、意味層を囲むことはありません。[バージョンとエディション §10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む) を参照してください。
 - **Cairn のバージョンと MC のターゲット (Cairn version vs MC target)**: **別々の軸** です。書式ではなく、フィールド、フラグ、キーワードで区別します。文章の中で紛らわしいときは、`cairn:2026.06`、`mc:1.21.4` のように書きます。[仕様書の目次](/ja/spec/) と [バージョンとエディション](/ja/spec/versioning-editions/) を参照してください。
 - **変換せずに再コンパイルする (Recompile, don't transcode)**: 言語仕様は、バージョンやエディションをまたいだ NBT の可搬性を **保証しません**。新しいバージョンを対象にするときは、NBT を変換するのではなく、DSL を再コンパイルします。[バージョンとエディション §10.2](/ja/spec/versioning-editions/#102-言語の契約-変換ではなく再コンパイル) を参照してください。
 

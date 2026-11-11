@@ -54,6 +54,10 @@ impl MemberFallback {
             | MemberRole::Lamp
             | MemberRole::Piston
             | MemberRole::Dispenser
+            | MemberRole::Repeater
+            | MemberRole::Comparator
+            | MemberRole::RedstoneTorch
+            | MemberRole::RedstoneDust
             | MemberRole::Circuit
             | MemberRole::RawBlock
             | MemberRole::RawFill

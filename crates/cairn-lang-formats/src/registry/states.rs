@@ -768,6 +768,9 @@ pub struct BedrockForm {
     pub waterlogged: bool,
     /// Each state the entry asks for that Bedrock does not carry.
     pub dropped: Vec<DroppedState>,
+    /// Each state the entry names that Bedrock does not carry because it works the state out
+    /// itself, which is lost where a member wrote it.
+    pub rederived: Vec<DroppedState>,
 }
 
 /// One Java state value a [`BedrockForm`] does not carry.
@@ -815,7 +818,7 @@ impl<'a> VersionStates<'a> {
     where
         'a: 's,
     {
-        if self.reads_as_java(id) {
+        if self.reads_as_own(id, given) {
             return vec![id];
         }
         let mut ids: Vec<&'s str> = Vec::new();
@@ -844,26 +847,35 @@ impl VersionStates<'_> {
     /// [`StateRefusal`] when the map has no form for the states, or they are not the block's.
     pub fn resolve(&self, state: &BlockState) -> Result<BedrockForm, StateRefusal> {
         let id = state.id.as_str();
-        if self.reads_as_java(id) {
+        if self.reads_as_own(id, &state.properties) {
             self.resolve_same(id, &state.properties)
         } else {
             self.resolve_onto(id, &state.properties)
         }
     }
 
-    /// Every canonical property `id` takes here with the values it holds, read as [`Self::resolve`]
-    /// reads the id, or `None` when no Java block maps onto it or the palette refuses some of its
-    /// states, so the map cannot tell which states it takes.
+    /// Every canonical property `id` takes here with the values it holds, those of each block
+    /// [`Self::resolve`] may read the id as, or `None` when no Java block maps onto it or the
+    /// palette refuses some of its states, so the map cannot tell which states it takes.
     #[must_use]
     pub fn canonical_domain(&self, id: &str) -> Option<IndexMap<String, Vec<String>>> {
-        let (forms, refused) = if self.reads_as_java(id) {
+        let own = self.reads_as_java(id);
+        let (forms, refused) = if own {
             (self.map.from.get(id), self.map.refused_from.contains(id))
         } else {
             (self.map.onto.get(id), self.map.refused_onto.contains(id))
         };
         let forms = forms.filter(|forms| !forms.is_empty() && !refused)?;
+        let others = self
+            .map
+            .onto
+            .get(id)
+            .filter(|_| own && !self.map.refused_onto.contains(id))
+            .into_iter()
+            .flatten()
+            .filter(|(java, _)| java != id);
         let mut domain: IndexMap<String, Vec<String>> = IndexMap::new();
-        for (_, at) in forms {
+        for (_, at) in forms.iter().chain(others) {
             for (key, held) in &self.family(*at).java {
                 let values = domain.entry(key.clone()).or_default();
                 for value in held {
@@ -884,6 +896,33 @@ impl VersionStates<'_> {
                 .onto
                 .get(id)
                 .is_some_and(|forms| forms.iter().any(|(java, _)| java == id))
+    }
+
+    /// Whether an entry of `id` with the states `given` reads as `id`'s own Java block: `id` names
+    /// one here, and that block has every property `given` carries or no other block mapped onto
+    /// `id` has them.
+    fn reads_as_own(&self, id: &str, given: &IndexMap<String, String>) -> bool {
+        if !self.reads_as_java(id) {
+            return false;
+        }
+        let own_takes = self
+            .map
+            .from
+            .get(id)
+            .and_then(|forms| forms.first())
+            .is_none_or(|(_, at)| {
+                let defaults = &self.family(*at).defaults;
+                given.keys().all(|key| defaults.contains_key(key))
+            });
+        own_takes
+            || !self.map.onto.get(id).is_some_and(|forms| {
+                forms.iter().any(|(java, at)| {
+                    java != id
+                        && given
+                            .keys()
+                            .all(|key| self.family(*at).java.contains_key(key))
+                })
+            })
     }
 
     fn family(&self, at: usize) -> &Family {
@@ -908,7 +947,7 @@ impl VersionStates<'_> {
         if unknown.is_none()
             && let Some((bedrock, at)) = forms.iter().find(|(_, at)| self.family(*at).holds(&full))
         {
-            return Ok(self.form(bedrock, id, self.family(*at), &full));
+            return Ok(self.form(bedrock, id, self.family(*at), &full, given));
         }
         // The refused pairs may hold these states, so no family's domain can rule them out.
         if self.map.refused_from.contains(id) {
@@ -1022,7 +1061,7 @@ impl VersionStates<'_> {
             };
             full.insert(key.clone(), value.clone());
         }
-        Ok(self.form(id, java, family, &full))
+        Ok(self.form(id, java, family, &full, given))
     }
 
     /// Why no Java block mapped onto `id` takes `given`: a property or value none has, else that
@@ -1087,6 +1126,7 @@ impl VersionStates<'_> {
         java: &str,
         family: &Family,
         full: &IndexMap<String, String>,
+        given: &IndexMap<String, String>,
     ) -> BedrockForm {
         let states = family
             .states
@@ -1104,26 +1144,34 @@ impl VersionStates<'_> {
                 (name.clone(), value)
             })
             .collect();
-        let dropped = family
-            .dropped
-            .iter()
-            .filter(|key| full[*key] != family.defaults[*key])
-            .filter_map(|key| {
-                // INVARIANT(dropped-classified): the loader refuses a dropped key without a row.
-                let (kind, reason) = self.index.sensitivity.get(key)?.row(java)?;
-                (*kind == SensitivityKind::MissingState).then(|| DroppedState {
-                    key: key.clone(),
-                    value: full[key].clone(),
-                    reason: reason.clone(),
-                })
-            })
-            .collect();
+        let mut dropped = Vec::new();
+        let mut rederived = Vec::new();
+        for key in &family.dropped {
+            // INVARIANT(dropped-classified): the loader refuses a dropped key without a row.
+            let Some((kind, reason)) = self.index.sensitivity.get(key).and_then(|k| k.row(java))
+            else {
+                continue;
+            };
+            let state = || DroppedState {
+                key: key.clone(),
+                value: full[key].clone(),
+                reason: reason.clone(),
+            };
+            match kind {
+                SensitivityKind::MissingState if full[key] != family.defaults[key] => {
+                    dropped.push(state());
+                }
+                SensitivityKind::Derived if given.contains_key(key) => rederived.push(state()),
+                SensitivityKind::MissingState | SensitivityKind::Derived => {}
+            }
+        }
         BedrockForm {
             id: bedrock.to_owned(),
             states,
             waterlogged: full.get(WATER_LAYER_STATE).is_some_and(|v| v == "true")
                 || self.index.in_water.contains(java),
             dropped,
+            rederived,
         }
     }
 }
@@ -1179,6 +1227,7 @@ fn bare_or(
             states: Vec::new(),
             waterlogged: false,
             dropped: Vec::new(),
+            rederived: Vec::new(),
         })
     } else {
         Err(StateRefusal::Unmapped { reason })

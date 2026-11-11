@@ -12,7 +12,7 @@ pub(crate) fn refused_under_guard(line: &Statement) -> bool {
     match line {
         Statement::Generic { keyword, .. } => {
             let role = role_of(keyword);
-            !role.is_raw() && !matches!(role, MemberRole::Other(_))
+            !role.is_escape_hatch() && !matches!(role, MemberRole::Other(_))
         }
         Statement::Logic { .. }
         | Statement::AssertTruth { .. }

@@ -1,5 +1,5 @@
-//! The `edition_guard` pass: a known member other than a raw one, or a `logic` or `assert` line,
-//! under an `@edition` guard, since the semantic layer is edition-neutral
+//! The `edition_guard` pass: a known member other than a raw member or a Tier 0 part, or a `logic`
+//! or `assert` line, under an `@edition` guard, since the semantic layer is edition-neutral
 //! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
 use crate::ast::{Item, Module, Statement};
@@ -48,10 +48,10 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
         Statement::Generic {
             keyword, children, ..
         } => match role_of(keyword) {
-            // `keyword_allowlist` reports an unknown keyword, offering the raw ones.
+            // `keyword_allowlist` reports an unknown keyword, offering the ones a guard holds.
             MemberRole::Other(_) => return,
-            role if role.is_raw() => {
-                // `nesting` refuses a member under a raw one; a nested guard's lines answer to it.
+            role if role.is_escape_hatch() => {
+                // `nesting` refuses a member under one; a nested guard's lines answer to that guard.
                 for child in children {
                     match child {
                         Statement::Generic { .. } => {}
@@ -82,8 +82,8 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
         code: DiagnosticCode::SemanticInEditionGuard,
         span: line.span().clone(),
         primary: format!(
-            "{what} stands under an `@edition {edition}` guard, which holds only raw members: the \
-             semantic layer is edition-neutral"
+            "{what} stands under an `@edition {edition}` guard, which holds only raw members and \
+             Tier 0 parts: the semantic layer is edition-neutral"
         ),
         notes: vec![
             DiagnosticNote {
@@ -94,7 +94,8 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
                 span: None,
                 message: "dedent the line out of the guard so that every edition builds it, and \
                           bind what differs per edition from a `theme NAME_java` and a `theme \
-                          NAME_bedrock`; the guard is for `raw_block` and `raw_fill`"
+                          NAME_bedrock`; the guard is for `raw_block`, `raw_fill` and the Tier 0 \
+                          parts `repeater`, `comparator`, `redstone_torch` and `redstone_dust`"
                     .into(),
             },
         ],

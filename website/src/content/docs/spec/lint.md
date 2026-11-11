@@ -72,7 +72,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
-| `E_SEMANTIC_IN_EDITION_GUARD` | A known member other than a raw one under an `@edition` guard, or a `logic` or `assert` line under one, directly or under a guarded raw member ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). |
+| `E_SEMANTIC_IN_EDITION_GUARD` | A known member other than a raw member or a Tier 0 part ([Redstone §14.1](/spec/redstone/#tier-0-parts)) under an `@edition` guard, or a `logic` or `assert` line under one, directly or under a guarded raw member or Tier 0 part ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
 | `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal, on any line but a `chest`'s, where `size=` is a blockstate ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). |
 | `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
@@ -98,8 +98,9 @@ body is a flat list. Reported once per dropped subtree, at its root.
 `E_SEMANTIC_IN_EDITION_GUARD`: the semantic layer is edition-neutral, so a guard holds only the
 escape hatch. Reported once at the outermost refused line, with a note at the guard, and anything
 indented under that line goes with it. No other check reads the refused line or what goes with it,
-so it draws no other finding. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD`
-instead, offered `raw_block` and `raw_fill`, or nothing in a `site` body, where neither builds.
+so it draws no other finding. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD` instead,
+offered `raw_block`, `raw_fill`, `repeater`, `comparator`, `redstone_torch` and `redstone_dust`, or
+nothing in a `site` body, where none of them builds.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
 `theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.
@@ -177,7 +178,7 @@ to compare.
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since the pinned target's pack records no states for its block to check it against ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
-| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned version has no form for, such as a stair's `shape` on Bedrock before 1.26.60, in the words of the pack's `sensitivity`; one line per entry ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned version has no form for, such as a stair's `shape` on Bedrock before 1.26.60, or a state a member wrote that the version works out itself, such as a dust's `connect=` there, in the words of the pack's `sensitivity`; one line per intent lost ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
 | `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members the previous lock's `member_version_sensitivity` lists, as ones that may resolve differently at the new target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). No lock the compiler writes lists any yet, since no constraint catalog ships, so a build over one does not raise it today. |
 
