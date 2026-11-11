@@ -78,4 +78,4 @@ Cairn は[日付ベースのバージョン](/ja/spec/versioning-editions/#101-�
 4. **人によるレビュー** を経て、リリース PR を `main` にマージします。パッチでもマイナーでも同じです。
 5. **公開** は、このマージをきっかけに実行します。`xtask` 以外のすべてのクレートを crates.io に `cargo publish` して `vYYYY.M.N` のタグを打ちます。Linux・macOS・Windows の `x86_64` と `aarch64` 向けのバイナリを、ターゲットごとのランナーでビルドします。すべてのアーカイブを SHA-256 のチェックサムとともに GitHub Release に添付し、Windows の `aarch64` 版を除く各アーカイブには sigstore の署名バンドルも添えます。署名付きの CycloneDX 形式の SBOM も添付します。VS Code 拡張をパッケージして、`.vsix` をチェックサムと sigstore の署名バンドルとともに添付し、同じファイルを Visual Studio Marketplace と Open VSX に公開します。tree-sitter の文法を npm に公開し、最後に `main` を `canary` に戻す PR を開きます。
 
-このスケジュールを通じた互換性の扱いは、別に[互換性ティア](/ja/spec/compatibility/)で定めています。ロックファイルの形式は M2 を達成する 2026.11.0 から、LSP のワイヤプロトコルは M5 から **Stable** です。続いて、レッドストーンの DSL が M6 を達成する 2026.12.0 から、`.crn` の構文が M3 から Stable になります。Rust の API はずっと **Internal** のままで、それ以外のほとんどは当面 **Evolving** とします。
+このスケジュールを通じた互換性の扱いは、別に[互換性ティア](/ja/spec/compatibility/)で定めています。ロックファイルの形式は M2 を達成する 2026.11.0 から、LSP のワイヤプロトコルは M5 から **Stable** です。続いて、レッドストーンの DSL は M6 を達成する 2026.12.0 から、`.crn` の構文は M3 から Stable になります。Rust の API はずっと **Internal** のままで、それ以外のほとんどは当面 **Evolving** とします。

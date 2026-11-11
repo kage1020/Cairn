@@ -610,10 +610,10 @@ command that pins none reports the ones every edition raises at the same place.
 | `E_LOGIC_UNSUPPORTED_PRIMITIVE` | A `logic` expression takes a form the logic lowering has no cell for. |
 | `E_LOGIC_NESTING_TOO_DEEP` | A `logic` expression nests deeper than the logic lowering descends. |
 | `W_LOGIC_UNUSED_SIGNAL` | A signal a `logic` line defines that nothing reads. |
-| `E_LOGIC_INVALID_SIGNAL` | A place that names a signal holds something other than `sig.` and one segment ([Redstone §14.2](/spec/redstone/#142-signal-binding)). |
-| `E_LOGIC_MISPLACED_BINDING` | An actuator key inside its component's `[selector]`, or on a member a `theme` selector made read it. |
+| `E_LOGIC_INVALID_SIGNAL` | A place that names a signal holds something other than `sig.` and one segment, on an actuator patch only under `cairn synth` ([Redstone §14.2](/spec/redstone/#142-signal-binding)). |
+| `E_LOGIC_MISPLACED_BINDING` | An actuator key inside its component's `[selector]`, under `cairn synth`, or on a member a `theme` selector made read it. |
 | `E_LOGIC_UNKNOWN_BINDING_KEY` | A `sig.` value under a key the member reads that is not an actuator key. |
-| `E_LOGIC_UNRESOLVED_PATCH` | An actuator patch whose selector picks no single component of its keyword. |
+| `E_LOGIC_UNRESOLVED_PATCH` | An actuator patch whose selector picks no single component of its keyword, under `cairn synth`; a command that lowers the struct refuses the patch as `E_INVALID_MEMBER` first. |
 | `E_LOGIC_DUPLICATE_BINDING` | A component carries a second binding under an actuator key it has. |
 | `E_NO_CIRCUIT_REGION` | A scope with a cell to build or an actuator to drive has no `circuit` line that reserves layers for them ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
 | `E_ROUTE_CONGESTION` | A scope's circuit does not fit the layers its `circuit` line reserves, or those layers take the struct past what one structure holds. |

@@ -249,10 +249,10 @@ struct の回路を組み上げるどのコマンドも、これらを報告し�
 | `E_LOGIC_UNSUPPORTED_PRIMITIVE` | `logic` の式が、論理の lowering にセルのない形を取っている。 |
 | `E_LOGIC_NESTING_TOO_DEEP` | `logic` の式の入れ子が、論理の lowering がたどる深さを超えている。 |
 | `W_LOGIC_UNUSED_SIGNAL` | `logic` 行が定義した信号を、何も読まない。 |
-| `E_LOGIC_INVALID_SIGNAL` | 信号を挙げる位置に、`sig.` と 1 つのセグメント以外のものがある ([レッドストーン §14.2](/ja/spec/redstone/#142-信号バインディング))。 |
-| `E_LOGIC_MISPLACED_BINDING` | アクチュエーターのキーが、その部品の `[selector]` の中か、`theme` のセレクタがそのキーを読ませたメンバーにある。 |
+| `E_LOGIC_INVALID_SIGNAL` | 信号を挙げる位置に、`sig.` と 1 つのセグメント以外のものがある。アクチュエーターのパッチでは `cairn synth` のときだけ ([レッドストーン §14.2](/ja/spec/redstone/#142-信号バインディング))。 |
+| `E_LOGIC_MISPLACED_BINDING` | アクチュエーターのキーが、`cairn synth` のときにその部品の `[selector]` の中にあるか、`theme` のセレクタがそのキーを読ませたメンバーにある。 |
 | `E_LOGIC_UNKNOWN_BINDING_KEY` | メンバーが読むキーのうち、アクチュエーターのキーでないものの下に `sig.` の値がある。 |
-| `E_LOGIC_UNRESOLVED_PATCH` | アクチュエーターのパッチのセレクタが、そのキーワードの部品をちょうど 1 つ選んでいない。 |
+| `E_LOGIC_UNRESOLVED_PATCH` | `cairn synth` のときに、アクチュエーターのパッチのセレクタが、そのキーワードの部品をちょうど 1 つ選んでいない。struct を lowering するコマンドは、先にそのパッチを `E_INVALID_MEMBER` として拒否する。 |
 | `E_LOGIC_DUPLICATE_BINDING` | 部品が、すでに持つアクチュエーターのキーで 2 つ目のバインディングを持っている。 |
 | `E_NO_CIRCUIT_REGION` | 組み立てるセルか駆動するアクチュエーターを持つスコープに、それらのための層を確保する `circuit` 行がない ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。 |
 | `E_ROUTE_CONGESTION` | スコープの回路が `circuit` 行の確保した層に収まらない。またはその層で、struct が 1 つの構造物が持てる量を超える。 |

@@ -32,8 +32,8 @@ Stable surfaces:
   primitives, theme/material primitives, edition guards), except what a section flags
   [subject to change](#subject-to-change).
 - The redstone DSL of [chapter 14](/spec/redstone/) (the `logic`, `circuit` and `assert` lines, the
-  built-in logic library, signal bindings, Tier 0 parts), except what a section flags
-  [subject to change](#subject-to-change).
+  built-in logic library, signal bindings and the sensors and actuators they bind, Tier 0 parts),
+  except what a section flags [subject to change](#subject-to-change).
 - The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
@@ -120,9 +120,10 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 
 Reading the table: **the column where a row first turns Stable is the soft commitment.** Until that
 milestone lands, the project reserves the right to change the surface without a deprecation window.
-The columns run in milestone order, which is not the order the milestones are reached in: M4 and M5
-came before M2, and M6 is planned before M3. A row is Stable from the release that reaches the
-milestone of its first Stable column, even when that milestone comes before one to its left.
+The columns run in milestone order, which is not the order the milestones are reached in: M5 came
+before M2, and M6 is planned before M3. A row is Stable from the release that reaches the milestone
+of its first Stable column, even when that milestone comes before one to its left, and a cell to the
+left of that column describes the surface only until that milestone is reached.
 
 The Rust API row never graduates within the planned roadmap. Cairn is consumed through the `cairn`
 CLI binary and the language server, not as a Rust library. If a downstream consumer wants a stable

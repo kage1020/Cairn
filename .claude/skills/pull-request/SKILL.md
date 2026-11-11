@@ -31,7 +31,9 @@ is the sequence.
    | `build` | `build` |
    | any, with `!` | `breaking`, naming every removed or retyped public item |
 
-   `docs`, `test`, `ci`, `chore` and `style` changes get no fragment. Write each entry as
+   `docs`, `test`, `ci`, `chore` and `style` changes get no fragment, except a `docs(spec)`
+   change that graduates a surface to Stable, which gets a `changed` fragment announcing it
+   (`spec/compatibility` "Evolving"). Write each entry as
    `- *(scope)* ...` lines that say what changed for a user and why, without issue or PR numbers.
    Never edit `CHANGELOG.md`.
 4. Fill in the sections of `.github/pull_request_template.md` for the body.
