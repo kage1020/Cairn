@@ -10,9 +10,6 @@ use crate::part::Part;
 use crate::placement_ir::{CircuitBlock, CircuitLayout, LayoutStage, ScopedCircuitLayout};
 use crate::sim::{Connection, Order, Sim};
 
-/// The ticks a circuit is given to come to rest before legalization gives up on it.
-pub(crate) const REST_TICKS: u32 = 256;
-
 /// Output of a [`compile_legalize`] run: the legalized circuits and the findings.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
@@ -97,7 +94,7 @@ pub(crate) fn built(layout: &CircuitLayout) -> Option<Built> {
 pub(crate) fn rest(layout: &CircuitLayout) -> Option<Sim> {
     let Built { parts, seeds } = built(layout)?;
     let mut sim = Sim::new(parts, seeds, Order::Forward);
-    sim.settle(REST_TICKS).then_some(sim)
+    sim.settle(sim.rest_ticks()).then_some(sim)
 }
 
 fn legalize(

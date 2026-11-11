@@ -153,6 +153,21 @@ impl Sim {
             .map_or([Connection::None; 4], |i| self.sides[i])
     }
 
+    /// The most ticks the circuit takes to come to rest: twice its parts' ticks summed, plus one.
+    pub(crate) fn rest_ticks(&self) -> u32 {
+        // `spec/redstone` "Verification": the logic is a DAG, so no change outlasts a pass through
+        // every part, even with each repeater holding a pulse for its delay.
+        self.components
+            .iter()
+            .map(|&i| match self.parts[i] {
+                Part::Repeater { delay, .. } => u32::from(delay),
+                _ => 1,
+            })
+            .fold(0, u32::saturating_add)
+            .saturating_mul(2)
+            .saturating_add(1)
+    }
+
     /// Whether no part has a tick pending.
     pub(crate) fn is_settled(&self) -> bool {
         self.pending.iter().all(Option::is_none)

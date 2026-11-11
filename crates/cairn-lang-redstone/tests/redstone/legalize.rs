@@ -136,6 +136,38 @@ fn a_riser_rests_with_its_lower_torch_lit_and_the_one_under_the_actuator_out() {
     );
 }
 
+/// The delay alone takes 264 ticks to light the riser.
+#[test]
+fn a_circuit_rests_with_its_sensors_off_however_long_its_path() {
+    let source = "theme t:\n  slot wall -> @oak_planks\n\n\
+                  struct slow size=272x6\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+                  door id=d side=front at=center\n  \
+                  lever id=l at=inside.back offset=1 y=0 -> sig.a\n  \
+                  logic sig.d = delay(not sig.a, 132)\n  \
+                  door[id=d] opened_by=sig.d\n  \
+                  circuit region=floor void=3\n";
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let layout = legalized(source, edition, None);
+        let riser = layout
+            .tiles
+            .iter()
+            .find(|tile| tile.kind == TileKind::Riser)
+            .expect("the door's riser");
+        let torches: Vec<String> = [Rel::new(0, 0, 0), Rel::new(-1, -1, 0)]
+            .into_iter()
+            .map(|rel| spelled(&block_at(&layout, riser.at(rel)).state))
+            .collect();
+        assert_eq!(
+            torches,
+            [
+                "minecraft:redstone_wall_torch[facing=south,lit=true]",
+                "minecraft:redstone_wall_torch[facing=south,lit=false]",
+            ],
+            "{edition:?}",
+        );
+    }
+}
+
 #[test]
 fn every_block_takes_its_id_from_the_target() {
     let layout = legalized(

@@ -627,6 +627,35 @@ fn stage_legalize_refuses_a_latency_bound_the_circuit_misses_on_that_edition() {
 }
 
 #[test]
+fn stage_legalize_refuses_an_always_the_circuit_misses_on_that_edition() {
+    // `sig.m` follows `sig.f` a tick later on Java than on Bedrock.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = write_source(
+        dir.path(),
+        "and.crn",
+        "theme t:\n  slot wall -> @oak_planks\n\n\
+         struct gate size=15x11\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         lever id=l1 at=inside.back offset=2 y=0 -> sig.a\n  \
+         lever id=l2 at=inside.back offset=6 y=0 -> sig.b\n  \
+         lamp id=lit at=inside.left offset=3 y=0\n  \
+         logic sig.f = sig.a and sig.b\n  \
+         logic sig.m = sig.f and sig.a\n  \
+         lamp[id=lit] lit_by=sig.m\n  \
+         circuit region=floor void=4\n  \
+         assert always(sig.f -> eventually sig.m within 4)\n",
+    );
+    let java = synth_stage(&path, "legalize", "java");
+    assert_refused(&java, &[(14, 3, "error", "E_SIM_ASSERTION_FAILED")], "java");
+    let bedrock = synth_stage(&path, "legalize", "bedrock");
+    assert_eq!(
+        bedrock.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&bedrock.stderr)
+    );
+}
+
+#[test]
 fn every_edition_tagged_stage_refuses_a_java_dispenser_fired_through_the_cell_above_it() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = write_source(dir.path(), "qc.crn", QUASI_CONNECTED_DISPENSER);

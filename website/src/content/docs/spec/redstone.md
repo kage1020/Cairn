@@ -697,29 +697,39 @@ reach.crn:7:3:   note: then the actuator reading sig.c: no buffer repeater on th
 ```
 
 `assert truth` and `assert always` are checked by running the legalized circuit of each target
-edition a tick at a time, each part taking the ticks [§14.4](#144-time-model) gives it. A run
-drives the circuit only through its sensors. It starts from the state the circuit rests in with
-every sensor off, switches on some of the sensors the assertion's signals depend on at tick 0, and
-holds them, the others staying off; an `observer` is switched on for that one tick, the pulse it
-gives. A check makes one run for each combination of those sensors, so `k` of them take `2^k` runs.
-A signal is read where what drives it leaves it, a sensor at its pad and a cell at its output,
-except the consequent of an `always`, which is read where `assert latency` ends a path: at the
-upper torch of every riser under an actuator that reads it by that name, or, where none does, where
-it is driven.
+edition a tick at a time, each part taking the ticks [§14.4](#144-time-model) gives it. A run drives
+the circuit only through its sensors. It starts from the state the circuit rests in with every
+sensor off, switches on some of the sensors the assertion's signals depend on at tick 0, and holds
+them, the others staying off; an `observer` is switched on for that one tick, the pulse it gives. A
+check makes one run for each combination of those sensors, so `k` of them take `2^k` runs, counting
+up with the sensors in source order, the first the highest bit. A run lasts until the circuit comes
+to rest, at most twice the ticks of all the circuit's parts added together and one more: the logic
+is a DAG ([§14.3](#143-the-logic-layer-is-a-dependency-dag)), so no change outlasts a pass through
+every part, even with each repeater holding a pulse for its delay. A signal is read where what
+drives it leaves it: a cell at its output, and a sensor at its pad, or as the run switches it where
+nothing in the circuit reads it and so it has no pad. The consequent of an `always` is read where
+`assert latency` ends a path instead: at the upper torch of each riser under an actuator that reads
+it by that name, or, where none does, where it is driven.
 
-- A **truth table** holds when each run, once the circuit rests, reads the output every row says
-  whose pattern the inputs then read match. A combination of the inputs no run reaches is not
-  checked; where every input is a sensor's signal, every combination is reached.
+- A **truth table** holds when, in each run, once the circuit rests, the output reads what every row
+  whose pattern matches the inputs says. A row no run reaches, its pattern matching none of the
+  combinations the inputs rest in, is not checked. Every combination is reached where each input is
+  the signal of a sensor of its own other than an `observer`, which is off again by the time the
+  circuit rests.
 - **`always(<a> -> eventually <b> within N)`** holds when, in each run, every tick on which `<a>`
-  reads on is followed, on that tick or within `N` after it, by one on which `<b>` reads on. Once
-  the circuit rests nothing changes, so its last tick stands for every tick after it.
+  reads on is followed, on that tick or within `N` after it, by one on which `<b>` reads on at each
+  point it is read: where several actuators read `<b>`, the one it reaches last counts, as the
+  slowest riser counts for a latency bound. Once the circuit rests nothing changes, so its last tick
+  stands for every tick after it.
 
 An assertion a run breaks is `E_SIM_ASSERTION_FAILED` on that edition, and the finding says which
-sensors the run switched on and what it read. For a truth table, that is the inputs and the output
-once the circuit rests, with a note at the row they contradict; the circuit computes the logic as
-written, so the fix is the row or the logic. For an `always`, it is the tick `<a>` read on and the
-first tick after it `<b>` did, with a note at the actuator where `<b>` is read; the fix relaxes
-`within` to the ticks measured, or shortens the path, as for a latency bound.
+sensors the run switched on and what it read. For a truth table, that is the first run to break it,
+and the inputs and the output once the circuit rests, with a note at the row they contradict; the
+circuit computes the logic as written, so the fix is the row or the logic. For an `always`, it is
+the run in which `<b>` follows `<a>` latest, or the first in which it never does: the tick `<a>`
+read on and the first tick after it on which `<b>` did, with a note at the actuator `<b>` reaches
+last. The fix relaxes `within` to the ticks measured, which then holds in every run, or shortens the
+path, as for a latency bound.
 
 ```text
 door.crn:33:3: error[E_SIM_ASSERTION_FAILED]: struct=gatehouse: `assert always(sig.step -> eventually sig.open within 2)` fails on java: with sig.step switched on, sig.step reads on at tick 0 and sig.open not until tick 3, 3 ticks later
@@ -727,10 +737,15 @@ door.crn:18:3:   note: sig.open is read at the torches under this actuator
   note: Fix: relax the bound to `within 3`, or shorten the path; the logic is never rewritten to meet an assertion
 ```
 
-An assertion whose signals depend on more than 10 sensors is not run, since it would take more
-than 1024 runs, and is the warning `W_SIM_ASSERTION_UNCHECKED` on its line. Every command that
-builds the circuit runs these checks once the latency bounds hold, and refuses to build a circuit
-an assertion fails on ([§14.8](#148-connection-to-the-ir-and-phases)).
+An assertion no run judges is not checked, and is the warning `W_SIM_ASSERTION_UNCHECKED` on its
+line. That is one in a scope that lays no circuit, its logic having no cell to build and no actuator
+to drive; one whose signals depend on more than 10 sensors, since it would take more than 1024 runs;
+and one no run breaks while a run is still changing when its ticks run out, which is a fault in the
+circuit the compiler built. A truth table no run breaks with rows no run reaches is the same
+warning, with a note at each of those rows. A `def` no `place` uses is built nowhere, so none of its
+assertions is checked, and the def is `W_UNUSED_DEF` ([Lint](/spec/lint/#sites-and-placements)).
+Every command that builds the circuit runs these checks once the latency bounds hold, and refuses to
+build a circuit an assertion fails on ([§14.8](#148-connection-to-the-ir-and-phases)).
 
 The self-correction loop (P5) is **synth → sim → diff → patch**, run per target edition. The patch
 targets place-and-route hints, repeaters, and buffers only. **The Logic IR is never rewritten**,

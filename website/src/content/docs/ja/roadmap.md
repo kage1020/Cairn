@@ -32,7 +32,7 @@ Cairn は[日付ベースのバージョン](/ja/spec/versioning-editions/#101-�
 | **M3, examples work** | 2027.1.0 の予定 | `examples/` のすべてのファイルが `--edition java` で警告なしにコンパイルでき、Minecraft で読み込める。仕様がドラフトを抜け、[互換性ティア](/ja/spec/compatibility/#c2-マイルストーンごとのティア表)が M3 に挙げる対象が Stable になる |
 | **M4, Java/Bedrock parity** | 2026.8.0 で達成 | 同じ DSL ソースから、両エディション向けに有効な出力ができる。エディション対応表が埋まり、エディション別のテーマのフォールバックが動く |
 | **M5, developer experience** | 2026.8.0 で達成 | `cairn-lsp` が、少なくとも 1 つのエディタ (VS Code) で診断と補完を提供する |
-| **M6, redstone simulates** | 2027.4.0 の予定 | `cairn compile` が `logic` のグラフを構造ファイルに配置し、tick シミュレータが、組み上げた回路に対して `redstone-door` のアサーションを検証する |
+| **M6, redstone simulates** | 2027.4.0 の予定 (シミュレータは 2026.12.0 で入る) | `cairn compile` が `logic` のグラフを構造ファイルに配置し、tick シミュレータが、組み上げた回路に対して `redstone-door` のアサーションを検証し、レッドストーンの DSL が Stable になる |
 
 ## これまでのリリース
 

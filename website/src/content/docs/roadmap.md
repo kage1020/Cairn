@@ -57,7 +57,7 @@ the monthly schedule shifts.
 | **M3, examples work** | Planned for 2027.1.0 | Every example in `examples/` compiles clean with `--edition java` and loads in Minecraft; the specification leaves draft, and the surfaces the [compatibility tiers](/spec/compatibility/#c2-tier-of-each-surface-by-milestone) list for M3 turn Stable |
 | **M4, Java/Bedrock parity** | Reached in 2026.8.0 | Same DSL source emits valid output for both editions; parity table populated; per-edition theme fallbacks work |
 | **M5, developer experience** | Reached in 2026.8.0 | `cairn-lsp` provides diagnostics and completion in at least one editor (VS Code) |
-| **M6, redstone simulates** | Planned for 2027.4.0 | `cairn compile` lays a `logic` graph into the structure file, and a tick simulator verifies `redstone-door`'s assertions against the circuit it built |
+| **M6, redstone simulates** | Planned for 2027.4.0; the simulator lands in 2026.12.0 | `cairn compile` lays a `logic` graph into the structure file, a tick simulator verifies `redstone-door`'s assertions against the circuit it built, and the redstone DSL turns Stable |
 
 ## Shipped so far
 

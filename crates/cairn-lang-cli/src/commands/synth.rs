@@ -9,8 +9,8 @@ use cairn_lang_core::{Edition, IntentModule, lower, resolve};
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{
     LayoutStage, compile_delay, compile_edition_netlist, compile_legalize, compile_netlist,
-    compile_placement, compile_routing, synthesize, verify_behaviour, verify_latency,
-    verify_portable,
+    compile_placement, compile_routing, synthesize, verify_latency, verify_portable,
+    verify_truth_and_temporal,
 };
 use clap::ValueEnum;
 
@@ -164,7 +164,7 @@ fn dump_stage(
     let legalized = compile_legalize(&delay.scoped, Some(&registry));
     reporting.gate(&legalized.diagnostics)?;
     reporting.gate(&verify_latency(&legalized.scoped, ir))?;
-    reporting.gate(&verify_behaviour(&legalized.scoped, ir))?;
+    reporting.gate(&verify_truth_and_temporal(&legalized.scoped, ir, &built))?;
     dump("Legalized Placement IR", &legalized.scoped)
 }
 

@@ -7,7 +7,6 @@ use cairn_lang_core::check::Severity;
 use cairn_lang_core::intent::IntentModule;
 use indexmap::IndexMap;
 
-use crate::behaviour::verify_behaviour;
 use crate::delay::compile_delay;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::edition_netlist::compile_edition_netlist;
@@ -18,7 +17,7 @@ use crate::placement_ir::{CircuitBlock, CircuitLayout};
 use crate::portable::verify_portable;
 use crate::routing::compile_routing;
 use crate::synth::synthesize;
-use crate::verify::verify_latency;
+use crate::verify::{verify_latency, verify_truth_and_temporal};
 
 /// The block entity a Java comparator's output strength is kept in.
 const COMPARATOR_ENTITY: &str = "minecraft:comparator";
@@ -61,7 +60,7 @@ pub fn build_circuits(
     if found.stop(verify_latency(&legalized.scoped, module)) {
         return found.all;
     }
-    if found.stop(verify_behaviour(&legalized.scoped, module)) {
+    if found.stop(verify_truth_and_temporal(&legalized.scoped, module, built)) {
         return found.all;
     }
     let mut attached = built.clone();
