@@ -259,7 +259,8 @@ struct の回路を組み上げるどのコマンドも、これらを報告し�
 | `E_ROUTE_UNREACHABLE_COMPONENT` | 回路がつなぐセンサーかアクチュエーターが、床下の回路の届かない場所に立っている。 |
 | `E_ATTENUATION_LIMIT` | マクロの段数がそのダストで運べる数を超えている。または入力への配線が弱すぎ、バッファのリピーターを置く場所がない。 |
 | `E_NO_PORTABLE_IMPL` | 組み上げた struct の部品が、別の部品をブロック更新を通して読むので、その動作が更新順序に依存する ([レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い))。 |
-| `E_SIM_ASSERTION_FAILED` | 合法化した回路が `assert latency` の上限より長くかかる。または上限の終点が始点に依存しない ([レッドストーン §14.7](/ja/spec/redstone/#147-検証))。 |
+| `E_SIM_ASSERTION_FAILED` | 合法化した回路が `assert latency` の上限より長くかかる。上限の終点が始点に依存しない。または回路の実行が `assert truth` か `assert always` を破る ([レッドストーン §14.7](/ja/spec/redstone/#147-検証))。 |
+| `W_SIM_ASSERTION_UNCHECKED` | `assert truth` か `assert always` を回路のどの実行も判定しないので、検査しない。回路を敷かないスコープにある。信号が 10 個を超えるセンサーに依存し、すべての組み合わせを実行するには多すぎる。または最後まで変化し続ける実行がある。あるいは真理値表に、どの実行も届かない行がある ([レッドストーン §14.7](/ja/spec/redstone/#147-検証))。 |
 
 ### 意味カテゴリ
 
@@ -274,10 +275,10 @@ struct の回路を組み上げるどのコマンドも、これらを報告し�
 | **fluid** | 水源、流れ、`waterlogged` が整合しているか。 |
 | **version_caps / parity** | ステートやエンティティのスキーマがターゲットで使えるか ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
 | **edit_stability** | `intent_state` の変更が、無関係なメンバーの `resolved_state` に波及しないか。 |
-| **redstone** | 宣言した真理値表と時相アサーションに対する、tick 単位のシミュレーション。レイテンシの上限、タイミングの衝突、QC への依存、配線の混雑 ([レッドストーン](/ja/spec/redstone/))。 |
+| **redstone** | 宣言した真理値表と時相アサーションに対する、tick 単位のシミュレーション。レイテンシの上限、QC への依存、配線の混雑 ([レッドストーン](/ja/spec/redstone/))。 |
 | **AABB 干渉** | 重なった場合は、優先度に従って統合するか拒否する。境界のブロックステートの再解決は IR 層が担う。 |
 
-このうち attachment、entity_aabb、support、fluid、edit_stability、AABB の干渉は計画中で、現時点ではどのコマンドも検査しません。本体が重なる 2 つの `place` 行も報告しません。幾何は一部だけ守られます。自分の行の指定で struct の外に出る door、window、軒の stair、chest、センサー、アクチュエーターは描かずに `E_INVALID_MEMBER` として報告し、建たなかったメンバーのせいでだけ外に出るものは `W_DEFERRED_MEMBER` として報告します。version_caps / parity は、専用のコードを通じて一部だけ実行します。`E_VERSION_CAP` は `--target` を `@requires` の下限と照らし合わせ、`E_UNKNOWN_ID` は固定したターゲットが宣言していないブロック ID を、`E_PARITY_UNSUPPORTED` はもう一方のエディションにしかない意味メンバーのブロックを、`E_STATE_DOMAIN` はそこでブロックが取らないステートを、`E_STATE_UNMAPPED` はそのステートマップに形のないブロックステートを拒否し、`W_INTENT_DEGRADED` はバージョンが表せないものを示します。一方、エンティティのスキーマは検査しません。redstone の行も一部だけです。真理値表のコードは表そのものの整合性を検査するだけで、真理値表や時相アサーションを回路と照合するものはありません。一方、レイテンシの上限、配線の混雑、回路の更新順序への依存には、[レッドストーン](#レッドストーン)のコードがあります。
+このうち attachment、entity_aabb、support、fluid、edit_stability、AABB の干渉は計画中で、現時点ではどのコマンドも検査しません。本体が重なる 2 つの `place` 行も報告しません。幾何は一部だけ守られます。自分の行の指定で struct の外に出る door、window、軒の stair、chest、センサー、アクチュエーターは描かずに `E_INVALID_MEMBER` として報告し、建たなかったメンバーのせいでだけ外に出るものは `W_DEFERRED_MEMBER` として報告します。version_caps / parity は、専用のコードを通じて一部だけ実行します。`E_VERSION_CAP` は `--target` を `@requires` の下限と照らし合わせ、`E_UNKNOWN_ID` は固定したターゲットが宣言していないブロック ID を、`E_PARITY_UNSUPPORTED` はもう一方のエディションにしかない意味メンバーのブロックを、`E_STATE_DOMAIN` はそこでブロックが取らないステートを、`E_STATE_UNMAPPED` はそのステートマップに形のないブロックステートを拒否し、`W_INTENT_DEGRADED` はバージョンが表せないものを示します。一方、エンティティのスキーマは検査しません。redstone の行は専用のコードを通じて実行します。真理値表のコードが表そのものの整合性を検査し、[レッドストーン](#レッドストーン)のコードが、真理値表、時相アサーション、レイテンシの上限を回路と照合し、配線と、回路の更新順序への依存を検査します。
 
 ### did you mean
 

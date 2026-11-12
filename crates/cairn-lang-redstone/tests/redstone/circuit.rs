@@ -202,6 +202,83 @@ fn a_finding_in_any_phase_leaves_every_struct_as_it_was() {
     }
 }
 
+/// A lever through a `not` to a door, `asserts` after the region.
+fn inverted(asserts: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @oak_planks\n\n\
+         struct room size=9x7\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         door id=d side=front at=center\n  \
+         lever id=l at=inside.back offset=2 y=0 -> sig.a\n  \
+         logic sig.n = not sig.a\n  \
+         door[id=d] opened_by=sig.n\n  circuit region=floor void=3\n{asserts}"
+    )
+}
+
+#[test]
+fn a_truth_row_the_circuit_breaks_stops_the_build_and_leaves_the_struct_as_it_was() {
+    let line = "assert truth(sig.a -> sig.n) { 0 -> 0 }";
+    let source = inverted(&format!("  {line}\n"));
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let (before, after, found) = build(&source, edition);
+        assert_eq!(
+            findings(&source, &found)
+                .into_iter()
+                .map(|(code, at, _, _)| (code, at))
+                .collect::<Vec<_>>(),
+            [("E_SIM_ASSERTION_FAILED", line)],
+            "{edition:?}",
+        );
+        assert_eq!(after, before, "{edition:?}");
+    }
+}
+
+#[test]
+fn an_assertion_left_unchecked_is_reported_and_the_circuit_still_laid() {
+    // `sig.d` is another name of `sig.a`, so no run rests with the two apart.
+    let line = "assert truth(sig.a, sig.d -> sig.n) { 10 -> 0; 01 -> 1 }";
+    let source = inverted(&format!("  logic sig.d = sig.a\n  {line}\n"));
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let (before, after, found) = build(&source, edition);
+        assert_eq!(
+            findings(&source, &found)
+                .into_iter()
+                .map(|(code, at, _, _)| (code, at))
+                .collect::<Vec<_>>(),
+            [("W_SIM_ASSERTION_UNCHECKED", line)],
+            "{edition:?}",
+        );
+        let key = "struct::room";
+        assert_eq!(
+            after.structures[key].dims,
+            Dims {
+                y: before.structures[key].dims.y + 3,
+                ..before.structures[key].dims
+            },
+            "{edition:?}",
+        );
+    }
+}
+
+#[test]
+fn a_truth_table_is_run_only_once_the_latency_bounds_hold() {
+    let bound = "assert latency(sig.a -> sig.n) <= 0";
+    let source = inverted(&format!(
+        "  {bound}\n  assert truth(sig.a -> sig.n) {{ 0 -> 0 }}\n"
+    ));
+    for edition in [Edition::Java, Edition::Bedrock] {
+        let (before, after, found) = build(&source, edition);
+        assert_eq!(
+            findings(&source, &found)
+                .into_iter()
+                .map(|(code, at, _, _)| (code, at))
+                .collect::<Vec<_>>(),
+            [("E_SIM_ASSERTION_FAILED", bound)],
+            "{edition:?}",
+        );
+        assert_eq!(after, before, "{edition:?}");
+    }
+}
+
 /// `alpha` lays its circuit whole; `beta`'s misses its bound only once legalized.
 #[test]
 fn a_finding_on_one_struct_leaves_every_struct_as_it_was() {

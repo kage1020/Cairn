@@ -19,7 +19,7 @@ use crate::placement_ir::{CircuitBlock, CircuitEntity, CircuitLayout};
 use crate::portable::verify_portable;
 use crate::routing::compile_routing;
 use crate::synth::synthesize;
-use crate::verify::verify_latency;
+use crate::verify::{verify_latency, verify_truth_and_temporal};
 
 /// The block entity a Java comparator's output strength is kept in.
 const COMPARATOR_ENTITY: &str = "minecraft:comparator";
@@ -59,6 +59,9 @@ pub fn build_circuits(
         return found.all;
     }
     if found.stop(verify_latency(&legalized.scoped, module)) {
+        return found.all;
+    }
+    if found.stop(verify_truth_and_temporal(&legalized.scoped, module, built)) {
         return found.all;
     }
     let mut attached = built.clone();

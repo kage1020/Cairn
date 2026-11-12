@@ -148,11 +148,12 @@ high on a wall, is `E_ROUTE_UNREACHABLE_COMPONENT`.
 
 **Assertions come in three kinds:** `truth(…)` for combinational logic, `latency(in -> out) <= N`
 for bounded delay, and `always(in -> eventually out within N)` for bounded temporal. There is no
-full LTL by design, only what a per-tick simulator can decide cheaply. Nothing checks `truth` and
-`always` against the circuit yet. A latency bound needs no simulator: every command that builds
-the circuit counts the ticks of the laid circuit for the edition it builds and refuses a bound it
-misses with `E_SIM_ASSERTION_FAILED`. The OR here is two repeaters, one tick, and the two torches
-that carry the signal up to the door take two more.
+full LTL by design, only what a per-tick simulator can decide cheaply. Every command that builds
+the circuit checks all three against the laid circuit for the edition it builds, and refuses one
+it misses with `E_SIM_ASSERTION_FAILED`. A latency bound is counted along the circuit's slowest
+path, and `truth` and `always` are checked by running it, from rest, with every combination of the
+plates stepped on. The OR here is two repeaters, one tick, and the two torches that carry the
+signal up to the door take two more, so the door opens three ticks after a step.
 
 **The edition difference is in the cell library, not the language.** The same logic becomes a
 `ComparatorAND` cell on Java and a `TorchAND` on Bedrock. A circuit that depends on

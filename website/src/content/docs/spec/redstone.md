@@ -703,12 +703,61 @@ reach.crn:7:3:   note: then the actuator reading sig.c: no buffer repeater on th
   note: Fix: relax the bound to `<= 4`, or shorten the path; the logic is never rewritten to meet a bound
 ```
 
-Nothing checks `truth` and `always` against the circuit yet: a truth table its logic contradicts
-still builds. The self-correction loop (P5) is
-**synth → sim → diff → patch**, run per target edition. The patch targets place-and-route hints,
-repeaters, and buffers only. **The Logic IR is never rewritten**, because self-correction that
-auto-modifies logic is dangerous. The loop does not exist yet: a bound that fails is reported, and
-nothing patches the layout to meet it.
+`assert truth` and `assert always` are checked by running the legalized circuit of each target
+edition a tick at a time, each part taking the ticks [§14.4](#144-time-model) gives it. A run drives
+the circuit only through its sensors. It starts from the state the circuit rests in with every
+sensor off, switches on some of the sensors the assertion's signals depend on at tick 0, and holds
+them, the others staying off; an `observer` is switched on for that one tick, the pulse it gives. A
+check makes one run for each combination of those sensors, so `k` of them take `2^k` runs, counting
+up with the sensors in source order, the first the highest bit. A run lasts until the circuit comes
+to rest, at most twice the ticks of all the circuit's parts added together and one more: the logic
+is a DAG ([§14.3](#143-the-logic-layer-is-a-dependency-dag)), so no change outlasts a pass through
+every part, even with each repeater holding a pulse for its delay. A signal is read where what
+drives it leaves it: a cell at its output, and a sensor at its pad, or as the run switches it where
+nothing in the circuit reads it and so it has no pad. The consequent of an `always` is read where
+`assert latency` ends a path instead: at the upper torch of each riser under an actuator that reads
+it by that name, or, where none does, where it is driven.
+
+- A **truth table** holds when, in each run, once the circuit rests, the output reads what every row
+  whose pattern matches the inputs says. A row no run reaches, its pattern matching none of the
+  combinations the inputs rest in, is not checked. Every combination is reached where each input is
+  the signal of a sensor of its own other than an `observer`, which is off again by the time the
+  circuit rests.
+- **`always(<a> -> eventually <b> within N)`** holds when, in each run, every tick on which `<a>`
+  reads on is followed, on that tick or within `N` after it, by one on which `<b>` reads on at each
+  point it is read: where several actuators read `<b>`, the one it reaches last counts, as the
+  slowest riser counts for a latency bound. Once the circuit rests nothing changes, so its last tick
+  stands for every tick after it.
+
+An assertion a run breaks is `E_SIM_ASSERTION_FAILED` on that edition, and the finding says which
+sensors the run switched on and what it read. For a truth table, that is the first run to break it,
+and the inputs and the output once the circuit rests, with a note at the row they contradict; the
+circuit computes the logic as written, so the fix is the row or the logic. For an `always`, it is
+the run in which `<b>` follows `<a>` latest, or the first in which it never does: the tick `<a>`
+read on and the first tick after it on which `<b>` did, with a note at the actuator `<b>` reaches
+last. The fix relaxes `within` to the ticks measured, which then holds in every run, or shortens the
+path, as for a latency bound.
+
+```text
+door.crn:33:3: error[E_SIM_ASSERTION_FAILED]: struct=gatehouse: `assert always(sig.step -> eventually sig.open within 2)` fails on java: with sig.step switched on, sig.step reads on at tick 0 and sig.open not until tick 3, 3 ticks later
+door.crn:18:3:   note: sig.open is read at the torches under this actuator
+  note: Fix: relax the bound to `within 3`, or shorten the path; the logic is never rewritten to meet an assertion
+```
+
+An assertion no run judges is not checked, and is the warning `W_SIM_ASSERTION_UNCHECKED` on its
+line. That is one in a scope that lays no circuit, its logic having no cell to build and no actuator
+to drive; one whose signals depend on more than 10 sensors, since it would take more than 1024 runs;
+and one no run breaks while a run is still changing when its ticks run out, which is a fault in the
+circuit the compiler built. A truth table no run breaks with rows no run reaches is the same
+warning, with a note at each of those rows. A `def` no `place` uses is built nowhere, so none of its
+assertions is checked, and the def is `W_UNUSED_DEF` ([Lint](/spec/lint/#sites-and-placements)).
+Every command that builds the circuit runs these checks once the latency bounds hold, and refuses to
+build a circuit an assertion fails on ([§14.8](#148-connection-to-the-ir-and-phases)).
+
+The self-correction loop (P5) is **synth → sim → diff → patch**, run per target edition. The patch
+targets place-and-route hints, repeaters, and buffers only. **The Logic IR is never rewritten**,
+because self-correction that auto-modifies logic is dangerous. The loop does not exist yet: an
+assertion that fails is reported, and nothing patches the layout to meet it.
 
 ## 14.8 Connection to the IR and phases
 
@@ -735,15 +784,15 @@ The Placement IR is filled pass by pass ([§14.5](#145-place-and-route)): placem
 then routing adds each net's dust, delay insertion its buffer repeaters, and legalization the block
 and state of every voxel. An Edition Cell fixes the ticks from each of its ports
 ([§14.6](#146-edition-differences)), but there is no wire to count before routing, so the delay is
-determined in the Placement IR and no earlier, and `assert latency` is checked on the legalized
+determined in the Placement IR and no earlier, and every assertion is checked on the legalized
 circuit ([§14.7](#147-verification)).
 
 The passes run once the struct is lowered, since a pad or riser stands under a component the
 lowering placed: synthesis, the order check of [§14.6](#146-edition-differences) on the struct as
-built, the four stages of place-and-route, and the latency check. The first that reports an error
-stops the rest, and the struct is left as it was. Otherwise each legalized circuit is laid under
-its struct, which rises `void=` layers over it, and a comparator's output strength goes into its
-block entity.
+built, the four stages of place-and-route, the latency check, and the runs that check `truth` and
+`always`. The first that reports an error stops the rest, and the struct is left as it was.
+Otherwise each legalized circuit is laid under its struct, which rises `void=` layers over it, and
+a comparator's output strength goes into its block entity.
 
 `cairn compile` builds every circuit for the edition it compiles, and an error the passes report
 refuses the compile as an error of the lowering does. `cairn lower --edition` prints the struct with

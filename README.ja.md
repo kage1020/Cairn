@@ -90,7 +90,7 @@ semantic-sensitive:      (none)
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
-- 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert latency` の上限をエディションごとに検査します。
+- 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
 - 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)
 
@@ -102,7 +102,6 @@ semantic-sensitive:      (none)
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
 - `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
 - `.litematic` と `.schem` の書き出し、既存の schematic の読み込み
-- 回路を `truth` と `always` のアサーションに照らして検証するティックシミュレータ
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
 ## 基本の考え方

@@ -622,7 +622,8 @@ wording the editions give it, and an edition's own by the rule for its guards
 | `E_ROUTE_UNREACHABLE_COMPONENT` | A sensor or actuator the circuit wires stands where the circuit under the floor cannot reach it. |
 | `E_ATTENUATION_LIMIT` | A macro has more stages than its dust carries, or an input's wire runs too weak with nowhere for a buffer repeater. |
 | `E_NO_PORTABLE_IMPL` | A component of the built struct reads another through a block update, so what it does depends on update order ([Redstone §14.6](/spec/redstone/#146-edition-differences)). |
-| `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start ([Redstone §14.7](/spec/redstone/#147-verification)). |
+| `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start, or an `assert truth` or `assert always` a run of the circuit breaks ([Redstone §14.7](/spec/redstone/#147-verification)). |
+| `W_SIM_ASSERTION_UNCHECKED` | An `assert truth` or `assert always` no run of the circuit judges, so it is not checked: one in a scope that lays no circuit, one whose signals depend on more than 10 sensors, too many to run every combination of, or one a run is still changing at the end of; or a truth table with rows no run reaches ([Redstone §14.7](/spec/redstone/#147-verification)). |
 
 ### Semantic categories
 
@@ -637,7 +638,7 @@ Beyond the codes above, lint covers:
 | **fluid** | Consistency of water source, flow, and `waterlogged`. |
 | **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
-| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, timing conflicts, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
+| **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
 Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
@@ -649,10 +650,10 @@ keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, throu
 pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other
 edition has, `E_STATE_DOMAIN` a state its block does not take there,
 `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
-version cannot carry, while no entity schema is checked. The redstone row runs only in part as well:
-the truth-table codes check a table against itself, and nothing checks a truth table or a temporal
-assertion against the circuit, while a latency bound, routing congestion and a circuit's dependence
-on update order have the codes of [Redstone](#redstone).
+version cannot carry, while no entity schema is checked. The redstone row runs through codes of its
+own: the truth-table codes check a table against itself, and the codes of [Redstone](#redstone)
+check a truth table, a temporal assertion and a latency bound against the circuit, and check its
+routing and its dependence on update order.
 
 ### "did you mean"
 

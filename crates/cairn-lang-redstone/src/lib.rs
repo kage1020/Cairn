@@ -54,7 +54,7 @@ pub use portable::verify_portable;
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
 pub use tile::{PadKind, TilePort};
-pub use verify::verify_latency;
+pub use verify::{MAX_ASSERTION_SENSORS, verify_latency, verify_truth_and_temporal};
 
 pub(crate) fn saturating_index(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)

@@ -321,10 +321,15 @@ impl CircuitLayout {
     /// The tile realising the netlist's cell `index`, the cells' tiles laid in the netlist's order.
     #[must_use]
     pub fn cell_tile(&self, index: usize) -> Option<&PlacedTile> {
+        self.cell_tiles().nth(index).map(|(_, tile)| tile)
+    }
+
+    /// Each tile realising a netlist cell with its index into `tiles`, in the netlist's order.
+    pub fn cell_tiles(&self) -> impl Iterator<Item = (usize, &PlacedTile)> {
         self.tiles
             .iter()
-            .filter(|tile| matches!(tile.kind, TileKind::Cell { .. }))
-            .nth(index)
+            .enumerate()
+            .filter(|(_, tile)| matches!(tile.kind, TileKind::Cell { .. }))
     }
 }
 
