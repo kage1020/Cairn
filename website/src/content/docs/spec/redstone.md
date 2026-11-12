@@ -20,8 +20,10 @@ not carried in the language core ([§14.4](#144-time-model)).
 - **Tier 1, logic.** This chapter. You declare a signal graph and the compiler turns it into voxels
   through synthesis → placement → routing.
 
-The only new keywords are `logic`, `circuit`, and `assert`. Logic primitives are not keywords: they
-ship as a built-in library, which keeps the vocabulary small and closed (P3).
+The logic layer adds three keywords, `logic`, `circuit` and `assert`, besides the sensors and
+actuators it binds ([§14.2](#142-signal-binding)) and the four Tier 0 parts
+([below](#tier-0-parts)). Logic primitives are not keywords: they ship as a built-in library, which
+keeps the vocabulary small and closed (P3).
 
 In Verilog terms, v1 allows the `assign` equivalent and no clocked assignment:
 
@@ -248,7 +250,9 @@ lever or button as soon as a block update reaches it.
 outside it can never be read, whether on the left of a `logic` line, in a sensor's `->` tail, or as
 an actuator key's value. That is `E_LOGIC_INVALID_SIGNAL`. A name is `sig.` and exactly one segment
 after it: `opened_by=a` is not a wire to a signal called `a`, and `opened_by=sig.a.b` names nothing
-either.
+either. On an actuator patch the block-array pass reads the value first, so a name outside `sig.`
+there is the patch's `E_INVALID_MEMBER` ([Lint](/spec/lint/#lowering)), and only `cairn synth`,
+which builds no block array, reports it as `E_LOGIC_INVALID_SIGNAL`.
 
 The host is checked before the value, so `walls -> a` is one fault and it belongs to the host: the
 `E_MISPLACED_BINDING` above, and not also the `E_LOGIC_INVALID_SIGNAL` the value would earn on a
@@ -256,11 +260,12 @@ sensor. No way of writing the value makes `walls` a sensor.
 
 **Bindings go after the `[selector]`, never inside it.** `door[id=front] opened_by=sig.power` binds;
 `door[id=front,opened_by=sig.power]` does not. The brackets pick the member the line acts on, so
-nothing written among them is read as a binding. A bracketed pair earns the finding its key would
-earn once moved out: `E_UNKNOWN_ARGUMENT` for a key outside the member's vocabulary, and
-`E_LOGIC_UNKNOWN_BINDING_KEY`, below, for a `sig.` value under a key the member reads that is not
-an actuator key. A component's own actuator key inside its brackets is `E_LOGIC_MISPLACED_BINDING`,
-which names the brackets, whatever the value.
+nothing written among them is read as a binding. The brackets of an actuator patch take only
+`id=<label>`, so any other pair among them, a component's own actuator key included, is
+`E_INVALID_MEMBER` on the patch, and the message names each such pair
+([Lint](/spec/lint/#lowering)). `cairn synth`, which builds no block array, reports an actuator key
+there as `E_LOGIC_MISPLACED_BINDING`, which names the brackets, and a `sig.` value under another key
+the member reads as `E_LOGIC_UNKNOWN_BINDING_KEY`.
 
 **A selector line binds the member its brackets pick.** `door[id=front] opened_by=sig.power` binds
 the door declared as `door id=front ...` in the same scope, at the top level or directly under a
@@ -268,13 +273,14 @@ the door declared as `door id=front ...` in the same scope, at the top level or 
 bind a lamp, piston and dispenser the same way. The `id=` has to name exactly one component of the
 patch's keyword, written without brackets. The patch is a line of its own, before or after the
 component it binds, at the top level or directly under a `level`, wherever that component is. A
-patch whose selector has no `id=`, or whose id no component of its keyword carries or two carry, is
-`E_LOGIC_UNRESOLVED_PATCH`: it acts on no component, so a port for it would have no component behind
-it. An actuator patch is the only binding a selector line carries, so a `->` tail on
-`pressure_plate[id=p]` or `lever[id=sw]` is `E_MISPLACED_BINDING`, as it is on a member that is not
-a sensor. Nor does a sensor take a patch of any other kind: a sensor line in the selector form, such
-as `lever[id=sw] at=inside.front offset=2 y=1`, places nothing, since its brackets pick a member
-declared elsewhere, and it is `E_INVALID_MEMBER`.
+patch whose selector has no `id=`, or whose id no component of its keyword carries or two carry,
+acts on no component, so the block-array pass refuses it as `E_INVALID_MEMBER`, and the message says
+which. `cairn synth`, which builds no block array, reports it as `E_LOGIC_UNRESOLVED_PATCH`, since a
+port for it would have no component behind it. An actuator patch is the only binding a selector line
+carries, so a `->` tail on `pressure_plate[id=p]` or `lever[id=sw]` is `E_MISPLACED_BINDING`, as it
+is on a member that is not a sensor. Nor does a sensor take a patch of any other kind: a sensor line
+in the selector form, such as `lever[id=sw] at=inside.front offset=2 y=1`, places nothing, since its
+brackets pick a member declared elsewhere, and it is `E_INVALID_MEMBER`.
 
 **An actuator takes one binding per key.** A door carries one `opened_by=`, a lamp one `lit_by=`, a
 piston one `powered_by=` and a dispenser one `fired_by=`, whether it is written on the component's
@@ -283,7 +289,7 @@ be two wires into one component, a wired OR the logic layer never states. Signal
 instead: write `logic sig.open = sig.a or sig.x` and bind the door to `sig.open`.
 
 A `sig.` value under a key the member reads that is not one of the four actuator keys is
-`E_LOGIC_UNKNOWN_BINDING_KEY`, raised by the synth pipeline, as in `walls height=sig.power`. The
+`E_LOGIC_UNKNOWN_BINDING_KEY`, raised by the synth pipeline, as in `door hinge=sig.power`. The
 value says a signal was meant to be wired and the key is not one any component reads a signal from.
 A misspelt actuator key such as `oepend_by=sig.power` is outside the member's vocabulary, so it is
 the `E_UNKNOWN_ARGUMENT` that `check` reports first.
@@ -369,9 +375,11 @@ under a `level`. Such a line is `E_MISPLACED_MEMBER` on that line, not `E_DUPLIC
 
 A scope needs the line once its logic has a cell to build or an actuator to drive. A scope without
 one is `E_NO_CIRCUIT_REGION` at its first cell, or at its first actuator binding when it has no
-cell, and so is a scope whose line reserves nothing: one with no `region=` label, a `void=` that is
-not a whole number of at least 1, or a scope with no `size=WxH`. Such logic in a `site` is
-`E_NO_CIRCUIT_REGION` too, since a `site` has no base plane to reserve under.
+cell. A scope with no `size=WxH` has no footprint to reserve under, so its line is
+`E_NO_CIRCUIT_REGION` on that line. A line with no `region=` label, or with a `void=` that is not a
+whole number of at least 1, reserves nothing and is `E_INVALID_MEMBER` on that line
+([Lint](/spec/lint/#lowering)). Such logic in a `site` is `E_NO_CIRCUIT_REGION` too, since a `site`
+has no base plane to reserve under.
 
 **The reservation.** `void=N` reserves `N` layers under the base plane, across the whole footprint
 the struct is built on, the ring a roof's `overhang=` adds included. The built struct is `N`

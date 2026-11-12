@@ -236,8 +236,8 @@ that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
 `cairn check` checks a truth table ([Literals and separators](#511-literals-and-separators)), and
 redstone synthesis resolves the signals it names (`E_LOGIC_UNBOUND_SIGNAL`). A latency bound is
-checked against the placed circuit ([Redstone §14.7](/spec/redstone/#147-verification)); nothing
-checks a truth table or a temporal assertion against a built circuit yet.
+counted along the laid circuit, and `truth` and `always` are checked by running it ([Redstone
+§14.7](/spec/redstone/#147-verification)).
 
 **Top-level names are scoped per kind.** `theme` / `def` / `struct` / `site` are four namespaces, so
 one name may appear once in each. Declaring it twice within one kind is `E_DUPLICATE_ITEM`. For

@@ -285,8 +285,8 @@ pub(crate) enum Command {
         #[arg(
             long,
             long_help = "Opt-in flag confirming the caller understands this surface is internal. \
-                Required until the redstone pipeline reaches a stable tier; without it the \
-                subcommand exits 2 with a hint"
+                Required because the subcommand prints the compiler's internal stages, which may \
+                change in any release; without it the subcommand exits 2 with a hint"
         )]
         experimental_logic_synth: bool,
         /// Which pipeline stage to print.
