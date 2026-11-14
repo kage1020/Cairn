@@ -3,13 +3,16 @@
 //! stored text.
 
 use std::collections::VecDeque;
+use std::convert::Infallible;
 use std::sync::mpsc;
 use std::thread;
 
-use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
+use lsp_server::{
+    Connection, ErrorCode, Message, Notification, Request, RequestId, Response, ResponseError,
+};
 use lsp_types::notification::{
-    DidChangeConfiguration, DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit,
-    Notification as _, PublishDiagnostics, ShowMessage,
+    Cancel, DidChangeConfiguration, DidChangeTextDocument, DidCloseTextDocument,
+    DidOpenTextDocument, Exit, Notification as _, PublishDiagnostics, ShowMessage,
 };
 use lsp_types::request::{
     CodeActionRequest, Completion, DocumentDiagnosticRequest, HoverRequest, Request as _, Shutdown,
@@ -21,10 +24,14 @@ use crate::completion::completions;
 use crate::diagnostics::compute_diagnostics;
 use crate::hover::hover;
 use crate::pin::{Pin, PinRefused};
-use crate::store::DocumentStore;
+use crate::store::{DocumentStore, Revision};
 
 /// A transport or protocol failure, which ends the process.
 type DynError = Box<dyn std::error::Error + Send + Sync>;
+
+/// What computes the findings on one document's text against a pin, as [`compute_diagnostics`]
+/// does.
+type Diagnose = fn(&lsp_types::Uri, &str, &Pin) -> Vec<lsp_types::Diagnostic>;
 
 /// The capabilities the `initialize` response advertises.
 fn server_capabilities() -> lsp_types::ServerCapabilities {
@@ -50,7 +57,7 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
         diagnostic_provider: Some(lsp_types::DiagnosticServerCapabilities::Options(
             lsp_types::DiagnosticOptions {
                 identifier: Some("cairn".to_owned()),
-                // A document's findings depend on its own text alone.
+                // A document's findings depend on no other document.
                 inter_file_dependencies: false,
                 workspace_diagnostics: false,
                 ..lsp_types::DiagnosticOptions::default()
@@ -82,11 +89,12 @@ struct Client {
 }
 
 impl Client {
-    /// The client whose `initialize` params are `params`.
+    /// The client whose `initialize` params are `params`, one that pulls when they declare the
+    /// `textDocument.diagnostic` capability object.
     fn negotiate(params: &serde_json::Value) -> Self {
         let pulls = params
             .pointer("/capabilities/textDocument/diagnostic")
-            .is_some_and(|declared| !declared.is_null());
+            .is_some_and(serde_json::Value::is_object);
         let refreshes = params
             .pointer("/capabilities/workspace/diagnostics/refreshSupport")
             .and_then(serde_json::Value::as_bool)
@@ -112,12 +120,14 @@ impl Client {
 ///
 /// # Errors
 ///
-/// A transport or protocol failure, or an `exit` that no `shutdown` preceded.
+/// A transport or protocol failure, an `exit` that no `shutdown` preceded, or a panic on the
+/// diagnostics thread.
 pub fn run() -> Result<(), DynError> {
     let (connection, io_threads) = Connection::stdio();
     let capabilities = serde_json::to_value(server_capabilities())?;
     let params = connection.initialize(capabilities)?;
-    let teardown = main_loop(&connection, Client::negotiate(&params))?;
+    let client = Client::negotiate(&params);
+    let teardown = main_loop(&connection, client, compute_diagnostics)?;
     // The writer thread ends only once `connection` drops.
     drop(connection);
     match (io_threads.join(), teardown) {
@@ -146,9 +156,10 @@ enum Teardown {
 }
 
 /// What the diagnostics thread publishes next for one document.
+#[derive(Debug, PartialEq, Eq)]
 enum Publication {
-    /// The findings on one revision of its text against one pin; `version` is `None` when the
-    /// pin changed and the text did not.
+    /// The findings on one text against one pin, published with the `version` the client gave
+    /// that text, or none when the pin changed and the text did not.
     Findings {
         version: Option<i32>,
         text: String,
@@ -161,44 +172,76 @@ enum Publication {
 /// A document and what to publish for it.
 type Queued = (lsp_types::Uri, Publication);
 
-/// A pulled report the client does not hold yet: the findings on one stored revision.
+/// A `textDocument/diagnostic` request still to answer, with the text of the revision it names
+/// and the pin that revision is checked against.
+#[derive(Debug, PartialEq, Eq)]
 struct Report {
     id: RequestId,
     uri: lsp_types::Uri,
     text: String,
     pin: Pin,
-    result_id: String,
+    revision: Revision,
 }
 
 /// What the diagnostics thread does next.
+#[derive(Debug, PartialEq, Eq)]
 enum Job {
     /// Publish for one document, in place of what is still queued for it.
     Publish(Queued),
     /// Answer one `textDocument/diagnostic` request.
     Report(Report),
+    /// Answer the report this `$/cancelRequest` names as cancelled, if it is still queued.
+    Cancel(RequestId),
 }
 
-/// Runs [`dispatch`] until it ends, while a second thread computes diagnostics, so a request is
-/// answered while a long document is still being diagnosed.
-fn main_loop(connection: &Connection, client: Client) -> Result<Teardown, DynError> {
+/// Runs [`dispatch`] while a second thread computes diagnostics, so only a pull waits on them,
+/// and ends with an error as soon as that thread stops before `dispatch` does.
+fn main_loop(
+    connection: &Connection,
+    client: Client,
+    diagnose: Diagnose,
+) -> Result<Teardown, DynError> {
     let (queue, queued) = mpsc::channel();
+    let (alive, diagnostics_ended) = crossbeam_channel::bounded::<Infallible>(0);
     thread::scope(|scope| {
         let diagnostics_thread = thread::Builder::new()
             .name("cairn-lsp-diagnostics".to_owned())
-            .spawn_scoped(scope, move || serve_queued(connection, &queued))?;
-        let dispatched = dispatch(connection, &queue, client);
+            .spawn_scoped(scope, move || {
+                let served = serve_queued(connection, &queued, diagnose);
+                // A panic drops `alive` too, as it unwinds, so `dispatch` wakes however this ends.
+                drop(alive);
+                served
+            })?;
+        let dispatched = dispatch(connection, &queue, &diagnostics_ended, client);
         drop(queue);
-        let published = diagnostics_thread
-            .join()
-            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        let published = diagnostics_thread.join().unwrap_or_else(|panic| {
+            let message = panic_message(&*panic);
+            Err(format!("the diagnostics thread panicked: {message}").into())
+        });
         // The diagnostics thread's failure is why a dispatch could not queue.
         published.and(dispatched)
     })
 }
 
-/// Does what `queued` holds until the queue closes: every report first, then the publications,
-/// skipping every revision of a document that a newer one queued after it replaces.
-fn serve_queued(connection: &Connection, queued: &mpsc::Receiver<Job>) -> Result<(), DynError> {
+/// What a panic said, when it said it with a string.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        message
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message
+    } else {
+        "a payload that is not a string"
+    }
+}
+
+/// Does what `queued` holds until the queue closes: every report first, in the order they came,
+/// then the publications, skipping every revision of a document that a newer one queued after it
+/// replaces. A report cancelled while still queued is answered as cancelled and never computed.
+fn serve_queued(
+    connection: &Connection,
+    queued: &mpsc::Receiver<Job>,
+    diagnose: Diagnose,
+) -> Result<(), DynError> {
     let mut pending: VecDeque<Queued> = VecDeque::new();
     let mut reports: VecDeque<Report> = VecDeque::new();
     loop {
@@ -209,6 +252,15 @@ fn serve_queued(connection: &Connection, queued: &mpsc::Receiver<Job>) -> Result
                     match pending.iter_mut().find(|(seen, _)| *seen == uri) {
                         Some((_, replaced)) => *replaced = publication,
                         None => pending.push_back((uri, publication)),
+                    }
+                }
+                Job::Cancel(id) => {
+                    let cancelled = reports
+                        .iter()
+                        .position(|report| report.id == id)
+                        .and_then(|at| reports.remove(at));
+                    if let Some(cancelled) = cancelled {
+                        respond_cancelled(connection, cancelled.id)?;
                     }
                 }
             }
@@ -223,31 +275,42 @@ fn serve_queued(connection: &Connection, queued: &mpsc::Receiver<Job>) -> Result
             return Ok(());
         };
         match job {
-            Job::Report(report) => respond_with_report(connection, report)?,
+            Job::Report(report) => respond_with_report(connection, report, diagnose)?,
             Job::Publish((uri, Publication::Findings { version, text, pin })) => {
-                let diagnostics = compute_diagnostics(&uri, &text, &pin);
+                let diagnostics = diagnose(&uri, &text, &pin);
                 publish(connection, uri, version, diagnostics)?;
             }
             // An empty set clears the closed document's squiggles.
             Job::Publish((uri, Publication::Cleared)) => {
                 publish(connection, uri, None, Vec::new())?;
             }
+            // Received while nothing was queued, so no report is left to cancel.
+            Job::Cancel(_) => {}
         }
     }
 }
 
-/// Dispatches messages until `exit` or closed input. Not `Connection::handle_shutdown`: it fails
-/// on any message between `shutdown` and `exit`, and editors send `didClose` there.
+/// Dispatches messages until `exit`, closed input, or the end of the diagnostics thread, which
+/// drops the sender of `diagnostics_ended`. Not `Connection::handle_shutdown`: it fails on any
+/// message between `shutdown` and `exit`, and editors send `didClose` there.
 fn dispatch(
     connection: &Connection,
     queue: &mpsc::Sender<Job>,
+    diagnostics_ended: &crossbeam_channel::Receiver<Infallible>,
     client: Client,
 ) -> Result<Teardown, DynError> {
     let mut store = DocumentStore::new();
     let mut pin = Pin::default();
     let mut refreshes_sent: u64 = 0;
     let mut shutdown_requested = false;
-    for message in &connection.receiver {
+    loop {
+        let message = crossbeam_channel::select! {
+            recv(connection.receiver) -> message => message,
+            recv(diagnostics_ended) -> _ => return Err("the diagnostics thread stopped".into()),
+        };
+        let Ok(message) = message else {
+            break;
+        };
         match message {
             // Ahead of the `shutdown` arm, so a second `shutdown` is refused.
             Message::Request(request) if shutdown_requested => {
@@ -334,7 +397,7 @@ fn handle_request(
                         format!("document not open: {}", uri.as_str()),
                     ),
                     Some(source) => match completions(source, position) {
-                        Some(items) => Response::new_ok(request.id, items),
+                        Some(list) => Response::new_ok(request.id, list),
                         None => Response::new_err(
                             request.id,
                             ErrorCode::InvalidParams as i32,
@@ -490,8 +553,8 @@ fn refresh(
     Ok(())
 }
 
-/// Answers a `textDocument/diagnostic` request: at once when the client holds the stored
-/// revision's report already, and otherwise from the diagnostics thread.
+/// Answers a `textDocument/diagnostic` request: at once when it is refused or the client holds
+/// the stored revision's report already, and otherwise from the diagnostics thread.
 fn handle_pull(
     connection: &Connection,
     queue: &mpsc::Sender<Job>,
@@ -499,22 +562,34 @@ fn handle_pull(
     pin: &Pin,
     request: Request,
 ) -> Result<(), DynError> {
-    let refusal = |id, message| {
-        let response = Response::new_err(id, ErrorCode::InvalidParams as i32, message);
-        connection.sender.send(Message::Response(response))
-    };
     let params = match serde_json::from_value::<lsp_types::DocumentDiagnosticParams>(request.params)
     {
         Ok(params) => params,
         Err(err) => {
             let method = DocumentDiagnosticRequest::METHOD;
-            refusal(request.id, format!("malformed `{method}` params: {err}"))?;
+            let message = format!("malformed `{method}` params: {err}");
+            let response = Response::new_err(request.id, ErrorCode::InvalidParams as i32, message);
+            connection.sender.send(Message::Response(response))?;
             return Ok(());
         }
     };
     let uri = params.text_document.uri;
-    let (Some(text), Some(revision)) = (store.get(&uri), store.revision(&uri)) else {
-        refusal(request.id, format!("document not open: {}", uri.as_str()))?;
+    let Some((text, revision)) = store.get_with_revision(&uri) else {
+        // A retry before the `didOpen` that brings the text is refused too, and the client pulls
+        // after that `didOpen` anyway.
+        let data = lsp_types::DiagnosticServerCancellationData {
+            retrigger_request: false,
+        };
+        let error = ResponseError {
+            code: ErrorCode::ServerCancelled as i32,
+            message: format!("document not open: {}", uri.as_str()),
+            data: Some(serde_json::to_value(data)?),
+        };
+        let response = Response {
+            id: request.id,
+            response_result: Err(error),
+        };
+        connection.sender.send(Message::Response(response))?;
         return Ok(());
     };
     // A new pin renumbers every document, so a revision names its report.
@@ -537,7 +612,7 @@ fn handle_pull(
         uri,
         text: text.to_owned(),
         pin: pin.clone(),
-        result_id,
+        revision,
     };
     queue
         .send(Job::Report(report))
@@ -546,26 +621,44 @@ fn handle_pull(
 }
 
 /// Sends `report`'s findings as the full report answering its request.
-fn respond_with_report(connection: &Connection, report: Report) -> Result<(), DynError> {
+fn respond_with_report(
+    connection: &Connection,
+    report: Report,
+    diagnose: Diagnose,
+) -> Result<(), DynError> {
     let Report {
         id,
         uri,
         text,
         pin,
-        result_id,
+        revision,
     } = report;
     let full =
         lsp_types::DocumentDiagnosticReport::Full(lsp_types::RelatedFullDocumentDiagnosticReport {
             related_documents: None,
             full_document_diagnostic_report: lsp_types::FullDocumentDiagnosticReport {
-                result_id: Some(result_id),
-                items: compute_diagnostics(&uri, &text, &pin),
+                result_id: Some(revision.to_string()),
+                items: diagnose(&uri, &text, &pin),
             },
         });
     let result = lsp_types::DocumentDiagnosticReportResult::Report(full);
     connection
         .sender
         .send(Message::Response(Response::new_ok(id, result)))?;
+    Ok(())
+}
+
+/// Answers the pull `id` names as cancelled before its report was computed.
+fn respond_cancelled(connection: &Connection, id: RequestId) -> Result<(), DynError> {
+    let response = Response::new_err(
+        id,
+        ErrorCode::RequestCanceled as i32,
+        format!(
+            "`{}` cancelled by the client before its report was computed",
+            DocumentDiagnosticRequest::METHOD,
+        ),
+    );
+    connection.sender.send(Message::Response(response))?;
     Ok(())
 }
 
@@ -584,7 +677,8 @@ fn parse_params<T: serde::de::DeserializeOwned>(
 }
 
 /// Mirrors one notification's text into the store and, for a client diagnostics are pushed to,
-/// queues that document's publication.
+/// queues that document's publication against `pin`; hands a `$/cancelRequest` to the
+/// diagnostics thread.
 fn handle_notification(
     queue: &mpsc::Sender<Job>,
     store: &mut DocumentStore,
@@ -592,7 +686,8 @@ fn handle_notification(
     mode: DiagnosticsMode,
     pin: &Pin,
 ) -> Result<(), DynError> {
-    let queued = match notification.method.as_str() {
+    let pushed = mode == DiagnosticsMode::Push;
+    let job = match notification.method.as_str() {
         DidOpenTextDocument::METHOD => {
             let Some(params) = parse_params::<lsp_types::DidOpenTextDocumentParams>(
                 DidOpenTextDocument::METHOD,
@@ -600,14 +695,19 @@ fn handle_notification(
             ) else {
                 return Ok(());
             };
-            let document = params.text_document;
-            store.open(document.uri.clone(), document.text.clone());
-            let findings = Publication::Findings {
-                version: Some(document.version),
-                text: document.text,
-                pin: pin.clone(),
-            };
-            (document.uri, findings)
+            let lsp_types::TextDocumentItem {
+                uri, version, text, ..
+            } = params.text_document;
+            let job = pushed.then(|| {
+                let findings = Publication::Findings {
+                    version: Some(version),
+                    text: text.clone(),
+                    pin: pin.clone(),
+                };
+                Job::Publish((uri.clone(), findings))
+            });
+            store.open(uri, text);
+            job
         }
         DidChangeTextDocument::METHOD => {
             let Some(params) = parse_params::<lsp_types::DidChangeTextDocumentParams>(
@@ -636,12 +736,14 @@ fn handle_notification(
                     return Ok(());
                 }
             };
-            let findings = Publication::Findings {
-                version: Some(params.text_document.version),
-                text: source.to_owned(),
-                pin: pin.clone(),
-            };
-            (uri, findings)
+            pushed.then(|| {
+                let findings = Publication::Findings {
+                    version: Some(params.text_document.version),
+                    text: source.to_owned(),
+                    pin: pin.clone(),
+                };
+                Job::Publish((uri, findings))
+            })
         }
         DidCloseTextDocument::METHOD => {
             let Some(params) = parse_params::<lsp_types::DidCloseTextDocumentParams>(
@@ -650,14 +752,27 @@ fn handle_notification(
             ) else {
                 return Ok(());
             };
-            store.close(&params.text_document.uri);
-            (params.text_document.uri, Publication::Cleared)
+            let uri = params.text_document.uri;
+            store.close(&uri);
+            pushed.then(|| Job::Publish((uri, Publication::Cleared)))
+        }
+        Cancel::METHOD => {
+            let Some(params) =
+                parse_params::<lsp_types::CancelParams>(Cancel::METHOD, notification.params)
+            else {
+                return Ok(());
+            };
+            let id = match params.id {
+                lsp_types::NumberOrString::Number(id) => RequestId::from(id),
+                lsp_types::NumberOrString::String(id) => RequestId::from(id),
+            };
+            Some(Job::Cancel(id))
         }
         _ => return Ok(()),
     };
-    if mode == DiagnosticsMode::Push {
+    if let Some(job) = job {
         queue
-            .send(Job::Publish(queued))
+            .send(job)
             .map_err(|_| "the diagnostics thread stopped")?;
     }
     Ok(())
