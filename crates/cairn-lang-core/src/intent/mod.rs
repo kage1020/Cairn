@@ -20,7 +20,7 @@ use crate::error::Span;
 
 pub(crate) use self::guard::{guarded_lines, refused_under_guard};
 pub use self::keyword_table::{
-    Actuator, MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue,
+    Actuator, BindingKey, MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue,
     UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
 };
 pub use self::lower::lower;

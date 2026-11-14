@@ -18,6 +18,7 @@ mod diag;
 mod door;
 mod fill;
 mod fixture;
+mod frame;
 mod geometry_material;
 mod members;
 mod paint;

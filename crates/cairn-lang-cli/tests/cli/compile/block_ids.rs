@@ -213,28 +213,23 @@ fn a_walkway_path_id_is_checked_too() {
     );
 }
 
-/// The slot tests above are the control: the same id on a `slot` is `E_UNKNOWN_ID`.
+/// A binding's id is judged as the slot tests above judge a slot's.
 #[test]
-fn a_theme_selector_binding_id_does_not_refuse_the_build() {
+fn a_theme_selector_binding_id_the_target_lacks_refuses_the_build() {
     let fixture = Fixture::new(&window_bound_to("totally_not_a_block"));
     let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = stderr_of(&out);
-    assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
-    assert_stream(&stderr, &[(4, 32, "warning", "W_IGNORED_ARGUMENT")]);
-    assert!(
-        fixture
-            .artifacts()
-            .iter()
-            .any(|name| std::path::Path::new(name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("nbt"))),
-        "the structure is written: {:?}",
+    assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
+    assert_stream(&stderr, &[(4, 32, "error", "E_UNKNOWN_ID")]);
+    assert_eq!(
         fixture.artifacts(),
+        Vec::<String>::new(),
+        "nothing is written"
     );
 }
 
 #[test]
-fn a_binding_in_a_def_nothing_places_is_not_an_error() {
+fn a_binding_in_a_def_nothing_places_is_not_judged() {
     let fixture = Fixture::new(
         "theme medieval:\n  slot glass -> @glass_pane\n  slot bad   -> @no_such_slot_block\n  \
          window[class=small] -> frame=@no_such_binding_block\n\n\
@@ -253,16 +248,10 @@ fn a_binding_in_a_def_nothing_places_is_not_an_error() {
     ]);
     let stderr = stderr_of(&out);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
-    assert_stream(
-        &stderr,
-        &[
-            (4, 32, "warning", "W_IGNORED_ARGUMENT"),
-            (6, 1, "warning", "W_UNUSED_DEF"),
-        ],
-    );
+    assert_stream(&stderr, &[(6, 1, "warning", "W_UNUSED_DEF")]);
     assert!(
         !stderr.contains("no_such_binding_block"),
-        "the binding's value is judged by nothing: {stderr}",
+        "nothing lowers the def, so nothing judges the binding's value: {stderr}",
     );
 }
 
@@ -285,7 +274,7 @@ fn buildable_row(fixture: &Fixture) -> String {
 }
 
 #[test]
-fn a_bad_binding_id_leaves_every_target_buildable() {
+fn a_bad_binding_id_leaves_no_target_buildable() {
     let with = Fixture::new(&window_bound_to("totally_not_a_block"));
     let without = Fixture::new(
         &window_bound_to("totally_not_a_block")
@@ -296,11 +285,14 @@ fn a_bad_binding_id_leaves_every_target_buildable() {
         !without.contains("none"),
         "the control has buildable targets in both editions: {without}",
     );
-    assert_eq!(with, without);
+    assert!(
+        with.contains("Java: none (") && with.contains("Bedrock: none ("),
+        "every target refuses the binding's id: {with}",
+    );
 }
 
 #[test]
-fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
+fn a_misspelled_binding_token_is_the_pinned_packs_to_judge() {
     let fixture = Fixture::new(
         "theme medieval:\n  slot wall -> @wall.stone.cobble\n  \
          walls[class=outer] -> trim=@wall.stone.cobbl\n\n\
@@ -308,16 +300,19 @@ fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
     );
     let source = fixture.source();
     let source = source.to_str().expect("utf-8 path");
-    let runs: [&[&str]; 3] = [
-        &["check", source, "--edition", "java"],
+    let bare = cairn_argv(&["check", source, "--edition", "java"]);
+    let stderr = stderr_of(&bare);
+    assert_eq!(bare.status.code(), Some(0), "{stderr}");
+    assert_stream(&stderr, &[]);
+    let pinned: [&[&str]; 2] = [
         &["check", source, "--edition", "java", "--target", "1.21.4"],
         &["info", source],
     ];
-    for argv in runs {
+    for argv in pinned {
         let out = cairn_argv(argv);
         let stderr = stderr_of(&out);
-        assert_eq!(out.status.code(), Some(0), "{argv:?}: {stderr}");
-        assert_stream(&stderr, &[(3, 30, "warning", "W_IGNORED_ARGUMENT")]);
+        assert_eq!(out.status.code(), Some(1), "{argv:?}: {stderr}");
+        assert_stream(&stderr, &[(3, 30, "error", "E_UNKNOWN_ABSTRACT_TOKEN")]);
     }
 }
 

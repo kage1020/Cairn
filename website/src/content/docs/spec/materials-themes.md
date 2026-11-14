@@ -4,9 +4,6 @@ title: "7. Materials and Themes"
 
 ## 7.1 Slots as dependency injection
 
-**Subject to change.** Selector bindings, the `key=value` pairs right of a selector row's arrow, are
-reserved and not built ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
 The structure never writes a concrete block name. It carries `mat_slot` injection points, and a
 `theme` binds values to slots and selectors, the way CSS or dependency injection does. That
 separates structure (where the walls are) from style (which blocks, what detailing).
@@ -23,14 +20,13 @@ theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
   slot glass -> @glass_pane
-  walls[class=outer]  -> trim=@spruce_log     # part detailing, via a selector (reserved)
+  walls[class=outer]  -> trim=@spruce_log     # part detailing, via a selector
   window[class=small] -> frame=@spruce_wood
 ```
 
 **The cascade.** A member collects the bindings of every selector row it matches, in source order,
 so when two rows bind the same key the member keeps the later value. CSS applies the same rule to
-two rules of equal weight. Bindings are reserved (below), so today the cascade decides what a member
-collects and nothing that is built.
+two rules of equal weight.
 
 Rows whose attributes partly overlap rely on that: `window[class=small,side=front]` refines
 `window[class=small]` for the members it selects, and the members only the wider row selects keep
@@ -38,34 +34,70 @@ the wider row's binding.
 
 Two rows that select the *same* members are different. Same keyword and same attributes means they
 match member for member, so no member keeps the earlier row's value of a key they both bind: that
-value is dead text whatever a binding comes to mean. That is
-`E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error even while
-bindings are reserved, for the reason `E_DUPLICATE_ARG` refuses one key written twice inside one row
+value is built for none of them. That is
+`E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error for the reason
+`E_DUPLICATE_ARG` refuses one key written twice inside one row
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Sameness is by meaning: attribute
 order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
 `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
 different keys are not reported. They compose, and splitting a long binding list over two lines is
 allowed.
 
-**Selector bindings are reserved.** Which keys a row may bind on each keyword, and what each one
-paints, is not specified yet, and no lowering reads a binding. The two selector rows above build the
-same cottage as a theme without them, and no member's block depends on them.
-
-Until that is specified, the compiler reports each binding as an unreached key,
-`W_IGNORED_ARGUMENT` ([Lint](/spec/lint/)). It does so whatever the key or value, on every row whose
-keyword it knows, whether the row matched and whether its theme was applied. A row whose keyword it
-does not know gets `E_UNKNOWN_KEYWORD` instead. A binding's value is not resolved as a block either,
-because what the key would paint is not specified: `frame=@no_such_block` is reported exactly as
-`frame=@spruce_wood` or `frame=42` is, with or without `--target`, and no binding makes `check`,
-`compile` or `info` refuse a build.
-
-Binding one key twice for the same members does refuse a build, since the earlier value is dead
-text whatever a binding comes to mean. Within one row that is `E_DUPLICATE_ARG`; across two rows
-that select the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is still checked:
-`E_THEME_SELECTOR_UNMATCHED` applies to it exactly as its own entry says.
-
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
 ([Components, Editing, and Multi-building](/spec/components-editing-sites/)).
+
+### Selector bindings
+
+A selector row binds the block of a **part** of each member it selects: cells the member builds, or
+cells of the wall round what it cuts, laid in a block of their own. Each keyword binds the keys
+below and no other.
+
+| Keyword | Key | The part it lays |
+|---|---|---|
+| `walls` | `trim=` | The corner posts: the four cells where two sides of the wall meet, in every row the member paints. |
+| `door`, `window` | `frame=` | A ring one cell wide round each opening the member cuts, in the plane of its wall. |
+
+No other keyword binds a key yet. A key the row's keyword does not bind lays nothing and is
+`E_UNKNOWN_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), naming the keys that keyword
+binds, on every row whose keyword the compiler knows, whether the row matched and whether its theme
+was applied. A row whose keyword it does not know gets `E_UNKNOWN_KEYWORD` instead.
+
+**A bound key and `mat_slot=`.** A binding names the block of its part and nothing else. The
+member's own `mat_slot=`, or the default block its role falls back to, still builds every other
+cell, and a binding never changes which slot the member reads. A part needs its member: a member
+that builds nothing, refused or with a `mat_slot=` that resolves to no block, lays no part either.
+A `window` written without a `mat_slot=`, cut to air, is still framed.
+
+**The part is the member's.** It is laid in its member's phase
+([Compilation §4.1](/spec/compilation/#41-phase-evaluation)) and its cells are that member's, so a
+later phase builds over them and a member of the same phase that meets them is judged as any two
+members are ([Compilation §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The
+corner posts are painted with the walls, in `massing`. A frame is laid in `openings` once every
+opening is cut and every door hung, so the order the openings are written in moves no frame:
+
+- The ring is the column on each side of the opening and the row above and the row below it,
+  corners included, clipped to the wall course that holds the opening.
+- It is laid only on cells a `walls` member still holds then: never on another opening, and never
+  on a cell another member took from the walls.
+- It never lies on the wall's two end columns, which the wall shares with the walls round each
+  corner, so a frame neither turns a corner nor covers a corner post.
+- Each rectangle a `repeat=` series or a `sym=true` mirror cuts gets its own ring.
+- A door's derived `hinge` reads the wall as the openings left it, before any frame
+  ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)).
+
+Two frames of different blocks that meet on a cell are `W_PHASE_CONFLICT`, and the later line wins;
+of one block, they are not reported.
+
+**The value is a block.** A binding's value is resolved as a `slot` rule's value is
+([§7.2](#72-canonical-vocabulary), [§7.3](#73-mappings-across-version-and-edition)), against the
+`(edition, version)` the compile targets and nothing else. A value that is no material token is
+`E_UNKNOWN_SLOT_TARGET`. A value the target cannot build earns the finding a slot's value would, at
+the binding, and its member is built without the part. It is judged wherever its member is lowered,
+even when the member's own line is refused, so one compile reports both.
+
+The two selector rows in the example above build a spruce-log post at each corner of the cottage's
+walls and a ring of spruce wood round each small window; without them the walls are cobblestone to
+the corners and each window is cut straight into them.
 
 ## 7.2 Canonical vocabulary
 

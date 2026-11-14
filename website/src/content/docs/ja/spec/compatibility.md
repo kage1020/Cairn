@@ -110,7 +110,7 @@ Rust API の行は、計画中のロードマップの範囲では昇格しま�
 
 - `E_PARSE`。仕様が定めていて、まだパースできない構文に出ます。たとえば小数、`nbt={...}` の値、`edit` です。
 - `E_UNKNOWN_KEYWORD`。仕様が定めていて、コンパイラがまだ知らないキーワードに出ます。たとえば `spawn`、`bed`、`sign`、`raw_repeat` です。
-- `W_IGNORED_ARGUMENT`。まだ届いていないキーに出ます。どのキーがそれにあたるかは [Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分) が挙げていて、theme のセレクタのバインディングもその 1 つです。
+- `W_IGNORED_ARGUMENT`。まだ届いていないキーに出ます。どのキーがそれにあたるかは [Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分) が挙げています。
 - `E_UNRESOLVED_PORT`。`level` の下のメンバーのポートに出ます。このポートは、[§9.3.5](/ja/spec/components-editing-sites/#935-ポートと-connect) が将来の拡張のために予約しています。
 - `W_DEFERRED_MEMBER`。block-array パスがまだ lowering しないものを行が書いたメンバー ([Lint](/ja/spec/lint/#lowering)) に出ます。たとえば、lowering がまだ扱わないキーワードのメンバー、持ち上げた `level` の下の `floor` や `roof`、`repeat=` が 1 より大きく `sym=true` も持つ `window` です。
 

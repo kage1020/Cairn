@@ -222,8 +222,7 @@ fn a_theme_selector_widens_the_vocabulary_of_the_keyword_it_names() {
                     window[tags=[a,b]] -> frame=@spruce_wood\n\n\
                     struct s size=9x7\n  \
                     window tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    assert_eq!(codes(selected), ["W_IGNORED_ARGUMENT"]);
-    assert_eq!(ignored_at(selected), ["@spruce_wood"]);
+    assert_eq!(codes(selected), Vec::<&str>::new());
 
     let unselected = "theme t:\n  slot glass -> @glass_pane\n\n\
                       struct s size=9x7\n  \
@@ -239,8 +238,7 @@ fn a_selector_widens_one_keyword_and_not_the_others() {
                struct s size=9x7\n  \
                window tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n  \
                door side=front at=center tags=[a,b]\n";
-    // Beside it, only the row's binding.
-    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 1);
     assert!(d.primary.contains("`door`"), "got: {}", d.primary);
 }
 
@@ -316,8 +314,14 @@ fn a_selector_that_names_no_rule_is_not_billed_twice() {
 
 #[test]
 fn a_selector_matched_conditional_key_is_still_reported() {
+    // A theme binds no key on `roof`, so the row's binding is refused beside it.
     let src = "theme t:\n  slot roof -> @spruce_stairs\n  roof[slope_to=front] -> frame=@spruce_wood\n\nstruct s size=9x9\n  roof kind=gable slope_to=front mat_slot=roof\n";
-    assert_eq!(ignored_at(src), ["@spruce_wood", "front"], "source:\n{src}");
+    assert_eq!(
+        codes(src),
+        ["E_UNKNOWN_ARGUMENT", "W_IGNORED_ARGUMENT"],
+        "source:\n{src}"
+    );
+    assert_eq!(ignored_at(src), ["front"], "source:\n{src}");
     let found = diagnose(src);
     assert!(
         found.iter().any(|d| d
@@ -485,15 +489,14 @@ fn the_table_and_the_sweep_agree_key_for_key() {
 #[test]
 fn a_selector_matched_key_is_still_reported_as_ignored() {
     let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass\n";
-    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "W_IGNORED_ARGUMENT"]);
-    assert_eq!(ignored_at(src), ["@spruce_wood", "slit"]);
+    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT"]);
+    assert_eq!(ignored_at(src), ["slit"]);
 }
 
 #[test]
 fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
-    let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> frame=@spruce_wood\n\nstruct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
-    // Beside it, only the row's binding.
-    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
+    let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> trim=@spruce_log\n\nstruct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 1);
     assert!(
         notes(&d).contains("did you mean `height`?"),
         "got: {}",
@@ -509,19 +512,18 @@ fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
 #[test]
 fn a_selector_coins_a_word_two_edits_from_a_real_one() {
     let theme =
-        "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hiegt=3] -> frame=@spruce_wood\n\n";
+        "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hiegt=3] -> trim=@spruce_log\n\n";
     // The member's own selector filters on a value it does not carry, so the row matches nothing.
     for (member, found) in [
-        ("walls hiegt=3 height=3", &["W_IGNORED_ARGUMENT"][..]),
+        ("walls hiegt=3 height=3", &[][..]),
         (
             "walls[hiegt=3] height=3",
-            &["E_THEME_SELECTOR_UNMATCHED", "W_IGNORED_ARGUMENT"][..],
+            &["E_THEME_SELECTOR_UNMATCHED"][..],
         ),
     ] {
         let src =
             format!("{theme}struct s size=5x5\n  floor mat_slot=wall\n  {member} mat_slot=wall\n");
         assert_eq!(codes(&src), found, "source:\n{src}");
-        assert_eq!(ignored_at(&src), ["@spruce_wood"], "source:\n{src}");
     }
 }
 
@@ -529,8 +531,8 @@ fn a_selector_coins_a_word_two_edits_from_a_real_one() {
 fn a_widened_key_appears_once_in_the_closed_set() {
     // `shape` is both in the role's vocabulary and selected on.
     let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass zzz=1\n";
-    // Beside it, the row's binding and the unread `shape=slit`.
-    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 3);
+    // Beside it, the unread `shape=slit`.
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
     let listed = notes(&d);
     let line = listed
         .lines()
@@ -790,12 +792,7 @@ fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
                     window[tags=[a,b]] -> frame=@spruce_wood\n\n\
                     struct s size=9x7\n  \
                     window[tags=[a,b]] tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    assert_eq!(
-        ignored_at(selected),
-        ["@spruce_wood"],
-        "only the row's binding"
-    );
-    assert_eq!(codes(selected), ["W_IGNORED_ARGUMENT"]);
+    assert_eq!(codes(selected), Vec::<&str>::new());
 
     // A near-miss of the role's own vocabulary is still a typo, in the bracket as on the line.
     let near_miss = "theme t:\n  slot glass -> @glass_pane\n  \
@@ -805,12 +802,8 @@ fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
     let found = diagnose(near_miss);
     assert_eq!(
         codes(near_miss),
-        [
-            "W_IGNORED_ARGUMENT",
-            "E_UNKNOWN_ARGUMENT",
-            "E_UNKNOWN_ARGUMENT"
-        ],
-        "the row's binding, then once on the line and once in the bracket",
+        ["E_UNKNOWN_ARGUMENT", "E_UNKNOWN_ARGUMENT"],
+        "once on the line and once in the bracket",
     );
     for d in found
         .iter()
@@ -832,123 +825,177 @@ fn an_unknown_keyword_answers_for_its_own_bracket() {
     );
 }
 
-/// A cottage with one theme selector row, whose binding the build never reads.
-const COTTAGE_WITH_A_SELECTOR_ROW: &str = "theme medieval:\n  \
+/// The README's cottage, whose two theme selector rows each bind the key their keyword binds.
+const COTTAGE_WITH_SELECTOR_ROWS: &str = "theme medieval:\n  \
     slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n  \
     slot roof  -> @spruce_stairs\n  slot glass -> @glass_pane\n  \
+    walls[class=outer]  -> trim=@spruce_log\n  \
     window[class=small] -> frame=@spruce_wood\n\n\
     struct cottage size=9x7\n  floor  mat_slot=floor\n  \
     walls  class=outer mat_slot=wall height=4\n  door   side=front at=center\n  \
     window class=small side=front offset=2 y=2 size=2x2 sym=true mat_slot=glass\n  \
     roof   kind=gable mat_slot=roof overhang=1\n";
 
+/// A theme whose one row, on a `window` of class `small`, holds `bindings`, and a struct with
+/// such a window.
+fn window_row(bindings: &str) -> String {
+    format!(
+        "theme t:\n  slot glass -> @glass_pane\n  window[class=small] -> {bindings}\n\n\
+         struct s size=9x7\n  \
+         window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n"
+    )
+}
+
+/// Each finding of `source` as its code and the source text it points at, in report order.
+fn found_at(source: &str) -> Vec<(&'static str, &str)> {
+    diagnose(source)
+        .iter()
+        .map(|d| (d.code.as_str(), &source[d.span.clone()]))
+        .collect()
+}
+
 #[test]
-fn a_theme_selector_binding_is_reported_as_ignored() {
-    let src = COTTAGE_WITH_A_SELECTOR_ROW;
-    let d = exactly_one(diagnose(src));
-    assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT");
-    assert_eq!(&src[d.span.clone()], "@spruce_wood");
-    assert!(
-        d.primary.contains("`frame=`") && d.primary.contains("`window`"),
-        "got: {}",
-        d.primary,
+fn a_key_its_keyword_binds_raises_nothing() {
+    assert_eq!(codes(COTTAGE_WITH_SELECTOR_ROWS), Vec::<&str>::new());
+}
+
+#[test]
+fn a_key_its_keyword_does_not_bind_is_refused_with_the_keys_it_does() {
+    let src = window_row("sill=@spruce_slab");
+    let d = exactly_one(diagnose(&src));
+    assert_eq!(d.code, DiagnosticCode::UnknownArgument);
+    assert_eq!(&src[d.span.clone()], "@spruce_slab");
+    assert_eq!(d.primary, "`sill=` is not a key a theme binds on `window`");
+    assert_eq!(notes(&d), "expected one of: frame");
+}
+
+#[test]
+fn a_near_miss_of_a_bound_key_is_named() {
+    let d = exactly_one(diagnose(&window_row("fram=@spruce_wood")));
+    assert_eq!(notes(&d), "did you mean `frame`?\nexpected one of: frame");
+}
+
+#[test]
+fn a_key_another_keyword_binds_names_the_row_it_belongs_on() {
+    let d = exactly_one(diagnose(&window_row("trim=@spruce_log")));
+    assert_eq!(
+        notes(&d),
+        "expected one of: frame\n\
+         `trim=` lays the corner posts of a `walls`, so it belongs on a `walls` row",
     );
-    assert!(
-        d.primary.contains("no pass lowers a selector's bindings"),
-        "got: {}",
+    let src = "theme t:\n  slot wall -> @cobblestone\n  walls[class=outer] -> frame=@spruce_wood\n\n\
+               struct s size=5x5\n  walls class=outer mat_slot=wall height=3\n";
+    let d = exactly_one(diagnose(src));
+    assert_eq!(
+        notes(&d),
+        "expected one of: trim\n\
+         `frame=` lays the frame of a `door` or `window`, so it belongs on a `door` or `window` \
+         row",
+    );
+}
+
+#[test]
+fn an_argument_of_the_member_line_written_on_a_row_is_sent_back_to_the_line() {
+    let d = exactly_one(diagnose(&window_row("mat_slot=glass")));
+    assert_eq!(
         d.primary,
+        "`mat_slot=` is not a key a theme binds on `window`"
     );
     assert_eq!(
         notes(&d),
-        "the build is the same with this binding or without it; delete it, or the whole row \
-         if it binds nothing else, or keep it and expect no effect until selector bindings \
-         are lowered",
+        "expected one of: frame\n\
+         `mat_slot=` is an argument of the `window` line itself, and a theme binds only the \
+         block of a part; write it on the member",
     );
 }
 
 #[test]
-fn every_binding_is_reported_whatever_its_key_or_value() {
-    let src = "theme t:\n  slot glass -> @glass_pane\n  \
-               window[class=small] -> frame=@spruce_wood fram=42\n\n\
-               struct s size=9x7\n  \
-               window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    assert_eq!(ignored_at(src), ["@spruce_wood", "42"]);
-    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "W_IGNORED_ARGUMENT"]);
+fn a_row_on_a_keyword_that_binds_nothing_is_told_to_go() {
+    let src = "theme t:\n  slot roof -> @spruce_stairs\n  roof[kind=gable] -> trim=@spruce_log\n\n\
+               struct s size=9x9\n  roof kind=gable mat_slot=roof\n";
+    let d = exactly_one(diagnose(src));
+    assert_eq!(d.primary, "`trim=` is not a key a theme binds on `roof`");
+    assert_eq!(
+        notes(&d),
+        "a theme binds no key on a `roof`, so no row on it builds anything; delete the row\n\
+         `trim=` lays the corner posts of a `walls`, so it belongs on a `walls` row",
+    );
 }
 
 #[test]
-fn the_first_value_of_a_key_repeated_in_one_row_is_reported_as_it_would_be_alone() {
-    let row = |bindings: &str| {
-        format!(
-            "theme t:\n  slot glass -> @glass_pane\n  window[class=small] -> {bindings}\n\n\
-             struct s size=9x7\n  \
-             window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n"
-        )
-    };
-    let src = row("frame=@no_such_block frame=@spruce_wood");
-    let found = diagnose(&src);
-    let at: Vec<(&str, &str)> = found
-        .iter()
-        .map(|d| (d.code.as_str(), &src[d.span.clone()]))
-        .collect();
+fn every_binding_is_judged_on_its_own() {
+    let src = window_row("frame=@spruce_wood fram=42");
+    assert_eq!(found_at(&src), [("E_UNKNOWN_ARGUMENT", "42")]);
+}
+
+#[test]
+fn the_first_value_of_a_key_repeated_in_one_row_is_judged_as_it_would_be_alone() {
+    let src = window_row("sill=@spruce_slab sill=@oak_slab");
     assert_eq!(
-        at,
+        found_at(&src),
         [
-            ("W_IGNORED_ARGUMENT", "@no_such_block"),
-            ("E_DUPLICATE_ARG", "frame=@spruce_wood"),
-            ("W_IGNORED_ARGUMENT", "@spruce_wood"),
+            ("E_UNKNOWN_ARGUMENT", "@spruce_slab"),
+            ("E_DUPLICATE_ARG", "sill=@oak_slab"),
+            ("E_UNKNOWN_ARGUMENT", "@oak_slab"),
         ],
     );
     assert_eq!(
-        found[0],
-        exactly_one(diagnose(&row("frame=@no_such_block")))
+        diagnose(&src)[0],
+        exactly_one(diagnose(&window_row("sill=@spruce_slab")))
     );
 }
 
 #[test]
-fn a_row_that_matches_nothing_is_reported_for_its_binding_too() {
+fn a_row_that_matches_nothing_is_judged_for_its_bindings_too() {
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
-               window[class=big] -> frame=@spruce_wood\n\n\
+               window[class=big] -> sill=@spruce_slab\n\n\
                struct s size=9x7\n  \
                window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    assert_eq!(ignored_at(src), ["@spruce_wood"]);
+    assert_eq!(
+        found_at(src),
+        [
+            (
+                "E_THEME_SELECTOR_UNMATCHED",
+                "window[class=big] -> sill=@spruce_slab"
+            ),
+            ("E_UNKNOWN_ARGUMENT", "@spruce_slab"),
+        ],
+    );
 }
 
 #[test]
-fn a_binding_in_a_theme_no_scope_applies_is_reported_too() {
+fn a_binding_in_a_theme_no_scope_applies_is_judged_too() {
     // Two themes and no `theme=`, so neither is applied.
     let src = "theme a:\n  slot glass -> @glass_pane\n  \
-               window[class=small] -> frame=@no_such_block\n\n\
+               window[class=small] -> sill=@spruce_slab\n\n\
                theme b:\n  slot glass -> @glass_pane\n\n\
                struct s size=9x7\n  \
                window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
     assert_eq!(
-        ignored_at(src),
-        ["@no_such_block"],
+        of_code(src, DiagnosticCode::UnknownArgument)
+            .iter()
+            .map(|d| &src[d.span.clone()])
+            .collect::<Vec<_>>(),
+        ["@spruce_slab"],
         "got {:#?}",
         diagnose(src)
     );
 }
 
 #[test]
-fn a_binding_in_a_theme_whose_name_an_earlier_theme_took_is_reported_too() {
+fn a_binding_in_a_theme_whose_name_an_earlier_theme_took_is_judged_too() {
     let src = "theme t:\n  slot glass -> @glass_pane\n\n\
                theme t:\n  slot glass -> @glass_pane\n  \
-               window[class=small] -> frame=@no_such_block frame=@spruce_wood\n\n\
+               window[class=small] -> sill=@spruce_slab sill=@oak_slab\n\n\
                struct s size=9x7\n  \
                window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    let found = diagnose(src);
-    let at: Vec<(&str, &str)> = found
-        .iter()
-        .map(|d| (d.code.as_str(), &src[d.span.clone()]))
-        .collect();
     assert_eq!(
-        at,
+        found_at(src),
         [
             ("E_DUPLICATE_ITEM", "t"),
-            ("W_IGNORED_ARGUMENT", "@no_such_block"),
-            ("E_DUPLICATE_ARG", "frame=@spruce_wood"),
-            ("W_IGNORED_ARGUMENT", "@spruce_wood"),
+            ("E_UNKNOWN_ARGUMENT", "@spruce_slab"),
+            ("E_DUPLICATE_ARG", "sill=@oak_slab"),
+            ("E_UNKNOWN_ARGUMENT", "@oak_slab"),
         ],
     );
 }
@@ -956,20 +1003,10 @@ fn a_binding_in_a_theme_whose_name_an_earlier_theme_took_is_reported_too() {
 #[test]
 fn a_selector_row_with_an_unknown_keyword_answers_only_for_the_keyword() {
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
-               windw[class=small] -> frame=@spruce_wood\n\n\
+               windw[class=small] -> sill=@spruce_slab\n\n\
                struct s size=9x7\n  \
                window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    assert_eq!(
-        ignored_at(src),
-        Vec::<&str>::new(),
-        "got {:#?}",
-        diagnose(src)
-    );
-    assert!(
-        codes(src).contains(&"E_UNKNOWN_KEYWORD"),
-        "got {:?}",
-        codes(src)
-    );
+    assert_eq!(codes(src), ["E_UNKNOWN_KEYWORD"]);
 }
 
 /// A theme declaring `wall` and `door`; `door` lets a fixture name a declared slot.

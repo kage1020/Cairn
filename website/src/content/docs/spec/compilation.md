@@ -21,7 +21,10 @@ raw         raw_block / raw_fill (the escape hatch)
 
 A `fill` is `massing` with a `mat_slot=` and `fluids` with a `fluid=`
 ([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)), so its water is poured once the blocks
-it may hold are placed.
+it may hold are placed. A part a `theme` selector row binds is its member's and is laid in its
+member's phase ([Materials and Themes](/spec/materials-themes/#selector-bindings)): a `walls`
+member's corner posts in `massing`, and a `door` or `window` frame in `openings`, once every
+opening is cut.
 
 Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `water` are not keywords
 yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,

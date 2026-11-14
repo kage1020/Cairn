@@ -24,10 +24,11 @@ use super::circuit::{
 };
 use super::connections::derive_connections;
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
-use super::door::{HungDoor, hang_doors, split_doors};
+use super::door::{hang_doors, split_doors};
 use super::fill::pour_fluids;
+use super::frame::lay_frames;
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
-use super::paint::paint_member;
+use super::paint::{Openings, paint_member};
 use super::phase::Phase;
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
 use super::token_diag::{NamedBy, diag_derived_state_domain, diag_state_unmapped};
@@ -324,16 +325,33 @@ fn paint_phases(
         .map(|&(index, _, _)| index)
         .collect();
     let mut canvas = Canvas::new(ctx.dims, phases);
-    let mut hung = Vec::new();
+    let mut openings = Openings::default();
     for (phase, bucket) in Phase::ALL.into_iter().zip(by_phase) {
         match phase {
             Phase::Massing | Phase::Envelope | Phase::Fixtures | Phase::Raw => {
-                run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+                run_phase(
+                    bucket,
+                    ctx,
+                    palette,
+                    &mut canvas,
+                    &mut openings,
+                    diagnostics,
+                );
             }
             Phase::Openings => {
-                run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+                run_phase(
+                    bucket,
+                    ctx,
+                    palette,
+                    &mut canvas,
+                    &mut openings,
+                    diagnostics,
+                );
                 // A door's hinge reads the wall beside it, which a later opening may cut.
-                hang_doors(&hung, &walls, palette, &mut canvas);
+                hang_doors(&openings.hung, &walls, palette, &mut canvas);
+                // After every cut and hinge, so no frame closes an opening or turns a hinge.
+                let frames = std::mem::take(&mut openings.frames);
+                lay_frames(frames, &walls, ctx, palette, &mut canvas);
             }
             Phase::Fluids => pour_fluids(bucket, ctx, palette, &mut canvas, diagnostics),
         }
@@ -341,7 +359,7 @@ fn paint_phases(
     let derived = ctx.registry.map_or_else(HashMap::new, |registry| {
         derive_connections(&mut canvas, palette, registry)
     });
-    let split = split_doors(&hung, &canvas);
+    let split = split_doors(&openings.hung, &canvas);
     (canvas, split, derived)
 }
 
@@ -402,7 +420,7 @@ fn bucket_members<'a>(
 }
 
 /// Paint one phase's bucket, each member through its own [`MemberCanvas`] so its writes are
-/// filed under it; each door that stands is added to `hung`.
+/// filed under it; each door that stands and each frame left to lay is added to `openings`.
 ///
 /// [`MemberCanvas`]: super::canvas::MemberCanvas
 pub(super) fn run_phase(
@@ -410,7 +428,7 @@ pub(super) fn run_phase(
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut Canvas,
-    hung: &mut Vec<HungDoor>,
+    openings: &mut Openings,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (index, y_offset, member) in bucket {
@@ -421,7 +439,7 @@ pub(super) fn run_phase(
             ctx,
             palette,
             &mut member_canvas,
-            hung,
+            openings,
             diagnostics,
         );
     }

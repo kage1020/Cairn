@@ -4,7 +4,7 @@
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::{MemberRole, ValueWithSpan};
+use crate::intent::{BindingKey, MemberRole, ValueWithSpan};
 use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
@@ -80,13 +80,15 @@ pub(super) enum TokenSite {
     WalkwayPath,
     /// A member's `mat_slot=` binding, with what becomes of the member without it.
     MemberSlot(MemberFallback),
+    /// A theme selector row's binding, naming the block of a part of the member.
+    Binding(BindingKey),
 }
 
 impl TokenSite {
     fn token_noun(self) -> &'static str {
         match self {
             Self::WalkwayPath => "abstract path token",
-            Self::MemberSlot(_) => "abstract token",
+            Self::MemberSlot(_) | Self::Binding(_) => "abstract token",
         }
     }
 
@@ -94,6 +96,12 @@ impl TokenSite {
     fn consequence(self) -> &'static str {
         match self {
             Self::WalkwayPath => "the walkway falls back to air",
+            Self::Binding(BindingKey::Trim) => {
+                "the walls are built without corner posts, their corners of the walls' own block"
+            }
+            Self::Binding(BindingKey::Frame) => {
+                "the opening is cut without a frame, and the wall round it stays"
+            }
             Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
             Self::MemberSlot(MemberFallback::Unpainted) => "the fill paints none of its box",
             Self::MemberSlot(MemberFallback::Absent) => {
@@ -113,6 +121,8 @@ impl TokenSite {
         match self {
             Self::WalkwayPath => "path=@gravel",
             Self::MemberSlot(_) => "@oak_planks",
+            Self::Binding(BindingKey::Trim) => "trim=@spruce_log",
+            Self::Binding(BindingKey::Frame) => "frame=@spruce_wood",
         }
     }
 
@@ -121,7 +131,7 @@ impl TokenSite {
             Self::WalkwayPath => {
                 "abstract path tokens must be declared in the pack's `materials` catalog"
             }
-            Self::MemberSlot(_) => {
+            Self::MemberSlot(_) | Self::Binding(_) => {
                 "abstract material tokens must be declared in the pack's `materials` catalog \
                  (see `spec/materials-themes` \"Canonical vocabulary\")"
             }
@@ -492,6 +502,13 @@ fn diag_parity_unsupported(
              binds no slot and builds nothing under a guard: set `path=` to a block both editions \
              have, or to an abstract token each edition's materials catalog maps"
             .to_owned(),
+        TokenSite::Binding(key) => format!(
+            "the semantic layer is edition-neutral: write this `{}=` row in a `theme NAME_{has}` \
+             and give the same row in `theme NAME_{lacks}` a block {} has, or bind a block both \
+             editions have",
+            key.key(),
+            lacks.title(),
+        ),
     };
     Diagnostic {
         code: DiagnosticCode::ParityUnsupported,

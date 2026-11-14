@@ -31,6 +31,8 @@ theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
   slot glass -> @glass_pane
+  walls[class=outer]  -> trim=@spruce_log
+  window[class=small] -> frame=@spruce_wood
 
 struct cottage size=9x7
   floor  mat_slot=floor
@@ -77,7 +79,7 @@ Diagnostics name what is wrong and what a valid value looks like, so a failed bu
 ```
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
-edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
+edition portability:     Java: portable: 12  degraded: 0  unsupported: 0   Bedrock: portable: 12  degraded: 0  unsupported: 0
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
@@ -88,7 +90,7 @@ semantic-sensitive:      (none)
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
-- Themes with slots and per-edition variants.
+- Themes with slots, per-edition variants, and selector rows that bind the block of a part: the corner posts of `walls` and the frame round each door and window.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
@@ -98,7 +100,6 @@ semantic-sensitive:      (none)
 
 **Not yet.**
 
-- Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
 - `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
 - `.litematic` and `.schem` writers, and importing existing schematics.
@@ -108,7 +109,7 @@ semantic-sensitive:      (none)
 
 - **Declare intent, not blockstate.** A gable roof knows which way its stairs face and whether each one sits top or bottom half; you never write `facing=` for it. Blockstate is derived, and you override only when the value *is* the intent.
 - **Order doesn't matter.** Write members in any order; the compiler sorts them into fixed phases (massing → envelope → openings → fixtures → fluids → redstone → raw).
-- **Themes separate "where" from "what".** Structure carries `mat_slot`s; a theme binds those slots to materials, the way a stylesheet binds classes.
+- **Themes separate "where" from "what".** Structure carries `mat_slot`s; a theme binds those slots to materials, the way a stylesheet binds classes. A selector row details the members it selects: in the cottage above, `walls[class=outer] -> trim=@spruce_log` stands spruce log posts at the walls' corners, and `window[class=small] -> frame=@spruce_wood` frames both windows in spruce wood. Delete the two rows and the cottage is cobblestone to every edge.
 - **Recompile, don't transcode.** The portable artifact is the `.crn` source. Structure files are build output for one edition and version, like a binary.
 - **Fail loud.** An unknown block, an unresolvable slot, or a target that cannot express your intent is an error or a named degradation, never a silent substitution.
 

@@ -862,14 +862,15 @@ mod selector {
 
     use crate::common::{diagnose, notes, of_code, one_of_code};
 
-    /// Every code `source` raises but the `W_IGNORED_ARGUMENT` on each binding written on a row
-    /// whose keyword is known.
+    /// Every code `source` raises but the `E_UNKNOWN_ARGUMENT` on each binding whose key its row's
+    /// known keyword does not bind.
     fn row_codes(source: &str) -> Vec<&'static str> {
         let found = diagnose(source);
-        let (dropped, kept): (Vec<_>, Vec<_>) = found
-            .iter()
-            .partition(|d| d.code == DiagnosticCode::IgnoredArgument);
-        let mut written: Vec<Span> = parse(source)
+        let (dropped, kept): (Vec<_>, Vec<_>) = found.iter().partition(|d| {
+            d.code == DiagnosticCode::UnknownArgument
+                && d.primary.contains("is not a key a theme binds")
+        });
+        let mut unbindable: Vec<Span> = parse(source)
             .expect("fixtures parse")
             .items
             .into_iter()
@@ -881,25 +882,23 @@ mod selector {
             .filter_map(|rule| match rule {
                 ThemeRule::Selector {
                     keyword, bindings, ..
-                } if !matches!(role_of(&keyword), MemberRole::Other(_)) => Some(bindings),
+                } if !matches!(role_of(&keyword), MemberRole::Other(_)) => {
+                    Some(bindings.into_iter().filter(move |binding| {
+                        role_of(&keyword).binding_key(&binding.key).is_none()
+                    }))
+                }
                 _ => None,
             })
             .flatten()
             .map(|binding| binding.value.span)
             .collect();
         let mut reported: Vec<Span> = dropped.iter().map(|d| d.span.clone()).collect();
-        written.sort_by_key(|span| (span.start, span.end));
+        unbindable.sort_by_key(|span| (span.start, span.end));
         reported.sort_by_key(|span| (span.start, span.end));
         assert_eq!(
-            reported, written,
-            "one W_IGNORED_ARGUMENT on each binding's value, got {found:#?}",
+            reported, unbindable,
+            "one E_UNKNOWN_ARGUMENT on each unbindable binding's value, got {found:#?}",
         );
-        for d in &dropped {
-            assert!(
-                d.primary.contains("is bound by a theme selector"),
-                "only binding findings may be filtered out here: {d:#?}",
-            );
-        }
         kept.iter().map(|d| d.code.as_str()).collect()
     }
 
@@ -977,7 +976,7 @@ mod selector {
             notes(&d),
             vec![
                 "`frame=` bound here",
-                "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's `frame=` and the earlier value is dead text whatever a binding comes to mean (no pass lowers a selector's bindings yet, so neither value is built today)",
+                "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's `frame=` and the earlier value is built for none of them",
                 "delete the value you do not mean from one of the rows, or narrow one selector so they pick different members",
             ],
         );

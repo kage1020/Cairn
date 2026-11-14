@@ -17,11 +17,10 @@ struct s size=9x7
 
 #[test]
 fn a_list_valued_selector_attribute_matches_the_member_that_carries_it() {
-    // Only the row's own binding, which nothing lowers.
     assert_eq!(
         codes(MATCHING),
-        [DiagnosticCode::IgnoredArgument.as_str()],
-        "a selector that does match must report nothing but its binding",
+        Vec::<&str>::new(),
+        "a selector that does match must report nothing",
     );
 }
 
@@ -72,8 +71,8 @@ struct s size=9x7
 ";
     assert_eq!(
         codes(source),
-        [DiagnosticCode::IgnoredArgument.as_str()],
-        "a nested list should match, leaving only the row's binding to report"
+        Vec::<&str>::new(),
+        "a nested list should match, leaving nothing to report"
     );
 }
 
@@ -88,14 +87,9 @@ theme t:
 struct s size=9x7
   window tags=[a,b] class=small side=front offset=2 y=2 size=2x2 mat_slot=glass
 ";
-    // Each row's binding is reported between them, since nothing lowers either.
     assert_eq!(
         codes(source),
-        vec![
-            DiagnosticCode::IgnoredArgument.as_str(),
-            DiagnosticCode::DuplicateSelector.as_str(),
-            DiagnosticCode::IgnoredArgument.as_str(),
-        ],
+        vec![DiagnosticCode::DuplicateSelector.as_str()]
     );
     let found = diagnose(source);
     let duplicate = found
