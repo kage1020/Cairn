@@ -230,6 +230,16 @@ impl Server {
         self.request_shutdown();
         self.exit_expecting(0);
     }
+
+    /// Send `shutdown` and `exit` without reading, assert the process exits 0, and return every
+    /// message it wrote that the test had not read, `shutdown`'s answer among them.
+    fn end(mut self) -> Vec<serde_json::Value> {
+        self.send(&serde_json::json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }));
+        self.send(&serde_json::json!({ "jsonrpc": "2.0", "method": "exit" }));
+        let status = self.child.wait().expect("wait for server exit");
+        assert_eq!(status.code(), Some(0), "unexpected exit code");
+        self.messages.iter().collect()
+    }
 }
 
 /// Read one Content-Length framed message, or `None` at end of stream.
@@ -265,8 +275,16 @@ fn diagnostics_of(message: &serde_json::Value) -> &Vec<serde_json::Value> {
         .expect("diagnostics array")
 }
 
+/// What a message is: its method, or the id it answers.
+fn label(message: &serde_json::Value) -> String {
+    match message.get("method").and_then(serde_json::Value::as_str) {
+        Some(method) => method.to_owned(),
+        None => format!("answer to {}", message["id"]),
+    }
+}
+
 #[test]
-fn initialize_advertises_full_sync_and_completion_and_shuts_down_clean() {
+fn initialize_advertises_sync_completion_hover_and_pulled_diagnostics_and_shuts_down_clean() {
     let (server, response) = Server::start();
     assert_eq!(response.get("id"), Some(&serde_json::json!(1)));
     let capabilities = &response["result"]["capabilities"];
@@ -297,21 +315,10 @@ fn a_client_that_declares_pulled_diagnostics_is_answered_and_not_published_to() 
         "method": "textDocument/diagnostic",
         "params": { "textDocument": { "uri": TEST_URI } },
     }));
-    let next = server.read_message();
-    assert_eq!(
-        next.get("id"),
-        Some(&serde_json::json!(2)),
-        "the pull's answer comes before anything else, got: {next}",
-    );
-    assert_eq!(next["result"]["kind"], "full");
-    assert!(
-        !next["result"]["items"]
-            .as_array()
-            .expect("an item array")
-            .is_empty(),
-        "the fixture has findings, got: {next}",
-    );
-    server.shutdown();
+    // Another thread answers the pull, so `shutdown` waits until that answer is in.
+    let mut sequence = vec![label(&server.read_message())];
+    sequence.extend(server.end().iter().map(label));
+    assert_eq!(sequence, ["answer to 2", "answer to 99"]);
 }
 
 #[test]

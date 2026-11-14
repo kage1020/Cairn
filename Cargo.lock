@@ -216,6 +216,7 @@ dependencies = [
  "cairn-lang-core",
  "cairn-lang-docs",
  "cairn-lang-formats",
+ "crossbeam-channel",
  "lsp-server",
  "lsp-types",
  "serde",
