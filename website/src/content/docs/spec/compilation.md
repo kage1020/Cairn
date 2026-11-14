@@ -75,6 +75,10 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 `--edition` is required and `--target` alone is refused. "1.21" means different things on Java and
 Bedrock, and Java's DataVersion has nothing to do with Bedrock's block_version.
 
+The file format is not part of the target. `--structure-format` picks one of Java's formats, which
+changes the files written and never the block array or the lockfile
+([§12.1](/spec/ecosystem-interop/#121-forward-direction)).
+
 ## 4.3 Gable roof voxel rules
 
 `roof kind=gable [overhang=N] mat_slot=...` lowers to two opposite stair slopes meeting at a ridge.

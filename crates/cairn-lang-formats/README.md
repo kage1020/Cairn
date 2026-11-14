@@ -6,9 +6,9 @@ Each format is a serializer or deserializer around the **block-array IR**, which
 
 ## Status
 
-Java vanilla `.nbt` and Bedrock `.mcstructure` writers ship, and so do the built-in registry packs behind `cairn info` and every id check. The Bedrock writer translates each palette entry's canonical blockstate, which is Java's, into the target version's Bedrock block and `states` through the built-in pack's state map ([`bedrock_state`](src/bedrock_state.rs)). A state the map has no form for, or one the Java block does not have, is a hard error (`BedrockStructureError::State`); intent a version can only approximate (stair `shape` before 1.26.60) is dropped with a `W_INTENT_DEGRADED` parity note rather than in silence; and `waterlogged` becomes the structure's water layer.
+Java vanilla `.nbt`, Litematica `.litematic`, Sponge Schematic `.schem` and Bedrock `.mcstructure` writers ship, and so do the built-in registry packs behind `cairn info` and every id check. The Bedrock writer translates each palette entry's canonical blockstate, which is Java's, into the target version's Bedrock block and `states` through the built-in pack's state map ([`bedrock_state`](src/bedrock_state.rs)). A state the map has no form for, or one the Java block does not have, is a hard error (`BedrockStructureError::State`); intent a version can only approximate (stair `shape` before 1.26.60) is dropped with a `W_INTENT_DEGRADED` parity note rather than in silence; and `waterlogged` becomes the structure's water layer.
 
-Litematica `.litematic` and WorldEdit `.schem` are still to land, and no reverse-direction (file → IR) backend ships yet.
+The `.litematic` writer puts each struct in a file of its own and each site in one file, a region per placement and walkway at its site origin ([ecosystem-interop "Litematica"](https://cairn.kage1020.com/spec/ecosystem-interop/)), and streams each region's packed `BlockStates` from the grid. The `.schem` writer writes version 3, one file per struct, placement and walkway like `.nbt`, each with its site origin as its `Offset` ([ecosystem-interop "Sponge Schematic"](https://cairn.kage1020.com/spec/ecosystem-interop/)), and streams the varint `Blocks.Data` from the grid. Every Java writer takes its block entities from the same encoding and placement as `.nbt`'s, so a block entity the IR carries is written by all three. A `.litematic` reader and a `.schem` reader ship too, the first reading one region at a time and the second versions 2 and 3, each into a `BlockVolume`; they are what the reverse direction will build on, but nothing turns their result into the IR yet.
 
 ## Public API
 
@@ -20,10 +20,25 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `java_structure::build_structure_tag` | `BlockArray` → `Compound` (Java vanilla shape). One compound per voxel, so for inspecting a structure rather than writing a large one. |
 | `java_structure::write_structure_gzip` | Check and gzip-write in one call, streaming. A refused array leaves the writer untouched. |
 | `java_structure::write_compound_gzip` | Gzip-write an already-built root under the empty root name vanilla expects. |
-| `java_structure::output_filename` | The stem `cottage` (`BlockArrayIr::artifact_stem` of `struct::cottage`) + `OutputExt::Nbt` → `cottage.nbt`; `OutputExt::Mcstructure` → `cottage.mcstructure`. |
-| `java_structure::OutputExt` | `Nbt` / `Mcstructure`. The only way to name an output extension, so no caller ends up with `.nbt.nbt`. |
+| `java_structure::output_filename` | The stem `cottage` (`BlockArrayIr::artifact_stem` of `struct::cottage`) + `OutputExt::Nbt` → `cottage.nbt`; `OutputExt::Mcstructure` → `cottage.mcstructure`; `OutputExt::Litematic` → `cottage.litematic`; `OutputExt::Schem` → `cottage.schem`. |
+| `java_structure::OutputExt` | `Nbt` / `Mcstructure` / `Litematic` / `Schem`. The only way to name an output extension, so no caller ends up with `.nbt.nbt`. |
 | `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `PaletteIndexOutOfRange`, `DimensionOverflow`, `VolumeOverflow`, `ListTooLong`, `VoxelCountMismatch`, `UnencodablePaletteString`. `#[non_exhaustive]`. |
 | `java_structure::Compound` | [`cairn-lang-nbt`](../cairn-lang-nbt/README.md)'s tag compound, passed through so building a tag tree needs one dependency rather than two. |
+| `litematic::litematic_files` | The `.litematic` files a `BlockArrayIr` writes to: a `LitematicFile` per struct and per site, in the order of each file's first structure. |
+| `litematic::LitematicFile` / `litematic::LitematicRegion` | One file's scope (`struct::cottage`, `site::hamlet`), stem and regions; a region's scope, name (the stem its `.nbt` would have), minimum corner and array. |
+| `litematic::prepare_litematic` / `litematic::Litematic` | Check a `LitematicFile` for a `JavaTarget`, each region as `prepare_structure` checks it, plus the names and the `i32` metadata; `Litematic::write_gzip` then writes it, packing `BlockStates` from the grid as it goes, and can fail only on I/O. |
+| `litematic::LitematicError` | `Region` (a region's `JavaStructureError`), `UnencodableName`, `CornerOverflow`, `MetadataOverflow`. `#[non_exhaustive]`. |
+| `litematic::read_litematic` | Gzip-wrapped `.litematic` → `LitematicSchematic`, one region's NBT in memory at a time. Reads `Version` 5 to 7, either corner a region's `Position` and `Size` name, and palettes under `Name` / `Properties` or `id` / `properties`; refuses a region past the block-array volume budget before reading its states. |
+| `litematic::LitematicSchematic` / `litematic::LitematicMetadata` / `litematic::ReadRegion` | What it returns: the data version, `Version`, `SubVersion`, the `Metadata` fields as stored, and each region's name, minimum corner, `BlockVolume` and raw `Entities`. |
+| `litematic::LitematicReadError` | `Nbt`, `Malformed` (by field path, such as `Regions.home1.Size`), `UnsupportedVersion`, `RegionTooLarge`, `PaletteTooLarge`, `BlockStatesTooShort`, `PaletteIndexOutOfRange`. `#[non_exhaustive]`. |
+| `schem::schem_files` / `schem::SchemFile` | The `.schem` files a `BlockArrayIr` writes to, one per structure in the IR's order: each one's scope, stem (the `.nbt` file's), `Offset` (its placement's or walkway's site origin, the origin for a struct) and array. |
+| `schem::prepare_schem` / `schem::Schem` | Check a `SchemFile` for a `JavaTarget` as `prepare_structure` checks its array, plus the unsigned-short extents, the palette's spellings and the varint data's length; `Schem::write_gzip` then writes version 3, encoding `Blocks.Data` from the grid as it goes, and can fail only on I/O. |
+| `schem::SchemError` | `Structure` (the array's `JavaStructureError`), `DimensionOverflow`, `UnspellableState`, `DuplicateState`, `UnencodableName`, `DataTooLong`. `#[non_exhaustive]`. |
+| `schem::read_schem` | Gzip-wrapped `.schem` of version 2 or 3 → `SpongeSchematic`, in whatever order the file stores its fields. Spells a state's id without a namespace as `minecraft:`, maps a sparse palette onto slots in index order, and refuses extents past the block-array volume budget before decoding the data. |
+| `schem::SpongeSchematic` | What it returns: `Version`, `DataVersion`, `Metadata` as stored, `Offset`, the `BlockVolume`, and raw `Entities`. |
+| `schem::SchemReadError` | `Nbt`, `Malformed` (by field path, such as `Schematic.Blocks.Palette`), `UnsupportedVersion`, `TooLarge`, `PaletteTooLarge`, `DataLength`, `UnknownPaletteIndex`. `#[non_exhaustive]`. |
+| `volume::BlockVolume` | Voxels as a file stores them: dims, palette in the file's order, `(y, z, x)` indices, and block entities. What every reader returns, so import has one shape to lift. |
+| `volume::StoredBlockEntity` | A block entity as a file stores it: its voxel, its id, and the rest of its NBT. |
 | `bedrock_structure::prepare_mcstructure` / `bedrock_structure::McStructure` | Check a `BlockArray` against the Bedrock backend and the NBT encoder and translate its palette through the target version's state map, returning the parity notes alongside; `McStructure::write` then writes the `.mcstructure`, encoding both `block_indices` layers from the grid as it goes, and can fail only on I/O. |
 | `bedrock_structure::build_mcstructure_tag` | `BlockArray` → `(Compound, Vec<ParityNote>)` (Bedrock `.mcstructure` shape). Both per-voxel layers as tags, so for inspecting a structure rather than writing a large one. |
 | `bedrock_structure::write_mcstructure` | Uncompressed little-endian write of a built root. |
@@ -68,8 +83,8 @@ Because the tables are closed, a suggestion cannot name a block that does not ex
 |---|---|---|---|
 | `.nbt` (vanilla structure block) | Java | **write (done)**, read | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `.mcstructure` | Bedrock | **write (done)**, read | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
-| `.litematic` (Litematica) | Java | read / write | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/), [ecosystem-interop "Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
-| `.schem` (WorldEdit / Sponge) | Java | read / write | [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.litematic` (Litematica) | Java | **write (done)**, **read (done)** | [ecosystem-interop "Litematica"](https://cairn.kage1020.com/spec/ecosystem-interop/), [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/), [ecosystem-interop "Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `.schem` (WorldEdit / Sponge) | Java | **write (done)**, **read (done)** | [ecosystem-interop "Sponge Schematic"](https://cairn.kage1020.com/spec/ecosystem-interop/), [ecosystem-interop "Forward direction"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 
 ## Forward / reverse contract
 

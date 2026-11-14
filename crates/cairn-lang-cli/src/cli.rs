@@ -201,9 +201,16 @@ pub(crate) enum Command {
             `--target` pins the one version a block id and its states have an answer for, which \
             is what lets the compile check them (`E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, \
             `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`); `cairn check --edition E --target V` pins the \
-            same pair to reach those findings without building anything. Exits 0 on success, 1 \
-            on parse, lowering, or I/O failure (including an unsupported `--target` or a state \
-            literal outside its block's states), and 2 when the source file cannot be located"
+            same pair to reach those findings without building anything. \
+            `--structure-format litematic` writes Java's artifacts as Litematica `.litematic` \
+            schematics instead: a struct to a file of its own and a site to one file with a \
+            region per placement and walkway (`spec/ecosystem-interop` \"Litematica\"); \
+            `--structure-format schem` writes them as Sponge Schematic version 3 `.schem` files, \
+            one per struct, placement and walkway, each offset by where it sits in its site \
+            (`spec/ecosystem-interop` \"Sponge Schematic\"). Exits 0 on success, 1 on parse, \
+            lowering, or I/O failure (including an unsupported `--target` or a state literal \
+            outside its block's states), and 2 when the source file cannot be located or \
+            `--structure-format` is given with `--edition bedrock`"
     )]
     Compile {
         /// Path to the .crn file to compile.
@@ -228,12 +235,26 @@ pub(crate) enum Command {
                 `DataVersionTable::latest`)"
         )]
         target: String,
+        /// Java structure file format; defaults to `nbt`.
+        #[arg(
+            long,
+            value_enum,
+            long_help = "The file format Java's structures are written in: `nbt` (the default), \
+                one vanilla structure file per struct, placement and walkway; `litematic`, one \
+                Litematica schematic per struct and per site; or `schem`, one Sponge Schematic \
+                per struct, placement and walkway (`spec/ecosystem-interop` \"Forward \
+                direction\"). Whichever is written, the artifacts share one naming rule, the \
+                same collision guards and the same lockfile. Bedrock writes only `.mcstructure`, \
+                so the flag with `--edition bedrock` is refused with exit 2 before the file is \
+                read"
+        )]
+        structure_format: Option<StructureFormat>,
         /// Output directory for the structure files; defaults to the source file's directory.
         #[arg(
             long,
-            long_help = "Output directory for the generated structure files (`.nbt` for Java, \
-                `.mcstructure` for Bedrock). Created if missing. Defaults to the source file's \
-                parent directory"
+            long_help = "Output directory for the generated structure files (`.nbt`, \
+                `.litematic` or `.schem` for Java, `.mcstructure` for Bedrock). Created if \
+                missing. Defaults to the source file's parent directory"
         )]
         out: Option<PathBuf>,
         /// Lockfile path; defaults to `<source>.lock` next to the source.
@@ -408,6 +429,18 @@ pub(crate) enum SynthStage {
             its bound, then an `assert truth` or `assert always` a run of the circuit breaks"
     )]
     Legalize,
+}
+
+/// The file format `cairn compile` writes Java's structures in.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum StructureFormat {
+    /// Vanilla structure files (`.nbt`), one per struct, placement and walkway (default).
+    #[default]
+    Nbt,
+    /// Litematica schematics (`.litematic`), one per struct and per site.
+    Litematic,
+    /// Sponge Schematic version 3 (`.schem`), one per struct, placement and walkway.
+    Schem,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

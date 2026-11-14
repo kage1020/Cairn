@@ -5,8 +5,11 @@ use std::process::ExitCode;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
-use cairn_lang_formats::java_structure::output_filename;
+use cairn_lang_formats::java_structure::{OutputExt, output_filename};
+use cairn_lang_formats::litematic::{litematic_files, prepare_litematic};
+use cairn_lang_formats::schem::{prepare_schem, schem_files};
 
+use crate::cli::StructureFormat;
 use crate::lockfile::build_lockfile;
 use crate::name_case::NameCase;
 use crate::report::degraded_warning;
@@ -44,16 +47,48 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
-/// Check every structure against the backend before any I/O, so only I/O can fail a write.
+/// Check every artifact against its backend before any I/O, so only I/O can fail a write;
+/// `format` picks Java's backend, Bedrock having one.
 pub(crate) fn prepare_artifacts<'a>(
     block_ir: &'a BlockArrayIr,
     target: &ResolvedTarget,
+    format: StructureFormat,
     out_dir: &Path,
     case: NameCase,
 ) -> Result<Vec<(PathBuf, PreparedStructure<'a>)>, PrepareRefusal> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
-    let mut seen_paths: std::collections::HashMap<EntryLocation, (PathBuf, String)> =
-        std::collections::HashMap::with_capacity(block_ir.structures.len());
+    let mut claims = Claims {
+        out_dir,
+        case,
+        seen: std::collections::HashMap::with_capacity(block_ir.structures.len()),
+    };
+    if let (ResolvedTarget::Java(java), StructureFormat::Litematic) = (target, format) {
+        for file in litematic_files(block_ir) {
+            let (scope, stem) = (file.scope.clone(), file.stem.clone());
+            let schematic = prepare_litematic(file, java).map_err(|err| {
+                eprintln!("error: checking `{scope}`: {err}");
+                ExitCode::from(1)
+            })?;
+            let path = claims.claim(&scope, &output_filename(&stem, OutputExt::Litematic))?;
+            prepared.push((path, PreparedStructure::Litematic(schematic)));
+        }
+        return Ok(prepared);
+    }
+    if let (ResolvedTarget::Java(java), StructureFormat::Schem) = (target, format) {
+        for file in schem_files(block_ir) {
+            let scope = file.scope;
+            let file_name = output_filename(&file.stem, OutputExt::Schem);
+            let schematic = prepare_schem(file, java).map_err(|err| {
+                eprintln!("error: checking `{scope}`: {err}");
+                ExitCode::from(1)
+            })?;
+            prepared.push((
+                claims.claim(scope, &file_name)?,
+                PreparedStructure::Schem(schematic),
+            ));
+        }
+        return Ok(prepared);
+    }
     for (scope, array) in &block_ir.structures {
         let (structure, degraded) = target.prepare(array).map_err(|err| {
             eprintln!("error: checking `{scope}`: {err}");
@@ -63,10 +98,25 @@ pub(crate) fn prepare_artifacts<'a>(
             eprintln!("{}", degraded_warning(scope, note));
         }
         let file_name = output_filename(&block_ir.artifact_stem(scope), target.output_ext());
-        let path = artifact_path(out_dir, scope, &file_name)?;
+        prepared.push((claims.claim(scope, &file_name)?, structure));
+    }
+    Ok(prepared)
+}
+
+/// The directory entries the artifacts prepared so far write, each with the scope that claimed it.
+struct Claims<'o> {
+    out_dir: &'o Path,
+    case: NameCase,
+    seen: std::collections::HashMap<EntryLocation, (PathBuf, String)>,
+}
+
+impl Claims<'_> {
+    /// Where `scope`'s artifact `file_name` goes, refused when an earlier scope's goes there too.
+    fn claim(&mut self, scope: &str, file_name: &str) -> Result<PathBuf, PrepareRefusal> {
+        let path = artifact_path(self.out_dir, scope, file_name)?;
         // Distinct scope keys can name one file, and the resolver's `E_OUTPUT_NAME_COLLISION`
         // sees only resolved scopes.
-        let location = entry_location(&path, case).map_err(|err| {
+        let location = entry_location(&path, self.case).map_err(|err| {
             eprintln!(
                 "error: cannot resolve where artifact `{}` would be written: {err}",
                 path.display(),
@@ -75,19 +125,18 @@ pub(crate) fn prepare_artifacts<'a>(
             ExitCode::from(1)
         })?;
         if let Some((first_path, first)) =
-            seen_paths.insert(location, (path.clone(), scope.clone()))
+            self.seen.insert(location, (path.clone(), scope.to_owned()))
         {
             let collision = ArtifactCollision {
                 first,
                 first_path,
-                scope: scope.clone(),
+                scope: scope.to_owned(),
                 path,
             };
             return Err(PrepareRefusal::Collision(collision));
         }
-        prepared.push((path, structure));
+        Ok(path)
     }
-    Ok(prepared)
 }
 
 /// Why [`prepare_artifacts`] refused.

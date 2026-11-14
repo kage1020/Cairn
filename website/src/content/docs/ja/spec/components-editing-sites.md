@@ -100,6 +100,8 @@ Y 軸は位置関係のセレクタの影響を受けません。今のところ
 
 ファイル名に site の名前は含めません。同じディレクトリには、すべての `struct` (自身の名前で書き出し、その名前がこうしたデバイス名なら `E_INVALID_STRUCT_NAME`) と、すべての通路 ([§9.3.5](#935-ポートと-connect)) も書き出します。大文字と小文字を区別せずに比べて同じファイル名になる 2 つの成果物は、`E_OUTPUT_NAME_COLLISION` です。`struct` と同じ名前の `place` や、2 つの site に置いた同じ `id=` は、片方でもう片方を上書きするのではなく拒否します。
 
+`cairn compile --structure-format litematic` の場合は、site を site の名前を付けた 1 つの `.litematic` に書き出し、各配置と各通路は、その `.nbt` のファイル名を付けたリージョンになります。site と同じ名前の `struct` は同じファイルに書き出すことになるので、コンパイルはこれを拒否します ([§12.1.1](/ja/spec/ecosystem-interop/#1211-litematica))。`--structure-format schem` の場合は `.nbt` と同じ名前でファイルを書き出し、各 `.schem` は、その配置や通路の原点を `Offset` に持ちます ([§12.1.2](/ja/spec/ecosystem-interop/#1212-sponge-schematic))。
+
 各配置のワールド座標での原点と `(site, def, theme)` の来歴は、ロックファイルの `placements` に記録するので、下流のツールは座標の計算をやり直さずに配置を再現できます。ロックファイルは、既定ではソースの隣に書き出す `<source>.lock` です (`village.crn` なら `village.crn.lock`)。
 
 ### 9.3.5 ポートと `connect`

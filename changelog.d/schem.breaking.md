@@ -1,0 +1,1 @@
+- *(formats)* `OutputExt` gains `Schem`, so an exhaustive match on it no longer compiles.
