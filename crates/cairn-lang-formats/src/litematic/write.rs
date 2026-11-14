@@ -11,7 +11,10 @@ use thiserror::Error;
 
 use super::{AIR_IDS, SUB_VERSION, bits_per_entry, long_count, schematic_version};
 use crate::data_version::JavaTarget;
-use crate::java_structure::{JavaStructureError, entity_nbt, palette_entry, prepare_structure};
+use crate::java_structure::{
+    JavaStructureError, entity_nbt, palette_entry, placed_block_entities, prepare_structure,
+};
+use crate::site_frame::site_origin;
 
 /// The keys every Litematica palette entry names its block and properties by.
 const PALETTE_KEYS: (&str, &str) = ("Name", "Properties");
@@ -58,12 +61,7 @@ pub fn litematic_files(ir: &BlockArrayIr) -> Vec<LitematicFile<'_>> {
     let mut files: IndexMap<String, LitematicFile<'_>> = IndexMap::new();
     for (scope, block_array) in &ir.structures {
         let name = ir.artifact_stem(scope);
-        let site = ir
-            .placements
-            .get(scope)
-            .map(|p| (&p.site, p.origin))
-            .or_else(|| ir.walkways.get(scope.as_str()).map(|w| (&w.site, w.origin)));
-        let (file_scope, stem, position) = match site {
+        let (file_scope, stem, position) = match site_origin(ir, scope) {
             Some((site, origin)) => (format!("site::{site}"), site.to_string(), origin),
             None => (scope.clone(), name.clone(), (0, 0, 0)),
         };
@@ -289,9 +287,8 @@ fn write_region<W: Write>(
         long_count(block_array.voxels.len(), bits),
         pack(indices, bits),
     )?;
-    let tile_entities: Vec<Compound> = block_array
-        .block_entities
-        .iter()
+    let tile_entities: Vec<Compound> = placed_block_entities(block_array)
+        .into_iter()
         .map(|entity| {
             let mut nbt = entity_nbt(entity);
             let (x, y, z) = entity.pos;

@@ -1,6 +1,6 @@
 //! The `.litematic` writer: the files an IR splits into and the tag tree each holds.
 
-use cairn_lang_core::block_array::{BlockArrayIr, Dims};
+use cairn_lang_core::block_array::{BlockArrayIr, BlockEntity, Dims};
 use cairn_lang_core::{Edition, WalkwayScopeKey};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::java_structure::JavaStructureError;
@@ -348,6 +348,49 @@ fn one_region(array: &cairn_lang_core::block_array::BlockArray) -> LitematicFile
             block_array: array,
         }],
     }
+}
+
+#[test]
+fn only_the_last_block_entity_at_each_voxel_of_the_grid_is_written() {
+    let mut array = comparator_array("minecraft:comparator");
+    let base = array.block_entities[0].clone();
+    let at = |pos, id: &str| BlockEntity {
+        pos,
+        id: id.to_owned(),
+        ..base.clone()
+    };
+    array.block_entities = vec![
+        at((1, 1, 1), "minecraft:first"),
+        at((0, 0, 3), "minecraft:off_the_grid"),
+        at((u32::MAX, 0, 0), "minecraft:far_off_the_grid"),
+        at((1, 1, 1), "minecraft:last"),
+        at((0, 0, 0), "minecraft:origin"),
+    ];
+    let ir = ir_of(array);
+    let root = written_root(only_file(&ir), &target("1.21.4"));
+    let region = entry(entry(&root, "Regions"), "comparator");
+    let Some(Tag::List(tile_entities)) = region.entries.get("TileEntities") else {
+        panic!("TileEntities is a list");
+    };
+    let written: Vec<(&Tag, &Tag, &Tag, &Tag)> = tile_entities
+        .items
+        .iter()
+        .map(|item| {
+            let Tag::Compound(nbt) = item else {
+                panic!("a tile entity is a compound");
+            };
+            let field = |key: &str| &nbt.entries[key];
+            (field("id"), field("x"), field("y"), field("z"))
+        })
+        .collect();
+    let (origin, last) = (string("minecraft:origin"), string("minecraft:last"));
+    assert_eq!(
+        written,
+        [
+            (&origin, &Tag::Int(0), &Tag::Int(0), &Tag::Int(0)),
+            (&last, &Tag::Int(1), &Tag::Int(1), &Tag::Int(1)),
+        ]
+    );
 }
 
 #[test]

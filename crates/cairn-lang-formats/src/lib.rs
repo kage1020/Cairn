@@ -10,6 +10,7 @@ pub mod java_structure;
 pub mod litematic;
 pub mod portability;
 pub mod registry;
+mod site_frame;
 pub mod volume;
 
 pub use bedrock_state::{BedrockStateError, StateTranslation, translate_states};

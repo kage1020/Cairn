@@ -374,6 +374,18 @@ fn block_entities_at(block_array: &BlockArray) -> HashMap<(u32, u32, u32), &Bloc
         .collect()
 }
 
+/// The block entities a structure's `blocks` holds: the last at each voxel of the grid, in the
+/// grid's `(y, z, x)` order.
+pub(crate) fn placed_block_entities(block_array: &BlockArray) -> Vec<&BlockEntity> {
+    let dims = block_array.dims;
+    let mut placed: Vec<(usize, &BlockEntity)> = block_entities_at(block_array)
+        .into_iter()
+        .filter_map(|((x, y, z), entity)| Some((dims.index(x, y, z)?, entity)))
+        .collect();
+    placed.sort_unstable_by_key(|&(index, _)| index);
+    placed.into_iter().map(|(_, entity)| entity).collect()
+}
+
 /// A block entity as the game saves one in a structure's `blocks`: its id and fields, without the
 /// position its block entry already gives.
 pub(crate) fn entity_nbt(entity: &BlockEntity) -> Compound {
