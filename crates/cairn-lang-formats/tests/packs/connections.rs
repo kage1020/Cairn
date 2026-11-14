@@ -11,7 +11,7 @@ use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_nbt::tag::Tag;
 
-use crate::common::{block_palette, lower_source, note_fields, states_for};
+use crate::common::{block_palette, lower_source, note_fields, states_for, written_palette};
 
 /// `minecraft:{id}` with `properties`.
 fn state(id: &str, properties: &[(&str, &str)]) -> BlockState {
@@ -315,32 +315,7 @@ fn a_bedrock_target_writes_the_connections_a_wall_and_its_gate_derive() {
         build_mcstructure_tag(&out.structures["struct::s"], &target, &states_for(&target))
             .expect("build");
     assert_eq!(notes, []);
-    let mut written: Vec<String> = block_palette(&root)
-        .iter()
-        .map(|entry| {
-            let Tag::Compound(entry) = entry else {
-                panic!("palette entry: {entry:?}");
-            };
-            let (Some(Tag::String(name)), Some(Tag::Compound(states))) =
-                (entry.entries.get("name"), entry.entries.get("states"))
-            else {
-                panic!("palette entry: {entry:?}");
-            };
-            let mut states: Vec<String> = states
-                .entries
-                .iter()
-                .map(|(key, value)| match value {
-                    Tag::Byte(v) => format!("{key}={v}"),
-                    Tag::Int(v) => format!("{key}={v}"),
-                    Tag::String(v) => format!("{key}={v}"),
-                    other => panic!("{key}: {other:?}"),
-                })
-                .collect();
-            states.sort();
-            format!("{name}[{}]", states.join(","))
-        })
-        .collect();
-    written.sort();
+    let written = written_palette(&root);
     let wall = |east, north, south, west, post| {
         format!(
             "minecraft:cobblestone_wall[wall_block_type=cobblestone,\

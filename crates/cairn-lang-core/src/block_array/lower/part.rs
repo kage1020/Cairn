@@ -21,17 +21,23 @@ use super::fixture::{
 };
 use super::members::{StructCtx, default_block_id};
 
-/// The note on an `at=` that is missing or neither form, saying what the two are.
-const STANDS: &str = "write `at=` as the coordinate triple `x,y,z` of the cell the part stands in, \
-                      as in `at=1,1,1`, or as a wall anchor, `at=<side>.outside` or \
-                      `at=inside.<side>`";
+/// The note on an `at=` that is missing or neither form, saying what the two are, for `what`.
+fn stands(what: &str) -> String {
+    format!(
+        "write `at=` as the coordinate triple `x,y,z` of the cell the {what} stands in, as in \
+         `at=1,1,1`, or as a wall anchor, `at=<side>.outside` or `at=inside.<side>`"
+    )
+}
+
+/// What a part's findings call it where any of the four would read the same.
+const PART: &str = "part";
 
 /// The note on a compass `facing=`, saying which way each word looks.
-const COMPASS: &str = "`facing=` takes one of north, south, east, west: north toward the `back` \
-                       wall and east toward the `right` one";
+pub(super) const COMPASS: &str = "`facing=` takes one of north, south, east, west: north toward \
+                                  the `back` wall and east toward the `right` one";
 
 /// The four compass faces, in the order a finding lists them.
-const COMPASS_FACES: [Face; 4] = [Face::North, Face::South, Face::East, Face::West];
+pub(super) const COMPASS_FACES: [Face; 4] = [Face::North, Face::South, Face::East, Face::West];
 
 /// A part's catalog token, and the Java id used without a pack.
 #[derive(Debug, Clone, Copy)]
@@ -100,9 +106,9 @@ struct Written<'m> {
     connect: Option<&'m str>,
 }
 
-/// How a part's `at=` names its cell.
+/// How a part's or a trapdoor's `at=` names its cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Stand {
+pub(super) enum Stand {
     /// A coordinate triple.
     Triple,
     /// A wall anchor.
@@ -226,10 +232,10 @@ fn place(
 ) -> Result<Stand, Refusal> {
     let fixture = part.fixture();
     let mut properties = states(part, member, written)?;
-    let stand = stand_of(fixture, member)?;
+    let stand = stand_of(fixture, PART, member)?;
     let (block, facing) = turn(part, member, written.facing, stand)?;
     let cell = match stand {
-        Stand::Triple => triple_cell(fixture, member, y_offset, ctx)?,
+        Stand::Triple => triple_cell(fixture, PART, member, y_offset, ctx)?,
         Stand::ByWall => {
             let (anchor, cell) = fixture_cell(fixture, member, y_offset, ctx)?;
             if let Some(facing) = by_the_wall(part, anchor, facing) {
@@ -294,7 +300,7 @@ fn states(
 
 /// `written` when it is one of `words`, `None` when the line writes none, or the refusal of any
 /// other word.
-fn word<'m>(
+pub(super) fn word<'m>(
     member: &Member,
     key: &str,
     written: Option<&'m str>,
@@ -318,16 +324,12 @@ fn word<'m>(
     )))
 }
 
-/// How the part's `at=` names its cell, or the refusal of an `at=` that is missing or neither form.
-fn stand_of(fixture: Fixture, member: &Member) -> Result<Stand, Refusal> {
+/// How the line's `at=` names its cell, or the refusal of an `at=` that is missing or neither form;
+/// `what` is what the notes call the member.
+pub(super) fn stand_of(fixture: Fixture, what: &str, member: &Member) -> Result<Stand, Refusal> {
     let keyword = fixture.keyword;
-    let refuse = |primary: String| {
-        Box::new(diag_invalid_member(
-            member,
-            primary,
-            vec![STANDS.to_owned()],
-        ))
-    };
+    let refuse =
+        |primary: String| Box::new(diag_invalid_member(member, primary, vec![stands(what)]));
     let Some(raw) = member.arguments.get("at") else {
         return Err(refuse(format!(
             "{keyword} has no `at=`, so nothing says where it stands"
@@ -451,9 +453,11 @@ fn by_the_wall(part: Part, anchor: Anchor, look: Option<Look>) -> Option<Face> {
     }
 }
 
-/// The cell a part's coordinate triple names, or the refusal of an `offset=` or `y=` beside it.
-fn triple_cell(
+/// The cell a line's coordinate triple names, or the refusal of an `offset=` or `y=` beside it;
+/// `what` is what the note calls the member.
+pub(super) fn triple_cell(
     fixture: Fixture,
+    what: &str,
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
@@ -472,9 +476,10 @@ fn triple_cell(
                 beside.join(" and "),
             ),
             vec![format!(
-                "drop {}, or set the part by a wall with `at=<side>.outside` or \
+                "drop {}, or set the {} by a wall with `at=<side>.outside` or \
                  `at=inside.<side>`, which reads them",
                 beside.join(" and "),
+                what,
             )],
         )));
     }

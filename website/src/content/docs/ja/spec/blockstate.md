@@ -4,11 +4,11 @@ title: "6. ブロックステート"
 
 ## 6.1 既定では導出し、上書きで昇格する
 
-**変更の余地あり。** 下に挙げる上書きのうち、組み上げられるのは `stair` の `facing`、`half`、`shape` と、`door` の `hinge`、`open`、`chest` の `facing`、`size`、`observer`・`piston`・`dispenser`・`repeater`・`comparator` の `facing`、`repeater` の `delay`、`comparator` の `mode`、`redstone_dust` の `connect` だけです。そのほかの上書きと、`beam`・`note_block` のキーワードはまだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
+**変更の余地あり。** 下に挙げる上書きのうち、組み上げられないのは `bed` の `facing` だけです。`bed` はまだキーワードではありません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
 
 既定では、コンパイラが位置と隣接するブロックからブロックステートを導出します。階段の向き、ドアの向き、ガラス板・フェンス・壁のつながり、チェストの左右などです。
 
-現時点で導出するのは、このうち階段の向きと形、ドア・チェスト・レッドストーン部品の向き、ガラス板・フェンス・壁・レッドストーンダストのつながり、チェストの連結です。`roof` は、置かれた位置から階段の `facing`、`half`、`shape` を得ます。軒の `stair` が位置から得るのは、置かれた面に応じた東西南北の `facing` だけで、`half` と `shape` は行に書いた値か、既定の `top` と `straight` です。つながりと連結は、すべてのメンバーを塗り終えたあとで設定します ([つながり](#つながり))。`waterlogged` は、水の `fill` がブロックと重なるところで設定します ([§6.3](#63-waterlogged))。下で述べる入れ替えのうち、レッドストーントーチのものは導出し、看板のものはまだ導出しません。
+現時点で導出するのは、このうち階段の向きと形、梁・ドア・チェスト・トラップドア・レッドストーン部品の向き、ガラス板・フェンス・壁・レッドストーンダストのつながり、チェストの連結です。`roof` は、置かれた位置から階段の `facing`、`half`、`shape` を得ます。軒の `stair` が位置から得るのは、置かれた面に応じた東西南北の `facing` だけで、`half` と `shape` は行に書いた値か、既定の `top` と `straight` です。つながりと連結は、すべてのメンバーを塗り終えたあとで設定します ([つながり](#つながり))。`waterlogged` は、水の `fill` がブロックと重なるところで設定します ([§6.3](#63-waterlogged))。下で述べる入れ替えのうち、レッドストーントーチのものは導出し、看板のものはまだ導出しません。
 
 `door` は、切り抜いた開口に 2 段の高さのドアのブロックをはめます ([構文 §5.4](/ja/spec/syntax/#54-セレクタ))。開口の段に `half=lower`、その上の段に `half=upper` を置きます。`facing` は構造の内側を向くので、閉じたドアは壁の外面に収まり、内側へ開きます。ドアは閉じた状態 `open=false` で組み上げます。`hinge` は、すべての開口を切り抜いたあとで、隣の壁から読み取ります。左右は外から見た向きで、ドアの左は `at=left` の側です。左右それぞれについて、ドアが立つ 2 段のうち、隣のセルにまだ `walls` メンバーのブロックが残っている段を数えます。また、ドアの下半分の隣に別のドアの下半分が立っていれば、その側にドアがあるとみなします。左にドアがあって右にないとき、または右の壁が左より多いときは蝶番を右に、それ以外は左に付けます。途切れのない壁のドアは左に、窓の隣のドアは壁の側に、並んだ 2 枚のドアはそれぞれ外側に蝶番が付き、両開きの組として開きます。ドアの行に書いた `hinge=left` か `hinge=right`、`open=true` か `open=false` は、導出した値に代わります。
 
@@ -17,6 +17,12 @@ title: "6. ブロックステート"
 `lever`、`button`、`daylight`、`observer`、`lamp`、`piston`、`dispenser` は、チェストと同じ方法でセルを取ります ([レッドストーン §14.2](/ja/spec/redstone/#142-信号バインディング))。レバーとボタンは壁に掛かり、`face=wall` と、壁から離れる向きの `facing` を持ちます。これは行の何によっても上書きされません。オブザーバー、ピストン、ディスペンサーも、行の `facing=` で向きを変えない限り壁から離れる向きを向きます。使える語は、チェストの 4 つの語に `up` と `down` を加えたものです。どれも動力のない状態で組むので、`powered`、`lit`、`extended`、`triggered` は書き出しません。
 
 Tier 0 の部品 (`repeater`、`comparator`、`redstone_torch`、`redstone_dust`) は、[レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品) のとおりにセルと向きを取ります。リピーターとコンパレーターの `facing=` は駆動する向き、つまり前面が向く方向で、ゲームの `facing` は背面が向く方向なので、ブロックには逆の向きを書きます。壁のそばに置いたトーチと、3 つ組の位置に `facing=` 付きで置いたトーチは壁付きトーチで、`facing` は指す向きです。3 つ組の位置に `facing=` なしで置いたトーチは、立てたトーチです。リピーターの `delay` とコンパレーターの `mode` は行に書いた値、書かれていなければ `1` と `compare` です。どの部品も何からも動力を受けていない状態で組むので、`powered`、`locked`、`lit`、`power` は書かず、ブロック自身の既定のステートのままです。リピーターは動力もロックもなく、コンパレーターは動力がなく、トーチは点灯し、ダストは信号強度 0 です。
+
+`trapdoor` は、トラップドアのブロックを 1 つ置きます。壁のそばに `at=<side>.outside` か `at=inside.<side>` と `offset=`、`y=` で置くときは、同じ `at=`、`offset=`、`y=` を書いたチェストが取るセルを取り、チェストの行が拒否される、または先送りされる場合には、トラップドアの行も同じように扱われます。`facing` は壁から離れる向きなので、トラップドアはセルの壁の側に蝶番が付き、開くと壁にぴったり沿います。`facing=` に `in`、`out`、`left`、`right` を書くと、チェストと同じように向きを変えます。座標の 3 つ組 `at=x,y,z` で置くときは、Tier 0 の部品と同じセルを取り ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品))、`facing=` は東西南北の方角 `north`、`south`、`east`、`west` です。書かなければブロック自身の `facing` のままです。トラップドアは閉じた状態でセルの下半分に、つまり `open=false` と `half=bottom` で組み、行に書いた `open=true` や `half=top` はそれぞれに代わります。動力のない状態で組むので、`powered` は書き出しません。`facing=` や `half=` にそれ以外の識別子を書くと `E_INVALID_MEMBER` で、壁のそばで東西南北の方角を書いた場合と、3 つ組の位置で壁から見た向きを書いた場合も同じです。識別子でない値と、真偽値でない `open=` は `W_IGNORED_ARGUMENT` で、そのキーを書かなかったものとして読みます。トラップドアの `mat_slot=` はそのブロックを指し、`mat_slot=` のないトラップドアはレジストリパックの `@trapdoor.default` で組みます。ブロックはトラップドア、つまり ID が `trapdoor` であるか `_trapdoor` で終わるブロックでなければなりません (MUST)。それ以外は `E_INCOMPATIBLE_MATERIAL` で、エラーと並んで `@trapdoor.default` でトラップドアを組みます。
+
+`beam` は、柱状のブロックを横に寝かせて一列に並べます。種類は `kind=pillar` の 1 つです。`at=<side>.top` は、その `level` の下の壁の最上段、つまりレベルの最初の段を含む `walls` の積み段の最後の段に、壁の 2 つの角のあいだのセルにわたって梁を渡します。`at=<id>.top` は、同じ本体のうちその `id=` を持つ `door` か `window` の上、開口の最上段の 1 段上に、開口の列と左右に 1 列ずつ多くわたって梁を渡します。これも壁の角のあいだに限ります。窓の `repeat=` の連なりと `sym=true` の鏡像は、窓の行が切り抜くとおりにそれぞれ覆います。面の名前は ID より先に読みます。開口の上に渡す梁は、梁自身の `level` では動きません。梁の `axis` は壁に沿い、前面と背面では `x`、左右の面では `z` です。行に `axis=` で `x`、`y`、`z` を書くとそれに代わるので、`axis=y` ならブロックを立てて帯にします。梁は `envelope` で、載る壁の上に置き、あとからそこを通る開口は `openings` で切り抜きます ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。`kind=` がないか知らない種類であるもの、どちらの形でもない `at=`、本体のどの `door` や `window` も持たない ID、角のあいだにセルを持たないほど短い壁、どの `walls` メンバーも届くように書かれていない段、`axis=` のそれ以外の識別子は `E_INVALID_MEMBER` です。届くように書かれた `walls` メンバーが塗らない段と、自身の行が位置を決めない開口は `W_DEFERRED_MEMBER` で、識別子でない `axis=` は `W_IGNORED_ARGUMENT` です。梁の `mat_slot=` はそのブロックを指し、`mat_slot=` のない梁はレジストリパックの `@beam.default` で組みます。ブロックは柱状のブロック、つまり固定したターゲットで `axis` が `x`、`y`、`z` を取るブロックでなければなりません (MUST)。バージョンを固定しない lowering はどのブロックも柱状とみなし、固定したターゲットではそれ以外が `E_INCOMPATIBLE_MATERIAL` で、エラーと並んで `@beam.default` で梁を組みます。梁は体積の大きさを決めません。
+
+`note_block` は、座標の 3 つ組 `at=x,y,z` が示すセルに音符ブロックを 1 つ置きます ([構文 §5.1.1](/ja/spec/syntax/#511-リテラルと区切り))。音符ブロックはどちらも向かないので、壁を基準にした位置は取りません。`note=` は 0 から 24 の整数、`instrument=` は楽器の名前で、どちらもブロックのステートに書きます。行が書かないステートは書き出さないので、ブロック自身の既定のまま、つまり `note` は 0、`instrument` はゲームが音符ブロックの下のブロックから決めるものになります。ゲームはそのブロックが変わるたびに楽器を決め直すので、書いた楽器が鳴るのはそれまでです。音符ブロックがどの楽器を取るかはターゲットが決めます。固定したバージョンで、音符ブロックが取らない `instrument=` (後のバージョンで加わったものなど) は、その値に対する `E_STATE_DOMAIN` で、音符ブロックは組みません。0 から 24 の外の `note=` と、3 つ組でないか struct の外にある `at=` は `E_INVALID_MEMBER` で、種類の違う値は `W_IGNORED_ARGUMENT` です。音符ブロックは動力のない状態で組むので、`powered` は書き出しません。ブロックはレジストリパックの `@note_block.default` で、行の `mat_slot=` は `W_IGNORED_ARGUMENT` です。Bedrock は音符ブロックの音をブロックエンティティに持ちますが、それを埋める書き出しはまだなく、楽器は下のブロックから決めます。そのため Bedrock のビルドはどちらも書き出さず、行が書いたものそれぞれについて `W_INTENT_DEGRADED` でそのことを知らせます ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。
 
 建築上の意図になりうるブロックステートは、どれも上書きできます。そして **書いた時点で、そのステートは意図 (intent) に昇格します**。「導出できるものは作者に書かせない」という厳しい考え方は採りません。ルールは「既定では導出し、意図になりうるブロックステートはすべて上書きできる」です。
 
@@ -30,14 +36,17 @@ Tier 0 の部品 (`repeater`、`comparator`、`redstone_torch`、`redstone_dust`
 | 個数 | `snow layers`、`candle count` |
 | レッドストーン | `redstone_dust connect`、`repeater delay`、`comparator mode`、`observer` / `piston` / `dispenser` / `repeater` / `comparator facing`、`note` / `instrument` |
 
+彩釉テラコッタの `facing`、雪の層の `layers`、ろうそくの `candles` には、メンバーを設けません。そうしたブロックの置かれた位置からは何も導出できないので、メンバーには導出するものがなく、ブロックのステートのリテラル以上に言えることもないからです。これらはブロックを指すマテリアルに `@white_glazed_terracotta[facing=east]`、`@snow[layers=3]`、`@candle[candles=3]` のように書き、`floor`、`walls`、`fill`、生のブロックが書いたとおりに置きます ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。固定したターゲットでは、`E_STATE_DOMAIN` がそれぞれの組を検査します。
+
 見落としやすいものが 2 つあります。これらは意図ではなく導出に属します。`torch` と `wall_torch`、`sign` と `wall_sign` は、取り付ける面に応じて自動的に入れ替わります。現在組み上げるのは `redstone_torch` のもので、行が書いた位置の指定と `facing=` から決めます。
 
-下の例には、コンパイラがまだ知らないキーワードが含まれています。受け付けるのは `stair` と `chest` の行だけで、`beam` と `note_block` は `E_UNKNOWN_KEYWORD` になります。
+下の例は、どの行も上書きを書いています。
 
 ```
 stair id=eave   kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left  # 軒
 beam  id=lintel kind=pillar mat_slot=frame at=front.top axis=x                             # 水平の梁
 chest id=store  at=inside.back offset=2 size=single
+trapdoor id=hatch at=inside.left offset=1 y=2 half=top open=true
 note_block at=2,1,2 instrument=bit note=12
 ```
 
@@ -75,7 +84,7 @@ member:
 
 Minecraft 自身の用語である「blockstate」と紛れないよう、あえて別の名前にしています。導出や塗りに由来する resolved のステートを、作者が書いた intent のステートと混ぜないことで、編集が安定します。
 
-メンバーの `intent_state` には、そのキーワードが名前を挙げるブロックステートのキーだけが入ります。`stair` なら `half`、`facing`、`shape`、`waterlogged`、`door` なら `hinge`、`open`、`chest` なら `facing`、`type` を行の上で綴った `size`、`waterlogged`、`observer`、`piston`、`dispenser` なら `facing` です。ほかのキーワードが挙げるキーは、まだありません。行に書いたそれ以外の `key=value` は、メンバーの引数になります。例外は `id`、`class`、`mat_slot` で、これらはそれぞれ専用のフィールドになります。キーがどちらに入るかはキーワードで決まります。`stair` の `shape=` は意図ですが、`window` の `shape=` は開口の輪郭を表す引数です ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約))。
+メンバーの `intent_state` には、そのキーワードが名前を挙げるブロックステートのキーだけが入ります。`stair` なら `half`、`facing`、`shape`、`waterlogged`、`beam` なら `axis`、`door` なら `hinge`、`open`、`chest` なら `facing`、`type` を行の上で綴った `size`、`waterlogged`、`trapdoor` なら `facing`、`half`、`open`、`waterlogged`、`note_block` なら `note`、`instrument`、`observer`、`piston`、`dispenser`、`redstone_torch` なら `facing`、`repeater` なら `facing`、`delay`、`comparator` なら `facing`、`mode`、`redstone_dust` なら `connect` です。ほかのキーワードが挙げるキーはありません。行に書いたそれ以外の `key=value` は、メンバーの引数になります。例外は `id`、`class`、`mat_slot` で、これらはそれぞれ専用のフィールドになります。キーがどちらに入るかはキーワードで決まります。`stair` の `shape=` は意図ですが、`window` の `shape=` は開口の輪郭を表す引数です ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約))。
 
 lowering は、組み上げる block-array の隣に、各メンバーの `resolved_state` を記録します。本体を塗り終えたときにメンバーのセルが持つすべてのステートと、それを持つセルの組です。セルは `x` 方向の連なりにまとめ、それぞれの最初のセルと長さで、block-array の順に並べます。セルは最後に塗ったメンバーのものになるので、ドアのブロックははめ込まれた壁ではなくドアに記録され、セルが 1 つも残らないメンバーは何も記録しません。`cairn lower --format json` は、この記録を `members` の下に、`structures` と同じキーで出力します。これで 2 つのビルドをメンバーごとに比べられます。本体はメンバーを、それぞれが持つ最初のセルの順に並べます。そのため、セルを共有しない行を並べ替えても、格子と同じく記録も変わりません ([コンパイルモデル §4.8](/ja/spec/compilation/#48-同一フェーズ内の衝突とパレット))。記録は本体を lowering するたびに作ります。ブロック ID は、テーマのエディション別の変種や固定したバージョンの上書きも含めて、その lowering のターゲットが解決したものです。プロパティの名前は正規の語彙のものです。
 
@@ -85,7 +94,7 @@ lowering は、組み上げる block-array の隣に、各メンバーの `resol
 
 ## 6.3 `waterlogged`
 
-**変更の余地あり。** 流水はまだ組み上げられません。`water` は `E_UNKNOWN_KEYWORD` で、`fill` が注ぐのは水源だけです ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。下の例では、`trapdoor` と `water` は `E_UNKNOWN_KEYWORD` になります。
+**変更の余地あり。** 流水はまだ組み上げられません。`water` は `E_UNKNOWN_KEYWORD` で、`fill` が注ぐのは水源だけです ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。下の例では、`water` は `E_UNKNOWN_KEYWORD` になります。
 
 既定では、塗りから決まります。`fill fluid=water` が水浸しにできるブロックと重なると、コンパイラが `waterlogged` を立てます。
 
@@ -95,12 +104,12 @@ lowering は、組み上げる block-array の隣に、各メンバーの `resol
 
 流体は `water`、種類は `kind=source` だけで、`kind=` を書かない `fill` も水源を注ぎます。`mat_slot=` と `fluid=` を両方書いた `fill`、ほかの流体や種類、ない、または座標の組でない `from=` や `to=`、struct の外にある角は `E_INVALID_MEMBER` です。`fluid=` のない `fill` に書いた `kind=` は `W_IGNORED_ARGUMENT` で、`mat_slot=` も `fluid=` もない `fill` は `E_MISSING_MATERIAL` です ([リント](/ja/spec/lint/))。`fill` は体積を決めません ([コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出))。書かれたとおりの struct が届き、組み上げた struct が届かない段に及ぶ `fill` は `W_DEFERRED_MEMBER` になり、その段を組み上げるはずのメンバーを待ちます。
 
-`waterlogged=auto|true|false` の 3 値で指定することもできます。水槽の中に空気の空間を残す (明示的な `false`)、水源と流水を区別する、水浸しにできるブロックの一覧がバージョンによって違うことに対応する、といった用途のためです。`stair` と `chest` では、`waterlogged=true` と `waterlogged=false` をブロックのステートに書いてそのまま残し、`waterlogged=auto` は、`waterlogged=` を書かないときと同じく、水の `fill` に設定させます。それ以外の語は `E_INVALID_MEMBER` です。流水は `flow=` と `level=` で明示します。
+`waterlogged=auto|true|false` の 3 値で指定することもできます。水槽の中に空気の空間を残す (明示的な `false`)、水源と流水を区別する、水浸しにできるブロックの一覧がバージョンによって違うことに対応する、といった用途のためです。`stair`、`chest`、`trapdoor` では、`waterlogged=true` と `waterlogged=false` をブロックのステートに書いてそのまま残し、`waterlogged=auto` は、`waterlogged=` を書かないときと同じく、水の `fill` に設定させます。それ以外の語は `E_INVALID_MEMBER` です。流水は `flow=` と `level=` で明示します。
 
-[§6.1](#61-既定では導出し上書きで昇格する) の上書きと同じく、`waterlogged=` は、ブロックを 1 つ置き、そのブロックのステートを行に書くメンバーに書きます。コンパイラが知っているキーワードのうち、水を含められるブロックについてそうするメンバーは `stair` と `chest` だけです。`door` と `pressure_plate` のブロックは水を含めず、`roof` と `window` は置くブロックのステートをすべて導出し、上書きを取らないので、この 4 つのどれに書いた `waterlogged=` も `E_UNKNOWN_ARGUMENT` になります。
+[§6.1](#61-既定では導出し上書きで昇格する) の上書きと同じく、`waterlogged=` は、ブロックを 1 つ置き、そのブロックのステートを行に書くメンバーに書きます。コンパイラが知っているキーワードのうち、水を含められるブロックについてそうするメンバーは `stair`、`chest`、`trapdoor` だけです。`door` と `pressure_plate` のブロックは水を含めず、`roof` と `window` は置くブロックのステートをすべて導出し、上書きを取らないので、この 4 つのどれに書いた `waterlogged=` も `E_UNKNOWN_ARGUMENT` になります。
 
 ```
 fill fluid=water kind=source from=1,1,1 to=5,3,5    # 重なったフェンス・階段・看板は自動で waterlogged になる
-trapdoor id=shutter at=.. waterlogged=false          # 水槽の中の空気の窓
+trapdoor id=shutter at=inside.front offset=2 y=2 waterlogged=false  # 水槽の中の空気の窓
 water id=stream from=.. flow=east level=4
 ```

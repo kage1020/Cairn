@@ -4,22 +4,20 @@ title: "6. Blockstate Model"
 
 ## 6.1 Derive by default, promote on override
 
-**Subject to change.** Of the overrides below, only a stair's `facing`, `half` and `shape`, a door's
-`hinge` and `open`, a chest's `facing` and `size`, an observer's, piston's, dispenser's, repeater's
-and comparator's `facing`, a repeater's `delay`, a comparator's `mode` and a redstone dust's
-`connect` are built. The others and the `beam` and `note_block` keywords are not ([Compatibility
-Tiers](/spec/compatibility/#subject-to-change)).
+**Subject to change.** Of the overrides below, a bed's `facing` is the one not built: `bed` is not a
+keyword yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
-Of these, stair geometry, the orientation of doors, chests and redstone components, pane, fence,
-wall and redstone dust connections, and chest pairing are derived today. A `roof` gets its stairs' `facing`, `half` and `shape` from where they
-sit. An eave `stair` gets only its cardinal `facing`, from the side it sits on, and its `half` and
-`shape` are what its line writes, or `top` and `straight`. Connections and pairs are set once every
-member is painted ([Connections](#connections)), and `waterlogged` where a water `fill` overlaps a
-block ([§6.3](#63-waterlogged)). Of the substitutions below, a redstone torch's is derived and a
-sign's is not yet.
+Of these, stair geometry, the orientation of beams, doors, chests, trapdoors and redstone
+components, pane, fence, wall and redstone dust connections, and chest pairing are derived today. A
+`roof` gets its stairs' `facing`, `half` and `shape` from where they sit. An eave `stair` gets only
+its cardinal `facing`, from the side it sits on, and its `half` and `shape` are what its line
+writes, or `top` and `straight`. Connections and pairs are set once every member is painted
+([Connections](#connections)), and `waterlogged` where a water `fill` overlaps a block
+([§6.3](#63-waterlogged)). Of the substitutions below, a redstone torch's is derived and a sign's is
+not yet.
 
 A `door` sets a door block two rows tall into the opening it cuts ([Syntax
 §5.4](/spec/syntax/#54-selectors)): `half=lower` on the row it opens at and `half=upper` on the row
@@ -71,6 +69,62 @@ or `1` and `compare`. Each part is built with nothing powering it, so its `power
 or `power` is never written and the block's own default stands: a repeater neither powered nor
 locked, a comparator unpowered, a torch lit and dust at power 0.
 
+A `trapdoor` sets one trapdoor block. By a wall, `at=<side>.outside` or `at=inside.<side>` with
+`offset=` and `y=`, it takes the cell a chest with the same `at=`, `offset=` and `y=` would take,
+and its line is refused or deferred wherever the chest's would be. Its `facing` points away from the
+wall, so the trapdoor is hinged on the wall's side of its cell and, open, lies flat against the
+wall, and a `facing=` of `in`, `out`, `left` or `right` turns it as it turns a chest. At a
+coordinate triple, `at=x,y,z`, it takes the cell a Tier 0 part would ([Redstone
+§14.1](/spec/redstone/#tier-0-parts)), and its `facing=` is a compass word, `north`, `south`, `east`
+or `west`; with none, the block's own `facing` stands. A trapdoor is built closed in the bottom half
+of its cell, `open=false` and `half=bottom`, and an `open=true` or `half=top` on its line replaces
+either. It is built unpowered, so its `powered` is never written. Any other identifier for `facing=`
+or `half=` is `E_INVALID_MEMBER`, as is a compass word by a wall and a way from a wall at a triple;
+a value that is no identifier, and an `open=` that is no boolean, is `W_IGNORED_ARGUMENT` and read
+as if the key were not written. The trapdoor's `mat_slot=` names its block, and a trapdoor without
+one is built from the registry pack's `@trapdoor.default`. The block MUST be a trapdoor, one whose
+id is `trapdoor` or ends in `_trapdoor`; any other is `E_INCOMPATIBLE_MATERIAL`, and the trapdoor is
+built from `@trapdoor.default` beside the error.
+
+A `beam` lays a run of pillar blocks on their side, and `kind=pillar` is its one kind.
+`at=<side>.top` lays it along the top row of the walls under its `level`: the last row of the course
+of `walls` that holds the level's first row, across the wall's cells between its two corners.
+`at=<id>.top` lays it over the `door` or `window` of the same body that has that `id=`, on the row
+above the opening's top row, across the opening's columns and one more on each side, still between
+the wall's corners. A window's `repeat=` series and its `sym=true` mirror are each covered, as the
+window's line cuts them. A side name is read before an id, and a beam's own `level` does not move a
+beam laid over an opening. The beam's `axis` runs along its wall, `x` along the front and back and
+`z` along the left and right, and an `axis=` of `x`, `y` or `z` on its line replaces it, so `axis=y`
+stands the blocks upright in a band. A beam is laid in `envelope`, over the walls it rests on, and
+an opening cut through it later is cut in `openings` ([Compilation Model
+§4.1](/spec/compilation/#41-phase-evaluation)). A missing or unknown `kind=`, an `at=` of neither
+form, an id no `door` or `window` of the body has, a wall too short to have a cell between its
+corners, a row no `walls` member is written to reach, and any other identifier for `axis=` are
+`E_INVALID_MEMBER`. A row a `walls` member is written to reach and does not paint, and an opening
+whose own line does not place it, are `W_DEFERRED_MEMBER`, and an `axis=` that is no identifier is
+`W_IGNORED_ARGUMENT`. The beam's `mat_slot=` names its block, and a beam without one is built from
+the registry pack's `@beam.default`. The block MUST be a pillar, one whose `axis` takes `x`, `y` and
+`z` at the pinned target. A lowering with no version pinned takes any block as one, and at a pinned
+target any other is `E_INCOMPATIBLE_MATERIAL`, and the beam is built from `@beam.default` beside the
+error. A beam does not size the volume.
+
+A `note_block` sets one note block in the cell its coordinate triple names, `at=x,y,z` ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)); a note block turns no way, so it takes no wall
+anchor. Its `note=`, a whole number from 0 to 24, and its `instrument=`, the name of an instrument,
+are written into its block's state, and a state its line does not write is left out, so the block's
+own default stands: `note` 0, and the `instrument` the game sets from the block under the note
+block. The game sets the instrument again each time that block changes, so a written instrument is
+the one played until then. Which instruments a note block takes is the target's: at a pinned version
+an `instrument=` its note block does not take, such as one a later version adds, is `E_STATE_DOMAIN`
+on the value, and no note block is built. A `note=` outside 0 to 24 and an `at=` that is no triple
+or lies outside the struct are `E_INVALID_MEMBER`, and a value of the wrong kind is
+`W_IGNORED_ARGUMENT`. A note block is built unpowered, so its `powered` is never written. Its block
+is the registry pack's `@note_block.default`, and a `mat_slot=` on its line is `W_IGNORED_ARGUMENT`.
+Bedrock keeps a note block's note in its block entity, which no writer fills yet, and works its
+instrument out from the block below, so a Bedrock build writes neither and says so, for each its
+line writes, with `W_INTENT_DEGRADED` ([Versioning and Editions
+§10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
+
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
 promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let
 the author write it". The rule is "derive by default; any blockstate that can be intent is
@@ -86,17 +140,25 @@ Cases that MUST stay overridable, because each can be intent:
 | Counts | `snow layers`, `candle count` |
 | Redstone | `redstone_dust connect`, `repeater delay`, `comparator mode`, `observer` / `piston` / `dispenser` / `repeater` / `comparator facing`, `note` / `instrument` |
 
+A glazed terracotta's `facing`, a snow layer's `layers` and a candle's `candles` take no member:
+nothing about where such a block stands derives them, so a member would have nothing to derive and
+no more to say than the block's state literal does. They are written on the material that names the
+block, `@white_glazed_terracotta[facing=east]`, `@snow[layers=3]` or `@candle[candles=3]`, which a
+`floor`, `walls`, `fill` or raw block lays as written ([Materials and Themes
+§7.4](/spec/materials-themes/#74-raw-blocks)), and at a pinned target `E_STATE_DOMAIN` checks each
+pair.
+
 Two easy-to-miss cases belong to derivation, not intent: `torch` ↔ `wall_torch` and `sign` ↔
 `wall_sign` are substituted automatically by attachment face. A `redstone_torch` is the one built
 today, from the anchor and `facing=` its line writes.
 
-The example below uses keywords the compiler does not know yet. Only its `stair` and `chest` lines
-are accepted: `beam` and `note_block` are `E_UNKNOWN_KEYWORD`.
+Each line of the example below writes an override.
 
 ```
 stair id=eave   kind=stairs mat_slot=roof side=front half=top facing=out shape=outer_left  # eaves
 beam  id=lintel kind=pillar mat_slot=frame at=front.top axis=x                             # horizontal beam
 chest id=store  at=inside.back offset=2 size=single
+trapdoor id=hatch at=inside.left offset=1 y=2 half=top open=true
 note_block at=2,1,2 instrument=bit note=12
 ```
 
@@ -203,12 +265,15 @@ The two are named apart from Minecraft's own term "blockstate" on purpose. Keepi
 (derived or paint-origin) out of intent state (authored) is what makes edits stable.
 
 A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a `stair`,
-`half`, `facing`, `shape` and `waterlogged`, on a `door`, `hinge` and `open`, on a `chest`,
-`facing`, `size`, the line's spelling of its `type`, and `waterlogged`, and on an `observer`,
-`piston` or `dispenser`, `facing`. No other keyword names one yet. Every other `key=value` the line writes is one of the member's arguments, apart from `id`,
-`class` and `mat_slot`, which become fields of their own. Where a key goes depends on the keyword:
-`shape=` on a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
-([Entities §8.2](/spec/entities/#82-anchor-conventions)).
+`half`, `facing`, `shape` and `waterlogged`, on a `beam`, `axis`, on a `door`, `hinge` and `open`,
+on a `chest`, `facing`, `size`, the line's spelling of its `type`, and `waterlogged`, on a
+`trapdoor`, `facing`, `half`, `open` and `waterlogged`, on a `note_block`, `note` and `instrument`,
+on an `observer`, `piston`, `dispenser` or `redstone_torch`, `facing`, on a `repeater`, `facing` and
+`delay`, on a `comparator`, `facing` and `mode`, and on a `redstone_dust`, `connect`. No other
+keyword names one. Every other `key=value` the line writes is one of the member's arguments, apart
+from `id`, `class` and `mat_slot`, which become fields of their own. Where a key goes depends on the
+keyword: `shape=` on a `stair` is intent, and `shape=` on a `window` is an argument, the opening's
+outline ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
 
 Lowering records each member's `resolved_state` beside the block array it builds: every state the
 member's cells hold once the body is painted, with the cells that hold it as runs along `x`, each
@@ -230,7 +295,7 @@ In place of `type`, a member carries the `role` its keyword classifies to.
 
 **Subject to change.** Flowing water is not built yet: `water` is `E_UNKNOWN_KEYWORD`, and a `fill`
 pours only source water ([Compatibility Tiers](/spec/compatibility/#subject-to-change)). In the
-example below, `trapdoor` and `water` are `E_UNKNOWN_KEYWORD`.
+example below, `water` is `E_UNKNOWN_KEYWORD`.
 
 The default is paint-derived: when `fill fluid=water` overlaps a waterloggable block, the compiler
 sets `waterlogged`.
@@ -267,18 +332,19 @@ the member that would build the row.
 
 A three-valued `waterlogged=auto|true|false` is allowed, for leaving an air pocket inside a tank
 (explicit `false`), distinguishing source from flowing, and version differences in the waterloggable
-table. On a `stair` or a `chest`, `waterlogged=true` and `waterlogged=false` are written into the
-block's state and kept, and `waterlogged=auto`, like no `waterlogged=` at all, lets a water fill set
-it. Any other word is `E_INVALID_MEMBER`. Flowing water is made explicit with `flow=` and `level=`.
+table. On a `stair`, a `chest` or a `trapdoor`, `waterlogged=true` and `waterlogged=false` are
+written into the block's state and kept, and `waterlogged=auto`, like no `waterlogged=` at all, lets
+a water fill set it. Any other word is `E_INVALID_MEMBER`. Flowing water is made explicit with
+`flow=` and `level=`.
 
 Like the overrides in [§6.1](#61-derive-by-default-promote-on-override), `waterlogged=` is written
 on a member that places one block and names that block's state, and of the keywords the compiler
-knows only `stair` and `chest` do so for a block that can hold water. The block of a `door` or a
-`pressure_plate` holds none, and a `roof` or a `window` derives the state of every block it lays
-and takes no override, so `waterlogged=` on any of the four is `E_UNKNOWN_ARGUMENT`.
+knows only `stair`, `chest` and `trapdoor` do so for a block that can hold water. The block of a
+`door` or a `pressure_plate` holds none, and a `roof` or a `window` derives the state of every block
+it lays and takes no override, so `waterlogged=` on any of the four is `E_UNKNOWN_ARGUMENT`.
 
 ```
 fill fluid=water kind=source from=1,1,1 to=5,3,5    # overlapping fences/stairs/signs auto-waterlogged
-trapdoor id=shutter at=.. waterlogged=false          # an air window in a tank
+trapdoor id=shutter at=inside.front offset=2 y=2 waterlogged=false  # an air window in a tank
 water id=stream from=.. flow=east level=4
 ```

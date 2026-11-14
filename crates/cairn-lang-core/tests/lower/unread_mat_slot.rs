@@ -71,6 +71,10 @@ const FIXTURES: &[(&str, &str)] = &[
         "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  dispenser at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
     ),
     (
+        "note_block",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  note_block at=2,1,2 note=3 mat_slot=%SLOT%\n",
+    ),
+    (
         "repeater",
         "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  repeater at=2,1,2 facing=east mat_slot=%SLOT%\n",
     ),

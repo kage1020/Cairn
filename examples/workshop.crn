@@ -1,0 +1,31 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# A workshop framed in logs, with a hatch on its wall and a note block on its floor.
+# Demonstrates: beam over a door and along a wall top, trapdoor by a wall and at a
+# coordinate triple, and note_block with the note and instrument its line writes.
+
+theme timber:
+  slot floor -> @oak_planks
+  slot wall  -> @cobblestone
+  slot frame -> @spruce_log
+  slot hatch -> @spruce_trapdoor
+  slot roof  -> @spruce_stairs
+
+struct workshop size=7x5
+  floor  mat_slot=floor
+  walls  mat_slot=wall height=4
+  door   id=entry side=front at=center
+  window id=light side=back offset=2 y=2 size=3x1
+  roof   kind=gable mat_slot=roof overhang=1
+  # A lintel over the door and the window, and a plate along each side wall's top.
+  beam id=lintel kind=pillar mat_slot=frame at=entry.top
+  beam id=head   kind=pillar mat_slot=frame at=light.top
+  beam id=west   kind=pillar mat_slot=frame at=left.top
+  beam id=east   kind=pillar mat_slot=frame at=right.top
+  # Hung on the left wall and open flat against it.
+  trapdoor id=hatch at=inside.left offset=2 y=2 mat_slot=hatch open=true
+  # Laid in the top half of its cell, a shelf.
+  trapdoor id=shelf at=5,2,1 mat_slot=hatch half=top facing=south
+  # Twelve semitones up, played as a bell.
+  note_block id=bell at=1,1,1 instrument=bell note=12

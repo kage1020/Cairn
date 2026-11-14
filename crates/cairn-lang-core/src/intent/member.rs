@@ -154,6 +154,7 @@ impl MemberRole {
                 | Self::Window
                 | Self::Roof
                 | Self::Stair
+                | Self::Beam
                 | Self::Level
                 | Self::PressurePlate
                 | Self::Lever
@@ -164,6 +165,8 @@ impl MemberRole {
                 | Self::Piston
                 | Self::Dispenser
                 | Self::Chest
+                | Self::Trapdoor
+                | Self::NoteBlock
                 | Self::Repeater
                 | Self::Comparator
                 | Self::RedstoneTorch
@@ -183,6 +186,7 @@ impl MemberRole {
                 | Self::Window
                 | Self::Roof
                 | Self::Stair
+                | Self::Beam
                 | Self::Level
                 | Self::PressurePlate
                 | Self::Lever
@@ -193,6 +197,8 @@ impl MemberRole {
                 | Self::Piston
                 | Self::Dispenser
                 | Self::Chest
+                | Self::Trapdoor
+                | Self::NoteBlock
                 | Self::Repeater
                 | Self::Comparator
                 | Self::RedstoneTorch
@@ -216,6 +222,7 @@ impl MemberRole {
             Self::Window => "window",
             Self::Roof => "roof",
             Self::Stair => "stair",
+            Self::Beam => "beam",
             Self::Level => "level",
             Self::PressurePlate => "pressure_plate",
             Self::Lever => "lever",
@@ -226,6 +233,8 @@ impl MemberRole {
             Self::Piston => "piston",
             Self::Dispenser => "dispenser",
             Self::Chest => "chest",
+            Self::Trapdoor => "trapdoor",
+            Self::NoteBlock => "note_block",
             Self::Repeater => "repeater",
             Self::Comparator => "comparator",
             Self::RedstoneTorch => "redstone_torch",
