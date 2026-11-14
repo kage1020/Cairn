@@ -1,13 +1,13 @@
 //! A lockfile is a reproducibility claim: deterministic hashes, a YAML round trip of one shape,
 //! and a reader that refuses any document it cannot vouch for.
 
-use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
+use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::lock::{
     HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement, LockTarget,
     LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
 };
-use cairn_lang_core::{Edition, PlaceId, PortId, SiteName, WalkwayEndpoint};
+use cairn_lang_core::{Edition, PlaceId, PortId, SiteName, WalkwayEndpoint, lower, parse, resolve};
 use indexmap::IndexMap;
 
 fn unit_ir(palette: Palette) -> BlockArrayIr {
@@ -73,6 +73,23 @@ fn hash_resolved_ir_reflects_palette_order() {
     let h1 = hash_resolved_ir(&unit_ir(p1)).expect("hash");
     let h2 = hash_resolved_ir(&unit_ir(p2)).expect("hash");
     assert_ne!(h1, h2);
+}
+
+#[test]
+fn hash_resolved_ir_reflects_member_addresses() {
+    let src = "theme t:\n  slot wall -> @cobblestone\n\n\
+               struct s size=3x3\n  walls mat_slot=wall height=1\n";
+    let module = parse(src).expect("parses");
+    let intent = lower(&module);
+    let mut ir = lower_to_block_array(&intent, &resolve(&intent, None), None);
+    let addressed = hash_resolved_ir(&ir).expect("hash");
+    let member = &mut ir.members["struct::s"][0];
+    assert_eq!(
+        member.address.as_ref().map(ToString::to_string).as_deref(),
+        Some("walls[0]"),
+    );
+    member.address = None;
+    assert_ne!(hash_resolved_ir(&ir).expect("hash"), addressed);
 }
 
 fn sample_lockfile() -> Lockfile {

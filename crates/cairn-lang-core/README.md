@@ -10,7 +10,7 @@ This crate is the dependency root of every crate above the byte layer; [`cairn-l
 |---|---|---|
 | `lex`, `parse`, `ast` | Surface syntax to AST, with `MAX_NESTING_DEPTH` / `MAX_EXPR_DEPTH` guards and a dedicated failure diagnoser | [syntax](https://cairn.kage1020.com/spec/syntax/) |
 | `logic_library` | The built-in logic library: each primitive a `logic` expression applies, and its notation, which the parser reads | [redstone "Two tiers, and the v1 boundary"](https://cairn.kage1020.com/spec/redstone/) |
-| `intent` | Intent IR — struct/site/def bodies reorganised into typed members with roles, plus the keyword table, semantic levels, and the lookup of the member an actuator patch binds | [architecture "The Intent IR is rich and carries invariants"](https://cairn.kage1020.com/spec/architecture/) |
+| `intent` | Intent IR — struct/site/def bodies reorganised into typed members with roles and meaning-based addresses, plus the keyword table, semantic levels, and the lookup of the member an actuator patch binds | [architecture "The Intent IR is rich and carries invariants"](https://cairn.kage1020.com/spec/architecture/), [syntax "IDs, classes, addresses"](https://cairn.kage1020.com/spec/syntax/) |
 | `check` | The diagnostic-collecting pipeline: arguments, arity, duplicates, nesting, positional form, `@requires`, `@cairn`, `@intended_targets`, materials, member scope, type mismatches | [lint](https://cairn.kage1020.com/spec/lint/) |
 | `resolve` | Theme binding, per-edition theme variants, `@requires` parsing, and the three version axes | [materials-themes](https://cairn.kage1020.com/spec/materials-themes/), [versioning-editions "The `edition portability` row" and "The `buildable targets` row"](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `block_array` | The universal pivot: walls, openings, roofs, walkways, and material lowering into a palette + index array | [architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/) |
@@ -26,7 +26,7 @@ Everything past the block-array IR — the NBT codec, the format backends, redst
 
 ## Not yet here
 
-Entity placement, the editing and patch DSL ([components-editing-sites "Editing model"](https://cairn.kage1020.com/spec/components-editing-sites/)), and the reverse direction — lifting an imported structure back into idiomatic Cairn — are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
+Entity placement, the `edit` patch DSL ([components-editing-sites "Editing model"](https://cairn.kage1020.com/spec/components-editing-sites/)), and the reverse direction — lifting an imported structure back into idiomatic Cairn — are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
 
 ## Versioning
 

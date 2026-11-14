@@ -30,14 +30,17 @@ def cottage class=house size=9x7:
 
 ## 9.2 Editing model
 
-**Subject to change.** The address the compiler gives a member without `id=`, and the `edit` patch
-DSL that would use it, are not built yet
+**Subject to change.** The `edit` patch DSL is not built yet
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
-Important members carry `id=`. Members without one get a **meaning-based stable address** derived
-from parent / role / side / level / offset rather than from generation order, so addresses stay
-stable when you append to a struct. No pass derives that address yet: today a member without `id=`
-has no address.
+Important members carry `id=`. Every member of a `struct` or `def` body also gets a **meaning-based
+stable address** derived from parent / role / side / level / offset rather than from generation
+order, so addresses stay stable when you append to a struct. `window@front[0]` is the window
+nearest the left end of the front wall, and `level[1].window@front[0]` the one nearest it under the
+second `level` from the bottom. [Syntax §5.5](/spec/syntax/#55-ids-classes-addresses) gives the
+form and how members of one role on one wall are counted. Reordering lines, or adding a member of
+another role, on another wall or further along the wall, moves no address. A member added ahead of
+others of its role on its wall renumbers those after it, which is what `id=` is for.
 
 Edits are a patch DSL against a selector or address:
 

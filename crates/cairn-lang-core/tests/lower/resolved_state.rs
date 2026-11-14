@@ -306,12 +306,35 @@ fn the_record_serializes_under_members_keyed_like_structures() {
             "struct::s": [{
                 "role": "walls",
                 "id": "shell",
+                "address": "walls[0]",
                 "resolved_state": [{
                     "state": { "id": "minecraft:cobblestone" },
                     "runs": [{ "from": [0, 1, 0], "len": 1 }],
                 }],
             }],
         }),
+    );
+}
+
+#[test]
+fn each_record_carries_the_address_its_line_was_given() {
+    let ir = lowered(&format!(
+        "{PRELUDE}struct s size=3x3\n  \
+         level y=1\n    \
+         walls mat_slot=wall height=1\n  \
+         walls mat_slot=wall height=1\n"
+    ));
+
+    let addresses: Vec<Option<String>> = ir.members["struct::s"]
+        .iter()
+        .map(|member| member.address.as_ref().map(ToString::to_string))
+        .collect();
+    assert_eq!(
+        addresses,
+        [
+            Some("walls[0]".to_owned()),
+            Some("level[0].walls[0]".to_owned())
+        ],
     );
 }
 

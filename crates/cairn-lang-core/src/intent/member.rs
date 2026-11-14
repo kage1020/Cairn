@@ -10,7 +10,7 @@ use crate::ast::{Value, ValueKind};
 use crate::edition::Edition;
 use crate::error::Span;
 
-use super::{AssertIr, LogicBinding, MemberRole};
+use super::{AssertIr, LogicBinding, MemberAddress, MemberRole};
 
 /// One named member produced by lowering a body statement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -22,6 +22,9 @@ pub struct Member {
     /// Explicit `class=` grouping, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
+    /// Where it stands in its `struct` or `def` body; `None` on a `site` row or an actuator patch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<MemberAddress>,
     /// What kind of member this is; unknown keywords are [`MemberRole::Other`].
     pub role: MemberRole,
     /// Explicit `mat_slot=` slot name, if any; [`Self::read_slot`] says whether it is read.

@@ -4,10 +4,11 @@ use indexmap::IndexMap;
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
+use super::addressing::assign_addresses;
 use super::{
-    Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
-    SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan,
-    refused_under_guard, role_of,
+    Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member,
+    MemberAddress, MemberBody, SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr,
+    ValueWithSpan, refused_under_guard, role_of,
 };
 
 /// Lower a parsed [`Module`] into its [`IntentModule`] form, at [`SemanticLevel::Grouped`].
@@ -94,10 +95,11 @@ fn lower_struct(
 ) -> StructIr {
     let HeaderBreakdown { size, args } = split_size(header_args);
     let MemberBody {
-        members,
+        mut members,
         logic,
         asserts,
     } = lower_body(body);
+    assign_addresses(&mut members, size.as_ref(), &MemberAddress::default());
     StructIr {
         name: name.to_owned(),
         size,
@@ -117,10 +119,11 @@ fn lower_def(
 ) -> DefIr {
     let HeaderBreakdown { size, args } = split_size(header_args);
     let MemberBody {
-        members,
+        mut members,
         logic,
         asserts,
     } = lower_body(body);
+    assign_addresses(&mut members, size.as_ref(), &MemberAddress::default());
     DefIr {
         name: name.to_owned(),
         size,
@@ -302,6 +305,7 @@ fn lower_member(stmt: &Statement) -> Member {
     Member {
         id: id.map(|label| label.name),
         class: class.map(|label| label.name),
+        address: None,
         role,
         mat_slot,
         selector: lowered_selector,
@@ -320,6 +324,7 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
     Member {
         id: None,
         class: None,
+        address: None,
         role: super::MemberRole::Other(String::new()),
         mat_slot: None,
         selector: None,
