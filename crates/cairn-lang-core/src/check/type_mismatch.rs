@@ -2,7 +2,7 @@
 //! non-`WxH` one. It walks the surface AST, where a value lowering hoisted still has its type and
 //! span.
 
-use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
+use crate::ast::{Arg, EditTarget, Item, Module, Statement, ThemeRule, Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{guarded_lines, role_of};
 
@@ -26,6 +26,20 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
             }
             Item::Site { body, .. } => check_body(body, sink),
         }
+    }
+    for edit in &module.edits {
+        let keyword = edit.target.keyword();
+        if let EditTarget::Selector { attrs, .. } = &edit.target {
+            check_args(Some(keyword), attrs, sink);
+        }
+        // `check::edit` refuses an edit's `id=` whatever its value.
+        let set: Vec<Arg> = edit
+            .set
+            .iter()
+            .filter(|arg| arg.key != "id")
+            .cloned()
+            .collect();
+        check_args(Some(keyword), &set, sink);
     }
 }
 

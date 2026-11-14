@@ -3,11 +3,14 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArray;
 use cairn_lang_formats::bedrock_structure::{McStructure, ParityNote, prepare_mcstructure};
+use cairn_lang_formats::build::BuildTarget;
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
 use cairn_lang_formats::java_structure::{JavaStructure, OutputExt, prepare_structure};
+use cairn_lang_formats::litematic::Litematic;
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+use cairn_lang_formats::schem::Schem;
 
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
 pub(crate) enum ResolvedTarget {
@@ -68,6 +71,14 @@ impl ResolvedTarget {
         })
     }
 
+    /// The target as a build is pinned to it.
+    pub(crate) fn build_target(&self) -> BuildTarget<'_> {
+        BuildTarget {
+            mc_version: self.mc_version(),
+            order_key: self.order_key(),
+        }
+    }
+
     pub(crate) fn registry_pack(&self) -> &'static RegistryPack {
         match self {
             ResolvedTarget::Java(_) => builtin_pack(Edition::Java),
@@ -86,18 +97,12 @@ pub(crate) fn resolve_target(
     }
 }
 
-/// Every version a pack can build for, in ascending release order.
-pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
-    pack.targetable()
-        .into_iter()
-        .map(|entry| entry.mc_version.clone())
-        .collect()
-}
-
-/// A structure its edition's backend has checked, waiting to be written.
+/// A structure file its backend has checked, waiting to be written.
 pub(crate) enum PreparedStructure<'a> {
     Java(JavaStructure<'a>),
     Bedrock(McStructure<'a>),
+    Litematic(Litematic<'a>),
+    Schem(Schem<'a>),
 }
 
 impl PreparedStructure<'_> {
@@ -105,6 +110,8 @@ impl PreparedStructure<'_> {
         let encoded = match self {
             PreparedStructure::Java(structure) => structure.write_gzip(writer),
             PreparedStructure::Bedrock(structure) => structure.write(writer),
+            PreparedStructure::Litematic(schematic) => schematic.write_gzip(writer),
+            PreparedStructure::Schem(schematic) => schematic.write_gzip(writer),
         };
         encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }

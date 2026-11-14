@@ -385,8 +385,9 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::RedstoneDust
             | MemberRole::RawBlock
             | MemberRole::RawFill => true,
-            // None of these lays a block of its own material.
+            // None of these lays a block of its own material; a `raw_repeat`'s lines do.
             MemberRole::Level
+            | MemberRole::RawRepeat
             | MemberRole::Circuit
             | MemberRole::Place
             | MemberRole::Connect
@@ -419,6 +420,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         MemberRole::Circuit,
         MemberRole::RawBlock,
         MemberRole::RawFill,
+        MemberRole::RawRepeat,
         MemberRole::Place,
         MemberRole::Connect,
         MemberRole::Other("mystery".to_owned()),

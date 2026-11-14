@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { runTests } from "@vscode/test-electron";
@@ -79,8 +80,9 @@ class Fixture {
   async expectLaunches(
     settings: Record<string, unknown>,
     expected: Launch[],
+    env: Record<string, string> = {},
   ): Promise<void> {
-    const failure = await this.open(settings).then(
+    const failure = await this.open(settings, env).then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -100,9 +102,12 @@ class Fixture {
 
   /**
    * Runs VS Code on the document with the extension and user `settings`
-   * until it exits.
+   * until it exits, with `env` added to the test host's environment.
    */
-  private async open(settings: Record<string, unknown>): Promise<void> {
+  private async open(
+    settings: Record<string, unknown>,
+    env: Record<string, string>,
+  ): Promise<void> {
     mkdirSync(join(this.userData, "User"), { recursive: true });
     const settingsFile = join(this.userData, "User", "settings.json");
     writeFileSync(settingsFile, JSON.stringify(settings));
@@ -120,6 +125,7 @@ class Fixture {
         `--extensions-dir=${join(this.root, "extensions")}`,
       ],
       extensionTestsEnv: {
+        ...env,
         PATH: [dirname(this.pathServer), process.env.PATH].join(delimiter),
       },
     });
@@ -237,5 +243,88 @@ test(
     const fixture = new Fixture(t);
     const missing = join(fixture.root, "missing", "cairn-lsp");
     await fixture.expectLaunches({ "cairn.serverPath": missing }, []);
+  },
+);
+
+test(
+  "Cairn: Show Info opens what cairn.info answers for the document",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const shown = join(fixture.root, "shown.json");
+    await fixture.expectLaunches(
+      {},
+      [
+        { server, argv: ["--version"], received: [], exitCode: 0 },
+        { server, argv: ["--version"], received: [], exitCode: 0 },
+        {
+          server,
+          argv: [],
+          received: [
+            "initialize",
+            "initialized",
+            "workspace/executeCommand",
+            "shutdown",
+            "exit",
+          ],
+          exitCode: 0,
+        },
+      ],
+      { CAIRN_TEST_SHOW_INFO: shown },
+    );
+    const request = {
+      command: "cairn.info",
+      arguments: [{ uri: pathToFileURL(fixture.document).href }],
+    };
+    assert.equal(
+      readFileSync(shown, "utf8"),
+      `${JSON.stringify(request, null, 2)}\n`,
+    );
+  },
+);
+
+test(
+  "Cairn: Diff Blocks opens what cairn.diffBlocks answers for the document and a structure file",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const shown = join(fixture.root, "shown.json");
+    const structure = join(fixture.root, "main.nbt");
+    writeFileSync(structure, "");
+    await fixture.expectLaunches(
+      {},
+      [
+        { server, argv: ["--version"], received: [], exitCode: 0 },
+        { server, argv: ["--version"], received: [], exitCode: 0 },
+        {
+          server,
+          argv: [],
+          received: [
+            "initialize",
+            "initialized",
+            "workspace/executeCommand",
+            "shutdown",
+            "exit",
+          ],
+          exitCode: 0,
+        },
+      ],
+      { CAIRN_TEST_DIFF_BLOCKS: shown, CAIRN_TEST_STRUCTURE: structure },
+    );
+    const request = {
+      command: "cairn.diffBlocks",
+      arguments: [
+        {
+          uri: pathToFileURL(fixture.document).href,
+          structure: pathToFileURL(structure).href,
+        },
+      ],
+    };
+    assert.equal(
+      readFileSync(shown, "utf8"),
+      `${JSON.stringify(request, null, 2)}\n`,
+    );
   },
 );

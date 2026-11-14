@@ -1020,3 +1020,66 @@ fn several_java_blocks_are_listed_with_a_count_past_four() {
         "`a`, `b`, `c` or 2 other Java blocks",
     );
 }
+
+#[test]
+fn a_java_block_is_written_apart_only_where_its_forms_are_its_own() {
+    let index = load(states(), sensitivity()).expect("the fixture loads");
+    let at = index.at("1.0").expect("the fixture maps 1.0");
+    assert_eq!(
+        at.written_apart("minecraft:stone_bricks"),
+        Some("minecraft:stonebrick")
+    );
+    assert_eq!(
+        at.written_apart("minecraft:birch_log"),
+        Some("minecraft:log")
+    );
+    assert_eq!(
+        at.written_apart("minecraft:oak_sign"),
+        None,
+        "`spruce_sign` writes the same forms"
+    );
+    assert_eq!(
+        at.written_apart("minecraft:oak_slab"),
+        None,
+        "a Bedrock spelling is written as itself"
+    );
+    assert_eq!(
+        at.written_apart("minecraft:creeper_head"),
+        None,
+        "refused here"
+    );
+    assert_eq!(at.written_apart("minecraft:no_such_block"), None);
+}
+
+#[test]
+fn a_java_block_sharing_one_form_or_refused_one_pair_is_not_written_apart() {
+    let apart = |catalog: Value, java: &str| {
+        let index = load(catalog, sensitivity()).expect("the variant loads");
+        let at = index.at("1.0").expect("the fixture maps 1.0");
+        at.written_apart(java).map(str::to_owned)
+    };
+    assert_eq!(
+        apart(states(), "minecraft:white_bed"),
+        Some("minecraft:bed".to_owned())
+    );
+    let mut shared = states();
+    let red_bed = shared["families"]
+        .as_array_mut()
+        .and_then(|families| {
+            families
+                .iter_mut()
+                .find(|f| f["ids"] == json!(["bed=red_bed"]))
+        })
+        .expect("the fixture maps `red_bed`");
+    red_bed["java"] = json!({ "occupied": ["true"], "part": ["head", "foot"] });
+    red_bed["states"] =
+        json!({ "head_piece_bit": { "reads": ["part"], "map": { "head": true, "foot": false } } });
+    assert_eq!(apart(shared.clone(), "minecraft:red_bed"), None);
+    assert_eq!(apart(shared, "minecraft:white_bed"), None);
+    let refused = with(
+        states(),
+        "/refused",
+        json!({ "1.0": ["jigsaw", "skull=creeper_head", "frame=white_bed"] }),
+    );
+    assert_eq!(apart(refused, "minecraft:white_bed"), None);
+}

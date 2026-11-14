@@ -30,14 +30,14 @@ def cottage class=house size=9x7:
 
 ## 9.2 Editing model
 
-**Subject to change.** The address the compiler gives a member without `id=`, and the `edit` patch
-DSL that would use it, are not built yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
-Important members carry `id=`. Members without one get a **meaning-based stable address** derived
-from parent / role / side / level / offset rather than from generation order, so addresses stay
-stable when you append to a struct. No pass derives that address yet: today a member without `id=`
-has no address.
+Important members carry `id=`. Every member of a `struct` or `def` body also gets a **meaning-based
+stable address** derived from parent / role / side / level / offset rather than from generation
+order, so addresses stay stable when you append to a struct. `window@front[0]` is the window
+nearest the left end of the front wall, and `level[1].window@front[0]` the one nearest it under the
+second `level` from the bottom. [Syntax §5.5](/spec/syntax/#55-ids-classes-addresses) gives the
+form and how members of one role on one wall are counted. Reordering lines, or adding a member of
+another role, on another wall or further along the wall, moves no address. A member added ahead of
+others of its role on its wall renumbers those after it, which is what `id=` is for.
 
 Edits are a patch DSL against a selector or address:
 
@@ -47,14 +47,96 @@ edit window@front[0]                  set mat_slot=accent_glass
 edit door[id=entry]                   set side=front at=center
 ```
 
-`edit` is not accepted yet. A top-level `edit` line is `E_PARSE`, since the only top-level items
-are `theme`, `def`, `site` and `struct`, so no edit is applied today and the edit-diff rule below
-has nothing to compare.
+**The line.** An edit is a top-level line, `edit TARGET set key=value …`, with at least one
+`key=value` after `set`. It may stand anywhere among the items, before or after the bodies it
+changes. Its target takes one of two forms:
 
-Editing at the level of a concept, such as "make only the second-floor windows arched", must be
-possible without breaking the whole. Edit diffs look only at what a line writes, its `intent_state`
-and its arguments ([Blockstate Model](/spec/blockstate/)), so a change in derived results does not
-harm edit stability.
+- A **selector**: a member keyword and its attributes in brackets, in the grammar of a `theme`'s
+  selector rows ([Materials and Themes
+  §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)). It selects every member of that
+  keyword that matches each attribute, so `window[]` selects every window. Brackets may follow one
+  another, and `window[class=vent][level=floor2]` is `window[class=vent,level=floor2]`. `level=NAME`
+  matches a member that stands under a `level` whose `id=` is `NAME`. Any other attribute matches
+  the value its key holds on the member's line, with `class=`, `id=` and `mat_slot=` compared as
+  label text.
+- An **address** ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), such as `window@front[0]`
+  or `level[1].door@inside.back[0]`, which selects the member of each body that carries it. A
+  bracket that holds a whole number is an address step, so `roof[0]` names the first `roof`, and
+  anything else in a bracket is a selector's attributes.
+
+A keyword with neither after it, as in `edit window set shape=arch`, does not parse (`E_PARSE`). A
+theme's selector row always carries its brackets, and an edit's selector is written the same way, so
+every window is `window[]`.
+
+**What an edit reaches.** An edit selects among the members of every `struct` and `def` body, those
+under a `level` or an `@edition` guard included, so an edit of a `def`'s member changes every
+`place` that uses the `def`. It reaches no `site` row: a row places a whole build rather than
+standing in one, takes no address, and is edited on its own line. It reaches no actuator patch
+(`door[id=entry] opened_by=sig.open`) either, which stands nowhere and adds to the member its
+selector picks. An edit of that member changes the member, and the patch still binds to it, since no
+edit changes an `id=`.
+
+**Each edit reads the lines as written.** An edit selects among the members as their lines write
+them, before any edit applies, and the edits then apply in source order, so when two edits set one
+key on the same member the later value stands. No edit changes what another selects. After `edit
+window[class=a] set class=b`, an `edit window[class=b] set y=3` changes the windows written
+`class=b` and not the ones the first edit gave that class. A member keeps the address its line gives
+it in the same way: an edit that sets `side=` or `offset=` moves the member's blocks and not its
+address, so every edit names the member by that address. What an edit selects can therefore be read
+from its own line and the lines it names, wherever the other edits stand.
+
+**Where a key goes.** An edit writes each `key=value` where the member's line would have put it
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), replacing the value
+the line wrote or adding one it did not. A blockstate key the keyword names goes into the member's
+`intent_state`, a `class=` or `mat_slot=` whose value is a label into the field of its own, and
+every other key into the member's arguments. An edit never writes `resolved_state`: lowering derives
+it again from the edited members. Every later pass reads the edited members, so a key an edit sets
+is checked as the line's own would be. A value of the wrong type is a type mismatch, a key written
+twice in one edit's selector or after its `set` is `E_DUPLICATE_ARG`, and a key no pass reads yet is
+`W_IGNORED_ARGUMENT`. A finding of lowering on the line of a member an edit changed, such as the
+refusal of a member the edit leaves unbuildable, carries a note at each edit that changed it. A
+finding about a value an edit wrote points at that value on the edit's line, and is reported once
+however many members the edit selects.
+
+**What an edit may set.** An edit sets the keys a line of its keyword takes, and the keys a `theme`
+selector of that keyword matches on ([Lint §11.3](/spec/lint/#113-error-vs-warning)), apart from
+`id=`. Any other key is `E_EDIT_UNKNOWN_KEY` and is not applied, while the edit's other keys are. A
+key outside the keyword's vocabulary names nothing, as it would on the line, and the finding lists
+the keys an edit of that keyword sets. `id=` is what edits, theme selectors and actuator patches
+name a member by, so an edit that renamed a member would change what the other lines select: a
+member's `id=` is written on its own line.
+
+**An edit that selects nothing.** An edit whose target matches no member changes nothing, and is
+`E_EDIT_UNMATCHED`, an error ([Lint §11.3](/spec/lint/#113-error-vs-warning)). For an address, the
+finding lists the addresses the members of its keyword carry. An edit whose keyword is not a member
+keyword is `E_UNKNOWN_KEYWORD` alone.
+
+**Edit stability.** Editing at the level of a concept, such as "make only the second-floor windows
+arched", must be possible without breaking the whole. Edit diffs look only at what a line writes,
+its `intent_state` and its arguments ([Blockstate Model](/spec/blockstate/)), so a change in derived
+results does not harm edit stability. An edit still reaches past the members it selects where
+another member's `resolved_state` follows them: a chest an edit moves away leaves its pair a single
+chest, and walls an edit makes taller lift the roof on them. `W_EDIT_RIPPLE` reports each member
+that changes this way ([Lint](/spec/lint/#edits)), so an edit meant for the second-floor windows
+says so when it changed something else.
+
+When an edit selects a member, lowering builds each body twice, with its edits and as written, and
+compares the cells of every member no edit selected, matched by its line. Such a member is reported
+once per structure when one of its cells holds another state with the edits than without them, or
+when it holds a cell in one build and not in the other. The finding names the first such cell in
+block-array order and the edits that changed a member of that body. A cell a selected member holds
+in either build is left out, since what stands there is the edit's own doing. An edit that changes
+the box a body builds into moves every other member's cells with it, as a roof's `overhang=` widens
+the box on each side alike, so the written build's cells are shifted by half the change in width and
+in depth before they are compared.
+
+`W_EDIT_RIPPLE` is a finding of block-array lowering, and each command sees the changes its lowering
+derives. `cairn compile`, `cairn lower`, `cairn info` and `cairn check --edition E --target V` read
+the blocks beside a member from a registry pack ([Blockstate Model
+§6.1](/spec/blockstate/#connections)), so they see a chest's pairing or a pane's sides change. A
+`cairn check` with no `--target`, and the language server, lower with no target at all and derive no
+connection, so they see only the changes in where a member's blocks stand, such as the roof that
+taller walls lift.
 
 ## 9.3 Multi-building with `site`
 
@@ -152,6 +234,13 @@ name (`E_INVALID_STRUCT_NAME` when that name spells such a device), and every wa
 ([§9.3.5](#935-ports-and-connect)). Two artifacts that would share a file name, compared ignoring
 case, are `E_OUTPUT_NAME_COLLISION`: a `place` named after a `struct`, or one `id=` placed in two
 sites, is refused rather than written over the other.
+
+`cairn compile --structure-format litematic` writes a site as one `.litematic` named after the site
+instead, each placement and walkway a region in it named as its `.nbt` file would be. A `struct`
+named after a site would write the same file, and the compile refuses it
+([§12.1.1](/spec/ecosystem-interop/#1211-litematica)). `--structure-format schem` names the files
+as `.nbt` does, each `.schem` carrying its placement's or walkway's origin as its `Offset`
+([§12.1.2](/spec/ecosystem-interop/#1212-sponge-schematic)).
 
 The world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
 the lockfile, by default `<source>.lock` beside the source (`village.crn.lock` for `village.crn`),

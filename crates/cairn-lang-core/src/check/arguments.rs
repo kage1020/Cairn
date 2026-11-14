@@ -3,27 +3,22 @@
 //! reported as ignored whatever its key. A theme selector's attribute (`window[tags=...]`) widens
 //! a role's vocabulary for its keyword only.
 
-use std::collections::{BTreeSet, HashMap};
-
 use indexmap::IndexMap;
 
 use crate::ast::{Item, Module, ThemeRule, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{
-    Actuator, IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS, Unread,
-    ValueWithSpan, role_of,
+    Actuator, IntentModule, Member, MemberRole, SelectorKeys, SelectorValue, UNIVERSAL_ARGUMENTS,
+    Unread, ValueWithSpan, role_of, selector_keys,
 };
 use crate::prose::or_list;
 use crate::suggest::{did_you_mean_note, nearest_match, one_edit_match};
 
 use super::DiagnosticSink;
 
-/// Keys the theme selectors match on, per keyword; ordered for a stable closed-set note.
-type SelectorKeys<'a> = HashMap<&'a str, BTreeSet<&'a str>>;
-
 pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink) {
     check_selector_bindings(module, sink);
-    let selected = selector_keys(ir);
+    let selected = selector_keys(&ir.themes);
     for s in &ir.structs {
         check_header("struct", &s.args, sink);
         walk(&s.members, &selected, sink);
@@ -89,19 +84,6 @@ fn check_header(keyword: &str, args: &IndexMap<String, ValueWithSpan>, sink: &mu
             sink.push(unread_header_argument(keyword, key, &value.span));
         }
     }
-}
-
-fn selector_keys(ir: &IntentModule) -> SelectorKeys<'_> {
-    let mut keys: SelectorKeys<'_> = HashMap::new();
-    for theme in &ir.themes {
-        for rule in &theme.selectors {
-            let entry = keys.entry(rule.keyword.as_str()).or_default();
-            for key in rule.attrs.keys() {
-                entry.insert(key.as_str());
-            }
-        }
-    }
-    keys
 }
 
 fn walk(members: &[Member], selected: &SelectorKeys<'_>, sink: &mut DiagnosticSink) {

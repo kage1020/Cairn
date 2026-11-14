@@ -16,13 +16,13 @@ block-array IR                   ボクセル格子 + パレット + block entit
 
 すべてのフォーマットのフロントエンドとバックエンドは、この層でつながります。差分 (diff)、IoU、シリアライズもすべてこの層で行います。block-array IR はボクセル格子、パレット、block entities、entities を持ち、フォーマット・エディション・バージョンのどれにも依存しません。
 
-順方向の変換ではこの層が出力先になり、逆方向の変換では入力先になります ([エコシステム連携](/ja/spec/ecosystem-interop/))。
+順方向の変換ではこの層が出力先になり、逆方向の変換はこの層を読みます。取り込みもこの層で検証します。取り込みが書き出すソースは、ファイルが持つ block array へ lowering されなければなりません ([エコシステム連携](/ja/spec/ecosystem-interop/))。
 
 ## 3.2 Intent IR は情報が豊富で、不変条件を持つ
 
-名前付きのメンバーは、`id`、`class`、`role`、`mat_slot`、`intent_state`、`resolved_state` を持ちます ([ブロックステート](/ja/spec/blockstate/))。`resolved_state` は lowering が導くので、lowering が読む Intent IR ではなく、メンバーを lowering した先の block-array IR に、構造ごとのキーで記録します。
+名前付きのメンバーは、`id`、`class`、`role`、アドレス ([構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス))、`mat_slot`、`intent_state`、`resolved_state` を持ちます ([ブロックステート](/ja/spec/blockstate/))。`resolved_state` は lowering が導くので、lowering が読む Intent IR ではなく、メンバーを lowering した先の block-array IR に、構造ごとのキーで記録します。ソースの `edit` の行は、どのパスが読むよりも先に Intent IR に適用するので、その後のパスはどれも編集したメンバーを見ます ([コンポーネント・編集・複数建築 §9.2](/ja/spec/components-editing-sites/#92-編集モデル))。
 
-raw のまま取り込んだだけでは、有効な Intent IR にはなりません。意味を付けて引き上げる (リフトする) ことで、はじめて Intent IR になります。その途中の成果物がどこまで進んだかは、`semantic_level: raw | grouped | lifted` で表します。
+取り込みは独自の IR を加えません。`cairn import` が書き出すのはソース、つまり Intent IR のエスケープハッチである生のメンバーからなる `.crn` で、そのソースはほかのソースと同じようにパースされ、ファイルが持っていた block array へ lowering されます ([エコシステム連携 §12.2](/ja/spec/ecosystem-interop/#122-逆方向の変換-コンパイラは写し取りllm-がリフトする))。生のメンバーはブロックを名指し、`mat_slot` を読まないので、書き出したものは `semantic_level: grouped`、つまり L1 にあたります。リフトはそのソースを `lifted`、つまり上の不変条件が述べるメンバーへとリファクタリングします。
 
 ## 3.3 レッドストーンのサブ層
 

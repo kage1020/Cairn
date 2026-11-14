@@ -28,6 +28,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "circuit",
     "raw_block",
     "raw_fill",
+    "raw_repeat",
     "place",
     "connect",
 ];
@@ -151,6 +152,8 @@ pub enum MemberRole {
     RawBlock,
     /// `raw_fill` escape hatch: one block id in every cell of a box.
     RawFill,
+    /// `raw_repeat` escape hatch: the raw members indented under it, written again at each step.
+    RawRepeat,
     /// `place` site placement.
     Place,
     /// `connect` site topology edge.
@@ -281,6 +284,7 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Place
             | Self::Connect
             | Self::Other(_) => None,
@@ -291,7 +295,14 @@ impl MemberRole {
     /// kind an `@edition` guard holds.
     #[must_use]
     pub fn is_escape_hatch(&self) -> bool {
-        matches!(self, Self::RawBlock | Self::RawFill) || self.is_tier0_part()
+        matches!(self, Self::RawBlock | Self::RawFill | Self::RawRepeat) || self.is_tier0_part()
+    }
+
+    /// Whether a `raw_repeat` writes a line of this role again at each step: a `raw_block` or a
+    /// `raw_fill`.
+    #[must_use]
+    pub fn is_repeatable(&self) -> bool {
+        matches!(self, Self::RawBlock | Self::RawFill)
     }
 
     /// Whether this is a Tier 0 part, a redstone part placed by hand (`spec/redstone` "Tier 0
@@ -339,8 +350,9 @@ impl MemberRole {
             Self::Comparator => &["at", "offset", "y", "facing", "mode"],
             Self::RedstoneDust => &["at", "offset", "y", "connect"],
             Self::Circuit => &["region", "void"],
-            Self::RawBlock => &["mat", "at"],
-            Self::RawFill => &["mat", "from", "to"],
+            Self::RawBlock => &["mat", "at", "origin"],
+            Self::RawFill => &["mat", "from", "to", "origin"],
+            Self::RawRepeat => &["count", "step"],
             // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
             // fix this set.
             Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
@@ -375,6 +387,7 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Place
             | Self::Connect
             | Self::Other(_) => &[],
@@ -422,6 +435,7 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Place
             | Self::Connect => &[UnreadArgument {
                 key: "mat_slot",
@@ -529,6 +543,7 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Connect
             | Self::Other(_) => &[],
         }
@@ -578,6 +593,7 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "circuit" => MemberRole::Circuit,
         "raw_block" => MemberRole::RawBlock,
         "raw_fill" => MemberRole::RawFill,
+        "raw_repeat" => MemberRole::RawRepeat,
         "place" => MemberRole::Place,
         "connect" => MemberRole::Connect,
         other => MemberRole::Other(other.to_owned()),

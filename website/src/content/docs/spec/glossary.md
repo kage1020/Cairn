@@ -41,6 +41,15 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   and no type, and no keyword places a block entity or an entity yet; `type` will sit beside `role`.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
+- **Address.** The name the compiler gives every member of a `struct` or `def` body from where it
+  stands, `ROLE@SIDE[N]` per step, such as `level[1].window@front[0]`: never from line order, so
+  reordering lines or appending a member elsewhere moves none. See
+  [syntax §5.5](/spec/syntax/#55-ids-classes-addresses).
+- **`edit`.** A top-level line, `edit TARGET set key=value …`, that changes the members a selector
+  (`window[class=vent]`) or an address (`window@front[0]`) selects, as their lines write them,
+  without rewriting those lines. A member it does not select whose `resolved_state` it changes is
+  `W_EDIT_RIPPLE`. See
+  [components-editing-sites §9.2](/spec/components-editing-sites/#92-editing-model).
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
@@ -64,11 +73,15 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 ## Materials and themes
 
 - **Canonical token.** The value bound to a slot or theme selector: a *meaning* token, not a raw
-  block ID. The backend resolves the per-`(edition, version)` ID and state names. See
-  [materials-themes §7.2](/spec/materials-themes/#72-canonical-vocabulary).
+  block ID. The backend resolves the per-`(edition, version)` ID and state names, across a rename,
+  a split and a merge. See [materials-themes §7.2](/spec/materials-themes/#72-canonical-vocabulary).
 - **Canonical block token.** A specific block meaning: `@oak_planks`, `@water_cauldron`,
-  `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → `cauldron`) are
-  forbidden.
+  `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → an empty `cauldron`)
+  are forbidden.
+- **Meaning token.** A property a canonical block token carries that its block does not have, whose
+  value picks one of the blocks the block split into: `fluid` in `@cauldron[fluid=water]`. The
+  registry pack's `meanings` table lists them. See [materials-themes
+  §7.3](/spec/materials-themes/#73-mappings-across-version-and-edition).
 - **Abstract material token.** An aesthetic choice: `@floor.wood.broadleaf`, `@roof.dark_wood`.
   Theme policy MAY downgrade these (e.g. oak↔birch).
 - **Tier-1 token.** An abstract material token the built-in `materials` catalogs declare, Stable
@@ -109,8 +122,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@cairn`.** Header declaring the **Cairn language version** the file was written against
   (CalVer `YYYY.M[.PATCH]`). Provenance only; optional.
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
-  on conflict with the inferred value. That error, `E_REQUIRES_CONFLICT`, is reserved: no inferred
-  range is derived yet. A `cairn compile --target` below the floor is `E_VERSION_CAP`. See
+  on conflict with the inferred range: a floor above the last version that declares a block the
+  build paints is `E_REQUIRES_CONFLICT`. A `cairn compile --target` below the floor is
+  `E_VERSION_CAP`. See
   [versioning-editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
   verification record, since the record lives in the lock. Still weighed against the file's own
@@ -120,11 +134,12 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   `lock_schema_version`, `source_hash`, `cairn_version`, `target` (`edition`, `mc_version`,
   `data_version`), `inputs` (`registry_pack_hash`, `constraint_catalog_hash`), `resolved_ir_hash`,
   `verified: true` and `member_version_sensitivity`, plus `placements` and `walkways` for a source
-  with a `site`. See
+  with a `site`. `cairn info` reports the target it verified as its `verified target` row. See
   [versioning-editions §10.6](/spec/versioning-editions/#106-provenance-and-lock).
-- **Provenance stamp.** `(edition, version)` recorded onto the block-array IR on import, mapped from
-  the format itself (`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java). See
-  [ecosystem-interop §12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls).
+- **Provenance stamp.** `(edition, version)` an import stamps onto the source it writes: the edition
+  the format's (`.nbt`, `.litematic` and `.schem` → java, `.mcstructure` → bedrock), and the shipped
+  target at or nearest after the version the file was saved at. See [ecosystem-interop
+  §12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls).
 
 ## Redstone
 
@@ -161,9 +176,11 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   meaning/behavior/appearance changed at this version" from `since/until`. Cauldron split @1.17,
   wall connection bool→none/low/tall @1.16, item format @1.20.5 are examples. See
   [versioning-editions §10.5](/spec/versioning-editions/#105-which-version-is-it-for-has-three-answers).
-- **Block IoU.** Voxel intersection-over-union used for the import self-correction loop. Convergence
-  threshold ≥ 0.985. See
-  [ecosystem-interop §12.2](/spec/ecosystem-interop/#122-reverse-direction-the-compiler-transliterates-an-llm-lifts),
+- **Block IoU.** `block_iou`, the voxel intersection-over-union `cairn diff-blocks` scores a lift
+  by: the cells where a structure file and a build hold the same block id, over the cells either
+  holds a block at. A lift converges at ≥ 0.985, with `state_accuracy` ≥ 0.995 (matched cells whose
+  states agree) and residual raw ≤ 5% (`residual_ratio`, built cells a raw member builds). See
+  [ecosystem-interop §12.2.1](/spec/ecosystem-interop/#1221-diffing-a-lift),
   [evaluation §13.2](/spec/evaluation/#132-reverse-conversion-auxiliary-metrics).
 - **Zero-shot Compile Rate / Fix Convergence Rate / Token Efficiency / Edit Stability.** The four
   primary spec-iteration metrics. See [evaluation §13.1](/spec/evaluation/#131-primary-metrics).
@@ -189,7 +206,12 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   L1 (spatial compression, no naming); L2 is the LLM's job (naming → `wall`, `mat_slot`,
   `theme`). See [ecosystem-interop §12.3](/spec/ecosystem-interop/#123-three-tiers-of-transliteration).
 - **`raw_fill` / `raw_block` / `raw_repeat`.** Escape-hatch primitives that name a block id
-  directly, skipping slot and theme; `raw_block` and `raw_fill` are built today. Faithful
-  transliteration writes them, and its instances carry `origin=imported` so they are not treated as
-  first-class design DSL. See
+  directly, skipping slot and theme; a `raw_repeat` writes the `raw_block` and `raw_fill` lines
+  under it again at a fixed step. Faithful transliteration writes them, and its instances carry
+  `origin=imported` so they are not treated as first-class design DSL: an imported raw member sizes
+  the volume and takes the connection states it leaves out from its neighbours. See
   [materials-themes §7.4](/spec/materials-themes/#74-raw-blocks).
+- **Region.** Cells a voxel diff finds missing, extra, replaced or in another state, of one block
+  and standing together, reported with the member that likely caused them and, when building with
+  one closes them, an `edit` line. See
+  [ecosystem-interop §12.2.2](/spec/ecosystem-interop/#1222-regions-and-their-causes).

@@ -27,6 +27,13 @@ theme medieval:
   window[class=small] -> frame=@spruce_wood
 ```
 
+**What a row selects.** A selector is a member keyword and its attributes in brackets, and it
+selects the members of that keyword that match each attribute. `level=NAME` matches a member that
+stands under a `level` whose `id=` is `NAME`, and any other attribute matches the value its key
+holds on the member's line. Brackets may follow one another: `window[class=small][side=front]` is
+`window[class=small,side=front]`. An `edit` line selects by the same grammar ([Components, Editing,
+and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
+
 **The cascade.** A member collects the bindings of every selector row it matches, in source order,
 so when two rows bind the same key the member keeps the later value. CSS applies the same rule to
 two rules of equal weight. Bindings are reserved (below), so today the cascade decides what a member
@@ -42,8 +49,8 @@ value is dead text whatever a binding comes to mean. That is
 `E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error even while
 bindings are reserved, for the reason `E_DUPLICATE_ARG` refuses one key written twice inside one row
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Sameness is by meaning: attribute
-order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
-`window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
+order does not count, and `class=` / `id=` / `mat_slot=` / `level=` values compare as label text,
+so `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
 different keys are not reported. They compose, and splitting a long binding list over two lines is
 allowed.
 
@@ -76,18 +83,18 @@ little-endian NBT, or Bedrock's `weirdo_direction`. The canonical vocabulary spe
 state values as Java does: `@oak_stairs[facing=east]` writes Java's `facing`, and the Bedrock backend
 maps it to its own `weirdo_direction`.
 
-The backend resolves less than that today. A canonical token is written as `minecraft:<token>` and
-checked against the pinned target ([§7.3](#73-mappings-across-version-and-edition)), so
-`@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version. Its states are the ones the token's
-Java block takes, and the Bedrock writer maps them through the pack's state map for the target
-version: `@oak_log[axis=x]` is written as `pillar_axis=x` on every Bedrock version, while
+A canonical token is written as `minecraft:<token>` where the pinned target declares that ID, and
+through the target's tables where it does not ([§7.3](#73-mappings-across-version-and-edition)), so
+`@water_cauldron` is written on Bedrock as its `cauldron` holding water. Its states are the ones the
+token's Java block takes, and the Bedrock writer maps them through the pack's state map for the
+target version: `@oak_log[axis=x]` is written as `pillar_axis=x` on every Bedrock version, while
 `@cherry_wood[axis=x]` is `E_STATE_UNMAPPED` at 1.21.40, whose map has no form for it.
 
 Tokens come in two kinds:
 
 | Kind | Example | What it means |
 |---|---|---|
-| **Canonical block token** | `@oak_planks`, `@water_cauldron`, `@oak_log[axis=x]` | A specific meaning in Minecraft. Silent meaning-breaking downgrades are **forbidden**, so `@water_cauldron` may never become `cauldron`. |
+| **Canonical block token** | `@oak_planks`, `@water_cauldron`, `@oak_log[axis=x]` | A specific meaning in Minecraft. Silent meaning-breaking downgrades are **forbidden**, so `@water_cauldron` may never become an empty `cauldron`. |
 | **Abstract material token** | `@floor.wood.broadleaf`, `@roof.dark_wood` | An aesthetic choice. Theme policy MAY downgrade these (oak ↔ birch). |
 
 ```
@@ -148,25 +155,54 @@ A canonical token absorbs five patterns. The resolution table's structure is in
 
 | Pattern | Example | Policy |
 |---|---|---|
-| Rename 1:1 | `@dirt_path` (was `grass_path`) | Auto-resolve. |
+| Rename 1:1 | `@chain` (Java 26.3's `iron_chain`) | Auto-resolve per target. |
 | Split 1:N | `@cauldron[fluid=water]` → `water_cauldron` | Separate by meaning token. |
-| Merge N:1 | `@oak_slab` (was `wooden_slab{variant}`) | Resolve per target. |
-| New | `@cherry_planks` | Needs a `requires >=` floor. |
+| Merge N:1 | `@stone_bricks` (Bedrock 1.21.0's `stonebrick[stone_brick_type=default]`) | Resolve per target. |
+| New | `@pale_oak_planks` | Refused below the first target that declares it. |
 | Deleted | Absent in the target version | Hard error plus alternatives. |
 
-Today only the last row holds as written. A canonical token is written as `minecraft:<token>` and
-checked against the pinned target ([Versioning and Editions
-§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)). A rename is
-`E_UNKNOWN_ID`, with a note naming the target's spelling from the registry pack's `aliases`
-(`@dirt_path` on Bedrock is answered with `minecraft:grass_path`); only an abstract token resolves
-across a rename, through its catalog entry's `overrides` ([§7.2](#72-canonical-vocabulary)). A split
-is not separated: `@cauldron[fluid=water]` names a state `minecraft:cauldron` does not have, so a
-pinned target refuses it as `E_STATE_DOMAIN` rather than reading it as `water_cauldron`. A merged id
-is checked per target like any other. No floor is inferred for a new block: `@pale_oak_planks` with
-no `@requires` checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it, naming
-1.21.4 as the first target that declares it. A deleted id is `E_UNKNOWN_ID`, naming the last target
-that declares it; an id no version declares names the nearest block the target has when one is near
-enough.
+A canonical token is written as `minecraft:<token>` and checked against the pinned target
+([Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)). Three of the
+target's registry pack tables answer the token first, in this order:
+
+1. **Meaning token**, for a split. The pack's `meanings` table lists each token whose block split
+   into several, with its meaning token, a property the block does not have whose value picks one of
+   them, and the block each value names. `@cauldron[fluid=water]` is `water_cauldron`, with `fluid`
+   dropped and every other state kept. A value the row does not list is `E_STATE_DOMAIN`, which
+   names the values it does list.
+2. **Rename**, where the pinned target does not declare the token's ID. When some version of the
+   edition declares it and its `aliases` group is one block renamed across the edition's range, so
+   that no version declares two of its spellings, the token is written under the one spelling the
+   target declares: Java 26.3 writes `@chain` as `iron_chain`, and Java 1.21.4 writes `@iron_chain`
+   as `chain`.
+3. **State map**, on Bedrock, where the pinned version does not declare the ID. A Java block the
+   version's state map writes as a Bedrock block is written as that block when no other Java block
+   mapped onto it takes any of the same forms there, so what is written still says which block it
+   was. `@oak_sign` is written as `standing_sign`, and `@stone_bricks` at 1.21.0 as
+   `stonebrick[stone_brick_type=default]`, a merge resolved per target. The palette keeps the Java
+   block and its states, which the writer maps as it maps any other's. A bed is not written so:
+   Bedrock keeps every bed's colour, and every flower pot's plant, in the block entity, so its
+   blocks cannot tell them apart and `@black_bed` stays `E_UNKNOWN_ID` there.
+
+A token none of them answers is `E_UNKNOWN_ID`, with a note naming the target's spelling from the
+pack's `aliases` where it has one: `@stonebrick` on Bedrock 1.21.60 is answered with the four blocks
+1.21.40 split it into, since choosing one would be the silent substitution [Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference) forbids. With no
+target pinned, a token some targetable version writes under another spelling passes as itself, so
+the range-wide passes of `cairn check` and `cairn info` do not refuse what a pinned build writes. A
+raw block names the ID it writes and is not read through these tables ([§7.4](#74-raw-blocks)), and
+an abstract token resolves through its catalog entry and that entry's `overrides`
+([§7.2](#72-canonical-vocabulary)). `cairn info` names each token a version writes under another ID,
+with the ID it writes ([Versioning and Editions](/spec/versioning-editions/#the-respelled-row)).
+
+No floor is inferred for a new block: `@pale_oak_planks` with no `@requires` checks clean on Java
+1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it, naming 1.21.4 as the first target that
+declares it, and `cairn info` starts Java's inferred range there ([Versioning and
+Editions](/spec/versioning-editions/#the-inferred-range-row)). A deleted id is `E_UNKNOWN_ID`,
+naming the last target that declares it, and ends the inferred range there, so a floor above that
+target is `E_REQUIRES_CONFLICT`; an id no version declares names the nearest block the target has
+when one is near enough.
 
 **Only ID, state, and serialization differences may be absorbed.** Concept absence and
 game-behaviour differences are not.
@@ -207,10 +243,10 @@ stands as a lone post to the wall under it
 ([Blockstate Model §6.1](/spec/blockstate/#connections)).
 A raw block over one half of a `door` replaces that half, and the game then drops the other; the
 line asks for that block, so nothing warns. Two raw members writing one cell contest it in their
-phase, and the later line wins with `W_PHASE_CONFLICT`. A raw member does not size the volume. As
-with a `fill`, a cell outside the footprint, or above every row the struct as written reaches, is
-`E_INVALID_MEMBER`, and a cell in a row the struct reaches but does not build is
-`W_DEFERRED_MEMBER`.
+phase, and the later line wins with `W_PHASE_CONFLICT`. A raw member does not size the volume unless
+`origin=imported` marks it (below). As with a `fill`, a cell outside the footprint, or above every
+row the struct as written reaches, is `E_INVALID_MEMBER`, and a cell in a row the struct reaches but
+does not build is `W_DEFERRED_MEMBER`.
 
 A `mat=` that is missing or not a block id is `E_INVALID_MEMBER`. That includes `@stone`, a
 canonical token, which a slot binds. So is an `at=`, `from=` or `to=` that is missing or not a
@@ -224,7 +260,37 @@ check at the pinned target keeps an unguarded one honest: `minecraft:light` buil
 edition under `@edition` ([Versioning and Editions
 §10.7](/spec/versioning-editions/#writing-an-alternative)).
 
-`raw_repeat` and the `origin=imported` that marks what import writes belong to import
-([Ecosystem Interop §12.3](/spec/ecosystem-interop/#123-three-tiers-of-transliteration)), which
-does not exist yet. Until it does, `raw_repeat` is `E_UNKNOWN_KEYWORD` and `origin=` is
-`E_UNKNOWN_ARGUMENT`.
+A `raw_repeat` writes the raw members indented under it again at a fixed step:
+
+```
+raw_repeat count=4 step=3,0,0
+  raw_fill  mat=minecraft:glass_pane from=1,2,0 to=1,3,0
+  raw_block mat=minecraft:lantern at=2,3,0
+```
+
+`count=` is how many copies are written, a positive integer, and `step=` how far each copy lies from
+the one before, a coordinate triple read as a distance ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)); the first copy is the lines as written. It
+holds only `raw_block` and `raw_fill` lines, and any other line under it is `E_UNSUPPORTED_NESTING`,
+another `raw_repeat` included ([Syntax §5.2](/spec/syntax/#52-nesting)). It may stand under a
+`level`, whose `y=` every copy takes, and under an `@edition` guard, which keeps every copy to its
+edition's build. Each copy is the raw member moved by its offset, and the member is judged by its
+last copy, which is the farthest on every axis since no step is negative: a member whose last copy
+lies outside the footprint or above every row the struct as written reaches is `E_INVALID_MEMBER`,
+one whose last copy lies in a row the struct reaches but does not build is `W_DEFERRED_MEMBER`, and
+either way no copy is built. Copies of one member that overlap contest nothing, so they raise no
+`W_PHASE_CONFLICT`, while a copy and another line still contest their cells. A `raw_repeat` with no
+`count=` or `step=`, a `count=` that is not a positive integer, a `step=` that is not a triple, a
+`step=0,0,0` over more than one copy, or no raw member under it is `E_INVALID_MEMBER`, and none of
+its members is built. It puts down nothing of its own, so a `mat_slot=` on its line is
+`W_IGNORED_ARGUMENT`.
+
+`origin=imported` marks a raw member `cairn import` wrote ([Ecosystem Interop
+§12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls)), and changes two things. The
+member sizes the volume: the struct is at least as tall as the highest row it, or its `raw_repeat`'s
+last copy, names, so an import is as tall as the file it came from ([Compilation Model
+§4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)). And its block takes the
+connection states its `mat=` leaves out from the blocks beside it, as a material's block does, while
+a state its `mat=` writes is kept ([Blockstate Model §6.1](/spec/blockstate/#connections)).
+Everything else above holds of it. `origin=` takes only `imported`, and any other value is
+`E_INVALID_MEMBER`: the mark says where a line came from, and a line written by hand leaves it out.

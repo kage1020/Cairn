@@ -7,10 +7,11 @@ use cairn_lang_core::block_array::{
     lower_to_block_array,
 };
 use cairn_lang_core::resolve::{DroppedIntent, declared_version_floors, versions_satisfying};
-use cairn_lang_core::{Edition, lower, parse, resolve};
-use cairn_lang_formats::bedrock_structure::ParityNote;
+use cairn_lang_core::{Edition, Severity, check, lower, parse, resolve};
+use cairn_lang_formats::bedrock_structure::{BedrockVolume, ParityNote};
 use cairn_lang_formats::data_version::BedrockTarget;
 use cairn_lang_formats::registry::{RegistryPack, VersionStates, builtin_pack};
+use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
 
@@ -96,6 +97,40 @@ pub fn lower_source(source: &str, edition: Edition, mc_version: Option<&str>) ->
     )
 }
 
+/// The block-array IR `source` compiles to for `edition` at `mc_version`, as `cairn compile`
+/// checks and lowers it, or the codes of the errors that refuse it.
+///
+/// # Errors
+///
+/// The codes, when a pass raises an error or `source` does not parse.
+pub fn compile_source(
+    source: &str,
+    edition: Edition,
+    mc_version: &str,
+) -> Result<BlockArrayIr, Vec<String>> {
+    let module = parse(source).map_err(|err| vec![err.user_message()])?;
+    let ir = lower(&module);
+    let mut findings = check(&module, &ir, Some(edition));
+    let resolution = resolve(&ir, Some(edition));
+    findings.extend(resolution.diagnostics.iter().cloned());
+    let mut built = lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&builtin_pack(edition).view(Some(mc_version))),
+    );
+    findings.append(&mut built.diagnostics);
+    let errors: Vec<String> = findings
+        .iter()
+        .filter(|finding| finding.severity() == Severity::Error)
+        .map(|finding| finding.code.as_str().to_owned())
+        .collect();
+    if errors.is_empty() {
+        Ok(built)
+    } else {
+        Err(errors)
+    }
+}
+
 /// [`lower_source`] over the shipped example `name`.
 pub fn lower_example(name: &str, edition: Edition, mc_version: Option<&str>) -> BlockArrayIr {
     lower_source(&example_source(name), edition, mc_version)
@@ -131,6 +166,25 @@ pub fn admitted_versions(pack: &RegistryPack, source: &str, edition: Edition) ->
     versions_satisfying(&pack.version_order(), &floors, &considered)
         .into_iter()
         .map(str::to_owned)
+        .collect()
+}
+
+/// A `.mcstructure` cell as read: its block and its second layer's, each a name and its states.
+pub type BedrockCell = (Option<(String, Compound)>, Option<(String, Compound)>);
+
+/// Each cell of `volume`, in its voxel order.
+pub fn bedrock_cells(volume: &BedrockVolume) -> Vec<BedrockCell> {
+    let named = |slot: &Option<PaletteIndex>| {
+        slot.map(|slot| {
+            let block = &volume.palette[usize::from(slot.0)];
+            (block.name.clone(), block.states.clone())
+        })
+    };
+    volume
+        .blocks
+        .iter()
+        .zip(&volume.liquids)
+        .map(|(block, liquid)| (named(block), named(liquid)))
         .collect()
 }
 
@@ -219,6 +273,40 @@ pub fn states_for(target: &BedrockTarget) -> VersionStates<'_> {
         .expect("the built-in Bedrock pack maps every targetable version")
 }
 
+/// A block-array IR holding `array` alone, under its `source_scope`.
+pub fn ir_of(array: BlockArray) -> BlockArrayIr {
+    BlockArrayIr {
+        structures: IndexMap::from([(array.source_scope.clone(), array)]),
+        placements: IndexMap::new(),
+        walkways: IndexMap::new(),
+        members: IndexMap::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+/// An array of `dims` holding `ids` after air, its voxels the palette slots `slots` in `(y, z, x)`
+/// order, under `struct::<name>`.
+///
+/// # Panics
+///
+/// When `slots` is not one slot per voxel.
+pub fn array_of(name: &str, dims: Dims, ids: &[&str], slots: &[u16]) -> BlockArray {
+    let mut palette = Palette::new_with_air();
+    for id in ids {
+        palette.intern(BlockState::bare(*id));
+    }
+    assert_eq!(slots.len(), dims.volume(), "one slot per voxel");
+    BlockArray {
+        dims,
+        palette,
+        voxels: slots.iter().map(|&slot| PaletteIndex(slot)).collect(),
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: format!("struct::{name}"),
+        derived: Vec::new(),
+    }
+}
+
 /// A 2×2×3 array of stone under a comparator spelled `id` at (1, 1, 1), its block entity resting
 /// at strength 3, where Java's `blocks` and Bedrock's `block_indices` order it apart.
 ///
@@ -255,5 +343,63 @@ pub fn comparator_array(id: &str) -> BlockArray {
         entities: vec![],
         source_scope: "struct::comparator".to_owned(),
         derived: Vec::new(),
+    }
+}
+
+/// A row of one voxel per entry of `slots`, under `struct::wide`, whose palette after air is
+/// `minecraft:b1` up to `minecraft:b<len - 1>`.
+///
+/// # Panics
+///
+/// When `slots` is longer than a `u32` counts.
+pub fn wide_array(len: usize, slots: &[u16]) -> BlockArray {
+    let mut entries = vec![BlockState::air()];
+    entries.extend((1..len).map(|i| BlockState::bare(format!("minecraft:b{i}"))));
+    BlockArray {
+        dims: Dims {
+            x: u32::try_from(slots.len()).expect("a row a u32 counts"),
+            y: 1,
+            z: 1,
+        },
+        palette: Palette { entries },
+        voxels: slots.iter().map(|&slot| PaletteIndex(slot)).collect(),
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: "struct::wide".to_owned(),
+        derived: Vec::new(),
+    }
+}
+
+/// `array` as a reader returns it: its palette, its grid, and the block entities a structure
+/// holds, the last at each voxel of the grid in `(y, z, x)` order, with their fields.
+pub fn volume_of(array: &BlockArray) -> BlockVolume {
+    let mut placed: Vec<(usize, &BlockEntity)> = Vec::new();
+    for entity in &array.block_entities {
+        let (x, y, z) = entity.pos;
+        let Some(index) = array.dims.index(x, y, z) else {
+            continue;
+        };
+        placed.retain(|&(at, _)| at != index);
+        placed.push((index, entity));
+    }
+    placed.sort_by_key(|&(index, _)| index);
+    BlockVolume {
+        dims: array.dims,
+        palette: array.palette.entries.clone(),
+        voxels: array.voxels.clone(),
+        block_entities: placed
+            .into_iter()
+            .map(|(_, entity)| {
+                let mut data = Compound::new();
+                for (field, value) in &entity.fields {
+                    data.insert(field.clone(), Tag::Int(*value));
+                }
+                StoredBlockEntity {
+                    pos: entity.pos,
+                    id: entity.id.clone(),
+                    data,
+                }
+            })
+            .collect(),
     }
 }

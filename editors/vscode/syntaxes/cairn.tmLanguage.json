@@ -7,6 +7,7 @@
     { "include": "#directive" },
     { "include": "#edition-guard" },
     { "include": "#top-level" },
+    { "include": "#edit-line" },
     { "include": "#slot-binding" },
     { "include": "#member-keyword" },
     { "include": "#string" },
@@ -43,6 +44,30 @@
         "1": { "name": "keyword.other.top-level.cairn" }
       }
     },
+    "edit-line": {
+      "name": "meta.edit.cairn",
+      "begin": "^(edit)\\b(?:\\s+([A-Za-z_][A-Za-z0-9_]*))?",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.edit.cairn" },
+        "2": { "name": "keyword.other.member.cairn" }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "match": "(?<=\\s)(set)(?=\\s)",
+          "captures": {
+            "1": { "name": "keyword.other.edit.cairn" }
+          }
+        },
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#material-token" },
+        { "include": "#block-id" },
+        { "include": "#attribute-key" },
+        { "include": "#coordinate" },
+        { "include": "#number" }
+      ]
+    },
     "slot-binding": {
       "match": "^\\s*(slot)\\s+([A-Za-z_][A-Za-z0-9_]*)",
       "captures": {
@@ -51,7 +76,7 @@
       }
     },
     "member-keyword": {
-      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|level|pressure_plate|lever|button|daylight|observer|lamp|piston|dispenser|chest|repeater|comparator|redstone_torch|redstone_dust|circuit|raw_block|raw_fill|place|connect)\\b",
+      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|level|pressure_plate|lever|button|daylight|observer|lamp|piston|dispenser|chest|repeater|comparator|redstone_torch|redstone_dust|circuit|raw_block|raw_fill|raw_repeat|place|connect)\\b",
       "captures": {
         "1": { "name": "keyword.other.member.cairn" }
       }

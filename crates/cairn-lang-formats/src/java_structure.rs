@@ -1,6 +1,8 @@
 //! A [`BlockArray`] as a Java structure file: `size`, `palette`, `blocks`, each with its block
 //! entity's `nbt`, an empty `entities` and `DataVersion`. Lowering never fills the IR's entities,
-//! so none is written.
+//! so none is written. [`read_structure`] reads such a file back, whichever tool saved it.
+
+mod read;
 
 use std::collections::HashMap;
 
@@ -15,6 +17,8 @@ use thiserror::Error;
 use crate::block_id::is_concrete_id;
 use crate::data_version::JavaTarget;
 use crate::dims::{VolumeError, dim_to_i32, dims_to_i32, fits_list_limit, list_volume};
+
+pub use read::{StoredStructure, StructureReadError, read_structure};
 
 /// Why a [`BlockArray`] cannot be written as a Java structure.
 #[derive(Debug, Error)]
@@ -305,6 +309,10 @@ pub enum OutputExt {
     Nbt,
     /// Bedrock structure (`.mcstructure`).
     Mcstructure,
+    /// Litematica schematic (`.litematic`).
+    Litematic,
+    /// Sponge Schematic (`.schem`).
+    Schem,
 }
 
 impl OutputExt {
@@ -314,6 +322,8 @@ impl OutputExt {
         match self {
             OutputExt::Nbt => "nbt",
             OutputExt::Mcstructure => "mcstructure",
+            OutputExt::Litematic => "litematic",
+            OutputExt::Schem => "schem",
         }
     }
 }
@@ -346,7 +356,10 @@ fn palette_list(entries: &[BlockState], data_version: i32) -> List {
     List::of_compounds(compounds)
 }
 
-fn palette_entry(state: &BlockState, (id_key, properties_key): (&str, &str)) -> Compound {
+pub(crate) fn palette_entry(
+    state: &BlockState,
+    (id_key, properties_key): (&str, &str),
+) -> Compound {
     let mut compound = Compound::new();
     compound.insert(id_key, Tag::String(state.id.clone()));
     if !state.properties.is_empty() {
@@ -368,9 +381,21 @@ fn block_entities_at(block_array: &BlockArray) -> HashMap<(u32, u32, u32), &Bloc
         .collect()
 }
 
+/// The block entities a structure's `blocks` holds: the last at each voxel of the grid, in the
+/// grid's `(y, z, x)` order.
+pub(crate) fn placed_block_entities(block_array: &BlockArray) -> Vec<&BlockEntity> {
+    let dims = block_array.dims;
+    let mut placed: Vec<(usize, &BlockEntity)> = block_entities_at(block_array)
+        .into_iter()
+        .filter_map(|((x, y, z), entity)| Some((dims.index(x, y, z)?, entity)))
+        .collect();
+    placed.sort_unstable_by_key(|&(index, _)| index);
+    placed.into_iter().map(|(_, entity)| entity).collect()
+}
+
 /// A block entity as the game saves one in a structure's `blocks`: its id and fields, without the
 /// position its block entry already gives.
-fn entity_nbt(entity: &BlockEntity) -> Compound {
+pub(crate) fn entity_nbt(entity: &BlockEntity) -> Compound {
     let mut nbt = Compound::new();
     nbt.insert("id", Tag::String(entity.id.clone()));
     for (field, value) in &entity.fields {

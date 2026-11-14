@@ -25,7 +25,8 @@ pub use lower::{
 };
 pub use material::{
     AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, MaterialDeferred,
-    OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, resolve_block_state,
+    OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, bound_canonical_tokens,
+    resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.
@@ -35,6 +36,7 @@ use crate::error::Span;
 use crate::ids::{
     PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem, walkway_artifact_stem,
 };
+use crate::intent::MemberAddress;
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -141,6 +143,9 @@ pub struct ResolvedMember {
     /// The member's `id=`, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The member's address in the body it was written in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<MemberAddress>,
     /// Each block state the member resolved to, in the order its first cell is laid out.
     pub resolved_state: Vec<ResolvedBlock>,
     /// Byte range of the member's own line.

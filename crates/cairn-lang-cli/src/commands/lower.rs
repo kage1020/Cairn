@@ -14,7 +14,7 @@ use cairn_lang_formats::registry::builtin_pack;
 
 use crate::cli::LowerFormat;
 use crate::pipeline::{build_diagnostics, lay_circuits, load_module, weighed_editions};
-use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
+use crate::report::{Found, print_json, report_diagnostics, report_failure_document};
 
 pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerFormat) -> ExitCode {
     let (source, module) = match load_module(file, format.failure_report()) {
@@ -129,6 +129,20 @@ fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
                     state.id,
                     state.properties_text()
                 );
+            }
+        }
+        let members = block_ir.members.get(key).map_or(&[][..], Vec::as_slice);
+        if !members.is_empty() {
+            outln!("  members:");
+        }
+        for member in members {
+            let address = member
+                .address
+                .as_ref()
+                .map_or_else(|| member.role.clone(), ToString::to_string);
+            match &member.id {
+                Some(id) => outln!("    {address}  id={id}"),
+                None => outln!("    {address}"),
             }
         }
         for y in 0..array.dims.y {

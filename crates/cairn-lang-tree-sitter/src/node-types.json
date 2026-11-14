@@ -1,5 +1,56 @@
 [
   {
+    "type": "address_side",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "address_step",
+    "named": true,
+    "fields": {
+      "index": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
+      "role": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "side": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "address_side",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "apply_expression",
     "named": true,
     "fields": {
@@ -427,6 +478,36 @@
     "fields": {}
   },
   {
+    "type": "edit_stmt",
+    "named": true,
+    "fields": {
+      "set": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "attribute_list",
+            "named": true
+          }
+        ]
+      },
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "member_address",
+            "named": true
+          },
+          {
+            "type": "selector",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "edition_guard",
     "named": true,
     "fields": {
@@ -616,6 +697,21 @@
         },
         {
           "type": "state_literal",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "member_address",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "address_step",
           "named": true
         }
       ]
@@ -889,7 +985,7 @@
     "named": true,
     "fields": {
       "filter": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1105,6 +1201,10 @@
         },
         {
           "type": "directive",
+          "named": true
+        },
+        {
+          "type": "edit_stmt",
           "named": true
         },
         {
@@ -1628,6 +1728,10 @@
     "named": false
   },
   {
+    "type": "edit",
+    "named": false
+  },
+  {
     "type": "edition",
     "named": false
   },
@@ -1697,6 +1801,10 @@
   },
   {
     "type": "requires",
+    "named": false
+  },
+  {
+    "type": "set",
     "named": false
   },
   {

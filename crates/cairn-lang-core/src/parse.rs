@@ -18,6 +18,8 @@ use crate::suggest::{did_you_mean, nearest_match};
 use crate::version::parse_requirement;
 use indexmap::IndexSet;
 
+mod edit;
+
 /// The word that introduces a version floor, after `@` or at the start of a body line.
 const REQUIRES: &str = "requires";
 
@@ -269,16 +271,27 @@ impl<'a> Parser<'a> {
     fn parse_module(&mut self) -> Result<Module, ParseError> {
         let mut headers = Vec::new();
         let mut items = Vec::new();
+        let mut edits = Vec::new();
         self.skip_newlines();
         while self.peek_is(&TokenKind::At) {
             headers.push(self.parse_header()?);
             self.skip_newlines();
         }
         while !self.at_eof() {
-            items.push(self.parse_item()?);
+            if self.peek_is_ident(edit::EDIT) {
+                let start_byte = self.current_byte();
+                self.advance();
+                edits.push(self.parse_edit(start_byte)?);
+            } else {
+                items.push(self.parse_item()?);
+            }
             self.skip_newlines();
         }
-        Ok(Module { headers, items })
+        Ok(Module {
+            headers,
+            items,
+            edits,
+        })
     }
 
     fn parse_header(&mut self) -> Result<Header, ParseError> {
@@ -401,7 +414,8 @@ impl<'a> Parser<'a> {
             other => Err(ParseError::Syntax {
                 position,
                 message: format!(
-                    "top-level item must be `theme`, `def`, `site`, or `struct`, got `{other}`"
+                    "top-level line must be `theme`, `def`, `site`, `struct` or `edit`, got \
+                     `{other}`"
                 ),
             }),
         }
@@ -467,11 +481,14 @@ impl<'a> Parser<'a> {
             self.expect_newline()?;
             return Ok(ThemeRule::Slot { slot, value, span });
         }
-        // Selector form: KEYWORD '[' attrs ']' '->' key=value (key=value)*
+        // Selector form: KEYWORD ('[' attrs ']')+ '->' key=value (key=value)*
         let attrs = if self.peek_is(&TokenKind::LBracket) {
-            self.advance();
-            let attrs = self.parse_arg_list_until(&TokenKind::RBracket)?;
-            self.expect(&TokenKind::RBracket)?;
+            let mut attrs = Vec::new();
+            while self.peek_is(&TokenKind::LBracket) {
+                self.advance();
+                attrs.extend(self.parse_arg_list_until(&TokenKind::RBracket)?);
+                self.expect(&TokenKind::RBracket)?;
+            }
             attrs
         } else {
             return Err(ParseError::Syntax {

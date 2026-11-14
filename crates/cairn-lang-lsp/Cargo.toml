@@ -21,5 +21,8 @@ lsp-types = "0.97.0"
 serde.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

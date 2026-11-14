@@ -18,6 +18,7 @@ use crate::block_array::{BlockState, Dims, PaletteIndex};
 
 use super::canvas::ScopePalette;
 use super::phase::Phase;
+use super::repeat::{Repeat, Repeats, diag_empty_repeat, read_repeat};
 use super::roof_kind::roof_line_refused;
 use super::token_diag::{
     IdSite, MemberFallback, TokenSite, check_state_literal, diag_abstract_token,
@@ -44,9 +45,19 @@ pub(super) struct StructCtx<'a> {
     pub(super) written: Written,
     /// The span start of each member a well-formed actuator patch binds a signal to.
     pub(super) patched: HashSet<usize>,
+    /// The copies of each raw member a `raw_repeat` holds.
+    pub(super) repeats: Repeats,
 }
 
 impl StructCtx<'_> {
+    /// The copies `member` is written as: its `raw_repeat`'s, or the one line.
+    pub(super) fn repeat_of(&self, member: &Member) -> Repeat {
+        self.repeats
+            .get(&member.span.start)
+            .copied()
+            .unwrap_or(Repeat::ONCE)
+    }
+
     /// The note on a refusal above the struct as written when a roof whose shape does not read
     /// may raise its top row, or `None`.
     pub(super) fn unread_roof_note(&self) -> Option<String> {
@@ -151,8 +162,9 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         MemberRole::Place | MemberRole::Connect | MemberRole::Other(_) => {
             MemberDisposition::NotLowered
         }
-        MemberRole::Level => unreachable!(
-            "`Level` members must be flattened before phase-bucketing (see `flatten_members`)"
+        MemberRole::Level | MemberRole::RawRepeat => unreachable!(
+            "`{}` members must be flattened before phase-bucketing (see `flatten_members`)",
+            member.role.keyword(),
         ),
     }
 }
@@ -189,14 +201,16 @@ fn level_offset_refusal(level: &Member) -> Diagnostic {
     diag_invalid_member(level, primary, vec![LEVEL_Y_FORM.to_owned()])
 }
 
-/// Flatten `level` blocks into the body's paint set, each member with its level's `y` offset.
+/// Flatten `level` and `raw_repeat` blocks into the body's paint set, each member with its level's
+/// `y` offset, and the copies of each raw member a `raw_repeat` holds.
 ///
 /// Sizing reads the same list, so the volume and the paint agree on which members count.
 pub(super) fn flatten_members<'a>(
     members: &'a [Member],
     diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<(u32, &'a Member)> {
+) -> (Vec<(u32, &'a Member)>, Repeats) {
     let mut out: Vec<(u32, &'a Member)> = Vec::new();
+    let mut repeats = Repeats::new();
     for member in members {
         if matches!(member.role, MemberRole::Level) {
             let Some(y_offset) = member.nonneg_u32("y") else {
@@ -221,13 +235,48 @@ pub(super) fn flatten_members<'a>(
                     }
                     continue;
                 }
-                out.push((y_offset, child));
+                push_painted(y_offset, child, &mut out, &mut repeats, diagnostics);
             }
         } else {
-            out.push((0, member));
+            push_painted(0, member, &mut out, &mut repeats, diagnostics);
         }
     }
-    out
+    (out, repeats)
+}
+
+/// Add `member` to the paint set at `y_offset`, or for a `raw_repeat`, the raw members under it
+/// with its copies.
+fn push_painted<'a>(
+    y_offset: u32,
+    member: &'a Member,
+    out: &mut Vec<(u32, &'a Member)>,
+    repeats: &mut Repeats,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if !matches!(member.role, MemberRole::RawRepeat) {
+        out.push((y_offset, member));
+        return;
+    }
+    let repeat = match read_repeat(member) {
+        Ok(repeat) => repeat,
+        Err(refusal) => {
+            diagnostics.push(*refusal);
+            return;
+        }
+    };
+    if member.children.members.is_empty() {
+        diagnostics.push(diag_empty_repeat(member));
+    }
+    // `check` refuses any other line under a `raw_repeat` as `E_UNSUPPORTED_NESTING`.
+    for child in member
+        .children
+        .members
+        .iter()
+        .filter(|child| child.role.is_repeatable())
+    {
+        repeats.insert(child.span.start, repeat);
+        out.push((y_offset, child));
+    }
 }
 
 /// Why a role has no lowering at a non-zero `level y=`, or `None` when it lowers at any offset.
@@ -262,6 +311,7 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::Circuit
         | MemberRole::RawBlock
         | MemberRole::RawFill
+        | MemberRole::RawRepeat
         | MemberRole::Place
         | MemberRole::Connect
         | MemberRole::Other(_) => None,

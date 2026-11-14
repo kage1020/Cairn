@@ -10,7 +10,7 @@ shape is what feeds the loop in [Evaluation Framework](/spec/evaluation/).
 
 This section is the catalog: every code a stable command can raise has a row here, and a code a
 stable command raises with no row is a bug in this section rather than a code outside it. A code
-another chapter names that no command raises yet, such as `E_REQUIRES_CONFLICT`, is a reserved code
+another chapter names that no command raises yet, such as `E_DECOMPILE_DIFF`, is a reserved code
 ([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Where a code's
 rule belongs to another chapter, the row states what the code means and links there for the rule.
 The row is what a reader with a code in hand needs to find, and the chapter is where the behaviour
@@ -37,7 +37,8 @@ row sharing its `id=` with any other row of that body, such as a `connect`, is s
 `E_DUPLICATE_ID`. So are two `place` rows indented under one row, which are not in that body.
 
 `E_DUPLICATE_SELECTOR` compares selectors by meaning, not by text: attribute order does not count,
-and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
+nor does how the attributes are split over brackets, and `class=` / `id=` / `mat_slot=` / `level=`
+compare as label text, so `small` and `"small"` are one value.
 Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
 partly overlap (see [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)).
 `E_DUPLICATE_SELECTOR` is an error even while selector bindings are reserved
@@ -57,9 +58,9 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | Code | Meaning |
 |---|---|
 | `E_PARSE` | The source did not parse. |
-| `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
+| `E_UNKNOWN_KEYWORD` | The statement keyword, or the member keyword an `edit` line's target names, is not in the known-keyword table. |
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes. |
-| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
+| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, an `edit` line included, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
@@ -84,15 +85,17 @@ report that line as well. A `level` that groups nothing, such as one inside anot
 `E_UNSUPPORTED_NESTING` as well: that finding is about the blocks its members lose, and a `circuit`
 line writes none.
 
-`E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, and a `site`
-body is a flat list. Reported once per dropped subtree, at its root.
+`E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, a `raw_repeat`
+holds only the `raw_block` and `raw_fill` lines it writes again, and a `site` body is a flat list. A
+line under a `raw_repeat` that is neither is reported on its own, with a note at the `raw_repeat`.
+Reported once per dropped subtree, at its root.
 
 `E_SEMANTIC_IN_EDITION_GUARD`: the semantic layer is edition-neutral, so a guard holds only the
 escape hatch. Reported once at the outermost refused line, with a note at the guard, and anything
 indented under that line goes with it. No other check reads the refused line or what goes with it,
 so it draws no other finding. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD` instead,
-offered `raw_block`, `raw_fill`, `repeater`, `comparator`, `redstone_torch` and `redstone_dust`, or
-nothing in a `site` body, where none of them builds.
+offered `raw_block`, `raw_fill`, `raw_repeat`, `repeater`, `comparator`, `redstone_torch` and
+`redstone_dust`, or nothing in a `site` body, where none of them builds.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
 `theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.
@@ -149,12 +152,13 @@ to compare.
 
 | Code | Meaning |
 |---|---|
-| `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
+| `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare: a canonical token none of the target's meaning, alias and state-map tables answers ([Materials and Themes §7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)), a raw block's ID, or the ID a catalog entry maps. |
 | `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
 | `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
+| `E_REQUIRES_CONFLICT` | An `@requires` floor lies above the edition's inferred range: every version it admits lacks a block the build paints ([Versioning and Editions](/spec/versioning-editions/#a-floor-is-weighed-against-the-registry)). |
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
 | `W_INTENDED_TARGET_CAP` | Some, not all, of them are. |
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
@@ -343,6 +347,34 @@ disagreeing about how far it reaches report the error. `W_INTENDED_TARGET_UNSUPP
 exactly one edition is in scope: a version Java cannot build is routinely the Bedrock target the
 author means, so with both in scope the question has not been asked.
 
+### Edits
+
+| Code | Meaning |
+|---|---|
+| `E_EDIT_UNMATCHED` | An `edit` line whose selector or address matches no member of a `struct` or `def` body as its lines write them ([Components, Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)). |
+| `E_EDIT_UNKNOWN_KEY` | A `key=` after an `edit` line's `set` that a line of the edited keyword does not take, or an `id=`, which no edit sets ([§9.2](/spec/components-editing-sites/#92-editing-model)). |
+| `W_EDIT_RIPPLE` | A member no `edit` line selects whose `resolved_state` the edits change ([§9.2](/spec/components-editing-sites/#92-editing-model)). |
+
+`E_EDIT_UNMATCHED` and `E_EDIT_UNKNOWN_KEY` are the check pass's, so `cairn check` and the language
+server raise them with or without a target, and every command that builds refuses them. Each edit
+selects among the members as their lines write them, so an edit is never unmatched because an
+earlier edit changed the attribute it selects on, and never matches a member only another edit gave
+that attribute. An edit whose keyword is not in the known-keyword table is `E_UNKNOWN_KEYWORD`
+alone, with the keywords of a `struct` or `def` body as its candidates. The rest of an edit is
+checked as a line is: a key it writes twice is `E_DUPLICATE_ARG` and a value of the wrong type is a
+type mismatch, and a finding about a value an edit wrote is reported once at that value, however
+many members the edit selects.
+
+`W_EDIT_RIPPLE` is raised by block-array lowering, which builds each body with its edits and as
+written and compares them member by member, leaving out every cell a selected member holds in either
+build ([§9.2](/spec/components-editing-sites/#92-editing-model)). One finding names one member of
+one structure, the first cell where it changed, and the edits that changed a member of that body.
+Which ripples a command reports follows what its lowering derives. `cairn compile`, `cairn lower`,
+`cairn info` and `cairn check --edition E --target V` read the blocks beside a member from a
+registry pack, so a chest's pairing or a pane's sides count. A `cairn check` with no `--target`, and
+the language server, derive no connection, so they report a ripple only in where a member's blocks
+stand, such as the roof that taller walls lift.
+
 ### Sites and placements
 
 | Code | Meaning |
@@ -511,23 +543,25 @@ Multi-building](/spec/components-editing-sites/).
 incomplete side is its own line rather than the compiler. A line does that with an argument the
 member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose
 `y=` is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=`
-is no block id), a value outside the ones its key takes (a `roof kind=` that names no kind,
-`side=middle`, an eave `stair` whose `half=` is an identifier other than `top` or `bottom`), or
-arguments that put it outside its struct as written: a `window` past the end of its wall, a `door`
-or `window` whose rows no course of the walls holds, an eave `stair` above the struct or on one
-where no `roof` has an `overhang=` of at least 1, a `fill` or `raw_fill` with a corner outside the
-struct, or a `raw_block` whose `at=` is outside it
-([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member
-at the size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
+is no block id, a `raw_repeat` with no `count=` or `step=` or with nothing under it), a value
+outside the ones its key takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair`
+whose `half=` is an identifier other than `top` or `bottom`, a `raw_repeat` `count=` below 1 or a
+`step=0,0,0` over more than one copy, a raw member's `origin=` other than `imported`), or arguments
+that put it outside its struct as written: a `window` past the end of its wall, a `door` or `window`
+whose rows no course of the walls holds, an eave `stair` above the struct or on one where no `roof`
+has an `overhang=` of at least 1, a `fill` or `raw_fill` with a corner outside the struct, or a
+`raw_block` whose `at=` is outside it, by any copy a `raw_repeat` writes ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member at the
+size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
 overhangs as its line says, and an unreadable value counts as the default its `W_IGNORED_ARGUMENT`
 puts in its place. A `roof` whose `kind=` or `slope_to=` does not read may rise as far as any roof
 on its footprint, and `walls` under a `level` that is not placed may hold any row, so a member only
 they could hold is deferred to them. A `circuit` line that reserves no region and an actuator patch
-that binds no component are refused the same way. [Redstone §14.2](/spec/redstone/#142-signal-binding)
-lists the lines that put a `pressure_plate` nowhere, which put a `chest` and every other sensor or
-actuator but `door` nowhere too, and for a sensor or actuator the drop reaches past the block array
-as well: its binding is still read, so its signal stays in the netlist with no component behind it,
-and the finding says so in a note.
+that binds no component are refused the same way. [Redstone
+§14.2](/spec/redstone/#142-signal-binding) lists the lines that put a `pressure_plate` nowhere,
+which put a `chest` and every other sensor or actuator but `door` nowhere too, and for a sensor or
+actuator the drop reaches past the block array as well: its binding is still read, so its signal
+stays in the netlist with no component behind it, and the finding says so in a note.
 
 A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with a
 note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws nothing,
@@ -625,6 +659,20 @@ wording the editions give it, and an edition's own by the rule for its guards
 | `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start, or an `assert truth` or `assert always` a run of the circuit breaks ([Redstone §14.7](/spec/redstone/#147-verification)). |
 | `W_SIM_ASSERTION_UNCHECKED` | An `assert truth` or `assert always` no run of the circuit judges, so it is not checked: one in a scope that lays no circuit, one whose signals depend on more than 10 sensors, too many to run every combination of, or one a run is still changing at the end of; or a truth table with rows no run reaches ([Redstone §14.7](/spec/redstone/#147-verification)). |
 
+### Import
+
+`cairn import` raises the first ([Ecosystem Interop
+§12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls)) and `cairn diff-blocks` the second
+([§12.2.1](/spec/ecosystem-interop/#1221-diffing-a-lift)), and no other command raises either. Each
+is about a structure file rather than a line of a source, so it carries no span and prints on stderr:
+`warning[W_SEMANTIC_LOSS]: …` with the body it concerns first when it concerns one, and
+`error[E_DECOMPILE_DIFF]: …` with each metric that misses its threshold.
+
+| Code | Meaning |
+|---|---|
+| `W_SEMANTIC_LOSS` | What the raw members an import writes do not carry. Every import raises it once for the author's intent, which no transliteration recovers, and then once for each kind of thing a body holds that no raw member writes: block entity data, entities, structure voids, the palettes of a `.nbt` past its first, and on Bedrock a block with no canonical state and water or a second-layer block the written block does not hold. |
+| `E_DECOMPILE_DIFF` | A lift `cairn diff-blocks` compares with a structure file has not converged: its block IoU is below 0.985, its `state_accuracy` below 0.995, or its residual raw above 5%. The report names the regions that differ and the `edit` lines found to close them ([§12.2.2](/spec/ecosystem-interop/#1222-regions-and-their-causes), [§12.2.3](/spec/ecosystem-interop/#1223-the-suggested-patch)), and under `--format json` carries the code as its `code`. |
+
 ### Semantic categories
 
 Beyond the codes above, lint covers:
@@ -637,23 +685,24 @@ Beyond the codes above, lint covers:
 | **support** | Hanging lanterns, torches, campfires, and gravity blocks such as gravel. |
 | **fluid** | Consistency of water source, flow, and `waterlogged`. |
 | **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
-| **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
+| **edit_stability** | Whether an `edit` changes the `resolved_state` of a member it does not select. |
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
-Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
-and no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
-holds only in part: a door, window, eave stair, chest, sensor or actuator its own line puts outside
-its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
-keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
-`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
-pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other
-edition has, `E_STATE_DOMAIN` a state its block does not take there,
-`E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
-version cannot carry, while no entity schema is checked. The redstone row runs through codes of its
-own: the truth-table codes check a table against itself, and the codes of [Redstone](#redstone)
-check a truth table, a temporal assertion and a latency bound against the circuit, and check its
-routing and its dependence on update order.
+Of these, attachment, entity_aabb, support, fluid and AABB interference are planned, and no command
+checks them yet: two `place` rows whose bodies overlap are not reported. Geometry holds only in
+part: a door, window, eave stair, chest, sensor or actuator its own line puts outside its struct is
+not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt keeps out
+as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
+`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_REQUIRES_CONFLICT` holds the floors
+to the blocks the build paints, `E_UNKNOWN_ID` refuses a block id the pinned target does not
+declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other edition has,
+`E_STATE_DOMAIN` a state its block does not take there, `E_STATE_UNMAPPED` a block state its state
+map has no form for, and `W_INTENT_DEGRADED` names what a version cannot carry, while no entity
+schema is checked. The redstone row runs through codes of its own: the truth-table codes check a
+table against itself, and the codes of [Redstone](#redstone) check a truth table, a temporal
+assertion and a latency bound against the circuit, and check its routing and its dependence on
+update order. edit_stability runs through `W_EDIT_RIPPLE` ([Edits](#edits)).
 
 ### "did you mean"
 
@@ -675,8 +724,8 @@ reference, a token and a block id print no such list.
 
 ## 11.2 Machine-readable payload
 
-Every command that takes `--format json` (`check`, `info`, `parse` and `lower`) writes exactly one
-JSON document to stdout under it, for every source it can read. `check`'s document is an array of
+Every command that takes `--format json` (`check`, `info`, `parse`, `lower` and `diff-blocks`)
+writes exactly one JSON document to stdout under it, for every source it can read. `check`'s document is an array of
 findings, so a source that does not parse is that array with one `E_PARSE` element. `info`'s is the
 report; where there is no report, after a parse failure or any error-severity finding, it writes
 `{"diagnostics": [ ... ]}` instead, told apart from a report by its keys and by the exit code. Which
@@ -724,6 +773,13 @@ failure is not the dump with a hole in it: each writes the same `{"diagnostics":
 `info` does, told apart from the dump by its keys and by the exit code. `lower` writes it for a
 source that does not parse and for one that fails a later pass, since neither leaves an IR worth
 dumping. Under every other `--format` the findings read as prose on stderr.
+
+`diff-blocks`'s product is the report of [Ecosystem
+Interop §12.2.4](/spec/ecosystem-interop/#1224-the-report). A source that does not build at the
+structure's stamp writes the `{"diagnostics": [ ... ]}` document `lower` does, and a refusal at the
+run level, a dropped scope or a `@requires` floor the stamp falls short of, writes
+`{"diagnostics": []}` and says the rest on stderr. A lift that does not converge is not a failure of
+this kind: its report is written, and carries `E_DECOMPILE_DIFF` as its `code`.
 
 `--format json` renders one object per finding:
 
@@ -827,8 +883,8 @@ holds `2^130`.
 The `E_` / `W_` prefix is not the severity, in either direction. Most `W_` codes mark a
 partial-build degradation, but some are warnings without being one, among them `W_UNUSED_DEF`, the
 two truth-table warnings, the two `@cairn` codes, `W_INTENDED_TARGET_CAP`,
-`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`, and
-`W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged; and two `E_`-prefixed codes are
+`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`, `W_EDIT_RIPPLE`,
+and `W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged; and two `E_`-prefixed codes are
 decided by the rule above rather than by their name:
 
 - `E_UNKNOWN_SLOT_TARGET` is an **error**, because the fault is in the source: the slot is written
@@ -889,6 +945,27 @@ select the same members are one binding list split over two lines
 ([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), so where
 the line breaks does not decide whether the build is refused.
 
+`E_EDIT_UNMATCHED` is an **error**, where `E_THEME_SELECTOR_UNMATCHED` is a warning. A theme row is
+style for whichever members the theme is bound to, and a member a later line adds may match it. An
+edit is a change asked of the members written now, and one that selects none of them builds
+something other than what was asked for, with nothing said: implicit dropping. The repair is in the
+source, since the target names a member that is not there, or one only another edit would have made.
+
+`E_EDIT_UNKNOWN_KEY` is an **error** for the reason `E_UNKNOWN_ARGUMENT` is: the key names nothing
+the edited keyword reads, so the member is built without what the edit asked for. It is a code of
+its own because what is refused differs: the key is not applied, and the edit's other keys are,
+where `E_UNKNOWN_ARGUMENT` is about a line's own key. A `theme` selector widens what an edit may set
+as it widens a line's vocabulary. `id=` is refused too, though every keyword takes it, because an id
+is what edits, theme selectors and actuator patches name a member by. An edit that renamed one would
+change what the other lines select, so a member's `id=` is written on its own line.
+
+`W_EDIT_RIPPLE` is a **warning** without being a degradation. The build is what the edited source
+says, since a member's `resolved_state` is derived from the blocks around it ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), so nothing is dropped or
+substituted. What the warning reports is an edit reaching further than the members it names, which
+is the edit-stability question ([Semantic categories](#semantic-categories)), and whether that was
+meant is the author's to say.
+
 The two `@cairn` codes are **warnings** by the same rule read the other way. The header is
 provenance: no pass branches on it, no palette entry comes from it, and the lockfile's
 `cairn_version` records the compiler rather than the file. `@cairn banana` builds byte-for-byte what
@@ -909,7 +986,10 @@ The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; o
 word the keyword already has is a typo written twice rather than a coinage, and is refused with the
 suggestion. Widening admits the word and nothing more: the match hands the member the row's
 bindings, which are reserved ([Materials and Themes](/spec/materials-themes/)), so a key the keyword
-defines and no pass reads is still an unreached key when a selector matches on it.
+defines and no pass reads is still an unreached key when a selector matches on it. A selector's
+`level=` widens nothing: it names the `level` a member stands under rather than a key of the
+member's line ([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)),
+so `window level=floor2` is still `E_UNKNOWN_ARGUMENT`.
 
 A member's own `[key=value]` answers to that same vocabulary. `window[clas=outer]` is the same
 defect as `window clas=outer`: a word the author expects something to read that nothing does, with
@@ -940,18 +1020,18 @@ reads where it is written, carried into the IR and never consulted. It comes in 
 reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
 ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
 accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
-`circuit`, `place`, `connect`, `raw_block` or `raw_fill` is that key today. A `mat_slot=` of either kind is not looked up in
-the theme, so a slot name the theme does not declare is this warning rather than
-`E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword
-reads only under some ways of writing a sibling argument, on a member that writes it another way.
-The boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this
-way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are
-not judged at all. All three make the build differ from the source. The rule forbids *silent*
-substitution, and all three are announced. For an unreached key the gap is the compiler's rather
-than the source's, which is why it is not a refusal. An inapplicable key is no gap at all: the key
-is one every member accepts and its value changes nothing in the build, so the warning asks for its
-removal, where a refusal would make a key every member accepts one that some refuse. Whether autofix
-is offered is up to the implementation.
+`circuit`, `place`, `connect`, `raw_block`, `raw_fill` or `raw_repeat` is that key today. A
+`mat_slot=` of either kind is not looked up in the theme, so a slot name the theme does not declare
+is this warning rather than `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key
+**routed past**: one the keyword reads only under some ways of writing a sibling argument, on a
+member that writes it another way. The boundary is the keyword: a spec-defined key on a keyword the
+compiler knows is reported this way, while a spec-defined *keyword* it does not know is
+`E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three make the build differ from
+the source. The rule forbids *silent* substitution, and all three are announced. For an unreached
+key the gap is the compiler's rather than the source's, which is why it is not a refusal. An
+inapplicable key is no gap at all: the key is one every member accepts and its value changes nothing
+in the build, so the warning asks for its removal, where a refusal would make a key every member
+accepts one that some refuse. Whether autofix is offered is up to the implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong wherever
 the member ends up, so it is a repair of its own, and holding the finding back until a refusal on

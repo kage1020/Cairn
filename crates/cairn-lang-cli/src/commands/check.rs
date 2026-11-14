@@ -13,7 +13,7 @@ use crate::pipeline::{
     report_partial_build, weighed_editions,
 };
 use crate::report::{
-    Finding, Found, print_json, render_diagnostics, report_diagnostic, report_parse_failure,
+    Found, print_json, render_diagnostics, report_diagnostic, report_parse_failure,
 };
 
 pub(crate) fn run_check(

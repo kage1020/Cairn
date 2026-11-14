@@ -1,5 +1,6 @@
 use cairn_lang_core::Edition;
 
+use crate::cli::StructureFormat;
 use crate::name_case::NameCase;
 use crate::pipeline::lowered_probe;
 use crate::target::resolve_target;
@@ -44,6 +45,7 @@ fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
             prepare_artifacts(
                 &rekeyed_probe(&[key]),
                 &target,
+                StructureFormat::Nbt,
                 out_dir,
                 NameCase::Sensitive
             )
@@ -52,8 +54,14 @@ fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
         );
     }
     let plain = rekeyed_probe(&["site::s::hut"]);
-    let prepared = prepare_artifacts(&plain, &target, out_dir, NameCase::Sensitive)
-        .unwrap_or_else(|_| panic!("a plain id prepares"));
+    let prepared = prepare_artifacts(
+        &plain,
+        &target,
+        StructureFormat::Nbt,
+        out_dir,
+        NameCase::Sensitive,
+    )
+    .unwrap_or_else(|_| panic!("a plain id prepares"));
     let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
     assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
 }
@@ -91,6 +99,7 @@ fn two_scopes_that_name_one_file_are_refused_before_any_io() {
             prepare_artifacts(
                 &rekeyed_probe(&["struct::hut", "site::s::barn"]),
                 &target,
+                StructureFormat::Nbt,
                 out_dir,
                 case,
             )
@@ -100,6 +109,7 @@ fn two_scopes_that_name_one_file_are_refused_before_any_io() {
         match prepare_artifacts(
             &rekeyed_probe(&["struct::hut", "site::s::hut"]),
             &target,
+            StructureFormat::Nbt,
             out_dir,
             case,
         ) {
@@ -125,6 +135,7 @@ fn two_scopes_whose_names_differ_only_in_case_collide_where_out_folds_case() {
     match prepare_artifacts(
         &rekeyed_probe(&["struct::hut", "struct::HUT"]),
         &target,
+        StructureFormat::Nbt,
         out_dir,
         NameCase::Insensitive,
     ) {
@@ -156,6 +167,7 @@ fn two_scopes_whose_names_differ_only_in_case_are_two_files_where_out_keeps_case
     let paths = prepared_paths(prepare_artifacts(
         &rekeyed_probe(&["struct::hut", "struct::HUT"]),
         &target,
+        StructureFormat::Nbt,
         out_dir,
         NameCase::Sensitive,
     ))
@@ -177,7 +189,7 @@ fn a_lock_differing_from_an_artifact_only_in_case_is_refused_only_where_out_fold
         (NameCase::Insensitive, Err(ExitCode::from(1))),
         (NameCase::Sensitive, Ok(())),
     ] {
-        let prepared = prepare_artifacts(&block_ir, &target, out_dir, case)
+        let prepared = prepare_artifacts(&block_ir, &target, StructureFormat::Nbt, out_dir, case)
             .unwrap_or_else(|_| panic!("one struct prepares"));
         for lock in LOCKS_DIFFERING_ONLY_IN_CASE {
             assert_eq!(
@@ -203,7 +215,7 @@ fn a_lower_case_lock_beside_an_upper_case_artifact_is_refused_where_out_folds_ca
         (NameCase::Insensitive, Err(ExitCode::from(1))),
         (NameCase::Sensitive, Ok(())),
     ] {
-        let prepared = prepare_artifacts(&block_ir, &target, out_dir, case)
+        let prepared = prepare_artifacts(&block_ir, &target, StructureFormat::Nbt, out_dir, case)
             .unwrap_or_else(|_| panic!("one struct prepares"));
         for lock in ["hut.nbt", "hut.nbt.tmp", "Hut.nbt.bak"] {
             assert_eq!(

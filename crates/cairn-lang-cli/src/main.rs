@@ -25,10 +25,12 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use cli::{Cli, Command};
+use cli::{Cli, Command, ImportMode};
 use commands::check::run_check;
 use commands::compile::run_compile;
+use commands::diff_blocks::run_diff_blocks;
 use commands::docs::run_docs;
+use commands::import::run_import;
 use commands::info::run_info;
 use commands::lower::run_lower;
 use commands::parse::run_parse;
@@ -61,8 +63,9 @@ fn main() -> ExitCode {
         Some(Command::Info {
             file,
             editions,
+            lock,
             format,
-        }) => run_info(&file, &editions, format),
+        }) => run_info(&file, &editions, lock.as_deref(), format),
         Some(Command::Lower {
             file,
             edition,
@@ -78,9 +81,27 @@ fn main() -> ExitCode {
             file,
             edition,
             target,
+            structure_format,
             out,
             lock,
-        }) => run_compile(&file, edition, &target, out.as_deref(), lock.as_deref()),
+        }) => run_compile(
+            &file,
+            edition,
+            &target,
+            structure_format,
+            out.as_deref(),
+            lock.as_deref(),
+        ),
+        Some(Command::Import {
+            file,
+            mode: ImportMode::Raw,
+            out,
+        }) => run_import(&file, out.as_deref()),
+        Some(Command::DiffBlocks {
+            structure,
+            file,
+            format,
+        }) => run_diff_blocks(&structure, &file, format),
         Some(Command::Docs { page, title, toc }) => {
             run_docs(page.as_deref(), title.as_deref(), toc)
         }

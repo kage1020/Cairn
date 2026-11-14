@@ -37,7 +37,8 @@ Stable surfaces:
 - The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
-  output schemas, and process exit codes.
+  output schemas, and process exit codes, apart from a flag or flag value in its first three
+  monthly minors.
 - The tier-1 material vocabulary: the abstract tokens the built-in `materials` catalogs declare,
   listed in [§7.2](/spec/materials-themes/#tier-1-tokens). Adding one is not a break.
 - The error and warning codes (`E_*`, `W_*`) [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists,
@@ -57,7 +58,12 @@ Evolving surfaces:
 
 - Spec chapters or sections explicitly marked as draft (the [Open Issues](/spec/open-issues/)
   list), and the syntax a section flags [subject to change](#subject-to-change).
-- New `cairn` subcommands during their first three monthly minors after introduction.
+- New `cairn` subcommands, new flags and flag values of `cairn compile`, `cairn check` and
+  `cairn info`, and new language server commands such as `cairn.info`
+  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)) and `cairn.diffBlocks`
+  ([§12.2.5](/spec/ecosystem-interop/#1225-the-report-in-an-editor)), during their first three
+  monthly minors after introduction. What such a command returns is the JSON document of the
+  subcommand it runs, at that document's tier.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.
@@ -169,7 +175,7 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 
 **Reserved codes.** The codes a stable command raises are the ones [Lint
 §11.1](/spec/lint/#111-diagnostic-codes) lists, the redstone pipeline's among them. Any other code
-the spec names, such as `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
+the spec names, such as `E_DECOMPILE_DIFF`, is a reserved code: no command raises it yet. A
 reserved code lands with the meaning the spec states for it, where it states one, and its row
 landing is adding a code.
 
@@ -187,10 +193,10 @@ placeholder's code still means what it meant. A placeholder stands in only for w
 build yet, or what the spec reserves for a later extension. Source the spec itself refuses keeps its
 code. The placeholders today include:
 
-- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as decimals,
-  `nbt={...}` values and `edit`;
+- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as decimals and
+  `nbt={...}` values;
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
-  `spawn`, `bed`, `sign` and `raw_repeat`;
+  `spawn`, `bed` and `sign`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists, a theme selector's bindings among them;
 - `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which
@@ -210,8 +216,7 @@ Two classes of change sit outside this matrix:
 - **Bug fixes** that align behaviour with the spec are never breaking, even if a consumer was
   depending on the buggy behaviour. The spec, not the implementation, defines the contract.
 - **Output bit-equality** of emitted `.nbt` / `.litematic` / `.schem` / `.mcstructure` is not
-  promised at any tier. Only the `.nbt` and `.mcstructure` writers exist today
-  ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases may produce
-  structurally-different files for the same source; what matters is that the result is valid for
-  the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See
+  promised at any tier ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases
+  may produce structurally-different files for the same source; what matters is that the result
+  is valid for the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock).

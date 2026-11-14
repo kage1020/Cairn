@@ -25,8 +25,8 @@ fn an_id_no_edition_has_is_refused_rather_than_written() {
 
 #[test]
 fn a_java_only_block_is_refused_on_bedrock_and_compiles_on_java() {
-    // Bedrock spells Java's `light` `light_block_0` … `light_block_15`.
-    let bedrock = Fixture::new(&source_binding("light"));
+    // Bedrock keeps a pot's plant in its block entity, so no block it writes says which plant.
+    let bedrock = Fixture::new(&source_binding("potted_poppy"));
     let out = compile_as(&bedrock, "bedrock", "1.21.60");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
@@ -36,7 +36,7 @@ fn a_java_only_block_is_refused_on_bedrock_and_compiles_on_java() {
         "the message must name the registry it checked, got: {stderr}",
     );
 
-    let java = Fixture::new(&source_binding("light"));
+    let java = Fixture::new(&source_binding("potted_poppy"));
     let out = compile_as(&java, "java", "1.21.4");
     assert_eq!(
         out.status.code(),
@@ -59,13 +59,14 @@ fn a_typo_is_answered_with_the_id_the_target_does_spell() {
 }
 
 #[test]
-fn a_rename_is_answered_with_the_name_the_target_uses() {
-    let fixture = Fixture::new(&source_binding("light"));
-    let out = compile_as(&fixture, "bedrock", "1.21.60");
+fn another_editions_spelling_is_answered_with_the_name_the_target_uses() {
+    // `light_block_5` is Bedrock's light at level 5, which no Java version spells so.
+    let fixture = Fixture::new(&source_binding("light_block_5"));
+    let out = compile_as(&fixture, "java", "1.21.4");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
     assert!(
-        stderr.contains("minecraft:light_block_0") && stderr.contains("alias table"),
+        stderr.contains("spells this block `minecraft:light`") && stderr.contains("alias table"),
         "expected the alias answer, got: {stderr}",
     );
     assert!(
@@ -75,15 +76,10 @@ fn a_rename_is_answered_with_the_name_the_target_uses() {
 }
 
 #[test]
-fn the_same_group_answers_from_either_edition() {
+fn the_canonical_spelling_is_written_on_bedrock_and_bedrocks_answered_on_java() {
     let on_bedrock = Fixture::new(&source_binding("oak_sign"));
     let out = compile_as(&on_bedrock, "bedrock", "1.21.60");
-    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
-    assert!(
-        stderr_of(&out).contains("minecraft:standing_sign"),
-        "bedrock spells the oak sign `standing_sign`, got: {}",
-        stderr_of(&out),
-    );
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
 
     let on_java = Fixture::new(&source_binding("standing_sign"));
     let out = compile_as(&on_java, "java", "1.21.4");
@@ -129,20 +125,20 @@ fn an_id_a_later_version_adds_is_answered_with_that_version() {
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
 }
 
-/// Bedrock 1.21.0 spells `stone_bricks` `stonebrick`.
+/// Bedrock 1.21.0 writes every head as `skull`, the kind kept in its block entity.
 #[test]
 fn an_id_is_checked_against_the_version_and_not_the_edition() {
-    let old = Fixture::new(&source_binding("stone_bricks"));
+    let old = Fixture::new(&source_binding("skeleton_skull"));
     let out = compile_as(&old, "bedrock", "1.21.0");
     let stderr = stderr_of(&out);
     assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
     assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
     assert!(
         stderr.contains(
-            "error[E_UNKNOWN_ID]: `minecraft:stone_bricks` is not a block in `bedrock 1.21.0`\n  \
-             note: `bedrock 1.21.0` spells this block `minecraft:stonebrick`, per the registry \
+            "error[E_UNKNOWN_ID]: `minecraft:skeleton_skull` is not a block in `bedrock 1.21.0`\n  \
+             note: `bedrock 1.21.0` spells this block `minecraft:skull`, per the registry \
              pack's alias table\n  \
-             note: the first target that declares `minecraft:stone_bricks` is bedrock 1.21.40: \
+             note: the first target that declares `minecraft:skeleton_skull` is bedrock 1.21.40: \
              build with `--target 1.21.40` or another target that declares it, or declare \
              `@requires bedrock version>=V`, with V the release that added it (1.21.40 at the \
              latest), so a target without it is refused at the floor\n"
@@ -150,12 +146,12 @@ fn an_id_is_checked_against_the_version_and_not_the_edition() {
         "1.21.0 points at its own spelling, then at the first target that has this one: {stderr}",
     );
 
-    let new = Fixture::new(&source_binding("stone_bricks"));
+    let new = Fixture::new(&source_binding("skeleton_skull"));
     let out = compile_as(&new, "bedrock", "1.21.60");
     assert_eq!(
         out.status.code(),
         Some(0),
-        "1.21.60 does declare stone_bricks; stderr: {}",
+        "1.21.60 does declare skeleton_skull; stderr: {}",
         stderr_of(&out),
     );
 }
