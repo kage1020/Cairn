@@ -250,6 +250,75 @@ fn a_lowering_stage_error_exits_one() {
     assert_eq!(run.stdout, "");
 }
 
+/// A block Java first declares at 1.21.4, on line 2.
+const PALE_OAK_SHED: &str = concat!(
+    "struct shed size=3x3\n",
+    "  raw_block mat=minecraft:pale_oak_planks at=1,0,1\n",
+);
+
+#[test]
+fn a_target_checks_block_ids_against_its_version() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write_source(tmp.path(), "shed.crn", PALE_OAK_SHED);
+    let path = path.to_str().unwrap();
+
+    let before = Run::from(cairn(
+        "lower",
+        &[path, "--edition", "java", "--target", "1.20.4"],
+    ));
+    assert_eq!(before.code, Some(1), "stderr={}", before.stderr);
+    assert_stream(&before.stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
+    assert_eq!(before.stdout, "");
+
+    let unpinned = Run::from(cairn("lower", &[path, "--edition", "java"]));
+    assert_eq!(unpinned.code, Some(0), "stderr={}", unpinned.stderr);
+    let since = Run::from(cairn(
+        "lower",
+        &[
+            path,
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--format",
+            "json",
+        ],
+    ));
+    assert_eq!(since.code, Some(0), "stderr={}", since.stderr);
+    assert_eq!(
+        palette_ids(&since.stdout, "struct::shed"),
+        ["minecraft:air", "minecraft:pale_oak_planks"],
+    );
+}
+
+#[test]
+fn a_target_the_edition_does_not_ship_is_refused_before_the_file_is_read() {
+    let run = Run::from(cairn(
+        "lower",
+        &["missing.crn", "--edition", "java", "--target", "9.9.9"],
+    ));
+    assert_eq!(run.code, Some(1));
+    assert!(
+        run.stderr
+            .starts_with("error: unsupported java target `9.9.9`. supported targets: "),
+        "stderr={}",
+        run.stderr,
+    );
+    assert_eq!(run.stderr.lines().count(), 1, "stderr={}", run.stderr);
+    assert_eq!(run.stdout, "");
+}
+
+#[test]
+fn a_target_without_an_edition_is_a_usage_error() {
+    let path = examples_dir().join("cottage.crn");
+    let run = Run::from(cairn(
+        "lower",
+        &[path.to_str().unwrap(), "--target", "1.21.4"],
+    ));
+    assert_eq!(run.code, Some(2), "stderr={}", run.stderr);
+    assert_eq!(run.stdout, "");
+}
+
 #[test]
 fn all_examples_exit_zero() {
     for path in crn_examples() {

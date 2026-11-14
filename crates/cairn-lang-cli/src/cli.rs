@@ -159,12 +159,14 @@ pub(crate) enum Command {
             result. A debugging surface for the universal voxel pivot; `cairn compile` writes the \
             same IR out as `.nbt` or `.mcstructure` files, per edition. Without `--edition` no \
             edition is pinned, so a member under an `@edition` guard and every struct's circuit \
-            are left out, and a note says how many were. Lowering warnings \
+            are left out, and a note says how many were. Without `--target` no version is \
+            pinned, so no block id is checked against a version's id table. Lowering warnings \
             (deferred members, themeless scopes, abstract tokens) print to stderr but do not \
             affect the exit code. Exits 0 on success, 1 on a parse failure, on any \
-            `Error`-severity diagnostic (`E_UNKNOWN_ABSTRACT_TOKEN` and the circuit's among them; \
-            `E_UNKNOWN_ID` is not, since nothing here pins a target to check ids against), or on \
-            an I/O error, and 2 when the file cannot be located"
+            `Error`-severity diagnostic (`E_UNKNOWN_ABSTRACT_TOKEN` and the circuit's among them, \
+            and `E_UNKNOWN_ID` with `--target`), on a `--target` the edition does not ship, or on \
+            an I/O error, and 2 when the file cannot be located or `--target` is given without \
+            `--edition`"
     )]
     Lower {
         /// Path to the .crn file to lower.
@@ -182,6 +184,18 @@ pub(crate) enum Command {
                 failed to lower is not there to wire"
         )]
         edition: Option<Edition>,
+        /// Minecraft version to lower for, resolved as `compile --target` is.
+        #[arg(
+            long,
+            requires = "edition",
+            long_help = "Optional Minecraft version pin, resolved against the pinned edition's \
+                data table exactly as `cairn compile --target` is, and requiring `--edition` as \
+                `cairn check --target` does. Setting it lowers against that version's id table, \
+                as `cairn check --edition E --target V` does, so the IR printed is the one \
+                `cairn compile` writes at that target. A version the edition does not ship is \
+                refused before the file is read"
+        )]
+        target: Option<String>,
         /// Output format for the lowered block-array IR.
         #[arg(long, value_enum, default_value_t = LowerFormat::Ascii)]
         format: LowerFormat,
