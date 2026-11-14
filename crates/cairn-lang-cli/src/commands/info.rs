@@ -8,8 +8,8 @@ use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::lock::LockReading;
 use cairn_lang_core::resolve::{
-    BuildableTargets, DegradedEntry, EditionReport, UnsupportedEntry, UnsupportedReason,
-    VersionAxes, compute_axes, declared_version_floors, resolve,
+    BuildableTargets, DegradedEntry, EditionReport, InferredRange, UnsupportedEntry,
+    UnsupportedReason, VersionAxes, compute_axes, declared_version_floors, resolve,
 };
 use cairn_lang_core::suggest::{candidate_list, did_you_mean};
 use cairn_lang_core::{Diagnostic, Edition, Module, Resolution, Severity, lower};
@@ -24,6 +24,7 @@ use crate::floors::{
     buildable_refusal, report_floors_left_out_of_the_neutral_row, report_version_notes,
     weigh_versions,
 };
+use crate::inferred::report_inferred_range;
 use crate::lockfile::{default_lock_path, describe_verified};
 use crate::pipeline::{
     RequestedEditions, build_diagnostics, dropped_scopes, lay_circuits, load_module,
@@ -31,7 +32,7 @@ use crate::pipeline::{
 };
 use crate::report::{
     FailureReport, Finding, Found, Reporting, palette_entry_name, print_json, report_diagnostic,
-    report_diagnostics, report_failure_document,
+    report_failure_document,
 };
 use crate::target::supported_versions;
 
@@ -346,11 +347,9 @@ fn edition_rows(
             &considered,
             !dropped.is_empty() || !states_unmapped.is_empty(),
         );
-        for (version, refusals) in &verdicts.refused {
-            eprintln!("note: {} {version} refuses this source", edition.as_str());
-            report_diagnostics(file, source, lines, refusals);
-        }
         report_version_notes(file, source, lines, edition, &verdicts, &considered);
+        let inferred_range =
+            report_inferred_range(reporting, ir, &resolution, edition, &considered, &floors);
 
         if let Some(portability) = portability {
             let refusal = buildable_refusal(
@@ -371,6 +370,7 @@ fn edition_rows(
                 buildable: verdicts.buildable,
                 considered,
                 refusal,
+                inferred_range,
             });
         }
     }
@@ -618,6 +618,19 @@ fn print_axes_report(axes: &VersionAxes) {
         axes.registry_compat.max,
     );
 
+    let inferred_line = joined_or(
+        "(no editions requested)",
+        "   ",
+        axes.inferred_range.iter().map(|range| {
+            format!(
+                "{}: {}",
+                capitalise(range.edition.as_str()),
+                inferred_text(range)
+            )
+        }),
+    );
+    outln!("inferred range:          {inferred_line}");
+
     let portability_line = joined_or(
         "(no editions requested)",
         "   ",
@@ -661,6 +674,15 @@ fn print_axes_report(axes: &VersionAxes) {
             .map(|f| format!("{}({} @{})", f.member, f.reason, f.boundary_version)),
     );
     outln!("semantic-sensitive:      {semantic_line}");
+}
+
+/// One edition's inferred range as its edges, or `none` when no version can lie in it.
+fn inferred_text(range: &InferredRange) -> String {
+    if range.empty {
+        "none".to_owned()
+    } else {
+        format!("{} .. {}", range.min, range.max)
+    }
 }
 
 /// One edition's buildable versions, with the refusing ones named after them.

@@ -77,6 +77,7 @@ Diagnostics name what is wrong and what a valid value looks like, so a failed bu
 ```
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
+inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)

@@ -109,8 +109,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@cairn`.** Header declaring the **Cairn language version** the file was written against
   (CalVer `YYYY.M[.PATCH]`). Provenance only; optional.
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
-  on conflict with the inferred value. That error, `E_REQUIRES_CONFLICT`, is reserved: no inferred
-  range is derived yet. A `cairn compile --target` below the floor is `E_VERSION_CAP`. See
+  on conflict with the inferred range: a floor above the last version that declares a block the
+  build paints is `E_REQUIRES_CONFLICT`. A `cairn compile --target` below the floor is
+  `E_VERSION_CAP`. See
   [versioning-editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
   verification record, since the record lives in the lock. Still weighed against the file's own

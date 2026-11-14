@@ -53,7 +53,8 @@ pub(crate) enum Command {
             on `cairn check` and see every lowering-stage finding `cairn compile` would refuse \
             on, plus the `E_PARTIAL_BUILD` a lost scope earns. Nothing is written either way — \
             `compile` remains the command that produces artifacts and the lockfile, and the only \
-            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`).\n\n\
+            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`) and the \
+            floors to the blocks the build paints (`E_REQUIRES_CONFLICT`).\n\n\
             When nothing else is an error, each struct's `logic` is built into its circuit as \
             `cairn compile` builds it (`spec/redstone` \"Place-and-route\"), and the circuit's \
             findings follow the lowering's: the pinned edition's, at the `--target` version when \
@@ -125,13 +126,16 @@ pub(crate) enum Command {
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
-    /// Report a .crn source file's version range, edition portability, semantic-sensitive
-    /// members and verified lock target.
+    /// Report a .crn source file's declared and inferred version ranges, edition portability,
+    /// semantic-sensitive members and verified lock target.
     #[command(
-        long_about = "Report the three version axes (declared registry range, semantic-sensitive \
-            members, verified lock target) for a .crn source file, with each requested edition's \
-            portability and buildable targets beside them. Exits 0 on success, including when \
-            the lockfile is missing or cannot be read; 1 on a parse failure, on any \
+        long_about = "Report the three version axes (the registry range the file declares and \
+            the one the blocks it paints imply per edition, semantic-sensitive members, verified \
+            lock target) for a .crn source file, with each requested edition's portability and \
+            buildable targets beside them. A floor above an edition's inferred range is printed \
+            as `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. \
+            Exits 0 on success, including when the lockfile is missing or cannot be read; 1 on a \
+            parse failure, on any \
             `Error`-severity diagnostic (the check passes run here, as does each requested \
             edition's lowering with its circuits laid, and a range derived from a file `cairn \
             check` rejects is a confident wrong answer), or on any other I/O error reading the \
@@ -147,8 +151,8 @@ pub(crate) enum Command {
             value_delimiter = ',',
             default_values_t = vec!["java".to_owned(), "bedrock".to_owned()],
             long_help = "Comma-separated editions to evaluate portability against. Each distinct \
-                edition produces one entry in the output's `edition portability` and `buildable \
-                targets` sections; a repeated name is reported once",
+                edition produces one entry in the output's `inferred range`, `edition \
+                portability` and `buildable targets` sections; a repeated name is reported once",
         )]
         editions: Vec<String>,
         /// Lockfile to report the verified target of; defaults to `<source>.lock` next to the
