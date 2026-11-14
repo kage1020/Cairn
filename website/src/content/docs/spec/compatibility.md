@@ -212,8 +212,7 @@ Two classes of change sit outside this matrix:
 - **Bug fixes** that align behaviour with the spec are never breaking, even if a consumer was
   depending on the buggy behaviour. The spec, not the implementation, defines the contract.
 - **Output bit-equality** of emitted `.nbt` / `.litematic` / `.schem` / `.mcstructure` is not
-  promised at any tier. The `.schem` writer does not exist yet
-  ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases may produce
-  structurally-different files for the same source; what matters is that the result is valid for
-  the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See
+  promised at any tier ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases
+  may produce structurally-different files for the same source; what matters is that the result
+  is valid for the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock).

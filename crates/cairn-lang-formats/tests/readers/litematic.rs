@@ -1,7 +1,7 @@
 //! `read_litematic` over what the writer wrote, and over files only another tool would write.
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, Dims, PaletteIndex};
+use cairn_lang_core::block_array::{BlockArrayIr, BlockState, Dims, PaletteIndex};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::litematic::{
     LitematicMetadata, LitematicReadError, LitematicSchematic, ReadRegion, litematic_files,
@@ -11,7 +11,7 @@ use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 use cairn_lang_nbt::{NbtReadError, write_java_gzip};
 
-use crate::common::{array_of, comparator_array, ir_of, latest, lower_example};
+use crate::common::{array_of, comparator_array, ir_of, latest, lower_example, volume_of};
 
 fn target(version: &str) -> JavaTarget {
     resolve_java_target(version).expect("a targetable version")
@@ -30,30 +30,6 @@ fn round_trip(ir: &BlockArrayIr, target: &JavaTarget) -> Vec<LitematicSchematic>
             read_litematic(bytes.as_slice()).expect("the file reads back")
         })
         .collect()
-}
-
-/// `array` as the reader returns it: its palette, its grid and its block entities' fields.
-fn volume_of(array: &BlockArray) -> BlockVolume {
-    BlockVolume {
-        dims: array.dims,
-        palette: array.palette.entries.clone(),
-        voxels: array.voxels.clone(),
-        block_entities: array
-            .block_entities
-            .iter()
-            .map(|entity| {
-                let mut data = Compound::new();
-                for (field, value) in &entity.fields {
-                    data.insert(field.clone(), Tag::Int(*value));
-                }
-                StoredBlockEntity {
-                    pos: entity.pos,
-                    id: entity.id.clone(),
-                    data,
-                }
-            })
-            .collect(),
-    }
 }
 
 #[test]

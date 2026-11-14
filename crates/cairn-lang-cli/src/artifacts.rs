@@ -7,6 +7,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{litematic_files, prepare_litematic};
+use cairn_lang_formats::schem::{prepare_schem, schem_files};
 
 use crate::cli::StructureFormat;
 use crate::lockfile::build_lockfile;
@@ -70,6 +71,21 @@ pub(crate) fn prepare_artifacts<'a>(
             })?;
             let path = claims.claim(&scope, &output_filename(&stem, OutputExt::Litematic))?;
             prepared.push((path, PreparedStructure::Litematic(schematic)));
+        }
+        return Ok(prepared);
+    }
+    if let (ResolvedTarget::Java(java), StructureFormat::Schem) = (target, format) {
+        for file in schem_files(block_ir) {
+            let scope = file.scope;
+            let file_name = output_filename(&file.stem, OutputExt::Schem);
+            let schematic = prepare_schem(file, java).map_err(|err| {
+                eprintln!("error: checking `{scope}`: {err}");
+                ExitCode::from(1)
+            })?;
+            prepared.push((
+                claims.claim(scope, &file_name)?,
+                PreparedStructure::Schem(schematic),
+            ));
         }
         return Ok(prepared);
     }

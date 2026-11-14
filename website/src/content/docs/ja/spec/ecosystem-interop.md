@@ -4,7 +4,7 @@ title: "12. エコシステム連携と逆変換"
 
 ## 12.1 順方向の変換
 
-block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem` / `.mcstructure` が出力されます ([アーキテクチャ](/ja/spec/architecture/))。各形式はシリアライザで、既存の形式は、ピボットの周りに追加するバックエンドという位置付けです。現在あるのは `.nbt`、`.litematic`、`.mcstructure` のシリアライザで、`.schem` のものはまだありません。
+block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem` / `.mcstructure` が出力されます ([アーキテクチャ](/ja/spec/architecture/))。各形式はシリアライザで、既存の形式は、ピボットの周りに追加するバックエンドという位置付けです。現在は 4 つすべてのシリアライザがあります。
 
 `cairn compile --edition bedrock` は `.mcstructure` を書き出します。`--edition java` は `.nbt` を書き出すか、`--structure-format` が指定した形式で書き出します。
 
@@ -12,8 +12,9 @@ block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem`
 |---|---|---|
 | `nbt` (既定) | struct、配置、通路ごとに 1 つのバニラ構造ファイル | 配置ごと、通路ごとに 1 ファイル ([§9.3.4](/ja/spec/components-editing-sites/#934-出力ファイル名)) |
 | `litematic` | struct ごと、site ごとに 1 つの Litematica schematic ([§12.1.1](#1211-litematica)) | 1 ファイルにまとめ、配置ごと、通路ごとに 1 つのリージョン |
+| `schem` | struct、配置、通路ごとに 1 つの Sponge Schematic ([§12.1.2](#1212-sponge-schematic)) | 配置ごと、通路ごとに 1 ファイル。それぞれ site の中の原点だけずらす |
 
-形式で変わるのはファイルだけです。block array は同じで、成果物は同じ規則で名付け、同じ衝突で拒否し、ロックファイルはもう一方の形式が書き出すものとバイト単位で同じです。Bedrock の構造形式は 1 つだけなので、`--edition bedrock` と一緒に `--structure-format` を指定すると使い方の誤り (終了コード 2) になり、ソースを読む前に拒否します。
+形式で変わるのはファイルだけです。block array は同じで、成果物は同じ規則で名付け、同じ衝突で拒否し、ロックファイルはどの形式で書き出してもバイト単位で同じです。Bedrock の構造形式は 1 つだけなので、`--edition bedrock` と一緒に `--structure-format` を指定すると使い方の誤り (終了コード 2) になり、ソースを読む前に拒否します。
 
 ### 12.1.1 Litematica
 
@@ -24,6 +25,28 @@ block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem`
 - `MinecraftDataVersion` はターゲットの DataVersion、`Version` はそのリリース向けの Litematica が読める schematic のバージョンで、1.20.5 の DataVersion (3837) より前なら 6、それ以降なら 7 です。`SubVersion` は 1 です。
 - `Metadata`: ファイルの名前にあたる `Name`、ソースには作者を書かないので `Cairn` とする `Author`、空の `Description`、`RegionCount`、リージョンのボクセル数を合計した `TotalVolume`、そのうち air、cave air、void air 以外の数を数えた `TotalBlocks`、すべてのリージョンを囲む箱の大きさの `EnclosingSize` です。作成時刻、更新時刻、プレビュー画像は入れません。そのため、同じソースからは常に同じバイト列が書き出されます。
 - `Regions`: 各リージョンには、最小の角にあたる `Position` と、どの軸も正の `Size` を入れます。`BlockStatePalette` には、リージョンのブロック状態を air を先頭にして並べ、どの DataVersion でも `Name` と `Properties` のキーで書きます。構造ファイルが `id` と `properties` に切り替わる版でも、Litematica はこのキーのままだからです。`BlockStates` には、各ボクセルのパレット番号を `(y, z, x)` の順に、最大の番号に必要なビット数 (2 ビット以上) で、各 long の下位から詰めます。1 つの long の残りに収まらない番号は、次の long にまたがります。`TileEntities` には、各ブロックエンティティを `.nbt` の書き出しが `nbt` に書くのと同じ形で入れ、リージョンの角からの `x`、`y`、`z` を加えます。`Entities`、`PendingBlockTicks`、`PendingFluidTicks` は空です。
+
+### 12.1.2 Sponge Schematic
+
+`.schem` は、WorldEdit が保存して読み込む、Sponge Schematic Specification の gzip で包んだ Java の NBT です。Cairn はバージョン 3 で書き出します。struct、配置、通路はそれぞれ 1 ファイルになり、`.nbt` と同じ名前を付けます (`cottage.schem`、`home1.schem`)。そのため site は、`.nbt` で書き出すときと同じファイルの組になります。各ファイルの `Offset` には、その配列が site の中で置かれる位置、つまりロックファイルが記録する原点を入れ、struct では `[0, 0, 0]` とします。site のファイルをすべて同じ地点に貼り付けると、site が組み上がります。
+
+バージョン 2 ではなくバージョン 3 で書き出す理由は次のとおりです。
+
+- WorldEdit は 7.3.0 からバージョン 3 を読み書きでき、7.3.0 以降の WorldEdit は、Cairn が出荷する Java のターゲット (1.20.4 から) のどれでも動きます。
+- バージョン 3 のブロックエンティティは、フィールドを `Id` と `Pos` と並ぶ `Data` コンパウンドに入れます。block array がブロックエンティティの id とフィールドを分けて持つのと同じ形です。バージョン 2 はフィールドを `Id` と `Pos` と同じ階層に並べるので、どちらかと同じ名前のフィールドがあると衝突します。
+- バージョン 3 は、Minecraft 自身のデータファイルと同じく、schematic を名前のないルートの中に入れます。
+
+`.schem` の読み込みはどちらのバージョンも受け付けるので、バージョン 2 しか書き出さないツールのファイルも読めます。
+
+ルートには `Schematic` コンパウンドを 1 つ入れ、その中に次のものを入れます。
+
+- `Version` は 3、`DataVersion` はターゲットのものです。
+- `Metadata`: ファイルの名前にあたる `Name` と、`Cairn` とする `Author` です。保存した日時は入れません。そのため、同じソースからは常に同じバイト列が書き出されます。
+- `Width`、`Height`、`Length` は、配列の x、y、z 方向の大きさです。どれも符号なし short で保存するので、いずれかの軸で 65535 を超える配列は拒否します。
+- `Offset` は前述のとおりです。
+- `Blocks`: `Palette` は、各ブロック状態をプロパティを名前順に並べた `namespace:id[name=value,...]` の綴りで書き、block array のパレット (air が先頭) での番号に対応付けます。プロパティの値にカンマを含むものなど、綴りを読み戻すと別の状態になってしまうものは拒否します。`Data` には、各ボクセルの番号を `(y, z, x)` の順に varint で入れます。`BlockEntities` には、各ブロックエンティティを `Pos`、`Id`、そして `.nbt` の書き出しが `nbt` に書くフィールドを入れた `Data` として入れます。
+
+バイオームとエンティティは書き出しません。
 
 ## 12.2 逆方向の変換: コンパイラは写し取り、LLM がリフトする
 

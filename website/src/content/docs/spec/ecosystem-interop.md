@@ -6,8 +6,7 @@ title: "12. Ecosystem Interop and Reverse Conversion"
 
 Serializing the block-array IR emits `.nbt`, `.litematic`, `.schem`, and `.mcstructure`
 ([Architecture](/spec/architecture/)). Each format is a serializer, and an existing format is one
-more backend around the pivot. The `.nbt`, `.litematic` and `.mcstructure` serializers exist today,
-and the `.schem` one does not yet.
+more backend around the pivot. All four serializers exist today.
 
 `cairn compile --edition bedrock` writes `.mcstructure`. `--edition java` writes `.nbt`, or the
 format `--structure-format` names:
@@ -16,10 +15,11 @@ format `--structure-format` names:
 |---|---|---|
 | `nbt` (the default) | a vanilla structure file per struct, placement and walkway | a file per placement and per walkway ([§9.3.4](/spec/components-editing-sites/#934-output-naming)) |
 | `litematic` | a Litematica schematic per struct and per site ([§12.1.1](#1211-litematica)) | one file, with a region per placement and per walkway |
+| `schem` | a Sponge Schematic per struct, placement and walkway ([§12.1.2](#1212-sponge-schematic)) | a file per placement and per walkway, each offset by its origin in the site |
 
 The format changes the files and nothing else. The block array is the same, an artifact is named by
-the same rule and refused on the same collisions, and the lockfile is the one the other format
-writes, byte for byte. Bedrock has one structure format, so `--structure-format` with
+the same rule and refused on the same collisions, and the lockfile is the same, byte for byte,
+whichever format is written. Bedrock has one structure format, so `--structure-format` with
 `--edition bedrock` is a usage error, exit 2, refused before the source is read.
 
 ### 12.1.1 Litematica
@@ -51,6 +51,43 @@ The root holds:
   does not fit what is left of one long runs on into the next. `TileEntities` holds each block
   entity as the `.nbt` writer writes its `nbt`, with its `x`, `y` and `z` from the region's corner.
   `Entities`, `PendingBlockTicks` and `PendingFluidTicks` are empty.
+
+### 12.1.2 Sponge Schematic
+
+A `.schem` is the gzip-wrapped Java NBT of the Sponge Schematic Specification, which WorldEdit saves
+and loads. Cairn writes version 3. Each struct, placement and walkway is a file of its own, named as
+its `.nbt` file is (`cottage.schem`, `home1.schem`), so a site writes the files it writes as `.nbt`.
+A file's `Offset` is where its array sits in its site, the origin the lockfile records, and
+`[0, 0, 0]` for a struct: pasting every file of a site at one point rebuilds the site.
+
+Version 3 is written rather than version 2 because:
+
+- WorldEdit has read and written version 3 since 7.3.0, and a WorldEdit release from 7.3.0 on runs
+  on every Java target Cairn ships, from 1.20.4.
+- A version 3 block entity keeps its fields in a `Data` compound beside its `Id` and `Pos`, as the
+  block array keeps a block entity's id apart from its fields. Version 2 lays the fields out beside
+  `Id` and `Pos`, where a field of either name collides with them.
+- Version 3 nests the schematic in an unnamed root, as Minecraft's own data files do.
+
+A file from a tool that writes only version 2 still reads, since the `.schem` reader takes either
+version.
+
+The root holds one `Schematic` compound:
+
+- `Version` 3, and `DataVersion`, the target's.
+- `Metadata`: `Name`, the file's stem, and `Author`, `Cairn`. The date the file was saved is left
+  out, so a source always compiles to the same bytes.
+- `Width`, `Height` and `Length`, the array's extents along x, y and z. Each is stored as an
+  unsigned short, so an array past 65535 on an axis is refused.
+- `Offset`, as above.
+- `Blocks`. `Palette` maps each block state, spelled `namespace:id[name=value,...]` with its
+  properties sorted by name, to its index in the block array's palette, air first. A state whose
+  spelling would read back as another, such as one with a comma in a property value, is refused.
+  `Data` holds each voxel's index as a varint, in `(y, z, x)` order. `BlockEntities` holds each
+  block entity as its `Pos`, its `Id`, and a `Data` holding the fields the `.nbt` writer writes in
+  its `nbt`.
+
+Biomes and entities are not written.
 
 ## 12.2 Reverse direction: the compiler transliterates, an LLM lifts
 

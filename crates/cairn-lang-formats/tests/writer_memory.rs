@@ -8,6 +8,7 @@ use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_targ
 use cairn_lang_formats::java_structure::{build_structure_tag, prepare_structure};
 use cairn_lang_formats::litematic::{LitematicFile, LitematicRegion, prepare_litematic};
 use cairn_lang_formats::registry::builtin_pack;
+use cairn_lang_formats::schem::{SchemFile, prepare_schem};
 use peak_alloc::PeakAlloc;
 
 // A local `GlobalAlloc` would need `unsafe`, which the workspace forbids here.
@@ -99,6 +100,20 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
                 .expect("write");
         })
     };
+    let schem_write = |array: &BlockArray| {
+        peak_during(|| {
+            let file = SchemFile {
+                scope: "struct::cube",
+                stem: "cube".to_owned(),
+                offset: (0, 0, 0),
+                block_array: array,
+            };
+            prepare_schem(file, &java)
+                .expect("prepare")
+                .write_gzip(&mut std::io::sink())
+                .expect("write");
+        })
+    };
     let java_tree = |array: &BlockArray| {
         peak_during(|| drop(build_structure_tag(array, &java).expect("build")))
     };
@@ -123,6 +138,7 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
         ("java write", &java_write as &dyn Fn(&BlockArray) -> usize),
         ("bedrock write", &bedrock_write),
         ("litematic write", &litematic_write),
+        ("schem write", &schem_write),
     ] {
         let (small_peak, large_peak) = (write(&small), write(&large));
         // Zero would mean the allocations escaped the counter, such as into a C allocator.

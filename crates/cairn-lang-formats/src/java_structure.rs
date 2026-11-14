@@ -307,6 +307,8 @@ pub enum OutputExt {
     Mcstructure,
     /// Litematica schematic (`.litematic`).
     Litematic,
+    /// Sponge Schematic (`.schem`).
+    Schem,
 }
 
 impl OutputExt {
@@ -317,6 +319,7 @@ impl OutputExt {
             OutputExt::Nbt => "nbt",
             OutputExt::Mcstructure => "mcstructure",
             OutputExt::Litematic => "litematic",
+            OutputExt::Schem => "schem",
         }
     }
 }

@@ -5,6 +5,7 @@ use std::fs;
 use std::process::Output;
 
 use cairn_lang_formats::litematic::read_litematic;
+use cairn_lang_formats::schem::read_schem;
 
 use crate::common::{Fixture, cairn};
 
@@ -65,6 +66,41 @@ fn litematic_writes_a_file_per_struct_and_one_per_site() {
 }
 
 #[test]
+fn schem_writes_a_file_per_struct_placement_and_walkway_at_its_offset() {
+    let fixture = Fixture::new(YARD);
+    compile_with(&fixture, &["--structure-format", "schem"]);
+    let artifacts = fixture.artifacts();
+    assert_eq!(
+        artifacts,
+        [
+            "a.schem",
+            "b.schem",
+            "s.crn.lock",
+            "shed.schem",
+            "yard_walkway_a_p__b_p.schem"
+        ]
+    );
+    let offsets: Vec<(&str, (i32, i32, i32))> = artifacts
+        .iter()
+        .filter(|name| *name != "s.crn.lock")
+        .map(|name| {
+            let bytes = fs::read(fixture.out().join(name)).expect("read");
+            let schematic = read_schem(bytes.as_slice()).expect("the artifact reads as a schem");
+            (name.as_str(), schematic.offset)
+        })
+        .collect();
+    assert_eq!(
+        offsets,
+        [
+            ("a.schem", (0, 0, 0)),
+            ("b.schem", (9, 0, 0)),
+            ("shed.schem", (0, 0, 0)),
+            ("yard_walkway_a_p__b_p.schem", (2, 0, 5)),
+        ]
+    );
+}
+
+#[test]
 fn nbt_is_the_default_and_naming_it_writes_the_same_files() {
     let unnamed = Fixture::new(YARD);
     compile_with(&unnamed, &[]);
@@ -92,35 +128,40 @@ fn nbt_is_the_default_and_naming_it_writes_the_same_files() {
 }
 
 #[test]
-fn the_lockfile_and_the_bytes_do_not_vary_from_one_litematic_build_to_the_next() {
+fn neither_format_changes_the_lockfile_or_varies_from_one_build_to_the_next() {
     let nbt = Fixture::new(YARD);
     compile_with(&nbt, &[]);
-    let first = Fixture::new(YARD);
-    compile_with(&first, &["--structure-format", "litematic"]);
-    let second = Fixture::new(YARD);
-    compile_with(&second, &["--structure-format", "litematic"]);
-
     let lock = |fixture: &Fixture| fs::read_to_string(fixture.lock()).expect("read lock");
-    assert_eq!(
-        lock(&first),
-        lock(&nbt),
-        "the format leaves the lockfile alone"
-    );
-    for stem in ["shed", "yard"] {
-        let file = format!("{stem}.litematic");
+    for (format, stems) in [
+        ("litematic", &["shed", "yard"][..]),
+        ("schem", &["a", "b", "shed", "yard_walkway_a_p__b_p"][..]),
+    ] {
+        let first = Fixture::new(YARD);
+        compile_with(&first, &["--structure-format", format]);
+        let second = Fixture::new(YARD);
+        compile_with(&second, &["--structure-format", format]);
         assert_eq!(
-            fs::read(first.out().join(&file)).expect("read"),
-            fs::read(second.out().join(&file)).expect("read"),
-            "{file}"
+            lock(&first),
+            lock(&nbt),
+            "{format} leaves the lockfile alone"
         );
+        for stem in stems {
+            let file = format!("{stem}.{format}");
+            assert_eq!(
+                fs::read(first.out().join(&file)).expect("read"),
+                fs::read(second.out().join(&file)).expect("read"),
+                "{file}"
+            );
+        }
     }
 }
 
 #[test]
 fn a_site_named_after_a_struct_collides_only_as_one_litematic() {
     let source = YARD.replace("struct shed", "struct yard");
-    let nbt = Fixture::new(&source);
-    compile_with(&nbt, &[]);
+    for format in ["nbt", "schem"] {
+        compile_with(&Fixture::new(&source), &["--structure-format", format]);
+    }
 
     let litematic = Fixture::new(&source);
     let out = litematic.out();

@@ -156,7 +156,9 @@ sites, is refused rather than written over the other.
 `cairn compile --structure-format litematic` writes a site as one `.litematic` named after the site
 instead, each placement and walkway a region in it named as its `.nbt` file would be. A `struct`
 named after a site would write the same file, and the compile refuses it
-([§12.1.1](/spec/ecosystem-interop/#1211-litematica)).
+([§12.1.1](/spec/ecosystem-interop/#1211-litematica)). `--structure-format schem` names the files
+as `.nbt` does, each `.schem` carrying its placement's or walkway's origin as its `Offset`
+([§12.1.2](/spec/ecosystem-interop/#1212-sponge-schematic)).
 
 The world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
 the lockfile, by default `<source>.lock` beside the source (`village.crn.lock` for `village.crn`),

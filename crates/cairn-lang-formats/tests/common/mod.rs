@@ -11,6 +11,7 @@ use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::ParityNote;
 use cairn_lang_formats::data_version::BedrockTarget;
 use cairn_lang_formats::registry::{RegistryPack, VersionStates, builtin_pack};
+use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
 
@@ -289,5 +290,63 @@ pub fn comparator_array(id: &str) -> BlockArray {
         entities: vec![],
         source_scope: "struct::comparator".to_owned(),
         derived: Vec::new(),
+    }
+}
+
+/// A row of one voxel per entry of `slots`, under `struct::wide`, whose palette after air is
+/// `minecraft:b1` up to `minecraft:b<len - 1>`.
+///
+/// # Panics
+///
+/// When `slots` is longer than a `u32` counts.
+pub fn wide_array(len: usize, slots: &[u16]) -> BlockArray {
+    let mut entries = vec![BlockState::air()];
+    entries.extend((1..len).map(|i| BlockState::bare(format!("minecraft:b{i}"))));
+    BlockArray {
+        dims: Dims {
+            x: u32::try_from(slots.len()).expect("a row a u32 counts"),
+            y: 1,
+            z: 1,
+        },
+        palette: Palette { entries },
+        voxels: slots.iter().map(|&slot| PaletteIndex(slot)).collect(),
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: "struct::wide".to_owned(),
+        derived: Vec::new(),
+    }
+}
+
+/// `array` as a reader returns it: its palette, its grid, and the block entities a structure
+/// holds, the last at each voxel of the grid in `(y, z, x)` order, with their fields.
+pub fn volume_of(array: &BlockArray) -> BlockVolume {
+    let mut placed: Vec<(usize, &BlockEntity)> = Vec::new();
+    for entity in &array.block_entities {
+        let (x, y, z) = entity.pos;
+        let Some(index) = array.dims.index(x, y, z) else {
+            continue;
+        };
+        placed.retain(|&(at, _)| at != index);
+        placed.push((index, entity));
+    }
+    placed.sort_by_key(|&(index, _)| index);
+    BlockVolume {
+        dims: array.dims,
+        palette: array.palette.entries.clone(),
+        voxels: array.voxels.clone(),
+        block_entities: placed
+            .into_iter()
+            .map(|(_, entity)| {
+                let mut data = Compound::new();
+                for (field, value) in &entity.fields {
+                    data.insert(field.clone(), Tag::Int(*value));
+                }
+                StoredBlockEntity {
+                    pos: entity.pos,
+                    id: entity.id.clone(),
+                    data,
+                }
+            })
+            .collect(),
     }
 }
