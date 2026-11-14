@@ -1,7 +1,19 @@
-use cairn_lang_core::resolve::DroppedIntent;
+use std::path::Path;
 
+use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_core::{lower, parse};
+
+use super::super::Recorded;
 use super::*;
-use crate::pipeline::lowered_probe;
+
+/// A walled three-by-three `struct probe` lowered unpinned, for a test to corrupt.
+fn lowered_probe(edition: Edition) -> BlockArrayIr {
+    let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, Some(edition));
+    lower_to_block_array(&ir, &resolution, Some(&builtin_pack(edition).view(None)))
+}
 
 #[test]
 fn the_notes_answer_the_figure_they_sit_under() {
@@ -100,8 +112,13 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
     .expect_err("a value outside the Java domain is not a portability figure");
 
     let lines = invalid_palette_report(Edition::Bedrock, &invalid);
+    let mut sink = Recorded::default();
+    let source = "";
+    let starts = LineStarts::new(source);
+    let mut out = Reporter::new(Path::new("probe.crn"), source, &starts, &mut sink);
     assert!(
         portability_figure(
+            &mut out,
             Edition::Bedrock,
             portability_for_bedrock(
                 &block_ir,
@@ -114,6 +131,7 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
         .is_none(),
         "a refused palette costs the edition its row rather than printing counts over it",
     );
+    assert_eq!(sink.0, lines, "the refusal is reported as it reads");
     assert_eq!(lines.len(), 3, "header, one leak, closing note: {lines:?}");
     assert!(
         lines[0].starts_with("error: the bedrock ") && lines[0].contains("no portability"),

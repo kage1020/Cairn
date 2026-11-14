@@ -199,6 +199,7 @@ version = "2026.11.0"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-nbt",
+ "cairn-lang-redstone",
  "flate2",
  "indexmap",
  "insta",

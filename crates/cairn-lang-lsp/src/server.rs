@@ -1,4 +1,5 @@
-//! The stdio JSON-RPC loop: diagnostics pushed on each change, completion from the stored text.
+//! The stdio JSON-RPC loop: diagnostics pushed on each change, completion and commands from the
+//! stored text.
 
 use std::collections::VecDeque;
 use std::sync::mpsc;
@@ -9,8 +10,9 @@ use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Notification as _,
     PublishDiagnostics,
 };
-use lsp_types::request::{Completion, Request as _, Shutdown};
+use lsp_types::request::{Completion, ExecuteCommand, Request as _, Shutdown};
 
+use crate::commands::{COMMANDS, execute_command};
 use crate::completion::completions;
 use crate::diagnostics::compute_diagnostics;
 use crate::store::DocumentStore;
@@ -31,6 +33,10 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
         completion_provider: Some(lsp_types::CompletionOptions {
             trigger_characters: Some(vec!["@".to_owned(), "=".to_owned(), ".".to_owned()]),
             ..lsp_types::CompletionOptions::default()
+        }),
+        execute_command_provider: Some(lsp_types::ExecuteCommandOptions {
+            commands: COMMANDS.map(str::to_owned).to_vec(),
+            ..lsp_types::ExecuteCommandOptions::default()
         }),
         ..lsp_types::ServerCapabilities::default()
     }
@@ -216,6 +222,11 @@ fn handle_request(
                     },
                 }
             }
+        }
+    } else if request.method == ExecuteCommand::METHOD {
+        match execute_command(store, request.params) {
+            Ok(result) => Response::new_ok(request.id, result),
+            Err(refused) => Response::new_err(request.id, refused.code, refused.message),
         }
     } else {
         Response::new_err(

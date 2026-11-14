@@ -8,6 +8,8 @@ Each format is a serializer or deserializer around the **block-array IR**, which
 
 Java vanilla `.nbt` and Bedrock `.mcstructure` writers ship, and so do the built-in registry packs behind `cairn info` and every id check. The Bedrock writer translates each palette entry's canonical blockstate, which is Java's, into the target version's Bedrock block and `states` through the built-in pack's state map ([`bedrock_state`](src/bedrock_state.rs)). A state the map has no form for, or one the Java block does not have, is a hard error (`BedrockStructureError::State`); intent a version can only approximate (stair `shape` before 1.26.60) is dropped with a `W_INTENT_DEGRADED` parity note rather than in silence; and `waterlogged` becomes the structure's water layer.
 
+The [`info`](src/info.rs) module builds the `cairn info` report, its JSON document and the `note:` lines behind its rows, once for both front ends: the CLI prints it, and the language server's `cairn.info` command returns it.
+
 Litematica `.litematic` and WorldEdit `.schem` are still to land, and no reverse-direction (file → IR) backend ships yet.
 
 ## Public API
@@ -40,7 +42,7 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `portability::PortabilityReport` | The counts and both entry lists, kept together so the figure and the list can never describe different palettes. Fields are private for that reason. |
 | `portability::PortabilityCounts` | `portable` / `degraded` / `unsupported`, as `u32` palette-entry counts. |
 | `portability::InvalidPalette` | Returned instead of counts when the palette is not one a build could have produced. Carries every refusal, unreworded, because they are one bug's symptoms. |
-| `registry::builtin_pack` | The block, alias, absence, material, connection, and data-version tables for one edition, and Bedrock's state maps, built in and parsed once per process. |
+| `registry::builtin_pack` | The block, alias, absence, material, meaning, connection, and data-version tables for one edition, and Bedrock's state maps, built in and parsed once per process. |
 | `registry::load_builtin_pack` | The same pack as a `Result`, for a caller that wants the parse error rather than the panic. |
 | `registry::load_from_dir` | The same tables from an external pack directory. Loads it as a Java pack; there is no Bedrock equivalent yet. |
 | `registry::RegistryPack` | A loaded and validated pack. Its fields are private and read through accessors, so a pack cannot be built without passing the validators or changed after. |
@@ -51,7 +53,7 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 
 ## Registry packs
 
-A pack is the closed vocabulary every id-level answer comes from: which blocks exist in a version and the values each of their states takes, which name a renamed block goes by there, and which canonical token an abstract material resolves to. The Bedrock pack also carries its state maps: `states.json`, how each version writes the canonical states, and the hand-written `sensitivity.json`, what dropping a state no Bedrock state reads costs. Both carry `connections.json`, what each block is to the rules that join panes, fences and walls to their neighbours, and the hand-written `absent.json`, the other edition's blocks this one has no counterpart for, each with the reason `E_PARITY_UNSUPPORTED` prints. `registry-data/<edition>/pack.json` holds the built-in pair, and `load_from_dir` takes an external one. Each table carries a `schema_version` the loader refuses to read past, so a pack written for a newer Cairn fails loudly instead of being half-understood.
+A pack is the closed vocabulary every id-level answer comes from: which blocks exist in a version and the values each of their states takes, which name a renamed block goes by there, and which canonical token an abstract material resolves to. The Bedrock pack also carries its state maps: `states.json`, how each version writes the canonical states, and the hand-written `sensitivity.json`, what dropping a state no Bedrock state reads costs. Both carry `connections.json`, what each block is to the rules that join panes, fences and walls to their neighbours, the hand-written `absent.json`, the other edition's blocks this one has no counterpart for, each with the reason `E_PARITY_UNSUPPORTED` prints, and the hand-written `meanings.json`, each canonical token whose block split into several and the meaning token whose value picks one. A canonical token a version does not declare is read through those tables before it is refused: the alias group of a block renamed across the edition gives that version's spelling, the meaning table gives the block a meaning token picks, and on Bedrock the state map gives the block it writes a Java block as where no other Java block takes the same forms. `registry-data/<edition>/pack.json` holds the built-in pair, and `load_from_dir` takes an external one. Each table carries a `schema_version` the loader refuses to read past, so a pack written for a newer Cairn fails loudly instead of being half-understood.
 
 The block tables are extracted from the game, and so is the integer each targetable row of a version table writes, Java's `data_version` and Bedrock's `block_version`: Java's from the server jar's `--reports`, Bedrock's from the block palette GeyserMC ships for the release, pinned by commit and SHA-256. Bedrock's state maps come from GeyserMC's Java-to-Bedrock mappings, pinned the same way, read against the `--reports` of the Java release each one follows. Both editions' connection tables are read off the block tags of the server jar of the Java release each version's states follow, the version itself on Java and the release its state map follows on Bedrock, and the block models of that release's client jar. `pack.json` records the file each table came from, under an `extracted` key the compiler does not read. To regenerate an edition's tables, or check the committed ones with `--check`:
 
@@ -85,6 +87,7 @@ Because the tables are closed, a suggestion cannot name a block that does not ex
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the block-array IR types.
 - [`cairn-lang-nbt`](../cairn-lang-nbt/README.md) for the byte-level codec.
+- [`cairn-lang-redstone`](../cairn-lang-redstone/README.md) for laying each struct's circuit, whose findings the `cairn info` report weighs per edition.
 
 ## License
 

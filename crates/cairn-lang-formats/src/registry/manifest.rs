@@ -35,6 +35,9 @@ pub struct PackFiles {
     /// The `absent` file; without it, no block is reported as `E_PARITY_UNSUPPORTED`.
     #[serde(default)]
     pub absent: Option<String>,
+    /// The `meanings` file; without it, no meaning token names a block.
+    #[serde(default)]
+    pub meanings: Option<String>,
     /// The `states` file, named with `sensitivity` or not at all.
     #[serde(default)]
     pub states: Option<String>,

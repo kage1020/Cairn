@@ -64,11 +64,15 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 ## Materials and themes
 
 - **Canonical token.** The value bound to a slot or theme selector: a *meaning* token, not a raw
-  block ID. The backend resolves the per-`(edition, version)` ID and state names. See
-  [materials-themes §7.2](/spec/materials-themes/#72-canonical-vocabulary).
+  block ID. The backend resolves the per-`(edition, version)` ID and state names, across a rename,
+  a split and a merge. See [materials-themes §7.2](/spec/materials-themes/#72-canonical-vocabulary).
 - **Canonical block token.** A specific block meaning: `@oak_planks`, `@water_cauldron`,
-  `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → `cauldron`) are
-  forbidden.
+  `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → an empty `cauldron`)
+  are forbidden.
+- **Meaning token.** A property a canonical block token carries that its block does not have, whose
+  value picks one of the blocks the block split into: `fluid` in `@cauldron[fluid=water]`. The
+  registry pack's `meanings` table lists them. See [materials-themes
+  §7.3](/spec/materials-themes/#73-mappings-across-version-and-edition).
 - **Abstract material token.** An aesthetic choice: `@floor.wood.broadleaf`, `@roof.dark_wood`.
   Theme policy MAY downgrade these (e.g. oak↔birch).
 - **Tier-1 token.** An abstract material token the built-in `materials` catalogs declare, Stable
@@ -109,8 +113,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@cairn`.** Header declaring the **Cairn language version** the file was written against
   (CalVer `YYYY.M[.PATCH]`). Provenance only; optional.
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
-  on conflict with the inferred value. That error, `E_REQUIRES_CONFLICT`, is reserved: no inferred
-  range is derived yet. A `cairn compile --target` below the floor is `E_VERSION_CAP`. See
+  on conflict with the inferred range: a floor above the last version that declares a block the
+  build paints is `E_REQUIRES_CONFLICT`. A `cairn compile --target` below the floor is
+  `E_VERSION_CAP`. See
   [versioning-editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
   verification record, since the record lives in the lock. Still weighed against the file's own
@@ -120,7 +125,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   `lock_schema_version`, `source_hash`, `cairn_version`, `target` (`edition`, `mc_version`,
   `data_version`), `inputs` (`registry_pack_hash`, `constraint_catalog_hash`), `resolved_ir_hash`,
   `verified: true` and `member_version_sensitivity`, plus `placements` and `walkways` for a source
-  with a `site`. See
+  with a `site`. `cairn info` reports the target it verified as its `verified target` row. See
   [versioning-editions §10.6](/spec/versioning-editions/#106-provenance-and-lock).
 - **Provenance stamp.** `(edition, version)` recorded onto the block-array IR on import, mapped from
   the format itself (`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java). See

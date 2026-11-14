@@ -10,7 +10,7 @@ use cairn_lang_core::block_array::{
     StateDomain, TargetRegistry, UnmappedState,
 };
 use cairn_lang_core::lock::HashHex;
-use cairn_lang_core::resolve::{VersionOrder, compare_versions};
+use cairn_lang_core::resolve::{SpellingTable, VersionOrder, compare_versions};
 use cairn_lang_core::suggest::nearest_match;
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
@@ -26,6 +26,7 @@ use super::data_versions::{
 use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
+use super::meanings::{MeaningIndex, MeaningsError};
 use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates, WATER_LAYER_STATE};
 
 /// The state of a slab that fills its cell, which the game never lets hold water although its
@@ -40,6 +41,7 @@ struct BuiltinFiles {
     blocks: &'static str,
     aliases: &'static str,
     absent: &'static str,
+    meanings: &'static str,
     connections: &'static str,
     states: Option<&'static str>,
     sensitivity: Option<&'static str>,
@@ -76,6 +78,7 @@ macro_rules! builtin_files {
             blocks: include_str!(concat!("../../registry-data/", $dir, "/blocks.json")),
             aliases: include_str!(concat!("../../registry-data/", $dir, "/aliases.json")),
             absent: include_str!(concat!("../../registry-data/", $dir, "/absent.json")),
+            meanings: include_str!(concat!("../../registry-data/", $dir, "/meanings.json")),
             connections: include_str!(concat!("../../registry-data/", $dir, "/connections.json")),
             states: $states,
             sensitivity: $sensitivity,
@@ -112,6 +115,7 @@ pub struct RegistryPack {
     blocks: BlocksIndex,
     aliases: AliasIndex,
     absent: AbsentIndex,
+    meanings: MeaningIndex,
     states: Option<StateMapIndex>,
     connections: ConnectionIndex,
     bytes_hash: HashHex,
@@ -127,6 +131,7 @@ pub struct PackView<'a> {
     /// Edition-wide; `ids` narrows a group to the spellings this target declares.
     aliases: &'a AliasIndex,
     absent: &'a AbsentIndex,
+    meanings: &'a MeaningIndex,
     mc_version: Option<&'a str>,
     /// The pinned version's sorted ids; `None` unpinned or without a `blocks` component.
     ids: Option<&'a [String]>,
@@ -245,9 +250,12 @@ impl TargetRegistry for PackView<'_> {
         if !recorded {
             return StateDomain::Unrecorded;
         }
-        let Some(domain) = self.domain_at(version, id) else {
+        let Some(mut domain) = self.domain_at(version, id) else {
             return StateDomain::AnsweredElsewhere;
         };
+        if let Some((meaning, values)) = self.meanings.meaning_of(id) {
+            domain.insert(meaning.to_owned(), values);
+        }
         let outside = state.properties.iter().filter_map(|(key, value)| {
             let fault = match domain.get(key) {
                 None => DomainFault::UnknownProperty {
@@ -311,6 +319,20 @@ impl TargetRegistry for PackView<'_> {
         said.all(|holds| holds == first).then_some(first)
     }
 
+    fn meant(&self, state: &BlockState) -> Option<BlockState> {
+        self.meanings.meant(state)
+    }
+
+    fn respelled(&self, state: &BlockState) -> Option<BlockState> {
+        if self.mc_version.is_some() {
+            return self.respelling(state).map(|respelling| respelling.state);
+        }
+        self.targetable
+            .iter()
+            .any(|version| self.respelled_at(version, &state.id).is_some())
+            .then(|| state.clone())
+    }
+
     fn aliases_for(&self, id: &str) -> Vec<String> {
         // Unfiltered, a group would suggest spellings from other versions and editions.
         let Some(ids) = self.ids else {
@@ -329,6 +351,56 @@ impl TargetRegistry for PackView<'_> {
 type Domain = IndexMap<String, Vec<String>>;
 
 impl PackView<'_> {
+    /// How the pinned version writes the canonical token `state` when its table does not declare
+    /// the id (`spec/materials-themes` "Mappings across version and edition"); `None` when it
+    /// writes the token under no other spelling, or no version is pinned.
+    #[must_use]
+    pub fn respelling(&self, state: &BlockState) -> Option<Respelling> {
+        let version = self.mc_version?;
+        if self.ids.is_some_and(|ids| contains(ids, &state.id)) {
+            return None;
+        }
+        match self.respelled_at(version, &state.id)? {
+            Respelled::Apart(bedrock) => {
+                let written = self
+                    .states
+                    .and_then(|map| map.resolve(state).ok())
+                    .map_or_else(|| bedrock.to_owned(), |form| form.id);
+                Some(Respelling {
+                    state: state.clone(),
+                    written,
+                    through: SpellingTable::StateMap,
+                })
+            }
+            Respelled::Renamed(spelling) => Some(Respelling {
+                state: BlockState {
+                    id: spelling.to_owned(),
+                    properties: state.properties.clone(),
+                },
+                written: spelling.to_owned(),
+                through: SpellingTable::Aliases,
+            }),
+        }
+    }
+
+    /// How `version`, whose table does not declare `id`, writes the canonical block `id` names.
+    fn respelled_at<'s>(&'s self, version: &'s str, id: &str) -> Option<Respelled<'s>> {
+        let ids = self.blocks.ids_for(version)?;
+        if contains(ids, id) {
+            return None;
+        }
+        if let Some(bedrock) = self
+            .state_maps
+            .and_then(|maps| maps.at(version))
+            .and_then(|map| map.written_apart(id))
+        {
+            return Some(Respelled::Apart(bedrock));
+        }
+        self.aliases
+            .renamed(self.blocks, ids, id)
+            .map(Respelled::Renamed)
+    }
+
     /// What `state` is to the connection rules at `version`, read as the canonical blocks its id
     /// names there, or `None` when the version's tables do not declare it or those blocks disagree.
     fn joins_at(&self, version: &str, state: &BlockState) -> Option<Joins> {
@@ -386,6 +458,25 @@ impl PackView<'_> {
             .map(str::to_owned)
             .collect()
     }
+}
+
+/// How a pinned version writes a canonical token whose id its table does not declare.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Respelling {
+    /// The state the palette holds.
+    pub state: BlockState,
+    /// The id the structure file names.
+    pub written: String,
+    /// The table that maps the token onto [`Self::written`].
+    pub through: SpellingTable,
+}
+
+/// How a version writes a canonical block it does not declare under the token's spelling.
+enum Respelled<'a> {
+    /// The state map writes it as this Bedrock block, in forms no other block takes there.
+    Apart(&'a str),
+    /// The version declares this other spelling of the block's `aliases` group.
+    Renamed(&'a str),
 }
 
 /// Whether the sorted `ids` hold `id`.
@@ -584,6 +675,35 @@ pub enum RegistryError {
         #[source]
         source: AbsentError,
     },
+    /// The pack's `meanings` catalog failed to validate.
+    #[error("registry pack `meanings`: {source}")]
+    Meanings {
+        /// The validation error.
+        #[source]
+        source: MeaningsError,
+    },
+    /// A `meanings` row names a block no version of the edition writes.
+    #[error(
+        "registry pack meanings token `{token}` names `{block}`, which no version of `blocks` declares or its state map writes"
+    )]
+    MeaningUnwritten {
+        /// The token.
+        token: String,
+        /// The block it names.
+        block: String,
+    },
+    /// A `meanings` row's meaning token is a state its block has, which it would hide.
+    #[error(
+        "registry pack meanings token `{token}` takes `{meaning}`, a state the block has at `{mc_version}`"
+    )]
+    MeaningIsAState {
+        /// The token.
+        token: String,
+        /// The meaning token.
+        meaning: String,
+        /// The first version whose block has it.
+        mc_version: String,
+    },
     /// An `absent` id, or a spelling of it in `aliases`, is one the pack's own `blocks` declares,
     /// so the edition has the block.
     #[error(
@@ -645,6 +765,12 @@ impl From<AliasError> for RegistryError {
     }
 }
 
+impl From<MeaningsError> for RegistryError {
+    fn from(source: MeaningsError) -> Self {
+        Self::Meanings { source }
+    }
+}
+
 impl From<AbsentError> for RegistryError {
     fn from(source: AbsentError) -> Self {
         Self::Absent { source }
@@ -700,6 +826,13 @@ impl RegistryPack {
     #[must_use]
     pub fn absent(&self) -> &AbsentIndex {
         &self.absent
+    }
+
+    /// The canonical tokens whose block split, with the meaning token that picks one, empty
+    /// without the component.
+    #[must_use]
+    pub fn meanings(&self) -> &MeaningIndex {
+        &self.meanings
     }
 
     /// The state maps, which a Bedrock pack with block tables carries and a Java pack never does.
@@ -870,6 +1003,7 @@ impl RegistryPack {
             blocks: &self.blocks,
             aliases: &self.aliases,
             absent: &self.absent,
+            meanings: &self.meanings,
             mc_version,
             ids,
             states: mc_version.and_then(|version| self.states.as_ref()?.at(version)),
@@ -948,6 +1082,7 @@ enum Component {
     Blocks,
     Aliases,
     Absent,
+    Meanings,
     States,
     Sensitivity,
     Connections,
@@ -962,6 +1097,7 @@ impl Component {
             Component::Blocks => "blocks",
             Component::Aliases => "aliases",
             Component::Absent => "absent",
+            Component::Meanings => "meanings",
             Component::States => "states",
             Component::Sensitivity => "sensitivity",
             Component::Connections => "connections",
@@ -993,6 +1129,7 @@ impl ComponentSource for BuiltinFiles {
             Component::Blocks => self.blocks,
             Component::Aliases => self.aliases,
             Component::Absent => self.absent,
+            Component::Meanings => self.meanings,
             Component::States => embedded(self.states, "states")?,
             Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
             Component::Connections => self.connections,
@@ -1075,7 +1212,15 @@ fn load_pack(
         AbsentIndex::empty,
     )?;
     validate_absent_undeclared(&absent, &aliases, &blocks)?;
+    let (meanings, meanings_text) = optional_component(
+        source,
+        Component::Meanings,
+        manifest.files.meanings.as_deref(),
+        MeaningIndex::from_catalog,
+        MeaningIndex::empty,
+    )?;
     let (states, states_text, sensitivity_text) = state_maps(source, &manifest, &blocks)?;
+    validate_meanings(&meanings, &blocks, states.as_ref())?;
     match &states {
         Some(states) => validate_states_cover_versions(states, &data_versions)?,
         None if expected_edition == Edition::Bedrock && !blocks.is_empty() => {
@@ -1101,6 +1246,7 @@ fn load_pack(
         (&manifest.files.blocks, &blocks_text),
         (&manifest.files.aliases, &aliases_text),
         (&manifest.files.absent, &absent_text),
+        (&manifest.files.meanings, &meanings_text),
         (&manifest.files.states, &states_text),
         (&manifest.files.sensitivity, &sensitivity_text),
         (&manifest.files.connections, &connections_text),
@@ -1117,6 +1263,7 @@ fn load_pack(
         blocks,
         aliases,
         absent,
+        meanings,
         states,
         connections,
         bytes_hash,
@@ -1229,6 +1376,48 @@ fn validate_absent_undeclared(
                 id: id.to_owned(),
                 declared: declared.to_owned(),
                 mc_version: mc_version.to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Refuses a `meanings` row that names a block no version writes, or whose meaning token is a
+/// state of its token's block, which the row would hide.
+fn validate_meanings(
+    meanings: &MeaningIndex,
+    blocks: &BlocksIndex,
+    states: Option<&StateMapIndex>,
+) -> Result<(), RegistryError> {
+    fn maps<'a>(states: Option<&'a StateMapIndex>, version: &'a str) -> Option<VersionStates<'a>> {
+        states.and_then(|states| states.at(version))
+    }
+    for (token, meaning, named) in meanings.rows() {
+        for block in named {
+            let written = blocks.declared_by_some_version(block) != Some(false)
+                || blocks.versions().any(|version| {
+                    maps(states, version).is_some_and(|map| map.written_apart(block).is_some())
+                });
+            if !written {
+                return Err(RegistryError::MeaningUnwritten {
+                    token: token.to_owned(),
+                    block: block.to_owned(),
+                });
+            }
+        }
+        let has_state = |version: &str| match maps(states, version) {
+            Some(map) => map
+                .canonical_domain(token)
+                .is_some_and(|domain| domain.contains_key(meaning)),
+            None => blocks
+                .states_of(version, token)
+                .is_some_and(|states| states.properties().any(|(key, _)| key == meaning)),
+        };
+        if let Some(version) = blocks.versions().find(|version| has_state(version)) {
+            return Err(RegistryError::MeaningIsAState {
+                token: token.to_owned(),
+                meaning: meaning.to_owned(),
+                mc_version: version.to_owned(),
             });
         }
     }

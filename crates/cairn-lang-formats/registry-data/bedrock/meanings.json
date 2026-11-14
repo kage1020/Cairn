@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "namespace": "minecraft",
+  "tokens": [
+    {
+      "token": "cauldron",
+      "meaning": "fluid",
+      "blocks": {
+        "water": "water_cauldron",
+        "lava": "lava_cauldron",
+        "powder_snow": "powder_snow_cauldron"
+      }
+    }
+  ]
+}

@@ -86,14 +86,6 @@ pub(crate) fn resolve_target(
     }
 }
 
-/// Every version a pack can build for, in ascending release order.
-pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
-    pack.targetable()
-        .into_iter()
-        .map(|entry| entry.mc_version.clone())
-        .collect()
-}
-
 /// A structure its edition's backend has checked, waiting to be written.
 pub(crate) enum PreparedStructure<'a> {
     Java(JavaStructure<'a>),

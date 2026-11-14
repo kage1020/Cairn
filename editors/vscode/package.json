@@ -33,6 +33,21 @@
     "workspaceContains:**/*.crn"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "cairn.showInfo",
+        "title": "Show Info",
+        "category": "Cairn"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "cairn.showInfo",
+          "when": "editorLangId == cairn"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "cairn",
