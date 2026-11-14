@@ -7,6 +7,7 @@
     { "include": "#directive" },
     { "include": "#edition-guard" },
     { "include": "#top-level" },
+    { "include": "#edit-line" },
     { "include": "#slot-binding" },
     { "include": "#member-keyword" },
     { "include": "#string" },
@@ -42,6 +43,30 @@
       "captures": {
         "1": { "name": "keyword.other.top-level.cairn" }
       }
+    },
+    "edit-line": {
+      "name": "meta.edit.cairn",
+      "begin": "^(edit)\\b(?:\\s+([A-Za-z_][A-Za-z0-9_]*))?",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.edit.cairn" },
+        "2": { "name": "keyword.other.member.cairn" }
+      },
+      "end": "$",
+      "patterns": [
+        {
+          "match": "(?<=\\s)(set)(?=\\s)",
+          "captures": {
+            "1": { "name": "keyword.other.edit.cairn" }
+          }
+        },
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#material-token" },
+        { "include": "#block-id" },
+        { "include": "#attribute-key" },
+        { "include": "#coordinate" },
+        { "include": "#number" }
+      ]
     },
     "slot-binding": {
       "match": "^\\s*(slot)\\s+([A-Za-z_][A-Za-z0-9_]*)",

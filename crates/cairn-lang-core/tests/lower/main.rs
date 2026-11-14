@@ -3,6 +3,7 @@
 #[path = "../common/mod.rs"]
 pub mod common;
 
+mod address;
 mod at_side_walkway;
 mod chest_block;
 mod components;
@@ -11,6 +12,7 @@ mod connections;
 mod cottage;
 mod door_block;
 mod door_wall_fit;
+mod edit;
 mod edition_guard;
 mod fill;
 mod intent;

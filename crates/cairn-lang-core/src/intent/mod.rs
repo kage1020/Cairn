@@ -1,12 +1,15 @@
 //! Intent IR, the first semantic layer above the surface AST: each body sorted into typed
 //! [`Member`]s with roles, and `logic` and `assert` lines split out.
 
+mod addressing;
 mod branch;
+mod edit;
 mod guard;
 mod keyword_table;
 mod lower;
 mod member;
 mod patch;
+mod select;
 mod semantic_level;
 
 use std::fmt;
@@ -18,6 +21,8 @@ use serde::Serialize;
 use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
+pub use self::edit::EditIr;
+pub(crate) use self::edit::edit_may_set;
 pub(crate) use self::guard::{guarded_lines, refused_under_guard};
 pub use self::keyword_table::{
     Actuator, MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue,
@@ -25,11 +30,16 @@ pub use self::keyword_table::{
 };
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
+pub(crate) use self::member::args_to_map;
 pub use self::member::{
     Arguments, BodyKind, IntentState, Label, Member, MemberBody, ValueWithSpan,
 };
 pub use self::patch::{PatchTargetError, actuator_patch_target};
+pub(crate) use self::select::{
+    SelectorKeys, compares_as_label, levels_under, selector_keys, selects,
+};
 pub use self::semantic_level::SemanticLevel;
+pub use crate::address::{AddressSegment, MemberAddress};
 
 /// Intent IR for a whole `.crn` module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -46,9 +56,61 @@ pub struct IntentModule {
     pub sites: Vec<SiteIr>,
     /// `struct` items, in source order.
     pub structs: Vec<StructIr>,
+    /// Top-level `edit` lines, in source order, each already applied to the members of
+    /// [`Self::structs`] and [`Self::defs`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<EditIr>,
+    /// The module as its lines write it, before any edit; `None` when there is no edit.
+    #[serde(skip)]
+    pub(crate) as_written: Option<Box<IntentModule>>,
 }
 
 impl IntentModule {
+    /// Every member with an address, at any depth of a `struct` or `def` body, with the kind and
+    /// name of the item it stands in: the structs' first, each body in source order, a member
+    /// before those nested under it.
+    #[must_use]
+    pub fn addressed_members(&self) -> Vec<(ScopeKind, &str, &Member)> {
+        fn walk<'a>(
+            kind: ScopeKind,
+            name: &'a str,
+            members: &'a [Member],
+            out: &mut Vec<(ScopeKind, &'a str, &'a Member)>,
+        ) {
+            for member in members {
+                if member.address.is_some() {
+                    out.push((kind, name, member));
+                }
+                walk(kind, name, &member.children.members, out);
+            }
+        }
+        let mut out = Vec::new();
+        for s in &self.structs {
+            walk(ScopeKind::Struct, &s.name, &s.members, &mut out);
+        }
+        for d in &self.defs {
+            walk(ScopeKind::Def, &d.name, &d.members, &mut out);
+        }
+        out
+    }
+
+    /// The byte range of each `edit` line, in source order.
+    pub(crate) fn edit_lines(&self) -> Vec<Span> {
+        self.edits.iter().map(|edit| edit.span.clone()).collect()
+    }
+
+    /// Each member line an `edit` selected, paired with that edit's line, the edits in turn.
+    pub(crate) fn edited_members(&self) -> Vec<(Span, Span)> {
+        self.edits
+            .iter()
+            .flat_map(|edit| {
+                edit.selected
+                    .iter()
+                    .map(|line| (line.clone(), edit.span.clone()))
+            })
+            .collect()
+    }
+
     /// Every `struct`, `def` and `site` body, in that order, each in source order.
     pub(crate) fn bodies(&self) -> impl Iterator<Item = ItemBody<'_>> {
         let structs = self.structs.iter().map(|s| ItemBody {
@@ -299,6 +361,9 @@ pub struct CircuitRegion {
     /// Byte range of the originating `circuit region=...` line.
     #[serde(skip)]
     pub span: Span,
+    /// The address of the originating `circuit region=...` line.
+    #[serde(skip)]
+    pub address: Option<MemberAddress>,
 }
 
 /// The usable reservations among [`circuit_lines`], in the same order.
@@ -455,6 +520,7 @@ fn collect_circuit_lines(
                         width: size.w.get(),
                         depth: size.h.get(),
                         span: m.span.clone(),
+                        address: m.address.clone(),
                     }),
                     Err(defect) => Err(RejectedCircuitRegion {
                         scope_kind,

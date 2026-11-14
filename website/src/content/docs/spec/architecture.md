@@ -24,10 +24,13 @@ Interop](/spec/ecosystem-interop/)).
 
 ## 3.2 The Intent IR is rich and carries invariants
 
-A named member carries `id`, `class`, `role`, `mat_slot`, `intent_state`, and `resolved_state`
-([Blockstate Model](/spec/blockstate/)). Lowering derives `resolved_state`, so it is recorded with
-the block-array IR the member was lowered to, keyed by structure, and not on the Intent IR the
-lowering reads.
+A named member carries `id`, `class`, `role`, its address
+([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), `mat_slot`, `intent_state`, and
+`resolved_state` ([Blockstate Model](/spec/blockstate/)). Lowering derives `resolved_state`, so it
+is recorded with the block-array IR the member was lowered to, keyed by structure, and not on the
+Intent IR the lowering reads. A source's `edit` lines are applied to the Intent IR before any pass
+reads it, so every pass after it sees the edited members ([Components, Editing, and Multi-building
+§9.2](/spec/components-editing-sites/#92-editing-model)).
 
 An import adds no IR of its own. `cairn import` writes source, a `.crn` of the raw members that are
 the Intent IR's escape hatch, and the source parses and lowers as any other does, to the block array

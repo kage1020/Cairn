@@ -11,7 +11,7 @@ use crate::common::{blocks_where, chests, lowered_with, only_structure, state_at
 
 /// A target whose connection table holds the blocks these tests build with, read as the game's
 /// rules read them, and which pins no version.
-struct Rules;
+pub(crate) struct Rules;
 
 impl TargetRegistry for Rules {
     fn lookup(&self, _token: &str) -> Option<BlockState> {

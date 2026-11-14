@@ -132,8 +132,8 @@ E_DECOMPILE_DIFF: block IoU = 0.962 < threshold 0.985
   Suggested patch: edit window[id=front_windows] set repeat=4
 ```
 
-`E_DECOMPILE_DIFF` is not implemented, and the `edit` statement its patch suggests does not parse
-yet ([§9.2](/spec/components-editing-sites/#92-editing-model)).
+`E_DECOMPILE_DIFF` is not implemented. The patch it suggests is an `edit` line
+([§9.2](/spec/components-editing-sites/#92-editing-model)), which a source already accepts.
 
 Convergence thresholds are block IoU ≥ 0.985, `state_accuracy` ≥ 0.995, and residual raw ≤ 5%. An
 exact match is not required, and the residue stays explicit as

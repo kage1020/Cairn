@@ -870,8 +870,10 @@ path. No constraint catalog ships yet ([§10.3](#103-backend--data-tables)), so 
 `constraint_catalog_hash` is all zeros and `member_version_sensitivity` is `[]`.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
-filling, and auto-address assignment. Auto-address assignment is not implemented yet: a member has
-an address only where it carries `id=` ([§9.2](/spec/components-editing-sites/#92-editing-model)).
+filling, and address assignment. Each member's `resolved_state` record carries the address the
+compiler gave it ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), so a change that moves an
+address, such as a member added ahead of others of its role on its wall, moves the hash as a change
+to what is built does.
 
 `lock_schema_version` leads the document so a reader can decide whether it understands the rest
 before parsing it. Version `1` is the shape above plus two keys written only when they are

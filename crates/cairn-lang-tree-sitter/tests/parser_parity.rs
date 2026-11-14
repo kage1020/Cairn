@@ -225,6 +225,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  front -> mat=@oak\n",
         Reject,
     ),
+    (
+        "selector_chained_filters",
+        "theme t:\n  window[class=a][level=b] -> f=@oak\n",
+        Accept,
+    ),
     ("selector_no_arrow", "theme t:\n  front[side=x]\n", Reject),
     (
         "selector_dotted_tail",
@@ -232,6 +237,83 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("theme_no_body", "theme empty:\n", Accept),
+    // -- edit lines ----------------------------------------------------
+    (
+        "edit_selector",
+        "edit window[class=vent] set shape=arch\n",
+        Accept,
+    ),
+    (
+        "edit_chained_selector",
+        "edit window[class=vent][level=floor2] set shape=arch\n",
+        Accept,
+    ),
+    (
+        "edit_empty_selector",
+        "edit window[] set shape=arch\n",
+        Accept,
+    ),
+    (
+        "edit_address",
+        "edit window@front[0] set mat_slot=accent\n",
+        Accept,
+    ),
+    (
+        "edit_address_no_side",
+        "edit roof[0] set overhang=2\n",
+        Accept,
+    ),
+    (
+        "edit_nested_address",
+        "edit level[1].door@inside.back[0] set side=front at=center\n",
+        Accept,
+    ),
+    (
+        "edit_between_items",
+        "struct s size=3x3\n  window side=front\n\nedit window@front[0] set y=2\n\nstruct t size=3x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "edit_before_a_header",
+        "edit window[0] set y=2\n@cairn 2026.06\n",
+        Reject,
+    ),
+    // Under a body the word is a member keyword, which `check` refuses as unknown.
+    (
+        "edit_indented",
+        "struct s size=3x3\n  edit window side=front\n",
+        Accept,
+    ),
+    ("edit_no_set", "edit window[0] shape=arch\n", Reject),
+    ("edit_sets_nothing", "edit window[0] set\n", Reject),
+    ("edit_set_positional", "edit window[0] set arch\n", Reject),
+    ("edit_bare_keyword", "edit window set shape=arch\n", Reject),
+    (
+        "edit_address_no_index",
+        "edit window@front set shape=arch\n",
+        Reject,
+    ),
+    (
+        "edit_address_word_index",
+        "edit window@front[x] set shape=arch\n",
+        Reject,
+    ),
+    (
+        "edit_address_trailing_dot",
+        "edit window[0]. set y=1\n",
+        Reject,
+    ),
+    (
+        "edit_side_trailing_dot",
+        "edit window@inside.[0] set y=1\n",
+        Reject,
+    ),
+    (
+        "edit_address_then_selector",
+        "edit level[0].window[class=a] set y=1\n",
+        Reject,
+    ),
+    ("edit_no_target", "edit set y=1\n", Reject),
     // -- member-level version floors ----------------------------------
     // `spec/versioning-editions` "Fail-loud and minimum-version inference" gives only `def` and
     // `theme` one. Its expression is opaque, so these pin where the line may stand.
@@ -1589,6 +1671,12 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "latency_bound_out_of_range",
         "struct s size=3x3\n  assert latency(a.b -> c.d) <= 4294967296\n",
+        Accept,
+    ),
+    // An address step's count is a `u32`.
+    (
+        "edit_address_index_out_of_range",
+        "edit window[4294967296] set y=1\n",
         Accept,
     ),
     // -- a size literal that runs into a word --------------------------

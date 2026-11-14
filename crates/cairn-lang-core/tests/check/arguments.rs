@@ -232,6 +232,16 @@ fn a_theme_selector_widens_the_vocabulary_of_the_keyword_it_names() {
 }
 
 #[test]
+fn a_level_attribute_names_a_level_and_widens_no_vocabulary() {
+    let src = "theme t:\n  slot glass -> @glass_pane\n  \
+               window[level=floor2] -> frame=@spruce_wood\n\n\
+               struct s size=9x7\n  level id=floor2 y=0\n    \
+               window level=floor2 side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "E_UNKNOWN_ARGUMENT"]);
+    assert_eq!(ignored_at(src), ["@spruce_wood"]);
+}
+
+#[test]
 fn a_selector_widens_one_keyword_and_not_the_others() {
     // The window is there so the row matches and raises no `E_THEME_SELECTOR_UNMATCHED`.
     let src = "theme t:\n  slot glass -> @glass_pane\n  \

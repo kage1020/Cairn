@@ -94,6 +94,20 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        "E_EDIT_UNKNOWN_KEY",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \nedit floor[0] set height=3\n",
+        ),
+    ),
+    (
+        "E_EDIT_UNMATCHED",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \nedit floor[1] set mat_slot=wall\n",
+        ),
+    ),
+    (
         "E_INVALID_REQUIRES",
         Source::Whole(
             "@requires version<1.20\n\
