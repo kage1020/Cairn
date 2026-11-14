@@ -22,8 +22,8 @@ pub(crate) mod version;
 
 pub use ast::{DottedRef, Module, Statement};
 pub use block_array::{
-    BlockArray, BlockArrayIr, BlockEntity, BlockState, Dims, Entity, Palette, PaletteIndex,
-    lower_to_block_array,
+    BlockArray, BlockArrayIr, BlockEntity, BlockEntityData, BlockState, Dims, Entity, Palette,
+    PaletteIndex, lower_to_block_array,
 };
 pub use check::{Diagnostic, DiagnosticCode, Severity, check};
 pub use edition::{Edition, UnknownEdition};

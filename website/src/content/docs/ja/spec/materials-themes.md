@@ -71,7 +71,9 @@ theme exact_oak:
 | `@wood.dark`、`@wood.light`、`@wood.warm`、`@wood.cool` | 色味で選ぶ板材 |
 | `@roof.dark_wood`、`@roof.light_wood`、`@roof.warm_wood`、`@roof.cool_wood` | 色味で選ぶ屋根の階段 |
 | `@beam.default` | `mat_slot=` で割り当てていない `beam` が敷く柱状のブロック |
-| `@sign.oak`、`@sign.oak_wall` | 立てた看板と壁の看板 |
+| `@sign.oak`、`@sign.oak_wall` | `mat_slot=` で割り当てていない `sign` が立てる看板と、掛ける壁の看板 |
+| `@bed.default` | `mat_slot=` で割り当てていない `bed` が置くベッド。赤いベッド |
+| `@bed.white`、`@bed.orange`、`@bed.magenta`、`@bed.light_blue`、`@bed.yellow`、`@bed.lime`、`@bed.pink`、`@bed.gray`、`@bed.light_gray`、`@bed.cyan`、`@bed.purple`、`@bed.blue`、`@bed.brown`、`@bed.green`、`@bed.red`、`@bed.black` | それぞれの染料の色のベッド |
 | `@door.default` | `mat_slot=` で割り当てていない `door` が置くドアのブロック |
 | `@chest.default` | `mat_slot=` で割り当てていない `chest` が置くチェストのブロック |
 | `@trapdoor.default` | `mat_slot=` で割り当てていない `trapdoor` が置くトラップドア |

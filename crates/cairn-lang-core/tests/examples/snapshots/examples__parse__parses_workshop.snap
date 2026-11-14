@@ -36,6 +36,16 @@ items:
         value:
           kind: Token
           value: spruce_stairs
+      - kind: Slot
+        slot: cot
+        value:
+          kind: Token
+          value: bed.brown
+      - kind: Slot
+        slot: board
+        value:
+          kind: Token
+          value: sign.oak
   - kind: Struct
     name: workshop
     args:
@@ -280,3 +290,61 @@ items:
             value:
               kind: Int
               value: 12
+      - kind: Generic
+        keyword: bed
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: cot
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - back
+          - key: offset
+            value:
+              kind: Int
+              value: 1
+          - key: y
+            value:
+              kind: Int
+              value: 1
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: cot
+      - kind: Generic
+        keyword: sign
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: board
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - front
+                - outside
+          - key: offset
+            value:
+              kind: Int
+              value: 1
+          - key: y
+            value:
+              kind: Int
+              value: 2
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: board
+          - key: text
+            value:
+              kind: List
+              value:
+                - kind: Str
+                  value: Workshop
+                - kind: Str
+                  value: open daily

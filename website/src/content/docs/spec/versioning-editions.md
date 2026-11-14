@@ -113,6 +113,15 @@ one block ID, and its `overrides` name the versions that spell it differently, a
   "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }] }
 ```
 
+An entry whose block the edition spells for several Java blocks also names, as `canonical`, the
+Java block the token stands for. Bedrock's one `bed` is every dyed bed, and its writer saves the
+colour of the bed `canonical` names in the bed's block entity ([Entities
+§8.1](/spec/entities/#81-two-tiers)):
+
+```json
+{ "token": "bed.blue", "block": "bed", "canonical": "blue_bed" }
+```
+
 The Bedrock pack carries its state maps as two more components. `states` is generated from
 GeyserMC's mappings, one pinned per version, and checked against that version's block palette when
 the pack is extracted and again when it is loaded. The Java states of one block that become one
@@ -157,9 +166,13 @@ one row per property and the blocks it covers, or every other block that drops i
 loses a value other than the Java default (a stair's `shape` up to 1.21.60), and a `derived` one
 loses nothing the lowering derived, because Bedrock works it out itself (a fence's connections), but
 loses at any value one a member's material or line wrote ([Blockstate
-§6.1](/spec/blockstate/#connections)). Its `reason` is the sentence `W_INTENT_DEGRADED` prints
-([§10.7](#107-java--bedrock-portability)). The loader refuses a dropped property no row classifies,
-and the extractor a row nothing drops.
+§6.1](/spec/blockstate/#connections)). A `block_entity` one loses nothing, because Bedrock keeps it
+in the block's block entity, which the writer fills from it: a chest's `type`, as the pairing of its
+two halves, and a note block's `note` ([Entities §8.1](/spec/entities/#81-two-tiers)). A
+`block_entity` row the writer has no block entity for is a defect in the pack, and the writer
+refuses each entry whose value it would have to keep there. A row's `reason` is the sentence
+`W_INTENT_DEGRADED` prints where the property is lost ([§10.7](#107-java--bedrock-portability)).
+The loader refuses a dropped property no row classifies, and the extractor a row nothing drops.
 
 Both packs carry a `connections` component: what each block is to the rules that join panes, fences,
 walls, chests and redstone dust to their neighbours ([Blockstate

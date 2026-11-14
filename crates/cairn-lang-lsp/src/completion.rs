@@ -975,6 +975,8 @@ mod tests {
                 "chest",
                 "trapdoor",
                 "note_block",
+                "sign",
+                "bed",
                 "repeater",
                 "comparator",
                 "redstone_torch",

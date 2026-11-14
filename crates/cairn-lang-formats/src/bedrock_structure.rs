@@ -1,11 +1,14 @@
 //! A [`BlockArray`] as a Bedrock `.mcstructure`. Each `block_indices` layer runs z fastest,
 //! `(x * size_y + y) * size_z + z`, unlike Java's `blocks`; the second layer holds water where a
 //! waterlogged entry stands and `-1` everywhere else. A block entity is written under
-//! `block_position_data`, keyed by its voxel's place in that order.
+//! `block_position_data`, keyed by its voxel's place in that order: each of the IR's, and one for
+//! each block whose Java states Bedrock keeps in its block entity, as a chest's pairing.
 
 use std::collections::HashMap;
 
-use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockState, PaletteIndex};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockEntityData, BlockState, DYE_COLORS, PaletteIndex, SignText,
+};
 use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
@@ -15,7 +18,7 @@ use cairn_lang_nbt::{
 };
 use thiserror::Error;
 
-use crate::bedrock_state::{BedrockStateError, translate_states};
+use crate::bedrock_state::{BedrockStateError, StateEntity, translate_states};
 use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, list_volume};
@@ -102,6 +105,29 @@ pub enum BedrockStructureError {
         id: String,
         /// The ids it maps, comma-joined.
         known: String,
+    },
+    /// A bed whose colour is no dye's.
+    #[error("the bed at {pos:?} is `{color}`, which is not a dye's colour. Valid: {valid}")]
+    UnknownBedColor {
+        /// The bed's voxel.
+        pos: (u32, u32, u32),
+        /// The colour.
+        color: String,
+        /// The dyes' colours, comma-joined.
+        valid: String,
+    },
+    /// A sign's text the NBT encoder cannot write.
+    #[error(
+        "the sign at {pos:?} has the text `{text}`, which cannot be written as NBT: {source}. \
+         Fix: write the sign's text in printable ASCII"
+    )]
+    UnencodableSignText {
+        /// The sign's voxel.
+        pos: (u32, u32, u32),
+        /// The face's text, its lines joined by newlines.
+        text: String,
+        /// The encoder's refusal.
+        source: NbtIoError,
     },
     /// A palette string the NBT encoder cannot write, checked first since the file writes it last.
     #[error("palette entry `{id}`: {field} cannot be written as NBT: {source}")]
@@ -190,6 +216,7 @@ pub fn prepare_mcstructure<'a>(
     let mut palette = BlockPalette::with_capacity(entries.len());
     let mut slots: Vec<i32> = Vec::with_capacity(entries.len());
     let mut waterlogged: Vec<bool> = Vec::with_capacity(entries.len());
+    let mut held: Vec<Option<(String, StateEntity)>> = Vec::with_capacity(entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
     for (slot, entry) in entries.iter().enumerate() {
         if !is_concrete_id(&entry.id) {
@@ -209,6 +236,11 @@ pub fn prepare_mcstructure<'a>(
                 dropped,
             }));
         }
+        held.push(
+            translated
+                .entity
+                .map(|entity| (translated.id.clone(), entity)),
+        );
         let compound = palette_entry(&translated.id, translated.states, target.block_version);
         slots.push(palette.slot(compound)?);
         waterlogged.push(translated.waterlogged);
@@ -233,7 +265,7 @@ pub fn prepare_mcstructure<'a>(
     if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
     }
-    let position_data = position_data(block_array)?;
+    let position_data = position_data(block_array, &held)?;
 
     let prepared = McStructure {
         block_array,
@@ -253,42 +285,154 @@ const WATER_ID: &str = "minecraft:water";
 /// Each block entity id the writer maps, with the id Bedrock saves it under.
 const BLOCK_ENTITY_IDS: [(&str, &str); 1] = [("minecraft:comparator", "Comparator")];
 
+/// The opaque black ARGB a sign's text is written in.
+const SIGN_TEXT_BLACK: i32 = 0xFF00_0000_u32.cast_signed();
+
 /// `block_position_data`: each block entity's `block_entity_data`, keyed by its voxel's index in
-/// `block_indices`, its position the voxel's own.
-fn position_data(block_array: &BlockArray) -> Result<Compound, BedrockStructureError> {
+/// `block_indices`, its position the voxel's own; `held` is what each palette entry's block entity
+/// holds of its states, with its Bedrock id.
+fn position_data(
+    block_array: &BlockArray,
+    held: &[Option<(String, StateEntity)>],
+) -> Result<Compound, BedrockStructureError> {
     let dims = block_array.dims;
+    let index = |(x, y, z): (u32, u32, u32)| {
+        (u64::from(x) * u64::from(dims.y) + u64::from(y)) * u64::from(dims.z) + u64::from(z)
+    };
     let mut data = Compound::new();
     for entity in &block_array.block_entities {
-        let (x, y, z) = entity.pos;
-        let Some(&(_, id)) = BLOCK_ENTITY_IDS.iter().find(|(java, _)| *java == entity.id) else {
-            return Err(BedrockStructureError::UnmappedBlockEntity {
-                id: entity.id.clone(),
-                known: BLOCK_ENTITY_IDS.map(|(java, _)| java).join(", "),
-            });
-        };
-        let index =
-            (u64::from(x) * u64::from(dims.y) + u64::from(y)) * u64::from(dims.z) + u64::from(z);
-        let mut block = Compound::new();
-        block.insert("block_entity_data", Tag::Compound(entity_data(entity, id)?));
-        data.insert(index.to_string(), Tag::Compound(block));
+        let nbt = member_entity(&entity.data, entity.pos)?;
+        data.insert(index(entity.pos).to_string(), placed(nbt, entity.pos)?);
+    }
+    if held.iter().all(Option::is_none) {
+        return Ok(data);
+    }
+    let held_at = |x: i64, y: u32, z: i64| {
+        let (x, z) = (u32::try_from(x).ok()?, u32::try_from(z).ok()?);
+        let voxel = block_array.voxels[dims.index(x, y, z)?];
+        held.get(usize::from(voxel.0))?.as_ref()
+    };
+    for x in 0..dims.x {
+        for y in 0..dims.y {
+            for z in 0..dims.z {
+                let Some((id, entity)) = held_at(i64::from(x), y, i64::from(z)) else {
+                    continue;
+                };
+                let nbt = match *entity {
+                    StateEntity::ChestHalf { toward, lead } => {
+                        let (px, pz) = (
+                            i64::from(x) + i64::from(toward.0),
+                            i64::from(z) + i64::from(toward.1),
+                        );
+                        // A half whose other half is not beside it stands single.
+                        let paired = held_at(px, y, pz).is_some_and(|(other, half)| {
+                            other == id
+                                && *half
+                                    == StateEntity::ChestHalf {
+                                        toward: (-toward.0, -toward.1),
+                                        lead: !lead,
+                                    }
+                        });
+                        if !paired {
+                            continue;
+                        }
+                        let mut nbt = Compound::new();
+                        nbt.insert("id", Tag::String("Chest".to_owned()));
+                        nbt.insert("pairlead", Tag::Byte(i8::from(lead)));
+                        for (axis, value) in [("pairx", px), ("pairz", pz)] {
+                            let value = i32::try_from(value)
+                                .expect("a voxel of the grid, whose dimensions fit `i32`");
+                            nbt.insert(axis, Tag::Int(value));
+                        }
+                        nbt
+                    }
+                    StateEntity::Note(note) => {
+                        let mut nbt = Compound::new();
+                        nbt.insert("id", Tag::String("Music".to_owned()));
+                        nbt.insert("note", Tag::Byte(note));
+                        nbt
+                    }
+                };
+                data.insert(index((x, y, z)).to_string(), placed(nbt, (x, y, z))?);
+            }
+        }
     }
     Ok(data)
 }
 
-/// A block entity as Bedrock saves one: `id`, its fields, and its position.
-fn entity_data(entity: &BlockEntity, id: &str) -> Result<Compound, BedrockStructureError> {
-    let (x, y, z) = entity.pos;
+/// One of the IR's block entities as Bedrock saves it, without its position.
+fn member_entity(
+    data: &BlockEntityData,
+    pos: (u32, u32, u32),
+) -> Result<Compound, BedrockStructureError> {
     let mut nbt = Compound::new();
-    nbt.insert("id", Tag::String(id.to_owned()));
-    for (field, value) in &entity.fields {
-        nbt.insert(field.clone(), Tag::Int(*value));
+    match data {
+        BlockEntityData::Fields { id: java, fields } => {
+            let Some(&(_, id)) = BLOCK_ENTITY_IDS.iter().find(|(known, _)| known == java) else {
+                return Err(BedrockStructureError::UnmappedBlockEntity {
+                    id: java.clone(),
+                    known: BLOCK_ENTITY_IDS.map(|(known, _)| known).join(", "),
+                });
+            };
+            nbt.insert("id", Tag::String(id.to_owned()));
+            for (field, value) in fields {
+                nbt.insert(field.clone(), Tag::Int(*value));
+            }
+        }
+        BlockEntityData::Sign { front, back } => {
+            nbt.insert("id", Tag::String("Sign".to_owned()));
+            nbt.insert("FrontText", Tag::Compound(sign_face(front, pos)?));
+            nbt.insert("BackText", Tag::Compound(sign_face(back, pos)?));
+            nbt.insert("IsWaxed", Tag::Byte(0));
+        }
+        BlockEntityData::Bed { color } => {
+            // A bed of no colour is saved as the game saves one, white.
+            let color = color.as_deref().unwrap_or(DYE_COLORS[0]);
+            let Some(number) = DYE_COLORS.iter().position(|dye| *dye == color) else {
+                return Err(BedrockStructureError::UnknownBedColor {
+                    pos,
+                    color: color.to_owned(),
+                    valid: DYE_COLORS.join(", "),
+                });
+            };
+            nbt.insert("id", Tag::String("Bed".to_owned()));
+            nbt.insert(
+                "color",
+                Tag::Byte(i8::try_from(number).expect("sixteen dyes fit a byte")),
+            );
+        }
     }
+    Ok(nbt)
+}
+
+/// One face of a sign as Bedrock saves it: its lines as one text, black and glowing or not.
+fn sign_face(text: &SignText, pos: (u32, u32, u32)) -> Result<Compound, BedrockStructureError> {
+    let joined = text.lines.join("\n");
+    check_string(&joined).map_err(|source| BedrockStructureError::UnencodableSignText {
+        pos,
+        text: joined.clone(),
+        source,
+    })?;
+    let mut face = Compound::new();
+    face.insert("Text", Tag::String(joined));
+    face.insert("TextOwner", Tag::String(String::new()));
+    face.insert("SignTextColor", Tag::Int(SIGN_TEXT_BLACK));
+    face.insert("IgnoreLighting", Tag::Byte(i8::from(text.glowing)));
+    face.insert("HideGlowOutline", Tag::Byte(0));
+    face.insert("PersistFormatting", Tag::Byte(1));
+    Ok(face)
+}
+
+/// `nbt` with the position `pos`, as `block_position_data` holds it.
+fn placed(mut nbt: Compound, (x, y, z): (u32, u32, u32)) -> Result<Tag, BedrockStructureError> {
     for (axis, value) in [("x", x), ("y", y), ("z", z)] {
         let value = i32::try_from(value)
             .map_err(|_| BedrockStructureError::DimensionOverflow { axis, value })?;
         nbt.insert(axis, Tag::Int(value));
     }
-    Ok(nbt)
+    let mut block = Compound::new();
+    block.insert("block_entity_data", Tag::Compound(nbt));
+    Ok(Tag::Compound(block))
 }
 
 /// The `block_palette` being built, a set (`spec/compilation` "Within-phase conflicts and the

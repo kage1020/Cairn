@@ -496,16 +496,72 @@ impl BlockState {
     }
 }
 
-/// A block entity on the grid, with the integer fields of its NBT payload.
+/// A block entity on the grid: what its block keeps beside its state, which each writer saves in
+/// its own edition's shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockEntity {
     /// Voxel coordinate the block entity sits at.
     pub pos: (u32, u32, u32),
-    /// Block entity id, e.g. `minecraft:comparator`.
-    pub id: String,
-    /// Integer fields of its payload, such as a comparator's `OutputSignal`.
-    #[serde(skip_serializing_if = "IndexMap::is_empty")]
-    pub fields: IndexMap<String, i32>,
+    /// What the block entity holds.
+    #[serde(flatten)]
+    pub data: BlockEntityData,
+}
+
+/// What a [`BlockEntity`] holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BlockEntityData {
+    /// Integer fields under a Java block entity id, as a circuit comparator keeps its
+    /// `OutputSignal` under `minecraft:comparator`.
+    Fields {
+        /// Block entity id, e.g. `minecraft:comparator`.
+        id: String,
+        /// Integer fields of its payload.
+        #[serde(skip_serializing_if = "IndexMap::is_empty")]
+        fields: IndexMap<String, i32>,
+    },
+    /// A sign's two faces (`spec/entities` "Two tiers").
+    Sign {
+        /// The face toward the way the sign faces, which its `text=` writes.
+        front: SignText,
+        /// The face its `back=` writes.
+        back: SignText,
+    },
+    /// One half of a bed, with the dye colour its block names.
+    Bed {
+        /// The dye's name, such as `red`; `None` for a block that names no colour.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+}
+
+/// The sixteen dye colours, in the order the game numbers them.
+pub const DYE_COLORS: [&str; 16] = [
+    "white",
+    "orange",
+    "magenta",
+    "light_blue",
+    "yellow",
+    "lime",
+    "pink",
+    "gray",
+    "light_gray",
+    "cyan",
+    "purple",
+    "blue",
+    "brown",
+    "green",
+    "red",
+    "black",
+];
+
+/// One face of a sign.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SignText {
+    /// Its lines, top first, at most four.
+    pub lines: Vec<String>,
+    /// Whether the text glows.
+    pub glowing: bool,
 }
 
 /// An entity (frames, paintings, item displays, ...), without its payload.

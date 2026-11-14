@@ -23,8 +23,7 @@
   no member: they are written as state literals on the material, which `E_STATE_DOMAIN` checks at
   a pinned target.
 - *(formats)* Both built-in packs declare the tier-1 tokens `beam.default`, `trapdoor.default` and
-  `note_block.default`. A Bedrock build drops a note block's written `note` and `instrument` with
-  `W_INTENT_DEGRADED`, since Bedrock keeps the note in a block entity no writer fills yet and works
-  the instrument out from the block below.
+  `note_block.default`. A Bedrock build drops a note block's written `instrument` with
+  `W_INTENT_DEGRADED`, since Bedrock works the instrument out from the block below.
 - *(lsp)* Completion offers `beam`, `trapdoor` and `note_block` with the other member keywords.
 - *(vscode)* The grammar highlights the three keywords.

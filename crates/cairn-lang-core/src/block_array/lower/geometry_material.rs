@@ -27,11 +27,45 @@ pub(super) enum Family {
     Trapdoor,
     /// The blocks with an `axis` taking `x`, `y` and `z`, which a `beam` lays on their side.
     Pillar,
+    /// The standing signs whose wall sign the target has, which a `sign` stands or hangs.
+    Sign,
+    /// The bed blocks a `bed` lays two of.
+    Bed,
 }
 
 /// The path of `id`, without its namespace.
-fn path_of(id: &str) -> &str {
+pub(super) fn path_of(id: &str) -> &str {
     id.rsplit_once(':').map_or(id, |(_, path)| path)
+}
+
+/// The wall sign of the standing sign `id`: `oak_sign`'s `oak_wall_sign`, and Bedrock's
+/// `spruce_standing_sign`'s `spruce_wall_sign`.
+pub(super) fn wall_sign_of(id: &str) -> String {
+    match id.strip_suffix("standing_sign") {
+        Some(stem) => format!("{stem}wall_sign"),
+        None => format!("{}_wall_sign", id.strip_suffix("_sign").unwrap_or(id)),
+    }
+}
+
+/// Whether `id` names a standing sign whose wall sign the target has, or may have where it cannot
+/// say: its path ends in `_sign`, and in neither `wall_sign` nor `hanging_sign`.
+fn is_sign(id: &str, registry: Option<&dyn TargetRegistry>) -> bool {
+    let path = path_of(id);
+    let standing =
+        path.ends_with("_sign") && !path.ends_with("wall_sign") && !path.ends_with("hanging_sign");
+    standing
+        && registry.is_none_or(|registry| {
+            let wall = wall_sign_of(id);
+            registry
+                .block_ids()
+                .map_or_else(|| registry.may_declare(&wall), |ids| ids.contains(&wall))
+        })
+}
+
+/// Whether `id` names a bed block: its path is `bed` or ends in `_bed`.
+fn is_bed(id: &str) -> bool {
+    let path = path_of(id);
+    path == "bed" || path.ends_with("_bed")
 }
 
 /// Whether `id` names a door block: its path ends in `_door`.
@@ -90,6 +124,8 @@ impl Family {
             Self::Button => is_button(id),
             Self::Trapdoor => is_trapdoor(id),
             Self::Pillar => is_pillar(id, registry),
+            Self::Sign => is_sign(id, registry),
+            Self::Bed => is_bed(id),
         }
     }
 
@@ -102,6 +138,8 @@ impl Family {
             Self::Button => "button",
             Self::Trapdoor => "trapdoor",
             Self::Pillar => "pillar",
+            Self::Sign => "sign",
+            Self::Bed => "bed",
         }
     }
 
@@ -114,6 +152,8 @@ impl Family {
             Self::Button => "`face` / `facing`",
             Self::Trapdoor => "`facing` / `half` / `open`",
             Self::Pillar => "`axis`",
+            Self::Sign => "`facing` / `rotation`",
+            Self::Bed => "`facing` / `part`",
         }
     }
 
@@ -143,6 +183,14 @@ impl Family {
             Self::Pillar => {
                 "bind the slot to a block whose `axis` takes `x`, `y` and `z`, such as a log — \
                  the registry pack's `beam.default` resolves to one"
+            }
+            Self::Sign => {
+                "bind the slot to a standing sign whose wall sign the target has — the registry \
+                 pack's `sign.oak` resolves to one"
+            }
+            Self::Bed => {
+                "bind the slot to a bed material — the registry pack's `bed.default` and \
+                 `bed.<colour>` tokens resolve to one"
             }
         }
     }

@@ -24,6 +24,8 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "chest",
     "trapdoor",
     "note_block",
+    "sign",
+    "bed",
     "repeater",
     "comparator",
     "redstone_torch",
@@ -146,6 +148,10 @@ pub enum MemberRole {
     Trapdoor,
     /// `note_block` fixture, placed at a coordinate triple.
     NoteBlock,
+    /// `sign` fixture, a standing or a wall sign holding text.
+    Sign,
+    /// `bed` fixture, a bed's head and foot.
+    Bed,
     /// `repeater` Tier 0 part.
     Repeater,
     /// `comparator` Tier 0 part.
@@ -286,6 +292,8 @@ impl MemberRole {
             | Self::Chest
             | Self::Trapdoor
             | Self::NoteBlock
+            | Self::Sign
+            | Self::Bed
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -343,13 +351,14 @@ impl MemberRole {
             Self::PressurePlate | Self::Lever | Self::Button | Self::Daylight => {
                 &["at", "offset", "y"]
             }
-            Self::Observer | Self::RedstoneTorch => &["at", "offset", "y", "facing"],
+            Self::Observer | Self::RedstoneTorch | Self::Bed => &["at", "offset", "y", "facing"],
             Self::Lamp => &["at", "offset", "y", "lit_by"],
             Self::Piston => &["at", "offset", "y", "powered_by", "facing", "sticky"],
             Self::Dispenser => &["at", "offset", "y", "fired_by", "facing"],
             Self::Chest => &["at", "offset", "y", "facing", "size", "waterlogged"],
             Self::Trapdoor => &["at", "offset", "y", "facing", "half", "open", "waterlogged"],
             Self::NoteBlock => &["at", "note", "instrument"],
+            Self::Sign => &["at", "offset", "y", "facing", "text", "back", "glowing"],
             Self::Repeater => &["at", "offset", "y", "facing", "delay"],
             Self::Comparator => &["at", "offset", "y", "facing", "mode"],
             Self::RedstoneDust => &["at", "offset", "y", "connect"],
@@ -375,7 +384,12 @@ impl MemberRole {
             Self::Beam => &["axis"],
             Self::Trapdoor => &["facing", "half", "open", "waterlogged"],
             Self::NoteBlock => &["note", "instrument"],
-            Self::Observer | Self::Piston | Self::Dispenser | Self::RedstoneTorch => &["facing"],
+            Self::Observer
+            | Self::Piston
+            | Self::Dispenser
+            | Self::RedstoneTorch
+            | Self::Sign
+            | Self::Bed => &["facing"],
             Self::Repeater => &["facing", "delay"],
             Self::Comparator => &["facing", "mode"],
             Self::RedstoneDust => &["connect"],
@@ -456,6 +470,8 @@ impl MemberRole {
             | Self::Button
             | Self::Chest
             | Self::Trapdoor
+            | Self::Sign
+            | Self::Bed
             | Self::Other(_) => &[],
         }
     }
@@ -546,6 +562,8 @@ impl MemberRole {
             | Self::Chest
             | Self::Trapdoor
             | Self::NoteBlock
+            | Self::Sign
+            | Self::Bed
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -598,6 +616,8 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "chest" => MemberRole::Chest,
         "trapdoor" => MemberRole::Trapdoor,
         "note_block" => MemberRole::NoteBlock,
+        "sign" => MemberRole::Sign,
+        "bed" => MemberRole::Bed,
         "repeater" => MemberRole::Repeater,
         "comparator" => MemberRole::Comparator,
         "redstone_torch" => MemberRole::RedstoneTorch,

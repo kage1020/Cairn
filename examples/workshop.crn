@@ -1,9 +1,11 @@
 @cairn 2026.06
 @requires version>=1.20
 
-# A workshop framed in logs, with a hatch on its wall and a note block on its floor.
+# A workshop framed in logs, with a hatch on its wall, a note block on its floor, a cot and a
+# sign by its door.
 # Demonstrates: beam over a door and along a wall top, trapdoor by a wall and at a
-# coordinate triple, and note_block with the note and instrument its line writes.
+# coordinate triple, note_block with the note and instrument its line writes, bed by a wall,
+# and sign with the text its line writes.
 
 theme timber:
   slot floor -> @oak_planks
@@ -11,6 +13,8 @@ theme timber:
   slot frame -> @spruce_log
   slot hatch -> @spruce_trapdoor
   slot roof  -> @spruce_stairs
+  slot cot   -> @bed.brown
+  slot board -> @sign.oak
 
 struct workshop size=7x5
   floor  mat_slot=floor
@@ -29,3 +33,7 @@ struct workshop size=7x5
   trapdoor id=shelf at=5,2,1 mat_slot=hatch half=top facing=south
   # Twelve semitones up, played as a bell.
   note_block id=bell at=1,1,1 instrument=bell note=12
+  # Its head to the back wall, under the shelf.
+  bed id=cot at=inside.back offset=1 y=1 mat_slot=cot
+  # Hung on the front wall's outside face, beside the door.
+  sign id=board at=front.outside offset=1 y=2 mat_slot=board text=["Workshop", "open daily"]

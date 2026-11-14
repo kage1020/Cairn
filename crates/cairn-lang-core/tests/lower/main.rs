@@ -5,6 +5,7 @@ pub mod common;
 
 mod at_side_walkway;
 mod beam;
+mod bed;
 mod chest_block;
 mod components;
 mod conditional_arguments;
@@ -29,6 +30,7 @@ mod port_rejection_reason;
 mod raw;
 mod resolved_state;
 mod roof_seats_on_the_wall;
+mod sign;
 mod state_domain;
 mod state_unmapped;
 mod struct_as_written;

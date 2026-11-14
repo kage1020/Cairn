@@ -6,7 +6,7 @@ use cairn_lang_core::{DiagnosticCode, Edition};
 use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 
-use crate::common::{lower_source, note_fields, states_for, written_palette};
+use crate::common::{lower_source, note_fields, position_data, states_for, written_palette};
 
 /// A room whose theme binds `frame` and `hatch`, holding `members`.
 fn room(members: &str) -> String {
@@ -27,7 +27,7 @@ fn findings(source: &str, edition: Edition, version: &str) -> Vec<(DiagnosticCod
 }
 
 #[test]
-fn a_bedrock_target_writes_each_members_states_in_its_own_and_notes_the_note_it_drops() {
+fn a_bedrock_target_writes_each_members_states_in_its_own_and_a_note_in_its_block_entity() {
     let source = room(
         "  beam kind=pillar mat_slot=frame at=front.top\n  beam kind=pillar at=left.top\n  \
          trapdoor at=inside.right offset=2 y=2 mat_slot=hatch open=true\n  \
@@ -49,28 +49,16 @@ fn a_bedrock_target_writes_each_members_states_in_its_own_and_notes_the_note_it_
     };
     assert_eq!(
         note_fields(&notes),
-        [
-            (
-                "minecraft:noteblock",
-                "instrument=bit,note=12",
-                &dropped(
-                    "note",
-                    "12",
-                    "Bedrock keeps a note block's note in its block entity, which Cairn does not \
-                     write"
-                ),
+        [(
+            "minecraft:noteblock",
+            "instrument=bit,note=12",
+            &dropped(
+                "instrument",
+                "bit",
+                "the written `instrument=bit` is not kept: Bedrock works a note block's \
+                 instrument out from the block below it"
             ),
-            (
-                "minecraft:noteblock",
-                "instrument=bit,note=12",
-                &dropped(
-                    "instrument",
-                    "bit",
-                    "the written `instrument=bit` is not kept: Bedrock works a note block's \
-                     instrument out from the block below it"
-                ),
-            ),
-        ],
+        )],
     );
     assert_eq!(
         written_palette(&root),
@@ -83,6 +71,14 @@ fn a_bedrock_target_writes_each_members_states_in_its_own_and_notes_the_note_it_
             "minecraft:spruce_trapdoor[direction=1,open_bit=1,upside_down_bit=0]",
             "minecraft:trapdoor[direction=0,open_bit=0,upside_down_bit=1]",
         ],
+    );
+    // The note block at its default note keeps nothing in its block entity.
+    assert_eq!(
+        position_data(&root),
+        [(
+            "57".to_owned(),
+            "{block_entity_data:{id:\"Music\",note:12b,x:2,y:1,z:2}}".to_owned()
+        )],
     );
 }
 

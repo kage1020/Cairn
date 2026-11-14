@@ -170,7 +170,8 @@ pub(super) fn lower_body_to_block_array<'a>(
         body.scope_label,
     );
 
-    let array = finished_array(dims, palette, voxels, body.source_scope, &derived);
+    let mut array = finished_array(dims, palette, voxels, body.source_scope, &derived);
+    array.block_entities = canvas.block_entities();
     let members = resolved_members(&flattened, canvas.owners(), &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));

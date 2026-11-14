@@ -413,6 +413,14 @@ const SWEEP: &[(&str, &str)] = &[
         "  note_block id=nb class=c at=1,0,1 note=12 instrument=bit\n",
     ),
     (
+        "sign",
+        "  sign id=sg class=c mat_slot=m at=inside.front offset=1 y=1 text=\"A\" back=[\"B\"] glowing=true\n  sign at=1,0,1 facing=east\n",
+    ),
+    (
+        "bed",
+        "  bed id=bd class=c mat_slot=m at=inside.front offset=1 y=0\n  bed at=1,0,1 facing=east\n",
+    ),
+    (
         "repeater",
         "  repeater id=rp class=c at=inside.front offset=1 y=1 facing=in delay=2\n",
     ),

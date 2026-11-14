@@ -2,7 +2,7 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
+    BlockArray, BlockEntityData, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
 };
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_state::BedrockStateError;
@@ -13,6 +13,7 @@ use cairn_lang_formats::bedrock_structure::{
 use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_nbt::tag::{Compound, Tag};
+use indexmap::IndexMap;
 
 use crate::common::{
     block_palette, comparator_array, default_palette, dropped_shape, note_fields, states_for,
@@ -899,7 +900,10 @@ fn a_block_entity_is_written_in_block_position_data_under_its_voxels_index() {
 #[test]
 fn a_block_entity_without_a_bedrock_form_is_refused() {
     let mut array = comparator_array("minecraft:powered_comparator");
-    array.block_entities[0].id = "minecraft:chest".to_owned();
+    array.block_entities[0].data = BlockEntityData::Fields {
+        id: "minecraft:chest".to_owned(),
+        fields: IndexMap::new(),
+    };
     match build(&array) {
         Err(BedrockStructureError::UnmappedBlockEntity { id, known }) => {
             assert_eq!(

@@ -103,6 +103,13 @@ pub trait TargetRegistry {
         let _ = id;
         true
     }
+
+    /// The canonical block `token` stands for where the target spells several canonical blocks
+    /// as the one it resolves to, as Bedrock's `bed` is every dyed bed; `None` otherwise.
+    fn canonical_block(&self, token: &str) -> Option<String> {
+        let _ = token;
+        None
+    }
 }
 
 /// The registry of a lowering with no target. It lifts every abstract token, and every id no

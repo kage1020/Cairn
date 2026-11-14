@@ -1,10 +1,12 @@
 //! Every id a built-in pack can produce exists in its target, on every supported version.
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::BUILTIN_BLOCK_IDS;
+use cairn_lang_core::block_array::{BUILTIN_BLOCK_IDS, DYE_COLORS};
+use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+use indexmap::IndexMap;
 
-use crate::common::{examples, lower_source, supported_versions};
+use crate::common::{examples, lower_source, states_for, supported_versions};
 
 fn edition(pack: &RegistryPack) -> &'static str {
     pack.manifest().edition.as_str()
@@ -68,6 +70,9 @@ fn both_packs_declare_the_tokens_that_redirect_the_member_defaults() {
         ("door.default", "door"),
         ("chest.default", "chest"),
         ("beam.default", "beam"),
+        ("sign.oak", "standing sign"),
+        ("sign.oak_wall", "wall sign"),
+        ("bed.default", "bed"),
         ("trapdoor.default", "trapdoor"),
         ("note_block.default", "note block"),
         ("lever.default", "lever"),
@@ -118,6 +123,8 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
     for (token, expected) in [
         ("sign.oak", "minecraft:standing_sign"),
         ("sign.oak_wall", "minecraft:wall_sign"),
+        ("bed.default", "minecraft:bed"),
+        ("bed.blue", "minecraft:bed"),
         ("pressure_plate.default", "minecraft:wooden_pressure_plate"),
         ("door.default", "minecraft:wooden_door"),
         ("button.default", "minecraft:wooden_button"),
@@ -138,6 +145,8 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
     for (token, expected) in [
         ("sign.oak", "minecraft:oak_sign"),
         ("sign.oak_wall", "minecraft:oak_wall_sign"),
+        ("bed.default", "minecraft:red_bed"),
+        ("bed.blue", "minecraft:blue_bed"),
         ("pressure_plate.default", "minecraft:oak_pressure_plate"),
         ("door.default", "minecraft:oak_door"),
         ("button.default", "minecraft:oak_button"),
@@ -150,6 +159,47 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
             Some(expected),
             "the Java pack must keep the Java spelling of `@{token}`",
         );
+    }
+}
+
+#[test]
+fn each_bed_token_stands_for_the_java_bed_its_java_token_names_which_bedrock_writes_as_its_block() {
+    let (java, bedrock) = (builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock));
+    let mut tokens = vec!["bed.default".to_owned()];
+    tokens.extend(DYE_COLORS.map(|dye| format!("bed.{dye}")));
+    let canonical: Vec<(&str, Option<&str>)> = bedrock
+        .materials()
+        .tokens()
+        .filter_map(|token| Some((token, Some(bedrock.materials().canonical_id(token)?))))
+        .collect();
+    assert_eq!(
+        canonical,
+        tokens
+            .iter()
+            .map(|token| (token.as_str(), java.materials().lookup_id(token)))
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        java.materials()
+            .tokens()
+            .filter_map(|token| java.materials().canonical_id(token))
+            .count(),
+        0
+    );
+    for version in supported_versions(bedrock) {
+        let target = resolve_bedrock_target(version).expect("a supported target");
+        let states = states_for(&target);
+        for (token, java_bed) in &canonical {
+            let java_bed = java_bed.expect("each Java bed token");
+            let id = bedrock
+                .materials()
+                .lookup_id(token)
+                .expect("a mapped token");
+            assert!(
+                states.java_ids(id, &IndexMap::new()).contains(&java_bed),
+                "bedrock {version} maps no `{java_bed}`, which `@{token}` stands for, onto `{id}`",
+            );
+        }
     }
 }
 

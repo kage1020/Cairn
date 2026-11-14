@@ -152,6 +152,10 @@ impl TargetRegistry for PackView<'_> {
         self.materials.tokens().map(str::to_owned).collect()
     }
 
+    fn canonical_block(&self, token: &str) -> Option<String> {
+        self.materials.canonical_id(token).map(str::to_owned)
+    }
+
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
         self.ids.map(|ids| BlockIdSet::new(&self.label, ids))
     }

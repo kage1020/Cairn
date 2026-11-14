@@ -4,20 +4,17 @@ title: "6. Blockstate Model"
 
 ## 6.1 Derive by default, promote on override
 
-**Subject to change.** Of the overrides below, a bed's `facing` is the one not built: `bed` is not a
-keyword yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
 By default the compiler derives blockstate from position and neighbours: stair facing, door
 orientation, glass-pane and fence and wall connections, chest left/right, and so on.
 
-Of these, stair geometry, the orientation of beams, doors, chests, trapdoors and redstone
-components, pane, fence, wall and redstone dust connections, and chest pairing are derived today. A
+Of these, stair geometry, the orientation of beams, doors, chests, trapdoors, signs, beds and
+redstone components, pane, fence, wall and redstone dust connections, and chest pairing are derived
+today. A
 `roof` gets its stairs' `facing`, `half` and `shape` from where they sit. An eave `stair` gets only
 its cardinal `facing`, from the side it sits on, and its `half` and `shape` are what its line
 writes, or `top` and `straight`. Connections and pairs are set once every member is painted
 ([Connections](#connections)), and `waterlogged` where a water `fill` overlaps a block
-([§6.3](#63-waterlogged)). Of the substitutions below, a redstone torch's is derived and a sign's is
-not yet.
+([§6.3](#63-waterlogged)). Both substitutions below, a torch's and a sign's, are derived.
 
 A `door` sets a door block two rows tall into the opening it cuts ([Syntax
 §5.4](/spec/syntax/#54-selectors)): `half=lower` on the row it opens at and `half=upper` on the row
@@ -120,10 +117,51 @@ on the value, and no note block is built. A `note=` outside 0 to 24 and an `at=`
 or lies outside the struct are `E_INVALID_MEMBER`, and a value of the wrong kind is
 `W_IGNORED_ARGUMENT`. A note block is built unpowered, so its `powered` is never written. Its block
 is the registry pack's `@note_block.default`, and a `mat_slot=` on its line is `W_IGNORED_ARGUMENT`.
-Bedrock keeps a note block's note in its block entity, which no writer fills yet, and works its
-instrument out from the block below, so a Bedrock build writes neither and says so, for each its
-line writes, with `W_INTENT_DEGRADED` ([Versioning and Editions
+Bedrock keeps a note block's note in its block entity, which its writer fills ([Entities
+§8.1](/spec/entities/#81-two-tiers)), and works its instrument out from the block below, so a
+Bedrock build does not write an instrument, and says so with `W_INTENT_DEGRADED` where the line
+writes one ([Versioning and Editions
 §10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
+
+A `sign` sets one sign block. By a wall, `at=<side>.outside` or `at=inside.<side>` with `offset=`
+and `y=`, it takes the cell a chest with the same `at=`, `offset=` and `y=` would take, and its
+line is refused or deferred wherever the chest's would be. There it is a wall sign hung on the
+wall's face, its `facing` away from the wall, so nothing is left for a `facing=` to choose, and one
+on its line is `E_INVALID_MEMBER`. At a coordinate triple, `at=x,y,z`, it takes the cell a Tier 0
+part would ([Redstone §14.1](/spec/redstone/#tier-0-parts)). With no `facing=` it is a standing
+sign on the block under it, written `rotation=0`, its front toward the `front` wall. A `facing=` of
+`north`, `south`, `east` or `west` makes it a wall sign hung on the block behind it, its front
+looking that way. Any other identifier for `facing=` is `E_INVALID_MEMBER`, and a value that is no
+identifier is `W_IGNORED_ARGUMENT` and read as if the key were not written. The text its line
+writes is kept in the sign's block entity ([Entities §8.1](/spec/entities/#81-two-tiers)). The
+sign's `mat_slot=` names a standing sign, and a sign without one is built from the registry pack's
+`@sign.oak`. A hung sign is built from that sign's wall sign, the block whose id ends in
+`wall_sign` where the standing sign's ends in `sign` or in `standing_sign`: `spruce_sign` hangs as
+`spruce_wall_sign`, Bedrock's `spruce_standing_sign` as `spruce_wall_sign`, and the default hangs as
+`@sign.oak_wall`. The block MUST be a standing sign whose wall sign the target has: its id ends in
+`_sign` and in neither `wall_sign` nor `hanging_sign`, and the pinned target declares its wall sign,
+or, with no version pinned, some version of the edition may. Any other is `E_INCOMPATIBLE_MATERIAL`,
+and the sign is built from the default beside the error.
+
+A `bed` lays a bed's two blocks: its head in the cell its `at=` names and its foot in the cell
+behind the head, each with its `part`, `head` or `foot`, and the `facing` its head points. By a wall
+its head takes the cell a chest would, and the bed lies with its head to the wall, its `facing`
+toward the wall: out of the struct from inside a wall and into it from outside one. A `facing=` of
+`left` or `right` turns it along the wall as it turns a chest, and the one that points its head away
+from the wall, `in` from inside it or `out` from outside it, would put its foot in the wall and is
+`E_INVALID_MEMBER`. At a coordinate triple its head takes the cell a Tier 0 part would, and its
+`facing=` is a compass word, `north`, `south`, `east` or `west`, which it MUST write, since no wall
+says which way it lies. Its foot MUST lie where its head may: inside the wall ring for a head inside
+a wall, outside the struct's footprint and in its block array for a head outside one, and on the
+footprint for a head at a triple. A foot anywhere else, a missing `facing=` at a triple and any
+other identifier for `facing=` are `E_INVALID_MEMBER`, and no half of the bed is built. A `facing=`
+that is no identifier is `W_IGNORED_ARGUMENT`, and a bed by a wall reads it as if the key were not
+written. A bed is built unoccupied, so its `occupied` is never written. The bed's `mat_slot=` names
+its block, and a bed without one is built from the registry pack's `@bed.default`, a red bed. The
+block MUST be a bed, one whose id is `bed` or ends in `_bed`; any other is
+`E_INCOMPATIBLE_MATERIAL`, and the bed is built from `@bed.default` beside the error. Its colour is
+its block's, which Bedrock keeps in the block entity of each half ([Entities
+§8.1](/spec/entities/#81-two-tiers)).
 
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
 promoted to intent**. Cairn does not adopt the strong reading, "if it can be derived, don't let
@@ -149,8 +187,10 @@ block, `@white_glazed_terracotta[facing=east]`, `@snow[layers=3]` or `@candle[ca
 pair.
 
 Two easy-to-miss cases belong to derivation, not intent: `torch` ↔ `wall_torch` and `sign` ↔
-`wall_sign` are substituted automatically by attachment face. A `redstone_torch` is the one built
-today, from the anchor and `facing=` its line writes.
+`wall_sign` are substituted automatically by attachment face. Every member that places a torch or a
+sign substitutes it: a `redstone_torch` and a `sign` take the form their anchor and `facing=` name,
+and each torch a circuit lays hangs on the side of the block behind it ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 Each line of the example below writes an override.
 
@@ -160,6 +200,7 @@ beam  id=lintel kind=pillar mat_slot=frame at=front.top axis=x                  
 chest id=store  at=inside.back offset=2 size=single
 trapdoor id=hatch at=inside.left offset=1 y=2 half=top open=true
 note_block at=2,1,2 instrument=bit note=12
+bed   id=cot    at=inside.back offset=1 y=1 facing=left
 ```
 
 ### Connections
@@ -228,9 +269,8 @@ pack nothing is derived. A Bedrock target reads its block as the canonical block
 names that take the block's states, and its writer maps the derived states as it maps every other. A
 block the pack cannot answer for is nothing to the rules: one no canonical block becomes, such as
 Bedrock's `border_block`, or one the canonical blocks it may be disagree on. Bedrock keeps a chest's
-pairing in its block entity, which no writer fills yet, so a Bedrock build writes each half of a
-pair as a single chest and says so with `W_INTENT_DEGRADED` ([Versioning and Editions
-§10.7](/spec/versioning-editions/#107-java--bedrock-portability)). A version whose state map keeps
+pairing in its block entity rather than its states, and its writer pairs the two halves there
+([Entities §8.1](/spec/entities/#81-two-tiers)). A version whose state map keeps
 none of a block's sides, such as Bedrock's panes, fences and dust before 1.26.60, has the game work
 them out from the blocks beside it: a side the lowering derived loses nothing there, and one a
 material or line writes, `@glass_pane[north=true]` or a dust's `connect=`, is not kept, which the
@@ -268,7 +308,8 @@ A member's `intent_state` holds the blockstate keys its keyword names, and only 
 `half`, `facing`, `shape` and `waterlogged`, on a `beam`, `axis`, on a `door`, `hinge` and `open`,
 on a `chest`, `facing`, `size`, the line's spelling of its `type`, and `waterlogged`, on a
 `trapdoor`, `facing`, `half`, `open` and `waterlogged`, on a `note_block`, `note` and `instrument`,
-on an `observer`, `piston`, `dispenser` or `redstone_torch`, `facing`, on a `repeater`, `facing` and
+on an `observer`, `piston`, `dispenser`, `redstone_torch`, `sign` or `bed`, `facing`, on a
+`repeater`, `facing` and
 `delay`, on a `comparator`, `facing` and `mode`, and on a `redstone_dust`, `connect`. No other
 keyword names one. Every other `key=value` the line writes is one of the member's arguments, apart
 from `id`, `class` and `mat_slot`, which become fields of their own. Where a key goes depends on the
@@ -289,7 +330,9 @@ and a pinned version's override included, and its property names are the canonic
 
 In place of `type`, a member carries the `role` its keyword classifies to.
 
-`bed` is treated as a block member rather than an entity, to keep the IR types clean.
+`bed` is treated as a block member rather than an entity, to keep the IR types clean, and so is
+`sign`. What either block keeps in a block entity rides beside the block array's grid ([Entities
+§8.1](/spec/entities/#81-two-tiers)).
 
 ## 6.3 `waterlogged`
 

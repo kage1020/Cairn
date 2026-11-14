@@ -167,6 +167,8 @@ impl MemberRole {
                 | Self::Chest
                 | Self::Trapdoor
                 | Self::NoteBlock
+                | Self::Sign
+                | Self::Bed
                 | Self::Repeater
                 | Self::Comparator
                 | Self::RedstoneTorch
@@ -199,6 +201,8 @@ impl MemberRole {
                 | Self::Chest
                 | Self::Trapdoor
                 | Self::NoteBlock
+                | Self::Sign
+                | Self::Bed
                 | Self::Repeater
                 | Self::Comparator
                 | Self::RedstoneTorch
@@ -235,6 +239,8 @@ impl MemberRole {
             Self::Chest => "chest",
             Self::Trapdoor => "trapdoor",
             Self::NoteBlock => "note_block",
+            Self::Sign => "sign",
+            Self::Bed => "bed",
             Self::Repeater => "repeater",
             Self::Comparator => "comparator",
             Self::RedstoneTorch => "redstone_torch",

@@ -73,12 +73,13 @@ that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offse
 wall's length. The `from=` and `to=` of a `fill` ([Blockstate Model
 §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and the `at=` of a `raw_block`
 ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), a Tier 0 part ([Redstone
-§14.1](/spec/redstone/#tier-0-parts)), a `trapdoor` and a `note_block` ([Blockstate Model
-§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), read a triple, and no other key
-does yet: the entities that take one are not keywords. A key that reads another kind of value treats
-a triple as any value of the wrong kind. A label or size key refuses it as a type mismatch, a member
-key such as `side=` or `height=` refuses its member as `E_INVALID_MEMBER`, and a key that falls back
-to its default, such as `sym=` or `overhang=`, says so with `W_IGNORED_ARGUMENT`.
+§14.1](/spec/redstone/#tier-0-parts)), a `trapdoor`, a `note_block`, a `sign` and a `bed`
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), read a
+triple, and no other key does yet: the entities that take one are not keywords. A key that reads
+another kind of value treats a triple as any value of the wrong kind. A label or size key refuses it
+as a type mismatch, a member key such as `side=` or `height=` refuses its member as
+`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says
+so with `W_IGNORED_ARGUMENT`.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
@@ -225,13 +226,14 @@ Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-ha
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `beam`, `level`,
 `pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
-`trapdoor`, `note_block`, `repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`,
-`raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The keyword table is
-global, so writing one in the other body parses and classifies and then reaches nothing. That is
-`E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along. A
-`level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
-reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
-`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+`trapdoor`, `note_block`, `sign`, `bed`, `repeater`, `comparator`, `redstone_torch`,
+`redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`,
+`connect`. The keyword table is global, so writing one in the other body parses and classifies and
+then reaches nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking
+anything indented under it along. A `level` groups the other members of a `struct` / `def` body,
+but not a `circuit` line, whose reservation spans the whole scope: a `circuit` line under a `level`
+reaches nothing either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
