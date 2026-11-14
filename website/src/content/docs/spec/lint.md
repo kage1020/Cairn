@@ -172,7 +172,7 @@ to compare.
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 | `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned version has no form for, such as a stair's `shape` on Bedrock before 1.26.60, or a state a member wrote that the version works out itself, such as a dust's `connect=` there, in the words of the pack's `sensitivity`; one line per intent lost ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
-| `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members the previous lock's `member_version_sensitivity` lists, as ones that may resolve differently at the new target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). No lock the compiler writes lists any yet, since no constraint catalog ships, so a build over one does not raise it today. |
+| `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members of this build that may resolve differently at the new target: those whose block a `semantic_sensitivity` row lists at a boundary version lying between the lock's verified version and the target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
 
 The last three are `cairn compile`'s alone: they are about the artifact and the lock it writes, so
 they carry no span and no other command raises them.
@@ -551,6 +551,55 @@ author restating a member is; two footprints that happen to intersect is not, an
 tell the two apart. The resolution the spec mandates still happens, and the finding says which voxel
 it happened at.
 
+### Constraint checks
+
+| Code | Meaning |
+|---|---|
+| `W_NO_ATTACHMENT_FACE` | A member built a block that hangs on a face of the block behind, under or over it, such as a lever, a button, a wall torch or a ladder, where that face is not sturdy, so the game drops it. |
+| `W_UNSUPPORTED_BLOCK` | A member built a block that needs the face of the block below or above it, such as a torch, a lantern, a pressure plate, redstone dust or a door, where that face does not hold it, or a block that falls, such as sand or gravel, over air or a fluid. |
+| `W_WATER_SPILL` | A member built water, from a water `fill` or a block with `waterlogged=true`, that flows into air inside the structure. |
+
+The three are the checks of the constraint catalog ([§11.4](#114-constraint-catalog)), and each
+reads only the blocks its tables list. They run in the block-array lowering at a pinned target, the
+one `cairn compile --target` and `cairn check --edition E --target V` run, on each `struct` or
+`place` body once every member of it is painted and its connections are derived
+([Blockstate](/spec/blockstate/#connections)). So a block is judged against what the build put
+beside it, whichever member put it there. What a block needs of its neighbour is the catalog's
+answer, and what the neighbour gives is the pinned version's, read from the registry pack the way
+the connection rules read it: a face of a block is sturdy when its model covers it whole, which a
+full block's every face is, glass among them, and a glass pane's side is not. A Bedrock target reads
+each block as the canonical blocks its state map names. With no version pinned, they are not raised
+([§11.3](#113-error-vs-warning)).
+
+- **Attachment** (`W_NO_ATTACHMENT_FACE`). A block of the `attachment` table hangs on the block its
+  states point away from: a lever or button with `face=floor` on the block below it, with
+  `face=ceiling` on the block above it, and with `face=wall` on the block behind its `facing`, as a
+  wall torch, a ladder and a tripwire hook do. That block's face toward it must be sturdy.
+- **Support** (`W_UNSUPPORTED_BLOCK`). A block of the `support` table stands on the block below it
+  or hangs from the block above it, as its row says, and needs that block's face toward it to be
+  sturdy, or only its centre to be. A centre is held by a sturdy face, by the top or bottom of the
+  post of a pane, fence or wall, and by a face of the `center_support` table: the ends of an upright
+  chain, the top of a closed fence gate. A block the row names in `also_on` holds it whatever its
+  faces, as a hopper holds redstone dust. So a torch stands on a fence post and a hanging lantern
+  under a chain, and a repeater on neither.
+- **Gravity** (`W_UNSUPPORTED_BLOCK`). A block of the `gravity` table falls where the cell below it
+  holds air, water or lava.
+- **Fluid** (`W_WATER_SPILL`). Water flows down and to the four sides. From a cell of water it
+  reaches each such neighbour that holds air, and from a block with `waterlogged=true` each one
+  through a face of the block that is not sturdy. A neighbour holding any block keeps it out.
+
+A cell outside the body's array is not judged: what stands there is the world's, which the build
+does not know. Nor is a neighbour the pack cannot answer for at the target, as when the canonical
+blocks a Bedrock block may be disagree. A body whose lowering raised an error is not judged at all,
+since a member an error refuses paints nothing and the cells it would have filled read as air.
+
+Each check reports a member once, at its line, however many of its blocks fail it. The message
+names the block and its cell, and the neighbour it fails against, air or a block; for a member with
+more than one, it gives their count and names the first its `resolved_state` records. A cell is
+written as the member's `at=` would write it, counted from the corner of the struct's interior, so
+one in an overhang's ring has a negative coordinate. `W_WATER_SPILL` names the cells of air the water
+reaches, each once.
+
 ### Truth tables
 
 | Code | Meaning |
@@ -632,17 +681,21 @@ Beyond the codes above, lint covers:
 | Category | Checks |
 |---|---|
 | **Geometry** | AABB expansion: a window outside the wall, a door hanging in mid-air. |
-| **attachment** | A frame, painting, sign, button, lever, or torch on a valid attachment face. |
+| **attachment** | A button, lever, wall torch, ladder or tripwire hook on a sturdy face; a frame, painting or sign on a solid one. |
 | **entity_aabb** | Entities not clipping walls or paths, not blocking a door's swing, not cramming. |
-| **support** | Hanging lanterns, torches, campfires, and gravity blocks such as gravel. |
-| **fluid** | Consistency of water source, flow, and `waterlogged`. |
+| **support** | Torches, lanterns, hanging signs, pressure plates, redstone dust, repeaters, comparators and doors on the face they need, and gravity blocks such as gravel over air. |
+| **fluid** | Water, and blocks with `waterlogged=true`, kept in by the blocks around them. |
 | **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
 | **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
 
-Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
-and no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
+attachment, support and fluid run at a pinned target, as the [constraint checks](#constraint-checks),
+over the blocks the catalog lists. A frame, a painting and a sign, standing or on a wall, are not
+among them: each needs a block the game counts as solid, which no table records. entity_aabb is
+specified with the catalog ([§11.4](#entity-aabb)) and reads the entities a build places, which no
+member does yet ([Entities](/spec/entities/)). edit_stability and AABB interference are planned, and
+no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
 holds only in part: a door, window, eave stair, chest, sensor or actuator its own line puts outside
 its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
 keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
@@ -827,15 +880,23 @@ holds `2^130`.
 The `E_` / `W_` prefix is not the severity, in either direction. Most `W_` codes mark a
 partial-build degradation, but some are warnings without being one, among them `W_UNUSED_DEF`, the
 two truth-table warnings, the two `@cairn` codes, `W_INTENDED_TARGET_CAP`,
-`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`, and
-`W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged; and two `E_`-prefixed codes are
-decided by the rule above rather than by their name:
+`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`,
+`W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged, and the three constraint checks;
+and two `E_`-prefixed codes are decided by the rule above rather than by their name:
 
 - `E_UNKNOWN_SLOT_TARGET` is an **error**, because the fault is in the source: the slot is written
   with a value that is not a material token. Its members degrade as they would with no theme bound,
   so what is built does not set it apart from `W_NO_THEME_BOUND`.
 - `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule that matches nothing overrides
   nothing.
+
+`W_NO_ATTACHMENT_FACE`, `W_UNSUPPORTED_BLOCK` and `W_WATER_SPILL` are warnings by the second
+rule. The structure file holds the blocks the source asked for, and what the game does with them
+once they are placed is the behaviour [Versioning and Editions
+§10.2](/spec/versioning-editions/#102-language-contract-recompile-dont-transcode) does not
+guarantee. The catalog is written by hand and lists the blocks it knows, so a build it passes may
+still lose a block it does not list, and one it warns on may be meant: a lever its author will hang
+a wall behind once the structure is placed.
 
 `E_PARSE` is one code for every shape a parse fails in (a stray character, an odd indent, an integer
 past `i64`, a keyword where an item was expected), with the message saying which. A code per shape
@@ -858,7 +919,8 @@ from its default block takes the block the pack names for it, so it is such a bl
 `W_WALKWAY_BLOCKED` note says "a block" where a pinned check would name it. `E_UNKNOWN_ID`,
 `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`, `E_PARITY_UNSUPPORTED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the
 pack's verdicts and are not raised, nor are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned
-target's tables, and `E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition`
+target's tables, the three [constraint checks](#constraint-checks), which read the pinned version's
+blocks, and `E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition`
 alone picks that edition's theme variants and keeps its `@edition` guards. With neither flag, each
 edition's variants are lowered, with that edition's guards: a finding whose span is on a line only
 one edition's variant reads, or whose span or one of whose notes' spans is on a line under that
@@ -1008,6 +1070,95 @@ told its keyword is unknown and not that its host cannot emit.
 
 ## 11.4 Constraint catalog
 
-In-game constraints are cataloged and managed per version: gravity blocks, attachment conditions,
-fluid flow, and disallowed attachment combinations ([Versioning and Editions](/spec/versioning-editions/)).
-"A frame cannot hang on glass" lives there.
+The constraint catalog says what the registry packs cannot: how the game treats a block once it
+stands in the world, and where a block's meaning changes between versions. The packs are extracted
+from the game; the catalog is written by hand ([Versioning and
+Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). The built-in one ships beside
+the packs, as `registry-data/constraints.json` in `cairn-lang-formats`, and is loaded and checked as
+they are. A lock records the sha256 of its text as `constraint_catalog_hash`
+([§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
+
+One catalog serves both editions. It names blocks by their canonical ids, which are Java's
+([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)), without the
+`namespace` it declares once, and a Bedrock build reads each of its blocks as the canonical blocks
+the pack's state map names. Its rules hold at every version that declares their blocks; what differs
+between versions is the faces the pack gives each block there, and a meaning that changes at a
+version is a `semantic_sensitivity` row.
+
+| Table | A row gives | Read by |
+|---|---|---|
+| `semantic_sensitivity` | `edition`, a `boundary` version of it, the `reason`, and the `ids` whose meaning changes there. | `cairn info`'s `semantic-sensitive` row, the lock's `member_version_sensitivity` and `W_SEMANTIC_SENSITIVITY` ([Versioning and Editions](/spec/versioning-editions/#the-semantic-sensitive-row)) |
+| `attachment` | `ids` and `hangs_by`, `face` for a block that reads `face` and `facing`, `facing` for one that reads `facing` alone. | `W_NO_ATTACHMENT_FACE` |
+| `support` | `ids`, `on` (`below` or `above`), `needs` (`sturdy` or `center`), and `also_on`, the blocks that hold them whatever their faces. | `W_UNSUPPORTED_BLOCK` |
+| `gravity` | `ids`. | `W_UNSUPPORTED_BLOCK` |
+| `center_support` | `ids` and the `faces` of each that hold a centre. | `W_UNSUPPORTED_BLOCK`, for a `center` row |
+| `entity_aabb` | `entities`, and the `width`, `height` and `depth` of each one's box, in blocks. | [Entity AABB](#entity-aabb) |
+
+A `support` or `center_support` row may hold for some states only: its `when` names them,
+`key: value` each. A row reads a state the build leaves unwritten as its `defaults` give it, and
+`defaults` names each state the row reads, no more. So a lantern has two rows, `hanging: "false"` on
+the block below and `hanging: "true"` from the block above, a door one for `half: "lower"`, and an
+`attachment` row gives `face` and `facing` their defaults. No state of a block meets two rules of
+`attachment`, `support` and `gravity`, so a block with two rows, as the lantern, gives each a
+different value of one state in `when`.
+
+```json
+{
+  "schema_version": 1,
+  "name": "cairn-builtin-constraints",
+  "namespace": "minecraft",
+  "semantic_sensitivity": [
+    {"edition": "java", "boundary": "1.17", "reason": "cauldron split",
+     "ids": ["cauldron", "lava_cauldron", "powder_snow_cauldron", "water_cauldron"]}
+  ],
+  "attachment": [
+    {"ids": ["lever", "stone_button"], "hangs_by": "face",
+     "defaults": {"face": "wall", "facing": "north"}}
+  ],
+  "support": [
+    {"ids": ["lantern"], "when": {"hanging": "true"}, "defaults": {"hanging": "false"},
+     "on": "above", "needs": "center"},
+    {"ids": ["redstone_wire"], "on": "below", "needs": "sturdy", "also_on": ["hopper"]}
+  ],
+  "gravity": [{"ids": ["gravel", "sand"]}],
+  "center_support": [
+    {"ids": ["chain"], "when": {"axis": "y"}, "defaults": {"axis": "y"}, "faces": ["down", "up"]}
+  ],
+  "entity_aabb": [
+    {"entities": ["item_frame"], "width": 0.75, "height": 0.75, "depth": 0.0625}
+  ]
+}
+```
+
+The loader refuses a catalog whose `schema_version` it does not read, a key no table has, a row that
+names no block or entity, an id no Java version declares, a `when` or `defaults` value no Java
+version gives the block, a state a row reads with no default or a default it does not read, a state
+of a block that meets two rules, a `boundary` its edition's version table cannot place, a `reason`
+that is empty, a box dimension that is not a positive number, and an entity given two boxes. A
+build never reads a half-understood catalog.
+
+The built-in catalog's `semantic_sensitivity` has three rows, all Java's, each listing the blocks
+that exist on both sides of its boundary: walls, whose connection states went from `true` / `false`
+to `none` / `low` / `tall` at 1.16; the cauldron, which split into one block per contents at 1.17;
+and the blocks that store items in a block entity, whose items moved from a `tag` to data components
+at 1.20.5. A lever on a glass pane is dropped and one on glass is kept, since glass is a full block.
+
+### Entity AABB
+
+An entity's box is the space it takes in the world, from its `entity_aabb` row. An entity that
+stands has a box `width` across in x and z, centred on its position, and `height` up from it. One
+that hangs on a face, an item frame or a painting, has a `depth` as well: its box is `width` along
+the face, `height` up it and `depth` out of it, from the face it hangs on.
+
+The check reads each entity a member places ([Entities](/spec/entities/)) and reports
+`W_ENTITY_CLIPPING`, a reserved code ([Compatibility Tiers
+§C.3](/spec/compatibility/#c3-how-a-break-is-communicated)), at the member where its box overlaps:
+
+- a cell holding a block all six of whose faces are sturdy, which the entity would stand inside;
+- a cell of a door, open or closed, which its swing passes through;
+- another entity's box, which would push the two apart.
+
+A box that only touches one of these, meeting it at a face, does not overlap it. An entity the table
+gives no box is not checked, as a block the catalog does not list is not. The code is a warning for
+the reason the constraint checks are ([§11.3](#113-error-vs-warning)). No member places an entity
+yet, so no command raises it.

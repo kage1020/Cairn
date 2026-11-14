@@ -8,6 +8,7 @@ mod chest_block;
 mod components;
 mod conditional_arguments;
 mod connections;
+mod constraints;
 mod cottage;
 mod door_block;
 mod door_wall_fit;
