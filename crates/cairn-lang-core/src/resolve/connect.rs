@@ -210,17 +210,19 @@ fn validate_port(
         return false;
     };
 
-    // Only the body's own members are ports: `block_array::ports` assumes no `level y=N` has
-    // shifted a port's member, so widening this lookup needs changes there too.
-    let count = def
-        .members
-        .iter()
+    // `block_array::ports` finds the member in the same two places.
+    let count = port_candidates(def)
         .filter(|m| m.id.as_deref() == Some(port.port.as_str()))
         .count();
     match count {
         0 => {
-            let refusal = match level_holding(&def.members, port.port.as_str()) {
-                Some(scoped) => diag_level_scoped_port(port, def, scoped),
+            let nested = def
+                .members
+                .iter()
+                .filter(|m| matches!(m.role, MemberRole::Level))
+                .find_map(|level| level_holding(&level.children.members, port.port.as_str()));
+            let refusal = match nested {
+                Some(scoped) => diag_nested_level_port(port, def, scoped),
                 None => diag_undeclared_port(port, def),
             };
             diagnostics.push(refusal);
@@ -248,8 +250,22 @@ fn validate_port(
     }
 }
 
+/// The members a port can name: those of `def`'s body, and those directly under its `level`s.
+fn port_candidates(def: &DefIr) -> impl Iterator<Item = &Member> {
+    def.members.iter().flat_map(|member| {
+        let under = if matches!(member.role, MemberRole::Level) {
+            member.children.members.as_slice()
+        } else {
+            &[]
+        };
+        std::iter::once(member).chain(under)
+    })
+}
+
 fn diag_undeclared_port(port: &PortRef, def: &DefIr) -> Diagnostic {
-    let pool: Vec<&str> = def.members.iter().filter_map(|m| m.id.as_deref()).collect();
+    let pool: Vec<&str> = port_candidates(def)
+        .filter_map(|m| m.id.as_deref())
+        .collect();
     let mut notes = Vec::with_capacity(2);
     notes.extend(
         nearest_match(port.port.as_str(), pool.iter().copied())
@@ -277,7 +293,7 @@ fn diag_undeclared_port(port: &PortRef, def: &DefIr) -> Diagnostic {
     }
 }
 
-/// A port's member indented under a `level`.
+/// A port's member indented under a `level` inside a `level`.
 #[derive(Clone, Copy)]
 struct LevelScoped<'m> {
     /// The `level` the member sits directly under.
@@ -286,7 +302,7 @@ struct LevelScoped<'m> {
     member: &'m Member,
 }
 
-fn diag_level_scoped_port(port: &PortRef, def: &DefIr, scoped: LevelScoped<'_>) -> Diagnostic {
+fn diag_nested_level_port(port: &PortRef, def: &DefIr, scoped: LevelScoped<'_>) -> Diagnostic {
     let level_label = scoped
         .level
         .id
@@ -297,7 +313,7 @@ fn diag_level_scoped_port(port: &PortRef, def: &DefIr, scoped: LevelScoped<'_>) 
         span: port.span.clone(),
         primary: format!(
             "port `{port_id}` of `def {def_name}` (used by `place {place_id}`) is declared under \
-             {level_label}, and a member under a `level` cannot be a port yet",
+             {level_label}, a `level` inside another, which builds nothing",
             port_id = port.port,
             def_name = def.name,
             place_id = port.place,
@@ -305,9 +321,8 @@ fn diag_level_scoped_port(port: &PortRef, def: &DefIr, scoped: LevelScoped<'_>) 
         notes: vec![DiagnosticNote {
             span: Some(scoped.member.span.clone()),
             message: format!(
-                "a port has to be a door or window declared directly in the body of \
-                 `def {def_name}`: use one of those as the endpoint; level-scoped ports are a \
-                 future extension",
+                "a port is a door or window in the body of `def {def_name}` or directly under \
+                 one of its `level`s: move the member out of the inner `level`",
                 def_name = def.name,
             ),
         }],

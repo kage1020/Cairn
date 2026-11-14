@@ -192,8 +192,6 @@ code. The placeholders today include:
   `spawn`, `bed`, `sign` and `raw_repeat`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists, a theme selector's bindings among them;
-- `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which
-  [§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) reserves for a later extension;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet
   ([Lint](/spec/lint/#lowering)), such as a member whose keyword lowering does not handle yet, a
   `floor` or `roof` under a raised `level`, and a `window` with `repeat=` above 1 and `sym=true`.

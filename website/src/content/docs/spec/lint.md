@@ -440,7 +440,7 @@ something for the name would build a site the source did not describe.
 
 | Code | Meaning |
 |---|---|
-| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
+| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member of the referenced def's body, or of a `level` directly in it, carries. A member under a `level` inside a `level` builds nothing, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
 | `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, or a `path=` that is not a material token (`path=gravel` for `path=@gravel`), so the walkway has no material to lay. |
 | `W_DUPLICATE_WALKWAY` | A `connect` joins the same two ports, in either order, as an earlier row in the same site that already laid them. |

@@ -21,17 +21,17 @@ use super::wall_column::WallColumn;
 /// Wall-local `v` every port anchors at, whatever the member's `y=`.
 const PORT_GROUND_V: u32 = 0;
 
-/// World row a door port's doorway opens at: one above the floor slab.
-///
-/// `fill_door` asks about `y_offset + 1`; the two agree because no port reaches a door under a
-/// `level`.
+/// Rows above its level's base row that a door port's doorway opens at: one above the floor slab,
+/// as `fill_door` asks about `y_offset + 1`.
 const DOOR_PORT_BASE_V: u32 = 1;
 
 /// Why [`port_world_position`] placed no port, one variant per refusal in the order it asks.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum PortRejection {
-    /// No member of the `def` body carries the port's `id=`.
+    /// No member of the `def` body, or of a `level` in it, carries the port's `id=`.
     UnknownMember,
+    /// The member is under a `level` whose `y=` does not read, so nothing of it is built.
+    LevelUnread { level: Span },
     /// The member's role is not `door` or `window`.
     ReservedRole { role: String, member: Span },
     /// `side=` is missing or does not name a cardinal wall.
@@ -46,9 +46,17 @@ pub(super) enum PortRejection {
     /// No `walls` member of the body paints.
     DoorNoWalls { member: Span },
     /// The walls paint, but not the row a door opens at.
-    DoorOutsideCourse { walls: WallColumn, member: Span },
+    DoorOutsideCourse {
+        base: u32,
+        walls: WallColumn,
+        member: Span,
+    },
     /// The course holding the row a door opens at ends there, leaving no row for its upper half.
-    DoorShortCourse { walls: WallColumn, member: Span },
+    DoorShortCourse {
+        base: u32,
+        walls: WallColumn,
+        member: Span,
+    },
     /// A window's `offset=` / `y=` / `size=` / `anchor=` cannot be used.
     WindowArgument { fault: WindowArgFault, member: Span },
     /// A window's rectangle runs past the far end of its wall.
@@ -102,6 +110,7 @@ impl PortRejection {
             Self::ReservedRole { member, .. } | Self::NotCut { member, .. } => {
                 (Some(member), false)
             }
+            Self::LevelUnread { level } => (Some(level), false),
             Self::UnknownMember | Self::Sizeless | Self::OutOfRange => (None, false),
         }
     }
@@ -111,18 +120,14 @@ impl PortRejection {
         const NO_WALLS: &str = "its `def` has no `walls` that paints — a positive `height=` and a `mat_slot=` that resolves";
         match self {
             Self::UnknownMember => "names no member of its `def` body".to_owned(),
-            Self::ReservedRole { role, .. } => {
-                // After `floor` the parenthetical would read as though floor ports were reserved.
-                let reserved = if role == "stair" || role == "roof" {
-                    format!(" (`{role}` ports are reserved)")
-                } else {
-                    String::new()
-                };
-                format!(
-                    "is a `{role}`, and only a `door` or a `window` can anchor a port{reserved} \
-                     — declare the port on a door or window instead",
-                )
-            }
+            Self::LevelUnread { .. } => "is under a `level` whose `y=` does not read, so none of \
+                                          its members is built — the finding on that `level` \
+                                          line says why"
+                .to_owned(),
+            Self::ReservedRole { role, .. } => format!(
+                "is a `{role}`, and only a `door` or a `window` can anchor a port — declare the \
+                 port on a door or window instead",
+            ),
             Self::Side { written, .. } => match written {
                 Written::Absent => {
                     "has no `side=` (expected one of front, back, left, right)".to_owned()
@@ -144,14 +149,14 @@ impl PortRejection {
             }
             Self::DoorColumn { fault, .. } => format!("is a door that {}", fault.clause()),
             Self::DoorNoWalls { .. } => format!("is a door with no wall to open: {NO_WALLS}"),
-            Self::DoorOutsideCourse { walls, .. } => format!(
-                "is a door that opens at y={DOOR_PORT_BASE_V}, the row above the floor slab, which \
-                 is not inside any wall course (the walls occupy {walls})",
+            Self::DoorOutsideCourse { base, walls, .. } => format!(
+                "is a door that opens at y={base}, the row above the floor slab, which is not \
+                 inside any wall course (the walls occupy {walls})",
             ),
-            Self::DoorShortCourse { walls, .. } => format!(
-                "is a door that stands at y={DOOR_PORT_BASE_V}..={}, and the wall course holding \
-                 y={DOOR_PORT_BASE_V} ends there (the walls occupy {walls})",
-                DOOR_PORT_BASE_V + DOOR_HEIGHT - 1,
+            Self::DoorShortCourse { base, walls, .. } => format!(
+                "is a door that stands at y={base}..={}, and the wall course holding y={base} \
+                 ends there (the walls occupy {walls})",
+                base + DOOR_HEIGHT - 1,
             ),
             Self::WindowArgument { fault, .. } => format!("is a window that {}", fault.clause()),
             Self::WindowPastWall {
@@ -190,7 +195,8 @@ impl PortRejection {
     }
 }
 
-/// The world cell one block outside `port_id`'s wall, on the placement's ground row.
+/// The world cell one block outside `port_id`'s wall, on the base row of the `level` it stands
+/// under, or the placement's ground row for a member of the body itself.
 ///
 /// # Errors
 ///
@@ -203,11 +209,7 @@ pub(super) fn port_world_position<S: BuildHasher>(
     walls: &WallColumn,
     cut: &HashSet<Span, S>,
 ) -> Result<(i32, i32, i32), PortRejection> {
-    let member = def
-        .members
-        .iter()
-        .find(|m| m.id.as_deref() == Some(port_id.as_str()))
-        .ok_or(PortRejection::UnknownMember)?;
+    let (level_y, member) = port_member(def, port_id)?;
     if !is_opening(&member.role) {
         return Err(PortRejection::ReservedRole {
             role: member.role.keyword().to_owned(),
@@ -238,14 +240,17 @@ pub(super) fn port_world_position<S: BuildHasher>(
                 member: member.span.clone(),
             });
         }
-        if walls.course_top_at(DOOR_PORT_BASE_V).is_none() {
+        let base = level_y.saturating_add(DOOR_PORT_BASE_V);
+        if walls.course_top_at(base).is_none() {
             return Err(PortRejection::DoorOutsideCourse {
+                base,
                 walls: walls.clone(),
                 member: member.span.clone(),
             });
         }
-        if !walls.contains_rows(DOOR_PORT_BASE_V, DOOR_HEIGHT) {
+        if !walls.contains_rows(base, DOOR_HEIGHT) {
             return Err(PortRejection::DoorShortCourse {
+                base,
                 walls: walls.clone(),
                 member: member.span.clone(),
             });
@@ -262,7 +267,7 @@ pub(super) fn port_world_position<S: BuildHasher>(
         )
         .ok_or(PortRejection::OutOfRange)?
     } else {
-        let u = window_center_offset(member, len, walls)?;
+        let u = window_center_offset(member, level_y, len, walls)?;
         opening_was_cut(member, "window", cut)?;
         wall_world_xz(
             side,
@@ -278,7 +283,39 @@ pub(super) fn port_world_position<S: BuildHasher>(
     let (nx, nz) = side.outward_normal();
     let x = wall_x.checked_add(nx).ok_or(PortRejection::OutOfRange)?;
     let z = wall_z.checked_add(nz).ok_or(PortRejection::OutOfRange)?;
-    Ok((x, place_origin.1, z))
+    let y = i32::try_from(level_y)
+        .ok()
+        .and_then(|level_y| place_origin.1.checked_add(level_y))
+        .ok_or(PortRejection::OutOfRange)?;
+    Ok((x, y, z))
+}
+
+/// The member of `def` carrying `port_id`, in its body or directly under one of its `level`s,
+/// with the `y=` of that `level`, `0` in the body.
+fn port_member<'d>(def: &'d DefIr, port_id: &PortId) -> Result<(u32, &'d Member), PortRejection> {
+    let carries = |m: &&Member| m.id.as_deref() == Some(port_id.as_str());
+    if let Some(member) = def.members.iter().find(carries) {
+        return Ok((0, member));
+    }
+    let (level, member) = def
+        .members
+        .iter()
+        .filter(|m| matches!(m.role, MemberRole::Level))
+        .find_map(|level| {
+            level
+                .children
+                .members
+                .iter()
+                .find(carries)
+                .map(|m| (level, m))
+        })
+        .ok_or(PortRejection::UnknownMember)?;
+    let level_y = level
+        .nonneg_u32("y")
+        .ok_or_else(|| PortRejection::LevelUnread {
+            level: level.span.clone(),
+        })?;
+    Ok((level_y, member))
 }
 
 /// Whether a member of `role` is an opening, the only member a port names.
@@ -330,11 +367,13 @@ fn opening_was_cut<S: BuildHasher>(
     }
 }
 
-/// A window port's wall-local `u`, its rectangle's centre: its first column plus `size.w / 2`.
+/// A window port's wall-local `u`, its rectangle's centre: its first column plus `size.w / 2`,
+/// for a window under a `level` whose `y=` is `level_y`.
 ///
 /// Bounds are checked in the cut's order, so a window wrong both ways gets its own line's reason.
 fn window_center_offset(
     member: &Member,
+    level_y: u32,
     len: u32,
     wall_column: &WallColumn,
 ) -> Result<u32, PortRejection> {
@@ -342,7 +381,8 @@ fn window_center_offset(
         fault,
         member: member.span.clone(),
     })?;
-    let (offset, y, sw, sh) = (args.column(), args.row(), args.width, args.height);
+    let (offset, sw, sh) = (args.column(), args.width, args.height);
+    let y = args.row().saturating_add(level_y);
     match offset.checked_add(sw) {
         Some(end) if end <= len => {}
         _ => {

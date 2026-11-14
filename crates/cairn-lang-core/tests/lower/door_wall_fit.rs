@@ -3,7 +3,6 @@
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
-use cairn_lang_core::{lower, parse, resolve};
 
 use crate::common::{
     defers, door_at, findings, lowered, oak_door, only_structure, refusals, state_at,
@@ -253,47 +252,6 @@ fn the_port_anchors_exactly_the_doorways_the_openings_pass_sets_a_door_in() {
                  the openings pass sets the door = {set}, the port anchors it = {anchored}",
             );
         }
-    }
-}
-
-#[test]
-fn a_door_under_a_level_is_not_a_port_at_all() {
-    // Port resolution walks the `def` body only, so a port's door always opens at row 1.
-    let src = format!(
-        "{THEME}def hut size=5x5:\n  \
-         walls id=w mat_slot=wall height=4\n  \
-         level id=up y=0\n    \
-         door id=e side=front at=center\n\n\
-         site s:\n  \
-         place id=a use=hut theme=t at=origin\n  \
-         place id=b use=hut theme=t east_of=a gap=4\n  \
-         connect a.e to b.e path=@gravel\n",
-    );
-    let module = parse(&src).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let refusals: Vec<_> = resolution
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::UnresolvedPort)
-        .collect();
-    assert_eq!(refusals.len(), 2, "{:?}", resolution.diagnostics);
-    for (refusal, place) in refusals.iter().zip(["a", "b"]) {
-        assert_eq!(
-            refusal.primary,
-            format!(
-                "port `e` of `def hut` (used by `place {place}`) is declared under \
-                 `level id=up`, and a member under a `level` cannot be a port yet"
-            ),
-        );
-        let notes: Vec<&str> = refusal.notes.iter().map(|n| n.message.as_str()).collect();
-        assert_eq!(
-            notes,
-            [
-                "a port has to be a door or window declared directly in the body of `def hut`: \
-                 use one of those as the endpoint; level-scoped ports are a future extension"
-            ],
-        );
     }
 }
 

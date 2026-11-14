@@ -168,10 +168,17 @@ coordinate solver.
 placements within the same `site`.
 
 **What a port is.** A port is the `(place, member_id)` pair that `PLACE.PORT` resolves to. Ports are
-exposed on `door` and `window` members declared directly in the body of the referenced `def`; stair
-and roof ports, and ports on level-scoped members, are reserved for a future extension.
+exposed on `door` and `window` members declared in the body of the referenced `def` or directly
+under one of its `level`s. Those are the two candidates, so one `id=` on a body member and on a
+member under a `level` is `E_AMBIGUOUS_PORT`. A member under a `level` inside a `level` is no port:
+that nesting builds nothing (`E_UNSUPPORTED_NESTING`). A `stair` or a `roof` is never a port. A port
+is where a strip enters a building, through a wall the source opened, and neither member opens one:
+an eave `stair` is a band along the top of a wall, and a roof is reached only by climbing, which
+a walkway does not do.
 
-**Where a port sits.** One block outside the member's `side=` wall, at the placement's ground row (`place_origin.1`).
+**Where a port sits.** One block outside the member's `side=` wall, on the base row of the `level`
+it stands under: `place_origin.1 + N` under `level y=N`, and the placement's ground row
+`place_origin.1` for a member of the body. That is the row its doorway's threshold stands on.
 `front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` ([§9.3.1](#931-coordinate-convention)).
 The wall-local offset comes from:
 
@@ -181,25 +188,26 @@ The wall-local offset comes from:
   later column moving it left ([§5.4](/spec/syntax/#54-selectors)).
 
 The placement's overhang shifts the port out into the overhang ring beyond the outer face. A
-`window`'s authored `y=` does **not** lift the port off the ground row: the walkway is a 1-voxel
-flat strip whose Y must agree with the other endpoint. A `sym=true` window contributes a single port
-at the primary `offset` side. Its mirrored cut, when there is one, appears in the wall too, but the
-`id=` resolves to one coordinate. A mirror that overlaps or coincides with the window is skipped
-([§5.4](/spec/syntax/#54-selectors)), and the window keeps its primary cut and its port.
+`window`'s authored `y=` does **not** lift the port off its level's base row: the walkway is a
+1-voxel flat strip whose Y must agree with the other endpoint. A `sym=true` window contributes a
+single port at the primary `offset` side. Its mirrored cut, when there is one, appears in the wall
+too, but the `id=` resolves to one coordinate. A mirror that overlaps or coincides with the window
+is skipped ([§5.4](/spec/syntax/#54-selectors)), and the window keeps its primary cut and its port.
 
 **A port is somewhere a wall was opened.** Both port roles are openings cut through masonry, so a
 placement whose walls do not reach the rows the opening needs anchors neither: a `door` needs the
 two rows it stands in inside one course, and a `window` needs its whole rectangle inside one.
 
 ```
-rows 1 and 2 in one course                       # door (a port's door is a def-body member,
-                                                 #       so the row it opens at is always 1)
-offset + size.w ≤ wall_length                    # window, horizontal
-every row of y … y + size.h - 1 in one course    # window, vertical
+rows N + 1 and N + 2 in one course                     # door
+offset + size.w ≤ wall_length                          # window, horizontal
+every row of N + y … N + y + size.h - 1 in one course  # window, vertical
 ```
 
-There `offset` and `y` are the window's first column and lowest row, which its `anchor=` moves off
-the values written ([§5.4](/spec/syntax/#54-selectors)).
+There `N` is the `y=` of the `level` the member stands under, `0` in the body, and `offset` and `y`
+are the window's first column and lowest row, which its `anchor=` moves off the values written
+([§5.4](/spec/syntax/#54-selectors)). A member under a `level` whose `y=` does not read builds
+nothing, and its port is refused with a note at that `level`.
 
 Those are the rules a port reads for itself. It also anchors only on an opening the openings pass
 actually cut. A `window` left uncut by an argument only the cut reads (`repeat=` or `step=`,
@@ -215,7 +223,8 @@ the level's base row. The base row is where that level's floor slab would go, th
 spanning the seam is inside it. Courses with air between them do not merge, and a window hung in
 the gap is outside every one of them. A `door` member of the `def` body opens at row `1`, so a
 placement whose only masonry is a `level y=6 walls` is a wall the doorway never reaches. The same
-body's `window` is refused for the same reason.
+body's `window` is refused for the same reason, while a `door` under that `level y=6` opens at
+row `7`, inside it.
 
 The rows a port is judged against are the rows the placement **painted**. That is the same value
 the openings pass cut against, not a second reading of the `def`. A `walls` whose `mat_slot=` does
@@ -232,11 +241,16 @@ argument, so the two never disagree about what was written. A port pushed past t
 by its `place` has no member line to point at and says so on the row alone.
 
 **How the path runs.** A Manhattan L, x-axis leg then z-axis leg, at the two ports' shared Y. 3D
-path search over staircases and multi-level walkways is out of scope by design.
+path search over staircases and multi-level walkways is out of scope by design. Two ports on
+different rows, such as a door under `level y=4` and a door in a `def` body, share no Y, so the
+row lays nothing and is reported as `W_DEFERRED_MEMBER`. Two ports under a `level` of one `y=` in
+two placements are joined by a strip on that row, a bridge between upper floors.
 
-When that L would cross an existing structure floor, the compiler searches the ground plane for a
-detour: the shortest route around the obstacle, and among equal-length routes the one with the
-fewest turns, with deterministic tie-breaking so the same source always lays the same strip.
+The strip's row is its plane. Every block a placement holds on that row is in the way: its floor
+and the foot of its walls on the ground row, and its walls on a row above. When the L would cross
+one, the compiler searches that plane for a detour: the shortest route around the obstacle, and
+among equal-length routes the one with the fewest turns, with deterministic tie-breaking so the
+same source always lays the same strip.
 
 The row falls back to the straight L, with the colliding cells skipped, only when no unobstructed
 route exists at all:
@@ -272,7 +286,8 @@ A row that lays no block has lost a walkway the source asked for. That happens f
 - an id the walkway's name cannot carry;
 - a path material that does not resolve;
 - a straight L that is itself past the router's search-area cap;
-- a straight L whose every cell overlaps a placement, which leaves the strip all air.
+- a straight L whose every cell overlaps a placement, which leaves the strip all air;
+- two ports on different rows.
 
 `cairn compile` then refuses the build with `E_PARTIAL_BUILD`, as it does for a lost scope, and
 `cairn check --edition E --target V` refuses with it too ([Lint](/spec/lint/)). A `cairn check`
@@ -295,7 +310,7 @@ adds a note to `E_PARTIAL_BUILD` and one to the count of scopes that did not low
 | Code | Cause |
 |---|---|
 | `E_CONNECT_ARITY` | The row's shape is not `FROM.PORT to TO.PORT`. Enforced before resolution, since an unreadable endpoint costs the row its walkway. |
-| `E_UNRESOLVED_PORT` | The right-of-dot port id does not name a member of the referenced def's body. Carries a nearest-match note when one fits the spell cap, or, when the id belongs to a member nested under a `level`, says so instead, with a note at that member: a level-scoped member cannot be a port yet. |
+| `E_UNRESOLVED_PORT` | The right-of-dot port id names no member of the referenced def's body or of a `level` directly in it. Carries a nearest-match note when one fits the spell cap, or, when the id belongs to a member under a `level` inside a `level`, says so instead, with a note at that member. |
 | `E_AMBIGUOUS_PORT` | The def exposes the same `id=` on more than one member. Rename the collision. |
 | `E_MISSING_PATH_MATERIAL` | The row omits `path=`, or gives it a value that is not a `@TOKEN` (`path=gravel`), so walkway lowering has nothing to lay. |
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |

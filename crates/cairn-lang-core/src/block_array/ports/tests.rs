@@ -886,6 +886,7 @@ fn every_rejection() -> Vec<PortRejection> {
     // `samples` reads only the variant.
     let seeds = [
         PortRejection::UnknownMember,
+        PortRejection::LevelUnread { level: 0..0 },
         PortRejection::ReservedRole {
             role: String::new(),
             member: 0..0,
@@ -901,10 +902,12 @@ fn every_rejection() -> Vec<PortRejection> {
         },
         PortRejection::DoorNoWalls { member: 0..0 },
         PortRejection::DoorOutsideCourse {
+            base: 0,
             walls: WallColumn::default(),
             member: 0..0,
         },
         PortRejection::DoorShortCourse {
+            base: 0,
             walls: WallColumn::default(),
             member: 0..0,
         },
@@ -938,6 +941,9 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
     let span: Span = 3..9;
     match r {
         PortRejection::UnknownMember => vec![PortRejection::UnknownMember],
+        PortRejection::LevelUnread { .. } => vec![PortRejection::LevelUnread {
+            level: span.clone(),
+        }],
         PortRejection::ReservedRole { .. } => ["stair", "roof", "floor"]
             .into_iter()
             .map(|role| PortRejection::ReservedRole {
@@ -963,16 +969,9 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
         PortRejection::DoorNoWalls { .. } => vec![PortRejection::DoorNoWalls {
             member: span.clone(),
         }],
-        PortRejection::DoorOutsideCourse { .. } => {
-            vec![PortRejection::DoorOutsideCourse {
-                walls: WallColumn::from_walls([(6, 4)]),
-                member: span.clone(),
-            }]
+        PortRejection::DoorOutsideCourse { .. } | PortRejection::DoorShortCourse { .. } => {
+            door_course_samples(r, &span)
         }
-        PortRejection::DoorShortCourse { .. } => vec![PortRejection::DoorShortCourse {
-            walls: WallColumn::from_walls([(0, 1)]),
-            member: span.clone(),
-        }],
         PortRejection::WindowArgument { .. } => [
             WindowArgFault::OffsetMalformed,
             WindowArgFault::YAbsent,
@@ -1035,6 +1034,36 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
     }
 }
 
+/// The renderings checked for a door whose course does not hold it, `r`'s variant, in the body and
+/// under a `level`.
+fn door_course_samples(r: &PortRejection, span: &Span) -> Vec<PortRejection> {
+    let short = matches!(r, PortRejection::DoorShortCourse { .. });
+    let cases = if short {
+        [(1, (0, 1)), (4, (0, 4))]
+    } else {
+        [(1, (6, 4)), (6, (0, 3))]
+    };
+    cases
+        .into_iter()
+        .map(|(base, course)| {
+            let (walls, member) = (WallColumn::from_walls([course]), span.clone());
+            if short {
+                PortRejection::DoorShortCourse {
+                    base,
+                    walls,
+                    member,
+                }
+            } else {
+                PortRejection::DoorOutsideCourse {
+                    base,
+                    walls,
+                    member,
+                }
+            }
+        })
+        .collect()
+}
+
 /// A window `width` wide and 2 tall at `offset=` and `y=1`, anchored by the `anchor=` named.
 fn window_args(offset: u32, width: u32, anchor: Option<&str>) -> WindowArgs {
     WindowArgs {
@@ -1089,8 +1118,9 @@ fn every_rejection_note_renders_in_full() {
                            middle_right, top_left, top_center, top_right";
     let expected: Vec<(String, bool)> = vec![
         ("`a.p` names no member of its `def` body".to_owned(), false),
-        ("`a.p` is a `stair`, and only a `door` or a `window` can anchor a port (`stair` ports are reserved) — declare the port on a door or window instead".to_owned(), true),
-        ("`a.p` is a `roof`, and only a `door` or a `window` can anchor a port (`roof` ports are reserved) — declare the port on a door or window instead".to_owned(), true),
+        ("`a.p` is under a `level` whose `y=` does not read, so none of its members is built — the finding on that `level` line says why".to_owned(), true),
+        ("`a.p` is a `stair`, and only a `door` or a `window` can anchor a port — declare the port on a door or window instead".to_owned(), true),
+        ("`a.p` is a `roof`, and only a `door` or a `window` can anchor a port — declare the port on a door or window instead".to_owned(), true),
         ("`a.p` is a `floor`, and only a `door` or a `window` can anchor a port — declare the port on a door or window instead".to_owned(), true),
         (format!("`a.p` has no `side=` (expected one of front, back, left, right){OWN}"), true),
         (format!("`a.p` has `side=frnt`, which is not one of front, back, left, right{OWN}"), true),
@@ -1108,7 +1138,9 @@ fn every_rejection_note_renders_in_full() {
         (format!("`a.p` is a door that has `offset=5`, past the end of the back wall (length 5){OWN}"), true),
         (format!("`a.p` is a door with no wall to open: {NO_WALLS}{OWN}"), true),
         (format!("`a.p` is a door that opens at y=1, the row above the floor slab, which is not inside any wall course (the walls occupy y=7..=10){OWN}"), true),
+        (format!("`a.p` is a door that opens at y=6, the row above the floor slab, which is not inside any wall course (the walls occupy y=1..=3){OWN}"), true),
         (format!("`a.p` is a door that stands at y=1..=2, and the wall course holding y=1 ends there (the walls occupy y=1..=1){OWN}"), true),
+        (format!("`a.p` is a door that stands at y=4..=5, and the wall course holding y=4 ends there (the walls occupy y=1..=4){OWN}"), true),
         (format!("`a.p` is a window that has an `offset=` that is not a non-negative integer that fits in u32{OWN}"), true),
         (format!("`a.p` is a window that has no `y=`{OWN}"), true),
         (format!("`a.p` is a window that has a `y=` that is not a non-negative integer that fits in u32{OWN}"), true),

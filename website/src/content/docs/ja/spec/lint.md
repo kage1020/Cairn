@@ -175,7 +175,7 @@ title: "11. Lint と制約検証"
 
 | コード | 意味 |
 |---|---|
-| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def の本体に直接宣言されたどのメンバーも持たないポート id を指している。`level` の下のメンバーはまだポートになれないので、id がそうしたメンバーのものであれば、診断にそのことが示される。 |
+| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def の本体のメンバーも、その直下の `level` のメンバーも持たないポート id を指している。`level` の中の `level` の下のメンバーは何も組み上げないので、id がそうしたメンバーのものであれば、診断にそのことが示される。 |
 | `E_AMBIGUOUS_PORT` | そのポート id が、参照先の def の複数のメンバーにマッチする。 |
 | `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` がない、または `path=` の値がマテリアルトークンではない (`path=@gravel` のつもりの `path=gravel` など) ので、通路を敷くマテリアルがない。 |
 | `W_DUPLICATE_WALKWAY` | 同じ site の先行する行がすでに通路を敷いた 2 つのポートを、`connect` が向きを問わずもう一度つないでいる。 |

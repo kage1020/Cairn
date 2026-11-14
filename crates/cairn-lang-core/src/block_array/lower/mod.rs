@@ -58,7 +58,7 @@ use body::{BodyDescriptor, BodyInputs, LoweredBody, lower_body_to_block_array};
 use connect::{ConnectInputs, lower_connects};
 use diag::{VoxelSource, diag_def_no_size, diag_struct_no_size};
 use overlap::report_placement_overlaps;
-use site_floor::{PlacedBody, collect_floor_cells};
+use site_floor::PlacedBody;
 
 pub use without_target::{findings_under_guards, findings_without_target};
 
@@ -123,15 +123,12 @@ fn lower_to_block_array_within(
         members,
     } = built;
     report_placement_overlaps(&placed, &mut diagnostics);
-    // After every site, so the collision set covers every floor tile a strip might cross.
-    let floor = collect_floor_cells(&structures, &placed);
     lower_connects(
         &ConnectInputs {
             resolution,
             defs: &intent.defs,
             registry,
             placed: &placed,
-            floor: &floor,
         },
         &mut structures,
         &mut walkways,

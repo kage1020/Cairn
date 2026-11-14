@@ -5,7 +5,7 @@ use super::door::{DOOR_BASE_ID, DOOR_TOKEN};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
-use super::site_floor::FloorExtent;
+use super::site_floor::{FloorExtent, collect_floor_cells};
 use super::*;
 use crate::ast::ValueKind;
 use crate::block_array::material::{NoTarget, resolve_block_state, stand_in};
@@ -112,7 +112,7 @@ fn one_placed_row(
 #[test]
 fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
     let (structures, placed) = one_placed_row((i32::MAX - 2, 0, 0), 3);
-    let plan = collect_floor_cells(&structures, &placed);
+    let plan = collect_floor_cells(&structures, &placed, 0);
     assert_eq!(
         plan.cells,
         HashSet::from([(i32::MAX - 2, 0, 0), (i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
@@ -130,7 +130,7 @@ fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
 #[cfg_attr(debug_assertions, should_panic(expected = "has no world coordinate"))]
 fn a_body_past_the_i32_edge_folds_nothing_onto_it() {
     let (structures, placed) = one_placed_row((i32::MAX - 1, 0, 0), 3);
-    let plan = collect_floor_cells(&structures, &placed);
+    let plan = collect_floor_cells(&structures, &placed, 0);
     assert_eq!(
         plan.cells,
         HashSet::from([(i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
@@ -149,7 +149,7 @@ fn a_body_past_the_i32_edge_folds_nothing_onto_it() {
 #[should_panic(expected = "has no structure")]
 fn a_placement_with_no_structure_is_not_a_silent_skip() {
     let (_, placed) = one_placed_row((0, 0, 0), 3);
-    let _ = collect_floor_cells(&IndexMap::new(), &placed);
+    let _ = collect_floor_cells(&IndexMap::new(), &placed, 0);
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn a_placement_with_no_structure_is_not_a_silent_skip() {
 fn a_body_with_no_row_0_is_not_a_silent_skip() {
     let (mut structures, placed) = one_placed_row((0, 0, 0), 3);
     structures["site::s::b"].dims.y = 0;
-    let _ = collect_floor_cells(&structures, &placed);
+    let _ = collect_floor_cells(&structures, &placed, 0);
 }
 
 #[test]

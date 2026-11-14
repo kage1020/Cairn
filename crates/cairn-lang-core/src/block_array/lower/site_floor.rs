@@ -1,5 +1,5 @@
-//! The floor cells the placed bodies of a run cover, which a `connect`
-//! strip routes around.
+//! The cells the placed bodies of a run hold on one walk plane, which a `connect` strip on that
+//! plane routes around.
 
 use std::collections::{HashMap, HashSet};
 
@@ -27,9 +27,10 @@ pub(super) struct PlacedBody {
     pub(super) cut: HashSet<Span>,
 }
 
-/// The walk plane the placements occupy: cells a walkway may not overwrite, and who lays each.
+/// What the placements hold on one walk plane: cells a walkway may not overwrite, and who lays
+/// each.
 pub(super) struct FloorPlan {
-    /// World cells of every non-air voxel on row 0 of every placement.
+    /// World cells of every non-air voxel of every placement on the plane.
     pub(super) cells: HashSet<(i32, i32, i32)>,
     /// For each cell in [`Self::cells`], what lays it, in placement order.
     pub(super) owners: HashMap<(i32, i32, i32), Vec<FloorOwner>>,
@@ -57,10 +58,12 @@ pub(super) struct FloorExtent {
     pub(super) max_z: i32,
 }
 
-/// Collect the [`FloorPlan`] of every lowered placement.
+/// Collect the [`FloorPlan`] every lowered placement lays on the world row `plane`: its floor
+/// on its ground row, and whatever its body holds on a row above.
 pub(super) fn collect_floor_cells(
     structures: &IndexMap<String, BlockArray>,
     placed: &IndexMap<String, PlacedBody>,
+    plane: i32,
 ) -> FloorPlan {
     let mut cells: HashSet<(i32, i32, i32)> = HashSet::new();
     let mut owners: HashMap<(i32, i32, i32), Vec<FloorOwner>> = HashMap::new();
@@ -71,14 +74,22 @@ pub(super) fn collect_floor_cells(
             debug_assert!(false, "placement `{key}` has no structure");
             continue;
         };
-        // Only row 0: the router searches the ports' shared plane alone.
+        // INVARIANT: a lowered body has a row 0.
+        debug_assert!(ba.dims.y > 0, "row 0 of `{key}` is outside {:?}", ba.dims);
+        // Only the plane: the router searches the ports' shared row alone.
+        let Some(row) = u32::try_from(i64::from(plane) - i64::from(placement.origin.1))
+            .ok()
+            .filter(|row| *row < ba.dims.y)
+        else {
+            continue;
+        };
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
-                let Some(i) = ba.dims.index(x, 0, z) else {
-                    // INVARIANT: the loop stays inside `dims`, and a lowered body has a row 0.
+                let Some(i) = ba.dims.index(x, row, z) else {
+                    // INVARIANT: the loop stays inside `dims`, `row` among them.
                     debug_assert!(
                         false,
-                        "cell ({x}, 0, {z}) of `{key}` is outside {:?}",
+                        "cell ({x}, {row}, {z}) of `{key}` is outside {:?}",
                         ba.dims
                     );
                     continue;
@@ -98,13 +109,13 @@ pub(super) fn collect_floor_cells(
                 else {
                     debug_assert!(
                         false,
-                        "cell ({x}, 0, {z}) of `{key}` at {:?} has no world coordinate; \
+                        "cell ({x}, {row}, {z}) of `{key}` at {:?} has no world coordinate; \
                          `PlaceAnchor::origin` should have refused the row",
                         placement.origin,
                     );
                     continue;
                 };
-                let cell = (wx, placement.origin.1, wz);
+                let cell = (wx, plane, wz);
                 cells.insert(cell);
                 owners.entry(cell).or_default().push(FloorOwner {
                     placement: index,
@@ -119,7 +130,7 @@ pub(super) fn collect_floor_cells(
                         e.max_z = e.max_z.max(wz);
                     })
                     .or_insert(FloorExtent {
-                        y: placement.origin.1,
+                        y: plane,
                         min_x: wx,
                         max_x: wx,
                         min_z: wz,
