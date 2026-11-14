@@ -70,7 +70,8 @@ fn check_args(keyword: Option<&str>, args: &[Arg], sink: &mut DiagnosticSink) {
             if !size_is_a_state {
                 check_size(&arg.value, sink);
             }
-        } else if LABEL_KEYS.contains(&arg.key.as_str()) {
+        // A header takes no label key, so one written there is `E_UNKNOWN_ARGUMENT`'s alone.
+        } else if keyword.is_some() && LABEL_KEYS.contains(&arg.key.as_str()) {
             check_label(&arg.key, &arg.value, sink);
         }
     }

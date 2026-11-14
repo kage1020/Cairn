@@ -104,7 +104,7 @@ fn duplicate_selector_attribute_is_reported() {
 
 #[test]
 fn duplicate_header_arg_other_than_size_is_arg_not_size() {
-    // The surviving `class=` is also `W_IGNORED_ARGUMENT`, since no pass reads it.
+    // The surviving `class=` is also `E_UNKNOWN_ARGUMENT`, since a header takes only `size=`.
     let src = "struct s size=1x1 class=house class=hut\n  floor mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 2, "got {diags:#?}");
@@ -117,7 +117,7 @@ fn duplicate_header_arg_other_than_size_is_arg_not_size() {
     assert!(
         diags
             .iter()
-            .any(|d| d.code == DiagnosticCode::IgnoredArgument && slice(src, d) == "hut"),
+            .any(|d| d.code == DiagnosticCode::UnknownArgument && slice(src, d) == "hut"),
         "got {diags:#?}",
     );
 }

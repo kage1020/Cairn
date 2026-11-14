@@ -9,7 +9,7 @@ title: "7. マテリアルとテーマ"
 構造の側には、具体的なブロック名を書きません。構造が持つのは `mat_slot` という注入ポイントだけで、そこにスロットやセレクタを通じて値を割り当てるのが `theme` です。CSS や依存性注入と同じ考え方です。これにより、構造 (壁がどこにあるか) とスタイル (どのブロックを使い、どう飾るか) が分かれます。
 
 ```
-def cottage class=house size=9x7:
+def cottage size=9x7:
   floor  id=floor  mat_slot=floor
   walls  id=walls  class=outer mat_slot=wall height=4
   roof   id=roof   kind=gable  mat_slot=roof
