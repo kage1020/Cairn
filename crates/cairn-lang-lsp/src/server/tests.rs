@@ -217,11 +217,11 @@ fn diagnostics_of(message: &serde_json::Value) -> &Vec<serde_json::Value> {
     diagnostics_for(message, TEST_URI)
 }
 
-/// Labels of a completion response's item array.
+/// Labels of a completion response's item list.
 fn completion_labels(response: &serde_json::Value) -> Vec<&str> {
-    response["result"]
+    response["result"]["items"]
         .as_array()
-        .expect("completion result should be an item array")
+        .expect("completion result should be a list of items")
         .iter()
         .map(|item| item["label"].as_str().expect("string label"))
         .collect()
@@ -719,6 +719,24 @@ fn completion_reflects_did_change_revisions() {
 }
 
 #[test]
+fn a_material_token_answer_cut_at_the_limit_says_it_is_incomplete() {
+    let session = Session::start();
+    let source = "theme a:\n  slot floor -> @";
+    session.did_open(source, 1);
+    let cut = session.request_completion(10, TEST_URI, 1, 17);
+    assert_eq!(cut["result"]["isIncomplete"], serde_json::json!(true));
+    assert_eq!(
+        cut["result"]["items"].as_array().map(Vec::len),
+        Some(crate::completion::MATERIAL_ITEM_LIMIT),
+    );
+    session.did_change(TEST_URI, "theme a:\n  slot floor -> @cherry_pl", 2);
+    let whole = session.request_completion(11, TEST_URI, 1, 26);
+    assert_eq!(whole["result"]["isIncomplete"], serde_json::json!(false));
+    assert_eq!(completion_labels(&whole), ["cherry_planks"]);
+    session.shutdown();
+}
+
+#[test]
 fn completion_on_an_unopened_document_is_invalid_params() {
     // -32602 is InvalidParams.
     let session = Session::start();
@@ -743,7 +761,7 @@ fn completion_answers_at_the_end_of_a_newline_terminated_document() {
     session.did_open("struct s size=2x2\n", 1);
     session.read_until_method("textDocument/publishDiagnostics");
     let response = session.request_completion(38, TEST_URI, 1, 0);
-    let items = response["result"]
+    let items = response["result"]["items"]
         .as_array()
         .unwrap_or_else(|| panic!("expected items at the empty final line, got: {response}"));
     assert!(!items.is_empty(), "the line exists, so it has candidates");
@@ -756,7 +774,7 @@ fn completion_answers_in_an_empty_document() {
     session.did_open("", 1);
     session.read_until_method("textDocument/publishDiagnostics");
     let response = session.request_completion(39, TEST_URI, 0, 0);
-    let items = response["result"]
+    let items = response["result"]["items"]
         .as_array()
         .unwrap_or_else(|| panic!("expected items in an empty document, got: {response}"));
     assert!(!items.is_empty(), "an empty document still has candidates");
@@ -898,7 +916,7 @@ fn a_ranged_change_outside_the_document_is_dropped() {
         "a refused revision publishes nothing, got: {response}"
     );
     assert!(
-        response["result"]
+        response["result"]["items"]
             .as_array()
             .is_some_and(|items| !items.is_empty()),
         "the refusal leaves the URI open, with a line 1 to complete on, got: {response}",

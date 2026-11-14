@@ -1,9 +1,11 @@
-//! Source text + cursor position → the whole closed-vocabulary set valid there.
+//! Source text + cursor position → the closed-vocabulary set valid there: whole for a keyword or a
+//! slot name, and for a material token the tokens matching what is typed, bounded.
 //!
 //! The context is read from the text, not a parse: a document mid-keystroke rarely parses, and
 //! Cairn is line-oriented (`spec/syntax` "Lexical").
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::Span;
@@ -43,41 +45,49 @@ struct SlotDecl {
     theme: Option<String>,
 }
 
-/// Every completion candidate at `position`, or `None` when the document has no such position.
+/// How many items a material-token answer holds at most. A longer match is cut there and marked
+/// incomplete, so the client asks again as the token grows.
+pub const MATERIAL_ITEM_LIMIT: usize = 100;
+
+/// The completion candidates at `position`, or `None` when the document has no such position.
 #[must_use]
 pub fn completions(
     source: &str,
     position: lsp_types::Position,
-) -> Option<Vec<lsp_types::CompletionItem>> {
+) -> Option<lsp_types::CompletionList> {
     let index = LineIndex::new(source);
     let offset = index.offset_at(source, position)?;
+    let whole = |items| lsp_types::CompletionList {
+        is_incomplete: false,
+        items,
+    };
     Some(match context_at(source, offset) {
-        None => Vec::new(),
-        Some(Context::TopLevelKeyword { replace }) => keyword_items(
+        None => whole(Vec::new()),
+        Some(Context::TopLevelKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             ItemKind::ALL
                 .into_iter()
                 .map(|kind| (kind.keyword(), "top-level item")),
-        ),
-        Some(Context::MemberKeyword { replace, body }) => keyword_items(
+        )),
+        Some(Context::MemberKeyword { replace, body }) => whole(keyword_items(
             &index,
             source,
             &replace,
             body.allowed_keywords()
                 .into_iter()
                 .map(|kw| (kw, "member command")),
-        ),
-        Some(Context::UnscopedMemberKeyword { replace }) => keyword_items(
+        )),
+        Some(Context::UnscopedMemberKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             cairn_lang_core::intent::known_keywords()
                 .iter()
                 .map(|kw| (*kw, "member command")),
-        ),
-        Some(Context::ThemeBodyKeyword { replace }) => keyword_items(
+        )),
+        Some(Context::ThemeBodyKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
@@ -86,24 +96,26 @@ pub fn completions(
                     .iter()
                     .map(|kw| (*kw, "theme selector")),
             ),
-        ),
-        Some(Context::SlotName { replace }) => slot_name_items(&index, source, &replace),
-        Some(Context::MaterialToken { replace }) => material_items(&index, source, &replace),
-        Some(Context::GuardWord { replace }) => keyword_items(
+        )),
+        Some(Context::SlotName { replace }) => whole(slot_name_items(&index, source, &replace)),
+        Some(Context::MaterialToken { replace }) => {
+            material_items(&index, source, &replace, offset)
+        }
+        Some(Context::GuardWord { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             std::iter::once(("edition", "edition guard")),
-        ),
-        Some(Context::EditionName { replace }) => keyword_items(
+        )),
+        Some(Context::EditionName { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             [Edition::Java, Edition::Bedrock]
                 .into_iter()
                 .map(|edition| (edition.as_str(), "edition")),
-        ),
-        Some(Context::GuardedMemberKeyword { replace }) => keyword_items(
+        )),
+        Some(Context::GuardedMemberKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
@@ -118,7 +130,7 @@ pub fn completions(
                     };
                     (*kw, detail)
                 }),
-        ),
+        )),
     })
 }
 
@@ -455,59 +467,121 @@ fn slot_name_items(
         .collect()
 }
 
-/// The built-in packs' abstract tokens, Java's first, then the canonical ids they resolve to.
+/// A material token a completion may offer, with its detail.
+struct MaterialCandidate {
+    label: String,
+    detail: String,
+}
+
+/// The built-in catalogs' abstract tokens, Java's first, each with the id it resolves to.
+fn abstract_tokens() -> &'static [MaterialCandidate] {
+    static TOKENS: OnceLock<Vec<MaterialCandidate>> = OnceLock::new();
+    TOKENS.get_or_init(|| {
+        let java = builtin_pack(Edition::Java).materials();
+        let bedrock = builtin_pack(Edition::Bedrock).materials();
+        let mut seen = HashSet::new();
+        java.tokens()
+            .chain(bedrock.tokens())
+            .filter(|token| seen.insert(*token))
+            .filter_map(|token| {
+                let id = java.lookup_id(token).or_else(|| bedrock.lookup_id(token))?;
+                Some(MaterialCandidate {
+                    label: token.to_owned(),
+                    detail: id.to_owned(),
+                })
+            })
+            .collect()
+    })
+}
+
+/// Every canonical id a built-in pack's blocks table declares, Java's and Bedrock's, sorted, each
+/// with the editions and versions that declare it.
+fn canonical_ids() -> &'static [MaterialCandidate] {
+    static IDS: OnceLock<Vec<MaterialCandidate>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        let mut declared: BTreeMap<&str, Vec<(Edition, Vec<&str>)>> = BTreeMap::new();
+        for edition in [Edition::Java, Edition::Bedrock] {
+            let blocks = builtin_pack(edition).blocks();
+            for version in blocks.versions() {
+                for id in blocks.ids_for(version).unwrap_or_default() {
+                    let editions = declared.entry(id).or_default();
+                    match editions.last_mut() {
+                        Some((seen, versions)) if *seen == edition => versions.push(version),
+                        _ => editions.push((edition, vec![version])),
+                    }
+                }
+            }
+        }
+        declared
+            .into_iter()
+            .map(|(id, editions)| MaterialCandidate {
+                // Built-in canonical tokens are written without `minecraft:`.
+                label: id.strip_prefix("minecraft:").unwrap_or(id).to_owned(),
+                detail: editions
+                    .iter()
+                    .map(|(edition, versions)| {
+                        format!("{} {}", edition.as_str(), versions.join(", "))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            })
+            .collect()
+    })
+}
+
+/// How `label` matches the token typed so far: `Some(0)` when it starts with it, `Some(1)` when a
+/// part after a `_` or `.` does, and `None` when neither does.
+fn match_rank(label: &str, typed: &str) -> Option<u8> {
+    if label.starts_with(typed) {
+        return Some(0);
+    }
+    label
+        .match_indices(['_', '.'])
+        .any(|(at, _)| label[at + 1..].starts_with(typed))
+        .then_some(1)
+}
+
+/// The material tokens matching what is typed between `replace`'s start and `cursor`: the
+/// abstract tokens first, then the canonical ids, each those starting with it ahead of those with
+/// a part that does, at most [`MATERIAL_ITEM_LIMIT`] of them.
 fn material_items(
     index: &LineIndex,
     source: &str,
     replace: &Span,
-) -> Vec<lsp_types::CompletionItem> {
-    let java = builtin_pack(Edition::Java).materials();
-    let bedrock = builtin_pack(Edition::Bedrock).materials();
-    let mut items = Vec::new();
-    let mut order = 0;
-    let mut seen = HashSet::new();
-    for token in java.tokens().chain(bedrock.tokens()) {
-        if !seen.insert(token) {
-            continue;
-        }
-        let Some(id) = java.lookup_id(token).or_else(|| bedrock.lookup_id(token)) else {
-            continue;
-        };
-        items.push(completion_item(
-            index,
-            source,
-            replace,
-            token,
-            lsp_types::CompletionItemKind::VALUE,
-            id.to_owned(),
-            order,
-        ));
-        order += 1;
+    cursor: usize,
+) -> lsp_types::CompletionList {
+    let typed = source[replace.start..cursor].to_ascii_lowercase();
+    let mut ranked: Vec<(u8, u8, &MaterialCandidate)> = abstract_tokens()
+        .iter()
+        .map(|candidate| (0, candidate))
+        .chain(canonical_ids().iter().map(|candidate| (1, candidate)))
+        .filter_map(|(tier, candidate)| {
+            match_rank(&candidate.label, &typed).map(|rank| (tier, rank, candidate))
+        })
+        .collect();
+    // Stable, so each group keeps the vocabulary's order.
+    ranked.sort_by_key(|(tier, rank, _)| (*tier, *rank));
+    let is_incomplete = ranked.len() > MATERIAL_ITEM_LIMIT;
+    let items = ranked
+        .into_iter()
+        .take(MATERIAL_ITEM_LIMIT)
+        .enumerate()
+        .map(|(order, (_, _, candidate))| {
+            completion_item(
+                index,
+                source,
+                replace,
+                &candidate.label,
+                lsp_types::CompletionItemKind::VALUE,
+                candidate.detail.clone(),
+                order,
+            )
+        })
+        .collect();
+    lsp_types::CompletionList {
+        is_incomplete,
+        items,
     }
-    // Both packs' ids: a token may resolve differently per edition, and both are canonical.
-    let mut seen_ids = HashSet::new();
-    let resolved_ids = java
-        .tokens()
-        .filter_map(|t| java.lookup_id(t))
-        .chain(bedrock.tokens().filter_map(|t| bedrock.lookup_id(t)));
-    for id in resolved_ids {
-        if !seen_ids.insert(id) {
-            continue;
-        }
-        // Built-in canonical tokens are written without `minecraft:`.
-        let label = id.strip_prefix("minecraft:").unwrap_or(id);
-        items.push(completion_item(
-            index,
-            source,
-            replace,
-            label,
-            lsp_types::CompletionItemKind::VALUE,
-            "canonical block id".to_owned(),
-            order,
-        ));
-        order += 1;
-    }
-    items
 }
 
 #[cfg(test)]
@@ -526,7 +600,9 @@ mod tests {
     }
 
     fn complete(source: &str, needle: &str) -> Vec<lsp_types::CompletionItem> {
-        completions(source, at_end_of(source, needle)).expect("position within document")
+        completions(source, at_end_of(source, needle))
+            .expect("position within document")
+            .items
     }
 
     fn labels(items: &[lsp_types::CompletionItem]) -> Vec<&str> {
@@ -721,7 +797,7 @@ mod tests {
                       struct s size=2x2\n  door id=\"@oa";
         // `@oa` alone would match `@oak_planks` above.
         assert_eq!(
-            completions(source, at_end_of(source, "id=\"@oa")),
+            completions(source, at_end_of(source, "id=\"@oa")).map(|list| list.items),
             Some(vec![]),
         );
     }
@@ -731,7 +807,7 @@ mod tests {
         let source = "theme a:\n  slot floor -> @oak_planks\n\
                       struct s size=2x2\n  window id=\"mat_slot=";
         assert_eq!(
-            completions(source, at_end_of(source, "id=\"mat_slot=")),
+            completions(source, at_end_of(source, "id=\"mat_slot=")).map(|list| list.items),
             Some(vec![]),
         );
     }
@@ -741,7 +817,7 @@ mod tests {
         let source = "theme a:\n  slot floor -> @oak_planks\n\
                       struct s size=2x2\n  window label=\"pick mat_slot=fl";
         assert_eq!(
-            completions(source, at_end_of(source, "pick mat_slot=fl")),
+            completions(source, at_end_of(source, "pick mat_slot=fl")).map(|list| list.items),
             Some(vec![]),
         );
     }
@@ -794,13 +870,17 @@ mod tests {
             ("theme b:\n  window[mat_slot=", vec!["floor"]),
         ] {
             let source = format!("{theme}{rest}");
-            let items = completions(&source, at_end_of(&source, rest)).expect("in the document");
+            let items = completions(&source, at_end_of(&source, rest))
+                .expect("in the document")
+                .items;
             assert_eq!(labels(&items), expected, "{rest:?}");
         }
         for keyword in cairn_lang_core::intent::known_keywords() {
             let rest = format!("struct s size=2x2\n  {keyword} mat_slot=");
             let source = format!("{theme}{rest}");
-            let items = completions(&source, at_end_of(&source, &rest)).expect("in the document");
+            let items = completions(&source, at_end_of(&source, &rest))
+                .expect("in the document")
+                .items;
             let unread = role_of(keyword).unread_argument("mat_slot").is_some();
             assert_eq!(
                 labels(&items).is_empty(),
@@ -874,63 +954,194 @@ mod tests {
         }
     }
 
+    /// The material-token answer at the end of `@typed` on a theme's slot row.
+    fn complete_material(typed: &str) -> lsp_types::CompletionList {
+        let source = format!("theme a:\n  slot floor -> @{typed}");
+        completions(&source, at_end_of(&source, &format!("@{typed}"))).expect("in the document")
+    }
+
+    /// Every id some version of either built-in pack declares, as a canonical token writes it.
+    fn declared_by_a_pack() -> BTreeSet<String> {
+        [Edition::Java, Edition::Bedrock]
+            .into_iter()
+            .flat_map(|edition| builtin_pack(edition).blocks().declared_ids())
+            .map(|id| id.strip_prefix("minecraft:").unwrap_or(id).to_owned())
+            .collect()
+    }
+
     #[test]
-    fn material_token_position_offers_registry_catalog_in_order() {
-        let source = "theme a:\n  slot floor -> @";
-        let items = complete(source, "@");
-        assert_eq!(items[0].label, "floor.wood.broadleaf");
-        assert_eq!(items[0].detail.as_deref(), Some("minecraft:oak_planks"));
-        for item in &items {
-            assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::VALUE));
-        }
-        let sort_texts: Vec<&str> = items
+    fn a_bare_at_offers_the_abstract_tokens_then_the_first_canonical_ids_cut_at_the_limit() {
+        let list = complete_material("");
+        assert!(
+            list.is_incomplete,
+            "the vocabulary is longer than the limit"
+        );
+        assert_eq!(list.items.len(), MATERIAL_ITEM_LIMIT);
+        let java = builtin_pack(Edition::Java).materials();
+        let bedrock = builtin_pack(Edition::Bedrock).materials();
+        let mut seen = HashSet::new();
+        let abstract_tokens: Vec<&str> = java
+            .tokens()
+            .chain(bedrock.tokens())
+            .filter(|token| seen.insert(*token))
+            .collect();
+        let canonical: Vec<String> = declared_by_a_pack().into_iter().collect();
+        let expected: Vec<&str> = abstract_tokens
+            .iter()
+            .copied()
+            .chain(canonical.iter().map(String::as_str))
+            .take(MATERIAL_ITEM_LIMIT)
+            .collect();
+        assert_eq!(labels(&list.items), expected);
+        assert_eq!(list.items[0].label, "floor.wood.broadleaf");
+        assert_eq!(
+            list.items[0].detail.as_deref(),
+            Some("minecraft:oak_planks")
+        );
+        let sort_texts: Vec<&str> = list
+            .items
             .iter()
             .map(|i| i.sort_text.as_deref().expect("sort_text present"))
             .collect();
-        let mut sorted = sort_texts.clone();
-        sorted.sort_unstable();
-        assert_eq!(sort_texts, sorted, "items must carry their own order");
-
-        let java = builtin_pack(Edition::Java).materials();
-        let bedrock = builtin_pack(Edition::Bedrock).materials();
-        let expected_abstract: BTreeSet<&str> = java.tokens().chain(bedrock.tokens()).collect();
-        let (canonical, abstract_items): (Vec<_>, Vec<_>) = items
-            .iter()
-            .partition(|i| i.detail.as_deref() == Some("canonical block id"));
-        let abstract_labels: BTreeSet<&str> =
-            abstract_items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(abstract_labels, expected_abstract);
-        let expected_canonical: BTreeSet<&str> = java
-            .tokens()
-            .filter_map(|t| java.lookup_id(t))
-            .chain(bedrock.tokens().filter_map(|t| bedrock.lookup_id(t)))
-            .map(|id| id.strip_prefix("minecraft:").unwrap_or(id))
-            .collect();
-        let canonical_labels: Vec<&str> = canonical.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(
-            canonical_labels.iter().copied().collect::<BTreeSet<_>>(),
-            expected_canonical,
-            "every id either catalog resolves to is offered, Bedrock-only ones included",
+        assert!(
+            sort_texts.is_sorted(),
+            "items must carry their own order: {sort_texts:?}",
         );
+        for item in &list.items {
+            assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::VALUE));
+        }
+    }
+
+    #[test]
+    fn a_canonical_id_only_the_blocks_tables_declare_is_offered_with_who_declares_it() {
+        let cherry = complete_material("cherry_pl");
+        assert!(!cherry.is_incomplete);
+        assert_eq!(labels(&cherry.items), ["cherry_planks"]);
         assert_eq!(
-            canonical_labels.len(),
-            expected_canonical.len(),
-            "canonical ids are deduplicated across catalog rows",
+            cherry.items[0].detail.as_deref(),
+            Some("java 1.20.4, 1.21, 1.21.4, 26.3; bedrock 1.21.0, 1.21.40, 1.21.60, 1.26.60"),
+        );
+        let pale = complete_material("pale_oak_pl");
+        assert_eq!(labels(&pale.items), ["pale_oak_planks"]);
+        assert_eq!(
+            pale.items[0].detail.as_deref(),
+            Some("java 1.21.4, 26.3; bedrock 1.21.60, 1.26.60"),
+        );
+        let bedrock_only = complete_material("stonebr");
+        assert_eq!(labels(&bedrock_only.items), ["stonebrick"]);
+        assert_eq!(
+            bedrock_only.items[0].detail.as_deref(),
+            Some("bedrock 1.21.0")
+        );
+        let border = complete_material("border");
+        assert_eq!(labels(&border.items), ["border_block"]);
+        assert_eq!(
+            border.items[0].detail.as_deref(),
+            Some("bedrock 1.21.0, 1.21.40, 1.21.60, 1.26.60"),
         );
     }
 
     #[test]
-    fn material_token_partial_prefix_returns_full_set_replacing_after_at() {
-        let source = "theme a:\n  slot floor -> @flo";
-        let items = complete(source, "@flo");
-        let empty_prefix_source = "theme a:\n  slot floor -> @";
-        let full = complete(empty_prefix_source, "@");
-        assert_eq!(items.len(), full.len());
-        let line = "  slot floor -> @flo";
-        let after_at = u32::try_from(line.find('@').expect("at sign") + 1).expect("fits u32");
-        for item in &items {
-            assert_eq!(edit_range(item), range(1, after_at, after_at + 3));
+    fn abstract_tokens_rank_ahead_of_canonical_ids_and_a_leading_match_ahead_of_an_inner_one() {
+        let cobble = complete_material("cobble");
+        assert!(!cobble.is_incomplete);
+        assert_eq!(
+            labels(&cobble.items),
+            [
+                "floor.stone.cobble",
+                "wall.stone.cobble",
+                "cobbled_deepslate",
+                "cobbled_deepslate_double_slab",
+                "cobbled_deepslate_slab",
+                "cobbled_deepslate_stairs",
+                "cobbled_deepslate_wall",
+                "cobblestone",
+                "cobblestone_double_slab",
+                "cobblestone_slab",
+                "cobblestone_stairs",
+                "cobblestone_wall",
+                "infested_cobblestone",
+                "mossy_cobblestone",
+                "mossy_cobblestone_double_slab",
+                "mossy_cobblestone_slab",
+                "mossy_cobblestone_stairs",
+                "mossy_cobblestone_wall",
+            ],
+        );
+    }
+
+    #[test]
+    fn every_canonical_id_offered_is_one_a_blocks_table_declares_and_none_is_left_out() {
+        let declared = declared_by_a_pack();
+        for first in 'a'..='z' {
+            let typed = first.to_string();
+            let list = complete_material(&typed);
+            for label in labels(&list.items) {
+                let is_abstract = abstract_tokens().iter().any(|token| token.label == label);
+                assert!(
+                    is_abstract || declared.contains(label),
+                    "`{label}` is declared by no table",
+                );
+            }
+            let matched = abstract_tokens()
+                .iter()
+                .chain(canonical_ids())
+                .filter(|candidate| match_rank(&candidate.label, &typed).is_some())
+                .count();
+            assert_eq!(
+                list.is_incomplete,
+                matched > MATERIAL_ITEM_LIMIT,
+                "`@{typed}`"
+            );
+            assert_eq!(
+                list.items.len(),
+                matched.min(MATERIAL_ITEM_LIMIT),
+                "`@{typed}`"
+            );
         }
+        for id in &declared {
+            let list = complete_material(id);
+            let first_canonical = labels(&list.items)
+                .into_iter()
+                .find(|label| !abstract_tokens().iter().any(|token| token.label == *label));
+            assert_eq!(first_canonical, Some(id.as_str()), "`@{id}` typed in full");
+        }
+    }
+
+    #[test]
+    fn a_longer_token_narrows_the_answer_until_it_is_complete() {
+        for (typed, incomplete) in [("", true), ("s", true), ("stone_bri", false)] {
+            let list = complete_material(typed);
+            assert_eq!(list.is_incomplete, incomplete, "`@{typed}`");
+            assert!(list.items.len() <= MATERIAL_ITEM_LIMIT, "`@{typed}`");
+        }
+        let narrowed = complete_material("stone_bri");
+        assert!(
+            labels(&narrowed.items)
+                .iter()
+                .all(|label| label.starts_with("stone_bri") || label.contains("_stone_bri")),
+            "{:?}",
+            labels(&narrowed.items),
+        );
+    }
+
+    #[test]
+    fn a_material_token_is_matched_on_what_precedes_the_cursor_and_replaced_whole() {
+        let source = "theme a:\n  slot floor -> @cherry_planks";
+        let position = at_end_of(source, "@cherry_pl");
+        let list = completions(source, position).expect("in the document");
+        assert_eq!(labels(&list.items), ["cherry_planks"]);
+        let line = "  slot floor -> @cherry_planks";
+        let after_at = u32::try_from(line.find('@').expect("at sign") + 1).expect("fits u32");
+        let end = u32::try_from(line.len()).expect("fits u32");
+        assert_eq!(edit_range(&list.items[0]), range(1, after_at, end));
+    }
+
+    #[test]
+    fn a_keyword_answer_is_never_cut() {
+        let list = completions("st", at_end_of("st", "st")).expect("in the document");
+        assert!(!list.is_incomplete);
+        assert_eq!(labels(&list.items), ["theme", "def", "site", "struct"]);
     }
 
     #[test]
