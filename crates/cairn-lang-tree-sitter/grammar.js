@@ -33,6 +33,12 @@ function namedOperands(primitive, operands) {
   )]));
 }
 
+// An `[X; ...]` array, whose every element is the one number `element` matches.
+function nbtArray(open, element, $) {
+  const number = alias(token(element), $.nbt_number);
+  return seq(open, optional(seq(number, repeat(seq(',', number)))), ']');
+}
+
 function declOf(keyword, bodyRule) {
   return $ => seq(
     keyword,
@@ -129,7 +135,11 @@ module.exports = grammar({
 
     requires_stmt: $ => seq('requires', field('arg', $.directive_literal)),
 
-    assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form, $.latency_form)),
+    assert_stmt: $ => seq(
+      'assert',
+      choice($.truth_form, $.temporal_form, $.latency_form),
+      optional(field('positional', $.positional_list)),
+    ),
 
     // A line break may stand between rows; the scanner measures no indent inside the braces.
     truth_form: $ => seq(
@@ -178,10 +188,11 @@ module.exports = grammar({
       field('bound', $.integer),
     ),
 
+    // Without its `=` the line still parses, and core reports it as binding nothing.
     logic_decl: $ => seq(
       'logic',
       field('name', $._dotted_ref),
-      '=',
+      optional('='),
       field('value', $._bool_expr),
     ),
 
@@ -271,6 +282,7 @@ module.exports = grammar({
       $.material_ref,
       prec(2, $.signal_ref),
       $.integer,
+      $.decimal,
       $.boolean,
       $.string,
       $.identifier,
@@ -296,6 +308,7 @@ module.exports = grammar({
       field('name', $.identifier),
       '->',
       field('target', $._value),
+      optional(field('positional', $.positional_list)),
     ),
 
     selector_rule: $ => seq(
@@ -313,12 +326,16 @@ module.exports = grammar({
 
     filter_list: $ => repeat1(choice($.attribute, ',')),
 
-    attribute_list: $ => repeat1($.attribute),
+    // A header's or a selector rule's arguments, among them the bare values core reports.
+    attribute_list: $ => repeat1(choice($.attribute, $._value)),
+
+    // The bare values on a line that takes no `key=value`, which core reports.
+    positional_list: $ => repeat1($._value),
 
     attribute: $ => seq(
       field('key', $.identifier),
       '=',
-      field('value', choice($.coordinate, $.block_id, $._value)),
+      field('value', choice($.coordinate, $.block_id, $.nbt_compound, $._value)),
     ),
 
     // One token, so a selector's `y=2,side=front` still reads `2` and then a separator.
@@ -350,6 +367,55 @@ module.exports = grammar({
       field('value', choice($.identifier, $.integer, $.boolean)),
     ),
 
+    // Minecraft's SNBT, so entries need commas and a string its quotes. Core alone refuses a
+    // repeated key, a list of mixed types, a number past its type's range, and nesting past 64.
+    nbt_compound: $ => seq(
+      '{',
+      optional(seq($.nbt_entry, repeat(seq(',', $.nbt_entry)))),
+      '}',
+    ),
+
+    nbt_entry: $ => seq(
+      field('key', choice($.nbt_key, $.nbt_string)),
+      ':',
+      field('value', $._nbt_value),
+    ),
+
+    _nbt_value: $ => choice(
+      $.nbt_compound,
+      $.nbt_list,
+      $.nbt_array,
+      $.nbt_number,
+      $.nbt_string,
+      $.boolean,
+    ),
+
+    nbt_list: $ => seq(
+      '[',
+      optional(seq($._nbt_value, repeat(seq(',', $._nbt_value)))),
+      ']',
+    ),
+
+    nbt_array: $ => choice(
+      nbtArray('[B;', /[+-]?(0|[1-9][0-9]*)[bB]/, $),
+      nbtArray('[I;', /[+-]?(0|[1-9][0-9]*)/, $),
+      nbtArray('[L;', /[+-]?(0|[1-9][0-9]*)[lL]/, $),
+    ),
+
+    // A whole number keeps no leading zero, and a fraction takes a float or double suffix or none.
+    nbt_number: _ => token(choice(
+      /[+-]?[0-9]+\.[0-9]+[fFdD]?/,
+      /[+-]?[0-9]+[fFdD]/,
+      /[+-]?(0|[1-9][0-9]*)[bBsSlL]?/,
+    )),
+
+    nbt_key: _ => /[A-Za-z0-9_.+-]+/,
+
+    nbt_string: _ => token(choice(
+      /"([^"\\\r\n]|\\["\\])*"/,
+      /'([^'\\\r\n]|\\['\\])*'/,
+    )),
+
     size_literal: $ => seq(
       alias(token(/[0-9]+/), $.integer),
       $._size_x,
@@ -380,6 +446,7 @@ module.exports = grammar({
       $.material_ref,
       prec(2, $.signal_ref),
       $.integer,
+      $.decimal,
       $.boolean,
       $.string,
       $.identifier,
@@ -387,6 +454,7 @@ module.exports = grammar({
     ),
 
     integer: $ => /[0-9]+/,
+    decimal: $ => /[0-9]+\.[0-9]+/,
     boolean: $ => choice('true', 'false'),
 
     string:  $ => /"[^"\r\n]*"/,

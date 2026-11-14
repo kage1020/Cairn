@@ -8,7 +8,7 @@ Write commands flat and in any order. The compiler assigns each one to a phase a
 phases in this fixed order:
 
 ```
-massing     floor / walls / volume / fill
+massing     floor / walls / fill
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / chest / sensors / actuators / Tier 0 parts
@@ -23,8 +23,8 @@ A `fill` is `massing` with a `mat_slot=` and `fluids` with a `fluid=`
 ([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)), so its water is poured once the blocks
 it may hold are placed.
 
-Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `water` are not keywords
-yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
+Not every row runs today. `sign`, `painting`, `frame`, `bed` and `water` are not keywords yet and
+are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
 `envelope`, `openings`, `fixtures` (whose members are `chest`, every sensor and actuator but
 `door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts))), `fluids` and `raw`
 ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)).
@@ -96,10 +96,14 @@ to the geometry, with `W_DEFERRED_MEMBER`. An eave `stair kind=stairs` follows t
 rule, but takes its states from its own arguments.
 
 Those arguments are `facing=out | in`, `half=top | bottom` and
-`shape=straight | outer_left | outer_right`, each a bare identifier, defaulting to `out`, `top` and
-`straight`. An identifier outside the list is `E_INVALID_MEMBER`, and the stair is not built. A
-value of another shape (`half="bottom"`, `facing=1`) is an unreadable value: the stair is built
-with that key's default, and the value is reported as `W_IGNORED_ARGUMENT`.
+`shape=straight | inner_left | inner_right | outer_left | outer_right`, each a bare identifier,
+defaulting to `out`, `top` and `straight`. The `shape=` values are a stair's five shapes, written
+on Java as named. A Bedrock version with no stair `shape` state drops any but `straight`, and the
+stair renders straight, with `W_INTENT_DEGRADED`
+([§10.7](/spec/versioning-editions/#107-java--bedrock-portability)). An identifier outside the
+list is `E_INVALID_MEMBER`, and the stair is not built. A value of another shape (`half="bottom"`,
+`facing=1`) is an unreadable value: the stair is built with that key's default, and the value is
+reported as `W_IGNORED_ARGUMENT`.
 The value is reported even when the stair is refused for another reason, with a note saying the
 stair is not built either way ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 

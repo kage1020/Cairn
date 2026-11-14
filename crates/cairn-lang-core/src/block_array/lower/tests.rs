@@ -2214,8 +2214,7 @@ fn door_at_unknown_value_is_refused_naming_the_anchors() {
         invalid_lines(src, &out),
         [(
             "door side=front at=middle",
-            "door has `at=middle`, which is not one of center, left, right — use \
-             `at=center | left | right`",
+            "door has `at=middle`, which is not one of center, left, right",
         )],
     );
     assert_eq!(deferred_count(&out), 0);
@@ -3865,9 +3864,11 @@ fn a_stair_with_an_unknown_state_is_refused_with_the_values_it_takes() {
             vec!["`facing=` takes one of out, in"],
         ),
         (
-            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left",
-            "unknown stair `shape=inner_left`",
-            vec!["`shape=` takes one of straight, outer_left, outer_right"],
+            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner",
+            "unknown stair `shape=inner`",
+            vec![
+                "`shape=` takes one of straight, inner_left, inner_right, outer_left, outer_right",
+            ],
         ),
     ] {
         assert_eq!(

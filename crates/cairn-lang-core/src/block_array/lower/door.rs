@@ -12,7 +12,7 @@ use crate::block_array::args::{
     ident_or_ignore, read_or_ignore,
 };
 use crate::block_array::openings::{
-    DOOR_HEIGHT, WallSide, door_anchor_offset, door_at_refusal, wall_length, wall_local_to_grid,
+    DOOR_HEIGHT, WallSide, door_column, wall_length, wall_local_to_grid,
 };
 use crate::block_array::roof::inward_cardinal;
 use crate::block_array::{BlockState, PaletteIndex};
@@ -187,12 +187,13 @@ fn stand_door(
 ) -> Option<HungDoor> {
     let side = side_of(member, diagnostics);
     let at = side.and_then(|side| {
-        door_anchor_offset(member, wall_length(side, ctx.interior_w, ctx.interior_h))
-            .map_err(|written| {
+        let length = wall_length(side, ctx.interior_w, ctx.interior_h);
+        door_column(member, side, length)
+            .map_err(|fault| {
                 diagnostics.push(diag_invalid_member(
                     member,
-                    door_at_refusal(&written),
-                    Vec::new(),
+                    fault.refusal(),
+                    vec![fault.fix(length)],
                 ));
             })
             .ok()
@@ -233,7 +234,7 @@ fn stand_door(
         ctx.interior_h,
         ctx.dims,
     ) else {
-        // INVARIANT(wall-grid-validated): `at < len`, and both rows sit in a painted course.
+        // INVARIANT(wall-grid-validated): `at < length`, and both rows sit in a painted course.
         debug_assert!(
             false,
             "door row y={base_row} at u={at} on the {} wall is outside the wall grid; `at=` \

@@ -341,11 +341,10 @@ fn one_refused_port_is_named_in_the_singular() {
 }
 
 #[test]
-fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
-    let src = site(&format!("{WALLS}  door id=p side=front at=3\n"), 6);
+fn a_corner_door_offset_reads_the_same_on_the_row_and_on_the_door() {
+    let src = site(&format!("{WALLS}  door id=p side=front offset=4\n"), 6);
     let out = lowered(&src);
-    let clause =
-        "has `at=3`, which is not one of center, left, right (numeric offsets are reserved)";
+    let clause = "has `offset=4`, the front wall's corner with the right wall";
     let notes = skip_notes(&src, &out);
     assert_eq!(notes.len(), 1, "{notes:#?}");
     assert_eq!(
@@ -359,10 +358,7 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
         .filter(|d| d.span == span)
         .map(|d| d.primary.as_str())
         .collect();
-    assert_eq!(
-        own,
-        [format!("door {clause} — use `at=center | left | right`")]
-    );
+    assert_eq!(own, [format!("door {clause}")]);
 }
 
 #[test]
