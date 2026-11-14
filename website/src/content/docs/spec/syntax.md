@@ -317,6 +317,25 @@ entities, and entities all use one selector grammar.
 x so a `sym=true` opening looks symmetric from either side. The `left` and `right` walls anchor at
 low `z` and mirror the same way.
 
+**`anchor=` window anchors.** `offset=` and `y=` place one cell of a window, and `anchor=` names
+which, seen from outside the wall:
+
+| Anchor | Column from the window's first | Row from its lowest |
+|---|---|---|
+| `bottom_left`, `middle_left`, `top_left` | `0` | `0`, `size_h / 2`, `size_h - 1` |
+| `bottom_center`, `center`, `top_center` | `size_w / 2` | `0`, `size_h / 2`, `size_h - 1` |
+| `bottom_right`, `middle_right`, `top_right` | `size_w - 1` | `0`, `size_h / 2`, `size_h - 1` |
+
+The three rows are the anchors in the order the first column lists them, so `top_center` is the
+column `size_w / 2` and the row `size_h - 1`. Division rounds down, so on an even span the middle is
+the later of the two middle cells, as `at=center` picks on an even wall. A window without `anchor=`
+is placed by `bottom_left`, its first column and lowest row. `anchor=bottom_center offset=4
+size=3x3` cuts the columns `3` to `5`, as `offset=3` does without it. Any other value is
+`E_INVALID_MEMBER`, and so is an anchor that puts the window's first column before the left end of
+its wall or its lowest row below the base row of its struct or `level`. In what follows, `offset`
+is the window's first column, which is `offset=` itself unless `anchor=` names a later one, and a
+`repeat=` series steps from it ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
+
 `sym=true` mirrors the opening across the wall's midpoint
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle
 is rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. That includes the

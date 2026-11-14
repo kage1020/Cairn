@@ -2,7 +2,7 @@
 //! struct, which rises over them (`spec/redstone` "Connection to the IR and phases").
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArrayIr, Dims, PaletteIndex, ResolvedMember};
+use cairn_lang_core::block_array::{Bbox, BlockArrayIr, Dims, PaletteIndex, ResolvedMember};
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
     CircuitEntity, CircuitLayout, Diagnostic, build_circuits, compile_legalize,
@@ -25,15 +25,27 @@ fn circuit(source: &str, edition: Edition) -> CircuitLayout {
     out.scoped.scopes[0].ir.clone()
 }
 
-/// `members` with every run `void` higher.
+/// `members` with every run and every geometry `void` higher.
 fn risen(members: &[ResolvedMember], void: u32) -> Vec<ResolvedMember> {
     let mut members = members.to_vec();
-    for run in members
-        .iter_mut()
-        .flat_map(|member| &mut member.resolved_state)
-        .flat_map(|block| &mut block.runs)
-    {
-        run.from.1 += void;
+    for member in &mut members {
+        let geometry = &mut member.geometry;
+        for cell in [
+            &mut geometry.anchor,
+            &mut geometry.declared_bbox.min,
+            &mut geometry.declared_bbox.max,
+            &mut geometry.actual_bbox.min,
+            &mut geometry.actual_bbox.max,
+        ] {
+            cell.1 += void;
+        }
+        for run in member
+            .resolved_state
+            .iter_mut()
+            .flat_map(|block| &mut block.runs)
+        {
+            run.from.1 += void;
+        }
     }
     members
 }
@@ -99,6 +111,11 @@ fn each_example_lays_its_circuit_under_its_struct_which_rises_whole() {
                 .map(|block| block.cells().count())
                 .sum();
             assert_eq!(cells, laid, "{name}");
+            assert_eq!(
+                members[0].geometry.declared_bbox,
+                Bbox::spanning((0, 0, 0), (now.dims.x - 1, void - 1, now.dims.z - 1)),
+                "{name}: the circuit declares the layers it reserves",
+            );
             assert_eq!(
                 members[1..],
                 risen(&before.members[&key], void)[..],

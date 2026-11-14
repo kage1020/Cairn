@@ -2,6 +2,7 @@
 
 use indexmap::IndexMap;
 
+use crate::block_array::geometry::Declared;
 use crate::block_array::material::is_stand_in;
 use crate::block_array::{BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull, PaletteIndex};
 
@@ -149,6 +150,8 @@ pub(super) struct Canvas {
     painted: Vec<bool>,
     /// Indexed like [`Self::phases`]: `true` once that member has written a cell.
     pub(super) wrote: Vec<bool>,
+    /// Indexed like [`Self::phases`]: what that member's line declares, once its painter read it.
+    declared: Vec<Option<Declared>>,
     /// `(overridden, overriding)` member pairs, in the order they are judged, to how many voxels
     /// the second took from each `(before, after)` pair of palette slots.
     pub(super) conflicts: IndexMap<(u32, u32), IndexMap<(PaletteIndex, PaletteIndex), u32>>,
@@ -175,6 +178,7 @@ impl Canvas {
             voxels: vec![PaletteIndex::AIR; dims.volume()],
             owners: vec![0; dims.volume()],
             wrote: vec![false; phases.len()],
+            declared: vec![None; phases.len()],
             held: vec![false; phases.len()],
             phases,
             painted: vec![false; 1],
@@ -247,6 +251,11 @@ impl Canvas {
             .filter_map(|(i, (slot, _))| Some((self.dims.position(i)?, *slot)))
     }
 
+    /// What member `index` of the flattened paint list declared, or `None` if it declared nothing.
+    pub(super) fn declared(&self, index: u32) -> Option<Declared> {
+        self.declared.get(index as usize).copied().flatten()
+    }
+
     /// The member of the flattened paint list that wrote `pos` last, or `None` for a cell no member
     /// wrote or one outside the grid.
     pub(super) fn owner_at(&self, pos: (u32, u32, u32)) -> Option<u32> {
@@ -293,6 +302,13 @@ impl MemberCanvas<'_> {
     /// The index in the flattened paint list of the member this canvas files writes under.
     pub(super) fn member(&self) -> u32 {
         self.member
+    }
+
+    /// Record what this member's line declares, before it paints the cells it names.
+    pub(super) fn declare(&mut self, declared: Declared) {
+        if let Some(slot) = self.canvas.declared.get_mut(self.member as usize) {
+            *slot = Some(declared);
+        }
     }
 
     /// Hold every contest this member's writes take part in until

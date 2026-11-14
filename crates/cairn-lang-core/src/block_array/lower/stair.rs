@@ -6,15 +6,16 @@ use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
-use crate::block_array::PaletteIndex;
 use crate::block_array::args::{
     NonNegRead, diag_deferred_member_noted, diag_invalid_member, ident_or_ignore,
     nonneg_int_or_refuse,
 };
+use crate::block_array::geometry::{Declared, outer_face};
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 use crate::block_array::roof::{
     Cardinal, STAIR_BASE_ID, StairShape, inward_cardinal, shed_high_side, stair_state,
 };
+use crate::block_array::{Bbox, PaletteIndex};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
@@ -317,28 +318,41 @@ fn paint_eave_band(
     canvas: &mut MemberCanvas<'_>,
 ) {
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
-    for u in 0..length {
-        let Some((wx, _wy, wz)) = wall_local_to_grid(
-            side,
-            u,
-            y_world,
-            ctx.overhang,
-            ctx.interior_w,
-            ctx.interior_h,
-            ctx.dims,
-        ) else {
-            // INVARIANT(wall-grid-validated): `u` is on the wall; `eave_row` checked `y_world`.
-            debug_assert!(
-                false,
-                "eave stair cell u={u} y={y_world} on the {} wall is outside the wall grid; \
-                 the band's `u < wall_length` / `y_world < dims.y` checks stopped agreeing \
-                 with `wall_local_to_grid`",
-                side_name(side),
-            );
-            continue;
-        };
-        let (x, z) = shift_outward(side, wx, wz);
-        canvas.paint((x, y_world, z), || idx);
+    let band: Vec<(u32, u32, u32)> = (0..length)
+        .filter_map(|u| {
+            let Some((wx, _wy, wz)) = wall_local_to_grid(
+                side,
+                u,
+                y_world,
+                ctx.overhang,
+                ctx.interior_w,
+                ctx.interior_h,
+                ctx.dims,
+            ) else {
+                // INVARIANT(wall-grid-validated): `u` is on the wall; `eave_row` checked `y_world`.
+                debug_assert!(
+                    false,
+                    "eave stair cell u={u} y={y_world} on the {} wall is outside the wall grid; \
+                     the band's `u < wall_length` / `y_world < dims.y` checks stopped agreeing \
+                     with `wall_local_to_grid`",
+                    side_name(side),
+                );
+                return None;
+            };
+            let (x, z) = shift_outward(side, wx, wz);
+            Some((x, y_world, z))
+        })
+        .collect();
+    let (Some(&anchor), Some(bbox)) = (band.first(), Bbox::around(band.iter().copied())) else {
+        return;
+    };
+    canvas.declare(Declared {
+        anchor,
+        bbox,
+        host_face: Some(outer_face(side)),
+    });
+    for cell in band {
+        canvas.paint(cell, || idx);
     }
 }
 

@@ -221,6 +221,8 @@ record as it was, as it leaves the grid ([Compilation Model
 §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The record is made each time a
 body is lowered: its block ids are those the lowering's target resolved, a theme's edition variant
 and a pinned version's override included, and its property names are the canonical vocabulary's.
+Beside its `resolved_state`, each member's record carries its anchor, its declared and actual
+bboxes and its host face ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
 
 In place of `type`, a member carries the `role` its keyword classifies to.
 

@@ -24,9 +24,10 @@ It is the output target of the forward direction and the input destination of th
 ## 3.2 The Intent IR is rich and carries invariants
 
 A named member carries `id`, `class`, `role`, `mat_slot`, `intent_state`, and `resolved_state`
-([Blockstate Model](/spec/blockstate/)). Lowering derives `resolved_state`, so it is recorded with
-the block-array IR the member was lowered to, keyed by structure, and not on the Intent IR the
-lowering reads.
+([Blockstate Model](/spec/blockstate/)). Lowering derives `resolved_state` and the member's anchor,
+declared and actual bboxes and host face ([Entities §8.2](/spec/entities/#82-anchor-conventions)),
+so they are recorded with the block-array IR the member was lowered to, keyed by structure, and not
+on the Intent IR the lowering reads.
 
 A raw import does not produce a valid Intent IR. It reaches one only after a semantic lift, and an
 artifact's progress along that path is `semantic_level: raw | grouped | lifted`.

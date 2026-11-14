@@ -5,6 +5,8 @@ use std::convert::Infallible;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
+use crate::block_array::geometry::Declared;
+use crate::block_array::joins::Face;
 use crate::block_array::roof::{
     RoofKind, RoofVoxel, flat_block_state, flat_voxels, gable_ridge_axis, gable_stair_state,
     gable_voxels, hip_stair_state, hip_voxels, shed_stair_state, shed_voxels,
@@ -14,7 +16,7 @@ use crate::block_array::{BlockState, PaletteIndex};
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{MemberState, StructCtx, resolve_member_state};
-use super::roof_kind::{parse_roof_kind, roof_draws, shed_slope_to};
+use super::roof_kind::{roof_draws, roof_line_refused, roof_rise, shed_slope_to};
 
 pub(super) fn fill_roof(
     member: &Member,
@@ -23,14 +25,17 @@ pub(super) fn fill_roof(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Some(kind) = parse_roof_kind(member, diagnostics) else {
-        return;
-    };
-    // A shed with no usable `slope_to=` draws nothing, so its material is never resolved.
-    if roof_draws(member).is_none() {
-        shed_slope_to(member, diagnostics);
+    // A roof its own line refuses draws nothing, so its material is never resolved.
+    if roof_line_refused(member, diagnostics) {
         return;
     }
+    let (Some(kind), Some(rise)) = (
+        roof_draws(member),
+        roof_rise(member, ctx.dims.x, ctx.dims.z),
+    ) else {
+        debug_assert!(false, "a roof its line does not refuse draws");
+        return;
+    };
     let resolved = match resolve_member_state(
         member,
         ctx.scope,
@@ -57,6 +62,10 @@ pub(super) fn fill_roof(
     );
 
     let (roof_w, roof_h, wall_top) = (ctx.dims.x, ctx.dims.z, ctx.wall_top);
+    canvas.declare(Declared::boxed(
+        ctx.footprint_box(wall_top.saturating_add(1), wall_top.saturating_add(rise)),
+        Some(Face::Up),
+    ));
     match kind {
         RoofKind::Gable => {
             let ridge_axis = gable_ridge_axis(roof_w, roof_h);

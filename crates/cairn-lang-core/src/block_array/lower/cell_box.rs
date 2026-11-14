@@ -5,6 +5,7 @@ use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
+use crate::block_array::Bbox;
 use crate::block_array::args::{diag_deferred_member_noted, diag_invalid_member};
 
 use super::members::{StructCtx, unplaced_walls_note};
@@ -92,6 +93,11 @@ pub(super) struct CellBox {
 }
 
 impl CellBox {
+    /// The box, as a member's geometry records it.
+    pub(super) fn bbox(self) -> Bbox {
+        Bbox::spanning(self.low, self.high)
+    }
+
     /// Every cell of the box, `x` fastest and `y` slowest.
     pub(super) fn cells(self) -> impl Iterator<Item = Cell> {
         let Self { low, high } = self;

@@ -8,6 +8,7 @@ use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, ident_or_ignore};
+use crate::block_array::geometry::Declared;
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Fixture, Refusal, Toward, fixture_cell, outside_the_array, written_facing};
@@ -148,6 +149,7 @@ fn place_chest(
     }
     keep_waterlogged(&mut properties, waterlogged);
     let state = BlockState { id, properties };
+    canvas.declare(Declared::cell(cell, Some(anchor.host_face())));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
         Ok(())

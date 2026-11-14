@@ -20,7 +20,7 @@ block-array IR                   ボクセル格子 + パレット + block entit
 
 ## 3.2 Intent IR は情報が豊富で、不変条件を持つ
 
-名前付きのメンバーは、`id`、`class`、`role`、`mat_slot`、`intent_state`、`resolved_state` を持ちます ([ブロックステート](/ja/spec/blockstate/))。`resolved_state` は lowering が導くので、lowering が読む Intent IR ではなく、メンバーを lowering した先の block-array IR に、構造ごとのキーで記録します。
+名前付きのメンバーは、`id`、`class`、`role`、`mat_slot`、`intent_state`、`resolved_state` を持ちます ([ブロックステート](/ja/spec/blockstate/))。`resolved_state` と、メンバーのアンカー、宣言上の bbox と実際の bbox、取り付ける面は lowering が導くので ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約))、lowering が読む Intent IR ではなく、メンバーを lowering した先の block-array IR に、構造ごとのキーで記録します。
 
 raw のまま取り込んだだけでは、有効な Intent IR にはなりません。意味を付けて引き上げる (リフトする) ことで、はじめて Intent IR になります。その途中の成果物がどこまで進んだかは、`semantic_level: raw | grouped | lifted` で表します。
 
