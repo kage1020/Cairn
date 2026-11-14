@@ -935,8 +935,8 @@ fn a_material_token_answer_cut_at_the_limit_says_it_is_incomplete() {
         cut["result"]["items"].as_array().map(Vec::len),
         Some(crate::completion::MATERIAL_ITEM_LIMIT),
     );
-    session.did_change(TEST_URI, "theme a:\n  slot floor -> @cherry_pl", 2);
-    let whole = session.request_completion(11, TEST_URI, 1, 26);
+    session.did_change(TEST_URI, "theme a:\n  slot floor -> @cherry_plan", 2);
+    let whole = session.request_completion(11, TEST_URI, 1, 28);
     assert_eq!(whole["result"]["isIncomplete"], serde_json::json!(false));
     assert_eq!(completion_labels(&whole), ["cherry_planks"]);
     session.shutdown();

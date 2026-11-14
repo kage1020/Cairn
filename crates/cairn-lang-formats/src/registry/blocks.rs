@@ -400,6 +400,13 @@ impl BlocksIndex {
         self.by_version.keys().map(String::as_str)
     }
 
+    /// Every version this index describes, in the catalog's order, with its sorted ids.
+    pub fn ids_by_version(&self) -> impl Iterator<Item = (&str, &[String])> {
+        self.by_version
+            .iter()
+            .map(|(version, table)| (version.as_str(), table.ids()))
+    }
+
     /// The number of versions.
     #[must_use]
     pub fn len(&self) -> usize {
