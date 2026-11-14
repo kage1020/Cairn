@@ -1104,6 +1104,25 @@ what this release's do ([§10.6](#106-provenance-and-lock)).
 | `unreadable` | `error`, the cause as the note words it |
 | `missing` | nothing more |
 
+### The report in an editor
+
+The language server gives the same answer for a document the editor has open, as the
+`workspace/executeCommand` command `cairn.info`. Its one argument is an object: `uri`, the open
+document's `file:` URI, and optionally `editions`, the list `--editions` takes, which defaults to
+`["java", "bedrock"]` as the flag does. The result is the document `cairn info --format json`
+prints for the file at that path: the report, or the `{"diagnostics": [ ... ]}` document where a
+finding refuses the run ([Lint §11.2](/spec/lint/#112-machine-readable-payload)). Two inputs come
+from the editor rather than a command line:
+
+- The source is the text the editor holds, saved or not, so `source_unchanged` compares the lock
+  with that text.
+- The lock is `<source>.lock` beside the file, the path `cairn info` reads without `--lock`.
+
+What `cairn info` writes on stderr is not sent: a response has no place for it, and the stderr of a
+JSON run is prose outside the contract. An argument the command cannot read, a document the editor
+does not have open, a URI that names no local file, or an `editions` list `--editions` would refuse
+is answered with an `InvalidParams` error that says which.
+
 ## 10.6 Provenance and lock
 
 The `.crn` carries the language version it is written against (`@cairn`) and, about targets, only

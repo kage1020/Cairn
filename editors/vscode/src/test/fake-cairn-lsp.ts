@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import type { ServerEvent } from "./server-event";
 
-type Message = { readonly id?: number | string; readonly method?: string };
+type Message = {
+  readonly id?: number | string;
+  readonly method?: string;
+  readonly params?: unknown;
+};
 
 const [log, server, ...argv] = process.argv.slice(2);
 const id = randomUUID();
@@ -29,6 +33,11 @@ function handle(message: Message): void {
     case "shutdown":
       record({ id, received: message.method });
       send({ jsonrpc: "2.0", id: message.id, result: null });
+      break;
+    case "workspace/executeCommand":
+      // Echoed, so a test reads the request back from what the editor shows.
+      record({ id, received: message.method });
+      send({ jsonrpc: "2.0", id: message.id, result: message.params });
       break;
     case "exit":
       record({ id, received: message.method });

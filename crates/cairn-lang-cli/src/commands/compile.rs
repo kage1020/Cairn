@@ -6,17 +6,17 @@ use std::process::ExitCode;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::info::{Reporter, default_lock_path, report_conflicts};
 
 use crate::artifacts::{
     PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
     write_artifacts_and_lock,
 };
 use crate::floors::enforce_version_floor;
-use crate::inferred::report_conflicts;
-use crate::lockfile::{default_lock_path, report_previous_target};
+use crate::lockfile::report_previous_target;
 use crate::name_case::NameCase;
 use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
-use crate::report::report_diagnostics;
+use crate::report::{Stderr, report_diagnostics};
 use crate::target::{ResolvedTarget, resolve_target};
 
 pub(crate) fn run_compile(
@@ -41,10 +41,19 @@ pub(crate) fn run_compile(
         Err(code) => return code,
     };
     let lines = LineStarts::new(&source);
+    let mut stderr = Stderr {
+        file,
+        source: &source,
+        lines: &lines,
+    };
     // A conflict holds at every target, so it stops the build ahead of the target's floor check.
     if report_diagnostics(file, &source, &lines, &block_ir.diagnostics)
         | report_diagnostics(file, &source, &lines, &circuits)
-        | report_conflicts(file, &source, &lines, edition, &conflicts)
+        | report_conflicts(
+            &mut Reporter::new(file, &source, &lines, &mut stderr),
+            edition,
+            &conflicts,
+        )
     {
         return ExitCode::from(1);
     }

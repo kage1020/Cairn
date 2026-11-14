@@ -1,19 +1,19 @@
 //! The canonical tokens an edition's versions write under another id, per
 //! `spec/versioning-editions` "The `respelled` row".
 
-use std::path::Path;
-
 use cairn_lang_core::block_array::{BlockState, TargetRegistry, bound_canonical_tokens};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::resolve::{
     RespelledToken, SpellingTable, VersionFloor, WrittenSpelling, versions_satisfying,
 };
 use cairn_lang_core::{Edition, Resolution};
-use cairn_lang_formats::registry::{PackView, RegistryPack};
+
+use super::Reporter;
+use crate::registry::{PackView, RegistryPack};
 
 /// The tokens `resolution` binds that a version of `considered` the floors admit writes under
 /// another id.
-pub(crate) fn respelled_tokens(
+pub(super) fn respelled_tokens(
     resolution: &Resolution,
     pack: &RegistryPack,
     floors: &[VersionFloor],
@@ -67,7 +67,11 @@ fn written_at(view: &PackView<'_>, token: &BlockState) -> Option<(String, Spelli
 }
 
 /// The `note:` lines saying how each of `tokens` is written: one per id written and table.
-pub(crate) fn report_respelled_notes(file: &Path, edition: Edition, tokens: &[RespelledToken]) {
+pub(super) fn report_respelled_notes(
+    out: &mut Reporter<'_>,
+    edition: Edition,
+    tokens: &[RespelledToken],
+) {
     for token in tokens {
         let mut spellings: Vec<(&str, SpellingTable, Vec<&str>)> = Vec::new();
         for written in &token.written {
@@ -80,15 +84,16 @@ pub(crate) fn report_respelled_notes(file: &Path, edition: Edition, tokens: &[Re
             }
         }
         for (id, through, versions) in spellings {
-            eprintln!(
+            let line = format!(
                 "note: {}:{}: `{}` is written `{id}` at {} {}, per the registry pack's {}",
-                file.display(),
+                out.file.display(),
                 token.position,
                 token.id,
                 edition.as_str(),
                 versions.join(", "),
                 table_name(through),
             );
+            out.line(&line);
         }
     }
 }

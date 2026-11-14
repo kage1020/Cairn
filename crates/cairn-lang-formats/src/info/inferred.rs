@@ -2,8 +2,6 @@
 //! contradict it (`spec/versioning-editions` "The `inferred range` row", "A floor is weighed
 //! against the registry").
 
-use std::path::Path;
-
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{DiagnosticData, LineStarts};
 use cairn_lang_core::intent::IntentModule;
@@ -12,10 +10,10 @@ use cairn_lang_core::resolve::{
     VersionOrder,
 };
 use cairn_lang_core::{Diagnostic, Edition, Resolution, Span};
-use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
-use crate::floors::{declared_floors, floor_keyword, floor_origin_note};
-use crate::report::Reporting;
+use super::Reporter;
+use super::floors::{declared_floors, floor_keyword, floor_origin_note};
+use crate::registry::{RegistryPack, builtin_pack};
 
 /// An id a build paints, at the first place it paints it.
 #[derive(Debug, Clone)]
@@ -26,7 +24,7 @@ struct Painted {
 
 /// A painted id with the carried version that bounds it.
 #[derive(Debug, Clone)]
-pub(crate) struct Bound {
+pub(super) struct Bound {
     painted: Painted,
     version: String,
     key: i64,
@@ -44,7 +42,8 @@ struct Inference {
 }
 
 /// A floor no version declaring every painted id clears, with the ids last declared below it.
-pub(crate) struct Conflict {
+#[derive(Debug, Clone)]
+pub struct Conflict {
     floor: VersionFloor,
     /// The earliest `version` first, then in source order; never empty.
     ids: Vec<Bound>,
@@ -158,79 +157,70 @@ impl Inference {
     }
 
     /// The `note:` lines naming each id that sets an edge, and each no version declares.
-    fn report_notes(&self, file: &Path, source: &str, lines: &LineStarts) {
+    fn report_notes(&self, out: &mut Reporter<'_>) {
         let edition = self.edition.as_str();
-        let at = |painted: &Painted| {
-            format!(
-                "{}:{}",
-                file.display(),
-                lines.position(source, painted.span.start)
-            )
-        };
         if let Some((version, ids)) = self.min_edge() {
             for b in ids {
-                eprintln!(
+                let line = format!(
                     "note: {}: {edition}'s inferred range starts at {version}, the first {edition} \
                      target that declares `{}`",
-                    at(&b.painted),
+                    out.at(b.painted.span.start),
                     b.painted.id,
                 );
+                out.line(&line);
             }
         }
         if let Some((version, ids)) = self.max_edge() {
             for b in ids {
-                eprintln!(
+                let line = format!(
                     "note: {}: {edition}'s inferred range ends at {version}, the last {edition} \
                      target that declares `{}`",
-                    at(&b.painted),
+                    out.at(b.painted.span.start),
                     b.painted.id,
                 );
+                out.line(&line);
             }
         }
         if let (true, Some((min, _)), Some((max, _))) =
             (self.crossed(), self.min_edge(), self.max_edge())
         {
-            eprintln!(
+            out.line(&format!(
                 "note: {edition} has no inferred range: it would start at {min} and end at {max}"
-            );
+            ));
         }
         for painted in &self.undeclared {
-            eprintln!(
+            let line = format!(
                 "note: {}: {edition} has no inferred range: no {edition} target declares `{}`",
-                at(painted),
+                out.at(painted.span.start),
                 painted.id,
             );
+            out.line(&line);
         }
     }
 }
 
-/// One edition's `inferred range` row for `cairn info`, its notes and conflicts printed on stderr.
-pub(crate) fn report_inferred_range(
-    reporting: Reporting<'_>,
+/// One edition's `inferred range` row for `cairn info`, its notes and conflicts sent to `out`.
+pub(super) fn report_inferred_range(
+    out: &mut Reporter<'_>,
     ir: &IntentModule,
     resolution: &Resolution,
     edition: Edition,
     considered: &[String],
     floors: &[VersionFloor],
 ) -> InferredRange {
-    let Reporting {
-        file,
-        source,
-        lines,
-        ..
-    } = reporting;
     let pack = builtin_pack(edition);
     let inference = Inference::of(ir, resolution, pack, edition, considered);
-    inference.report_notes(file, source, lines);
+    inference.report_notes(out);
     let conflicts = inference.conflicts(floors, &pack.version_order());
     // Reported, not refused: the build is the command that refuses it.
-    report_conflicts(file, source, lines, edition, &conflicts);
-    inference.range(source, lines, &conflicts)
+    report_conflicts(out, edition, &conflicts);
+    inference.range(out.source, out.lines, &conflicts)
 }
 
 /// The floors among `floors` above the last version declaring an id the newest of `considered`
 /// lacks.
-pub(crate) fn requires_conflicts(
+#[must_use]
+pub fn requires_conflicts(
     ir: &IntentModule,
     resolution: &Resolution,
     pack: &RegistryPack,
@@ -269,39 +259,33 @@ fn conflicts(
 }
 
 /// Report each conflict as `E_REQUIRES_CONFLICT`; whether there was one.
-pub(crate) fn report_conflicts(
-    file: &Path,
-    source: &str,
-    lines: &LineStarts,
-    edition: Edition,
-    conflicts: &[Conflict],
-) -> bool {
+pub fn report_conflicts(out: &mut Reporter<'_>, edition: Edition, conflicts: &[Conflict]) -> bool {
     let edition = edition.as_str();
     for Conflict { floor, ids } in conflicts {
         let bounding = &ids[0];
-        eprintln!(
-            "error[E_REQUIRES_CONFLICT]: {}:{}: {} requires {}, but no {edition} target it \
-             admits declares `{}`, which this build paints.",
-            file.display(),
-            lines.position(source, floor.span.start),
+        let line = format!(
+            "error[E_REQUIRES_CONFLICT]: {}: {} requires {}, but no {edition} target it admits \
+             declares `{}`, which this build paints.",
+            out.at(floor.span.start),
             floor.declarer(),
             floor.rendered(),
             bounding.painted.id,
         );
+        out.line(&line);
         if let Some(note) = floor_origin_note(floor) {
-            eprintln!("{note}");
+            out.line(&note);
         }
         for b in ids {
-            eprintln!(
-                "  note: {}:{}: `{}` is last declared at {edition} {}",
-                file.display(),
-                lines.position(source, b.painted.span.start),
+            let line = format!(
+                "  note: {}: `{}` is last declared at {edition} {}",
+                out.at(b.painted.span.start),
                 b.painted.id,
                 b.version,
             );
+            out.line(&line);
         }
         let replaced: Vec<String> = ids.iter().map(|b| format!("`{}`", b.painted.id)).collect();
-        eprintln!(
+        let line = format!(
             "  fix: lower the {} floor to {} or below, or replace {} with {} a {edition} target at \
              or above {} declares",
             floor_keyword(floor),
@@ -310,6 +294,7 @@ pub(crate) fn report_conflicts(
             if ids.len() == 1 { "a block" } else { "blocks" },
             floor.version,
         );
+        out.line(&line);
     }
     !conflicts.is_empty()
 }

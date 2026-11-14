@@ -531,6 +531,15 @@ verified target:         java 1.21.4/DataVersion 4189, source unchanged, written
 | `unreadable` | 原因を note と同じ文言で示す `error` |
 | `missing` | なし |
 
+### エディタでのレポート
+
+言語サーバーは、エディタが開いている文書について同じ答えを `workspace/executeCommand` のコマンド `cairn.info` として返します。引数は 1 つのオブジェクトで、開いている文書の `file:` URI である `uri` と、省略できる `editions` を持ちます。`editions` は `--editions` が受け取るリストで、フラグと同じく省略時は `["java", "bedrock"]` です。結果は、そのパスのファイルに対して `cairn info --format json` が出力する文書です。つまりレポートか、指摘が実行を拒否した場合は `{"diagnostics": [ ... ]}` の文書です ([Lint §11.2](/ja/spec/lint/#112-機械可読ペイロード))。入力のうち 2 つは、コマンドラインではなくエディタから来ます。
+
+- ソースは、保存したかどうかにかかわらずエディタが保持しているテキストです。そのため `source_unchanged` はロックをそのテキストと比べます。
+- ロックはファイルの隣の `<source>.lock` で、`--lock` なしの `cairn info` が読むパスです。
+
+`cairn info` が stderr に書く内容は送りません。応答にはそれを入れる場所がなく、JSON での実行の stderr は契約の外の文章だからです。コマンドが読めない引数、エディタが開いていない文書、ローカルのファイルを指さない URI、`--editions` なら拒否する `editions` のリストには、どれに当たるかを述べる `InvalidParams` エラーで答えます。
+
 ## 10.6 来歴 (provenance) とロック
 
 `.crn` が持つのは、書かれた言語のバージョン (`@cairn`) と、ターゲットについてはヒントである `@intended_targets` だけです。`verified: true`、DataVersion、各種ハッシュはロックにだけ存在し、ビルドが成功したときにコンパイラが書き込みます。手で書くことはありません。

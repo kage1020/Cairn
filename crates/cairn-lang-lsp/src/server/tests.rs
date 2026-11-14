@@ -517,6 +517,47 @@ fn completion_answers_in_an_empty_document() {
     session.shutdown();
 }
 
+#[test]
+fn capabilities_advertise_the_commands_the_server_runs() {
+    let capabilities = serde_json::to_value(server_capabilities()).expect("serialise");
+    assert_eq!(
+        capabilities["executeCommandProvider"],
+        serde_json::json!({ "commands": ["cairn.info"] }),
+    );
+}
+
+#[test]
+fn execute_command_runs_cairn_info_on_the_open_document() {
+    let session = Session::start();
+    session.did_open(CLEAN, 1);
+    let execute = |id: i64, command: &str| {
+        session.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "workspace/executeCommand",
+            "params": { "command": command, "arguments": [{ "uri": TEST_URI }] },
+        }));
+        session.read_response(id)
+    };
+    let lock = if cfg!(windows) {
+        r"\test.crn.lock"
+    } else {
+        "/test.crn.lock"
+    };
+    assert_eq!(
+        execute(40, "cairn.info")["result"]["verified_target"],
+        serde_json::json!({ "path": lock, "status": "missing" }),
+    );
+    assert_eq!(
+        execute(41, "cairn.diffBlocks")["error"],
+        serde_json::json!({
+            "code": -32602,
+            "message": "unknown command `cairn.diffBlocks`; this server runs `cairn.info`",
+        }),
+    );
+    session.shutdown();
+}
+
 // ------------------------------------- the store mirrors the client's open set
 
 #[test]

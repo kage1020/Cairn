@@ -12,6 +12,7 @@ authors.workspace = true
 [dependencies]
 cairn-lang-core.workspace = true
 cairn-lang-nbt.workspace = true
+cairn-lang-redstone.workspace = true
 flate2.workspace = true
 indexmap.workspace = true
 serde = { workspace = true, features = ["derive"] }

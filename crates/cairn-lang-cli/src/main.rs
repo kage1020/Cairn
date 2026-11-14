@@ -14,12 +14,10 @@ mod artifacts;
 mod cli;
 mod commands;
 mod floors;
-mod inferred;
 mod lockfile;
 mod name_case;
 mod pipeline;
 mod report;
-mod respelled;
 mod staging;
 mod target;
 

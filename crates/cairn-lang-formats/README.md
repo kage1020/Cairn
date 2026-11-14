@@ -8,6 +8,8 @@ Each format is a serializer or deserializer around the **block-array IR**, which
 
 Java vanilla `.nbt` and Bedrock `.mcstructure` writers ship, and so do the built-in registry packs behind `cairn info` and every id check. The Bedrock writer translates each palette entry's canonical blockstate, which is Java's, into the target version's Bedrock block and `states` through the built-in pack's state map ([`bedrock_state`](src/bedrock_state.rs)). A state the map has no form for, or one the Java block does not have, is a hard error (`BedrockStructureError::State`); intent a version can only approximate (stair `shape` before 1.26.60) is dropped with a `W_INTENT_DEGRADED` parity note rather than in silence; and `waterlogged` becomes the structure's water layer.
 
+The [`info`](src/info.rs) module builds the `cairn info` report, its JSON document and the `note:` lines behind its rows, once for both front ends: the CLI prints it, and the language server's `cairn.info` command returns it.
+
 Litematica `.litematic` and WorldEdit `.schem` are still to land, and no reverse-direction (file → IR) backend ships yet.
 
 ## Public API
@@ -85,6 +87,7 @@ Because the tables are closed, a suggestion cannot name a block that does not ex
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the block-array IR types.
 - [`cairn-lang-nbt`](../cairn-lang-nbt/README.md) for the byte-level codec.
+- [`cairn-lang-redstone`](../cairn-lang-redstone/README.md) for laying each struct's circuit, whose findings the `cairn info` report weighs per edition.
 
 ## License
 

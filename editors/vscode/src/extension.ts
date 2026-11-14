@@ -3,12 +3,16 @@ import { promisify } from "node:util";
 import {
   ExtensionContext,
   OutputChannel,
+  TextDocument,
   Uri,
+  ViewColumn,
+  commands,
   env,
   window,
   workspace,
 } from "vscode";
 import {
+  ExecuteCommandRequest,
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
@@ -17,12 +21,17 @@ import {
 const execFileAsync = promisify(execFile);
 const RELEASE_URL = "https://github.com/kage1020/Cairn/releases";
 const PROBE_TIMEOUT_MS = 5_000;
+// Not `cairn.info`: the client registers that one itself, from the server's capabilities.
+const SHOW_INFO = "cairn.showInfo";
+const INFO = "cairn.info";
 
 let client: LanguageClient | undefined;
 
 export async function activate(context: ExtensionContext): Promise<void> {
   const output = window.createOutputChannel("Cairn Language Server", { log: true });
   context.subscriptions.push(output);
+  // Before the server is found, so the command can say it is missing.
+  context.subscriptions.push(commands.registerCommand(SHOW_INFO, showInfo));
 
   const serverPath = await resolveServerPath(output);
   if (!serverPath) {
@@ -77,6 +86,57 @@ export async function deactivate(): Promise<void> {
     // VS Code is tearing the extension host down; nothing user-facing is left.
     console.error("cairn-lsp: stop() failed during deactivate:", err);
   }
+}
+
+/**
+ * Opens what `cairn.info` answers for the active `.crn` editor beside it,
+ * and returns the opened document.
+ */
+async function showInfo(): Promise<TextDocument | undefined> {
+  const editor = window.activeTextEditor;
+  if (editor?.document.languageId !== "cairn") {
+    void window.showErrorMessage(
+      "Cairn: Show Info reports on the active editor, which is not a .crn file. Open one first.",
+    );
+    return undefined;
+  }
+  if (editor.document.uri.scheme !== "file") {
+    void window.showErrorMessage(
+      "Cairn: Show Info reads the lockfile beside the source. Save the document to a file first.",
+    );
+    return undefined;
+  }
+  const current = client;
+  if (!current?.isRunning()) {
+    void window.showErrorMessage(
+      "Cairn: Show Info needs cairn-lsp, which is not running. " +
+        "See the Output panel (Cairn Language Server) for why.",
+    );
+    return undefined;
+  }
+  let report: unknown;
+  try {
+    report = await current.sendRequest(ExecuteCommandRequest.type, {
+      command: INFO,
+      arguments: [
+        { uri: current.code2ProtocolConverter.asUri(editor.document.uri) },
+      ],
+    });
+  } catch (err) {
+    void window.showErrorMessage(
+      `cairn-lsp did not run ${INFO}: ${describeError(err)}`,
+    );
+    return undefined;
+  }
+  const shown = await workspace.openTextDocument({
+    language: "json",
+    content: `${JSON.stringify(report, null, 2)}\n`,
+  });
+  await window.showTextDocument(shown, {
+    viewColumn: ViewColumn.Beside,
+    preserveFocus: true,
+  });
+  return shown;
 }
 
 async function resolveServerPath(
