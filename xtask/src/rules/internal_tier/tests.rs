@@ -223,14 +223,14 @@ fn a_crate_root_that_does_not_parse_is_reported_at_the_error() {
 }
 
 fn member(name: &str, library: bool, readme: bool, published: bool) -> Member {
-    let dir = PathBuf::from("crates").join(name);
+    let path = |file: &str| PathBuf::from(format!("crates/{name}/{file}"));
     Member {
         name: name.to_owned(),
-        roots: vec![dir.join(if library { "src/lib.rs" } else { "src/main.rs" })],
-        library: library.then(|| dir.join("src/lib.rs")),
-        readme: readme.then(|| dir.join("README.md")),
+        dir: PathBuf::from(format!("crates/{name}")),
+        roots: vec![path(if library { "src/lib.rs" } else { "src/main.rs" })],
+        library: library.then(|| path("src/lib.rs")),
+        readme: readme.then(|| path("README.md")),
         published,
-        dir,
     }
 }
 
@@ -279,10 +279,11 @@ fn each_published_library_is_held_to_both_pages_and_the_rest_are_skipped() {
             readme_fix(3).replacen("README.md", "crates/bare-readme/README.md", 1),
             crate_doc_fix(1).replacen("lib.rs", "crates/bare-doc/src/lib.rs", 1),
             format!(
-                "crates/no-readme/Cargo.toml: internal-tier: publishes a library with no README \
+                "{}: internal-tier: publishes a library with no README \
                  for crates.io to show; remove `readme = false` if the manifest sets it, and add \
                  a README.md beside it whose first paragraph under its title is, word for word: \
-                 {STATEMENT}"
+                 {STATEMENT}",
+                Path::new("crates/no-readme").join("Cargo.toml").display()
             ),
             "crates/unread/src/lib.rs: internal-tier: cannot read crates/unread/src/lib.rs: not \
              found"
@@ -326,10 +327,11 @@ fn a_link_to_a_section_the_page_lacks_is_reported_at_the_page() {
     assert_eq!(
         link_finding(&broken).map(|finding| finding.render(RULE.name)),
         Some(format!(
-            "website/src/content/docs/spec/compatibility.md: internal-tier: has no section at \
+            "{}: internal-tier: has no section at \
              `#no-such-section`, where the Internal-tier statement every published library crate \
              opens with links; give the tier definition that heading back, or change the link in \
-             xtask's `STATEMENT` and in every crate: {broken}"
+             xtask's `STATEMENT` and in every crate: {broken}",
+            Path::new(PAGES).join("spec/compatibility.md").display()
         ))
     );
 }
