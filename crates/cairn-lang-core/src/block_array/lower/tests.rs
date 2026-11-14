@@ -1315,11 +1315,23 @@ const SLOT_READERS: &[(&str, &str)] = &[
         "chest",
         "struct s size=3x3\n  chest at=inside.front offset=1 mat_slot=c\n",
     ),
+    (
+        "beam",
+        "struct s size=3x3\n  walls height=2\n  beam kind=pillar at=front.top mat_slot=b\n",
+    ),
+    (
+        "trapdoor",
+        "struct s size=3x3\n  trapdoor at=inside.front offset=1 mat_slot=t\n",
+    ),
 ];
 
 /// A themeless struct per keyword whose role reads no `mat_slot=`, `mat_slot=d` on its member;
 /// a misplaced `place` or `connect` still reaches the list the gate reads.
 const SLOT_IGNORERS: &[(&str, &str)] = &[
+    (
+        "note_block",
+        "struct s size=3x3\n  note_block at=1,0,1 mat_slot=d\n",
+    ),
     (
         "lever",
         "struct s size=3x3\n  lever at=inside.front offset=1 mat_slot=d\n",
@@ -1631,7 +1643,7 @@ fn abstract_token_deferral_says_what_each_member_does_instead() {
                       window side=front offset=1 y=1 size=1x2 mat_slot=wall",
             consequence: Some(
                 "the walls are not built and take up no rows, so a door or window cut into \
-                 them is refused",
+                 them, or a beam laid on them, is deferred",
             ),
             voxels: |out| {
                 assert_eq!(struct_s(out).dims.y, 1);

@@ -14,6 +14,7 @@ const GEOMETRY_ROWS: &[&str] = &[
     "window id=w side=front y=1 offset=1 size=1x1",
     "roof kind=flat mat_slot=wall",
     "stair kind=stairs mat_slot=wall",
+    "beam kind=pillar at=front.top",
     "level y=0",
     "pressure_plate id=p at=front.outside",
     "lever id=v at=inside.front",
@@ -24,6 +25,8 @@ const GEOMETRY_ROWS: &[&str] = &[
     "piston id=pi at=inside.front",
     "dispenser id=ds at=inside.front",
     "chest id=c at=inside.front",
+    "trapdoor id=td at=inside.front",
+    "note_block at=1,0,1",
     "repeater at=1,0,1 facing=east",
     "comparator at=1,0,1 facing=east",
     "redstone_torch at=1,0,1",
@@ -202,9 +205,10 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
     assert!(
         notes(&geometry).contains(
-            &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, \
-             lever, button, daylight, observer, lamp, piston, dispenser, chest, repeater, \
-             comparator, redstone_torch, redstone_dust, circuit, raw_block, raw_fill"
+            &"expected one of: floor, walls, fill, door, window, roof, stair, beam, level, \
+             pressure_plate, lever, button, daylight, observer, lamp, piston, dispenser, chest, \
+             trapdoor, note_block, repeater, comparator, redstone_torch, redstone_dust, circuit, \
+             raw_block, raw_fill"
         ),
         "got {:#?}",
         notes(&geometry),

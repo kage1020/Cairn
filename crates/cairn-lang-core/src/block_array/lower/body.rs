@@ -126,6 +126,11 @@ pub(super) fn lower_body_to_block_array<'a>(
         wall_column,
         written: Written::of(&written_members, interior_w, interior_h),
         patched,
+        openings: flattened
+            .iter()
+            .copied()
+            .filter(|(_, member)| matches!(member.role, MemberRole::Door | MemberRole::Window))
+            .collect(),
     };
     let (canvas, split_doors, derived) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();

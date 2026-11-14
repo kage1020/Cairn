@@ -4,6 +4,7 @@
 pub mod common;
 
 mod at_side_walkway;
+mod beam;
 mod chest_block;
 mod components;
 mod conditional_arguments;
@@ -17,6 +18,7 @@ mod intent;
 mod l_walkway;
 mod level_scoped_members;
 mod no_theme_bound;
+mod note_block;
 mod own_line_first;
 mod palette_capacity;
 mod palette_is_referenced;
@@ -33,6 +35,7 @@ mod struct_as_written;
 mod structure_volume;
 mod the_volume_is_what_gets_painted;
 mod tier0_parts;
+mod trapdoor;
 mod unknown_id_versions;
 mod unplaceable_plate;
 mod unreached_keys;

@@ -1,0 +1,203 @@
+---
+source: crates/cairn-lang-core/tests/lower/intent.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: timber
+    slots:
+      floor:
+        kind: Token
+        value: oak_planks
+      wall:
+        kind: Token
+        value: cobblestone
+      frame:
+        kind: Token
+        value: spruce_log
+      hatch:
+        kind: Token
+        value: spruce_trapdoor
+      roof:
+        kind: Token
+        value: spruce_stairs
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: workshop
+    size:
+      w: 7
+      h: 5
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: floor
+        arguments: {}
+        intent_state: {}
+      - role:
+          kind: Walls
+        mat_slot: wall
+        arguments:
+          height:
+            kind: Int
+            value: 4
+        intent_state: {}
+      - id: entry
+        role:
+          kind: Door
+        arguments:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+        intent_state: {}
+      - id: light
+        role:
+          kind: Window
+        arguments:
+          side:
+            kind: Ident
+            value: back
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 2
+          size:
+            kind: Size
+            value:
+              w: 3
+              h: 1
+        intent_state: {}
+      - role:
+          kind: Roof
+        mat_slot: roof
+        arguments:
+          kind:
+            kind: Ident
+            value: gable
+          overhang:
+            kind: Int
+            value: 1
+        intent_state: {}
+      - id: lintel
+        role:
+          kind: Beam
+        mat_slot: frame
+        arguments:
+          kind:
+            kind: Ident
+            value: pillar
+          at:
+            kind: DotRef
+            value:
+              - entry
+              - top
+        intent_state: {}
+      - id: head
+        role:
+          kind: Beam
+        mat_slot: frame
+        arguments:
+          kind:
+            kind: Ident
+            value: pillar
+          at:
+            kind: DotRef
+            value:
+              - light
+              - top
+        intent_state: {}
+      - id: west
+        role:
+          kind: Beam
+        mat_slot: frame
+        arguments:
+          kind:
+            kind: Ident
+            value: pillar
+          at:
+            kind: DotRef
+            value:
+              - left
+              - top
+        intent_state: {}
+      - id: east
+        role:
+          kind: Beam
+        mat_slot: frame
+        arguments:
+          kind:
+            kind: Ident
+            value: pillar
+          at:
+            kind: DotRef
+            value:
+              - right
+              - top
+        intent_state: {}
+      - id: hatch
+        role:
+          kind: Trapdoor
+        mat_slot: hatch
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - left
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 2
+        intent_state:
+          open:
+            kind: Bool
+            value: true
+      - id: shelf
+        role:
+          kind: Trapdoor
+        mat_slot: hatch
+        arguments:
+          at:
+            kind: Coord
+            value:
+              x: 5
+              y: 2
+              z: 1
+        intent_state:
+          half:
+            kind: Ident
+            value: top
+          facing:
+            kind: Ident
+            value: south
+      - id: bell
+        role:
+          kind: NoteBlock
+        arguments:
+          at:
+            kind: Coord
+            value:
+              x: 1
+              y: 1
+              z: 1
+        intent_state:
+          instrument:
+            kind: Ident
+            value: bell
+          note:
+            kind: Int
+            value: 12

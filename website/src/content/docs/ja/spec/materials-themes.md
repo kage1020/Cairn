@@ -70,9 +70,12 @@ theme exact_oak:
 | `@wall.wood.broadleaf`、`@wall.wood.conifer`、`@wall.stone.cobble`、`@wall.stone.smooth` | 壁 |
 | `@wood.dark`、`@wood.light`、`@wood.warm`、`@wood.cool` | 色味で選ぶ板材 |
 | `@roof.dark_wood`、`@roof.light_wood`、`@roof.warm_wood`、`@roof.cool_wood` | 色味で選ぶ屋根の階段 |
+| `@beam.default` | `mat_slot=` で割り当てていない `beam` が敷く柱状のブロック |
 | `@sign.oak`、`@sign.oak_wall` | 立てた看板と壁の看板 |
 | `@door.default` | `mat_slot=` で割り当てていない `door` が置くドアのブロック |
 | `@chest.default` | `mat_slot=` で割り当てていない `chest` が置くチェストのブロック |
+| `@trapdoor.default` | `mat_slot=` で割り当てていない `trapdoor` が置くトラップドア |
+| `@note_block.default` | `note_block` が置く音符ブロック |
 | `@pressure_plate.default` | `mat_slot=` で割り当てていない `pressure_plate` が置くブロック |
 | `@lever.default` | `lever` が壁に掛けるレバー |
 | `@button.default` | `mat_slot=` で割り当てていない `button` が壁に掛けるボタン |

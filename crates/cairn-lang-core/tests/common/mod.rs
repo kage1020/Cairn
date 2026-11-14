@@ -10,7 +10,7 @@ use cairn_lang_core::block_array::{
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
-pub const SHIPPED_EXAMPLES: usize = 15;
+pub const SHIPPED_EXAMPLES: usize = 16;
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {

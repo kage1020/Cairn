@@ -48,6 +48,10 @@ const PINNED: Table = &[
     ),
     ("minecraft:oak_log", &[("axis", &["x", "y", "z"])]),
     (
+        "minecraft:note_block",
+        &[("instrument", &["harp", "bit"]), ("note", &["0", "12"])],
+    ),
+    (
         "minecraft:oak_button",
         &[
             ("face", &["floor", "wall", "ceiling"]),
@@ -73,8 +77,13 @@ const PINNED: Table = &[
     ),
 ];
 
-/// The edition's other version, which the pinned one dropped `active` and a stair's `shape` from.
+/// The edition's other version, which the pinned one dropped `active`, a stair's `shape` and the
+/// `trumpet` instrument from.
 const OLDER: Table = &[
+    (
+        "minecraft:note_block",
+        &[("instrument", &["harp", "bit", "trumpet"])],
+    ),
     (
         "minecraft:creaking_heart",
         &[
@@ -565,6 +574,76 @@ fn a_state_lowering_derives_outside_its_block_is_refused_at_the_member() {
             "origin": "derived",
         }),
     );
+}
+
+#[test]
+fn an_instrument_the_target_lacks_is_refused_on_its_value_and_builds_no_note_block() {
+    let source = "struct s size=3x3\n  note_block at=1,0,1 instrument=trumpet\n  \
+                  note_block at=0,0,0 instrument=bitt\n";
+    let out = lowered_at(source, &Tables::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [
+            (
+                DiagnosticCode::StateDomain,
+                "trumpet",
+                "`minecraft:note_block` takes no `instrument=trumpet` at test 2.0; `instrument` \
+                 takes harp, bit",
+                vec![
+                    "`instrument=trumpet` is valid at 1.0: pass that version as `--target`, or \
+                     give `instrument=` a value test 2.0 takes",
+                ],
+            ),
+            (
+                DiagnosticCode::StateDomain,
+                "bitt",
+                "`minecraft:note_block` takes no `instrument=bitt` at test 2.0; `instrument` takes \
+                 harp, bit",
+                vec![
+                    "did you mean `instrument=bit`?",
+                    "give `instrument=` a value test 2.0 takes, or leave `instrument=` out",
+                ],
+            ),
+        ],
+    );
+    assert_eq!(
+        serde_json::to_value(&out.diagnostics[1].data).expect("the payload serialises"),
+        json!({
+            "kind": "state_domain",
+            "id": "minecraft:note_block",
+            "key": "instrument",
+            "value": "bitt",
+            "registry": "test 2.0",
+            "reason": "value_outside",
+            "valid": ["harp", "bit"],
+            "origin": "argument",
+            "suggestion": "bit",
+        }),
+    );
+    assert_eq!(solid_cells(only_structure(&out)), 0);
+}
+
+#[test]
+fn a_beam_bound_to_a_block_whose_axis_is_not_xyz_is_built_from_the_default_beam() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=3x3\n  walls mat_slot=wall height=1\n  \
+                  beam kind=pillar mat_slot=wall at=front.top\n";
+    let out = lowered_at(source, &Tables::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [(
+            DiagnosticCode::IncompatibleMaterial,
+            "@cobblestone",
+            "beam derives `axis` from the wall it lies along and `minecraft:cobblestone` is not a \
+             pillar, so those states have nowhere to go",
+            vec![
+                "bind the slot to a block whose `axis` takes `x`, `y` and `z`, such as a log — the \
+                 registry pack's `beam.default` resolves to one",
+                "reached through `mat_slot=wall`, so every member reading that slot has it too",
+            ],
+        )],
+    );
+    assert!(painted(&out, "minecraft:oak_log[axis=x]"));
 }
 
 #[test]
