@@ -14,10 +14,12 @@ mod artifacts;
 mod cli;
 mod commands;
 mod floors;
+mod inferred;
 mod lockfile;
 mod name_case;
 mod pipeline;
 mod report;
+mod respelled;
 mod staging;
 mod target;
 
@@ -61,8 +63,9 @@ fn main() -> ExitCode {
         Some(Command::Info {
             file,
             editions,
+            lock,
             format,
-        }) => run_info(&file, &editions, format),
+        }) => run_info(&file, &editions, lock.as_deref(), format),
         Some(Command::Lower {
             file,
             edition,

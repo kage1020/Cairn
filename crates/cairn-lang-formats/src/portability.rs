@@ -1,9 +1,11 @@
 //! Per-edition palette-entry portability for `cairn info`, counted over the lowered IR so each
 //! figure matches what `cairn compile --edition` emits. An id no version of the edition declares
 //! is unsupported, answered by the pack's `absent` reason when it is the other edition's block; on
-//! Bedrock the rest go through the `.mcstructure` writer's state translation at
-//! every version that declares them, and are asked of the edition: a state some version maps is
-//! not unsupported, and a loss at some version is a degradation.
+//! Bedrock the rest go through the `.mcstructure` writer's state translation at every version that
+//! writes them, under their own spelling or another, and are asked of the edition: a state some
+//! version maps is not unsupported, and a loss at some version is a degradation.
+
+use std::borrow::Cow;
 
 use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
 use cairn_lang_core::resolve::{DegradedEntry, DroppedIntent, UnsupportedEntry, UnsupportedReason};
@@ -149,7 +151,12 @@ pub fn portability_for_bedrock(
     let mut report = PortabilityReport::default();
     let mut leaks = Vec::new();
     for (entry, derived) in entries_with_derived(ir) {
-        if absent_from_edition(blocks, entry) {
+        let written_apart = |version| {
+            states
+                .and_then(|states| states.at(version))
+                .is_some_and(|map| map.written_apart(&entry.id).is_some())
+        };
+        if absent_from_edition(blocks, entry) && !blocks.versions().any(written_apart) {
             report.push_unsupported(absent_entry(blocks, aliases, absent, entry));
             continue;
         }
@@ -158,17 +165,24 @@ pub fn portability_for_bedrock(
         let mut unmapped: Option<String> = None;
         let mut leaked: Option<BedrockStateError> = None;
         for version in blocks.versions() {
-            let declared = blocks
-                .ids_for(version)
-                .is_some_and(|ids| ids.binary_search(&entry.id).is_ok());
-            let Some(map) = states
-                .and_then(|states| states.at(version))
-                .filter(|_| declared)
-            else {
+            let (Some(ids), Some(map)) = (
+                blocks.ids_for(version),
+                states.and_then(|states| states.at(version)),
+            ) else {
+                continue;
+            };
+            let spelled = if ids.binary_search(&entry.id).is_ok() || written_apart(version) {
+                Cow::Borrowed(entry)
+            } else if let Some(spelling) = aliases.renamed(blocks, ids, &entry.id) {
+                Cow::Owned(BlockState {
+                    id: spelling.to_owned(),
+                    properties: entry.properties.clone(),
+                })
+            } else {
                 continue;
             };
             // No wildcard arm: a new refusal must be classified here.
-            match translate_states(&map, entry, derived) {
+            match translate_states(&map, &spelled, derived) {
                 Ok(translated) => {
                     written = true;
                     for intent in translated.degraded {

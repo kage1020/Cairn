@@ -5,8 +5,9 @@ use indexmap::IndexMap;
 
 use crate::Edition;
 use crate::ast::ValueKind;
+use crate::error::Span;
 use crate::intent::ValueWithSpan;
-use crate::resolve::{TokenKind, classify_token};
+use crate::resolve::{Resolution, TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
@@ -41,6 +42,23 @@ pub trait TargetRegistry {
     fn aliases_for(&self, id: &str) -> Vec<String> {
         let _ = id;
         Vec::new()
+    }
+
+    /// The block `state` names through a meaning token, a property its block lacks whose value
+    /// picks one of the blocks it split into (`@cauldron[fluid=water]` is `water_cauldron`), with
+    /// that property dropped; `None` when it carries none.
+    fn meant(&self, state: &BlockState) -> Option<BlockState> {
+        let _ = state;
+        None
+    }
+
+    /// The state the palette holds for the canonical token `state` when the pinned target does
+    /// not declare its id but writes the block under another spelling, or, with no version
+    /// pinned, `state` itself when some version would (`spec/materials-themes` "Mappings across
+    /// version and edition"); `None` otherwise.
+    fn respelled(&self, state: &BlockState) -> Option<BlockState> {
+        let _ = state;
+        None
     }
 
     /// Why the pinned target's state map has no form for `state`, or `None` when it has one, the
@@ -433,8 +451,8 @@ pub fn resolve_block_state(
             let ValueKind::Token(inner) = &slot.value.kind else {
                 unreachable!("classify_token reports Canonical only for ValueKind::Token");
             };
-            let state = canonical_to_block_state(inner);
-            validated_id(state, registry, &IdOrigin::Authored).map_err(MaterialDeferred::UnknownId)
+            validated_token(canonical_to_block_state(inner), registry)
+                .map_err(MaterialDeferred::UnknownId)
         }
         TokenKind::Abstract => {
             let ValueKind::Token(inner) = &slot.value.kind else {
@@ -463,6 +481,50 @@ pub fn resolve_block_state(
         }
         TokenKind::NotAToken => Err(MaterialDeferred::AlreadyDiagnosed),
     }
+}
+
+/// Each canonical token `resolution` binds to a member's `mat_slot=` or a walkway's `path=`, once
+/// per place it is written, in source order, as the block state it spells.
+#[must_use]
+pub fn bound_canonical_tokens(resolution: &Resolution) -> Vec<(Span, BlockState)> {
+    let slots = resolution
+        .scopes
+        .values()
+        .flat_map(|scope| scope.members.values())
+        .filter_map(|binding| binding.slot_value.as_ref());
+    let paths = resolution.connects.iter().map(|connect| &connect.path);
+    let mut tokens: Vec<(Span, BlockState)> = slots
+        .chain(paths)
+        .filter_map(
+            |value| match (&value.value.kind, classify_token(&value.value)) {
+                (ValueKind::Token(inner), TokenKind::Canonical) => {
+                    Some((value.span.clone(), canonical_to_block_state(inner)))
+                }
+                _ => None,
+            },
+        )
+        .collect();
+    tokens.sort_by_key(|(span, _)| span.start);
+    tokens.dedup_by_key(|(span, _)| span.start);
+    tokens
+}
+
+/// [`validated_id`] for a canonical token, which the target may spell another way.
+fn validated_token(
+    state: BlockState,
+    registry: Option<&dyn TargetRegistry>,
+) -> Result<BlockState, Box<UnknownId>> {
+    let Some(registry) = registry else {
+        return Ok(state);
+    };
+    let state = registry.meant(&state).unwrap_or(state);
+    let declared = registry
+        .block_ids()
+        .is_some_and(|ids| ids.contains(&state.id));
+    if !declared && let Some(respelled) = registry.respelled(&state) {
+        return Ok(respelled);
+    }
+    validated_id(state, Some(registry), &IdOrigin::Authored)
 }
 
 /// Refuse `state` when the pinned target does not declare its id; pass it when none is pinned,

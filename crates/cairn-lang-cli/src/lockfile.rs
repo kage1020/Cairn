@@ -107,7 +107,7 @@ fn report_target_change(
 }
 
 /// The left half of the warning: `1.20.4/DataVersion 3700`.
-fn describe_verified(target: &LockTarget, show_edition: bool) -> String {
+pub(crate) fn describe_verified(target: &LockTarget, show_edition: bool) -> String {
     let field = match target.edition {
         Edition::Java => "DataVersion",
         Edition::Bedrock => "block version",

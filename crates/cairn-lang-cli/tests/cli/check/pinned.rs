@@ -9,9 +9,9 @@ use crate::common::{assert_stream, cairn, compile, crn_examples, examples_dir};
 const UNKNOWN_ID: &str =
     "theme t:\n  slot floor -> @totally_not_a_block\nstruct s size=2x2\n  floor mat_slot=floor\n";
 
-/// A slot bound to an id Bedrock spells only from 1.21.40.
+/// A slot bound to an id Bedrock spells only from 1.21.40: 1.21.0 writes every head as `skull`.
 const RENAMED_ID: &str =
-    "theme t:\n  slot floor -> @stone_bricks\nstruct s size=2x2\n  floor mat_slot=floor\n";
+    "theme t:\n  slot floor -> @skeleton_skull\nstruct s size=2x2\n  floor mat_slot=floor\n";
 
 /// A typo'd abstract token, a lowering-stage error needing no id table, in a struct whose walls
 /// still paint, so it is not a lost scope.
@@ -151,7 +151,7 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
     );
     // From the pack's alias table, not a distance search.
     assert!(
-        stderr.contains("stonebrick"),
+        stderr.contains("minecraft:skull"),
         "the older spelling is the repair, got: {stderr}",
     );
 
@@ -162,7 +162,7 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
             "--edition",
             "bedrock",
             "--target",
-            "1.21.40",
+            "1.21.60",
         ],
     );
     let stderr = String::from_utf8(accepted.stderr).expect("utf-8");
