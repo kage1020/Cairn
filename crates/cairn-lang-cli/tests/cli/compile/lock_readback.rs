@@ -5,7 +5,7 @@ use std::fs;
 
 use tempfile::TempDir;
 
-use crate::common::{Run, compile, example_in_tempdir};
+use crate::common::{Fixture, Run, compile, compile_as, example_in_tempdir};
 
 fn warning_lines(stderr: &str) -> Vec<&str> {
     stderr
@@ -111,34 +111,40 @@ fn the_verified_side_names_the_field_the_recorded_edition_actually_has() {
     );
 }
 
+/// A store room whose cauldron, chest and barrel the catalog lists as moving at Java 1.17 and
+/// 1.20.5.
+const STORE: &str = "theme t:\n  slot wall -> @cobblestone\n\n\
+                     struct s size=5x5\n  \
+                     floor mat_slot=wall\n  \
+                     walls mat_slot=wall height=3\n  \
+                     raw_block id=pot mat=minecraft:cauldron at=1,1,1\n  \
+                     raw_block id=box mat=minecraft:chest at=2,1,1\n  \
+                     raw_block id=keg mat=minecraft:barrel at=3,1,1\n";
+
+/// [`STORE`] compiled for Java `first`, its lock rewritten by `doctor`, then compiled for `then`.
+fn recompile_store(first: &str, doctor: impl FnOnce(&str) -> String, then: &str) -> Run {
+    let fixture = Fixture::new(STORE);
+    let lock = fixture.lock();
+    let built = Run::from(compile_as(&fixture, "java", first));
+    assert_eq!(built.code, Some(0), "stderr={}", built.stderr);
+    let written = fs::read_to_string(&lock).expect("read lock");
+    fs::write(&lock, doctor(&written)).expect("write lock");
+    Run::from(compile_as(&fixture, "java", then))
+}
+
 #[test]
-fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
-    // The compiler records no sensitivity, so the entries come from a doctored lock.
-    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
-    let out_dir = TempDir::new().expect("out");
-    let lock = out_dir.path().join("cottage.lock");
-
-    compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
-    let recorded = fs::read_to_string(&lock).expect("read lock");
-    let doctored = recorded.replace(
-        "member_version_sensitivity: []\n",
-        "member_version_sensitivity:\n\
-         - id: yard_water\n  \
-           reason: cauldron split at 1.17\n\
-         - id: fence\n  \
-           reason: connects differently since 1.16\n",
-    );
-    assert_ne!(doctored, recorded, "the fixture did not add any entries");
-    fs::write(&lock, &doctored).expect("write lock");
-
-    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
+fn a_retarget_across_a_boundary_names_the_members_it_moves() {
+    // 1.20.4 and 1.21.4 lie either side of 1.20.5 only, so the cauldron's 1.17 is not crossed.
+    let second = recompile_store("1.20.4", str::to_owned, "1.21.4");
+    assert_eq!(second.code, Some(0), "stderr={}", second.stderr);
     assert_eq!(
         warning_lines(&second.stderr),
         [
             PREVIOUS_TARGET,
-            "W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence",
+            "W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: box (item format at \
+             1.20.5), keg (item format at 1.20.5)",
         ],
-        "stderr does not carry the recorded members: {}",
+        "stderr: {}",
         second.stderr,
     );
     assert!(
@@ -149,28 +155,30 @@ fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
 }
 
 #[test]
-fn one_recorded_member_reads_as_one_member() {
-    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
-    let out_dir = TempDir::new().expect("out");
-    let lock = out_dir.path().join("cottage.lock");
-
-    compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
-    let recorded = fs::read_to_string(&lock).expect("read lock");
-    let doctored = recorded.replace(
-        "member_version_sensitivity: []\n",
-        "member_version_sensitivity:\n\
-         - id: yard_water\n  \
-           reason: cauldron split at 1.17\n",
+fn a_retarget_on_one_side_of_every_boundary_names_no_member() {
+    let second = recompile_store("1.21", str::to_owned, "26.3");
+    assert_eq!(
+        warning_lines(&second.stderr),
+        ["W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.21/DataVersion 3953, now 26.3/5023."],
+        "stderr: {}",
+        second.stderr,
     );
-    assert_ne!(doctored, recorded, "the fixture did not add any entries");
-    fs::write(&lock, &doctored).expect("write lock");
+}
 
-    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
+#[test]
+fn a_verified_version_the_table_does_not_know_names_every_sensitive_member() {
+    // Where the lock's version stood cannot be told, so every boundary may have been crossed.
+    let second = recompile_store(
+        "1.20.4",
+        |written| with_line(written, "  mc_version: 1.20.4\n", "  mc_version: 1.12.2\n"),
+        "1.21.4",
+    );
     assert_eq!(
         warning_lines(&second.stderr),
         [
-            PREVIOUS_TARGET,
-            "W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: yard_water",
+            "W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.12.2/DataVersion 3700, now 1.21.4/4189.",
+            "W_SEMANTIC_SENSITIVITY: 3 members may resolve differently: pot (cauldron split at \
+             1.17), box (item format at 1.20.5), keg (item format at 1.20.5)",
         ],
         "stderr: {}",
         second.stderr,
@@ -178,7 +186,32 @@ fn one_recorded_member_reads_as_one_member() {
 }
 
 #[test]
-fn nothing_is_said_about_sensitivity_when_the_lockfile_recorded_none() {
+fn the_members_the_lock_recorded_are_not_what_the_warning_reads() {
+    // The cottage has no sensitive member, so a list doctored into its lock names nothing now.
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
+    let out_dir = TempDir::new().expect("out");
+    let lock = out_dir.path().join("cottage.lock");
+
+    compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
+    let recorded = fs::read_to_string(&lock).expect("read lock");
+    let doctored = with_line(
+        &recorded,
+        "member_version_sensitivity: []\n",
+        "member_version_sensitivity:\n- id: yard_water\n  reason: cauldron split at 1.17\n",
+    );
+    fs::write(&lock, &doctored).expect("write lock");
+
+    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
+    assert_eq!(
+        warning_lines(&second.stderr),
+        [PREVIOUS_TARGET],
+        "stderr: {}",
+        second.stderr,
+    );
+}
+
+#[test]
+fn nothing_is_said_about_sensitivity_when_no_member_is_sensitive() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -392,26 +425,6 @@ fn a_lock_recording_a_walkway_place_windows_reserves_is_still_read() {
         &replaced,
         id,
         "identifier `lpt¹` is a device name Windows reserves",
-    );
-}
-
-#[test]
-fn a_lock_with_a_refused_id_still_reports_the_sensitive_members_it_recorded() {
-    let id = "sub/home1";
-    let (run, replaced) = recompile_village_over(|written| {
-        let sensitive = with_line(
-            written,
-            "member_version_sensitivity: []\n",
-            "member_version_sensitivity:\n- id: yard_water\n  reason: cauldron split at 1.17\n",
-        );
-        with_line(&sensitive, "  id: home1\n", &format!("  id: {id}\n"))
-    });
-    assert_refused_but_read(&run, &replaced, id, "/");
-    assert!(
-        run.stderr
-            .contains("W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: yard_water"),
-        "the recorded member should be reported: {}",
-        run.stderr,
     );
 }
 

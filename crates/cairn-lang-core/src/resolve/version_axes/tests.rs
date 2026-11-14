@@ -13,6 +13,7 @@ fn synthetic_portability(entries: &[(Edition, u32)]) -> Vec<EditionReport> {
             buildable: Vec::new(),
             considered: Vec::new(),
             refusal: None,
+            semantic_sensitive: Vec::new(),
         })
         .collect()
 }
@@ -57,6 +58,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
                 buildable: vec!["1.20.4".to_owned()],
                 considered: vec!["1.20.4".to_owned()],
                 refusal: None,
+                semantic_sensitive: Vec::new(),
             },
             EditionReport {
                 edition: Edition::Bedrock,
@@ -75,6 +77,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
                 buildable: vec!["1.21.0".to_owned()],
                 considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
                 refusal: None,
+                semantic_sensitive: Vec::new(),
             },
         ],
     );
@@ -200,11 +203,39 @@ fn every_unsupported_reason_carries_its_own_wire_shape() {
 }
 
 #[test]
-fn semantic_sensitive_is_empty_without_catalog() {
-    let src = "struct s size=4x4\n  walls height=3\n";
-    let m = parse(src).expect("parse");
-    let axes = compute_axes(&m, synthetic_portability(&[(Edition::Java, 0)]));
-    assert_eq!(axes.semantic_sensitive, [] as [SemanticSensitiveFinding; 0]);
+fn semantic_sensitive_carries_each_editions_findings_in_report_order() {
+    let finding = |edition, member: &str, reason: &str, boundary: &str| SemanticSensitiveFinding {
+        edition,
+        member: member.to_owned(),
+        reason: reason.to_owned(),
+        boundary_version: boundary.to_owned(),
+    };
+    let mut reports = synthetic_portability(&[(Edition::Bedrock, 0), (Edition::Java, 0)]);
+    reports[0].semantic_sensitive =
+        vec![finding(Edition::Bedrock, "pantry", "item format", "1.21.0")];
+    reports[1].semantic_sensitive = vec![
+        finding(Edition::Java, "yard_water", "cauldron split", "1.17"),
+        finding(Edition::Java, "walls", "wall connections", "1.16"),
+    ];
+    let m = parse("struct s size=4x4\n  walls height=3\n").expect("parse");
+    let axes = compute_axes(&m, reports);
+    assert_eq!(
+        axes.semantic_sensitive,
+        [
+            finding(Edition::Bedrock, "pantry", "item format", "1.21.0"),
+            finding(Edition::Java, "yard_water", "cauldron split", "1.17"),
+            finding(Edition::Java, "walls", "wall connections", "1.16"),
+        ],
+    );
+    assert_eq!(
+        serde_json::to_value(&axes.semantic_sensitive[1]).expect("the finding serializes"),
+        serde_json::json!({
+            "edition": "java",
+            "member": "yard_water",
+            "reason": "cauldron split",
+            "boundary_version": "1.17",
+        }),
+    );
 }
 
 #[test]
@@ -250,5 +281,79 @@ fn a_dropped_intent_serializes_its_pieces_and_not_its_sentence() {
             "value": "outer_left",
             "mc_versions": ["1.21.0", "1.21.60"],
         }),
+    );
+}
+
+/// The `recommended test targets` row of one Java report building `buildable`, whose members
+/// cross `boundaries`.
+fn recommended(buildable: &[&str], boundaries: &[&str]) -> Vec<String> {
+    let mut reports = synthetic_portability(&[(Edition::Java, 0)]);
+    reports[0].buildable = buildable
+        .iter()
+        .map(|&version| version.to_owned())
+        .collect();
+    reports[0].semantic_sensitive = boundaries
+        .iter()
+        .map(|&boundary| SemanticSensitiveFinding {
+            edition: Edition::Java,
+            member: "box".to_owned(),
+            reason: "item format".to_owned(),
+            boundary_version: boundary.to_owned(),
+        })
+        .collect();
+    let m = parse("struct s size=4x4\n  walls height=3\n").expect("parse");
+    let [row] =
+        <[RecommendedTestTargets; 1]>::try_from(compute_axes(&m, reports).recommended_test_targets)
+            .expect("one row per report");
+    assert_eq!(row.edition, Edition::Java);
+    row.versions
+}
+
+#[test]
+fn the_recommended_targets_are_the_buildable_ends_and_either_side_of_each_boundary_inside_them() {
+    let all = ["1.20.4", "1.21", "1.21.4", "26.3"];
+    let cases: [(&[&str], &[&str], &[&str]); 10] = [
+        (&all, &[], &["1.20.4", "26.3"]),
+        (&all, &["1.20.5"], &["1.20.4", "1.21", "26.3"]),
+        (&all, &["1.20.5", "1.20.5"], &["1.20.4", "1.21", "26.3"]),
+        (&all, &["1.21"], &["1.20.4", "1.21", "26.3"]),
+        (&all, &["26.1"], &["1.20.4", "1.21.4", "26.3"]),
+        (
+            &all,
+            &["1.21.2", "1.20.5"],
+            &["1.20.4", "1.21", "1.21.4", "26.3"],
+        ),
+        (&all, &["1.16", "1.17", "27.1"], &["1.20.4", "26.3"]),
+        (&["1.21.4", "26.3"], &["1.20.5"], &["1.21.4", "26.3"]),
+        (&["26.3"], &["1.20.5"], &["26.3"]),
+        (&[], &["1.20.5"], &[]),
+    ];
+    for (buildable, boundaries, expected) in cases {
+        assert_eq!(
+            recommended(buildable, boundaries),
+            expected,
+            "{buildable:?} across {boundaries:?}",
+        );
+    }
+}
+
+#[test]
+fn the_recommended_targets_are_one_row_per_edition_in_report_order() {
+    let mut reports = synthetic_portability(&[(Edition::Bedrock, 0), (Edition::Java, 0)]);
+    reports[0].buildable = vec!["1.21.0".to_owned(), "1.21.40".to_owned()];
+    reports[1].semantic_sensitive = vec![SemanticSensitiveFinding {
+        edition: Edition::Java,
+        member: "box".to_owned(),
+        reason: "item format".to_owned(),
+        boundary_version: "1.20.5".to_owned(),
+    }];
+    let m = parse("struct s size=4x4\n  walls height=3\n").expect("parse");
+    let axes = compute_axes(&m, reports);
+    assert_eq!(
+        serde_json::to_value(&axes.recommended_test_targets).expect("the rows serialize"),
+        serde_json::json!([
+            {"edition": "bedrock", "versions": ["1.21.0", "1.21.40"]},
+            {"edition": "java", "versions": []},
+        ]),
     );
 }

@@ -76,11 +76,12 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 
 ```
 $ cairn info cottage.crn
-registry compatibility:  1.20 .. latest
-edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
-intended targets:        (none declared)
-semantic-sensitive:      (none)
+registry compatibility:    1.20 .. latest
+edition portability:       Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
+buildable targets:         Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)   Bedrock: (none)
+recommended test targets:  Java: 1.20.4, 26.3   Bedrock: 1.21.0, 1.26.60
 ```
 
 ## いま使える機能
@@ -90,6 +91,7 @@ semantic-sensitive:      (none)
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
+- パックの隣に置く制約カタログ。ターゲットを固定したビルドは、支えるもののないレバーや松明、空気の上の砂、構造物から流れ出す水を警告し、`cairn info` とロックファイルは、Java のあるバージョンで意味が変わるメンバーを示します
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
 - 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)

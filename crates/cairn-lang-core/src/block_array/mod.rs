@@ -6,6 +6,7 @@
 
 mod args;
 mod attach;
+mod constraint;
 mod joins;
 mod lower;
 mod material;
@@ -19,6 +20,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
+pub use constraint::{Constraint, Support};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{
     BUILTIN_BLOCK_IDS, findings_under_guards, findings_without_target, lower_to_block_array,
@@ -455,6 +457,9 @@ pub struct BlockState {
 impl BlockState {
     /// Canonical Minecraft id for the air block.
     pub const AIR_ID: &'static str = "minecraft:air";
+
+    /// Canonical Minecraft id for water, which a water `fill` pours.
+    pub const WATER_ID: &'static str = "minecraft:water";
 
     /// The [`Self::AIR_ID`] state, with no properties.
     #[must_use]

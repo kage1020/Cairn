@@ -1,5 +1,6 @@
 //! What `cairn info` reports (`spec/versioning-editions`): the declared registry range,
-//! per-edition portability, semantic-sensitive members, and the buildable targets.
+//! per-edition portability, semantic-sensitive members, the buildable targets, and the versions
+//! worth testing against.
 
 use std::collections::HashSet;
 
@@ -23,12 +24,16 @@ pub struct VersionAxes {
     pub registry_compat: RegistryRange,
     /// Per-edition portability counts, in the caller's order (the CLI's `--editions`).
     pub edition_portability: Vec<EditionPortability>,
-    /// Axis 2: members whose meaning shifts at a boundary version. Always empty: no catalog exists.
+    /// Axis 2: members whose meaning shifts at a boundary version, per edition in
+    /// `edition_portability` order.
     pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
     /// Per edition, in `edition_portability` order, the supported versions that build the source.
     pub buildable_targets: Vec<BuildableTargets>,
     /// The versions `@intended_targets` names, verbatim and in source order.
     pub intended_targets: Vec<String>,
+    /// Per edition, in `edition_portability` order, the buildable versions worth testing a build
+    /// in.
+    pub recommended_test_targets: Vec<RecommendedTestTargets>,
 }
 
 /// Everything one requested edition contributes to [`VersionAxes`].
@@ -48,6 +53,9 @@ pub struct EditionReport {
     pub considered: Vec<String>,
     /// Why [`Self::buildable`] is empty, when it is.
     pub refusal: Option<BuildableRefusal>,
+    /// The members the constraint catalog lists as meaning something else across one of this
+    /// edition's boundary versions.
+    pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
 }
 
 /// Which supported versions of one edition can build the source.
@@ -226,14 +234,27 @@ pub enum UnsupportedReason {
     },
 }
 
-/// One semantic-sensitivity finding; never produced, since no catalog exists.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// The versions of one edition worth testing a build in (`spec/versioning-editions` "The
+/// `recommended test targets` row").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RecommendedTestTargets {
+    /// Target edition this row describes.
+    pub edition: Edition,
+    /// The recommended versions, oldest first, each one of the edition's buildable targets.
+    pub versions: Vec<String>,
+}
+
+/// A member whose blocks mean something else across a boundary version of one edition
+/// (`spec/versioning-editions` "The `semantic-sensitive` row").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SemanticSensitiveFinding {
-    /// Identifier or keyword the finding refers to (`yard_water`, `wall`, ...).
+    /// The edition whose versions the boundary is one of.
+    pub edition: Edition,
+    /// The member's `id=`, or its keyword when it carries none (`yard_water`, `walls`).
     pub member: String,
-    /// Human-readable reason (`"cauldron split at 1.17"`).
+    /// What changes at the boundary, as the catalog words it (`"cauldron split"`).
     pub reason: String,
-    /// Version at which the meaning shifts.
+    /// The first version that reads the member the new way.
     pub boundary_version: String,
 }
 
@@ -242,7 +263,14 @@ pub struct SemanticSensitiveFinding {
 pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxes {
     let mut edition_portability = Vec::with_capacity(editions.len());
     let mut buildable_targets = Vec::with_capacity(editions.len());
+    let mut semantic_sensitive = Vec::new();
+    let mut recommended_test_targets = Vec::with_capacity(editions.len());
     for report in editions {
+        recommended_test_targets.push(RecommendedTestTargets {
+            edition: report.edition,
+            versions: worth_testing(&report.buildable, &report.semantic_sensitive),
+        });
+        semantic_sensitive.extend(report.semantic_sensitive);
         edition_portability.push(EditionPortability {
             edition: report.edition,
             portable: report.portable,
@@ -264,10 +292,37 @@ pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxe
             max: "latest".to_owned(),
         },
         edition_portability,
-        semantic_sensitive: Vec::new(),
+        semantic_sensitive,
         buildable_targets,
         intended_targets: declared_intended_targets(module),
+        recommended_test_targets,
     }
+}
+
+/// The versions of `buildable`, ascending, worth testing a build in: the oldest and the newest,
+/// and either side of each boundary of `sensitive` some of them lie before and some at or after.
+fn worth_testing(buildable: &[String], sensitive: &[SemanticSensitiveFinding]) -> Vec<String> {
+    let Some(newest) = buildable.len().checked_sub(1) else {
+        return Vec::new();
+    };
+    let mut picked: HashSet<usize> = HashSet::from([0, newest]);
+    for finding in sensitive {
+        // A boundary is a row of the edition's version table, whose labels sort as its keys do.
+        let before =
+            |version: &String| compare_versions(version, &finding.boundary_version).is_lt();
+        if let (Some(last_before), Some(first_after)) = (
+            buildable.iter().rposition(before),
+            buildable.iter().position(|version| !before(version)),
+        ) {
+            picked.extend([last_before, first_after]);
+        }
+    }
+    buildable
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| picked.contains(at))
+        .map(|(_, version)| version.clone())
+        .collect()
 }
 
 /// A list's length as its figure; `PALETTE_CAPACITY` keeps the clamp unreachable.

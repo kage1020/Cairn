@@ -10,7 +10,7 @@ use tempfile::TempDir;
 
 use crate::common::{
     Fixture, assert_stream, bytes_contain, cairn, compile_as, crn_examples, example_in_tempdir,
-    examples_dir, nbt_body, write_source,
+    examples_dir, nbt_body, stderr_of, write_source,
 };
 
 /// From cargo, not `CAIRN_VERSION`, which would only restate what the binary wrote.
@@ -676,7 +676,6 @@ fn covered_examples_compile_without_deferred_warnings() {
 
 #[test]
 fn lockfile_hashes_are_populated() {
-    // `constraint_catalog_hash` is zero while there is no catalog.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("pack.lock");
@@ -705,9 +704,49 @@ fn lockfile_hashes_are_populated() {
         "resolved_ir_hash must be the hash of the IR the compile lowered",
     );
     assert_eq!(
-        lf.inputs.constraint_catalog_hash.as_str(),
-        HashHex::ZERO_STR,
-        "constraint_catalog_hash stays zero until its own ingest lands",
+        lf.inputs.constraint_catalog_hash,
+        HashHex::from_bytes(include_bytes!(
+            "../../../../cairn-lang-formats/registry-data/constraints.json"
+        )),
+        "constraint_catalog_hash is the hash of the catalog the build read",
+    );
+    assert_eq!(lf.member_version_sensitivity, []);
+}
+
+#[test]
+fn the_lock_records_each_sensitive_member_with_its_boundary() {
+    let fixture = Fixture::new(concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "struct s size=5x5\n",
+        "  floor mat_slot=wall\n",
+        "  walls mat_slot=wall height=3\n",
+        "  raw_block id=pot mat=minecraft:cauldron at=1,1,1\n",
+        "  raw_fill mat=minecraft:chest from=2,1,1 to=3,1,1\n",
+    ));
+    let result = compile_as(&fixture, "java", "26.3");
+    assert!(result.status.success(), "stderr={}", stderr_of(&result));
+    let lf = Lockfile::read_from_path(&fixture.lock()).expect("read lock");
+    let recorded: Vec<(&str, &str)> = lf
+        .member_version_sensitivity
+        .iter()
+        .map(|member| (member.id.as_str(), member.reason.as_str()))
+        .collect();
+    assert_eq!(
+        recorded,
+        [
+            ("pot", "cauldron split at 1.17"),
+            ("raw_fill", "item format at 1.20.5"),
+        ],
+    );
+    let bedrock = Fixture::new(&fs::read_to_string(fixture.source()).expect("read source"));
+    assert!(compile_as(&bedrock, "bedrock", "1.26.60").status.success());
+    let lf = Lockfile::read_from_path(&bedrock.lock()).expect("read lock");
+    assert_eq!(
+        lf.member_version_sensitivity,
+        [],
+        "the catalog lists Java boundaries only"
     );
 }
 
@@ -1536,6 +1575,7 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     // A walkway is judged by the pair its row names, so a duplicate of a laid pair loses nothing.
     let hut = concat!(
         "def hut size=5x5:\n",
+        "  floor mat_slot=wall\n",
         "  walls id=w mat_slot=wall height=3\n",
         "  door  id=p side=front at=center\n",
         "\n",
@@ -1553,7 +1593,7 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     let result = compile_as(&laid, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(result.status.success(), "stderr={stderr}");
-    assert_stream(&stderr, &[(12, 3, "warning", "W_DUPLICATE_WALKWAY")]);
+    assert_stream(&stderr, &[(13, 3, "warning", "W_DUPLICATE_WALKWAY")]);
     assert!(!stderr.contains("E_PARTIAL_BUILD"), "stderr={stderr}");
     let lf = Lockfile::read_from_path(&laid.lock()).expect("read lock");
     assert_eq!(lf.walkways.len(), 1);
@@ -1574,8 +1614,8 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     assert_stream(
         &stderr,
         &[
-            (11, 3, "warning", "W_INVALID_WALKWAY_IDENT"),
             (12, 3, "warning", "W_INVALID_WALKWAY_IDENT"),
+            (13, 3, "warning", "W_INVALID_WALKWAY_IDENT"),
             (0, 0, "error", "E_PARTIAL_BUILD"),
         ],
     );
@@ -1720,6 +1760,7 @@ fn walkways_that_flatten_to_one_filename_are_refused_before_anything_is_written(
     // Both walkways flatten to `s_walkway_a_b_c__d_e_f.nbt`, though their scope keys differ.
     let fixture = Fixture::new(concat!(
         "def hut size=5x5:\n",
+        "  floor mat_slot=wall\n",
         "  walls id=w mat_slot=wall height=3\n",
         "  door  id=c   side=front at=center\n",
         "  door  id=f   side=front at=left\n",

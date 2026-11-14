@@ -7,7 +7,7 @@ use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
 use cairn_lang_formats::java_structure::{JavaStructure, OutputExt, prepare_structure};
-use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+use cairn_lang_formats::registry::{PackView, RegistryPack, builtin_constraints, builtin_pack};
 
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
 pub(crate) enum ResolvedTarget {
@@ -83,6 +83,16 @@ pub(crate) fn resolve_target(
     match edition {
         Edition::Java => resolve_java_target(target).map(ResolvedTarget::Java),
         Edition::Bedrock => resolve_bedrock_target(target).map(ResolvedTarget::Bedrock),
+    }
+}
+
+/// The built-in pack's view of `edition` at `pinned`, which runs the constraint catalog's checks
+/// only with a version pinned (`spec/lint` "Constraint checks").
+pub(crate) fn registry_view(edition: Edition, pinned: Option<&str>) -> PackView<'_> {
+    let view = builtin_pack(edition).view(pinned);
+    match pinned {
+        Some(_) => view.with_constraints(builtin_constraints()),
+        None => view,
     }
 }
 

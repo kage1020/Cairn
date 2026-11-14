@@ -225,9 +225,9 @@ impl LockInputs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemberSensitivity {
-    /// Member id from the lowered IR.
+    /// The member's `id=`, or its keyword when it has none.
     pub id: String,
-    /// Human-readable reason, mirroring `cairn info`.
+    /// The catalog's reason and the boundary version, as `<reason> at <version>`.
     pub reason: String,
 }
 

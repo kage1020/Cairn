@@ -25,7 +25,7 @@ DataFixerUpper は前方向にしか変換できず、情報を失い、対応�
 - 見た目の一貫性 (色温度のずれ)。
 - 物理ルールの変更 (1.21 のウィンドチャージが従来のトラップを壊す)。
 
-出力される NBT は幾何的には正しいものの、ゲーム内での体験までは保証しません。
+出力される NBT は幾何的には正しいものの、ゲーム内での体験までは保証しません。ゲームがブロックを落とす、落下させる、水を流れ出させることを制約カタログが知っている場合は、固定したビルドが警告し ([Lint](/ja/spec/lint/#制約の検査))、メンバーの意味があるバージョンで変わることを知っている場合は、`cairn info` とロックがそのメンバーを示します ([§10.5](#semantic-sensitive-の行))。どちらも保証ではありません。カタログは知っていることを挙げるだけです。
 
 ## 10.3 バックエンドはデータテーブル
 
@@ -33,20 +33,15 @@ DataFixerUpper は前方向にしか変換できず、情報を失い、対応�
 
 **機械的な抽出。** ゲームの `--reports` やレジストリダンプから取り出します。構文とドメインに関する真実はここにあります。ブロックとエンティティの ID、ブロックステートのプロパティとそのドメイン、アイテムとコンポーネントのスキーマ、DataVersion、タグです。誰かの記憶ではなくゲームそのものを真実の源にするので、新しいバージョンについての知識の抜けが根本からなくなります。上に挙げたもののうち組み込みパックが持っているのは、バージョンごとのブロック ID、各ブロックのステートのプロパティとそのドメイン、バージョン表です。ブロック表は抽出したものです。Java の表はサーバー jar の `--reports` から、Bedrock の表は、そのリリースのブロックパレット、つまりゲームが受け付けるすべてのブロックステートから取り出します。各 `pack.json` には、それぞれの表の抽出元のファイルとそのハッシュを記録しており、抽出をやり直してそれらと突き合わせることが検査になります。
 
-**バージョンタグ付きの、手書きの制約カタログ。** データに含まれない事柄を扱います。取り付け (額縁はガラスには掛けられない)、重力と支え (砂利、吊るしたランタン)、流体の挙動、エンティティの AABB、レッドストーンです。新しいバージョンごとに一度定義すれば、すべてのユーザーがその恩恵を受けます。制約カタログはまだ同梱していないので、ロックの `constraint_catalog_hash` はゼロで、意味が変わりうるメンバーとして報告されるものもありません ([§10.5](#105-どのバージョン向けかの答えは-3-つある))。
+**手書きの制約カタログ。** データに含まれない事柄を扱います。取り付け (レバーは板ガラスには付けられない)、重力と支え (砂利、吊るしたランタン)、流体の挙動、エンティティの AABB、レッドストーン、そしてブロックの意味が変わるバージョンです。一度定義すれば、すべてのユーザーがその恩恵を受けます。組み込みのカタログはパックの隣に同梱しており、両方のエディションに使う 1 つのファイルで、正規の ID で書きます。規則はそのブロックを宣言するすべてのバージョンで成り立ち、各バージョンの面はパックから読みます。あるバージョンで変わる意味には、そのバージョンを付けます。表とそれを読む検査は [Lint §11.4](/ja/spec/lint/#114-制約カタログ) が定めます。ロックはその本文の sha256 を記録します ([§10.6](#106-来歴-provenance-とロック))。
 
-```yaml
-constraints:
-  minecraft:item_frame:
-    type: entity_attachment
-    since: "1.13"
-    targets: { solid_full_face: true, glass_pane: false }
-    error: "item_frame requires a solid attachable face"
-  minecraft:lantern:
-    type: support
-    states:
-      hanging=true:  { requires_above: solid_or_chain }
-      hanging=false: { requires_below: solid_top }
+```json
+"support": [
+  {"ids": ["lantern"], "when": {"hanging": "false"}, "defaults": {"hanging": "false"},
+   "on": "below", "needs": "center"},
+  {"ids": ["lantern"], "when": {"hanging": "true"}, "defaults": {"hanging": "false"},
+   "on": "above", "needs": "center"}
+]
 ```
 
 ### `(edition, version)` 行列の畳み込み
@@ -260,23 +255,24 @@ Java のリリースは `1.20.4 / 1.21 / 1.21.4 / 26.3`、Bedrock のリリー�
 「対応バージョン」は 1 つには決まりません。`cairn info` は 3 つの軸を報告します。
 
 1. **宣言されたレジストリ範囲 `[Vmin, Vmax]`**: ファイルがエディションを指定せずに宣言した下限を合成したものと、開いた上端です。使っているブロックから導いた事実ではなく、ソースとそれがインスタンス化する構成要素が宣言した内容を読み返したものです。詳しくは [`registry compatibility` の行](#registry-compatibility-の行)を参照してください。
-2. **意味が変わりうるメンバー**: ID は有効なまま、意味、挙動、見た目が変わる箇所です。範囲よりもこちらが重要です。挙動の変化は ID の消滅よりはるかに頻繁に起きるので、レジストリだけで Vmax を決めるのは危険です。制約カタログは `since`/`until` とは別に `semantic_sensitivity` (境界のバージョンと理由) を持ち、その境界をまたぐコンパイルは警告を出します。例: 1.17 の大釜の分割、1.16 で壁の接続が bool から `none/low/tall` に変わった件、1.20.5 のアイテムフォーマット。制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、`semantic-sensitive` の行は常に `(none)` で、警告を出すコンパイルもありません。
+2. **意味が変わりうるメンバー**: ID は有効なまま、意味、挙動、見た目が変わる箇所です。範囲よりもこちらが重要です。挙動の変化は ID の消滅よりはるかに頻繁に起きるので、レジストリだけで Vmax を決めるのは危険です。制約カタログは `since`/`until` とは別に `semantic_sensitivity` (境界のバージョンと理由) を持ち、その境界をまたぐコンパイルは警告を出します。例: 1.17 の大釜の分割、1.16 で壁の接続が bool から `none/low/tall` に変わった件、1.20.5 のアイテムフォーマット。この 3 つは組み込みのカタログが同梱しているものです。[`semantic-sensitive` の行](#semantic-sensitive-の行) を参照してください。
 3. **検証済みのロックターゲット** ([§10.6](#106-来歴-provenance-とロック))。`cairn info` はロックファイルを読まないので、この軸はまだ報告しません。ロックのターゲットとビルドするターゲットを比べるのは `cairn compile` で、違いがあれば `W_PREVIOUSLY_VERIFIED_TARGET` で知らせます。
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  1.21.40 .. latest
-edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
-buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
-intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16)
+registry compatibility:    1.21.40 .. latest
+edition portability:       Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+buildable targets:         Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
+intended targets:          1.21.40, 1.21.60
+semantic-sensitive:        Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
+recommended test targets:  Java: (none)   Bedrock: 1.21.40, 1.26.60
 ```
 
-名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。`semantic-sensitive` の行は、制約カタログがあれば加わる内容を示したもので、現在は `(none)` と表示します。
+名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。`semantic-sensitive` の行が Java のメンバーだけを示すのは、組み込みのカタログの境界がすべて Java のものだからです。`recommended test targets` の行は、どのバージョンでもビルドできない Java には何も挙げず、Bedrock にはビルドできる最も古いバージョンと最も新しいバージョンを挙げます。その間に Bedrock の境界はないからです。
 
 `intended targets` はファイル自身の `@intended_targets` 行をそのまま写したもので、答えではなく宣言である唯一の行です。`buildable targets` の隣にあるのは、矛盾しうる相手がその行だからです。判定できる半分の比較は [§10.4](#ヒントは下限と突き合わせる) が自動で行い、残りは読み手が突き合わせます。何も宣言していないファイルでも行は消えず、`(none declared)` と表示します。
 
-5 行は stdout に、それぞれの数値の内訳は stderr に `note:` 行として出ます。行を読むパイプラインは、`cairn info` が最後まで完了するかぎり、毎回同じ 5 行を受け取ります。完了しない場合は別です。指摘がどの行も計算する前にコマンドを拒否するので、stdout は 1 行欠けるのではなく空になります。
+6 行は stdout に、それぞれの数値の内訳は stderr に `note:` 行として出ます。行を読むパイプラインは、`cairn info` が最後まで完了するかぎり、毎回同じ 6 行を受け取ります。完了しない場合は別です。指摘がどの行も計算する前にコマンドを拒否するので、stdout は 1 行欠けるのではなく空になります。
 
 ### `registry compatibility` の行
 
@@ -304,11 +300,12 @@ struct hut size=5x5
   walls mat_slot=wall height=3
 
 $ cairn info hut.crn --editions java
-registry compatibility:  1.20.4 .. latest
-edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
-intended targets:        (none declared)
-semantic-sensitive:      (none)
+registry compatibility:    1.20.4 .. latest
+edition portability:       Java: portable: 2  degraded: 0  unsupported: 0
+buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)
+recommended test targets:  Java: 1.21.4, 26.3
 ```
 
 `1.20.4 .. latest` は答えのように読めますが、2 行下の行がそれを否定しています。しかも拒否されたリストには `1.20.4` 自身が入っています。宣言した下限が間違っているのではなく、別の問いに答えているのです。`minecraft:pale_moss_block` が 1.21.4 で追加されたことはパックについての事実で、この行が読むのはファイルが宣言した内容だけです。
@@ -396,7 +393,26 @@ semantic-sensitive:      (none)
 
 テキストの行からは、これらは何もわかりません。`buildable targets: Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)` は 5 つの原因のどれでも成り立ちます。どの原因も stderr には出ますが、形は同じではありません。下限に関する 2 つの原因は行の位置を持つ `note:` として、落ちたスコープは位置を持たずスコープ名だけを示す `note:` として、ライターが書き出せないエントリはそのエントリを示す `note:` として、拒否された lowering はそのバージョンの下に指摘そのものとして、それぞれの位置とともに出力します。`reason` が補うのは、この情報を読み取れない JSON の側です。
 
-5 つ目の行 `recommended test targets` もこの軸に属し、また別の問い (どのバージョンでテストする価値があるか) に答えます。まだこれを出力するコードはありません。
+### `semantic-sensitive` の行
+
+この行は、2 つ目の軸に、指定されたエディションごとに `Java: <members>   Bedrock: <members>` の形で答えます。各メンバーは `name(reason @boundary)` と書き、そのエディションに該当がなければ `(none)` と書きます。メンバーが建てるブロックを、そのエディションの `semantic_sensitivity` の行が挙げているとき ([Lint §11.4](/ja/spec/lint/#114-制約カタログ))、そのメンバーを、該当する行ごとに 1 回、メンバーの順に挙げます。名前はその `id=` で、持たない場合はキーワードです。ブロックは範囲全体の lowering が建てるもので、`edition portability` の行が読むのも同じなので、Bedrock のブロックは、いずれかのバージョンのステートマップがそれから作るすべての正規のブロックとして読みます。`--format json` はこの行を `semantic_sensitive` として、項目ごとに `{edition, member, reason, boundary_version}` を、指定されたエディションの順に出力します。
+
+この行が示すのは、何が変わりうるかであって、どこで変わるかではありません。メンバーは、それをビルドするバージョンが境界のどちら側にあっても挙げます。この行はソースを読むもので、そのソースをどのバージョン向けにビルドするかは、ほかの行が答えるからです。境界はそのエディション自身のバージョンなので、別のエディションの境界のためにメンバーを挙げることはありません。組み込みのカタログの境界はすべて Java のものです。
+
+コンパイルは、ターゲット自身についての答えを、そのバージョンがブロックを読むとおりに読んで、ロックの `member_version_sensitivity` に記録します。そして同じエディションの別のバージョン向けに再コンパイルするとき、2 つのバージョンの間に境界があるメンバーについて警告します ([§10.6](#106-来歴-provenance-とロック))。
+
+### `recommended test targets` の行
+
+この行は、ビルドをどのバージョンで読み込んでテストする価値があるかに、指定されたエディションごとに `Java: <versions>   Bedrock: <versions>` の形で答えます。選ぶ対象は、そのエディションの [buildable targets](#buildable-targets-の行)、つまりターゲットを固定した lowering がエラーを出さないサポート対象のバージョンです。
+
+- そのうち最も古いものと最も新しいもの
+- そのエディションの [`semantic-sensitive`](#semantic-sensitive-の行) の項目の境界ごとに、境界より前で最も新しいものと、境界以降で最も古いもの。境界の両側にビルドできるバージョンがある場合に限る
+
+各バージョンは 1 回ずつ、エディションのバージョン表の順に古いものから並べます。意味が変わりうるメンバーのないソースは、ビルドできる最も古いバージョンと最も新しいバージョンだけになります。ビルドできるバージョンがどの境界についても片側にしかないソースも同じです。どのバージョンでもビルドできないエディションは `(none)` です。`--format json` はこの行を `recommended_test_targets` として、指定されたエディションごとに 1 件の `{edition, versions}` を、指定された順に出力します。
+
+ビルドできる最も古いバージョンと最も新しいバージョンは、ビルドが主張する範囲の両端です。その間にある境界では 1 つのソースが 2 通りに読まれるので、この行は、境界に最も近いビルドできるバージョンを両側に 1 つずつ加えます。2 通りの読み方を両方示す、最も近い組です。範囲の外にある境界は、このソースのビルドが出会うものを何も変えないので、`semantic-sensitive` の行がそのメンバーを挙げていても、この行には入れません。Java 1.20.5 でアイテムフォーマットが変わるチェストを持ち、サポート対象のすべてのバージョンでビルドできるソースは、`Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60` になります。1.20.4 と 1.21 が 1.20.5 の両側にあり、1.21.4 は 1.21 と 26.3 が示さないことを何も示さないからです。
+
+ほかの行と同じく、この行は報告するだけで、何も拒否しません。この行が挙げないバージョンでも、ビルドできることに変わりはありません。
 
 ## 10.6 来歴 (provenance) とロック
 
@@ -411,10 +427,12 @@ target: { edition: java, mc_version: 1.20.4, data_version: 3700 }
 inputs: { registry_pack_hash: sha256:..., constraint_catalog_hash: sha256:... }
 resolved_ir_hash: sha256:...
 verified: true
-member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17" } ]
+member_version_sensitivity:
+  - { id: yard_water, reason: "cauldron split at 1.17" }
+  - { id: pantry, reason: "item format at 1.20.5" }
 ```
 
-コンパイルは、`--lock` で別のパスを指定しないかぎり、ロックをソースの隣に `<source>.lock` として書き出します。制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、現在の `constraint_catalog_hash` はゼロで、`member_version_sensitivity` は `[]` です。
+コンパイルは、`--lock` で別のパスを指定しないかぎり、ロックをソースの隣に `<source>.lock` として書き出します。`constraint_catalog_hash` は制約カタログの本文の sha256 です ([§10.3](#103-バックエンドはデータテーブル))。`member_version_sensitivity` は、[`semantic-sensitive` の行](#semantic-sensitive-の行) がターゲットのエディションについて見つけるものを、ターゲットがブロックを読むとおりに読んで並べたもので、各 `reason` は行の理由と境界を `<reason> at <boundary>` と書いたものです。
 
 `resolved_ir_hash` が再現性の中心です。マクロ展開、デフォルト値の補完、アドレスの自動割り当てを終えた後の IR を固定します。ただしアドレスの自動割り当ては未実装で、アドレスを持つのは `id=` を書いたメンバーだけです ([§9.2](/ja/spec/components-editing-sites/#92-編集モデル))。
 
@@ -425,10 +443,10 @@ member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17"
 ```text
 $ cairn compile build.crn --edition java --target 1.21.4 --lock build.crn.lock
 W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
-W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
+W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: pantry (item format at 1.20.5)
 ```
 
-2 つ目の警告は前のロックに記録されたメンバーを読むものなので、現在のコンパイルが書き出すロックからは出ません。
+2 つ目の警告は、このビルドのメンバーのうち、ロックが検証したバージョンとターゲットの間に境界があるものを、またぐ境界とともに示します。1.20.4 と 1.21.4 の間にある境界は 1.20.5 だけなので、`yard_water` の 1.17 は示しません。読むのはロックに記録されたリストではなく、このビルドです。そのリストは比べるべき境界を持たず、ソースがもう建てないメンバーを挙げていることもあるからです。エディションをまたぐ場合は、2 つのエディションのバージョンの間に順序がないので、メンバーを示しません。ロックのバージョンの位置をエディションの表が決められない場合は、それがどこにあったかわからないので、意味が変わりうるメンバーをすべて示します。
 
 ## 10.7 Java / Bedrock の可搬性
 
