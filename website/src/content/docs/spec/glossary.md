@@ -109,8 +109,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@cairn`.** Header declaring the **Cairn language version** the file was written against
   (CalVer `YYYY.M[.PATCH]`). Provenance only; optional.
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
-  on conflict with the inferred value. That error, `E_REQUIRES_CONFLICT`, is reserved: no inferred
-  range is derived yet. A `cairn compile --target` below the floor is `E_VERSION_CAP`. See
+  on conflict with the inferred range: a floor above the last version that declares a block the
+  build paints is `E_REQUIRES_CONFLICT`. A `cairn compile --target` below the floor is
+  `E_VERSION_CAP`. See
   [versioning-editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
   verification record, since the record lives in the lock. Still weighed against the file's own
@@ -120,7 +121,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   `lock_schema_version`, `source_hash`, `cairn_version`, `target` (`edition`, `mc_version`,
   `data_version`), `inputs` (`registry_pack_hash`, `constraint_catalog_hash`), `resolved_ir_hash`,
   `verified: true` and `member_version_sensitivity`, plus `placements` and `walkways` for a source
-  with a `site`. See
+  with a `site`. `cairn info` reports the target it verified as its `verified target` row. See
   [versioning-editions §10.6](/spec/versioning-editions/#106-provenance-and-lock).
 - **Provenance stamp.** `(edition, version)` recorded onto the block-array IR on import, mapped from
   the format itself (`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java). See

@@ -6,9 +6,10 @@ use std::process::ExitCode;
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::lock::LockReading;
 use cairn_lang_core::resolve::{
-    BuildableTargets, DegradedEntry, EditionReport, UnsupportedEntry, UnsupportedReason,
-    VersionAxes, compute_axes, declared_version_floors, resolve,
+    BuildableTargets, DegradedEntry, EditionReport, InferredRange, UnsupportedEntry,
+    UnsupportedReason, VersionAxes, compute_axes, declared_version_floors, resolve,
 };
 use cairn_lang_core::suggest::{candidate_list, did_you_mean};
 use cairn_lang_core::{Diagnostic, Edition, Module, Resolution, Severity, lower};
@@ -23,17 +24,24 @@ use crate::floors::{
     buildable_refusal, report_floors_left_out_of_the_neutral_row, report_version_notes,
     weigh_versions,
 };
+use crate::inferred::report_inferred_range;
+use crate::lockfile::{default_lock_path, describe_verified};
 use crate::pipeline::{
     RequestedEditions, build_diagnostics, dropped_scopes, lay_circuits, load_module,
     raised_by_each, requested_editions, same_place,
 };
 use crate::report::{
     FailureReport, Finding, Found, Reporting, palette_entry_name, print_json, report_diagnostic,
-    report_diagnostics, report_failure_document,
+    report_failure_document,
 };
 use crate::target::supported_versions;
 
-pub(crate) fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
+pub(crate) fn run_info(
+    file: &Path,
+    editions: &[String],
+    lock: Option<&Path>,
+    format: InfoFormat,
+) -> ExitCode {
     let asked = match requested_editions(editions) {
         Ok(asked) => asked,
         Err(message) => {
@@ -90,16 +98,121 @@ pub(crate) fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> 
     };
 
     let axes = compute_axes(&module, rows);
+    let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
+    let reading = LockReading::of(&lock_path, &source);
+    let verified_target = VerifiedTarget {
+        path: lock_path.display().to_string(),
+        reading: &reading,
+    };
+    for note in verified_target_notes(file, &verified_target) {
+        eprintln!("{note}");
+    }
 
     match format {
         InfoFormat::Text => {
             print_axes_report(&axes);
+            outln!(
+                "verified target:         {}",
+                verified_target_text(&reading)
+            );
             ExitCode::SUCCESS
         }
-        InfoFormat::Json => match print_json("version axes", &axes) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(code) => code,
-        },
+        InfoFormat::Json => {
+            let document = InfoDocument {
+                axes: &axes,
+                verified_target,
+            };
+            match print_json("version axes", &document) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(code) => code,
+            }
+        }
+    }
+}
+
+/// What `--format json` prints: the axes, then the `verified target` row.
+#[derive(serde::Serialize)]
+struct InfoDocument<'a> {
+    #[serde(flatten)]
+    axes: &'a VersionAxes,
+    verified_target: VerifiedTarget<'a>,
+}
+
+/// The lockfile the `verified target` row read, and what it says.
+#[derive(serde::Serialize)]
+struct VerifiedTarget<'a> {
+    path: String,
+    #[serde(flatten)]
+    reading: &'a LockReading,
+}
+
+/// The `verified target` row's text after its label.
+fn verified_target_text(reading: &LockReading) -> String {
+    match reading {
+        LockReading::Missing => "(no lock)".to_owned(),
+        LockReading::Read {
+            target,
+            verified,
+            source_unchanged,
+            cairn_version,
+            ..
+        } => format!(
+            "{}{}, source {}, written by Cairn {cairn_version}",
+            describe_verified(target, true),
+            if *verified { "" } else { " (not verified)" },
+            if *source_unchanged {
+                "unchanged"
+            } else {
+                "changed"
+            },
+        ),
+        LockReading::NewerSchema {
+            lock_schema_version,
+            ..
+        } => format!("(lock schema {lock_schema_version}, newer than this Cairn reads)"),
+        LockReading::Unreadable { .. } => "(unreadable lock)".to_owned(),
+    }
+}
+
+/// The `note:` lines saying what the row alone does not: why there is no target, or why the one
+/// it names does not certify this source.
+fn verified_target_notes(file: &Path, verified: &VerifiedTarget<'_>) -> Vec<String> {
+    let path = &verified.path;
+    match verified.reading {
+        LockReading::Missing => vec![format!(
+            "note: no lockfile at {path}, so no target is verified; `cairn compile` writes one"
+        )],
+        LockReading::Read {
+            source_unchanged,
+            refused_identifier,
+            ..
+        } => {
+            let refused = refused_identifier.iter().map(|refused| {
+                format!(
+                    "note: {path} records an identifier this Cairn refuses ({refused}); the next \
+                     `cairn compile` replaces it"
+                )
+            });
+            let changed = (!source_unchanged).then(|| {
+                format!(
+                    "note: {} has changed since {path} was written, so its target was verified \
+                     for another revision of the file; the next `cairn compile` rewrites the lock",
+                    file.display(),
+                )
+            });
+            refused.chain(changed).collect()
+        }
+        LockReading::NewerSchema {
+            lock_schema_version,
+            supported,
+        } => vec![format!(
+            "note: {path} declares lock schema version {lock_schema_version}, and this Cairn \
+             reads {supported}; the newer Cairn that wrote it can report it"
+        )],
+        LockReading::Unreadable { error } => vec![format!(
+            "note: {path}: the lockfile could not be read ({error}); the next `cairn compile` \
+             replaces it"
+        )],
     }
 }
 
@@ -234,11 +347,9 @@ fn edition_rows(
             &considered,
             !dropped.is_empty() || !states_unmapped.is_empty(),
         );
-        for (version, refusals) in &verdicts.refused {
-            eprintln!("note: {} {version} refuses this source", edition.as_str());
-            report_diagnostics(file, source, lines, refusals);
-        }
         report_version_notes(file, source, lines, edition, &verdicts, &considered);
+        let inferred_range =
+            report_inferred_range(reporting, ir, &resolution, edition, &considered, &floors);
 
         if let Some(portability) = portability {
             let refusal = buildable_refusal(
@@ -259,6 +370,7 @@ fn edition_rows(
                 buildable: verdicts.buildable,
                 considered,
                 refusal,
+                inferred_range,
             });
         }
     }
@@ -506,6 +618,19 @@ fn print_axes_report(axes: &VersionAxes) {
         axes.registry_compat.max,
     );
 
+    let inferred_line = joined_or(
+        "(no editions requested)",
+        "   ",
+        axes.inferred_range.iter().map(|range| {
+            format!(
+                "{}: {}",
+                capitalise(range.edition.as_str()),
+                inferred_text(range)
+            )
+        }),
+    );
+    outln!("inferred range:          {inferred_line}");
+
     let portability_line = joined_or(
         "(no editions requested)",
         "   ",
@@ -549,6 +674,15 @@ fn print_axes_report(axes: &VersionAxes) {
             .map(|f| format!("{}({} @{})", f.member, f.reason, f.boundary_version)),
     );
     outln!("semantic-sensitive:      {semantic_line}");
+}
+
+/// One edition's inferred range as its edges, or `none` when no version can lie in it.
+fn inferred_text(range: &InferredRange) -> String {
+    if range.empty {
+        "none".to_owned()
+    } else {
+        format!("{} .. {}", range.min, range.max)
+    }
 }
 
 /// One edition's buildable versions, with the refusing ones named after them.

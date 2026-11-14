@@ -13,8 +13,23 @@ fn synthetic_portability(entries: &[(Edition, u32)]) -> Vec<EditionReport> {
             buildable: Vec::new(),
             considered: Vec::new(),
             refusal: None,
+            inferred_range: open_range(edition),
         })
         .collect()
+}
+
+/// A range no id bounds.
+fn open_range(edition: Edition) -> InferredRange {
+    InferredRange {
+        edition,
+        min: "0.0".to_owned(),
+        max: "latest".to_owned(),
+        empty: false,
+        min_ids: Vec::new(),
+        max_ids: Vec::new(),
+        undeclared: Vec::new(),
+        conflicts: Vec::new(),
+    }
 }
 
 #[test]
@@ -57,6 +72,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
                 buildable: vec!["1.20.4".to_owned()],
                 considered: vec!["1.20.4".to_owned()],
                 refusal: None,
+                inferred_range: open_range(Edition::Java),
             },
             EditionReport {
                 edition: Edition::Bedrock,
@@ -75,6 +91,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
                 buildable: vec!["1.21.0".to_owned()],
                 considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
                 refusal: None,
+                inferred_range: open_range(Edition::Bedrock),
             },
         ],
     );
@@ -249,6 +266,90 @@ fn a_dropped_intent_serializes_its_pieces_and_not_its_sentence() {
             "key": "shape",
             "value": "outer_left",
             "mc_versions": ["1.21.0", "1.21.60"],
+        }),
+    );
+}
+
+#[test]
+fn each_editions_inferred_range_is_forwarded_in_the_callers_order() {
+    let m = parse("struct s size=4x4\n  walls height=3\n").expect("parse");
+    let mut reports = synthetic_portability(&[(Edition::Bedrock, 0), (Edition::Java, 0)]);
+    reports[0].inferred_range.min = "1.21.40".to_owned();
+    let axes = compute_axes(&m, reports);
+    let ranges: Vec<(Edition, &str)> = axes
+        .inferred_range
+        .iter()
+        .map(|range| (range.edition, range.min.as_str()))
+        .collect();
+    assert_eq!(
+        ranges,
+        [(Edition::Bedrock, "1.21.40"), (Edition::Java, "0.0")]
+    );
+}
+
+#[test]
+fn an_open_range_serializes_its_edges_and_nothing_it_lacks() {
+    assert_eq!(
+        serde_json::to_value(open_range(Edition::Java)).expect("the range serializes"),
+        serde_json::json!({ "edition": "java", "min": "0.0", "max": "latest", "empty": false }),
+    );
+}
+
+#[test]
+fn a_bounded_range_names_its_ids_and_the_floors_above_it() {
+    let at = |line: u32, col: u32| Position {
+        line: std::num::NonZeroU32::new(line).expect("1-based"),
+        col: std::num::NonZeroU32::new(col).expect("1-based"),
+    };
+    let range = InferredRange {
+        edition: Edition::Java,
+        min: "1.21.4".to_owned(),
+        max: "1.21.4".to_owned(),
+        empty: false,
+        min_ids: vec![PaintedId {
+            id: "minecraft:pale_moss_block".to_owned(),
+            position: at(4, 17),
+        }],
+        max_ids: vec![PaintedId {
+            id: "minecraft:chain".to_owned(),
+            position: at(5, 17),
+        }],
+        undeclared: vec![PaintedId {
+            id: "minecraft:nonesuch".to_owned(),
+            position: at(6, 17),
+        }],
+        conflicts: vec![RequiresConflict {
+            floor: DeclaredFloor {
+                declared: "java version>=26.3".to_owned(),
+                position: at(1, 1),
+                declared_by: None,
+            },
+            ids: vec![LastDeclaredId {
+                id: "minecraft:chain".to_owned(),
+                last_declared: "1.21.4".to_owned(),
+                position: at(5, 17),
+            }],
+        }],
+    };
+    assert_eq!(
+        serde_json::to_value(range).expect("the range serializes"),
+        serde_json::json!({
+            "edition": "java",
+            "min": "1.21.4",
+            "max": "1.21.4",
+            "empty": false,
+            "min_ids": [{ "id": "minecraft:pale_moss_block", "line": 4, "col": 17 }],
+            "max_ids": [{ "id": "minecraft:chain", "line": 5, "col": 17 }],
+            "undeclared": [{ "id": "minecraft:nonesuch", "line": 6, "col": 17 }],
+            "conflicts": [{
+                "floor": { "declared": "java version>=26.3", "line": 1, "col": 1 },
+                "ids": [{
+                    "id": "minecraft:chain",
+                    "last_declared": "1.21.4",
+                    "line": 5,
+                    "col": 17,
+                }],
+            }],
         }),
     );
 }

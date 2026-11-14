@@ -12,6 +12,7 @@ use crate::artifacts::{
     write_artifacts_and_lock,
 };
 use crate::floors::enforce_version_floor;
+use crate::inferred::report_conflicts;
 use crate::lockfile::{default_lock_path, report_previous_target};
 use crate::name_case::NameCase;
 use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
@@ -34,13 +35,16 @@ pub(crate) fn run_compile(
         circuits,
         dropped_scopes,
         version_floors,
+        conflicts,
     } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
     let lines = LineStarts::new(&source);
+    // A conflict holds at every target, so it stops the build ahead of the target's floor check.
     if report_diagnostics(file, &source, &lines, &block_ir.diagnostics)
         | report_diagnostics(file, &source, &lines, &circuits)
+        | report_conflicts(file, &source, &lines, edition, &conflicts)
     {
         return ExitCode::from(1);
     }

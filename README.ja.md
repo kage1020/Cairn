@@ -72,15 +72,17 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 
 診断は、何が誤りかと、どんな値なら有効かを示します。ビルドが失敗しても、次に何を書けばよいかがその場で分かります。`--format json` を付けると同じ内容を機械可読な形式で出力するので、書いて、チェックして、直すというループを人の手でもツールからでも回せます。
 
-`cairn info` を使うと、ターゲットを決める前にどのバージョンでビルドできるかを確かめられます。
+`cairn info` を使うと、ターゲットを決める前にどのバージョンでビルドできるかを確かめられます。最後のコンパイルが検証したターゲットも、ロックファイルから読んで表示します。
 
 ```
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
+inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
+verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
 ## いま使える機能

@@ -1,5 +1,5 @@
-//! What `cairn info` reports (`spec/versioning-editions`): the declared registry range,
-//! per-edition portability, semantic-sensitive members, and the buildable targets.
+//! What `cairn info` reports (`spec/versioning-editions`): the declared and inferred registry
+//! ranges, per-edition portability, semantic-sensitive members, and the buildable targets.
 
 use std::collections::HashSet;
 
@@ -15,12 +15,14 @@ use crate::version::{FloorVerdict, VersionOrder, compare_versions, parse_min_ver
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
 
 /// What `cairn info` answers to "which version is this `.crn` for?", short of the third axis, the
-/// verified lock target, which no lockfile is read for yet.
+/// verified lock target, which [`crate::lock::LockReading`] reads from the lockfile.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct VersionAxes {
     /// Axis 1: the version range the file declares.
     pub registry_compat: RegistryRange,
+    /// Axis 1 again, per edition in `edition_portability` order: the range the packs imply.
+    pub inferred_range: Vec<InferredRange>,
     /// Per-edition portability counts, in the caller's order (the CLI's `--editions`).
     pub edition_portability: Vec<EditionPortability>,
     /// Axis 2: members whose meaning shifts at a boundary version. Always empty: no catalog exists.
@@ -48,6 +50,8 @@ pub struct EditionReport {
     pub considered: Vec<String>,
     /// Why [`Self::buildable`] is empty, when it is.
     pub refusal: Option<BuildableRefusal>,
+    /// The versions whose block tables declare every id the build paints.
+    pub inferred_range: InferredRange,
 }
 
 /// Which supported versions of one edition can build the source.
@@ -149,6 +153,63 @@ pub struct RegistryRange {
     pub max: String,
 }
 
+/// The versions of one edition whose block tables declare every id a build paints, per
+/// `spec/versioning-editions` "The `inferred range` row".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct InferredRange {
+    /// Target edition this row describes.
+    pub edition: Edition,
+    /// Lower edge (inclusive): a version label, or `"0.0"` when no id bounds it.
+    pub min: String,
+    /// Upper edge (inclusive): a version label, or `"latest"` when no id bounds it.
+    pub max: String,
+    /// Whether no version can lie in the range: an id no version declares, or `min` above `max`.
+    pub empty: bool,
+    /// The ids whose first declaring version is `min`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub min_ids: Vec<PaintedId>,
+    /// The ids whose last declaring version is `max`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub max_ids: Vec<PaintedId>,
+    /// The ids no version the edition's pack carries declares.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub undeclared: Vec<PaintedId>,
+    /// The floors above `max`, each `E_REQUIRES_CONFLICT`, in source order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub conflicts: Vec<RequiresConflict>,
+}
+
+/// A block id a build paints, at the first place it paints it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PaintedId {
+    /// The fully namespaced id.
+    pub id: String,
+    /// Where the build paints it.
+    #[serde(flatten)]
+    pub position: Position,
+}
+
+/// A declared floor that admits no version declaring an id the build paints.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RequiresConflict {
+    /// The floor.
+    pub floor: DeclaredFloor,
+    /// The ids last declared below it, the earliest `last_declared` first.
+    pub ids: Vec<LastDeclaredId>,
+}
+
+/// A painted id with the last version of its edition that declares it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LastDeclaredId {
+    /// The fully namespaced id.
+    pub id: String,
+    /// The last version that declares it.
+    pub last_declared: String,
+    /// Where the build paints it.
+    #[serde(flatten)]
+    pub position: Position,
+}
+
 /// Per-edition portability counts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EditionPortability {
@@ -240,9 +301,11 @@ pub struct SemanticSensitiveFinding {
 /// The version axes for `cairn info`, from `module` and the caller's per-edition reports.
 #[must_use]
 pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxes {
+    let mut inferred_range = Vec::with_capacity(editions.len());
     let mut edition_portability = Vec::with_capacity(editions.len());
     let mut buildable_targets = Vec::with_capacity(editions.len());
     for report in editions {
+        inferred_range.push(report.inferred_range);
         edition_portability.push(EditionPortability {
             edition: report.edition,
             portable: report.portable,
@@ -263,6 +326,7 @@ pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxe
             min: derive_min_version(module),
             max: "latest".to_owned(),
         },
+        inferred_range,
         edition_portability,
         semantic_sensitive: Vec::new(),
         buildable_targets,
