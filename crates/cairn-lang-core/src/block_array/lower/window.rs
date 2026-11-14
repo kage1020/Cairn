@@ -2,7 +2,7 @@
 
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
-use crate::intent::Member;
+use crate::intent::{BindingKey, Member};
 
 use crate::block_array::PaletteIndex;
 use crate::block_array::args::{
@@ -14,10 +14,13 @@ use crate::block_array::openings::{
 };
 
 use super::canvas::{MemberCanvas, ScopePalette};
+use super::frame::{Cut, Frame};
 use super::members::{
-    StructCtx, UNPAINTED_COURSE, palette_index_for, side_name, side_of, unplaced_walls_note,
+    StructCtx, UNPAINTED_COURSE, bound_block, palette_index_for, side_name, side_of,
+    unplaced_walls_note,
 };
 
+/// Cut a `window`'s rectangles, with the frame a theme binds on it round the ones it cut.
 pub(super) fn fill_window(
     member: &Member,
     y_offset: u32,
@@ -25,7 +28,8 @@ pub(super) fn fill_window(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+) -> Option<Frame> {
+    let frame = bound_block(member, BindingKey::Frame, ctx, diagnostics);
     // Read before anything can refuse the window, so it is reported in the same compile.
     let (sym, sym_unread) = match read_or_ignore(
         member,
@@ -42,7 +46,7 @@ pub(super) fn fill_window(
     let cut = cut_window(member, sym, y_offset, ctx, palette, canvas, diagnostics);
     diagnostics.extend(sym_unread.map(|unread| {
         unread.report(match cut {
-            WindowCut::Cut => {
+            WindowCut::Cut(_) => {
                 "the window is drawn without its mirror, as `sym=false` would draw it"
             }
             WindowCut::Refused => {
@@ -55,13 +59,16 @@ pub(super) fn fill_window(
             }
         })
     }));
+    match (frame, cut) {
+        (Some(state), WindowCut::Cut(cuts)) => Some(Frame::new(canvas.member(), state, cuts)),
+        _ => None,
+    }
 }
 
 /// What [`cut_window`] did with the window, which picks the note on an unreadable `sym=`.
-#[derive(Clone, Copy)]
 enum WindowCut {
-    /// The primary rectangle was cut.
-    Cut,
+    /// The primary rectangle was cut, with every rectangle that was.
+    Cut(Vec<Cut>),
     /// The window was refused, and another finding says why.
     Refused,
     /// Refused because `repeat=` is above 1 and an unreadable `sym=` may have meant `true`.
@@ -142,21 +149,27 @@ fn cut_window(
         height: sh,
         palette_index: idx,
     };
-    for i in 0..repeat {
-        let stamped_offset = offset.saturating_add(step.saturating_mul(i));
-        paint_window_rect(
-            ctx,
-            WindowRect {
-                offset: stamped_offset,
+    let mut cuts: Vec<Cut> = (0..repeat)
+        .map(|i| {
+            let rect = WindowRect {
+                offset: offset.saturating_add(step.saturating_mul(i)),
                 ..base_rect
-            },
-            canvas,
-        );
-    }
+            };
+            paint_window_rect(ctx, rect, canvas);
+            rect.cut()
+        })
+        .collect();
     if sym == Some(true) {
-        cut_window_mirror(member, base_rect, len, ctx, canvas, diagnostics);
+        cuts.extend(cut_window_mirror(
+            member,
+            base_rect,
+            len,
+            ctx,
+            canvas,
+            diagnostics,
+        ));
     }
-    WindowCut::Cut
+    WindowCut::Cut(cuts)
 }
 
 /// A window's `repeat=` and `step=`, or `None` after the finding that refuses the window.
@@ -343,7 +356,8 @@ fn window_course_refusal(
     Some(diag_invalid_member(member, primary, vec![fix.to_owned()]))
 }
 
-/// Cut a `sym=true` window's mirror across the middle of its wall, or report why it is skipped.
+/// Cut a `sym=true` window's mirror across the middle of its wall, returning it, or report why it
+/// is skipped.
 fn cut_window_mirror(
     member: &Member,
     rect: WindowRect,
@@ -351,7 +365,7 @@ fn cut_window_mirror(
     ctx: &StructCtx<'_>,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+) -> Option<Cut> {
     let WindowRect {
         side,
         offset,
@@ -393,16 +407,14 @@ fn cut_window_mirror(
             ),
             &note,
         ));
-        return;
+        return None;
     }
-    paint_window_rect(
-        ctx,
-        WindowRect {
-            offset: mirror_offset,
-            ..rect
-        },
-        canvas,
-    );
+    let mirror = WindowRect {
+        offset: mirror_offset,
+        ..rect
+    };
+    paint_window_rect(ctx, mirror, canvas);
+    Some(mirror.cut())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -413,6 +425,18 @@ struct WindowRect {
     width: u32,
     height: u32,
     palette_index: PaletteIndex,
+}
+
+impl WindowRect {
+    fn cut(self) -> Cut {
+        Cut {
+            side: self.side,
+            offset: self.offset,
+            y_start: self.y_start,
+            width: self.width,
+            height: self.height,
+        }
+    }
 }
 
 fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberCanvas<'_>) {

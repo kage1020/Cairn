@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberRole};
+use crate::intent::{BindingKey, Member, MemberRole};
 use crate::resolve::ScopeResolution;
 
 use crate::block_array::args::{
@@ -347,6 +347,52 @@ pub(super) fn resolve_member_state(
         MaterialDeferred::AlreadyDiagnosed => {}
     }
     MemberState::Unbound
+}
+
+/// The block a theme selector row binds `key` to on `member`, or `None` when no row does or after
+/// the finding that says its value names no block.
+pub(super) fn bound_block(
+    member: &Member,
+    key: BindingKey,
+    ctx: &StructCtx<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<BlockState> {
+    let value = ctx
+        .scope?
+        .members
+        .get(&member.span.start)?
+        .selector_extras
+        .get(key.key())?;
+    let site = TokenSite::Binding(key);
+    let unbound = match resolve_block_state(value, ctx.registry) {
+        Ok(state) => {
+            return check_state_literal(value, &state, ctx.registry, diagnostics).then_some(state);
+        }
+        Err(unbound) => unbound,
+    };
+    match unbound {
+        MaterialDeferred::Abstract(token) => {
+            diagnostics.push(diag_abstract_token(value.span.clone(), &token, site));
+        }
+        MaterialDeferred::UnknownAbstract { token, suggestion } => {
+            diagnostics.push(diag_unknown_abstract_token(
+                value.span.clone(),
+                &token,
+                suggestion.as_deref(),
+                site,
+            ));
+        }
+        MaterialDeferred::UnknownId(unknown) => {
+            diagnostics.push(diag_undeclared_id(
+                value.span.clone(),
+                &unknown,
+                IdSite::Semantic(site),
+            ));
+        }
+        // INVARIANT(upstream-diagnosed): `check_slot_targets` reports `E_UNKNOWN_SLOT_TARGET`.
+        MaterialDeferred::AlreadyDiagnosed => {}
+    }
+    None
 }
 
 /// The block a member is built from when no `mat_slot=` binds one: the pack's `token`, or

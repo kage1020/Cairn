@@ -138,6 +138,18 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  walls clas=outer mat_slot=wall height=3\n"),
     ),
     (
+        // Whole, so the row joins the theme the struct binds; a theme binds `trim=` on `walls`.
+        "E_UNKNOWN_ARGUMENT",
+        Source::Whole(
+            "@cairn 2026.06\n@requires version>=1.20\n\n\
+             theme t:\n  slot wall -> @cobblestone\n  \
+             window[class=small] -> trim=@spruce_log\n\n\
+             struct s size=5x5\n  \
+             walls mat_slot=wall height=3\n  \
+             window class=small side=front offset=1 y=1 size=1x1 mat_slot=wall\n",
+        ),
+    ),
+    (
         // A bare value beside the keys, which `spec/syntax` "Lexical" forbids.
         "E_UNEXPECTED_POSITIONAL",
         Source::WithPrologue(

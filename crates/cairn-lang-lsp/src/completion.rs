@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use cairn_lang_core::Edition;
 use cairn_lang_core::Span;
 use cairn_lang_core::ast::ItemKind;
-use cairn_lang_core::intent::{BodyKind, role_of};
+use cairn_lang_core::intent::{BindingKey, BodyKind, MemberRole, role_of};
 use cairn_lang_formats::builtin_pack;
 
 use crate::line_index::LineIndex;
@@ -23,6 +23,12 @@ enum Context {
     UnscopedMemberKeyword { replace: Span },
     /// First word of an indented line in a `theme` body: `slot` or a selector's member keyword.
     ThemeBodyKeyword { replace: Span },
+    /// A key position right of a `theme` selector row's arrow: a key that row's keyword binds and
+    /// the row does not bind yet.
+    BindingKey {
+        replace: Span,
+        keys: Vec<BindingKey>,
+    },
     /// Value position of `mat_slot=`: a slot name declared by a theme.
     SlotName { replace: Span },
     /// Right after `@` outside the header position: a material token.
@@ -87,6 +93,21 @@ pub fn completions(
                     .map(|kw| (*kw, "theme selector")),
             ),
         ),
+        Some(Context::BindingKey { replace, keys }) => keys
+            .into_iter()
+            .enumerate()
+            .map(|(order, key)| {
+                completion_item(
+                    &index,
+                    source,
+                    &replace,
+                    key.key(),
+                    lsp_types::CompletionItemKind::PROPERTY,
+                    format!("binds {}", key.part()),
+                    order,
+                )
+            })
+            .collect(),
         Some(Context::SlotName { replace }) => slot_name_items(&index, source, &replace),
         Some(Context::MaterialToken { replace }) => material_items(&index, source, &replace),
         Some(Context::GuardWord { replace }) => keyword_items(
@@ -212,6 +233,11 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
             _ => None,
         };
     }
+    if enclosing_item_keyword(&outside) == Some("theme")
+        && let Some(keys) = unbound_keys(before_token)
+    {
+        return Some(Context::BindingKey { replace, keys });
+    }
     if !before_token.trim_start().is_empty() {
         return None;
     }
@@ -236,6 +262,46 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
         }),
         _ => Some(Context::UnscopedMemberKeyword { replace }),
     }
+}
+
+/// The keys a theme selector row's keyword binds that the row does not, when `before` is the row
+/// up to a key position right of its arrow (`spec/materials-themes` "Selector bindings").
+fn unbound_keys(before: &str) -> Option<Vec<BindingKey>> {
+    let row = before.trim_start();
+    if row.len() == before.len() {
+        return None;
+    }
+    let keyword = line_keyword(row);
+    let role = role_of(keyword);
+    if matches!(role, MemberRole::Other(_)) {
+        return None;
+    }
+    let attrs = row[keyword.len()..].strip_prefix('[')?;
+    let (mut depth, mut in_string) = (1_usize, false);
+    let close = attrs.char_indices().find_map(|(i, c)| {
+        match c {
+            '"' => in_string = !in_string,
+            '[' if !in_string => depth += 1,
+            ']' if !in_string => depth -= 1,
+            _ => {}
+        }
+        (depth == 0).then_some(i)
+    })?;
+    let bindings = attrs[close + 1..].trim_start().strip_prefix("->")?;
+    if !(bindings.is_empty() || bindings.ends_with(char::is_whitespace)) {
+        return None;
+    }
+    let written: Vec<&str> = bindings
+        .split_whitespace()
+        .filter_map(|pair| pair.split_once('=').map(|(key, _)| key))
+        .collect();
+    Some(
+        role.binding_keys()
+            .iter()
+            .copied()
+            .filter(|key| !written.contains(&key.key()))
+            .collect(),
+    )
 }
 
 /// The word `line` opens with after its indent.
@@ -603,6 +669,55 @@ mod tests {
             1 + cairn_lang_core::intent::known_keywords().len(),
             "a selector is matched against every body, so its vocabulary stays the whole table",
         );
+    }
+
+    #[test]
+    fn a_selector_rows_key_position_offers_the_keys_its_keyword_binds() {
+        for (source, needle, offered) in [
+            ("theme x:\n  window[class=small] -> fr", "-> fr", "frame"),
+            ("theme x:\n  door[class=main] -> ", "-> ", "frame"),
+            ("theme x:\n  walls[class=outer] ->", "->", "trim"),
+            (
+                "theme x:\n  window[tags=[a,\"]\"]] -> f",
+                "]] -> f",
+                "frame",
+            ),
+        ] {
+            let items = complete(source, needle);
+            assert_eq!(labels(&items), [offered], "for {source:?}");
+            let item = &items[0];
+            assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::PROPERTY));
+        }
+        let items = complete("theme x:\n  walls[class=outer] -> tr", "-> tr");
+        assert_eq!(items[0].detail.as_deref(), Some("binds the corner posts"));
+        assert_eq!(edit_range(&items[0]), range(1, 24, 26));
+    }
+
+    #[test]
+    fn a_selector_row_offers_no_key_it_binds_already_or_its_keyword_does_not_bind() {
+        for (source, needle) in [
+            (
+                "theme x:\n  window[class=small] -> frame=@spruce_wood f",
+                "wood f",
+            ),
+            ("theme x:\n  roof[kind=gable] -> t", "-> t"),
+        ] {
+            assert_eq!(labels(&complete(source, needle)), Vec::<&str>::new());
+        }
+    }
+
+    #[test]
+    fn only_a_theme_selector_row_takes_a_binding_key() {
+        for (source, needle) in [
+            ("theme x:\n  windw[class=small] -> f", "-> f"),
+            ("theme x:\n  window[class=small f", "small f"),
+            ("struct s size=3x3\n  window[class=small] -> f", "-> f"),
+        ] {
+            assert!(
+                !labels(&complete(source, needle)).contains(&"frame"),
+                "for {source:?}",
+            );
+        }
     }
 
     #[test]

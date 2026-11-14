@@ -1,6 +1,6 @@
 //! Theme slot findings: a `mat_slot=` the bound theme does not declare, a
-//! slot value that is not a material token, and a selector that matched
-//! nothing.
+//! slot or selector binding value that is not a material token, and a
+//! selector that matched nothing.
 
 use std::collections::HashSet;
 
@@ -60,28 +60,52 @@ pub(super) fn unresolved_slot_diag(
     }
 }
 
-/// Slot values that are not material tokens, in every declared theme, shadowed ones included.
+/// Slot values and selector binding values that are not material tokens, in every declared theme,
+/// shadowed ones included; a key its keyword does not bind is `check::arguments`' to report.
 pub(super) fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<Diagnostic>) {
     for theme in themes {
         for (slot_name, v) in &theme.slots {
             if classify_token(&v.value) == TokenKind::NotAToken {
-                diagnostics.push(Diagnostic {
-                    code: DiagnosticCode::UnknownSlotTarget,
-                    span: v.span.clone(),
-                    primary: format!(
-                        "slot `{slot}` in theme `{theme}` does not bind to a canonical or abstract material token",
-                        slot = slot_name,
-                        theme = theme.name,
+                diagnostics.push(not_a_material_token(
+                    format!(
+                        "slot `{slot_name}` in theme `{}` does not bind to a canonical or abstract material token",
+                        theme.name,
                     ),
-                    notes: vec![DiagnosticNote {
-                        span: None,
-                        message: "expected a `@canonical_block` or `@abstract.material` value"
-                            .to_owned(),
-                    }],
-                    data: None,
-                });
+                    v,
+                ));
             }
         }
+        for sel in &theme.selectors {
+            let role = role_of(&sel.keyword);
+            for (key, v) in &sel.bindings {
+                if role.binding_key(key).is_some()
+                    && classify_token(&v.value) == TokenKind::NotAToken
+                {
+                    diagnostics.push(not_a_material_token(
+                        format!(
+                            "`{key}=` on `{selector}` in theme `{theme}` does not bind to a canonical or abstract material token",
+                            selector = selector_text(&sel.keyword, &sel.attrs),
+                            theme = theme.name,
+                        ),
+                        v,
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// The `E_UNKNOWN_SLOT_TARGET` on `value`, which `primary` says binds no material token.
+fn not_a_material_token(primary: String, value: &ValueWithSpan) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::UnknownSlotTarget,
+        span: value.span.clone(),
+        primary,
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "expected a `@canonical_block` or `@abstract.material` value".to_owned(),
+        }],
+        data: None,
     }
 }
 

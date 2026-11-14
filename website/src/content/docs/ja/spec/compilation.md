@@ -18,7 +18,7 @@ logic_route Placement IR 上での配線、遅延の挿入、合法化。遅延�
 raw         raw_block / raw_fill (エスケープハッチ)
 ```
 
-水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
+水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。`theme` のセレクタ行が割り当てる部位はメンバーのもので、メンバーのフェーズで作ります ([マテリアルとテーマ](/ja/spec/materials-themes/#セレクタのバインディング))。`walls` メンバーの隅柱は `massing` で、`door` や `window` の枠はすべての開口を切り抜いたあとの `openings` で作ります。
 
 ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
 

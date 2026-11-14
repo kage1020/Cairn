@@ -192,7 +192,7 @@ code. The placeholders today include:
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
   `spawn`, `bed`, `sign` and `raw_repeat`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
-  lists, a theme selector's bindings among them;
+  lists;
 - `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which
   [§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) reserves for a later extension;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet

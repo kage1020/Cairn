@@ -79,6 +79,16 @@ fn the_course_a_row_sits_in_is_the_one_that_caps_what_opens_there() {
 }
 
 #[test]
+fn the_course_a_row_sits_in_is_named_by_both_its_ends() {
+    let column = WallColumn::from_walls([(0, 2), (6, 2)]);
+    assert_eq!(column.course_at(1), Some((1, 2)));
+    assert_eq!(column.course_at(2), Some((1, 2)));
+    assert_eq!(column.course_at(8), Some((7, 8)));
+    assert_eq!(column.course_at(3), None, "the gap holds no course");
+    assert_eq!(column.course_at(0), None, "the floor slab owns row 0");
+}
+
+#[test]
 fn a_row_in_merged_courses_is_capped_by_the_merge_and_not_by_its_member() {
     let column = WallColumn::from_walls([(0, 1), (1, 3)]);
     assert_eq!(column.to_string(), "y=1..=4");

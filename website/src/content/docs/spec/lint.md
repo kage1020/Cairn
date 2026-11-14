@@ -40,8 +40,8 @@ row sharing its `id=` with any other row of that body, such as a `connect`, is s
 and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
 Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
 partly overlap (see [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)).
-`E_DUPLICATE_SELECTOR` is an error even while selector bindings are reserved
-([§11.3](#113-error-vs-warning)).
+Every key both rows write counts, one their keyword does not bind as well. Why
+`E_DUPLICATE_SELECTOR` is an error is in [§11.3](#113-error-vs-warning).
 
 `E_DUPLICATE_ITEM` treats `theme` / `def` / `struct` / `site` as four separate namespaces, so one
 name may appear once in each. For the first three the first declaration resolves and the rest bind
@@ -58,8 +58,8 @@ compose to the strictest across every line, so a second one adds a constraint ([
 |---|---|
 | `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
-| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes. |
-| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
+| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes, or a `key=` a `theme` selector row binds that its keyword does not ([Materials and Themes](/spec/materials-themes/#selector-bindings)). |
+| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
@@ -150,7 +150,7 @@ to compare.
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
-| `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
+| `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, a `theme` selector row's binding, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
 | `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
@@ -161,11 +161,11 @@ to compare.
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
-| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
+| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE`, or a key a `theme` selector row binds, whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member of the scopes the theme is bound to. A theme no scope binds is not checked. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
-| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)), or a struct's circuit is built of a circuit token it does not declare ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
+| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` or a `theme` selector row's binding resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)), or a struct's circuit is built of a circuit token it does not declare ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since the pinned target's pack records no states for its block to check it against ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
@@ -877,13 +877,13 @@ compiler. The drop does not stop at the member either: a dropped `walls` lowers 
 volume is derived from, so the structure shrinks and every `door` and `window` that was to be cut
 into it is deferred as well.
 
-`E_DUPLICATE_SELECTOR` is an **error** on the same test, though selector bindings are reserved and
-neither of the two values it is about is built. Whatever a binding comes to mean, the later row
-makes the earlier value dead text, and that is a fault in the source: it is there today and stays
-there once bindings are lowered. Every member the earlier row selects is selected by the later row
-too, so no edit to the members brings the earlier value back, where adding a member revives a row
-`E_THEME_SELECTOR_UNMATCHED` reports. The compiler's gap is the reservation itself, which each
-binding's `W_IGNORED_ARGUMENT` already reports. The code also gives two rows the verdict
+`E_DUPLICATE_SELECTOR` is an **error** on the same test. Every member the earlier row selects is
+selected by the later row too, so each of them keeps the later value of a key both rows bind, and
+the earlier value is built for none of them: a block the source asks for, dropped with nothing but
+this finding to say so. The fault is the source's, and no edit to the members brings the earlier
+value back, where adding a member revives a row `E_THEME_SELECTOR_UNMATCHED` reports. A key both
+rows write that their keyword does not bind is the same text written twice, so it counts too,
+beside the `E_UNKNOWN_ARGUMENT` on each binding. The code also gives two rows the verdict
 `E_DUPLICATE_ARG` gives one. The same key written twice inside one row is refused, and rows that
 select the same members are one binding list split over two lines
 ([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), so where
@@ -908,8 +908,17 @@ Each keyword's vocabulary is closed, and a `theme` selector widens the one it na
 The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; one edit away from a
 word the keyword already has is a typo written twice rather than a coinage, and is refused with the
 suggestion. Widening admits the word and nothing more: the match hands the member the row's
-bindings, which are reserved ([Materials and Themes](/spec/materials-themes/)), so a key the keyword
-defines and no pass reads is still an unreached key when a selector matches on it.
+bindings, and a key the keyword defines and no pass reads is still an unreached key when a selector
+matches on it.
+
+The right of a selector row's arrow answers to a closed vocabulary of its own, the keys a theme
+binds on the row's keyword ([Materials and Themes](/spec/materials-themes/#selector-bindings)):
+`trim=` on `walls`, and `frame=` on `door` and `window`. A key outside it is `E_UNKNOWN_ARGUMENT`
+for the reason above. It lays no part on any member, so its value is built nowhere however the
+theme is applied, and the member it was meant for is built without it. It is reported on every row
+whose keyword the compiler knows, matched or not and applied or not, since the key is wrong
+wherever the theme ends up. The finding names the keys the keyword binds, and a key another keyword
+binds, such as `trim=` on a `window` row, is told which row it belongs on.
 
 A member's own `[key=value]` answers to that same vocabulary. `window[clas=outer]` is the same
 defect as `window clas=outer`: a word the author expects something to read that nothing does, with
@@ -935,11 +944,9 @@ the key itself decides whether the member is built at all, the member is left ou
 [§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
 reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
 *unreached* key is one this specification defines that no pass reads yet. `window shape=` /
-`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today. Every
-`key=value` on the right of a `theme` selector row whose keyword the compiler knows is one too,
-reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
-([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
-accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
+`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today. An
+*inapplicable* key is one every member accepts, on a keyword that puts down nothing it would be
+read for; `mat_slot=` on a `level`,
 `circuit`, `place`, `connect`, `raw_block` or `raw_fill` is that key today. A `mat_slot=` of either kind is not looked up in
 the theme, so a slot name the theme does not declare is this warning rather than
 `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword

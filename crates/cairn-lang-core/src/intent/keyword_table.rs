@@ -99,6 +99,58 @@ impl Actuator {
     }
 }
 
+/// A key a `theme` selector row binds, each naming the part of the selected members it lays
+/// (`spec/materials-themes` "Selector bindings").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BindingKey {
+    /// `trim=` on `walls`: a post at each corner of the footprint.
+    Trim,
+    /// `frame=` on `door` and `window`: a ring of the wall round each opening cut.
+    Frame,
+}
+
+impl BindingKey {
+    /// Every binding key, in the order `spec/materials-themes` "Selector bindings" lists them.
+    pub const ALL: &'static [Self] = &[Self::Trim, Self::Frame];
+
+    /// The key as written before its `=`.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Trim => "trim",
+            Self::Frame => "frame",
+        }
+    }
+
+    /// The part it lays, as a finding names it: "the corner posts".
+    #[must_use]
+    pub const fn part(self) -> &'static str {
+        match self {
+            Self::Trim => "the corner posts",
+            Self::Frame => "the frame",
+        }
+    }
+
+    /// The binding key written `key`, or `None` for a key no keyword binds.
+    #[must_use]
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|binding| binding.key() == key)
+    }
+
+    /// The keywords that bind it, in the known-keyword table's order.
+    #[must_use]
+    pub fn keywords(self) -> Vec<&'static str> {
+        KNOWN_KEYWORDS
+            .iter()
+            .copied()
+            .filter(|keyword| role_of(keyword).binding_keys().contains(&self))
+            .collect()
+    }
+}
+
 /// Coarse classification of a member, derived from its source keyword.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
@@ -347,6 +399,51 @@ impl MemberRole {
             Self::Connect => &["path"],
             Self::Other(_) => return None,
         })
+    }
+
+    /// The keys a `theme` selector row on this role's keyword binds (`spec/materials-themes`
+    /// "Selector bindings").
+    ///
+    /// Every role is spelled out, so a new one fails the compile here.
+    #[must_use]
+    pub const fn binding_keys(&self) -> &'static [BindingKey] {
+        match self {
+            Self::Walls => &[BindingKey::Trim],
+            Self::Door | Self::Window => &[BindingKey::Frame],
+            Self::Floor
+            | Self::Fill
+            | Self::Roof
+            | Self::Stair
+            | Self::Level
+            | Self::PressurePlate
+            | Self::Lever
+            | Self::Button
+            | Self::Daylight
+            | Self::Observer
+            | Self::Lamp
+            | Self::Piston
+            | Self::Dispenser
+            | Self::Chest
+            | Self::Repeater
+            | Self::Comparator
+            | Self::RedstoneTorch
+            | Self::RedstoneDust
+            | Self::Circuit
+            | Self::RawBlock
+            | Self::RawFill
+            | Self::Place
+            | Self::Connect
+            | Self::Other(_) => &[],
+        }
+    }
+
+    /// The binding key `key` names on this role, or `None` when a row on its keyword binds none.
+    #[must_use]
+    pub fn binding_key(&self, key: &str) -> Option<BindingKey> {
+        self.binding_keys()
+            .iter()
+            .copied()
+            .find(|binding| binding.key() == key)
     }
 
     /// The keys of [`Self::own_keys`] that name a blockstate of the block this role places

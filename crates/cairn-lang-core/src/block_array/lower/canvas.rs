@@ -1,5 +1,7 @@
 //! The grid and the palette one body is painted into.
 
+use std::collections::HashSet;
+
 use indexmap::IndexMap;
 
 use crate::block_array::material::is_stand_in;
@@ -136,6 +138,26 @@ impl ScopePalette {
     }
 }
 
+/// A block state a member paints, interned on its first cell so a state it paints nowhere claims
+/// no palette slot.
+pub(super) struct LazySlot {
+    state: BlockState,
+    slot: Option<PaletteIndex>,
+}
+
+impl LazySlot {
+    pub(super) fn new(state: BlockState) -> Self {
+        Self { state, slot: None }
+    }
+
+    /// The state's slot in `palette`, interning it on the first call.
+    pub(super) fn intern(&mut self, palette: &mut ScopePalette) -> PaletteIndex {
+        *self
+            .slot
+            .get_or_insert_with(|| palette.intern(self.state.clone()))
+    }
+}
+
 /// The voxel grid under construction, with who wrote each cell and which palette slots a write
 /// named, so within-phase contests and covered materials can be told apart.
 pub(super) struct Canvas {
@@ -245,6 +267,20 @@ impl Canvas {
             .enumerate()
             .filter(|(_, (_, owner))| **owner != 0)
             .filter_map(|(i, (slot, _))| Some((self.dims.position(i)?, *slot)))
+    }
+
+    /// Every cell one of `members` of the flattened paint list wrote last.
+    pub(super) fn cells_owned_by(&self, members: &[u32]) -> HashSet<(u32, u32, u32)> {
+        self.owners
+            .iter()
+            .enumerate()
+            .filter(|(_, owner)| {
+                owner
+                    .checked_sub(1)
+                    .is_some_and(|member| members.contains(&member))
+            })
+            .filter_map(|(i, _)| self.dims.position(i))
+            .collect()
     }
 
     /// The member of the flattened paint list that wrote `pos` last, or `None` for a cell no member

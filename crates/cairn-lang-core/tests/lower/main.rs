@@ -27,6 +27,7 @@ mod port_rejection_reason;
 mod raw;
 mod resolved_state;
 mod roof_seats_on_the_wall;
+mod selector_bindings;
 mod state_domain;
 mod state_unmapped;
 mod struct_as_written;
