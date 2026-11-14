@@ -660,15 +660,17 @@ wording the editions give it, and an edition's own by the rule for its guards
 
 ### Import
 
-`cairn import` raises this one ([Ecosystem Interop
-§12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls)). It is about the structure file
-read rather than a line of a source, so it carries no span, it prints on stderr as
-`warning[W_SEMANTIC_LOSS]: …`, the body it concerns first when it concerns one, and no other command
-raises it.
+`cairn import` raises the first ([Ecosystem Interop
+§12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls)) and `cairn diff-blocks` the second
+([§12.2.1](/spec/ecosystem-interop/#1221-diffing-a-lift)), and no other command raises either. Each
+is about a structure file rather than a line of a source, so it carries no span and prints on stderr:
+`warning[W_SEMANTIC_LOSS]: …` with the body it concerns first when it concerns one, and
+`error[E_DECOMPILE_DIFF]: …` with each metric that misses its threshold.
 
 | Code | Meaning |
 |---|---|
 | `W_SEMANTIC_LOSS` | What the raw members an import writes do not carry. Every import raises it once for the author's intent, which no transliteration recovers, and then once for each kind of thing a body holds that no raw member writes: block entity data, entities, structure voids, the palettes of a `.nbt` past its first, and on Bedrock a block with no canonical state and water or a second-layer block the written block does not hold. |
+| `E_DECOMPILE_DIFF` | A lift `cairn diff-blocks` compares with a structure file has not converged: its block IoU is below 0.985, its `state_accuracy` below 0.995, or its residual raw above 5%. The report names the regions that differ and the `edit` lines found to close them ([§12.2.2](/spec/ecosystem-interop/#1222-regions-and-their-causes), [§12.2.3](/spec/ecosystem-interop/#1223-the-suggested-patch)), and under `--format json` carries the code as its `code`. |
 
 ### Semantic categories
 
@@ -720,8 +722,8 @@ reference, a token and a block id print no such list.
 
 ## 11.2 Machine-readable payload
 
-Every command that takes `--format json` (`check`, `info`, `parse` and `lower`) writes exactly one
-JSON document to stdout under it, for every source it can read. `check`'s document is an array of
+Every command that takes `--format json` (`check`, `info`, `parse`, `lower` and `diff-blocks`)
+writes exactly one JSON document to stdout under it, for every source it can read. `check`'s document is an array of
 findings, so a source that does not parse is that array with one `E_PARSE` element. `info`'s is the
 report; where there is no report, after a parse failure or any error-severity finding, it writes
 `{"diagnostics": [ ... ]}` instead, told apart from a report by its keys and by the exit code. Which
@@ -769,6 +771,13 @@ failure is not the dump with a hole in it: each writes the same `{"diagnostics":
 `info` does, told apart from the dump by its keys and by the exit code. `lower` writes it for a
 source that does not parse and for one that fails a later pass, since neither leaves an IR worth
 dumping. Under every other `--format` the findings read as prose on stderr.
+
+`diff-blocks`'s product is the report of [Ecosystem
+Interop §12.2.4](/spec/ecosystem-interop/#1224-the-report). A source that does not build at the
+structure's stamp writes the `{"diagnostics": [ ... ]}` document `lower` does, and a refusal at the
+run level, a dropped scope or a `@requires` floor the stamp falls short of, writes
+`{"diagnostics": []}` and says the rest on stderr. A lift that does not converge is not a failure of
+this kind: its report is written, and carries `E_DECOMPILE_DIFF` as its `code`.
 
 `--format json` renders one object per finding:
 

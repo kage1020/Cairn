@@ -111,7 +111,6 @@ file already there. The extension, in any case, names the format, and the format
 a usage error, exit 2, as are a file that is not there and an `--out` that names the file itself.
 `raw` is the one mode, since L1 is the compiler's ceiling
 ([§12.3](#123-three-tiers-of-transliteration)) and the lift is a refactor of what it writes.
-`cairn diff-blocks` is not built, and nor is the loop below.
 
 The source is checked before it is written. It is compiled against the target it is stamped with
 ([§12.4](#124-import-stamping-and-pitfalls)) and compared with the file cell by cell, so
@@ -124,20 +123,193 @@ that saving the file in that release renames a block an older one spelled otherw
 member builds as the file holds it refuses the import rather than writing it wrong. Either refusal,
 or bytes the format's reader refuses, is exit 1, and nothing is written.
 
-The compile → diff → patch loop reports like this:
+The last step closes the loop. `cairn diff-blocks` builds the lift at the target the structure file
+is stamped with and compares the two cell by cell ([§12.2.1](#1221-diffing-a-lift)), names each
+region of cells that differ with its likely cause ([§12.2.2](#1222-regions-and-their-causes)), and
+suggests `edit` lines that bring the build nearer the file
+([§12.2.3](#1223-the-suggested-patch)). The refactor between the import and the diff is the LLM's,
+and the loop runs until the lift converges:
 
 ```text
-E_DECOMPILE_DIFF: block IoU = 0.962 < threshold 0.985
-  missing bbox=(12,4,3)..(18,6,3) mat=glass_pane → likely window repeat too small
-  Suggested patch: edit window[id=front_windows] set repeat=4
+house.litematic against house.lifted.crn at java 1.21.4, the shipped target the file was saved at
+block IoU       0.962  converges at >= 0.985
+state_accuracy  1.000  converges at >= 0.995
+residual raw    0%     converges at <= 5%
+1 region differs:
+  missing house (12,4,3)..(18,6,3): 12 cells of minecraft:glass_pane → likely `window[id=front_windows]` `repeat=3` too small
+suggested patch, reaching block IoU 1.000, state_accuracy 1.000, residual raw 0%:
+  edit window[id=front_windows] set repeat=4
+error[E_DECOMPILE_DIFF]: block IoU = 0.962 < threshold 0.985
 ```
 
-`E_DECOMPILE_DIFF` is not implemented. The patch it suggests is an `edit` line
-([§9.2](/spec/components-editing-sites/#92-editing-model)), which a source already accepts.
+A lift converges at block IoU ≥ 0.985, `state_accuracy` ≥ 0.995, and residual raw ≤ 5%. An exact
+match is not required, and the residue stays explicit as `raw_fill id=residual_* origin=imported`.
 
-Convergence thresholds are block IoU ≥ 0.985, `state_accuracy` ≥ 0.995, and residual raw ≤ 5%. An
-exact match is not required, and the residue stays explicit as
-`raw_fill id=residual_* origin=imported`.
+### 12.2.1 Diffing a lift
+
+`cairn diff-blocks STRUCTURE FILE [--format text|json]` reads STRUCTURE as `cairn import` reads it:
+its extension names its format and edition, and it is stamped by the rules of
+[§12.4](#124-import-stamping-and-pitfalls). FILE is then built at that stamp, with every pass
+`cairn compile` runs at it, and the blocks it builds are compared with the blocks STRUCTURE holds.
+Building at the stamp keeps the comparison within one edition and one version.
+
+Each side is a set of bodies. STRUCTURE's are the bodies an import writes: one for each Litematica
+region, else one for the file, its structure voids read as air. FILE's are its structs and its sites,
+each site laid as one body: its placements and walkways at their positions in the site, a later
+array's block over an earlier one's and its air over nothing, moved so its lowest corner is
+`(0, 0, 0)`. When each side holds one body, the two are compared whatever their names. Otherwise a
+body pairs with the body of the other side that has its name, and a body with none is compared with
+nothing. Two paired bodies are compared cell by cell from their `(0, 0, 0)` cells, over the box that
+holds both.
+
+A cell holds a block unless it lies outside its body or holds `minecraft:air`, `minecraft:cave_air`
+or `minecraft:void_air`. Two blocks match when their ids are the same, and their states agree when
+every property agrees as the stamped target builds it:
+
+- A property both write agrees when the two values are the same.
+- A property one side leaves out is read at the default the target builds for it: on Bedrock the
+  default its state map gives, and `waterlogged` as `false` on either edition, since lowering leaves
+  it out where no water stands.
+- A property STRUCTURE writes and the build leaves out, with no such default, is not compared. A
+  game-saved file writes every property of a block, and a source writes only the ones it sets.
+- A property the build writes and STRUCTURE leaves out, with no such default, differs.
+- A property the target builds the same at any value is not compared.
+
+Over every pair, the diff counts the cells STRUCTURE holds a block at, the cells FILE builds a block
+at, the cells both hold a block at, the cells where both hold the same id, which are *matched*, and
+the matched cells whose states agree. A built cell is *residual* when the member that owns it once
+the body is built is a `raw_block` or `raw_fill`, a `raw_repeat`'s copies included, whether or not
+its line is marked `origin=imported`. From those counts:
+
+- **block_iou.** The block IoU: matched cells over the cells either side holds a block at. A cell
+  where the two hold different ids is in the union and not in the intersection. It is 1 when
+  neither side holds a block.
+- **state_accuracy.** Matched cells whose states agree over every matched cell, so a cell of two
+  different ids counts against the block IoU and not here. It is 1 when no cell is matched.
+- **residual_ratio.** Residual raw: residual cells over the cells FILE builds a block at. It is 0
+  when FILE builds none.
+
+A lift **converges** when all three meet their thresholds, each compared unrounded. Short of that,
+the diff reports `E_DECOMPILE_DIFF` ([Lint §11.1](/spec/lint/#import)).
+
+The metrics are defined on any two sets of bodies, and the library computes them for any caller,
+such as an evaluation harness
+([Evaluation §13.2](/spec/evaluation/#132-reverse-conversion-auxiliary-metrics)). Between two editions or two versions nothing is respelled: ids are compared as each side writes
+them, so a block one version renamed, or one the other edition spells otherwise, is replaced, and a
+property one side leaves out is read at the defaults of STRUCTURE's target. `cairn diff-blocks` does
+not meet that case, since it builds FILE at STRUCTURE's stamp.
+
+### 12.2.2 Regions and their causes
+
+A cell that differs is *missing* when STRUCTURE holds a block there and the build none, *extra* when
+the build holds one and STRUCTURE none, *replaced* when the two hold different ids, and *state* when
+they hold one id whose states do not agree. Within a pair, the cells of one kind with the same ids,
+STRUCTURE's and the build's, are one region when each stands within two cells of another on every
+axis, so one cell of anything else between them does not split it.
+
+A region reports its kind, its body (the build's name, else STRUCTURE's), the box from its lowest
+corner to its highest, how many cells in it differ, its block (STRUCTURE's, or the build's for an
+extra region), the build's block for a replaced region, and each property that differs, with both
+values, for a state region. Regions are listed most cells first, then by pair, by kind in the order
+above, by lowest corner (`y`, then `z`, then `x`) and by block.
+
+Its cause is read from the members that own its cells once the build is laid, by the member that
+owns the most of them, the one written first of those that own as many:
+
+- **built_by.** An extra, replaced or state region names the member that built it.
+- **cleared_by.** A missing region whose cells a member owns names that member, which left them
+  air.
+- **short_of.** A missing region no member owns names the member nearest it, within two cells, of
+  those that build its block: a wall a row short, a fill a column narrow.
+- **walkway.** A walkway of the site laid the region's block.
+- **no_member.** No member builds the block there, or none within two cells of a missing region.
+- **unpaired.** The region's body has no body on the other side to pair with.
+
+A member is named by its keyword, its `id=` when its line writes one, its address in the body it is
+written in ([Components, Editing, and Multi-building
+§9.2](/spec/components-editing-sites/#92-editing-model)), and its line. A member of a `def` is named
+in the `def`, wherever a site places it.
+
+### 12.2.3 The suggested patch
+
+The patch is up to three `edit` lines ([§9.2](/spec/components-editing-sites/#92-editing-model))
+that bring the build nearer STRUCTURE when appended to FILE. Each is found by building with it, not
+by inference alone:
+
+1. The regions are taken in the order they are listed. A region whose cause names a member of FILE
+   that no earlier region named is tried, and any other region is passed over.
+2. The member's candidates are tried in this order: for a raw member's replaced or state region,
+   its `mat=` set to the block most of the region's cells hold in STRUCTURE; for a state region,
+   each state argument its keyword takes set to STRUCTURE's value; for a replaced region, its
+   `mat_slot=` set to each other slot whose members build the region's block; each whole number
+   its line writes, one more, one less, two more and two less, none below 0; `repeat=2` and
+   `repeat=3` when its keyword takes `repeat=` and its line leaves it out; and its `from=` and `to=`
+   grown over a missing region beside it, or cut back from an extra one that spans the box on two
+   axes and lies at one end of the third.
+3. Each candidate is appended as a line of its own to FILE, after the lines already kept, and the
+   text is built at the stamp with every pass `cairn compile` runs. A candidate that does not parse,
+   raises an error or drops a scope is discarded, and the build of every other is compared with
+   STRUCTURE.
+4. The candidate that leaves the fewest cells differing is kept, when that is fewer than the lines
+   kept so far leave; of two that leave as many, the earlier. The cells counted are those only one
+   side holds a block at, those where the two hold different ids, and the matched cells whose states
+   disagree.
+5. The search stops once three lines are kept, 48 candidates have been built, or no cell differs.
+
+A kept line is reported with the region it was found for, and that region's cause then reads as the
+change: `` `walls[0]` `height=3` too small `` for one whole number, `` `walls[0]` without
+`repeat=2` `` for a key its line leaves out, and `` `raw_fill[0]` `mat=minecraft:granite` where
+`mat=minecraft:stone` builds it `` otherwise. The patch lists its lines in order, with the metrics
+FILE reaches with all of them appended. When no candidate helps, there is no patch.
+
+### 12.2.4 The report
+
+FILE is built first, and its findings print on stderr as `cairn compile` prints them. An error, a
+scope the build drops ([Lint §11.1](/spec/lint/#lowering)), or a `@requires` floor the stamp falls
+short of ([Versioning and Editions](/spec/versioning-editions/)) refuses the comparison. The floor's
+refusal ends with a note naming the stamp, since the command takes no `--target`.
+
+The text report prints on stdout:
+
+- `STRUCTURE against FILE at EDITION VERSION, REASON`, the reason being the stamping rule of
+  [§12.4](#124-import-stamping-and-pitfalls) that chose the version;
+- each metric with its threshold, the block IoU and `state_accuracy` to three decimals rounded down
+  and residual raw as a percentage to a tenth rounded up, so a printed value never reads as meeting
+  a threshold its metric misses;
+- when more than one pair is compared, each pair's metrics on a line of its own;
+- `no cell differs`, or how many regions differ followed by the first ten, one per line, and how
+  many more there are;
+- the patch, after the metrics it reaches.
+
+When the lift does not converge, stderr carries `error[E_DECOMPILE_DIFF]:` with each metric that
+misses its threshold, a note giving the thresholds, and a note on what to do next: append the patch,
+edit what the regions name, or, when every cell matches and only residual raw falls short, name what
+the raw members build.
+
+`--format json` writes one document to stdout ([Lint §11.2](/spec/lint/#112-machine-readable-payload)):
+
+| Key | Value |
+|---|---|
+| `structure` | STRUCTURE's file name. |
+| `target` | `edition` and `version`, the stamp FILE is built at. |
+| `saved` | The version STRUCTURE was saved at, as an import's header names it. |
+| `converged` | Whether the lift converges. |
+| `code` | `"E_DECOMPILE_DIFF"`, present when it does not. |
+| `block_iou`, `state_accuracy`, `residual_ratio` | The metrics, unrounded. |
+| `thresholds` | The three thresholds, under the same keys. |
+| `counts` | `structure_blocks`, `built_blocks`, `both_blocks`, `matched`, `states_matched` and `residual`, the cells the metrics are ratios of. |
+| `bodies` | Each pair: `structure` and `source`, the name of each side's body, absent for a side with none; its metrics; its `counts`. |
+| `regions` | Every region: `kind`, `body`, `from` and `to` as `[x, y, z]`, `cells`, `mat`; `built` for a replaced region; `states` for a state region, each `key` with its `structure` and `built` values, `null` for a side that writes none; `cause`, its `kind` and, for the three that name one, its `member` (`keyword`, `id` when written, `address`, `line`); and `patch`, the kept line found for it. |
+| `patch` | Present when lines are kept: `edits` in order, the metrics reached, and their `counts`. |
+
+Where FILE does not build at the stamp, the document is `{"diagnostics": [ ... ]}` with the
+findings, as `cairn lower` writes it, and a refusal at the run level, a dropped scope or a floor,
+writes `{"diagnostics": []}` and says the rest on stderr.
+
+The exit code is 0 when the lift converges; 1 when it does not, when FILE does not parse, raises an
+error, drops a scope or needs a later target than the stamp, or when STRUCTURE cannot be read as its
+format or was saved past every shipped target; and 2 when either file cannot be located or
+STRUCTURE's extension names no format the command reads.
 
 ## 12.3 Three tiers of transliteration
 

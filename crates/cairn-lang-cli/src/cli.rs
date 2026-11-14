@@ -317,6 +317,33 @@ pub(crate) enum Command {
         )]
         out: Option<PathBuf>,
     },
+    /// Compare a structure file with what a .crn builds at the structure's stamp.
+    #[command(
+        long_about = "Build FILE at the target STRUCTURE is stamped with and compare the two cell \
+            by cell (`spec/ecosystem-interop` \"Diffing a lift\"): the block IoU, the \
+            state_accuracy and the residual raw share, every region of cells that differ with its \
+            material and likely cause (\"Regions and their causes\"), and up to three `edit` \
+            lines, each found by building FILE with it appended, that bring the build nearer \
+            STRUCTURE (\"The suggested patch\"). The stamp is read the way `cairn import` reads \
+            it (\"Import stamping and pitfalls\"), so FILE is built at the target the structure \
+            was saved at, or the nearest shipped one.\n\n\
+            A lift converges at block IoU >= 0.985, state_accuracy >= 0.995 and residual raw <= \
+            5%. Short of that, `E_DECOMPILE_DIFF` names each metric that falls short.\n\n\
+            Exits 0 when the lift converges; 1 when it does not, when FILE does not parse, raises \
+            an error, builds only part of itself or needs a later target than the stamp, or when \
+            STRUCTURE cannot be read as its format or is saved past every shipped target; and 2 \
+            when either file cannot be located or STRUCTURE's extension names no format this \
+            command reads"
+    )]
+    DiffBlocks {
+        /// Path to the structure file (`.nbt`, `.litematic`, `.schem` or `.mcstructure`).
+        structure: PathBuf,
+        /// Path to the .crn file to build and compare.
+        file: PathBuf,
+        /// Output format for the report.
+        #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
+        format: DiffFormat,
+    },
     /// Experimental: print one stage of a .crn source file's redstone pipeline as JSON.
     #[command(
         long_about = "Lower a .crn source file's `logic` bindings, sensors, and actuators through \
@@ -526,6 +553,15 @@ pub(crate) enum InfoFormat {
     Json,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub(crate) enum DiffFormat {
+    /// The metrics, the regions and the patch for humans, with `E_DECOMPILE_DIFF` on stderr
+    /// (default).
+    Text,
+    /// Pretty JSON of the whole report, every region listed, for tools.
+    Json,
+}
+
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum LowerFormat {
     /// Per-structure ASCII Y-slice plus a palette listing and the address of each member that
@@ -547,6 +583,15 @@ impl ParseFormat {
 }
 
 impl InfoFormat {
+    pub(crate) fn failure_report(self) -> FailureReport {
+        match self {
+            Self::Json => FailureReport::Json,
+            Self::Text => FailureReport::Text,
+        }
+    }
+}
+
+impl DiffFormat {
     pub(crate) fn failure_report(self) -> FailureReport {
         match self {
             Self::Json => FailureReport::Json,

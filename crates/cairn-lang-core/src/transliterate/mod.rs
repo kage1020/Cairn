@@ -20,6 +20,7 @@ use crate::block_array::{BlockState, Dims, PaletteIndex, TargetRegistry};
 use crate::diagnostic::Diagnostic;
 use crate::edition::Edition;
 
+pub(crate) use emit::spelled;
 pub use names::unit_names;
 
 /// The widest and deepest footprint one written body takes; a grid past it on `x` or `z` is
@@ -62,9 +63,15 @@ impl GridEntry {
 
     /// Whether `built` builds the same block as this entry at the target.
     fn is_built_as(&self, built: &BlockState) -> bool {
-        if built.id != self.state.id {
-            return false;
-        }
+        built.id == self.state.id && self.differing_states(built).is_empty()
+    }
+
+    /// Each property `built` holds at another value than this entry, as `(key, this entry's
+    /// value, built's value)`, a property one side leaves out read as the target's default.
+    pub(crate) fn differing_states(
+        &self,
+        built: &BlockState,
+    ) -> Vec<(String, Option<String>, Option<String>)> {
         let read = |state: &BlockState, key: &str| {
             state
                 .properties
@@ -72,13 +79,23 @@ impl GridEntry {
                 .or_else(|| self.defaults.get(key))
                 .cloned()
         };
-        let keys = built
+        let mut keys: Vec<&String> = Vec::new();
+        for key in built
             .properties
             .keys()
             .chain(self.state.properties.keys())
-            .chain(self.defaults.keys());
-        keys.filter(|key| !self.unread.contains(key))
-            .all(|key| read(built, key) == read(&self.state, key))
+            .chain(self.defaults.keys())
+        {
+            if !self.unread.contains(key) && !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+        keys.into_iter()
+            .filter_map(|key| {
+                let (expected, got) = (read(&self.state, key), read(built, key));
+                (expected != got).then(|| (key.clone(), expected, got))
+            })
+            .collect()
     }
 }
 

@@ -1,9 +1,11 @@
 //! Every shipped example that builds, written in each format of its edition, imported, and the
-//! import compiled for the same target: it builds the blocks the file holds.
+//! import compiled for the same target: it builds the blocks the file holds, and the voxel diff
+//! finds no cell of the file that it or the example builds otherwise.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims};
 use cairn_lang_core::transliterate::{CHUNK_FOOTPRINT, WrittenBody};
+use cairn_lang_core::voxel_diff::{Metrics, compare};
 use cairn_lang_formats::bedrock_structure::{prepare_mcstructure, read_mcstructure};
 use cairn_lang_formats::import::{ImportFormat, RawImport, import_raw};
 use cairn_lang_formats::java_structure::prepare_structure;
@@ -298,4 +300,53 @@ fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
         }
     }
     assert_eq!(unbuilt, Vec::<(String, Edition)>::new());
+}
+
+#[test]
+fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_and_its_source() {
+    for (name, source) in examples() {
+        for edition in [Edition::Java, Edition::Bedrock] {
+            let Some(version) = version_for(&source, edition) else {
+                continue;
+            };
+            let Ok(ir) = compile_source(&source, edition, &version) else {
+                continue;
+            };
+            let formats: &[ImportFormat] = match edition {
+                Edition::Java => &[
+                    ImportFormat::Nbt,
+                    ImportFormat::Litematic,
+                    ImportFormat::Schem,
+                ],
+                Edition::Bedrock => &[ImportFormat::Mcstructure],
+            };
+            for &format in formats {
+                for file in written(&ir, format, &version) {
+                    let import = imported(&file, format);
+                    let label = format!("{name} as {} at {edition} {version}", file.name);
+                    let units = &import.decoded.units;
+                    let lifted = compile_source(&import.transliteration.source, edition, &version)
+                        .unwrap_or_else(|codes| panic!("{label}: the import refuses {codes:?}"));
+                    let counts = compare(units, &lifted).counts;
+                    assert_eq!(
+                        counts.metrics(),
+                        Metrics {
+                            block_iou: 1.0,
+                            state_accuracy: 1.0,
+                            residual_ratio: 1.0,
+                        },
+                        "{label}: the import"
+                    );
+                    if ir.structures.len() == 1 {
+                        let metrics = compare(units, &ir).counts.metrics();
+                        assert_eq!(
+                            (metrics.block_iou, metrics.state_accuracy),
+                            (1.0, 1.0),
+                            "{label}: the source"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

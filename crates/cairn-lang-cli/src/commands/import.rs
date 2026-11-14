@@ -14,7 +14,7 @@ use crate::report::report_diagnostics;
 
 pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     let Some(format) = ImportFormat::from_path(file) else {
-        refuse_extension(file);
+        refuse_extension(file, "import");
         return ExitCode::from(2);
     };
     let out = out.map_or_else(|| default_out(file), Path::to_path_buf);
@@ -26,19 +26,11 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
         eprintln!("  note: give `--out` a `.crn` path, or leave it out to write `<stem>.raw.crn`");
         return ExitCode::from(2);
     }
-    let reader = match File::open(file) {
-        Ok(opened) => BufReader::new(opened),
-        Err(err) => {
-            eprintln!("error: cannot read `{}`: {err}", file.display());
-            return match err.kind() {
-                std::io::ErrorKind::NotFound => ExitCode::from(2),
-                _ => ExitCode::from(1),
-            };
-        }
+    let reader = match open_structure(file) {
+        Ok(reader) => reader,
+        Err(code) => return code,
     };
-    let name = file
-        .file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let name = file_name(file);
     let import = match import_raw(reader, format, &name) {
         Ok(import) => import,
         Err(err) => {
@@ -70,10 +62,28 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The refusal of a path whose extension names no format an import reads.
-fn refuse_extension(file: &Path) {
+/// Open a structure file, or report why not: exit 2 for a path that names nothing, 1 for anything
+/// else.
+pub(crate) fn open_structure(file: &Path) -> Result<BufReader<File>, ExitCode> {
+    File::open(file).map(BufReader::new).map_err(|err| {
+        eprintln!("error: cannot read `{}`: {err}", file.display());
+        match err.kind() {
+            std::io::ErrorKind::NotFound => ExitCode::from(2),
+            _ => ExitCode::from(1),
+        }
+    })
+}
+
+/// The name of `file`, without its directory.
+pub(crate) fn file_name(file: &Path) -> String {
+    file.file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+/// The refusal of a path whose extension names no format `cairn <command>` reads.
+pub(crate) fn refuse_extension(file: &Path, command: &str) {
     eprintln!(
-        "error: `{}` is not a structure file `cairn import` reads",
+        "error: `{}` is not a structure file `cairn {command}` reads",
         file.display()
     );
     let legacy = file
@@ -84,7 +94,7 @@ fn refuse_extension(file: &Path) {
         eprintln!(
             "  note: a `.schematic` stores the numeric block ids of the releases before 1.13, \
              which this version does not read; save it as a `.schem` from WorldEdit 7 or later \
-             and import that"
+             and name that"
         );
     }
     let names: Vec<String> = ImportFormat::ALL

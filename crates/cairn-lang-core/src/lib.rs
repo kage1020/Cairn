@@ -21,6 +21,7 @@ pub mod resolve;
 pub mod suggest;
 pub mod transliterate;
 pub(crate) mod version;
+pub mod voxel_diff;
 
 pub use ast::{DottedRef, Module, Statement};
 pub use block_array::{

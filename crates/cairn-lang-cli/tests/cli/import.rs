@@ -165,7 +165,7 @@ fn a_file_import_cannot_read_or_stamp_is_refused_with_nothing_written() {
                 "error: `{}` is not a structure file `cairn import` reads\n  note: a \
                  `.schematic` stores the numeric block ids of the releases before 1.13, which \
                  this version does not read; save it as a `.schem` from WorldEdit 7 or later \
-                 and import that\n{formats}\n",
+                 and name that\n{formats}\n",
                 legacy.display()
             ),
         ),

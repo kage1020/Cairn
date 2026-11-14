@@ -5,6 +5,7 @@ mod common;
 mod check;
 mod compile;
 mod contract;
+mod diff_blocks;
 mod docs;
 mod import;
 mod info;

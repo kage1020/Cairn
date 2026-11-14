@@ -314,7 +314,7 @@ fn chunks(name: &str, dims: Dims) -> Vec<Chunk> {
 }
 
 /// `state` as a `mat=` writes it: the id, and its properties sorted by name in brackets.
-pub(super) fn spelled(state: &BlockState) -> String {
+pub(crate) fn spelled(state: &BlockState) -> String {
     let (id, properties) = state.canonical_key();
     if properties.is_empty() {
         return id.to_owned();

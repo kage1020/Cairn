@@ -28,6 +28,7 @@ use clap::Parser;
 use cli::{Cli, Command, ImportMode};
 use commands::check::run_check;
 use commands::compile::run_compile;
+use commands::diff_blocks::run_diff_blocks;
 use commands::docs::run_docs;
 use commands::import::run_import;
 use commands::info::run_info;
@@ -95,6 +96,11 @@ fn main() -> ExitCode {
             mode: ImportMode::Raw,
             out,
         }) => run_import(&file, out.as_deref()),
+        Some(Command::DiffBlocks {
+            structure,
+            file,
+            format,
+        }) => run_diff_blocks(&structure, &file, format),
         Some(Command::Docs { page, title, toc }) => {
             run_docs(page.as_deref(), title.as_deref(), toc)
         }

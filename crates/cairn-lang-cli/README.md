@@ -19,6 +19,7 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 | `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--edition`, `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot; the ASCII dump lists each member that built a cell by its address. Without `--edition` it pins no edition, so it leaves out what `@edition` guards hold and every struct's circuit. |
 | `cairn compile <file.crn> --edition <e>` | Write the structure artifacts and a lockfile. `--target`, `--structure-format`, `--out`, `--lock`. |
 | `cairn import <file>` | Write a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file as a `.crn` of raw members that compiles back to its blocks, stamped with the target it compiles for. `--mode raw`, `--out`. See below. |
+| `cairn diff-blocks <structure> <file.crn>` | Build the source at the structure file's stamp and compare the two cell by cell: the metrics, the regions that differ with their likely causes, and a suggested patch of `edit` lines. `--format text\|json`. Exits 1 with `E_DECOMPILE_DIFF` until the lift converges. See below. |
 | `cairn synth <file.crn>` | Print one redstone pipeline stage as JSON. Experimental; see below. |
 | `cairn docs [page] [title]` | Print a page of the documentation site as Markdown, from the copy embedded in the binary, or list the pages. `--toc` lists a page's headings. See below. |
 
@@ -39,8 +40,8 @@ Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 | Code | Meaning |
 |---|---|
 | `0` | Success. Warnings do not change it. |
-| `1` | A parse failure, an `Error`-severity diagnostic, an I/O error, or a run-level refusal such as a `--target` the edition does not ship or a structure file `cairn import` cannot read, stamp or write as raw members. |
-| `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`, a `cairn import` of a file whose extension names no format it reads, or its `--out` naming that file), or `cairn docs` was asked for a page or part the binary does not carry, for a title more than one part has, or for a `#fragment` together with a title or `--toc`. |
+| `1` | A parse failure, an `Error`-severity diagnostic, an I/O error, a run-level refusal such as a `--target` the edition does not ship or a structure file `cairn import` cannot read, stamp or write as raw members, or a lift `cairn diff-blocks` finds has not converged. |
+| `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`, a `cairn import` or `cairn diff-blocks` of a file whose extension names no format it reads, or an import's `--out` naming that file), or `cairn docs` was asked for a page or part the binary does not carry, for a title more than one part has, or for a `#fragment` together with a title or `--toc`. |
 
 A reader of stdout that stops early (`cairn lower f.crn | head -1`) does not change the code: output written after stdout has been closed is dropped, and the command exits as it would have with stdout open. This holds for stdout only: diagnostics go to stderr, and a stderr whose reader has gone still ends the run with a panic.
 
@@ -53,6 +54,12 @@ A run-level refusal is reported on stderr and by the exit code in both output fo
 Every run warns with `W_SEMANTIC_LOSS`: once that the import recovers blocks rather than intent, and once for each thing in the file a raw member cannot carry, such as a chest's contents, an entity or a structure void ([ecosystem-interop "Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/)). Naming what the members build is a refactor of the written source, not a mode of the command, so `raw` is its one `--mode`.
 
 The command is a thin wrapper over [`cairn_lang_formats::import`](../cairn-lang-formats/README.md), which decodes, stamps and transliterates; it reads the file, writes the source and prints what the library returns.
+
+## `cairn diff-blocks`
+
+`cairn diff-blocks house.litematic house.lifted.crn` closes the lift loop ([ecosystem-interop "Diffing a lift"](https://cairn.kage1020.com/spec/ecosystem-interop/)). It reads the structure file as `cairn import` does, builds the source at the target the file is stamped with, and compares the two cell by cell. The report gives the block IoU, the `state_accuracy` and the share of the build raw members still build, each against its threshold (≥ 0.985, ≥ 0.995, ≤ 5%), then every region of cells that differ with its block and the member that likely caused it ([ecosystem-interop "Regions and their causes"](https://cairn.kage1020.com/spec/ecosystem-interop/)), then up to three `edit` lines that bring the build nearer the file, each found by building the source with it appended ([ecosystem-interop "The suggested patch"](https://cairn.kage1020.com/spec/ecosystem-interop/)). Until all three metrics meet their thresholds the run exits 1 with `E_DECOMPILE_DIFF` on stderr. `--format json` prints the whole report, every region listed, as one document.
+
+The command builds the source with the passes `cairn compile` runs, and the comparison, the regions and the patch search are [`cairn_lang_core::voxel_diff`](../cairn-lang-core/README.md), which an evaluation harness can call for the same metrics.
 
 ## `cairn docs`
 
