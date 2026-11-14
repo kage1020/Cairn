@@ -166,6 +166,7 @@ mod tests {
             | C::StructureTooLarge
             | C::PaletteTooLarge
             | C::InvalidWalkwayIdent
+            | C::PlacementOverlap
             | C::PhaseConflict => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
@@ -249,6 +250,7 @@ mod tests {
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_INVALID_MEMBER",
                 "E_PARITY_UNSUPPORTED",
+                "E_PLACEMENT_OVERLAP",
                 "E_STATE_DOMAIN",
                 "E_STATE_UNMAPPED",
                 "E_UNKNOWN_ABSTRACT_TOKEN",

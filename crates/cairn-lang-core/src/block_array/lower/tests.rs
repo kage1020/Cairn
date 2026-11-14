@@ -100,6 +100,8 @@ fn one_placed_row(
                 origin,
                 dims,
             },
+            row: 0..0,
+            anchor: PlaceAnchor::WorldOrigin,
             walls: WallColumn::default(),
             cut: HashSet::new(),
         },

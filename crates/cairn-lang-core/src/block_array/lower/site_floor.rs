@@ -10,11 +10,17 @@ use crate::error::Span;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{BlockArray, PaletteIndex, Placement};
 
+use super::anchor::PlaceAnchor;
+
 /// One `place` row that lowered, with the masonry and openings its body lowered with.
 ///
 /// Not on [`Placement`], which is hashed into `resolved_ir_hash`.
 pub(super) struct PlacedBody {
     pub(super) placement: Placement,
+    /// Byte range of the `place` row.
+    pub(super) row: Span,
+    /// The origin selector the row was placed by.
+    pub(super) anchor: PlaceAnchor,
     /// The rows this body's `walls` painted, as the openings phase cut against them.
     pub(super) walls: WallColumn,
     /// The doors and windows the openings phase cut, by member span.

@@ -96,6 +96,10 @@ low-`x`, low-`z` corner, and `dims` is its full extent: the `size=WxH` footprint
 A `place` with no origin selector or more than one, an `at=` other than `origin`, or an `east_of=`
 / `north_of=` whose value is not a label is `E_INVALID_PLACE_ORIGIN`.
 
+A selector keeps its row clear of the row it names and of no other, so a second `at=origin`, or a
+chain of relative rows that comes back alongside another, can land on a placement. Two rows of one
+site whose boxes share a cell are `E_PLACEMENT_OVERLAP` ([Lint](/spec/lint/#sites-and-placements)).
+
 `gap=` belongs to the two relative selectors. An `at=origin` row is anchored absolutely and reads
 no distance, so a `gap=` written beside it is read by nothing and reported as `W_IGNORED_ARGUMENT`
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). The argument is real, and which of the two the
@@ -298,4 +302,5 @@ adds a note to `E_PARTIAL_BUILD` and one to the count of scopes that did not low
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |
 | `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. When every cell of the straight L overlaps a placement, or the straight L alone is past the router's search-area cap, nothing is laid and the walkway is lost. |
 | `W_DUPLICATE_WALKWAY` | The same two ports, in either order, already have a walkway laid in this site; the duplicate row is dropped. |
+| `E_PLACEMENT_OVERLAP` | The strip lays a cell inside the box of a placement other than the two it joins, as under that placement's eaves: the router keeps a strip off placement floors only ([Lint](/spec/lint/#sites-and-placements)). |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port id cannot be carried in the walkway's name ([Lint](/spec/lint/)); the row is dropped. |

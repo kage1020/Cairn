@@ -23,6 +23,7 @@ mod palette_capacity;
 mod palette_is_referenced;
 mod parity_unsupported;
 mod phase_order;
+mod placement_overlap;
 mod port_reads_the_wall_that_paints;
 mod port_rejection_reason;
 mod raw;
