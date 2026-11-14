@@ -86,6 +86,47 @@ fn each_member_line_of_a_struct_or_def_body_carries_its_address() {
     assert_eq!(found, expected);
 }
 
+#[test]
+fn each_edit_line_lists_its_target_and_the_keys_it_sets() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write_source(
+        tmp.path(),
+        "edits.crn",
+        "edit window[class=vent][level=floor2] set shape=arch\n\n\
+         struct s size=5x5\n  window side=front offset=1\n\n\
+         edit level[1].window@front[0] set mat_slot=accent y=2\n",
+    );
+    let out = cairn("parse", &[path.to_str().unwrap()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let ident = |key: &str, value: &str| serde_json::json!({"key": key, "value": {"kind": "Ident", "value": value}});
+    assert_eq!(
+        parsed["edits"],
+        serde_json::json!([
+            {
+                "target": {
+                    "kind": "Selector",
+                    "keyword": "window",
+                    "attrs": [ident("class", "vent"), ident("level", "floor2")],
+                },
+                "set": [ident("shape", "arch")],
+            },
+            {
+                "target": {"kind": "Address", "address": "level[1].window@front[0]"},
+                "set": [
+                    ident("mat_slot", "accent"),
+                    {"key": "y", "value": {"kind": "Int", "value": 2}},
+                ],
+            },
+        ]),
+    );
+}
+
 /// Each line of `body` and of the bodies nested in it, as `(keyword, address)`.
 fn collect_addresses(body: &serde_json::Value, found: &mut Vec<(String, Option<String>)>) {
     for line in body.as_array().into_iter().flatten() {
