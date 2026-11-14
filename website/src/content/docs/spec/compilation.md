@@ -16,7 +16,7 @@ fluids      fill fluid= / water
 logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
 logic_place pads, risers and cells laid under the floor → Placement IR
 logic_route routing, delay insertion and legalization over the Placement IR, delay determined
-raw         raw_block / raw_fill (the escape hatch)
+raw         raw_block / raw_fill / raw_repeat (the escape hatch)
 ```
 
 A `fill` is `massing` with a `mat_slot=` and `fluids` with a `fluid=`
@@ -213,7 +213,7 @@ The volume a struct lowers into is derived, never written:
 ```
 Dims.x = size.W + 2 × overhang
 Dims.z = size.H + 2 × overhang
-Dims.y = void + 1 + wall_top + roof_extra
+Dims.y = void + max(1 + wall_top + roof_extra, imported)
 ```
 
 Each term counts only the members that will paint:
@@ -224,19 +224,22 @@ Each term counts only the members that will paint:
   enclosing level's offset and `0` in the body.
 - `roof_extra`: the tallest per-kind contribution from [§4.3](#43-gable-roof-voxel-rules)–[§4.6](#46-flat-roof-voxel-rules).
 - `1`: the base plane, which every struct has.
+- `imported`: one more than the highest row an `origin=imported` raw member names, the last copy of
+  its `raw_repeat` included, `N` being the enclosing level's offset ([Materials and Themes
+  §7.4](/spec/materials-themes/#74-raw-blocks)), and `0` with none.
 - `void`: the layers a `circuit` line reserves under the base plane once the struct's logic lays a
   circuit in them, raising every other row by as many, while a `def` placed in a `site` has its
   origin lowered by as many ([Redstone §14.5](/spec/redstone/#145-place-and-route)), and `0`
   otherwise.
 
-Members inside a `level` count in all three, at their offset: `walls height=3` written directly
-gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
+Members inside a `level` count in each, at their offset: `walls height=3` written directly gives
+`Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, `chest`, every
-sensor and actuator, `fill`, `raw_block` and `raw_fill` read `N` as the base their geometry is
-measured from. A `floor` and a `roof` are planes a struct has one of, and what one under a raised
-`level` builds is reserved for a later extension: under `level y=N` with `N > 0` each fires
-`W_DEFERRED_MEMBER` and lowers to nothing.
+sensor and actuator, `fill`, `raw_block` and `raw_fill`, under a `raw_repeat` or not, read `N` as
+the base their geometry is measured from. A `floor` and a `roof` are planes a struct has one of, and
+what one under a raised `level` builds is reserved for a later extension: under `level y=N` with
+`N > 0` each fires `W_DEFERRED_MEMBER` and lowers to nothing.
 
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under

@@ -1094,6 +1094,22 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  slot wall -> minecraft:stone\n",
         Reject,
     ),
+    // -- raw_repeat -------------------------------------------------------
+    (
+        "raw_repeat_with_its_members_under_it",
+        "struct s size=9x3\n  raw_repeat count=3 step=3,0,0\n    raw_fill mat=minecraft:glass_pane from=0,1,0 to=1,2,0 origin=imported\n    raw_block mat=minecraft:torch at=2,1,0\n",
+        Accept,
+    ),
+    (
+        "raw_repeat_under_an_edition_guard",
+        "def d size=5x5\n  @edition java\n    raw_repeat count=2 step=0,1,0\n      raw_block mat=minecraft:light at=1,1,1\n",
+        Accept,
+    ),
+    (
+        "raw_repeat_with_its_member_after_a_colon",
+        "struct s size=9x3\n  raw_repeat count=3 step=3,0,0: raw_fill mat=minecraft:glass_pane from=0,1,0 to=1,2,0\n",
+        Reject,
+    ),
     // -- edition guards ---------------------------------------------------
     (
         "edition_guard_in_a_struct_body",

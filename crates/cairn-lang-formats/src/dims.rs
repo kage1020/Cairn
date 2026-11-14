@@ -56,3 +56,22 @@ pub(crate) fn list_volume(block_array: &BlockArray) -> Result<usize, VolumeError
 pub(crate) fn fits_list_limit(len: usize) -> bool {
     i32::try_from(len).is_ok()
 }
+
+/// The extents a stored `size` of three ints names, or `None` for any other shape or a negative.
+pub(crate) fn read_extents(size: Option<&[i32]>) -> Option<Dims> {
+    let [x, y, z] = size? else {
+        return None;
+    };
+    Some(Dims {
+        x: u32::try_from(*x).ok()?,
+        y: u32::try_from(*y).ok()?,
+        z: u32::try_from(*z).ok()?,
+    })
+}
+
+/// The voxel count of `dims`, saturated at `u64::MAX`.
+pub(crate) fn saturating_volume(dims: Dims) -> u64 {
+    u64::from(dims.x)
+        .saturating_mul(u64::from(dims.y))
+        .saturating_mul(u64::from(dims.z))
+}

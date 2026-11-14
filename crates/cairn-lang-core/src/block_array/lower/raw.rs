@@ -1,5 +1,6 @@
 //! Painting a `raw_block` or `raw_fill`: the block id its `mat=` names, written as given into the
-//! cells its triples name (`spec/materials-themes` "Raw blocks").
+//! cells its triples name and those of each copy its `raw_repeat` asks for (`spec/materials-themes`
+//! "Raw blocks").
 
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
@@ -11,8 +12,9 @@ use crate::block_array::material::{IdOrigin, block_id_state, validated_id};
 use crate::resolve::{TokenKind, classify_token};
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::cell_box::{Shape, written_cells};
+use super::cell_box::{Shape, repeated_cells};
 use super::members::StructCtx;
+use super::repeat::origin_refusal;
 use super::token_diag::{IdSite, check_state_literal, diag_undeclared_id};
 
 /// The note on a `mat=` that is missing or no block id, saying what one is.
@@ -29,16 +31,20 @@ pub(super) fn fill_raw(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let repeat = ctx.repeat_of(member);
     // `mat=` is judged even where the cells are refused or deferred, as nothing else judges it.
-    let cells =
-        written_cells(member, shape, y_offset, ctx).map_err(|refusal| diagnostics.push(*refusal));
+    let cells = repeated_cells(member, shape, y_offset, repeat, ctx)
+        .map_err(|refusal| diagnostics.push(*refusal));
+    let origin = origin_refusal(member).map(|refusal| diagnostics.push(refusal));
     let state = raw_state(member, ctx, diagnostics);
-    let (Ok(cells), Some(state)) = (cells, state) else {
+    let (Ok(cells), None, Some(state)) = (cells, origin, state) else {
         return;
     };
     let idx = palette.intern(state);
-    for cell in cells.cells() {
-        canvas.paint(cell, || idx);
+    for shift in repeat.shifts() {
+        for cell in cells.shifted(shift).cells() {
+            canvas.paint(cell, || idx);
+        }
     }
 }
 

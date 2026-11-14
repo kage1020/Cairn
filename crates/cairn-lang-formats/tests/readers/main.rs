@@ -4,4 +4,6 @@
 pub mod common;
 
 mod litematic;
+mod mcstructure;
 mod schem;
+mod structure;

@@ -1,6 +1,8 @@
 //! A [`BlockArray`] as a Java structure file: `size`, `palette`, `blocks`, each with its block
 //! entity's `nbt`, an empty `entities` and `DataVersion`. Lowering never fills the IR's entities,
-//! so none is written.
+//! so none is written. [`read_structure`] reads such a file back, whichever tool saved it.
+
+mod read;
 
 use std::collections::HashMap;
 
@@ -15,6 +17,8 @@ use thiserror::Error;
 use crate::block_id::is_concrete_id;
 use crate::data_version::JavaTarget;
 use crate::dims::{VolumeError, dim_to_i32, dims_to_i32, fits_list_limit, list_volume};
+
+pub use read::{StoredStructure, StructureReadError, read_structure};
 
 /// Why a [`BlockArray`] cannot be written as a Java structure.
 #[derive(Debug, Error)]

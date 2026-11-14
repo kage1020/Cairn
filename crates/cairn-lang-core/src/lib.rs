@@ -18,6 +18,7 @@ pub mod parse;
 pub(crate) mod prose;
 pub mod resolve;
 pub mod suggest;
+pub mod transliterate;
 pub(crate) mod version;
 
 pub use ast::{DottedRef, Module, Statement};

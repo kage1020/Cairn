@@ -29,9 +29,15 @@ game, since `place` has no rotation, so a fixed frame does not fix the facing. A
 `y=0` comes from `level y=N`
 ([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)).
 
-**The type of the reverse-direction IR:** one IR that can degenerate, or separate Intent IR and
-Raw Geometry IR types. The tentative policy is to share the block-array layer and split types at the
-member layer above it ([Architecture](/spec/architecture/)).
+**The type of the reverse-direction IR:** one IR that can degenerate, or separate Intent IR and Raw
+Geometry IR types. Decided: one IR at both layers. The reverse direction reads the block-array layer
+as the forward one writes it, and above it an import writes raw members of the ordinary Intent IR
+rather than a type of its own ([Architecture
+§3.2](/spec/architecture/#32-the-intent-ir-is-rich-and-carries-invariants)). A raw member is already
+the member that names its block and skips the slot and the theme, and the source an import writes is
+checked by compiling it back to the block array it came from, so the check is the compiler that
+builds every source. A Raw Geometry IR would need a lowering and a check of its own for the same
+blocks, and a lift would cross from one type to the other instead of refactoring one source.
 
 **Legacy `.schematic`** from before 1.13 is unsupported in v1. A numeric-ID mapping could be
 considered later as an option.

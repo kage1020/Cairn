@@ -10,7 +10,6 @@ use crate::block_array::{BlockState, PaletteIndex};
 
 use super::canvas::{Canvas, ScopePalette};
 use super::cell_box::Cell;
-use super::phase::Phase;
 
 /// How high a wall's side stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +108,8 @@ struct Grid<'a> {
     canvas: &'a Canvas,
     palette: &'a ScopePalette,
     joins: Vec<Joins>,
+    /// Per member of the flattened paint list, whether the blocks it placed keep their state.
+    keeps_state: &'a [bool],
 }
 
 /// The cell `face` steps `cell` into, or `None` past the grid's low edge.
@@ -151,12 +152,13 @@ impl Grid<'_> {
 
 /// Set the connection states of every pane, fence, wall, fence gate, chest and dust on `canvas`
 /// that its state does not write, each repainted under the member that painted it, and answer
-/// the keys set at each cell; a block a raw member placed keeps its state (`spec/materials-themes`
-/// "Raw blocks").
+/// the keys set at each cell; a block placed by a member `keeps_state` marks, a raw member's
+/// without `origin=imported`, keeps its state (`spec/materials-themes` "Raw blocks").
 pub(super) fn derive_connections(
     canvas: &mut Canvas,
     palette: &mut ScopePalette,
     registry: &dyn TargetRegistry,
+    keeps_state: &[bool],
 ) -> HashMap<Cell, Vec<String>> {
     let joins: Vec<Joins> = (0..palette.len())
         .map(|slot| {
@@ -168,6 +170,7 @@ pub(super) fn derive_connections(
         canvas,
         palette,
         joins,
+        keeps_state,
     };
     let mut joiners = gather(&grid);
     if joiners.is_empty() {
@@ -208,6 +211,11 @@ pub(super) fn derive_connections(
                 .filter(|key| !joiner.state.properties.contains_key(*key))
                 .cloned()
                 .collect();
+            debug_assert!(
+                keys.iter()
+                    .all(|key| joiner.kind.connection_keys().contains(&key.as_str())),
+                "{keys:?} reach past `JoinKind::connection_keys`",
+            );
             (!keys.is_empty()).then_some((joiner.cell, state, keys))
         })
         .collect();
@@ -235,8 +243,8 @@ fn gather(grid: &Grid<'_>) -> Vec<Joiner> {
         let raw = grid
             .canvas
             .owner_at(cell)
-            .and_then(|owner| grid.canvas.phase_of(owner))
-            == Some(Phase::Raw);
+            .and_then(|owner| grid.keeps_state.get(owner as usize).copied())
+            .unwrap_or(false);
         // A side a raw block's state leaves out stands as the block's default, which joins nothing.
         let joined = Face::SIDES.map(|side| match written_side(&state, kind, side) {
             Some(written) => written,

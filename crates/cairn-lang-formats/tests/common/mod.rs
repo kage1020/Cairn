@@ -7,8 +7,8 @@ use cairn_lang_core::block_array::{
     lower_to_block_array,
 };
 use cairn_lang_core::resolve::{DroppedIntent, declared_version_floors, versions_satisfying};
-use cairn_lang_core::{Edition, lower, parse, resolve};
-use cairn_lang_formats::bedrock_structure::ParityNote;
+use cairn_lang_core::{Edition, Severity, check, lower, parse, resolve};
+use cairn_lang_formats::bedrock_structure::{BedrockVolume, ParityNote};
 use cairn_lang_formats::data_version::BedrockTarget;
 use cairn_lang_formats::registry::{RegistryPack, VersionStates, builtin_pack};
 use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
@@ -97,6 +97,40 @@ pub fn lower_source(source: &str, edition: Edition, mc_version: Option<&str>) ->
     )
 }
 
+/// The block-array IR `source` compiles to for `edition` at `mc_version`, as `cairn compile`
+/// checks and lowers it, or the codes of the errors that refuse it.
+///
+/// # Errors
+///
+/// The codes, when a pass raises an error or `source` does not parse.
+pub fn compile_source(
+    source: &str,
+    edition: Edition,
+    mc_version: &str,
+) -> Result<BlockArrayIr, Vec<String>> {
+    let module = parse(source).map_err(|err| vec![err.user_message()])?;
+    let ir = lower(&module);
+    let mut findings = check(&module, &ir, Some(edition));
+    let resolution = resolve(&ir, Some(edition));
+    findings.extend(resolution.diagnostics.iter().cloned());
+    let mut built = lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&builtin_pack(edition).view(Some(mc_version))),
+    );
+    findings.append(&mut built.diagnostics);
+    let errors: Vec<String> = findings
+        .iter()
+        .filter(|finding| finding.severity() == Severity::Error)
+        .map(|finding| finding.code.as_str().to_owned())
+        .collect();
+    if errors.is_empty() {
+        Ok(built)
+    } else {
+        Err(errors)
+    }
+}
+
 /// [`lower_source`] over the shipped example `name`.
 pub fn lower_example(name: &str, edition: Edition, mc_version: Option<&str>) -> BlockArrayIr {
     lower_source(&example_source(name), edition, mc_version)
@@ -132,6 +166,25 @@ pub fn admitted_versions(pack: &RegistryPack, source: &str, edition: Edition) ->
     versions_satisfying(&pack.version_order(), &floors, &considered)
         .into_iter()
         .map(str::to_owned)
+        .collect()
+}
+
+/// A `.mcstructure` cell as read: its block and its second layer's, each a name and its states.
+pub type BedrockCell = (Option<(String, Compound)>, Option<(String, Compound)>);
+
+/// Each cell of `volume`, in its voxel order.
+pub fn bedrock_cells(volume: &BedrockVolume) -> Vec<BedrockCell> {
+    let named = |slot: &Option<PaletteIndex>| {
+        slot.map(|slot| {
+            let block = &volume.palette[usize::from(slot.0)];
+            (block.name.clone(), block.states.clone())
+        })
+    };
+    volume
+        .blocks
+        .iter()
+        .zip(&volume.liquids)
+        .map(|(block, liquid)| (named(block), named(liquid)))
         .collect()
 }
 

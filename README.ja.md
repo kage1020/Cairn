@@ -87,7 +87,8 @@ semantic-sensitive:      (none)
 
 - `cairn parse` / `check` / `info` / `lower` / `compile`
 - 1 つのソースから Java の `.nbt`、Litematica の `.litematic`、Sponge Schematic の `.schem` のいずれかと、Bedrock の `.mcstructure` を出力
-- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
+- `cairn import`。この 4 つのどのファイルも、同じブロックへコンパイルし直せる生のメンバーの `.crn` として読み戻します。復元するのはブロックとその規則性で、意図ではないことを `W_SEMANTIC_LOSS` で示します。
+- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill` / `raw_repeat`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
@@ -101,7 +102,7 @@ semantic-sensitive:      (none)
 - テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
 - `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
-- 既存の schematic の読み込み
+- `cairn diff-blocks` と、取り込んだものを壁や窓やテーマへリフトするループ
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
 ## 基本の考え方

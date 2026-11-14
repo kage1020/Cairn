@@ -468,6 +468,30 @@ fn a_raw_block_keeps_its_state_and_a_neighbour_still_joins_it() {
 }
 
 #[test]
+fn an_imported_raw_block_takes_the_sides_its_state_leaves_out_from_its_neighbours() {
+    // `spec/materials-themes` "Raw blocks".
+    let out = lowered_with(
+        &yard(
+            "@cobblestone",
+            1,
+            "raw_block mat=minecraft:glass_pane at=2,1,2 origin=imported\n  \
+             raw_block mat=minecraft:glass_pane[west=false] at=4,1,2 origin=imported",
+        ),
+        &Rules,
+    );
+    assert_eq!(out.diagnostics, []);
+    let ba = only_structure(&out);
+    assert_eq!(
+        at(ba, 2, 1, 2),
+        "minecraft:glass_pane[east=true,north=false,south=false,west=true]",
+    );
+    assert_eq!(
+        at(ba, 4, 1, 2),
+        "minecraft:glass_pane[east=false,north=true,south=false,west=false]",
+    );
+}
+
+#[test]
 fn a_wall_under_a_raw_pane_reads_only_the_sides_the_pane_writes() {
     // `spec/materials-themes` "Raw blocks".
     let raw = lowered_with(

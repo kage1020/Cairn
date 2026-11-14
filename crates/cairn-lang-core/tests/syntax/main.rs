@@ -21,6 +21,7 @@ mod parse_diagnostic;
 mod parse_refusal_positions;
 mod parse_truth_rows;
 mod raw_directive_values;
+mod raw_repeat;
 mod span_propagation;
 mod state_literals;
 

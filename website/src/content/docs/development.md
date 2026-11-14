@@ -28,7 +28,7 @@ Each crate maps back to the spec chapter it implements:
 | [`cairn-lang-core`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-core/README.md) | Parser, IR, resolver, lint | lib |
 | [`cairn-lang-cli`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-cli/README.md) | The `cairn` binary | bin |
 | [`cairn-lang-nbt`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-nbt/README.md) | Java / Bedrock NBT codec | lib |
-| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.litematic` / `.schem` / `.mcstructure` writers, `.litematic` and `.schem` readers, registry packs, portability | lib |
+| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.litematic` / `.schem` / `.mcstructure` writers and readers, the importer, registry packs, portability | lib |
 | [`cairn-lang-redstone`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-redstone/README.md) | Logic synthesis, place-and-route, and the tick simulator that checks a circuit against its assertions | lib |
 | [`cairn-lang-lsp`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-lsp/README.md) | Language Server Protocol | lib + bin |
 | [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) | WebAssembly bindings | cdylib + rlib |
@@ -255,11 +255,13 @@ to bytes, streamed so its peak memory does not grow with the volume (`tests/writ
 Importing it, the reverse direction, needs two more things:
 
 1. A reader from bytes to voxels, built on `cairn-lang-nbt`'s pull reader so one region or one
-   list item is in memory at a time. `.litematic` and `.schem` have one, returning each region
-   or schematic as a `BlockVolume`.
-2. An `(edition, version)` provenance stamp on import
-   ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)), which no
-   format has yet.
+   list item is in memory at a time. Each of the four formats has one, returning each region or
+   structure as a `BlockVolume`, or a `.mcstructure` as a `BedrockVolume`.
+2. An arm in `import::decode_structure`, which turns what the reader returns into block grids and
+   reads the version the file was saved at, the `(edition, version)` provenance stamp is chosen
+   from ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)).
+   Core's `transliterate` writes the `.crn` from the grids whatever the format, so nothing past
+   the decode is per format.
 
 If you find yourself reaching into `cairn-lang-core` to add format-specific fields, format concerns
 are leaking into the block-array IR. Discuss it before merging.

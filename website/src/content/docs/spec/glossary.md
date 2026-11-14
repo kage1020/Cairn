@@ -122,9 +122,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   `verified: true` and `member_version_sensitivity`, plus `placements` and `walkways` for a source
   with a `site`. See
   [versioning-editions §10.6](/spec/versioning-editions/#106-provenance-and-lock).
-- **Provenance stamp.** `(edition, version)` recorded onto the block-array IR on import, mapped from
-  the format itself (`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java). See
-  [ecosystem-interop §12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls).
+- **Provenance stamp.** `(edition, version)` an import stamps onto the source it writes: the edition
+  the format's (`.nbt`, `.litematic` and `.schem` → java, `.mcstructure` → bedrock), and the shipped
+  target at or nearest after the version the file was saved at. See [ecosystem-interop
+  §12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls).
 
 ## Redstone
 
@@ -189,7 +190,8 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   L1 (spatial compression, no naming); L2 is the LLM's job (naming → `wall`, `mat_slot`,
   `theme`). See [ecosystem-interop §12.3](/spec/ecosystem-interop/#123-three-tiers-of-transliteration).
 - **`raw_fill` / `raw_block` / `raw_repeat`.** Escape-hatch primitives that name a block id
-  directly, skipping slot and theme; `raw_block` and `raw_fill` are built today. Faithful
-  transliteration writes them, and its instances carry `origin=imported` so they are not treated as
-  first-class design DSL. See
+  directly, skipping slot and theme; a `raw_repeat` writes the `raw_block` and `raw_fill` lines
+  under it again at a fixed step. Faithful transliteration writes them, and its instances carry
+  `origin=imported` so they are not treated as first-class design DSL: an imported raw member sizes
+  the volume and takes the connection states it leaves out from its neighbours. See
   [materials-themes §7.4](/spec/materials-themes/#74-raw-blocks).

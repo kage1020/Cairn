@@ -29,6 +29,7 @@ use super::fill::pour_fluids;
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::paint_member;
 use super::phase::Phase;
+use super::repeat::{imported_rows, is_imported};
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
 use super::token_diag::{NamedBy, diag_derived_state_domain, diag_state_unmapped};
 use super::written::{Written, written_members};
@@ -81,7 +82,7 @@ pub(super) fn lower_body_to_block_array<'a>(
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
 
     // Flattened once: sizing and the phase buckets must read the same paint set.
-    let flattened = flatten_members(body.members, diagnostics);
+    let (flattened, repeats) = flatten_members(body.members, diagnostics);
     // Unflattened: a roof a `level` drops is still written.
     let written_members = written_members(body.members);
     // A scope that reads no `mat_slot=` loses nothing to a missing theme (`spec/lint` "Materials
@@ -100,10 +101,14 @@ pub(super) fn lower_body_to_block_array<'a>(
     let max_wall_top = max_wall_top(&painting_walls);
     let wall_column = WallColumn::from_walls(painting_walls.iter().copied());
     let roof_extra = max_roof_extra_height(&flattened, interior_w, interior_h, overhang);
+    let imported = imported_rows(&flattened, &repeats);
 
     let dims = Dims {
         x: interior_w.saturating_add(overhang.saturating_mul(2)),
-        y: 1u32.saturating_add(max_wall_top).saturating_add(roof_extra),
+        y: 1u32
+            .saturating_add(max_wall_top)
+            .saturating_add(roof_extra)
+            .max(imported),
         z: interior_h.saturating_add(overhang.saturating_mul(2)),
     };
     if !dims.fits_volume_budget() {
@@ -124,8 +129,9 @@ pub(super) fn lower_body_to_block_array<'a>(
         wall_top: max_wall_top,
         rise: roof_extra,
         wall_column,
-        written: Written::of(&written_members, interior_w, interior_h),
+        written: Written::of(&written_members, interior_w, interior_h).raised_to(imported),
         patched,
+        repeats,
     };
     let (canvas, split_doors, derived) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
@@ -317,7 +323,11 @@ fn paint_phases(
     palette: &mut ScopePalette,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Canvas, Vec<u32>, HashMap<Cell, Vec<String>>) {
-    let PhaseBuckets { by_phase, phases } = buckets;
+    let PhaseBuckets {
+        by_phase,
+        phases,
+        keeps_state,
+    } = buckets;
     let walls: Vec<u32> = by_phase[Phase::Massing.index()]
         .iter()
         .filter(|(_, _, member)| matches!(member.role, MemberRole::Walls))
@@ -339,7 +349,7 @@ fn paint_phases(
         }
     }
     let derived = ctx.registry.map_or_else(HashMap::new, |registry| {
-        derive_connections(&mut canvas, palette, registry)
+        derive_connections(&mut canvas, palette, registry, &keeps_state)
     });
     let split = split_doors(&hung, &canvas);
     (canvas, split, derived)
@@ -351,6 +361,9 @@ struct PhaseBuckets<'a> {
     by_phase: [Vec<(u32, u32, &'a Member)>; Phase::COUNT],
     /// The phase that evaluates each member of the flattened list, in order, or `None`.
     phases: Vec<Option<Phase>>,
+    /// Per member of the flattened list, whether the blocks it places keep their state as written:
+    /// a raw member's, unless `origin=imported` marks it.
+    keeps_state: Vec<bool>,
 }
 
 /// File every member of the paint set under its phase, reporting the ones no phase reads and the
@@ -366,10 +379,14 @@ fn bucket_members<'a>(
     let mut buckets = PhaseBuckets {
         by_phase: Default::default(),
         phases: Vec::with_capacity(flattened.len()),
+        keeps_state: Vec::with_capacity(flattened.len()),
     };
     let mut patched = HashSet::new();
     for (index, &(y_offset, member)) in flattened.iter().enumerate() {
         let index = u32::try_from(index).expect("the paint set is far shorter than u32::MAX");
+        buckets
+            .keeps_state
+            .push(member.role.is_repeatable() && !is_imported(member));
         // An actuator patch binds a component declared elsewhere; only its shape is checked here
         // (`spec/redstone` "Signal binding").
         if let Some(patch) = patched_actuator(member) {

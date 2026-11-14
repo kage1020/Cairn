@@ -266,6 +266,57 @@ pub(crate) enum Command {
         )]
         lock: Option<PathBuf>,
     },
+    /// Write a structure file as a .crn of raw members, stamped with the target it compiles for.
+    #[command(
+        long_about = "Read a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file and write it \
+            as a `.crn` of `raw_block`, `raw_fill` and `raw_repeat` lines marked \
+            `origin=imported`, which `cairn compile` builds back into the blocks the file holds \
+            (`spec/ecosystem-interop` \"Reverse direction: the compiler transliterates, an LLM \
+            lifts\"). The extension names the format, and the format the edition: `.mcstructure` \
+            is Bedrock's, the other three Java's.\n\n\
+            The source is stamped with one shipped target, which its `@requires` and \
+            `@intended_targets` name: the one the file was saved at, the nearest after it when \
+            the file was saved between two, the earliest when it was saved before every one, or \
+            the latest when it names no version (`spec/ecosystem-interop` \"Import stamping and \
+            pitfalls\"). A file saved past every \
+            target this build ships is refused. The written source is compiled against the \
+            stamp and compared cell by cell before anything is written, so a file whose blocks \
+            the stamped target does not declare is refused with the compile's errors.\n\n\
+            An import recovers blocks and their regularity, not intent: every run warns with \
+            `W_SEMANTIC_LOSS`, once for that and once for each thing a raw member cannot carry, \
+            such as a chest's contents, an entity or a structure void. A Litematica region is a \
+            struct of its own, and a structure wider or deeper than 48 blocks is a `site` of \
+            48 by 48 chunks.\n\n\
+            Exits 0 when the source is written, warnings included; 1 when the file cannot be \
+            read as its format, is saved past every shipped target, holds blocks the stamped \
+            target refuses or that no raw member builds, or cannot be read or written for a \
+            reason other than absence; and 2 when the file cannot be located, its extension names no format this command \
+            reads, or `--out` names the file itself"
+    )]
+    Import {
+        /// Path to the structure file to import.
+        file: PathBuf,
+        /// How far the import goes; `raw` is the one mode.
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = ImportMode::Raw,
+            long_help = "How far the import goes. `raw` is the compiler's ceiling: a faithful \
+                transliteration that names nothing (`spec/ecosystem-interop` \"Three tiers of \
+                transliteration\"). Naming what the raw members build, as walls, windows and \
+                material slots, is a refactor of the written source rather than a mode of this \
+                command"
+        )]
+        mode: ImportMode,
+        /// Path to write the .crn to; defaults to `<stem>.raw.crn` beside the file.
+        #[arg(
+            long,
+            long_help = "Path to write the `.crn` to, its directory created if missing. Defaults \
+                to `<stem>.raw.crn` beside the file, so `house.litematic` → `house.raw.crn`. An \
+                existing file there is replaced"
+        )]
+        out: Option<PathBuf>,
+    },
     /// Experimental: print one stage of a .crn source file's redstone pipeline as JSON.
     #[command(
         long_about = "Lower a .crn source file's `logic` bindings, sensors, and actuators through \
@@ -441,6 +492,13 @@ pub(crate) enum StructureFormat {
     Litematic,
     /// Sponge Schematic version 3 (`.schem`), one per struct, placement and walkway.
     Schem,
+}
+
+/// How far `cairn import` takes a structure file.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ImportMode {
+    /// Raw members that build the file's blocks, with no name given to anything (default).
+    Raw,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
