@@ -571,9 +571,11 @@ There is no single "for-version". `cairn info` reports three axes:
    `none/low/tall` at 1.16, the item format at 1.20.5. No constraint catalog ships yet
    ([§10.3](#103-backend--data-tables)), so the `semantic-sensitive` row is always `(none)` and no
    compile warns.
-3. **The verified lock target** ([§10.6](#106-provenance-and-lock)). `cairn info` does not report
-   it yet, because it reads no lockfile. `cairn compile` does compare a lock's target with the one
-   it builds, and reports a change as `W_PREVIOUSLY_VERIFIED_TARGET`.
+3. **The verified lock target** ([§10.6](#106-provenance-and-lock)): the `(edition, version,
+   data_version)` the source's lockfile records, whether the source still hashes to that lock's
+   `source_hash`, and the Cairn release that wrote it. See [the `verified target`
+   row](#the-verified-target-row). `cairn compile` compares the same target with the one it builds,
+   and reports a change as `W_PREVIOUSLY_VERIFIED_TARGET`.
 
 ```text
 $ cairn info build.crn --editions java,bedrock
@@ -582,12 +584,13 @@ edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedro
 buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
 intended targets:        1.21.40, 1.21.60
 semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16)
+verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
 Every version named is one the built-in packs declare. The file behind this output carries
 `@requires version>=1.21.40`, which is what puts every Java target below the floor, and Bedrock
-1.21.0 with them. The `semantic-sensitive` row shows what a constraint catalog would add; today it
-reads `(none)`.
+1.21.0 with them, and its last compile built it for Bedrock 1.21.60. The `semantic-sensitive` row
+shows what a constraint catalog would add; today it reads `(none)`.
 
 `intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
 declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
@@ -595,8 +598,8 @@ contradict. [§10.4](#the-hint-is-weighed-against-the-floor) automates the compa
 that is decidable, and the reader makes it for the rest. A file declaring none gets `(none
 declared)` rather than a missing row.
 
-The five lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A pipeline
-reading the rows sees the same five lines every time `cairn info` runs to completion. A run that
+The six lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A pipeline
+reading the rows sees the same six lines every time `cairn info` runs to completion. A run that
 does not complete is a different case: a finding refuses the command before any row is computed, so
 stdout is empty rather than short a line.
 
@@ -648,6 +651,7 @@ edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
 buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
 intended targets:        (none declared)
 semantic-sensitive:      (none)
+verified target:         (no lock)
 ```
 
 `1.20.4 .. latest` reads as an answer, and the row two below disproves it, with `1.20.4` itself in
@@ -844,8 +848,58 @@ cannot carry prints a `note:` naming the entry, and a refused lowering prints th
 themselves under the version, each with its own position. Only the JSON lacks them, and `reason`
 fills that gap.
 
-A fifth line, `recommended test targets`, belongs to this axis and answers a different question
+A further row, `recommended test targets`, belongs to this axis and answers a different question
 again: which versions are worth testing against. No code path emits it yet.
+
+### The `verified target` row
+
+The row reads the lockfile `--lock` names, or `<source>.lock` beside the source when the flag is
+absent: the path `cairn compile` writes ([§10.6](#106-provenance-and-lock)). It reports what that
+lock records, not what a build would verify today. A lock certifies the build that wrote it, and
+reading one builds nothing.
+
+A lock the schema accepts prints its target, whether the source still hashes to its `source_hash`,
+and its `cairn_version`:
+
+```text
+verified target:         java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
+```
+
+The target is spelled the way `W_PREVIOUSLY_VERIFIED_TARGET` spells it, edition first, with `block
+version` in place of `DataVersion` on Bedrock. `source changed` in place of `source unchanged` means
+the target was verified for another revision of the file, so the build it certifies is not this
+one's. A note on stderr says so, and the next `cairn compile` rewrites the lock. A lock whose
+`verified` is `false` names a target nothing verified, and the row adds `(not verified)` after the
+target. The compiler never writes one.
+
+A lock valid but for an identifier the current rule refuses, as one an earlier Cairn wrote can be,
+is reported all the same: the release that wrote it verified its target. A note names the
+identifier, and the next compile replaces the lock, as `cairn compile` says when it reads one.
+
+A lock the row cannot read prints a placeholder in place of the target, with a `note:` on stderr
+naming the path and the cause:
+
+| The lock | Row | JSON `status` |
+|---|---|---|
+| No file at the path | `(no lock)` | `missing` |
+| A `lock_schema_version` above the one this release reads | `(lock schema N, newer than this Cairn reads)` | `newer_schema` |
+| A file that cannot be read, or a document the schema refuses for any other reason | `(unreadable lock)` | `unreadable` |
+
+None of them refuses the command. A lock is the record of an earlier build rather than an input to
+this report, so `cairn info` exits 0 with the placeholder in the row, as it does for an edition with
+no buildable target. A `--lock` naming a file that does not exist is `(no lock)`, like the default
+path. A newer schema is read no further than its version, because its field names need not mean
+what this release's do ([§10.6](#106-provenance-and-lock)).
+
+`--format json` carries the row as `verified_target`, an object that always has `status` and
+`path`, the lock path as the note prints it, and by `status` also:
+
+| `status` | Also carries |
+|---|---|
+| `read` | `target` (`edition`, `mc_version`, `data_version`), `verified`, `source_unchanged`, `cairn_version`, and `refused_identifier`, the refusal as the note words it, when the lock records one |
+| `newer_schema` | `lock_schema_version`, the version the document declares, and `supported`, the one this release reads |
+| `unreadable` | `error`, the cause as the note words it |
+| `missing` | nothing more |
 
 ## 10.6 Provenance and lock
 
@@ -866,8 +920,10 @@ member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17"
 ```
 
 A compile writes the lock next to its source as `<source>.lock` unless `--lock` names another
-path. No constraint catalog ships yet ([§10.3](#103-backend--data-tables)), so today
-`constraint_catalog_hash` is all zeros and `member_version_sensitivity` is `[]`.
+path, and `cairn info` reads the same path back as its [`verified target`
+row](#the-verified-target-row). No constraint catalog ships yet
+([§10.3](#103-backend--data-tables)), so today `constraint_catalog_hash` is all zeros and
+`member_version_sensitivity` is `[]`.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and auto-address assignment. Auto-address assignment is not implemented yet: a member has

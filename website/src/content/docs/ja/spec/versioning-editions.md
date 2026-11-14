@@ -261,7 +261,7 @@ Java のリリースは `1.20.4 / 1.21 / 1.21.4 / 26.3`、Bedrock のリリー�
 
 1. **宣言されたレジストリ範囲 `[Vmin, Vmax]`**: ファイルがエディションを指定せずに宣言した下限を合成したものと、開いた上端です。使っているブロックから導いた事実ではなく、ソースとそれがインスタンス化する構成要素が宣言した内容を読み返したものです。詳しくは [`registry compatibility` の行](#registry-compatibility-の行)を参照してください。
 2. **意味が変わりうるメンバー**: ID は有効なまま、意味、挙動、見た目が変わる箇所です。範囲よりもこちらが重要です。挙動の変化は ID の消滅よりはるかに頻繁に起きるので、レジストリだけで Vmax を決めるのは危険です。制約カタログは `since`/`until` とは別に `semantic_sensitivity` (境界のバージョンと理由) を持ち、その境界をまたぐコンパイルは警告を出します。例: 1.17 の大釜の分割、1.16 で壁の接続が bool から `none/low/tall` に変わった件、1.20.5 のアイテムフォーマット。制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、`semantic-sensitive` の行は常に `(none)` で、警告を出すコンパイルもありません。
-3. **検証済みのロックターゲット** ([§10.6](#106-来歴-provenance-とロック))。`cairn info` はロックファイルを読まないので、この軸はまだ報告しません。ロックのターゲットとビルドするターゲットを比べるのは `cairn compile` で、違いがあれば `W_PREVIOUSLY_VERIFIED_TARGET` で知らせます。
+3. **検証済みのロックターゲット** ([§10.6](#106-来歴-provenance-とロック)): ソースのロックファイルが記録した `(edition, version, data_version)` と、ソースがいまもそのロックの `source_hash` と同じハッシュになるかどうか、そしてそのロックを書き出した Cairn のリリースです。詳しくは [`verified target` の行](#verified-target-の行)を参照してください。同じターゲットとビルドするターゲットを `cairn compile` も比べ、違いがあれば `W_PREVIOUSLY_VERIFIED_TARGET` で知らせます。
 
 ```text
 $ cairn info build.crn --editions java,bedrock
@@ -270,13 +270,14 @@ edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedro
 buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
 intended targets:        1.21.40, 1.21.60
 semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16)
+verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
-名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。`semantic-sensitive` の行は、制約カタログがあれば加わる内容を示したもので、現在は `(none)` と表示します。
+名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。また、最後のコンパイルでは Bedrock 1.21.60 向けにビルドしています。`semantic-sensitive` の行は、制約カタログがあれば加わる内容を示したもので、現在は `(none)` と表示します。
 
 `intended targets` はファイル自身の `@intended_targets` 行をそのまま写したもので、答えではなく宣言である唯一の行です。`buildable targets` の隣にあるのは、矛盾しうる相手がその行だからです。判定できる半分の比較は [§10.4](#ヒントは下限と突き合わせる) が自動で行い、残りは読み手が突き合わせます。何も宣言していないファイルでも行は消えず、`(none declared)` と表示します。
 
-5 行は stdout に、それぞれの数値の内訳は stderr に `note:` 行として出ます。行を読むパイプラインは、`cairn info` が最後まで完了するかぎり、毎回同じ 5 行を受け取ります。完了しない場合は別です。指摘がどの行も計算する前にコマンドを拒否するので、stdout は 1 行欠けるのではなく空になります。
+6 行は stdout に、それぞれの数値の内訳は stderr に `note:` 行として出ます。行を読むパイプラインは、`cairn info` が最後まで完了するかぎり、毎回同じ 6 行を受け取ります。完了しない場合は別です。指摘がどの行も計算する前にコマンドを拒否するので、stdout は 1 行欠けるのではなく空になります。
 
 ### `registry compatibility` の行
 
@@ -309,6 +310,7 @@ edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
 buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
 intended targets:        (none declared)
 semantic-sensitive:      (none)
+verified target:         (no lock)
 ```
 
 `1.20.4 .. latest` は答えのように読めますが、2 行下の行がそれを否定しています。しかも拒否されたリストには `1.20.4` 自身が入っています。宣言した下限が間違っているのではなく、別の問いに答えているのです。`minecraft:pale_moss_block` が 1.21.4 で追加されたことはパックについての事実で、この行が読むのはファイルが宣言した内容だけです。
@@ -396,7 +398,40 @@ semantic-sensitive:      (none)
 
 テキストの行からは、これらは何もわかりません。`buildable targets: Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)` は 5 つの原因のどれでも成り立ちます。どの原因も stderr には出ますが、形は同じではありません。下限に関する 2 つの原因は行の位置を持つ `note:` として、落ちたスコープは位置を持たずスコープ名だけを示す `note:` として、ライターが書き出せないエントリはそのエントリを示す `note:` として、拒否された lowering はそのバージョンの下に指摘そのものとして、それぞれの位置とともに出力します。`reason` が補うのは、この情報を読み取れない JSON の側です。
 
-5 つ目の行 `recommended test targets` もこの軸に属し、また別の問い (どのバージョンでテストする価値があるか) に答えます。まだこれを出力するコードはありません。
+さらに別の行 `recommended test targets` もこの軸に属し、また別の問い (どのバージョンでテストする価値があるか) に答えます。まだこれを出力するコードはありません。
+
+### `verified target` の行
+
+この行は、`--lock` が指定したロックファイルを、指定がなければソースの隣の `<source>.lock` を読みます。`cairn compile` が書き出すパスです ([§10.6](#106-来歴-provenance-とロック))。報告するのはそのロックが記録している内容で、いまビルドしたら検証できる内容ではありません。ロックが保証するのはそれを書き出したビルドであり、ロックを読んでも何もビルドしません。
+
+スキーマが受け付けるロックは、ターゲット、ソースがいまも `source_hash` と同じハッシュになるかどうか、`cairn_version` を表示します。
+
+```text
+verified target:         java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
+```
+
+ターゲットの表記は `W_PREVIOUSLY_VERIFIED_TARGET` と同じで、エディションを先頭に置き、Bedrock では `DataVersion` の代わりに `block version` と書きます。`source unchanged` の代わりに `source changed` と出た場合は、ターゲットを検証したのがファイルの別の版であり、ロックが保証するビルドはこのファイルのものではない、という意味です。stderr の note がそのことを伝え、次の `cairn compile` がロックを書き直します。`verified` が `false` のロックは、何も検証していないターゲットを記録しているので、行はターゲットの後に `(not verified)` を付けます。コンパイラがそのようなロックを書くことはありません。
+
+識別子が現在の規則で拒否される点を除けば正しいロック (以前の Cairn が書いたロックはこうなりえます) も、そのまま報告します。ターゲットは、そのロックを書いたリリースが検証したものだからです。note がその識別子を示し、次のコンパイルがロックを置き換えます。`cairn compile` がそのようなロックを読んだときに伝える内容と同じです。
+
+読めないロックは、ターゲットの代わりにプレースホルダを表示し、パスと原因を示す `note:` を stderr に出します。
+
+| ロック | 行 | JSON の `status` |
+|---|---|---|
+| パスにファイルがない | `(no lock)` | `missing` |
+| `lock_schema_version` がこのリリースの読めるものより新しい | `(lock schema N, newer than this Cairn reads)` | `newer_schema` |
+| 読み込めないファイル、またはそれ以外の理由でスキーマが拒否する文書 | `(unreadable lock)` | `unreadable` |
+
+どの場合もコマンドは拒否しません。ロックはこのレポートへの入力ではなく以前のビルドの記録なので、ビルドできるターゲットのないエディションの場合と同じく、`cairn info` は行にプレースホルダを入れて 0 で終了します。存在しないファイルを `--lock` で指定した場合も、既定のパスと同じく `(no lock)` です。新しいスキーマはバージョンより先を読みません。そのフィールド名が、このリリースのものと同じ意味だとは限らないからです ([§10.6](#106-来歴-provenance-とロック))。
+
+`--format json` はこの行を `verified_target` として出力します。常に `status` と `path` (note が表示するロックのパス) を持つオブジェクトで、`status` に応じて次のものも持ちます。
+
+| `status` | 追加の内容 |
+|---|---|
+| `read` | `target` (`edition`, `mc_version`, `data_version`)、`verified`、`source_unchanged`、`cairn_version`。ロックが拒否される識別子を記録している場合は、その拒否を note と同じ文言で示す `refused_identifier` も |
+| `newer_schema` | 文書が宣言したバージョンの `lock_schema_version` と、このリリースが読むバージョンの `supported` |
+| `unreadable` | 原因を note と同じ文言で示す `error` |
+| `missing` | なし |
 
 ## 10.6 来歴 (provenance) とロック
 
@@ -414,7 +449,7 @@ verified: true
 member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17" } ]
 ```
 
-コンパイルは、`--lock` で別のパスを指定しないかぎり、ロックをソースの隣に `<source>.lock` として書き出します。制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、現在の `constraint_catalog_hash` はゼロで、`member_version_sensitivity` は `[]` です。
+コンパイルは、`--lock` で別のパスを指定しないかぎり、ロックをソースの隣に `<source>.lock` として書き出します。`cairn info` は同じパスを [`verified target` の行](#verified-target-の行)として読み返します。制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、現在の `constraint_catalog_hash` はゼロで、`member_version_sensitivity` は `[]` です。
 
 `resolved_ir_hash` が再現性の中心です。マクロ展開、デフォルト値の補完、アドレスの自動割り当てを終えた後の IR を固定します。ただしアドレスの自動割り当ては未実装で、アドレスを持つのは `id=` を書いたメンバーだけです ([§9.2](/ja/spec/components-editing-sites/#92-編集モデル))。
 

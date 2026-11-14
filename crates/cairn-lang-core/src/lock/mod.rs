@@ -13,6 +13,7 @@ pub use schema::{
     MemberSensitivity, RefusedIdentifierLock,
 };
 
+use serde::Serialize;
 use thiserror::Error;
 
 /// Errors raised while reading or writing a lockfile.
@@ -107,7 +108,97 @@ impl Lockfile {
     /// `body` is invalid even with its identifiers read as plain strings.
     pub fn refused_identifier(body: &str) -> Result<Option<RefusedIdentifierLock>, LockError> {
         gate_schema_version(body)?;
-        Ok(schema::refused_identifier(body)?)
+        let refused = schema::refused_identifier(body)?;
+        Ok(refused.map(|(error, probe)| RefusedIdentifierLock {
+            error,
+            target: probe.target,
+            member_version_sensitivity: probe.member_version_sensitivity,
+        }))
+    }
+}
+
+/// What the lockfile at a path says it verified, as `spec/versioning-editions` "The `verified
+/// target` row" reports it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum LockReading {
+    /// No file at the path.
+    Missing,
+    /// A document the schema accepts, or one it refuses only for an identifier.
+    Read {
+        /// The target the lock records.
+        target: LockTarget,
+        /// The lock's `verified` field.
+        verified: bool,
+        /// Whether the source hashes to the lock's `source_hash`.
+        source_unchanged: bool,
+        /// The release that wrote the lock.
+        cairn_version: String,
+        /// The identifier the current rule refuses, as its error reads, when the lock records one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        refused_identifier: Option<String>,
+    },
+    /// A document declaring a schema revision newer than this build reads.
+    NewerSchema {
+        /// Version the document declared.
+        lock_schema_version: u32,
+        /// Highest version this build understands.
+        supported: u32,
+    },
+    /// A file that cannot be read, or a document the schema refuses for another reason.
+    Unreadable {
+        /// The cause, as [`LockError`] words it.
+        error: String,
+    },
+}
+
+impl LockReading {
+    /// Read the lockfile at `path` for the source whose text is `source`.
+    #[must_use]
+    pub fn of(path: &Path, source: &str) -> Self {
+        let body = match fs::read_to_string(path) {
+            Ok(body) => body,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Self::Missing,
+            Err(err) => return Self::unreadable(&err.into()),
+        };
+        let source_hash = hash_source(source);
+        let err = match Lockfile::from_yaml(&body) {
+            Ok(lock) => {
+                return Self::Read {
+                    source_unchanged: lock.source_hash == source_hash,
+                    target: lock.target,
+                    verified: lock.verified,
+                    cairn_version: lock.cairn_version,
+                    refused_identifier: None,
+                };
+            }
+            Err(LockError::UnsupportedSchemaVersion { found, supported }) => {
+                return Self::NewerSchema {
+                    lock_schema_version: found,
+                    supported,
+                };
+            }
+            Err(err) => err,
+        };
+        match schema::refused_identifier(&body) {
+            Ok(Some((error, probe))) => Self::Read {
+                source_unchanged: probe.source_hash == source_hash,
+                target: probe.target,
+                verified: probe.verified,
+                cairn_version: probe.cairn_version,
+                refused_identifier: Some(error.to_string()),
+            },
+            // The probe's error, not the strict one: the strict read may have stopped at an
+            // identifier before reaching what is really wrong.
+            Err(cause) => Self::unreadable(&cause.into()),
+            Ok(None) => Self::unreadable(&err),
+        }
+    }
+
+    fn unreadable(err: &LockError) -> Self {
+        Self::Unreadable {
+            error: err.to_string(),
+        }
     }
 }
 
