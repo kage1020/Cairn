@@ -50,6 +50,21 @@ fn a_key_the_role_does_not_read_is_refused() {
     assert!(d.primary.contains("`walls`"), "got: {}", d.primary);
 }
 
+/// No keyword reads `nbt=` yet, so it is a key like any other a role does not take.
+#[test]
+fn a_compound_on_a_key_no_role_reads_is_refused_as_that_key() {
+    let src = "struct s size=5x5\n  walls mat_slot=wall height=3 nbt={CustomName:\"x\"}\n";
+    let d = exactly_one(diagnose(src));
+    assert_eq!(
+        (d.code.as_str(), d.primary.as_str(), &src[d.span.clone()]),
+        (
+            "E_UNKNOWN_ARGUMENT",
+            "`nbt=` is not an argument `walls` reads",
+            "{CustomName:\"x\"}",
+        ),
+    );
+}
+
 #[test]
 fn the_finding_points_at_the_argument_and_not_at_the_line() {
     // The IR carries no span for the key, so the anchor is the value.

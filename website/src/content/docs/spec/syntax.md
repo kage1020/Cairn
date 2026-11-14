@@ -25,22 +25,70 @@ The parser puts anything that is not `key=`, `-> binding`, or `[selector]` into 
 so a dropped `=` lands there too. `walls mat_slot=wall height 3` is not a `walls` with a shortened
 height. It is not built at all.
 
-Only a member line (a line of a `struct`, `def` or `site` body) keeps a positional list so far. The
-header line of a `struct`, `def`, `site` or `theme`, a `theme` rule, and a `logic` or `assert` line
-do not yet, so the same slip there is `E_PARSE`, which ends the parse: `struct s size 3x3` is refused
-with "expected `=`".
+A header, a `theme` rule and a `logic` or `assert` line keep one too, and the parse goes on past it.
+A `struct` or `def` header and a `theme` selector rule keep their bare values beside their
+`key=value` arguments, so `struct s size 3x3` is `E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as
+`size=3x3`. A `site` or `theme` header reads nothing after its name, a `slot` row nothing after the
+value it binds, and an `assert` line nothing after the end of its form: a bare value there is the
+same finding, and a `key=value` there is `E_PARSE`. A `logic` line whose `=` is dropped,
+`logic sig.a sig.b or sig.c`, still reads the expression after its name, binds nothing, and is
+`E_UNEXPECTED_POSITIONAL` on the whole line.
 
 ### 5.1.1 Literals and separators
 
-**Subject to change.** Decimals (`scale=1.5`) and `nbt={...}` values, which other chapters write,
-do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
-No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
-parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
+No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` and `scale=-1.5`
+are `E_PARSE`. An **integer** is a run of decimal digits, up to 2^63 − 1, or 2^32 − 1 for the
 `within` bound of an `assert always`, the `<=` bound of an `assert latency` and the stage count of
 a macro such as `pulse(sig.ring, 4)`, which is at least 1 ([Redstone
-§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)). A decimal such as `scale=1.5`
-([Entities](/spec/entities/)) is therefore `E_PARSE` too until the parser reads one.
+§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)).
+
+A **decimal** is two runs of decimal digits joined by `.`, as in `scale=1.5`. It has no exponent
+and no type suffix, so a run that continues past its digits, such as `1.5e3`, `1.5f` or `1.5.2`, is
+refused at the literal, as a size's is. A `.` with no digit after it, `1.`, or none before it, `.5`,
+is refused too, and the finding names `1.0` and `0.5`. A decimal stands where an integer stands as
+a value: after a key's `=`, in a value list and as a bare value. It is not an integer, so a
+coordinate triple's component, a size's extent, a stage count, an assertion's bound and a value in
+a block-state literal each refuse one at the literal. The parser keeps it as written, digit for
+digit. The key that reads one says whether the writer stores it as a float or a double, and the
+writer rounds the written value to the nearest one of that type. Such a key reads an integer as the
+same number, so `scale=2` and `scale=2.0` are one value.
+
+No key reads a decimal yet: the keys that will, such as the `scale=` of a display entity
+([Entities §8.1](/spec/entities/#81-two-tiers)), belong to keywords the compiler does not know. A
+key that reads another kind of value treats a decimal as it treats a coordinate triple (below): a
+label or size key refuses it as a type mismatch, a member key such as `height=` or `offset=` refuses
+its member as `E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or
+`overhang=`, says so with `W_IGNORED_ARGUMENT`.
+
+An **NBT compound** is raw NBT written as SNBT in braces, as in `nbt={variant:"black"}`. It is what
+a key reads when a `{` follows its `=`, with a space between them or none. Anywhere else a `{` keeps
+its own meaning, so a bare `{a:1}` and a compound in a value list are `E_PARSE`. A compound closes
+on the line it opens on, since only a truth table's braces run onto the lines below, and one left
+open at the end of its line is `E_PARSE` there. What it holds is the part of Java's SNBT that every
+version Cairn targets reads alike:
+
+- A compound is `{}`, or entries `key:value` with exactly one `,` between two of them. A key is
+  quoted, or a run of letters, digits, `_`, `-`, `.` and `+`, and a compound names each key once.
+- A list is `[]`, or values with exactly one `,` between two of them, all of one type. An array
+  opens with `[B;`, `[I;` or `[L;`, nothing between the three characters, and holds bytes, ints or
+  longs.
+- A number is an optional sign, digits, an optional `.` and digits, and an optional suffix, in
+  either case: `b`, `s` and `l` for a byte, a short and a long, `f` and `d` for a float and a
+  double. With no suffix it is an int, or a double when it has a `.`. A byte, a short, an int or a
+  long has no `.` and no leading zero, and every number is inside its type's range.
+- A string is quoted with `"` or `'`, and escapes only `\` and its own quote. `true` and `false` are
+  the bytes `1b` and `0b`, and any other unquoted word is refused, so a value is a string only
+  where it is quoted: `variant:black` is written `variant:"black"`.
+- Compounds, lists and arrays nest at most 64 deep, the outermost compound included.
+
+Anything else is `E_PARSE` where it starts, an exponent, a hexadecimal or binary number, a `_`
+between digits, an escape such as `\n`, a function such as `bool(...)` and a comment among them. The
+parser keeps the compound as written, braces included, and checks no field in it against the
+target: what its fields mean, and the `@edition` guard a line that writes one stands under, are
+[Entities §8.1](/spec/entities/#81-two-tiers)'s. No keyword reads `nbt=` yet, so it is a key like
+any other that its line does not read: `E_UNKNOWN_ARGUMENT` on a header or a member, and
+`W_IGNORED_ARGUMENT` as a theme selector's binding. A key that reads another kind of value treats a
+compound as it treats a decimal.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
@@ -191,14 +239,18 @@ and Monaco use the same rule, so a diagnostic's line number and the line under t
 same row. A position always points at the text that is wrong, so an error at the end of a line is
 reported there and never at the first column of the next one.
 
-The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
+The tree-sitter grammar is a known exception in three ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts nine forms the parser refuses, because tree-sitter cannot express their
-rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within` or `<=` bound
-or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last component runs
-into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
-literal naming one property twice.
+correctly. It also accepts fourteen forms the parser refuses, because tree-sitter cannot express
+their rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word
+(`2x2y`), an integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within`
+or `<=` bound or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last
+component runs into a size (`1,2,3x4`), a truth row whose width differs from the input count, a
+block-state literal naming one property twice, a decimal that runs into a word (`1.5e3`), and an
+NBT compound that names one key twice, holds a list of mixed types or a number past its type's
+range, or nests past 64. And it refuses a bare value after the name on a `site` or
+`theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because taking one
+there would let error recovery read an over-indented first body line into the header.
 
 ## 5.2 Nesting
 

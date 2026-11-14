@@ -8,7 +8,7 @@ This crate is the dependency root of every crate above the byte layer; [`cairn-l
 
 | Module | Role | Spec reference |
 |---|---|---|
-| `lex`, `parse`, `ast` | Surface syntax to AST, with `MAX_NESTING_DEPTH` / `MAX_EXPR_DEPTH` guards and a dedicated failure diagnoser | [syntax](https://cairn.kage1020.com/spec/syntax/) |
+| `lex`, `parse`, `ast` | Surface syntax to AST, with `MAX_NESTING_DEPTH` / `MAX_EXPR_DEPTH` / `lex::MAX_NBT_DEPTH` guards and a dedicated failure diagnoser | [syntax](https://cairn.kage1020.com/spec/syntax/) |
 | `logic_library` | The built-in logic library: each primitive a `logic` expression applies, and its notation, which the parser reads | [redstone "Two tiers, and the v1 boundary"](https://cairn.kage1020.com/spec/redstone/) |
 | `intent` | Intent IR — struct/site/def bodies reorganised into typed members with roles, plus the keyword table, semantic levels, and the lookup of the member an actuator patch binds | [architecture "The Intent IR is rich and carries invariants"](https://cairn.kage1020.com/spec/architecture/) |
 | `check` | The diagnostic-collecting pipeline: arguments, arity, duplicates, nesting, positional form, `@requires`, `@cairn`, `@intended_targets`, materials, member scope, type mismatches | [lint](https://cairn.kage1020.com/spec/lint/) |

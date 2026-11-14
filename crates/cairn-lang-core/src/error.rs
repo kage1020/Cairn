@@ -184,6 +184,47 @@ pub enum LexError {
         /// The character that would have continued it.
         found: char,
     },
+    /// A decimal is followed by text that would have continued it, as in `1.5e3` or `1.5.2`.
+    #[error(
+        "{position}: decimal `{literal}` is followed by `{found}`; a decimal is digits, a `.` and \
+         digits, with no exponent or suffix, as in `1.5`"
+    )]
+    TrailingDecimalSegment {
+        /// Where the literal starts.
+        position: Position,
+        /// The literal as written, up to the offending character.
+        literal: String,
+        /// The character that would have continued it.
+        found: char,
+    },
+    /// A decimal has no digit after its `.`, as in `1.`.
+    #[error(
+        "{position}: decimal `{whole}.` has no digit after its `.`; write `{whole}.0`, or \
+         `{whole}` for a whole number"
+    )]
+    DecimalWithoutFraction {
+        /// Where the literal starts.
+        position: Position,
+        /// The digits before the `.`.
+        whole: String,
+    },
+    /// A decimal has no digit before its `.`, as in `.5`.
+    #[error("{position}: decimal `.{fraction}` has no digit before its `.`; write `0.{fraction}`")]
+    DecimalWithoutWhole {
+        /// Where the `.` is.
+        position: Position,
+        /// The digits after the `.`.
+        fraction: String,
+    },
+    /// An `nbt={...}` compound strays from the SNBT that `spec/syntax` "Literals and separators"
+    /// reads.
+    #[error("{position}: {reason}")]
+    InvalidNbt {
+        /// Where in the compound it strays.
+        position: Position,
+        /// What is wrong there and what to write instead.
+        reason: String,
+    },
     /// An integer literal could not be parsed.
     #[error("{position}: {}", render_invalid_int(*context, lexeme, *kind))]
     InvalidInt {
@@ -267,6 +308,10 @@ impl LexError {
             | Self::UnterminatedString { position }
             | Self::UnexpectedChar { position, .. }
             | Self::TrailingSizeSegment { position, .. }
+            | Self::TrailingDecimalSegment { position, .. }
+            | Self::DecimalWithoutFraction { position, .. }
+            | Self::DecimalWithoutWhole { position, .. }
+            | Self::InvalidNbt { position, .. }
             | Self::InvalidInt { position, .. } => *position,
         }
     }
@@ -290,6 +335,10 @@ impl LexError {
             | Self::UnterminatedString { position }
             | Self::UnexpectedChar { position, .. }
             | Self::TrailingSizeSegment { position, .. }
+            | Self::TrailingDecimalSegment { position, .. }
+            | Self::DecimalWithoutFraction { position, .. }
+            | Self::DecimalWithoutWhole { position, .. }
+            | Self::InvalidNbt { position, .. }
             | Self::InvalidInt { position, .. } => position,
         };
         *position = position.rebased(base);

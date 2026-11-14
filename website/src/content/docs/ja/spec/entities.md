@@ -13,7 +13,7 @@ title: "8. エンティティ"
 - **構造化する (第一級)**: `sign`、`painting`、`item_frame`、`armor_stand`、`villager` (と `trade`)、`display` (text / block / item)、`bed` (ブロックとして扱う)。
 - **汎用の受け皿**: そのほかの mob には `spawn id=.. type=<entity> at=<selector> [nbt={...}]` を使います。
 
-このうち `sign` と `bed` はキーワードで、[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) のとおりに置きます。ほかのものは `spawn` を含めてまだキーワードではなく、すべて `E_UNKNOWN_KEYWORD` になるので、エンティティを置くビルドはまだありません。下の例には、パーサがまだ受け付けない構文も含まれています。小数 (`scale=1.5`) と `nbt={...}` の値は `E_PARSE` になります ([構文 §5.1.1](/ja/spec/syntax/#511-リテラルと区切り))。
+このうち `sign` と `bed` はキーワードで、[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) のとおりに置きます。ほかのものは `spawn` を含めてまだキーワードではなく、すべて `E_UNKNOWN_KEYWORD` になるので、エンティティを置くビルドはまだありません。下の例はパースできます。小数 (`scale=1.5`) と `nbt={...}` のコンパウンドは値です ([構文 §5.1.1](/ja/spec/syntax/#511-リテラルと区切り))。例の中のキーワードは、`sign` のほかはどれも `E_UNKNOWN_KEYWORD` になります。
 
 ```
 villager id=trader at=stall[0] profession=librarian level=master
@@ -21,8 +21,13 @@ trade villager=trader buy=emerald count=24 sell=enchanted_book enchant=mending
 text_display  id=holo   at=4,3,2 text="Inn" billboard=fixed scale=1.5
 block_display id=model  at=front.above block=@lantern scale=0.5
 item_display  id=trophy at=counter item=diamond_sword rotation=y90
-spawn id=cat type=cat at=inside.floor nbt={variant:"black"}
+@edition java
+  spawn id=cat type=cat at=inside.floor nbt={variant:"black"}
 ```
+
+`scale=` のように小数を読むキーは、埋める NBT のフィールドが持つ型に合わせて、float か double として書き出されます。
+
+`nbt={...}` のコンパウンドは、もともとエディション固有のものです。Java と Bedrock では、エンティティやブロックエンティティのフィールドの名前が異なり、そのフィールドを持つレジストリパックもないので、生の ID を検査するように ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック)) コンパウンドをターゲットに照らして検査するものはありません。そのため、`nbt=` を書く行は、そのフィールド名で綴ったエディションの `@edition` ガードの下に置きます。ガードは、生のメンバーと同じようにその行を囲みます ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む))。ガードの外にある場合は `E_NBT_OUTSIDE_EDITION_GUARD` になる予定で、これは予約されたコードです。その行を残すビルドは、行が置くエンティティやブロックエンティティに、コンパウンドを書かれたとおりに書き込みます。コンパイラが検査するのはコンパウンドの構文だけで、中身は検査しません。
 
 村人の交易所は定番の建築で、display エンティティは現代的な装飾に欠かせません。これらを `nbt={}` で書かせると、生成の品質と編集の安定性が落ちるので、構造化します。
 

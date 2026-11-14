@@ -4,6 +4,7 @@
 
 use std::fmt::Write as _;
 
+use cairn_lang_core::lex::MAX_NBT_DEPTH;
 use cairn_lang_core::logic_library::{CallSignature, LogicPrimitive, Notation};
 use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH};
 use tree_sitter::Parser;
@@ -385,6 +386,83 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "site_header_args",
         "site s size=3x3\n  place id=a\n",
+        Reject,
+    ),
+    (
+        "theme_header_args",
+        "theme t dark=1:\n  slot a -> @b\n",
+        Reject,
+    ),
+    // -- bare values on the lines that are not members ---------------
+    (
+        "struct_header_dropped_equals",
+        "struct s size 3x3\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "def_header_dropped_equals",
+        "def d size 3x3:\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "header_bare_value_before_an_argument",
+        "struct s 9x7 size=3x3 tall:\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "slot_row_bare_value",
+        "theme t:\n  slot a -> @b @c\n",
+        Accept,
+    ),
+    ("slot_row_args", "theme t:\n  slot a -> @b c=1\n", Reject),
+    (
+        "selector_rule_dropped_equals",
+        "theme t:\n  window[side=front] -> mat_slot glass\n",
+        Accept,
+    ),
+    (
+        "selector_rule_bare_value_among_bindings",
+        "theme t:\n  window[side=front] -> a=1 [b] c=@d\n",
+        Accept,
+    ),
+    (
+        "assert_truth_bare_value",
+        "struct s size=3x3\n  assert truth(a.b -> c.d) { 0 -> 1 } strict\n",
+        Accept,
+    ),
+    (
+        "assert_always_bare_value",
+        "struct s size=3x3\n  assert always(a.b -> eventually c.d within 4) twice\n",
+        Accept,
+    ),
+    (
+        "assert_latency_bare_values",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= 4 ticks 2\n",
+        Accept,
+    ),
+    (
+        "assert_latency_args",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= 4 ticks=2\n",
+        Reject,
+    ),
+    (
+        "logic_dropped_equals",
+        "struct s size=3x3\n  logic s.out a.b and not c.d\n",
+        Accept,
+    ),
+    (
+        "logic_dropped_equals_before_a_call",
+        "struct s size=3x3\n  logic s.out latch(set=a.b, reset=c.d)\n",
+        Accept,
+    ),
+    (
+        "logic_dropped_equals_before_parentheses",
+        "struct s size=3x3\n  logic s.out (a.b or c.d)\n",
+        Accept,
+    ),
+    (
+        "logic_name_alone",
+        "struct s size=3x3\n  logic s.out\n",
         Reject,
     ),
     (
@@ -888,27 +966,21 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  slot a-b -> @c\n",
         Reject,
     ),
-    // A header refuses any trailing token; `size_with_a_third_extent` is where the size rule is.
+    // A header keeps a bare value after its arguments, as a member line does.
     (
-        "a_header_refuses_a_trailing_token",
-        "struct s size=2x2x9\n  floor a=1\n",
-        Reject,
-    ),
-    (
-        "a_header_refuses_a_trailing_token_whatever_it_is",
+        "a_header_keeps_a_trailing_bare_value",
         "struct s size=2x2 junk\n  floor a=1\n",
-        Reject,
+        Accept,
     ),
     (
         "size_spaced",
         "struct s size=9 x 7\n  floor mat_slot=f\n",
-        Reject,
+        Accept,
     ),
-    // Refused left of the separator, which is scanned before any run of spaces.
     (
         "size_space_before_x",
         "struct s size=9 x7\n  floor mat_slot=f\n",
-        Reject,
+        Accept,
     ),
     // No size at all: an `x` with no digit behind it ends the number in both parsers, so the `x`
     // and the `2` are positional values.
@@ -952,11 +1024,10 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor size=2x-1\n",
         Reject,
     ),
-    // A header refuses any trailing bare token, as it refuses `size=2x2 junk`.
     (
         "size_separator_before_a_space_in_a_header",
         "struct s size=2x 2\n  floor a=1\n",
-        Reject,
+        Accept,
     ),
     // A string ends at the first quote and never spans a line.
     (
@@ -1108,6 +1179,232 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "block_id_in_a_slot_row",
         "theme t:\n  slot wall -> minecraft:stone\n",
+        Reject,
+    ),
+    // -- decimals and NBT compounds ----------------------------------------
+    (
+        "decimal_value",
+        "struct s size=3x3\n  floor scale=1.5\n",
+        Accept,
+    ),
+    (
+        "decimal_in_a_list_and_bare",
+        "struct s size=3x3\n  floor a=[0.25, 2] 3.75\n",
+        Accept,
+    ),
+    (
+        "decimal_in_a_selector",
+        "struct s size=3x3\n  door[y=1.5] side=front\n",
+        Accept,
+    ),
+    (
+        "decimal_on_a_header",
+        "struct s size=3x3 scale=1.5\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "decimal_without_a_whole_part",
+        "struct s size=3x3\n  floor scale=.5\n",
+        Reject,
+    ),
+    (
+        "decimal_without_a_fraction",
+        "struct s size=3x3\n  floor scale=1.\n",
+        Reject,
+    ),
+    (
+        "decimal_with_a_second_dot",
+        "struct s size=3x3\n  floor scale=1.5.2\n",
+        Reject,
+    ),
+    (
+        "decimal_with_a_sign",
+        "struct s size=3x3\n  floor scale=-1.5\n",
+        Reject,
+    ),
+    (
+        "decimal_stage_count",
+        "struct s size=3x3\n  logic s.out = delay(a.b, 1.5)\n",
+        Reject,
+    ),
+    (
+        "decimal_latency_bound",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= 1.5\n",
+        Reject,
+    ),
+    (
+        "decimal_coordinate_component",
+        "struct s size=3x3\n  fill from=1,2.5,3\n",
+        Reject,
+    ),
+    (
+        "size_running_into_a_fraction",
+        "struct s size=3x3\n  floor size=9x7.5\n",
+        Reject,
+    ),
+    (
+        "dotted_version_in_a_raw_value",
+        "@requires version>=1.21.4\nstruct s size=3x3\n",
+        Accept,
+    ),
+    (
+        "nbt_compound",
+        "struct s size=3x3\n  floor nbt={variant:\"black\", \"a b\":'it\\'s', n:[1, -2, +3]}\n",
+        Accept,
+    ),
+    (
+        "nbt_every_value_kind",
+        "struct s size=3x3\n  floor nbt={d:[1.5, 2d], f:[0.5f, 1F], b:[true, 0b], w:[B; 1b], i:[I;], l:[L; 1L], c:{}, e:[[1], []]}\n",
+        Accept,
+    ),
+    (
+        "nbt_key_of_symbols",
+        "struct s size=3x3\n  floor nbt={a-b.c+d_e:1, 0:2}\n",
+        Accept,
+    ),
+    (
+        "nbt_key_that_reads_as_a_value",
+        "struct s size=3x3\n  floor nbt={true:1, false:2b, 1b:3}\n",
+        Accept,
+    ),
+    (
+        "nbt_leading_zero_on_a_fraction",
+        "struct s size=3x3\n  floor nbt={a:007.5, b:07f, c:0, d:-0}\n",
+        Accept,
+    ),
+    (
+        "nbt_apart_from_its_equals_sign",
+        "struct s size=3x3\n  floor nbt= {a:1}\n",
+        Accept,
+    ),
+    (
+        "nbt_in_a_selector",
+        "struct s size=3x3\n  door[nbt={a:1}] side=front\n",
+        Accept,
+    ),
+    (
+        "nbt_in_a_theme_rule",
+        "theme t:\n  window[side=front] -> nbt={a:1}\n",
+        Accept,
+    ),
+    (
+        "nbt_on_a_header",
+        "struct s size=3x3 nbt={a:1}\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "nbt_unquoted_string",
+        "struct s size=3x3\n  floor nbt={variant:black}\n",
+        Reject,
+    ),
+    (
+        "nbt_trailing_comma",
+        "struct s size=3x3\n  floor nbt={a:1,}\n",
+        Reject,
+    ),
+    (
+        "nbt_doubled_comma",
+        "struct s size=3x3\n  floor nbt={a:1,,b:2}\n",
+        Reject,
+    ),
+    (
+        "nbt_entries_without_a_comma",
+        "struct s size=3x3\n  floor nbt={a:1 b:2}\n",
+        Reject,
+    ),
+    (
+        "nbt_key_without_a_colon",
+        "struct s size=3x3\n  floor nbt={a 1}\n",
+        Reject,
+    ),
+    (
+        "nbt_key_with_a_namespace",
+        "struct s size=3x3\n  floor nbt={minecraft:id:1}\n",
+        Reject,
+    ),
+    (
+        "nbt_exponent",
+        "struct s size=3x3\n  floor nbt={a:1.5e3}\n",
+        Reject,
+    ),
+    (
+        "nbt_hexadecimal",
+        "struct s size=3x3\n  floor nbt={a:0x1F}\n",
+        Reject,
+    ),
+    (
+        "nbt_underscore_between_digits",
+        "struct s size=3x3\n  floor nbt={a:1_000}\n",
+        Reject,
+    ),
+    (
+        "nbt_leading_zero",
+        "struct s size=3x3\n  floor nbt={a:01}\n",
+        Reject,
+    ),
+    (
+        "nbt_fraction_with_a_whole_suffix",
+        "struct s size=3x3\n  floor nbt={a:1.5b}\n",
+        Reject,
+    ),
+    (
+        "nbt_fraction_without_digits",
+        "struct s size=3x3\n  floor nbt={a:1.}\n",
+        Reject,
+    ),
+    (
+        "nbt_escape_other_than_a_quote",
+        "struct s size=3x3\n  floor nbt={a:\"x\\ny\"}\n",
+        Reject,
+    ),
+    (
+        "nbt_unterminated_string",
+        "struct s size=3x3\n  floor nbt={a:'x}\n",
+        Reject,
+    ),
+    (
+        "nbt_over_two_lines",
+        "struct s size=3x3\n  floor nbt={a:1,\n  b:2}\n",
+        Reject,
+    ),
+    (
+        "nbt_as_a_bare_value",
+        "struct s size=3x3\n  floor {a:1}\n",
+        Reject,
+    ),
+    (
+        "nbt_in_a_list",
+        "struct s size=3x3\n  floor a=[{a:1}]\n",
+        Reject,
+    ),
+    (
+        "nbt_byte_array_of_ints",
+        "struct s size=3x3\n  floor nbt={a:[B; 1]}\n",
+        Reject,
+    ),
+    (
+        "nbt_long_array_of_ints",
+        "struct s size=3x3\n  floor nbt={a:[L; 1]}\n",
+        Reject,
+    ),
+    (
+        "nbt_int_array_of_bytes",
+        "struct s size=3x3\n  floor nbt={a:[I; 1b]}\n",
+        Reject,
+    ),
+    (
+        "nbt_int_array_of_booleans",
+        "struct s size=3x3\n  floor nbt={a:[I; true]}\n",
+        Reject,
+    ),
+    (
+        "nbt_array_spaced_from_its_type",
+        "struct s size=3x3\n  floor nbt={a:[B ; 1b]}\n",
+        Reject,
+    ),
+    (
+        "nbt_comment_inside",
+        "struct s size=3x3\n  floor nbt={a:1 # note}\n",
         Reject,
     ),
     // -- edition guards ---------------------------------------------------
@@ -1603,10 +1900,41 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
         Accept,
     ),
+    // On a header, the grammar reads `x9` as a bare value after the size.
+    (
+        "size_with_a_third_extent_in_a_header",
+        "struct s size=2x2x9\n  floor a=1\n",
+        Accept,
+    ),
     // The grammar's coordinate ends at `3` and reads `x4` as a positional word.
     (
         "coordinate_running_into_a_size",
         "struct s size=3x3\n  fill from=1,2,3x4\n",
+        Accept,
+    ),
+    // -- a decimal that runs into a word ---------------------------------
+    // As for a size, ending the literal before the tail needs negative lookahead.
+    (
+        "decimal_running_into_a_word",
+        "struct s size=3x3\n  floor scale=1.5e3\n",
+        Accept,
+    ),
+    // -- what an NBT compound holds ----------------------------------------
+    // Comparing two keys, relating a list's values to each other and bounding a number by its
+    // suffix's range are beyond the grammar, which reads each value on its own.
+    (
+        "nbt_repeated_key",
+        "struct s size=3x3\n  floor nbt={a:1, \"a\":2}\n",
+        Accept,
+    ),
+    (
+        "nbt_list_of_mixed_types",
+        "struct s size=3x3\n  floor nbt={a:[1, 2b]}\n",
+        Accept,
+    ),
+    (
+        "nbt_number_past_its_range",
+        "struct s size=3x3\n  floor nbt={a:128b}\n",
         Accept,
     ),
     // -- a truth row of the wrong width --------------------------------
@@ -1615,6 +1943,19 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "truth_row_wider_than_the_input_list",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 00 -> 1 }\n",
         Accept,
+    ),
+    // -- a bare value on a header that takes no argument -----------------
+    // Core reports it as `E_UNEXPECTED_POSITIONAL`. Taking it here would let error recovery read an
+    // over-indented first body line into the header and lose the header with it.
+    (
+        "site_header_bare_value",
+        "site s extra:\n  place id=a\n",
+        Reject,
+    ),
+    (
+        "theme_header_bare_value",
+        "theme t dark:\n  slot a -> @b\n",
+        Reject,
     ),
     // -- a state literal naming one property twice ----------------------
     // Comparing two property names' text is beyond a context-free grammar.
@@ -1683,6 +2024,7 @@ const DEPTH_DIVERGENCES: &[(&str, Shape, usize)] = &[
         nested_mux,
         MAX_NESTING_DEPTH + 1,
     ),
+    ("nbt_past_its_nesting_bound", nested_nbt, MAX_NBT_DEPTH + 1),
 ];
 
 /// One indented `level` block per level.
@@ -1698,6 +2040,15 @@ fn nested_blocks(depth: usize) -> String {
 /// `mat=[[[ … x … ]]]`.
 fn nested_list(depth: usize) -> String {
     format!("struct a size=1x1\n  {}\n", list_line(depth))
+}
+
+/// `nbt={a:{a:{ … }}}`, the compound `depth` deep.
+fn nested_nbt(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  floor nbt={}{}\n",
+        "{a:".repeat(depth - 1) + "{",
+        "}".repeat(depth)
+    )
 }
 
 /// `window mat=[[[ … x … ]]]`, the list `depth` deep.

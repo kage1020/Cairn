@@ -411,3 +411,29 @@ struct s size=3x3
   logic sig.out = edge_rising(sig.a, 2)
 
 ---
+
+==================
+A logic line without its `=` still parses its expression
+==================
+
+struct s
+  logic sig.lamps sig.power and not sig.day
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (struct_body
+      (logic_decl
+        (signal_ref
+          (identifier)
+          (identifier))
+        (binary_expression
+          (signal_ref
+            (identifier)
+            (identifier))
+          (unary_expression
+            (signal_ref
+              (identifier)
+              (identifier))))))))
