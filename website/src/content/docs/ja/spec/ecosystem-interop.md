@@ -27,7 +27,7 @@ E_DECOMPILE_DIFF: block IoU = 0.962 < threshold 0.985
   Suggested patch: edit window[id=front_windows] set repeat=4
 ```
 
-`E_DECOMPILE_DIFF` は未実装です。また、修正案が使っている `edit` 文もまだパースできません ([§9.2](/ja/spec/components-editing-sites/#92-編集モデル))。
+`E_DECOMPILE_DIFF` は未実装です。修正案は `edit` の行で ([§9.2](/ja/spec/components-editing-sites/#92-編集モデル))、ソースはすでにこれを受け付けます。
 
 収束の閾値は、block IoU ≥ 0.985、`state_accuracy` ≥ 0.995、残った raw ≤ 5% です。完全な一致は求めません。残差は `raw_fill id=residual_* origin=imported` として明示的に残します。
 

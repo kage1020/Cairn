@@ -1,0 +1,104 @@
+==================
+Edit by a selector of chained brackets (field labels)
+==================
+
+edit window[class=vent][level=floor2] set shape=arch
+
+---
+
+(source_file
+  (edit_stmt
+    target: (selector
+      keyword: (identifier)
+      filter: (selector_filter
+        (filter_list
+          (attribute
+            key: (identifier)
+            value: (identifier))))
+      filter: (selector_filter
+        (filter_list
+          (attribute
+            key: (identifier)
+            value: (identifier)))))
+    set: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (identifier)))))
+
+==================
+Edit by a nested address (field labels)
+==================
+
+edit level[1].door@inside.back[0] set side=front at=center
+
+---
+
+(source_file
+  (edit_stmt
+    target: (member_address
+      (address_step
+        role: (identifier)
+        index: (integer))
+      (address_step
+        role: (identifier)
+        side: (address_side
+          (identifier)
+          (identifier))
+        index: (integer)))
+    set: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (identifier))
+      (attribute
+        key: (identifier)
+        value: (identifier)))))
+
+==================
+Edits between items
+==================
+
+edit window@front[0] set mat_slot=accent_glass
+
+struct s size=3x3
+  window side=front
+
+edit window[] set shape=arch
+
+---
+
+(source_file
+  (edit_stmt
+    (member_address
+      (address_step
+        (identifier)
+        (address_side
+          (identifier))
+        (integer)))
+    (attribute_list
+      (attribute
+        (identifier)
+        (identifier))))
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))))
+  (edit_stmt
+    (selector
+      (identifier)
+      (selector_filter))
+    (attribute_list
+      (attribute
+        (identifier)
+        (identifier)))))

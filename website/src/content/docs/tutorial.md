@@ -203,7 +203,7 @@ Read on: [Components, Editing, and Multi-building](/spec/components-editing-site
 
 | If you want to… | Read |
 |---|---|
-| Change part of a build without rewriting it (planned) | [Editing model §9.2](/spec/components-editing-sites#92-editing-model), as in `edit window[class=vent] set shape=arch` |
+| Change part of a build without rewriting it | [Editing model §9.2](/spec/components-editing-sites#92-editing-model), as in `edit window[class=vent] set shape=arch` |
 | Know which Minecraft versions a file works on | [Versioning and Editions §10.5](/spec/versioning-editions#105-which-version-is-it-for-has-three-answers), the `cairn info` report |
 | Bring an existing schematic into Cairn (planned) | [Ecosystem Interop](/spec/ecosystem-interop/): transliterate, lift, voxel-diff |
 | Try the other roof kinds | The `roof-shed`, `roof-hip`, and `roof-flat` [examples](/examples/) |

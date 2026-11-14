@@ -27,6 +27,13 @@ theme medieval:
   window[class=small] -> frame=@spruce_wood
 ```
 
+**What a row selects.** A selector is a member keyword and its attributes in brackets, and it
+selects the members of that keyword that match each attribute. `level=NAME` matches a member that
+stands under a `level` whose `id=` is `NAME`, and any other attribute matches the value its key
+holds on the member's line. Brackets may follow one another: `window[class=small][side=front]` is
+`window[class=small,side=front]`. An `edit` line selects by the same grammar ([Components, Editing,
+and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
+
 **The cascade.** A member collects the bindings of every selector row it matches, in source order,
 so when two rows bind the same key the member keeps the later value. CSS applies the same rule to
 two rules of equal weight. Bindings are reserved (below), so today the cascade decides what a member
@@ -42,8 +49,8 @@ value is dead text whatever a binding comes to mean. That is
 `E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error even while
 bindings are reserved, for the reason `E_DUPLICATE_ARG` refuses one key written twice inside one row
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Sameness is by meaning: attribute
-order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
-`window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
+order does not count, and `class=` / `id=` / `mat_slot=` / `level=` values compare as label text,
+so `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
 different keys are not reported. They compose, and splitting a long binding list over two lines is
 allowed.
 

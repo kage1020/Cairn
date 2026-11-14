@@ -7,6 +7,7 @@ mod binding;
 mod cairn_version;
 mod connect_arity;
 mod duplicate;
+mod edit;
 mod edition_guard;
 mod intended_targets;
 mod keyword_allowlist;
@@ -29,7 +30,7 @@ pub use intended_targets::weigh_intended_targets;
 pub use sink::DiagnosticSink;
 
 use crate::ast::Module;
-use crate::diagnostic::{EditionFindings, agreed};
+use crate::diagnostic::{EditionFindings, agreed, drop_repeats_within};
 use crate::edition::Edition;
 use crate::intent::IntentModule;
 
@@ -45,6 +46,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     edition_guard::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(module, ir, &mut sink);
+    edit::run(ir, &mut sink);
     binding::run(ir, &mut sink);
     material::run(ir, &mut sink);
     member_scope::run(ir, &mut sink);
@@ -58,7 +60,9 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     for d in resolver_findings(ir, edition) {
         sink.push(d);
     }
-    sink.into_sorted()
+    let mut found = sink.into_sorted();
+    drop_repeats_within(&mut found, &ir.edit_lines());
+    found
 }
 
 /// The resolver's findings on `ir` under `edition`, or with none pinned and some line under an
@@ -128,6 +132,8 @@ mod tests {
             | C::TruthTableConflict
             | C::TruthTableDuplicateRow
             | C::TruthTablePartial
+            | C::EditUnmatched
+            | C::EditUnknownKey
             | C::MissingMaterial => RaisedBy::Syntactic,
             C::UnresolvedSlot
             | C::ThemeSelectorUnmatched
@@ -166,6 +172,7 @@ mod tests {
             | C::StructureTooLarge
             | C::PaletteTooLarge
             | C::InvalidWalkwayIdent
+            | C::EditRipple
             | C::PhaseConflict => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
@@ -209,6 +216,8 @@ mod tests {
                 "E_DUPLICATE_SELECTOR",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
+                "E_EDIT_UNKNOWN_KEY",
+                "E_EDIT_UNMATCHED",
                 "E_INVALID_REQUIRES",
                 "E_INVALID_STRUCT_NAME",
                 "E_MISPLACED_BINDING",

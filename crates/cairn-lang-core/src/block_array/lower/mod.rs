@@ -25,6 +25,7 @@ mod part;
 mod phase;
 mod plate;
 mod raw;
+mod ripple;
 mod roof_fill;
 mod roof_kind;
 mod site_floor;
@@ -40,10 +41,10 @@ use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
-use crate::diagnostic::{Diagnostic, sort_by_position};
+use crate::diagnostic::{Diagnostic, note_edits, sort_by_position};
 use crate::ids::{PlaceId, SiteName, WalkwayScopeKey};
 use crate::intent::{DefIr, IntentModule, MemberRole, SiteIr, StructIr};
-use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
+use crate::resolve::{Resolution, ScopeResolution, place_scope_key, resolve};
 
 use super::args::diag_deferred_member_reason;
 use super::material::TargetRegistry;
@@ -141,8 +142,9 @@ fn lower_to_block_array_within(
     // Findings that are not repeats must differ in their text, as `geometry_material_id`'s do.
     let mut said: HashSet<Diagnostic> = HashSet::new();
     diagnostics.retain(|d| said.insert(d.clone()));
+    note_edits(&mut diagnostics, &intent.edited_members());
 
-    BlockArrayIr {
+    let mut lowered = BlockArrayIr {
         structures,
         placements: placed
             .into_iter()
@@ -151,7 +153,21 @@ fn lower_to_block_array_within(
         walkways,
         members,
         diagnostics,
+    };
+    if let Some(as_written) = intent.as_written.as_deref()
+        && intent.edits.iter().any(|edit| !edit.selected.is_empty())
+    {
+        let written = lower_to_block_array_within(
+            as_written,
+            &resolve(as_written, resolution.edition),
+            registry,
+            palette_capacity,
+        );
+        let ripples = ripple::edit_ripples(&intent.edits, &lowered, &written);
+        lowered.diagnostics.extend(ripples);
+        sort_by_position(&mut lowered.diagnostics);
     }
+    lowered
 }
 
 fn lower_struct<'a>(

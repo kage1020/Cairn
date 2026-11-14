@@ -27,7 +27,9 @@ A named member carries `id`, `class`, `role`, its address
 ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), `mat_slot`, `intent_state`, and
 `resolved_state` ([Blockstate Model](/spec/blockstate/)). Lowering derives `resolved_state`, so it
 is recorded with the block-array IR the member was lowered to, keyed by structure, and not on the
-Intent IR the lowering reads.
+Intent IR the lowering reads. A source's `edit` lines are applied to the Intent IR before any pass
+reads it, so every pass after it sees the edited members ([Components, Editing, and Multi-building
+§9.2](/spec/components-editing-sites/#92-editing-model)).
 
 A raw import does not produce a valid Intent IR. It reaches one only after a semantic lift, and an
 artifact's progress along that path is `semantic_level: raw | grouped | lifted`.

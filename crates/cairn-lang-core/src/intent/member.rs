@@ -6,7 +6,7 @@ use std::ops::Deref;
 use indexmap::IndexMap;
 use serde::Serialize;
 
-use crate::ast::{Value, ValueKind};
+use crate::ast::{Arg, Value, ValueKind};
 use crate::edition::Edition;
 use crate::error::Span;
 
@@ -332,6 +332,11 @@ impl Arguments {
     pub(super) fn insert(&mut self, key: String, value: ValueWithSpan) {
         self.fields.insert(key, value);
     }
+
+    /// Drop `key`, keeping the others in source order.
+    pub(super) fn remove(&mut self, key: &str) {
+        self.fields.shift_remove(key);
+    }
 }
 
 impl Deref for Arguments {
@@ -360,6 +365,18 @@ impl ValueWithSpan {
         let span = value.span().clone();
         Self { value, span }
     }
+}
+
+/// `args` keyed by name; a repeated key keeps its last value.
+pub(crate) fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
+    let mut map = IndexMap::with_capacity(args.len());
+    for arg in args {
+        map.insert(
+            arg.key.clone(),
+            ValueWithSpan::from_value(arg.value.clone()),
+        );
+    }
+    map
 }
 
 /// An identifier or string hoisted out of a member's arguments, with where it was written.

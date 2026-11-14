@@ -5,13 +5,16 @@ use indexmap::IndexMap;
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::addressing::assign_addresses;
+use super::edit::apply_edits;
+use super::member::args_to_map;
 use super::{
     Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member,
     MemberAddress, MemberBody, SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr,
     ValueWithSpan, refused_under_guard, role_of,
 };
 
-/// Lower a parsed [`Module`] into its [`IntentModule`] form, at [`SemanticLevel::Grouped`].
+/// Lower a parsed [`Module`] into its [`IntentModule`] form, at [`SemanticLevel::Grouped`], with
+/// its `edit` lines applied.
 #[must_use]
 pub fn lower(module: &Module) -> IntentModule {
     let mut themes = Vec::new();
@@ -44,14 +47,18 @@ pub fn lower(module: &Module) -> IntentModule {
         }
     }
 
-    IntentModule {
+    let mut intent = IntentModule {
         semantic_level: SemanticLevel::Grouped,
         headers: module.headers.clone(),
         themes,
         defs,
         sites,
         structs,
-    }
+        edits: Vec::new(),
+        as_written: None,
+    };
+    apply_edits(&mut intent, &module.edits);
+    intent
 }
 
 fn lower_theme(name: &str, body: &[ThemeRule], span: crate::error::Span) -> ThemeIr {
@@ -336,17 +343,6 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
         edition_guard: None,
         span,
     }
-}
-
-fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
-    let mut map = IndexMap::with_capacity(args.len());
-    for arg in args {
-        map.insert(
-            arg.key.clone(),
-            ValueWithSpan::from_value(arg.value.clone()),
-        );
-    }
-    map
 }
 
 /// Move an identifier or string `value` into an empty `slot`; `false` leaves it in [`Arguments`].
