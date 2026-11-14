@@ -15,7 +15,7 @@ use crate::version::{FloorVerdict, VersionOrder, compare_versions, parse_min_ver
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
 
 /// What `cairn info` answers to "which version is this `.crn` for?", short of the third axis, the
-/// verified lock target, which no lockfile is read for yet.
+/// verified lock target, which [`crate::lock::LockReading`] reads from the lockfile.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct VersionAxes {

@@ -43,16 +43,16 @@ pub struct RefusedIdentifierLock {
 /// The tests' `mirror` stops compiling until a field added to a strict struct is added here.
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LockfileProbe {
+pub(super) struct LockfileProbe {
     #[serde(default = "assume_unversioned_schema")]
     lock_schema_version: u32,
-    source_hash: HashHex,
-    cairn_version: String,
-    target: LockTarget,
+    pub(super) source_hash: HashHex,
+    pub(super) cairn_version: String,
+    pub(super) target: LockTarget,
     inputs: LockInputs,
     resolved_ir_hash: HashHex,
-    verified: bool,
-    member_version_sensitivity: Vec<MemberSensitivity>,
+    pub(super) verified: bool,
+    pub(super) member_version_sensitivity: Vec<MemberSensitivity>,
     #[serde(default)]
     placements: Vec<PlacementProbe>,
     #[serde(default)]
@@ -91,10 +91,11 @@ struct EndpointProbe {
     port: String,
 }
 
-/// The first identifier the rule refuses, in field order; the caller gates the schema version.
+/// The first identifier the rule refuses, in field order, with the document that records it; the
+/// caller gates the schema version.
 pub(super) fn refused_identifier(
     body: &str,
-) -> Result<Option<RefusedIdentifierLock>, serde_norway::Error> {
+) -> Result<Option<(IdError, LockfileProbe)>, serde_norway::Error> {
     let probe: LockfileProbe = serde_norway::from_str(body)?;
     let placements = probe.placements.iter().flat_map(|p| {
         [
@@ -111,14 +112,8 @@ pub(super) fn refused_identifier(
             PortId::new(w.to.port.as_str()).err(),
         ]
     });
-    let Some(error) = placements.chain(walkways).flatten().next() else {
-        return Ok(None);
-    };
-    Ok(Some(RefusedIdentifierLock {
-        error,
-        target: probe.target,
-        member_version_sensitivity: probe.member_version_sensitivity,
-    }))
+    let error = placements.chain(walkways).flatten().next();
+    Ok(error.map(|error| (error, probe)))
 }
 
 /// The whole lockfile document.
