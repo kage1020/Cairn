@@ -13,10 +13,18 @@ use cairn_lang_formats::builtin_pack;
 
 use crate::line_index::LineIndex;
 
+/// The word that opens a top-level `edit` line (`spec/components-editing-sites` "Editing model").
+const EDIT: &str = "edit";
+
+/// The word between an edit's target and the keys it sets.
+const SET: &str = "set";
+
 /// Where the cursor sits, and the byte span of the partial token to replace.
 enum Context {
-    /// First word of an indent-0 line: a top-level item keyword.
+    /// First word of an indent-0 line: a top-level item keyword, or `edit`.
     TopLevelKeyword { replace: Span },
+    /// The word after an `edit` line's target: `set`.
+    EditSet { replace: Span },
     /// First word of an indented line in an item body: a member keyword that body reads.
     MemberKeyword { replace: Span, body: BodyKind },
     /// First word of an indented line under a header that does not resolve: any member keyword.
@@ -59,7 +67,14 @@ pub fn completions(
             &replace,
             ItemKind::ALL
                 .into_iter()
-                .map(|kind| (kind.keyword(), "top-level item")),
+                .map(|kind| (kind.keyword(), "top-level item"))
+                .chain(std::iter::once((EDIT, "edit patch"))),
+        ),
+        Some(Context::EditSet { replace }) => keyword_items(
+            &index,
+            source,
+            &replace,
+            std::iter::once((SET, "keys the edit sets")),
         ),
         Some(Context::MemberKeyword { replace, body }) => keyword_items(
             &index,
@@ -203,14 +218,21 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
         return match &head[token_start_of(head)..] {
             // Not where `mat_slot=` is unread: `check` would report any slot offered as ignored.
             "mat_slot"
-                if role_of(line_keyword(before_token))
-                    .unread_argument("mat_slot")
-                    .is_none() =>
+                if role_of(
+                    edit_target_keyword(before_token).unwrap_or(line_keyword(before_token)),
+                )
+                .unread_argument("mat_slot")
+                .is_none() =>
             {
                 Some(Context::SlotName { replace })
             }
             _ => None,
         };
+    }
+    if let Some(rest) = before_token.strip_prefix(EDIT)
+        && rest.starts_with(char::is_whitespace)
+    {
+        return edit_line_context(rest, replace);
     }
     if !before_token.trim_start().is_empty() {
         return None;
@@ -236,6 +258,67 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
         }),
         _ => Some(Context::UnscopedMemberKeyword { replace }),
     }
+}
+
+/// What an `edit` line takes at a word boundary, given `rest`, the line after its `edit`: the
+/// target's member keyword first, then `set`.
+fn edit_line_context(rest: &str, replace: Span) -> Option<Context> {
+    if !rest.ends_with(char::is_whitespace) {
+        return None;
+    }
+    match words_outside_brackets(rest)?.as_slice() {
+        [] => Some(Context::MemberKeyword {
+            replace,
+            body: BodyKind::Geometry,
+        }),
+        [_target] => Some(Context::EditSet { replace }),
+        _ => None,
+    }
+}
+
+/// The whitespace-separated words of `text`, a bracket's spaces kept inside its word, or `None`
+/// while a bracket is open.
+fn words_outside_brackets(text: &str) -> Option<Vec<&str>> {
+    let mut words = Vec::new();
+    let mut depth = 0usize;
+    let mut start = None;
+    for (i, c) in text.char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if c.is_whitespace() && depth == 0 {
+            if let Some(from) = start.take() {
+                words.push(&text[from..i]);
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if depth > 0 {
+        return None;
+    }
+    if let Some(from) = start {
+        words.push(&text[from..]);
+    }
+    Some(words)
+}
+
+/// The keyword of the members an `edit` line selects, its address's last step's, when `line`
+/// is an `edit` line that has written one.
+fn edit_target_keyword(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix(EDIT)?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let target = *words_outside_brackets(rest)?.first()?;
+    // A step ends in `]`, and a side's own dots never follow one.
+    let step = target.rsplit_once("].").map_or(target, |(_, last)| last);
+    let end = step
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(step.len());
+    Some(&step[..end])
 }
 
 /// The word `line` opens with after its indent.
@@ -556,10 +639,13 @@ mod tests {
     }
 
     #[test]
-    fn top_level_line_start_offers_exactly_the_item_keywords() {
+    fn top_level_line_start_offers_exactly_the_item_keywords_and_edit() {
         let source = "st";
         let items = complete(source, "st");
-        assert_eq!(labels(&items), vec!["theme", "def", "site", "struct"]);
+        assert_eq!(
+            labels(&items),
+            vec!["theme", "def", "site", "struct", "edit"]
+        );
         for item in &items {
             assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::KEYWORD));
             assert_eq!(edit_range(item), range(0, 0, 2));
@@ -768,6 +854,52 @@ mod tests {
                       struct s size=2x2\n  window id=\"#front\" mat_slot=";
         let items = complete(source, "mat_slot=");
         assert_eq!(labels(&items), vec!["floor"]);
+    }
+
+    #[test]
+    fn an_edit_target_offers_the_keywords_of_struct_and_def_bodies() {
+        let source = "struct s size=2x2\n  floor mat_slot=f\nedit wi";
+        let items = complete(source, "edit wi");
+        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
+        for item in &items {
+            assert_eq!(edit_range(item), range(2, 5, 7));
+        }
+    }
+
+    #[test]
+    fn a_written_edit_target_offers_set_and_nothing_after_it() {
+        for (source, expected) in [
+            ("edit window[class=a level=b] s", vec!["set"]),
+            ("edit level[0].door@inside.back[0] ", vec!["set"]),
+            ("edit window[class=a ", vec![]),
+            ("edit window[0] set ", vec![]),
+            ("edit window[0] set shape=arch ", vec![]),
+        ] {
+            let items = completions(source, at_end_of(source, source)).expect("in the document");
+            assert_eq!(labels(&items), expected, "{source:?}");
+        }
+        let source = "edit window@front[0] se";
+        let items = complete(source, "] se");
+        assert_eq!(edit_range(&items[0]), range(0, 21, 23));
+        assert_eq!(items[0].detail.as_deref(), Some("keys the edit sets"));
+    }
+
+    #[test]
+    fn mat_slot_on_an_edit_line_follows_the_edited_keyword() {
+        let theme = "theme a:\n  slot floor -> @oak_planks\n";
+        for (rest, expected) in [
+            ("edit window@front[0] set mat_slot=", vec!["floor"]),
+            (
+                "edit level[0].window@front[0] set y=2 mat_slot=",
+                vec!["floor"],
+            ),
+            ("edit circuit[0] set mat_slot=", vec![]),
+            ("edit level[0].circuit[0] set mat_slot=", vec![]),
+        ] {
+            let source = format!("{theme}{rest}");
+            let items = completions(&source, at_end_of(&source, rest)).expect("in the document");
+            assert_eq!(labels(&items), expected, "{rest:?}");
+        }
     }
 
     #[test]

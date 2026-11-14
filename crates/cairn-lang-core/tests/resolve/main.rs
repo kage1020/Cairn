@@ -7,6 +7,7 @@ mod composite_version_floors;
 mod def_member;
 mod intended_targets;
 mod resolver;
+mod selector_level_attrs;
 mod selector_list_attrs;
 mod selector_state_attrs;
 mod silent_skip_arms;

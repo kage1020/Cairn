@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 
 use super::*;
 use crate::block_array::{BlockArray, CellRun, Dims, Entity, PALETTE_CAPACITY, Palette};
+use crate::intent::AddressSegment;
 
 const KEY: &str = "struct::hut";
 
@@ -32,6 +33,7 @@ fn hut() -> BlockArrayIr {
     let floor = ResolvedMember {
         role: "floor".to_owned(),
         id: None,
+        address: None,
         resolved_state: vec![ResolvedBlock {
             state: stone(),
             runs: vec![
@@ -93,7 +95,7 @@ type Blocks<'a> = Vec<(&'a str, Vec<CellRun>)>;
 #[test]
 fn a_circuit_lays_under_the_structure_which_rises_over_it() {
     let mut ir = hut();
-    assert_eq!(ir.attach_circuit(KEY, 2, &circuit(), 10..20), Ok(()));
+    assert_eq!(ir.attach_circuit(KEY, 2, &circuit(), 10..20, None), Ok(()));
 
     let array = &ir.structures[KEY];
     assert_eq!(array.dims, Dims { x: 2, y: 3, z: 2 });
@@ -189,6 +191,25 @@ fn a_circuit_lays_under_the_structure_which_rises_over_it() {
 }
 
 #[test]
+fn the_circuit_is_recorded_under_the_address_of_its_line() {
+    let mut ir = hut();
+    let line = MemberAddress::default().child(AddressSegment {
+        role: "circuit".to_owned(),
+        side: None,
+        index: 0,
+    });
+    assert_eq!(
+        ir.attach_circuit(KEY, 2, &circuit(), 10..20, Some(line.clone())),
+        Ok(())
+    );
+    let addresses: Vec<Option<MemberAddress>> = ir.members[KEY]
+        .iter()
+        .map(|member| member.address.clone())
+        .collect();
+    assert_eq!(addresses, [Some(line), None]);
+}
+
+#[test]
 fn a_refused_circuit_leaves_the_structure_as_it_was() {
     let mut full = hut();
     full.structures[KEY]
@@ -259,7 +280,10 @@ fn a_refused_circuit_leaves_the_structure_as_it_was() {
         ),
     ] {
         let before = ir.clone();
-        assert_eq!(ir.attach_circuit(key, void, &blocks, 0..0), Err(refusal));
+        assert_eq!(
+            ir.attach_circuit(key, void, &blocks, 0..0, None),
+            Err(refusal)
+        );
         assert_eq!(ir, before, "{key} void={void}");
     }
 }
@@ -286,7 +310,7 @@ fn a_slot_only_the_circuit_holds_records_every_key_of_its_state_as_derived() {
             entity: None,
         },
     ];
-    assert_eq!(ir.attach_circuit(KEY, 1, &blocks, 10..20), Ok(()));
+    assert_eq!(ir.attach_circuit(KEY, 1, &blocks, 10..20, None), Ok(()));
     let keys = ["east", "north", "power", "south", "west"].map(str::to_owned);
     assert_eq!(
         ir.structures[KEY].derived,

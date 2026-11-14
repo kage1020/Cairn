@@ -6,6 +6,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::block_array::{BlockState, Face};
 use cairn_lang_core::error::Span;
+use cairn_lang_core::intent::{CircuitRegion, MemberAddress};
 use indexmap::IndexMap;
 use serde::Serialize;
 
@@ -71,23 +72,30 @@ pub struct Reservation {
     /// The `circuit` line.
     #[serde(skip)]
     pub span: Span,
+    /// The `circuit` line's address in its body.
+    #[serde(skip)]
+    pub address: Option<MemberAddress>,
 }
 
 impl Reservation {
-    /// The reservation `void` layers deep under a struct `width` by `depth`.
+    /// The reservation `line` makes under a struct `width` by `depth`.
     ///
     /// # Panics
     ///
     /// On a `void` of 0, which lowering refuses.
-    pub(crate) fn new(label: String, void: u32, width: u32, depth: u32, span: Span) -> Self {
-        assert!(void > 0, "a `circuit` line reserves at least one layer");
+    pub(crate) fn new(line: &CircuitRegion, width: u32, depth: u32) -> Self {
+        assert!(
+            line.void > 0,
+            "a `circuit` line reserves at least one layer"
+        );
         Self {
-            label,
-            void,
-            layers: void.min(MAX_CIRCUIT_LAYERS),
+            label: line.label.clone(),
+            void: line.void,
+            layers: line.void.min(MAX_CIRCUIT_LAYERS),
             width,
             depth,
-            span,
+            span: line.span.clone(),
+            address: line.address.clone(),
         }
     }
 

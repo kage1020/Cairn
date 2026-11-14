@@ -301,6 +301,7 @@ fn resolved_members(
             ResolvedMember {
                 role: member.role.keyword().to_owned(),
                 id: member.id.clone(),
+                address: member.address.clone(),
                 resolved_state: blocks.into_values().collect(),
                 span: member.span.clone(),
             }

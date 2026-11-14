@@ -191,6 +191,7 @@ snow, covers here what its model does.
 ```yaml
 member:
   id: eave
+  address: stair@front[0]                  # where it stands, derived (Syntax §5.5)
   type: block | block_entity | entity      # typed in the IR; the distinction is the compiler's job
   primitive: stairs
   intent_state:   { half: top, facing: out, shape: outer_left }  # author intent
@@ -205,19 +206,26 @@ The two are named apart from Minecraft's own term "blockstate" on purpose. Keepi
 A member's `intent_state` holds the blockstate keys its keyword names, and only those: on a `stair`,
 `half`, `facing`, `shape` and `waterlogged`, on a `door`, `hinge` and `open`, on a `chest`,
 `facing`, `size`, the line's spelling of its `type`, and `waterlogged`, and on an `observer`,
-`piston` or `dispenser`, `facing`. No other keyword names one yet. Every other `key=value` the line writes is one of the member's arguments, apart from `id`,
-`class` and `mat_slot`, which become fields of their own. Where a key goes depends on the keyword:
-`shape=` on a `stair` is intent, and `shape=` on a `window` is an argument, the opening's outline
-([Entities §8.2](/spec/entities/#82-anchor-conventions)).
+`piston` or `dispenser`, `facing`. No other keyword names one yet. Every other `key=value` the line
+writes is one of the member's arguments, apart from `id`, `class` and `mat_slot`, which become
+fields of their own. Where a key goes depends on the keyword: `shape=` on a `stair` is intent, and
+`shape=` on a `window` is an argument, the opening's outline ([Entities
+§8.2](/spec/entities/#82-anchor-conventions)). An `edit` line writes its keys by the same rule, each
+where the member's line would have put it, and never into `resolved_state` ([Components, Editing,
+and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
 
 Lowering records each member's `resolved_state` beside the block array it builds: every state the
 member's cells hold once the body is painted, with the cells that hold it as runs along `x`, each
 from its first cell, in block-array order. A cell belongs to the member that painted it last, so a
 door's block is recorded on the door and not on the wall it was set into, and a member none of whose
 cells survive records nothing. `cairn lower --format json` prints the record under `members`, keyed
-like `structures`, which is what lets two builds be compared member by member. A body lists its
-members in the order of the first cell each owns, so reordering lines that share no cell leaves the
-record as it was, as it leaves the grid ([Compilation Model
+like `structures`. Each record names its member by keyword, by `id=` where the line writes one, and
+by its address ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), which is what lets two
+builds be compared member by member, as `W_EDIT_RIPPLE` compares a body built with its edits and as
+written ([Components, Editing, and Multi-building
+§9.2](/spec/components-editing-sites/#92-editing-model)). A body lists its members in the order of
+the first cell each owns, so reordering lines that share no cell leaves the record as it was, as it
+leaves the grid ([Compilation Model
 §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The record is made each time a
 body is lowered: its block ids are those the lowering's target resolved, a theme's edition variant
 and a pinned version's override included, and its property names are the canonical vocabulary's.

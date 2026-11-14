@@ -13,10 +13,10 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 
 | Subcommand | What it does |
 |---|---|
-| `cairn parse <file.crn>` | Lex and parse, printing the AST. `--format json\|debug`. Runs no check passes. |
+| `cairn parse <file.crn>` | Lex and parse, printing the AST. `--format json\|debug`; the JSON gives each member line of a `struct` or `def` body its address, and lists each `edit` line with its target and the keys it sets. Runs no check passes. |
 | `cairn check <file.crn>` | Run the validation passes and print diagnostics. `--format text\|json`. Writes nothing. |
 | `cairn info <file.crn>` | Report the version range the file declares, per-edition portability, buildable targets, declared intended targets, and semantic-sensitive members. `--editions java,bedrock`, `--format text\|json`. |
-| `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--edition`, `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot. Without `--edition` it pins no edition, so it leaves out what `@edition` guards hold and every struct's circuit. |
+| `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--edition`, `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot; the ASCII dump lists each member that built a cell by its address. Without `--edition` it pins no edition, so it leaves out what `@edition` guards hold and every struct's circuit. |
 | `cairn compile <file.crn> --edition <e>` | Write the structure artifacts and a lockfile. `--target`, `--out`, `--lock`. |
 | `cairn synth <file.crn>` | Print one redstone pipeline stage as JSON. Experimental; see below. |
 | `cairn docs [page] [title]` | Print a page of the documentation site as Markdown, from the copy embedded in the binary, or list the pages. `--toc` lists a page's headings. See below. |

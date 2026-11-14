@@ -33,12 +33,14 @@ structs:
       h: 7
     args: {}
     members:
-      - role:
+      - address: "floor[0]"
+        role:
           kind: Floor
         mat_slot: floor
         arguments: {}
         intent_state: {}
       - class: outer
+        address: "walls[0]"
         role:
           kind: Walls
         mat_slot: wall
@@ -47,7 +49,8 @@ structs:
             kind: Int
             value: 4
         intent_state: {}
-      - role:
+      - address: "door@front[0]"
+        role:
           kind: Door
         arguments:
           side:
@@ -58,6 +61,7 @@ structs:
             value: center
         intent_state: {}
       - class: small
+        address: "window@front[0]"
         role:
           kind: Window
         mat_slot: glass
@@ -80,7 +84,8 @@ structs:
             kind: Bool
             value: true
         intent_state: {}
-      - role:
+      - address: "roof[0]"
+        role:
           kind: Roof
         mat_slot: roof
         arguments:

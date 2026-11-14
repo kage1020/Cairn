@@ -187,8 +187,8 @@ placeholder's code still means what it meant. A placeholder stands in only for w
 build yet, or what the spec reserves for a later extension. Source the spec itself refuses keeps its
 code. The placeholders today include:
 
-- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as decimals,
-  `nbt={...}` values and `edit`;
+- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as decimals and
+  `nbt={...}` values;
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
   `spawn`, `bed`, `sign` and `raw_repeat`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
