@@ -364,7 +364,7 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "door",
-        "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a hinge=left open=false\n",
+        "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a hinge=left open=false\n  door id=e side=back offset=1\n",
     ),
     (
         "window",
