@@ -54,7 +54,7 @@ Evolving な面:
 
 Internal な面:
 
-- ライブラリを持つワークスペースのクレートすべての Rust API。`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、`cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-tree-sitter`、`cairn-lang-docs` がそれにあたります。`cairn-lang-cli` はライブラリを持たず、`cairn` のバイナリだけを含みます。これらのクレートは、含まれる最初の月次マイナーリリースから crates.io に公開します。各クレートは、docs.rs が最初に表示するクレートレベルの `//!` ドキュメントと、crates.io が表示する README を、同じ 1 文で始めます。その文は、そのクレートの Rust API が Internal ティアに属し何も約束しないことを述べ、この定義にリンクします。
+- ライブラリを持つワークスペースのクレートすべての Rust API。`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、`cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-tree-sitter`、`cairn-lang-docs` がそれにあたります。`cairn-lang-cli` はライブラリを持たず、`cairn` のバイナリだけを含みます。これらのクレートは、含まれる最初の月次マイナーリリースから crates.io に公開します。公開する各クレートは、docs.rs が最初に表示するクレートレベルの `//!` ドキュメントと、crates.io が表示する README を、同じ 1 文で始めます。この 1 文で、そのクレートの Rust API が Internal ティアに属し、互換性の約束がないことを伝え、この定義へリンクします。
 - `cairn synth` と、それが出力する JSON。このコマンドは `--experimental-logic-synth` を付けたときにしか動きません。
 - コンパイラの中間表現 (Intent IR、Semantic IR、block-array ピボットのレイアウト)。
 - 増分ビルドキャッシュのディスク上の形式 (プロジェクト内の `target/` に相当するもの)。

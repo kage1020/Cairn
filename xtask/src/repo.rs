@@ -135,6 +135,10 @@ impl Repo {
 }
 
 /// The member an entry of `cargo metadata`'s `packages` describes, in the workspace at `root`.
+///
+/// # Errors
+///
+/// When the entry lacks a name or manifest, or a path in it lies outside `root`.
 fn member(package: &serde_json::Value, root: &Path) -> Result<Member, String> {
     let (Some(name), Some(manifest)) =
         (package["name"].as_str(), package["manifest_path"].as_str())
@@ -196,7 +200,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_library_of_any_crate_type_is_the_members_library_and_a_root() {
+    fn a_member_lists_its_library_and_binary_roots_and_its_readme() {
         let package = json!({
             "name": "a",
             "manifest_path": "/w/crates/a/Cargo.toml",
@@ -244,13 +248,40 @@ mod tests {
             published: false,
         };
         assert_eq!(
-            member(&package(json!([])), Path::new("/w")),
-            Ok(unpublished)
+            member(&package(json!([])), Path::new("/w")).as_ref(),
+            Ok(&unpublished)
         );
-        assert!(
-            member(&package(json!(["internal"])), Path::new("/w"))
-                .unwrap()
-                .published
+        assert_eq!(
+            member(&package(json!(["internal"])), Path::new("/w")),
+            Ok(Member {
+                published: true,
+                ..unpublished
+            })
         );
+    }
+
+    #[test]
+    fn a_target_of_any_library_crate_type_is_the_library() {
+        let kinds = ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"];
+        for kind in kinds {
+            let package = json!({
+                "name": "a",
+                "manifest_path": "/w/a/Cargo.toml",
+                "publish": null,
+                "targets": [{"kind": [kind], "src_path": "/w/a/src/lib.rs"}],
+            });
+            assert_eq!(
+                member(&package, Path::new("/w")),
+                Ok(Member {
+                    name: "a".to_owned(),
+                    dir: PathBuf::from("a"),
+                    roots: vec![PathBuf::from("a/src/lib.rs")],
+                    library: Some(PathBuf::from("a/src/lib.rs")),
+                    readme: None,
+                    published: true,
+                }),
+                "{kind}"
+            );
+        }
     }
 }
