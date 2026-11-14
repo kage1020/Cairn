@@ -10,6 +10,7 @@ mod conditional_arguments;
 mod connections;
 mod cottage;
 mod door_block;
+mod door_column;
 mod door_wall_fit;
 mod edition_guard;
 mod fill;

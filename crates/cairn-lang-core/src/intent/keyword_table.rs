@@ -312,7 +312,7 @@ impl MemberRole {
             Self::Floor => &[],
             Self::Walls => &["height"],
             Self::Fill => &["from", "to", "fluid", "kind"],
-            Self::Door => &["side", "at", "opened_by", "hinge", "open"],
+            Self::Door => &["side", "at", "offset", "opened_by", "hinge", "open"],
             Self::Window => &[
                 "side", "y", "offset", "size", "sym", "repeat", "step", "shape", "anchor",
             ],

@@ -23,9 +23,10 @@ outputs ([Redstone §14.5](/spec/redstone/#145-place-and-route)), and only a Jav
 comparator. Every other block that has a block entity, such as the one a `chest`, a `dispenser` or a
 `daylight` sets ([Blockstate Model
 §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override), [Redstone
-§14.2](/spec/redstone/#142-signal-binding)), is placed with no data. The example below also uses
-syntax the parser does not accept yet: a decimal (`scale=1.5`) and an `nbt={...}` value are
-`E_PARSE` ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)).
+§14.2](/spec/redstone/#142-signal-binding)), is placed with no data. The example below parses:
+a decimal (`scale=1.5`) and an `nbt={...}` compound are values
+([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)), and each keyword in it is
+`E_UNKNOWN_KEYWORD`.
 
 ```
 villager id=trader at=stall[0] profession=librarian level=master
@@ -33,8 +34,23 @@ trade villager=trader buy=emerald count=24 sell=enchanted_book enchant=mending
 text_display  id=holo   at=4,3,2 text="Inn" billboard=fixed scale=1.5
 block_display id=model  at=front.above block=@lantern scale=0.5
 item_display  id=trophy at=counter item=diamond_sword rotation=y90
-spawn id=cat type=cat at=inside.floor nbt={variant:"black"}
+@edition java
+  spawn id=cat type=cat at=inside.floor nbt={variant:"black"}
 ```
+
+A key that reads a decimal, such as `scale=`, is written as a float or a double, whichever the NBT
+field it fills holds.
+
+An `nbt={...}` compound is edition-specific by nature. Java and Bedrock name an entity's and a block
+entity's fields apart, and no registry pack holds those fields, so nothing checks a compound against
+the target the way a raw id is checked ([Materials and Themes
+§7.4](/spec/materials-themes/#74-raw-blocks)). A line that writes `nbt=` therefore stands under the
+`@edition` guard of the edition whose field names it spells, which holds it as it holds a raw member
+([Versioning and Editions
+§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). Outside a guard it is
+to be `E_NBT_OUTSIDE_EDITION_GUARD`, a reserved code. The build that keeps the line writes the
+compound, as given, into the entity or block entity the line places: the compiler checks the
+compound's syntax and nothing in it.
 
 A villager trading hall is a staple build and display entities are core to modern decoration.
 Sending them to `nbt={}` would cost generation quality and edit stability, so they are structured.
