@@ -233,3 +233,45 @@ fn a_writer_failing_inside_a_list_returns_its_error_rather_than_panicking() {
         "got {err:?}",
     );
 }
+
+#[test]
+fn a_streamed_long_array_is_the_bytes_of_the_tag_holding_its_values() {
+    let values = vec![0, -1, i64::MIN, 0x0102_0304_0506_0708];
+    let mut tree = Compound::new();
+    tree.insert("BlockStates", Tag::LongArray(values.clone()));
+    tree.insert("Empty", Tag::LongArray(vec![]));
+
+    let mut java_tree = Vec::new();
+    write_java_uncompressed(&mut java_tree, "", &tree).expect("tree write");
+    let mut java_stream = Vec::new();
+    stream_java_uncompressed(&mut java_stream, "", |root| {
+        root.long_array("BlockStates", values.len(), values.iter().copied())?;
+        root.long_array("Empty", 0, [])
+    })
+    .expect("stream write");
+    assert_eq!(java_stream, java_tree, "big-endian");
+
+    let mut bedrock_tree = Vec::new();
+    write_bedrock_uncompressed(&mut bedrock_tree, "", &tree).expect("tree write");
+    let mut bedrock_stream = Vec::new();
+    stream_bedrock_uncompressed(&mut bedrock_stream, "", |root| {
+        root.long_array("BlockStates", values.len(), values.iter().copied())?;
+        root.long_array("Empty", 0, [])
+    })
+    .expect("stream write");
+    assert_eq!(bedrock_stream, bedrock_tree, "little-endian");
+}
+
+#[test]
+#[should_panic(expected = "a streamed long array declared 3 values and was given 2")]
+fn a_long_array_given_fewer_values_than_it_declared_panics() {
+    let mut buf = Vec::new();
+    let _ = stream_java_uncompressed(&mut buf, "", |root| root.long_array("a", 3, [1, 2]));
+}
+
+#[test]
+#[should_panic(expected = "a streamed long array declared 1 values and was given more")]
+fn a_long_array_given_more_values_than_it_declared_panics() {
+    let mut buf = Vec::new();
+    let _ = stream_java_uncompressed(&mut buf, "", |root| root.long_array("a", 1, [1, 2]));
+}

@@ -78,9 +78,17 @@ fn main() -> ExitCode {
             file,
             edition,
             target,
+            structure_format,
             out,
             lock,
-        }) => run_compile(&file, edition, &target, out.as_deref(), lock.as_deref()),
+        }) => run_compile(
+            &file,
+            edition,
+            &target,
+            structure_format,
+            out.as_deref(),
+            lock.as_deref(),
+        ),
         Some(Command::Docs { page, title, toc }) => {
             run_docs(page.as_deref(), title.as_deref(), toc)
         }

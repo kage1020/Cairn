@@ -6,6 +6,7 @@ use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, Palett
 use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, prepare_mcstructure};
 use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_target};
 use cairn_lang_formats::java_structure::{build_structure_tag, prepare_structure};
+use cairn_lang_formats::litematic::{LitematicFile, LitematicRegion, prepare_litematic};
 use cairn_lang_formats::registry::builtin_pack;
 use peak_alloc::PeakAlloc;
 
@@ -80,6 +81,24 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
             prepared.write(&mut std::io::sink()).expect("write");
         })
     };
+    let litematic_write = |array: &BlockArray| {
+        peak_during(|| {
+            let file = LitematicFile {
+                scope: "struct::cube".to_owned(),
+                stem: "cube".to_owned(),
+                regions: vec![LitematicRegion {
+                    scope: "struct::cube",
+                    name: "cube".to_owned(),
+                    position: (0, 0, 0),
+                    block_array: array,
+                }],
+            };
+            prepare_litematic(file, &java)
+                .expect("prepare")
+                .write_gzip(&mut std::io::sink())
+                .expect("write");
+        })
+    };
     let java_tree = |array: &BlockArray| {
         peak_during(|| drop(build_structure_tag(array, &java).expect("build")))
     };
@@ -103,6 +122,7 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
     for (label, write) in [
         ("java write", &java_write as &dyn Fn(&BlockArray) -> usize),
         ("bedrock write", &bedrock_write),
+        ("litematic write", &litematic_write),
     ] {
         let (small_peak, large_peak) = (write(&small), write(&large));
         // Zero would mean the allocations escaped the counter, such as into a C allocator.

@@ -37,7 +37,8 @@ Stable surfaces:
 - The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
-  output schemas, and process exit codes.
+  output schemas, and process exit codes, apart from a flag or flag value in its first three
+  monthly minors.
 - The tier-1 material vocabulary: the abstract tokens the built-in `materials` catalogs declare,
   listed in [§7.2](/spec/materials-themes/#tier-1-tokens). Adding one is not a break.
 - The error and warning codes (`E_*`, `W_*`) [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists,
@@ -57,7 +58,8 @@ Evolving surfaces:
 
 - Spec chapters or sections explicitly marked as draft (the [Open Issues](/spec/open-issues/)
   list), and the syntax a section flags [subject to change](#subject-to-change).
-- New `cairn` subcommands during their first three monthly minors after introduction.
+- New `cairn` subcommands, and new flags and flag values of `cairn compile`, `cairn check` and
+  `cairn info`, during their first three monthly minors after introduction.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.
@@ -210,7 +212,7 @@ Two classes of change sit outside this matrix:
 - **Bug fixes** that align behaviour with the spec are never breaking, even if a consumer was
   depending on the buggy behaviour. The spec, not the implementation, defines the contract.
 - **Output bit-equality** of emitted `.nbt` / `.litematic` / `.schem` / `.mcstructure` is not
-  promised at any tier. Only the `.nbt` and `.mcstructure` writers exist today
+  promised at any tier. The `.schem` writer does not exist yet
   ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases may produce
   structurally-different files for the same source; what matters is that the result is valid for
   the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See

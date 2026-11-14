@@ -219,6 +219,40 @@ pub fn states_for(target: &BedrockTarget) -> VersionStates<'_> {
         .expect("the built-in Bedrock pack maps every targetable version")
 }
 
+/// A block-array IR holding `array` alone, under its `source_scope`.
+pub fn ir_of(array: BlockArray) -> BlockArrayIr {
+    BlockArrayIr {
+        structures: IndexMap::from([(array.source_scope.clone(), array)]),
+        placements: IndexMap::new(),
+        walkways: IndexMap::new(),
+        members: IndexMap::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+/// An array of `dims` holding `ids` after air, its voxels the palette slots `slots` in `(y, z, x)`
+/// order, under `struct::<name>`.
+///
+/// # Panics
+///
+/// When `slots` is not one slot per voxel.
+pub fn array_of(name: &str, dims: Dims, ids: &[&str], slots: &[u16]) -> BlockArray {
+    let mut palette = Palette::new_with_air();
+    for id in ids {
+        palette.intern(BlockState::bare(*id));
+    }
+    assert_eq!(slots.len(), dims.volume(), "one slot per voxel");
+    BlockArray {
+        dims,
+        palette,
+        voxels: slots.iter().map(|&slot| PaletteIndex(slot)).collect(),
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: format!("struct::{name}"),
+        derived: Vec::new(),
+    }
+}
+
 /// A 2×2×3 array of stone under a comparator spelled `id` at (1, 1, 1), its block entity resting
 /// at strength 3, where Java's `blocks` and Bedrock's `block_indices` order it apart.
 ///

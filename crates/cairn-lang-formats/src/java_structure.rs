@@ -305,6 +305,8 @@ pub enum OutputExt {
     Nbt,
     /// Bedrock structure (`.mcstructure`).
     Mcstructure,
+    /// Litematica schematic (`.litematic`).
+    Litematic,
 }
 
 impl OutputExt {
@@ -314,6 +316,7 @@ impl OutputExt {
         match self {
             OutputExt::Nbt => "nbt",
             OutputExt::Mcstructure => "mcstructure",
+            OutputExt::Litematic => "litematic",
         }
     }
 }
@@ -346,7 +349,10 @@ fn palette_list(entries: &[BlockState], data_version: i32) -> List {
     List::of_compounds(compounds)
 }
 
-fn palette_entry(state: &BlockState, (id_key, properties_key): (&str, &str)) -> Compound {
+pub(crate) fn palette_entry(
+    state: &BlockState,
+    (id_key, properties_key): (&str, &str),
+) -> Compound {
     let mut compound = Compound::new();
     compound.insert(id_key, Tag::String(state.id.clone()));
     if !state.properties.is_empty() {
@@ -370,7 +376,7 @@ fn block_entities_at(block_array: &BlockArray) -> HashMap<(u32, u32, u32), &Bloc
 
 /// A block entity as the game saves one in a structure's `blocks`: its id and fields, without the
 /// position its block entry already gives.
-fn entity_nbt(entity: &BlockEntity) -> Compound {
+pub(crate) fn entity_nbt(entity: &BlockEntity) -> Compound {
     let mut nbt = Compound::new();
     nbt.insert("id", Tag::String(entity.id.clone()));
     for (field, value) in &entity.fields {
