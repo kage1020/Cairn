@@ -96,7 +96,7 @@ fn a_latency_bound_is_a_whole_number_of_ticks() {
     );
     assert_eq!(
         refusal("struct s size=3x3\n  assert latency(a -> b) <= 1.5\n"),
-        "2:30: expected end of line, got `.`",
+        "2:29: expected integer literal, got decimal `1.5`",
     );
 }
 
@@ -652,7 +652,13 @@ fn a_stage_count_is_refused_where_it_is_wrong() {
         ),
         (
             "delay(sig.x, 1.5)",
-            "2:31: expected `)`, got `.`: a stage count is a whole number of stages, as in \
+            "2:30: expected a stage count, a whole number of at least 1, got decimal `1.5`: \
+             `delay` is applied to its operand and a stage count, as in `delay(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x, 1 .)",
+            "2:32: expected `)`, got `.`: a stage count is a whole number of stages, as in \
              `delay(…, N)`"
                 .to_owned(),
         ),

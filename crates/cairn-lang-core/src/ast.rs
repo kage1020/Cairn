@@ -487,6 +487,8 @@ pub enum ValueKind {
     Bool(bool),
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
+    /// Decimal literal as written (`1.5`): the key that reads one picks a float or a double.
+    Decimal(String),
     /// Size literal `WxH` (`9x7`), in blocks.
     Size {
         /// Width in blocks.
@@ -507,6 +509,8 @@ pub enum ValueKind {
     Token(String),
     /// Block id as Minecraft spells it, with its state literal if any: `minecraft:light[level=15]`.
     BlockId(String),
+    /// `nbt={...}` compound as written, braces included, in the SNBT subset the lexer checks.
+    Nbt(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(DottedRef),
     /// Double-quoted string literal.
@@ -562,6 +566,7 @@ impl Value {
             ValueKind::Str(s) => Some(format!("\"{s}\"")),
             ValueKind::Bool(b) => Some(b.to_string()),
             ValueKind::Int(i) => Some(i.to_string()),
+            ValueKind::Decimal(text) | ValueKind::Nbt(text) => Some(text.clone()),
             ValueKind::Size { w, h } => Some(format!("{w}x{h}")),
             ValueKind::Coord { x, y, z } => Some(format!("{x},{y},{z}")),
             ValueKind::Token(t) => Some(format!("@{t}")),
@@ -587,10 +592,12 @@ impl Value {
             ValueKind::Ident(..) => "identifier",
             ValueKind::Bool(..) => "boolean",
             ValueKind::Int(..) => "integer",
+            ValueKind::Decimal(..) => "decimal",
             ValueKind::Size { .. } => "size",
             ValueKind::Coord { .. } => "coordinate",
             ValueKind::Token(..) => "token",
             ValueKind::BlockId(..) => "block id",
+            ValueKind::Nbt(..) => "NBT compound",
             ValueKind::DotRef(..) => "reference",
             ValueKind::Str(..) => "string",
             ValueKind::List(..) => "list",

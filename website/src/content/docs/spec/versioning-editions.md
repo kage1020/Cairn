@@ -1043,8 +1043,10 @@ that it would get outside one. What the guard adds is the edition whose build ke
 What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
 §7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
 §14.1](/spec/redstone/#tier-0-parts): `repeater`, `comparator`, `redstone_torch` and
-`redstone_dust`. Any other member, and a `logic` or `assert` line, is
-`E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking
+`redstone_dust`. A line that writes an `nbt={...}` compound belongs to that layer too, and stands
+under a guard ([Entities §8.1](/spec/entities/#81-two-tiers)), though no keyword reads `nbt=` yet.
+Any other member, and a `logic` or `assert` line, is `E_SEMANTIC_IN_EDITION_GUARD`
+([Lint](/spec/lint/)), once at the outermost such line, taking
 anything indented under it along. So is a `logic` or `assert` line under a guarded raw member or
 Tier 0 part, which outside a guard would still reach redstone synthesis. No build and no other
 check reads a refused line or what goes with it, so it draws that finding alone. A raw member or a

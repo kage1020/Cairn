@@ -9,7 +9,7 @@ use crate::ast::{
 use crate::calver::future_version_note;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition::Edition;
-use crate::error::{IntContext, ParseError, Position};
+use crate::error::{IntContext, LexError, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
 use crate::logic_library::{CallSignature, LogicPrimitive, Notation, StageCount, infix_rank_above};
@@ -1586,14 +1586,20 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Whether the next tokens are an integer, a `,` and another component, or a `-` before the
+    /// Whether the next tokens are a number, a `,` and another component, or a `-` before the
     /// first: only a coordinate triple puts those after `=`, since a selector's `,` precedes a key.
     fn at_coordinate(&self) -> bool {
         let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        let number = |offset| {
+            matches!(
+                kind(offset),
+                Some(TokenKind::Int { .. } | TokenKind::Decimal { .. })
+            )
+        };
         let first = usize::from(matches!(kind(0), Some(TokenKind::Minus)));
-        matches!(kind(first), Some(TokenKind::Int { .. }))
+        number(first)
             && matches!(kind(first + 1), Some(TokenKind::Comma))
-            && (first == 1 || matches!(kind(2), Some(TokenKind::Int { .. } | TokenKind::Minus)))
+            && (first == 1 || number(2) || matches!(kind(2), Some(TokenKind::Minus)))
     }
 
     /// Read a coordinate triple `X,Y,Z`, three integers joined by `,` with nothing between.
@@ -1659,24 +1665,35 @@ impl<'a> Parser<'a> {
         matches!(kind(0), Some(TokenKind::Comma))
             && matches!(
                 kind(1),
-                Some(TokenKind::Int { .. } | TokenKind::Minus | TokenKind::Size(..))
+                Some(
+                    TokenKind::Int { .. }
+                        | TokenKind::Decimal { .. }
+                        | TokenKind::Minus
+                        | TokenKind::Size(..)
+                )
             )
     }
 
-    /// The refusal for a coordinate component that is a `-` or a size rather than an integer.
+    /// The refusal for a coordinate component that is a `-`, a size or a decimal rather than an
+    /// integer.
     fn coordinate_component_refusal(&self, position: Position) -> ParseError {
         let token = &self.tokens[self.pos];
-        let message = if let TokenKind::Size(..) = token.kind {
-            let written = &self.source[token.span.clone()];
-            let rest = &written[written.find('x').unwrap_or_default()..];
-            format!(
-                "a coordinate component runs into `{rest}`: `{written}` reads as a size, and a \
-                 coordinate triple is three integers, `x,y,z`, as `4,3,2`"
-            )
-        } else {
-            "a coordinate component is never negative: a coordinate counts from the low corner \
-             of the footprint, as `0,0,0`"
-                .to_owned()
+        let written = &self.source[token.span.clone()];
+        let message = match token.kind {
+            TokenKind::Size(..) => {
+                let rest = &written[written.find('x').unwrap_or_default()..];
+                format!(
+                    "a coordinate component runs into `{rest}`: `{written}` reads as a size, and \
+                     a coordinate triple is three integers, `x,y,z`, as `4,3,2`"
+                )
+            }
+            TokenKind::Decimal { .. } => format!(
+                "a coordinate component is a whole number, and `{written}` is a decimal: a \
+                 coordinate triple names a cell by three integers, `x,y,z`, as `4,3,2`"
+            ),
+            _ => "a coordinate component is never negative: a coordinate counts from the low \
+                  corner of the footprint, as `0,0,0`"
+                .to_owned(),
         };
         ParseError::Syntax { position, message }
     }
@@ -1926,6 +1943,27 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Value::new(ValueKind::Str(s), token.span))
             }
+            TokenKind::Decimal { lexeme } => {
+                self.advance();
+                // The lexer leaves a touching `.` to the parse, since a raw directive value
+                // reads `1.21.4` as text.
+                if self
+                    .peek()
+                    .is_some_and(|t| t.kind == TokenKind::Dot && t.span.start == token.span.end)
+                {
+                    return Err(LexError::TrailingDecimalSegment {
+                        position,
+                        literal: lexeme,
+                        found: '.',
+                    }
+                    .into());
+                }
+                Ok(Value::new(ValueKind::Decimal(lexeme), token.span))
+            }
+            TokenKind::Nbt(text) => {
+                self.advance();
+                Ok(Value::new(ValueKind::Nbt(text), token.span))
+            }
             TokenKind::Ident(first) => {
                 self.advance();
                 if self.peek_is(&TokenKind::Dot) {
@@ -1981,6 +2019,7 @@ impl<'a> Parser<'a> {
             Some(
                 TokenKind::Ident(_)
                     | TokenKind::Int { .. }
+                    | TokenKind::Decimal { .. }
                     | TokenKind::Bool(_)
                     | TokenKind::Str(_)
                     | TokenKind::Size(..)
