@@ -16,7 +16,7 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 | `cairn parse <file.crn>` | Lex and parse, printing the AST. `--format json\|debug`. Runs no check passes. |
 | `cairn check <file.crn>` | Run the validation passes and print diagnostics. `--format text\|json`. Writes nothing. |
 | `cairn info <file.crn>` | Report the version range the file declares, per-edition portability, buildable targets, declared intended targets, and semantic-sensitive members. `--editions java,bedrock`, `--format text\|json`. |
-| `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--edition`, `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot. Without `--edition` it pins no edition, so it leaves out what `@edition` guards hold and every struct's circuit. |
+| `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--edition`, `--target`, `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot. Without `--edition` it pins no edition, so it leaves out what `@edition` guards hold and every struct's circuit. Without `--target` it pins no version, so no block id is checked against a version's id table; with one it lowers against that version's, as `check --edition E --target V` does, and prints the IR `compile` writes at that target. |
 | `cairn compile <file.crn> --edition <e>` | Write the structure artifacts and a lockfile. `--target`, `--out`, `--lock`. |
 | `cairn synth <file.crn>` | Print one redstone pipeline stage as JSON. Experimental; see below. |
 | `cairn docs [page] [title]` | Print a page of the documentation site as Markdown, from the copy embedded in the binary, or list the pages. `--toc` lists a page's headings. See below. |
@@ -31,7 +31,7 @@ Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 
 - `--edition` is **required** by `compile`, and every subcommand that takes `--target` refuses it without `--edition`. The same `1.21` means different things on Java and Bedrock, and Java's DataVersion is unrelated to Bedrock's `block_version`.
 - `--target` is an opaque label resolved through the pinned edition's data table, with DataVersion as the canonical ordering key ([versioning-editions "The target is a compile-time parameter"](https://cairn.kage1020.com/spec/versioning-editions/)). `latest` aliases the row that table names as latest, which is not necessarily the newest row it carries.
-- `compile --target` defaults to `latest`. `check --target` has no default, so `cairn check --edition java` still runs the unpinned gate rather than refusing ids on a version nobody chose.
+- `compile --target` defaults to `latest`. `check --target` and `lower --target` have no default, so `cairn check --edition java` still runs the unpinned gate rather than refusing ids on a version nobody chose.
 
 ## Exit codes
 

@@ -15,16 +15,33 @@ use cairn_lang_formats::registry::builtin_pack;
 use crate::cli::LowerFormat;
 use crate::pipeline::{build_diagnostics, lay_circuits, load_module, weighed_editions};
 use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
+use crate::target::{ResolvedTarget, resolve_target};
 
-pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerFormat) -> ExitCode {
+pub(crate) fn run_lower(
+    file: &Path,
+    edition: Option<Edition>,
+    target: Option<&str>,
+    format: LowerFormat,
+) -> ExitCode {
+    // clap refuses `--target` without `--edition` (`spec/compilation` "Target axes").
+    let pinned = match edition.zip(target) {
+        Some((edition, target)) => match resolve_target(edition, target) {
+            Ok(resolved) => Some(resolved),
+            Err(err) => {
+                eprintln!("error: {err}");
+                return ExitCode::from(1);
+            }
+        },
+        None => None,
+    };
     let (source, module) = match load_module(file, format.failure_report()) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
     let ir = lower(&module);
     let resolution = resolve(&ir, edition);
-    // No `--target`, so no version to check ids against.
-    let registry = builtin_pack(edition.unwrap_or(Edition::Java)).view(None);
+    let registry = builtin_pack(edition.unwrap_or(Edition::Java))
+        .view(pinned.as_ref().map(ResolvedTarget::mc_version));
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     // With no edition pinned the guarded lines are left out, but an error on one still fails the
     // command.

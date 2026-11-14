@@ -181,12 +181,13 @@ they carry no span and no other command raises them.
 `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which `cairn compile`, `cairn
 lower`, `cairn info` and `cairn check` all run, as does the language server. `E_UNKNOWN_ID`,
 `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` and `E_STATE_UNMAPPED` further need a pinned target, so
-three commands raise them: `cairn compile --target`, `cairn check --edition E
---target V`, and `cairn info`, which lowers once per supported version for its `buildable targets`
-row and prints each refusing version's findings under `note: <edition> <version> refuses this
-source`, exiting 0 all the same ([Versioning and
-Editions](/spec/versioning-editions/#the-buildable-targets-row)). `lower` lowers against no version,
-as does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
+four commands raise them: `cairn compile --target`, `cairn check --edition E --target V`,
+`cairn lower --edition E --target V`, and `cairn info`, which lowers once per supported version for
+its `buildable targets` row and prints each refusing version's findings under `note: <edition>
+<version> refuses this source`, exiting 0 all the same ([Versioning and
+Editions](/spec/versioning-editions/#the-buildable-targets-row)). A `lower` with no `--target`
+lowers against no version, as does the rest of `info`'s report, and so does a `compile` whose
+target the file's floors refuse
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
 check` with no `--target`, and the language server, lower with no target at all, so they raise
 `E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
@@ -485,14 +486,14 @@ the build is unaffected.
 state a member writes counts, including one a later member covers, so the limit is on the states
 written rather than the states the finished scope keeps. A vanilla registry has far fewer states, so
 a source reaches it only through block ids or state literals no pinned target checks. Both go
-unchecked wherever lowering runs with no version pinned: in `cairn lower`, the range-wide lowering
-behind `cairn info`'s report, the language server and a `cairn check` with no `--target`, in a
-`cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
-and in a `cairn compile` whose target the file's floors refuse ([Versioning and
-Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A pinned target checks both,
-save a literal on a block its pack records no states for, which `W_STATE_LITERAL_UNCHECKED` names,
-so the note asks a build that pins one to split the scope rather than to pin a target. A warning,
-for the reason above.
+unchecked wherever lowering runs with no version pinned: in a `cairn lower` with no `--target`, the
+range-wide lowering behind `cairn info`'s report, the language server and a `cairn check` with no
+`--target`, in a `cairn compile` or `cairn check --edition E --target V` naming a version the
+edition does not ship, and in a `cairn compile` whose target the file's floors refuse ([Versioning
+and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A pinned target checks
+both, save a literal on a block its pack records no states for, which `W_STATE_LITERAL_UNCHECKED`
+names, so the note asks a build that pins one to split the scope rather than to pin a target. A
+warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it. In a struct body it covers three

@@ -66,8 +66,9 @@ fn main() -> ExitCode {
         Some(Command::Lower {
             file,
             edition,
+            target,
             format,
-        }) => run_lower(&file, edition, format),
+        }) => run_lower(&file, edition, target.as_deref(), format),
         Some(Command::Synth {
             file,
             experimental_logic_synth,

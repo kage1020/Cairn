@@ -345,7 +345,7 @@ fn two_huts_joined_by(path: &str) -> String {
 }
 
 #[test]
-fn lower_stays_silent_about_ids_because_it_takes_no_target() {
+fn lower_without_a_target_stays_silent_about_ids() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
     let out = Command::new(cargo_bin())
         .arg("lower")
