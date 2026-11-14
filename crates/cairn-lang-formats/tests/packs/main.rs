@@ -7,6 +7,7 @@ pub mod common;
 mod absent;
 mod aliases;
 mod connections;
+mod constraints;
 mod declared_elsewhere;
 mod ids_exist;
 mod spelling;

@@ -27,6 +27,7 @@ pub use portability::{
     portability_for_java,
 };
 pub use registry::{
-    PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
-    load_builtin_pack, load_from_dir,
+    ConstraintIndex, ConstraintsError, PackFiles, PackManifest, PackSource, RegistryError,
+    RegistryPack, builtin_constraints, builtin_pack, load_builtin_constraints, load_builtin_pack,
+    load_from_dir, parse_constraints,
 };

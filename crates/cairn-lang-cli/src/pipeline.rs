@@ -21,7 +21,7 @@ use cairn_lang_redstone::{Diagnostic as CircuitDiagnostic, build_circuits};
 
 use crate::floors::{DeclaredFloors, floor_refusing_target};
 use crate::report::{FailureReport, report_failure_document};
-use crate::target::{ResolvedTarget, resolve_target, supported_versions};
+use crate::target::{ResolvedTarget, registry_view, resolve_target, supported_versions};
 
 pub(crate) use requested::{RequestedEditions, requested_editions};
 
@@ -86,7 +86,7 @@ pub(crate) fn check_lowering(
     let pinned = resolved.as_ref().ok().map(ResolvedTarget::mc_version);
     // The theme variant decides which id a `mat_slot=` reaches, so resolve for the edition.
     let resolution = resolve(ir, Some(edition));
-    let registry = builtin_pack(edition).view(pinned);
+    let registry = registry_view(edition, pinned);
     let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
     CheckLowering {
         dropped_scopes: dropped_scopes(&resolution, &block_ir),
@@ -391,7 +391,7 @@ pub(crate) fn load_and_lower(
         .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
-    let registry = builtin_pack(edition).view(mc_version);
+    let registry = registry_view(edition, mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     // `check`'s gate, so `compile` never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(

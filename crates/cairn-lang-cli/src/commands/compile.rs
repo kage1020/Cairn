@@ -12,7 +12,7 @@ use crate::artifacts::{
     write_artifacts_and_lock,
 };
 use crate::floors::enforce_version_floor;
-use crate::lockfile::{default_lock_path, report_previous_target};
+use crate::lockfile::{default_lock_path, report_previous_target, sensitive_members};
 use crate::name_case::NameCase;
 use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
 use crate::report::report_diagnostics;
@@ -100,7 +100,12 @@ fn check_and_write(
         return code;
     }
     // Before the lockfile is replaced: it is the only record of what was verified before.
-    report_previous_target(lock_path, edition, target);
+    report_previous_target(
+        lock_path,
+        edition,
+        target,
+        &sensitive_members(block_ir, edition, target),
+    );
     write_artifacts_and_lock(&prepared, source, block_ir, edition, target, lock_path)
 }
 

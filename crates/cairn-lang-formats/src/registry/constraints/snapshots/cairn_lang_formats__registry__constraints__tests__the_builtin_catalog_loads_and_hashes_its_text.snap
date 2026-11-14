@@ -1,0 +1,5 @@
+---
+source: crates/cairn-lang-formats/src/registry/constraints/tests.rs
+expression: builtin.hash().to_string()
+---
+sha256:c2c0e9aef9fa0225c84152cc92a3f02941b316388b6246b32476cc5c5b8fb889

@@ -114,7 +114,9 @@ pub(crate) enum Command {
                 findings that need a target join the report — `E_UNKNOWN_ID` above all, which \
                 exists only where a target is pinned: `stone_bricks` is a block on Bedrock \
                 1.21.40 and not on Bedrock 1.21.0, so with no version chosen there is no question \
-                to answer. A version the edition does not ship \
+                to answer. The constraint catalog's checks run there too (`W_NO_ATTACHMENT_FACE`, \
+                `W_UNSUPPORTED_BLOCK`, `W_WATER_SPILL`), since what holds a block is the pinned \
+                version's answer. A version the edition does not ship \
                 still lowers, against the same unpinned view `cairn lower` uses, so every finding \
                 that needs no id table is reported before the target is refused. Leaving the flag \
                 off still lowers, with no target, and reports only the findings every target that \
@@ -200,8 +202,12 @@ pub(crate) enum Command {
             1.26.60) is dropped with a `W_INTENT_DEGRADED` warning rather than silently. \
             `--target` pins the one version a block id and its states have an answer for, which \
             is what lets the compile check them (`E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, \
-            `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`); `cairn check --edition E --target V` pins the \
-            same pair to reach those findings without building anything. Exits 0 on success, 1 \
+            `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`) and run the constraint catalog's checks on \
+            what it builds; `cairn check --edition E --target V` pins the same pair to reach \
+            those findings without building anything. The lockfile records the catalog's hash \
+            and the members whose meaning changes at a boundary version of the edition, and a \
+            recompile for another version names those whose boundary it crosses \
+            (`W_SEMANTIC_SENSITIVITY`). Exits 0 on success, 1 \
             on parse, lowering, or I/O failure (including an unsupported `--target` or a state \
             literal outside its block's states), and 2 when the source file cannot be located"
     )]

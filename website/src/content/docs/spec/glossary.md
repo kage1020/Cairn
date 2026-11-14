@@ -157,10 +157,18 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Fail-loud.** Silent substitution and implicit dropping of unknown IDs / out-of-domain states
   are forbidden. Errors return the closed set of valid candidates plus a suggested DSL fix.
   See [versioning-editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
-- **`semantic_sensitivity`.** A constraint-catalog field distinguishing "the ID stays valid but
-  meaning/behavior/appearance changed at this version" from `since/until`. Cauldron split @1.17,
-  wall connection bool→none/low/tall @1.16, item format @1.20.5 are examples. See
-  [versioning-editions §10.5](/spec/versioning-editions/#105-which-version-is-it-for-has-three-answers).
+- **Constraint catalog.** The hand-written tables of how the game treats a block once it stands in
+  the world, beside the extracted registry packs: what a block hangs on or stands on, what falls,
+  and where a meaning changes between versions. A pinned build checks what it builds against them.
+  See [lint §11.4](/spec/lint/#114-constraint-catalog).
+- **Sturdy face.** A face of a block its model covers whole: a full block's every face, a bottom
+  slab's bottom, an upright stair's bottom and back. What a pane, fence or wall joins, and what an
+  attached block hangs on. See [blockstate](/spec/blockstate/#connections).
+- **`semantic_sensitivity`.** A constraint-catalog table distinguishing "the ID stays valid but
+  meaning/behavior/appearance changed at this version" from `since/until`, one row per edition,
+  boundary version and reason. Cauldron split @1.17, wall connection bool→none/low/tall @1.16, item
+  format @1.20.5 are the built-in catalog's. See
+  [versioning-editions](/spec/versioning-editions/#the-semantic-sensitive-row).
 - **Block IoU.** Voxel intersection-over-union used for the import self-correction loop. Convergence
   threshold ≥ 0.985. See
   [ecosystem-interop §12.2](/spec/ecosystem-interop/#122-reverse-direction-the-compiler-transliterates-an-llm-lifts),
