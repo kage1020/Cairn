@@ -1073,16 +1073,16 @@ fn each_edition_counts_the_blocks_of_its_own_guards_and_none_of_the_others() {
 
 #[test]
 fn a_java_only_block_is_not_reported_as_bedrock_portable() {
-    // `minecraft:oak_sign` is Bedrock's `standing_sign`, and has no properties to translate.
+    // Bedrock keeps a pot's plant in its block entity, so no block it writes says which plant.
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+    let src = one_slot_source(tmp.path(), "javaonly.crn", "potted_poppy");
 
     assert_build_refuses_the_id(
         &src,
         "bedrock",
         "1.21.60",
         &tmp.path().join("out"),
-        "minecraft:oak_sign",
+        "minecraft:potted_poppy",
         (4, 17),
     );
 
@@ -1163,15 +1163,15 @@ fn stdout_rows(stdout: &str) -> Vec<&str> {
 #[test]
 fn the_unsupported_figure_names_the_entry_and_the_reason() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
-    let (code, stdout, stderr) = info_raw(&src, "bedrock");
+    let src = one_slot_source(tmp.path(), "bedrockspelling.crn", "standing_sign");
+    let (code, stdout, stderr) = info_raw(&src, "java");
     assert_eq!(code, Some(0), "info reports; it does not refuse: {stderr}");
     assert!(
         stdout.contains("unsupported: 1"),
         "premise: the figure is the thing being explained, got: {stdout}",
     );
     assert!(
-        stderr.contains("minecraft:oak_sign"),
+        stderr.contains("minecraft:standing_sign"),
         "the entry behind the figure must be named, got: {stderr}",
     );
     assert!(
@@ -1179,7 +1179,7 @@ fn the_unsupported_figure_names_the_entry_and_the_reason() {
         "and the reason with it, since the three have three different repairs, got: {stderr}",
     );
     assert!(
-        stderr.contains("it spells the block `minecraft:standing_sign`"),
+        stderr.contains("it spells the block `minecraft:oak_sign`"),
         "the reason must end on what this edition calls the block, got: {stderr}",
     );
 }
@@ -1188,7 +1188,7 @@ fn the_unsupported_figure_names_the_entry_and_the_reason() {
 fn naming_the_entry_does_not_move_the_rows() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let clean = one_slot_source(tmp.path(), "clean.crn", "cobblestone");
-    let named = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+    let named = one_slot_source(tmp.path(), "javaonly.crn", "potted_poppy");
     let (_, clean_out, _) = info_raw(&clean, "bedrock");
     let (_, named_out, named_err) = info_raw(&named, "bedrock");
     let labels: Vec<String> = stdout_rows(&clean_out)
@@ -1201,6 +1201,7 @@ fn naming_the_entry_does_not_move_the_rows() {
             "registry compatibility",
             "inferred range",
             "edition portability",
+            "respelled",
             "buildable targets",
             "intended targets",
             "semantic-sensitive",
@@ -1214,11 +1215,11 @@ fn naming_the_entry_does_not_move_the_rows() {
         "naming an entry must not add a row, got: {named_out}",
     );
     assert!(
-        !named_out.contains("oak_sign"),
+        !named_out.contains("potted_poppy"),
         "the id belongs on stderr with the other notes, got: {named_out}",
     );
     assert!(
-        named_err.contains("oak_sign"),
+        named_err.contains("potted_poppy"),
         "premise: it is on stderr, got: {named_err}",
     );
 }
@@ -1227,7 +1228,7 @@ fn naming_the_entry_does_not_move_the_rows() {
 fn an_entry_is_named_even_when_no_target_was_weighed() {
     // A floor above every version skips them all, leaving the portability count the only report.
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let src = one_slot_source(tmp.path(), "floored.crn", "oak_sign");
+    let src = one_slot_source(tmp.path(), "floored.crn", "potted_poppy");
     let body = std::fs::read_to_string(&src).expect("read the probe source back");
     let floored = body.replace(
         "@cairn 2026.06\n",
@@ -1244,7 +1245,7 @@ fn an_entry_is_named_even_when_no_target_was_weighed() {
     // Premise: the floor skipped every version, so nothing else named it.
     assert_stream(&stderr, &[]);
     assert!(
-        stderr.contains("minecraft:oak_sign"),
+        stderr.contains("minecraft:potted_poppy"),
         "the count is the only report left, so it has to name the entry: {stderr}",
     );
 }
@@ -1252,18 +1253,18 @@ fn an_entry_is_named_even_when_no_target_was_weighed() {
 #[test]
 fn the_json_row_names_exactly_what_its_count_counts() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+    let src = one_slot_source(tmp.path(), "bedrockspelling.crn", "standing_sign");
     let axes = info_json_at(&src, "java,bedrock");
-    let bedrock = portability_entry(&axes, "bedrock");
-    let entries = bedrock["unsupported_entries"]
+    let java = portability_entry(&axes, "java");
+    let entries = java["unsupported_entries"]
         .as_array()
         .expect("unsupported_entries is a JSON array");
     assert_eq!(
         entries.len() as u64,
-        bedrock["unsupported"].as_u64().expect("a count"),
-        "the list and the figure count the same entries, got: {bedrock}",
+        java["unsupported"].as_u64().expect("a count"),
+        "the list and the figure count the same entries, got: {java}",
     );
-    assert_eq!(entries[0]["id"], "minecraft:oak_sign");
+    assert_eq!(entries[0]["id"], "minecraft:standing_sign");
     assert_eq!(entries[0]["reason"], "absent_from_edition");
     let aliases = entries[0]["aliases"]
         .as_array()
@@ -1271,28 +1272,29 @@ fn the_json_row_names_exactly_what_its_count_counts() {
     let alias = aliases
         .first()
         .and_then(serde_json::Value::as_str)
-        .expect("Bedrock has this block under another name");
-    let (_, _, stderr) = info_raw(&src, "bedrock");
+        .expect("Java has this block under another name");
+    assert_eq!(alias, "minecraft:oak_sign");
+    let (_, _, stderr) = info_raw(&src, "java");
     assert!(
         stderr.contains(&format!("it spells the block `{alias}`")),
         "the note and the JSON must offer the same id, got: {stderr}",
     );
-    let java = portability_entry(&axes, "java");
-    assert_eq!(java["unsupported"], 0);
+    let bedrock = portability_entry(&axes, "bedrock");
+    assert_eq!(bedrock["unsupported"], 0);
     assert!(
-        java["unsupported_entries"]
+        bedrock["unsupported_entries"]
             .as_array()
             .expect("every row carries the key")
             .is_empty(),
-        "Java has the block, so its list is empty rather than absent: {java}",
+        "Bedrock has the block, so its list is empty rather than absent: {bedrock}",
     );
-    assert_eq!(java["degraded"], 0);
+    assert_eq!(bedrock["degraded"], 0);
     assert!(
-        java["degraded_entries"]
+        bedrock["degraded_entries"]
             .as_array()
             .expect("every row carries the key")
             .is_empty(),
-        "Java loses nothing here, so its list is empty rather than absent: {java}",
+        "Bedrock loses nothing here, so its list is empty rather than absent: {bedrock}",
     );
 }
 
@@ -1499,7 +1501,7 @@ fn a_source_info_refuses_prints_no_rows_at_all() {
 #[test]
 fn an_unsupported_entry_is_a_figure_not_a_gate() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
+    let src = one_slot_source(tmp.path(), "javaonly.crn", "potted_poppy");
     let out = Command::new(cargo_bin())
         .args(["info", src.to_str().unwrap(), "--editions", "bedrock"])
         .output()
@@ -1539,7 +1541,7 @@ fn a_walkway_path_material_reaches_the_portability_row() {
          site duo:\n\
          \x20\x20place id=a use=hut theme=t at=origin\n\
          \x20\x20place id=b use=hut theme=t east_of=a gap=2\n\
-         \x20\x20connect a.entry to b.entry path=@oak_sign\n",
+         \x20\x20connect a.entry to b.entry path=@potted_poppy\n",
     )
     .expect("write walkway source");
 
@@ -1548,7 +1550,7 @@ fn a_walkway_path_material_reaches_the_portability_row() {
         "bedrock",
         "1.21.60",
         &tmp.path().join("out"),
-        "minecraft:oak_sign",
+        "minecraft:potted_poppy",
         (15, 35),
     );
 

@@ -5,4 +5,5 @@ mod inferred_range;
 mod intended_targets;
 mod parity;
 mod report;
+mod respelled;
 mod verified_target;

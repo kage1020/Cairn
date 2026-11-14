@@ -79,6 +79,7 @@ $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
+respelled:               Java: none   Bedrock: none
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
@@ -91,7 +92,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - 1 つのソースから Java の `.nbt` と Bedrock の `.mcstructure` を出力
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
-- ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
+- ソースごとのロックファイルと、バージョン別のブロック ID、改名前の旧名、意味トークンを収めたレジストリパック。正規トークンはターゲットごとの綴りで書き出されます
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
 - 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)

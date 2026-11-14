@@ -64,11 +64,15 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 ## Materials and themes
 
 - **Canonical token.** The value bound to a slot or theme selector: a *meaning* token, not a raw
-  block ID. The backend resolves the per-`(edition, version)` ID and state names. See
-  [materials-themes §7.2](/spec/materials-themes/#72-canonical-vocabulary).
+  block ID. The backend resolves the per-`(edition, version)` ID and state names, across a rename,
+  a split and a merge. See [materials-themes §7.2](/spec/materials-themes/#72-canonical-vocabulary).
 - **Canonical block token.** A specific block meaning: `@oak_planks`, `@water_cauldron`,
-  `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → `cauldron`) are
-  forbidden.
+  `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → an empty `cauldron`)
+  are forbidden.
+- **Meaning token.** A property a canonical block token carries that its block does not have, whose
+  value picks one of the blocks the block split into: `fluid` in `@cauldron[fluid=water]`. The
+  registry pack's `meanings` table lists them. See [materials-themes
+  §7.3](/spec/materials-themes/#73-mappings-across-version-and-edition).
 - **Abstract material token.** An aesthetic choice: `@floor.wood.broadleaf`, `@roof.dark_wood`.
   Theme policy MAY downgrade these (e.g. oak↔birch).
 - **Tier-1 token.** An abstract material token the built-in `materials` catalogs declare, Stable

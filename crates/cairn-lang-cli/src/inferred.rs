@@ -386,3 +386,6 @@ fn edge(bounds: &[Bound], key: i64) -> (&str, Vec<&Bound>) {
     let at: Vec<&Bound> = bounds.iter().filter(|b| b.key == key).collect();
     (at[0].version.as_str(), at)
 }
+
+#[cfg(test)]
+mod tests;

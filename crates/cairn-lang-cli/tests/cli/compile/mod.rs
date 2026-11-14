@@ -8,6 +8,7 @@ mod edition_guard;
 mod edition_theme;
 mod lock_readback;
 mod requires_conflict;
+mod respelled;
 mod roof_material;
 mod state_literal;
 mod unknown_argument;

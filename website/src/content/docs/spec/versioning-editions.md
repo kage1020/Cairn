@@ -113,6 +113,21 @@ one block ID, and its `overrides` name the versions that spell it differently, a
   "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }] }
 ```
 
+Both packs carry a `meanings` component, written by hand: each canonical token whose block split
+into several, its meaning token, a property the block does not have whose value picks one of them,
+and the block each value names ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)):
+
+```json
+{ "token": "cauldron", "meaning": "fluid",
+  "blocks": { "water": "water_cauldron", "lava": "lava_cauldron",
+              "powder_snow": "powder_snow_cauldron" } }
+```
+
+The loader refuses a component with no rows, a row that names no block, a token two rows name, a
+block no version of `blocks` declares and no version's state map writes, and a meaning token its
+block takes as a state at some version, which the row would hide.
+
 The Bedrock pack carries its state maps as two more components. `states` is generated from
 GeyserMC's mappings, one pinned per version, and checked against that version's block palette when
 the pack is extracted and again when it is loaded. The Java states of one block that become one
@@ -141,7 +156,10 @@ family, among the Java blocks spelled that way, that takes its states. An ID tha
 its own Java block unless the entry carries a state that block does not take: Bedrock spells Java's
 `redstone_wall_torch` as `redstone_torch` too, so there `redstone_torch[facing=north,lit=true]` is
 the wall torch and `redstone_torch[lit=true]` the standing one. The states such an ID takes are
-those of every block it reads as.
+those of every block it reads as. A Java ID that is no Bedrock spelling at the version, such as
+`oak_sign`, reads as its own Java block's family too: that is how a canonical token Bedrock writes
+as a block of its own reaches the palette ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)).
 
 The same stairs at 1.21.60 have no `minecraft:corner`, so that row lists `shape` under `dropped`: a
 property the family holds at more than one value that no Bedrock state reads. `waterlogged` never
@@ -208,9 +226,12 @@ refuses a row naming a block, or a value of a state, that the version's block ta
 ## 10.4 Fail-loud and minimum-version inference
 
 Unknown IDs, out-of-domain states, and parity gaps are hard errors. Silent substitution and implicit
-dropping are forbidden. An error returns the closed set of candidates valid in the target, the
-minimum version, and a suggested fix. That sends the model back to registry-derived candidates
-rather than to its memory.
+dropping are forbidden. Writing a canonical token under the spelling the target gives the same block
+is neither ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)), and `cairn info` names each
+one ([§10.5](#the-respelled-row)). An error returns the closed set of candidates valid in the
+target, the minimum version, and a suggested fix. That sends the model back to registry-derived
+candidates rather than to its memory.
 
 ```text
 E_UNKNOWN_ID line 4: "minecraft:pale_oak_planks" not in java 1.21 registry.
@@ -255,10 +276,17 @@ built-in packs record every block's states, so only an external pack can leave o
 ### Which registry an unknown ID is unknown to
 
 An ID is checked against the block table for the one `(edition, version)` the compile pinned, not
-against the edition as a whole. Bedrock 1.21.0 spells stone bricks `stonebrick` and 1.21.40 spells
-it `stone_bricks`, so an edition-wide answer would accept both everywhere and catch neither mistake.
-The tables ship in the registry pack's `blocks` component, folded with the `inherits + diffs` rule
-of [§10.3](#103-backend--data-tables).
+against the edition as a whole. Bedrock 1.21.0 has no `pale_moss_block`, which 1.21.60 adds, and
+1.21.40 no longer has `stonebrick`, which it split four ways, so an edition-wide answer would accept
+both everywhere and catch neither mistake. The tables ship in the registry pack's `blocks`
+component, folded with the `inherits + diffs` rule of [§10.3](#103-backend--data-tables).
+
+The ID checked is the one the build writes. A canonical token the pinned target does not declare is
+first read through the target's meaning, alias and state-map tables ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)), so `@chain` on Java 26.3 is
+checked, and written, as `iron_chain`, and only a token none of them answers is unknown. A raw
+block's ID is checked as written, and an abstract token's as its catalog entry maps it for the
+target.
 
 The check therefore runs where a version is pinned and nowhere else: on `cairn compile --target`,
 on `cairn check --edition E --target V`, which pins the same pair to run the same pass without
@@ -279,17 +307,18 @@ target that builds it, so neither this check, `E_UNKNOWN_ABSTRACT_TOKEN` nor
 `W_ABSTRACT_TOKEN_DEFERRED` reaches it ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 Checking against *every* version the edition ships and refusing only the ids valid in none of them
-would need no flag, and would answer a different question: `stone_bricks` is valid somewhere on
+would need no flag, and would answer a different question: `pale_moss_block` is valid somewhere on
 Bedrock, so a build pinned to 1.21.0 would still be told nothing. The pin is what makes the answer
 true of the build being made.
 
 The suggested fix depends on which of four ways a wrong ID arrived. A **typo** is answered by a
 distance search over the same table: `oak_plank` is answered with `oak_planks`. A **rename** is not
-a typo. Bedrock spells Java's `light` as `light_block_0` … `light_block_15`, eight edits away, and
-no threshold that keeps the typo finder honest will ever connect the two. Renames are answered from
-the registry pack's `aliases` component instead, and only where the pack has a row; where it does
-not, and no other version of the edition declares the ID, the message says it has no candidate
-rather than offering the nearest unrelated block.
+a typo. Java spells Bedrock's `light_block_5` as `light`, eight edits away, and no threshold that
+keeps the typo finder honest will ever connect the two. A rename the target's tables follow is
+written rather than refused; the rest, such as another edition's spelling or a split no one spelling
+succeeds, are answered from the registry pack's `aliases` component instead, and only where the pack
+has a row; where it does not, and no other version of the edition declares the ID, the message says
+it has no candidate rather than offering the nearest unrelated block.
 
 An `aliases` row is a **group of spellings**: the names one block has worn, across editions and
 across one edition's own range, including the several IDs one old spelling split into.
@@ -300,27 +329,27 @@ across one edition's own range, including the several IDs one old spelling split
 
 Nothing in the row says which spelling belongs to which `(edition, version)`. The `blocks` component
 already knows that, per version, so a lookup is "take the group, keep the members the pinned target
-declares". That is what lets one set of rows answer Java → Bedrock (`oak_sign` → `standing_sign`)
-and Bedrock 1.21.0 → 1.21.40 (`stonebrick` → `stone_bricks`) alike. An answer is the closed set
-§10.4 asks for, never a pick from it: `@light` on Bedrock 1.21.60 is answered with all sixteen light
-levels, because choosing one would be the silent substitution this section forbids.
+declares". That is what lets one set of rows answer Bedrock → Java (`standing_sign` → `oak_sign`)
+and Bedrock 1.21.40 → 1.21.0 (`skeleton_skull` → `skull`) alike, and what writes a renamed token
+under the pinned target's spelling. An answer is the closed set §10.4 asks for, never a pick from
+it: `@stonebrick` on Bedrock 1.21.60 is answered with the four blocks 1.21.40 split it into, because
+choosing one would be the silent substitution this section forbids.
 
 The third kind is a real block at the wrong version: one a later release adds, or one a later
-release drops. The block tables answer it, so the error names the targets of the edition nearest
-the pinned one on either side that declare the ID: the first after it and the last before it. They
-are the versions the pack carries a table for, not the releases that changed the block: the
-built-in Java tables carry 1.20.4, 1.21, 1.21.4 and 26.3, so `@leaf_litter`, which 1.21.5 added,
-is first declared at 26.3 as far as they say. The fix offered is a `--target` among them. For an ID
-the author named that no earlier target declares, it also offers an `@requires <edition>
-version>=` floor at the release that added it, with the first target as that release's upper
-bound, so a target without the block is refused at the floor instead; an ID the pack chose is the
-pack's to fix and gets no floor. `cairn check --target` is not held to the floors, so it keeps
-reporting the ID at an older target once the floor is declared, where `cairn compile` refuses the
-target at the floor. Such an ID is no typo, so no distance search runs for it: `@pale_oak_planks`
-on Java 1.21 is answered with 1.21.4, not with `dark_oak_planks`. An alias answer still stands
-beside it, and comes first, since both are true: `@stone_bricks` on Bedrock 1.21.0 is answered with
-both `stonebrick`, the spelling 1.21.0 declares, and 1.21.40, the first target that declares
-`stone_bricks`.
+release drops. The block tables answer it, so the error names the targets of the edition nearest the
+pinned one on either side that declare the ID: the first after it and the last before it. They are
+the versions the pack carries a table for, not the releases that changed the block: the built-in
+Java tables carry 1.20.4, 1.21, 1.21.4 and 26.3, so `@leaf_litter`, which 1.21.5 added, is first
+declared at 26.3 as far as they say. The fix offered is a `--target` among them. For an ID the
+author named that no earlier target declares, it also offers an `@requires <edition> version>=`
+floor at the release that added it, with the first target as that release's upper bound, so a target
+without the block is refused at the floor instead; an ID the pack chose is the pack's to fix and
+gets no floor. `cairn check --target` is not held to the floors, so it keeps reporting the ID at an
+older target once the floor is declared, where `cairn compile` refuses the target at the floor. Such
+an ID is no typo, so no distance search runs for it: `@pale_oak_planks` on Java 1.21 is answered
+with 1.21.4, not with `dark_oak_planks`. An alias answer still stands beside it, and comes first,
+since both are true: `@skeleton_skull` on Bedrock 1.21.0 is answered with both `skull`, the spelling
+1.21.0 declares, and 1.21.40, the first target that declares `skeleton_skull`.
 
 The fourth is a block only the other edition has, which the pinned edition's pack lists as
 `absent` ([§10.7](#a-block-only-the-other-edition-has)). It is not a typo, a rename or a version,
@@ -478,25 +507,26 @@ refused by the other's answer.
 ### A floor is weighed against the registry
 
 A floor says which versions the file admits, and the inferred range
-([§10.5](#the-inferred-range-row)) says which versions declare every block the build paints. A
-floor above the range's upper edge admits only versions that lack one of them. `@requires java
-version>=26.3` on a build that paints `@chain`, which Java's table declares last at 1.21.4, is a
-file no Java target can build, and no `--target` repairs it. That is `E_REQUIRES_CONFLICT`:
+([§10.5](#the-inferred-range-row)) says which versions declare every block the build paints. A floor
+above the range's upper edge admits only versions that lack one of them. `@requires bedrock
+version>=1.21.40` on a build that paints `@stonebrick`, which Bedrock's table declares last at
+1.21.0 before 1.21.40 split it four ways, is a file no Bedrock target can build, and no `--target`
+repairs it. That is `E_REQUIRES_CONFLICT`:
 
 ```text
 $ cat shed.crn
-@requires java version>=26.3
+@requires bedrock version>=1.21.40
 
 theme t:
-  slot wall -> @chain
+  slot wall -> @stonebrick
 
 struct shed size=3x3
   walls mat_slot=wall height=2
 
-$ cairn compile shed.crn --edition java --target 1.21.4
-error[E_REQUIRES_CONFLICT]: shed.crn:1:1: this file requires java version>=26.3, but no java target it admits declares `minecraft:chain`, which this build paints.
-  note: shed.crn:4:16: `minecraft:chain` is last declared at java 1.21.4
-  fix: lower the `@requires` floor to 1.21.4 or below, or replace `minecraft:chain` with a block a java target at or above 26.3 declares
+$ cairn compile shed.crn --edition bedrock --target 1.21.0
+error[E_REQUIRES_CONFLICT]: shed.crn:1:1: this file requires bedrock version>=1.21.40, but no bedrock target it admits declares `minecraft:stonebrick`, which this build paints.
+  note: shed.crn:4:16: `minecraft:stonebrick` is last declared at bedrock 1.21.0
+  fix: lower the `@requires` floor to 1.21.0 or below, or replace `minecraft:stonebrick` with a block a bedrock target at or above 1.21.40 declares
 ```
 
 It is weighed per edition, in that edition's table, against every floor a build of the edition is
@@ -642,6 +672,7 @@ $ cairn info build.crn --editions java,bedrock
 registry compatibility:  1.21.40 .. latest
 inferred range:          Java: 0.0 .. latest   Bedrock: 1.21.40 .. latest
 edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+respelled:               Java: none   Bedrock: minecraft:oak_sign
 buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
 intended targets:        1.21.40, 1.21.60
 semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16)
@@ -652,8 +683,9 @@ Every version named is one the built-in packs declare. The file behind this outp
 `@requires version>=1.21.40`, which is what puts every Java target below the floor, and Bedrock
 1.21.0 with them, and its last compile built it for Bedrock 1.21.60. Its Bedrock build paints a
 block Bedrock's table first declares at 1.21.40, which is why the floor was declared and where
-Bedrock's inferred range starts; nothing the Java build paints bounds Java's. The
-`semantic-sensitive` row shows what a constraint catalog would add; today it reads `(none)`.
+Bedrock's inferred range starts; nothing the Java build paints bounds Java's. Bedrock writes the
+`@oak_sign` it paints as `standing_sign`, which the `respelled` row names. The `semantic-sensitive`
+row shows what a constraint catalog would add; today it reads `(none)`.
 
 `intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
 declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
@@ -661,8 +693,8 @@ contradict. [§10.4](#the-hint-is-weighed-against-the-floor) automates the compa
 that is decidable, and the reader makes it for the rest. A file declaring none gets `(none
 declared)` rather than a missing row.
 
-The seven lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A
-pipeline reading the rows sees the same seven lines every time `cairn info` runs to completion. A
+The eight lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A
+pipeline reading the rows sees the same eight lines every time `cairn info` runs to completion. A
 run that does not complete is a different case: a finding refuses the command before any row is
 computed, so stdout is empty rather than short a line.
 
@@ -712,6 +744,7 @@ $ cairn info hut.crn --editions java
 registry compatibility:  1.20.4 .. latest
 inferred range:          Java: 1.21.4 .. latest
 edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
+respelled:               Java: none
 buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
 intended targets:        (none declared)
 semantic-sensitive:      (none)
@@ -750,17 +783,20 @@ first declares at 1.21.4 and Bedrock at 1.21.60, so with `--editions java,bedroc
 inferred range:          Java: 1.21.4 .. latest   Bedrock: 1.21.60 .. latest
 ```
 
-It is read off two lowerings, pinned to the oldest and the newest version the pack carries, the
-same pass `cairn compile --target` runs at each. An ID the oldest version lacks starts the range at
-the first version that declares it, and an ID the newest lacks ends it at the last version that
-declares it. Those are the `since` and `until` the `E_UNKNOWN_ID` at that pin carries
+It is read off two lowerings, pinned to the oldest and the newest version the pack carries, the same
+pass `cairn compile --target` runs at each. An ID the oldest version lacks starts the range at the
+first version that declares it, and an ID the newest lacks ends it at the last version that declares
+it. Those are the `since` and `until` the `E_UNKNOWN_ID` at that pin carries
 ([§10.4](#which-registry-an-unknown-id-is-unknown-to)). The range is their intersection: the latest
 start and the earliest end. The IDs counted are the ones the pinned lowering checks against the
 version's table, as that pin spells them: a member's block, a raw block and a walkway's `path=`,
-whether the author wrote the ID or the pack's materials catalog chose it. A catalog token the pack
-respells for one version with an `overrides` row is declared at both pins and bounds nothing. A
-circuit's components are not checked against the table and do not count. Each pin resolves the
-edition's theme variants, so the two editions can paint different IDs for one slot.
+whether the author wrote the ID or the pack's materials catalog chose it. A canonical token a pin
+writes under another spelling is counted as that spelling
+([§10.4](#which-registry-an-unknown-id-is-unknown-to)), so `@chain`, which Java 26.3 writes as
+`iron_chain`, bounds nothing, and a catalog token the pack respells for one version with an
+`overrides` row is declared at both pins and bounds nothing either. A circuit's components are not
+checked against the table and do not count. Each pin resolves the edition's theme variants, so the
+two editions can paint different IDs for one slot.
 
 An edge no ID sets is open: `0.0` below, as the `registry compatibility` row writes it, and `latest`
 above. The tables say nothing about a release before the first version the pack carries or after
@@ -827,9 +863,12 @@ would keep only its own version's. `--format json` carries them as
 
 Both questions are asked of the *edition* rather than of a version, because this row reports across
 a whole compatible range. An ID valid for only part of that range is therefore not `unsupported`, as
-when Bedrock renamed `stonebrick` to `stone_bricks` at 1.21.40. Whether the version being built has
-it is what a pinned target answers, as `E_UNKNOWN_ID`, from `cairn compile --target` or `cairn check
---edition E --target V` for the same answer without a build
+`stonebrick`, which Bedrock split four ways at 1.21.40. Nor is a Java block some version's state map
+writes as a block of its own ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)): `oak_sign` is portable on
+Bedrock, which writes it as `standing_sign`. Whether the version being built has it is what a pinned
+target answers, as `E_UNKNOWN_ID`, from `cairn compile --target` or `cairn check --edition E
+--target V` for the same answer without a build
 ([§10.4](#104-fail-loud-and-minimum-version-inference)). States are asked the same way, of every
 version that declares the block: `cherry_wood[axis=x]` is portable because three versions write it,
 although 1.21.40's palette has no form for it, and a build pinned there answers `E_STATE_UNMAPPED`.
@@ -896,6 +935,43 @@ The state translator is the only place this can be observed, so the rule is stat
 question alone. It is not a licence to answer `unsupported` for a validation gap elsewhere: a figure
 computed over a palette a validated pack could not have produced is not a portability answer,
 whatever produced it.
+
+### The `respelled` row
+
+Per requested edition, the row names each canonical token that a version the file's floors admit
+writes under an ID other than the token's own ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)): a rename the pack's
+`aliases` follow, a Java block Bedrock's state map writes as one of its own, or the block a meaning
+token picks. Each ID is listed once, in source order, or the edition reads `none`. A build whose
+theme binds `@chain`, `@oak_sign` and `@cauldron[fluid=water]` reads:
+
+```text
+respelled:               Java: minecraft:chain, minecraft:cauldron   Bedrock: minecraft:chain, minecraft:oak_sign
+```
+
+Each token is named on stderr where a theme slot or a `path=` binds it, once per ID written and
+table, with the versions that write that ID:
+
+```text
+note: shop.crn:2:17: `minecraft:chain` is written `minecraft:iron_chain` at java 26.3, per the registry pack's alias table
+note: shop.crn:4:16: `minecraft:cauldron` is written `minecraft:water_cauldron` at java 1.20.4, 1.21, 1.21.4, 26.3, per the registry pack's meaning table
+note: shop.crn:2:17: `minecraft:chain` is written `minecraft:iron_chain` at bedrock 1.26.60, per the registry pack's alias table
+note: shop.crn:3:16: `minecraft:oak_sign` is written `minecraft:standing_sign` at bedrock 1.21.0, 1.21.40, 1.21.60, 1.26.60, per the registry pack's state map
+```
+
+The ID is the one the structure file names, so a token Bedrock writes back under its own ID is not
+listed: `@cauldron[fluid=water]` is Bedrock's `cauldron`, with the water in a state. A raw block
+names the ID it writes, and a catalog token the block its entry maps, so neither is listed. A
+version below a floor is not weighed, since no build writes it.
+
+A lockfile records no spelling: the target and the pack hash it records
+([§10.6](#106-provenance-and-lock)) fix every such choice, and this row reads them back for each
+version at once.
+
+`--format json` carries the row as `respelled`, one `{edition, tokens}` object per requested edition
+in the `--editions` order. A token is `{id, line, col, written}`, and `written` lists each version
+that writes another ID, in release order, as `{version, id, through}`, where `through` is `aliases`,
+`state_map` or `meanings`. An edition with none has an empty `tokens`.
 
 ### The `buildable targets` row
 
@@ -1265,11 +1341,15 @@ the block `light_block` and carries the level beside it as a `block_light_level`
 promoted the level into the id, so 1.21.40 and 1.21.60 spell the same block `light_block_0` …
 `light_block_15` and have no id named `light_block` at all. The `aliases` row holding all of those
 spellings together ([§10.4](#104-fail-loud-and-minimum-version-inference)) answers the diagnostic
-and not the source. Its answer is the closed set the pinned target declares: `light` against Bedrock
-1.21.60 comes back as all sixteen levels. A set of sixteen is not a spelling. Picking one of them is
-the silent substitution that section forbids, so it stays the author's to do. Writing the branch for
-one of the two shapes is doing it, and the floor is what says which shape that is. Being scoped, it
-is inert on the Java build ([§10.4](#a-floor-may-name-its-edition)), which the other branch serves.
+and not the source. Its answer is the closed set the pinned target declares: a raw `light` against
+Bedrock 1.21.60 comes back as all sixteen levels. A set of sixteen is not a spelling. Picking one of
+them is the silent substitution that section forbids, so it stays the author's to do. Writing the
+branch for one of the two shapes is doing it, and the floor is what says which shape that is. Being
+scoped, it is inert on the Java build ([§10.4](#a-floor-may-name-its-edition)), which the other
+branch serves. A slot bound to the canonical token `@light[level=15]` needs neither guard nor floor,
+since each version's state map writes it as that version spells the block ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)); a raw block is the escape
+hatch from that mapping, so it names one spelling and is checked as written.
 
 Leaving the floor off is loud rather than wrong: `light_block_15` against Bedrock 1.21.0 is
 `E_UNKNOWN_ID`, since the check is per version. The floor adds two things. One is a different

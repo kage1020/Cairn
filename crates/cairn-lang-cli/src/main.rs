@@ -19,6 +19,7 @@ mod lockfile;
 mod name_case;
 mod pipeline;
 mod report;
+mod respelled;
 mod staging;
 mod target;
 

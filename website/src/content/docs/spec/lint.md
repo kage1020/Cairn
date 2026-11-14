@@ -149,7 +149,7 @@ to compare.
 
 | Code | Meaning |
 |---|---|
-| `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
+| `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare: a canonical token none of the target's meaning, alias and state-map tables answers ([Materials and Themes §7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)), a raw block's ID, or the ID a catalog entry maps. |
 | `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
 | `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |

@@ -127,12 +127,13 @@ pub(crate) enum Command {
         format: CheckFormat,
     },
     /// Report a .crn source file's declared and inferred version ranges, edition portability,
-    /// semantic-sensitive members and verified lock target.
+    /// respelled tokens, semantic-sensitive members and verified lock target.
     #[command(
         long_about = "Report the three version axes (the registry range the file declares and \
             the one the blocks it paints imply per edition, semantic-sensitive members, verified \
-            lock target) for a .crn source file, with each requested edition's portability and \
-            buildable targets beside them. A floor above an edition's inferred range is printed \
+            lock target) for a .crn source file, with each requested edition's portability, the \
+            canonical tokens its versions write under another id, and its buildable targets \
+            beside them. A floor above an edition's inferred range is printed \
             as `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. \
             Exits 0 on success, including when the lockfile is missing or cannot be read; 1 on a \
             parse failure, on any \

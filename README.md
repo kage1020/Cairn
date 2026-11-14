@@ -79,6 +79,7 @@ $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
+respelled:               Java: none   Bedrock: none
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
@@ -91,7 +92,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
 - Themes with slots and per-edition variants.
-- A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
+- A per-source lockfile, and registry packs carrying per-version block IDs, rename aliases and meaning tokens, so a canonical token is written the way each target spells it.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
