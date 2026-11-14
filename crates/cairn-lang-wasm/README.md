@@ -27,23 +27,25 @@ wasm-pack test --node crates/cairn-lang-wasm   # the exports as a JavaScript cal
 |---|---|
 | `cairn_version()` | The Cairn release version, as a string. |
 | `compile(source, edition, target)` | `cairn compile --edition <edition> --target <target>` over `source`, written to memory: `{ ok, diagnostics, run_level, ir, artifacts }`. |
-| `info(source, editions)` | `cairn info --editions <editions>` over `source`: `{ ok, diagnostics, run_level, axes }`, where `axes` is the report `cairn info --format json` prints. |
+| `info(source, editions)` | The document `cairn info --editions <editions> --format json` prints for `source`: the report, or `{ diagnostics }` when a finding refuses the run. |
 | `targets(edition)` | `{ latest, versions }`: every version a `target` may name, in release order, and the one `latest` names. |
 
-The fields:
+What `compile` answers:
 
-- `ok` is whether `cairn compile`, or `cairn info`, would exit 0.
+- `ok` is whether `cairn compile` would exit 0.
 - `diagnostics` holds every finding the run reports, warnings included, each in the shape [lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/) gives a finding. A source that does not parse answers its one `E_PARSE`.
-- `run_level` holds what refuses the run without being a finding at a span: an unshipped `target`, a lost scope (`E_PARTIAL_BUILD`), a `@requires` floor the target is below (`E_VERSION_CAP`), two structures written to one file, and a palette a registry pack should have refused. The warnings that name no span, such as `W_INTENT_DEGRADED`, are here too, in the order they arose. Each carries `severity` and `primary`, and `code`, `line`, `col` and `notes` where it has them.
+- `run_level` holds what refuses the run without being a finding at a span: an unshipped `target`, a lost scope (`E_PARTIAL_BUILD`), a `@requires` floor the target is below (`E_VERSION_CAP`), a floor no target declaring a painted block clears (`E_REQUIRES_CONFLICT`), and two structures written to one file. The warnings that name no span, such as `W_INTENT_DEGRADED`, are here too, in the order they arose. Each carries `severity` and `primary`, and `code`, `line`, `col` and `notes` where it has them.
 - `ir` is the block-array IR the structure files are written from, once no finding is an error, even when the run is refused; `null` otherwise. Its layout is Internal.
 - `artifacts` holds one `{ name, bytes }` per structure, `bytes` a `Uint8Array` of the file `cairn compile` writes, when the build is `ok`. No lockfile is written.
+
+A source in memory has no path, so `info` reads no lock: its `verified_target` is `{ "path": "", "status": "missing" }` ([versioning-editions "The report in a browser"](https://cairn.kage1020.com/spec/versioning-editions/)). What `cairn info` writes on stderr is not answered.
 
 An `edition` that is not `java` or `bedrock`, or an `editions` list that is empty or names something else, throws an `Error` whose message says what is valid. A Rust panic aborts, which traps the instance: a caller drops it and loads a fresh one.
 
 ## Dependencies
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the parser, the checks and the lowering.
-- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the build both front ends run, the writers and the registry packs.
+- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the build and the `cairn info` report every front end runs, the writers and the registry packs.
 - `wasm-bindgen` and `js-sys` for the JavaScript boundary, and `serde_json` for the answers' shape.
 
 ## License

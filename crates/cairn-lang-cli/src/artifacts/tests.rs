@@ -42,8 +42,6 @@ fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
     for key in ["site::s::/abs/hut", "site::s::sub/hut", "site::s::a\\b"] {
         assert!(
             prepare_artifacts(
-                Path::new("probe.crn"),
-                "",
                 &rekeyed_probe(&[key]),
                 &target,
                 out_dir,
@@ -54,15 +52,8 @@ fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
         );
     }
     let plain = rekeyed_probe(&["site::s::hut"]);
-    let prepared = prepare_artifacts(
-        Path::new("probe.crn"),
-        "",
-        &plain,
-        &target,
-        out_dir,
-        NameCase::Sensitive,
-    )
-    .unwrap_or_else(|_| panic!("a plain id prepares"));
+    let prepared = prepare_artifacts(&plain, &target, out_dir, NameCase::Sensitive)
+        .unwrap_or_else(|_| panic!("a plain id prepares"));
     let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
     assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
 }
@@ -98,8 +89,6 @@ fn two_scopes_that_name_one_file_are_refused_before_any_io() {
     for case in [NameCase::Sensitive, NameCase::Insensitive] {
         assert!(
             prepare_artifacts(
-                Path::new("probe.crn"),
-                "",
                 &rekeyed_probe(&["struct::hut", "site::s::barn"]),
                 &target,
                 out_dir,
@@ -109,8 +98,6 @@ fn two_scopes_that_name_one_file_are_refused_before_any_io() {
             "the control pair names two files where `--out` is {case:?}",
         );
         match prepare_artifacts(
-            Path::new("probe.crn"),
-            "",
             &rekeyed_probe(&["struct::hut", "site::s::hut"]),
             &target,
             out_dir,
@@ -136,8 +123,6 @@ fn two_scopes_whose_names_differ_only_in_case_collide_where_out_folds_case() {
     let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
     let out_dir = Path::new("out");
     match prepare_artifacts(
-        Path::new("probe.crn"),
-        "",
         &rekeyed_probe(&["struct::hut", "struct::HUT"]),
         &target,
         out_dir,
@@ -169,8 +154,6 @@ fn two_scopes_whose_names_differ_only_in_case_are_two_files_where_out_keeps_case
     let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
     let out_dir = Path::new("out");
     let paths = prepared_paths(prepare_artifacts(
-        Path::new("probe.crn"),
-        "",
         &rekeyed_probe(&["struct::hut", "struct::HUT"]),
         &target,
         out_dir,
@@ -194,15 +177,8 @@ fn a_lock_differing_from_an_artifact_only_in_case_is_refused_only_where_out_fold
         (NameCase::Insensitive, Err(ExitCode::from(1))),
         (NameCase::Sensitive, Ok(())),
     ] {
-        let prepared = prepare_artifacts(
-            Path::new("probe.crn"),
-            "",
-            &block_ir,
-            &target,
-            out_dir,
-            case,
-        )
-        .unwrap_or_else(|_| panic!("one struct prepares"));
+        let prepared = prepare_artifacts(&block_ir, &target, out_dir, case)
+            .unwrap_or_else(|_| panic!("one struct prepares"));
         for lock in LOCKS_DIFFERING_ONLY_IN_CASE {
             assert_eq!(
                 check_lock_path_is_free(&prepared, &out_dir.join(lock), case),
@@ -227,15 +203,8 @@ fn a_lower_case_lock_beside_an_upper_case_artifact_is_refused_where_out_folds_ca
         (NameCase::Insensitive, Err(ExitCode::from(1))),
         (NameCase::Sensitive, Ok(())),
     ] {
-        let prepared = prepare_artifacts(
-            Path::new("probe.crn"),
-            "",
-            &block_ir,
-            &target,
-            out_dir,
-            case,
-        )
-        .unwrap_or_else(|_| panic!("one struct prepares"));
+        let prepared = prepare_artifacts(&block_ir, &target, out_dir, case)
+            .unwrap_or_else(|_| panic!("one struct prepares"));
         for lock in ["hut.nbt", "hut.nbt.tmp", "Hut.nbt.bak"] {
             assert_eq!(
                 check_lock_path_is_free(&prepared, &out_dir.join(lock), case),

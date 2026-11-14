@@ -305,7 +305,8 @@ class Playground extends HTMLElement {
           const notes = document.createElement("ul");
           for (const note of finding.notes) {
             const line = document.createElement("li");
-            line.textContent = note.message;
+            line.textContent =
+              note.line === undefined ? note.message : `${note.line}:${note.col}: ${note.message}`;
             notes.append(line);
           }
           item.append(notes);

@@ -5,7 +5,7 @@
 //! `spec/lint` "Machine-readable payload" gives; a name that is not an edition throws an `Error`.
 
 use cairn_lang_core::Edition;
-use cairn_lang_formats::build::gate::requested_editions;
+use cairn_lang_formats::info::requested_editions;
 use js_sys::{Array, JSON, Object, Reflect, Uint8Array};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -50,7 +50,7 @@ pub fn compile(source: &str, edition: &str, target: &str) -> Result<JsValue, JsV
     Ok(value)
 }
 
-/// `cairn info --editions <editions>` over `source`, as [`report::Informed`].
+/// `cairn info --editions <editions> --format json` over `source`, as [`report::Informed`].
 ///
 /// # Errors
 ///

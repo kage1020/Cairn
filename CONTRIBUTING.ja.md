@@ -63,7 +63,7 @@ cargo xtask lint --site website/dist site-parity   # website/ で `pnpm run buil
 |---|---|
 | `crates/cairn-lang-core` | 字句解析、構文解析、Intent IR、check パス、解決、block-array lowering |
 | `crates/cairn-lang-nbt` | NBT のエンコードとデコード。Java はビッグエンディアン、Bedrock はリトルエンディアン |
-| `crates/cairn-lang-formats` | 構造ファイルの書き出し (`.nbt` / `.mcstructure`)、レジストリパック、エディション間の可搬性、フロントエンドが共有するビルド |
+| `crates/cairn-lang-formats` | 構造ファイルの書き出し (`.nbt` / `.mcstructure`)、レジストリパック、エディション間の可搬性、フロントエンドが共有するビルドと `cairn info` のレポート |
 | `crates/cairn-lang-redstone` | Logic IR、ネットリスト、配置、配線、遅延、交差の合法化 |
 | `crates/cairn-lang-cli` | `cairn` バイナリ |
 | `crates/cairn-lang-lsp` | 言語サーバー `cairn-lsp` |

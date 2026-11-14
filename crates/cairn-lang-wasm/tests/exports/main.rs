@@ -3,7 +3,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use cairn_lang_core::{CAIRN_VERSION, Edition};
-use cairn_lang_formats::build::gate::requested_editions;
+use cairn_lang_formats::info::requested_editions;
 use cairn_lang_wasm::{cairn_version_js, compile, info, report, targets};
 use js_sys::{Array, Error, JSON, Object, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};

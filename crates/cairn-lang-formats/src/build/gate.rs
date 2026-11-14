@@ -84,38 +84,6 @@ fn is_intended_target_cap(code: DiagnosticCode) -> bool {
     )
 }
 
-/// The distinct editions an `--editions` list names, in the order it first names them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RequestedEditions(Vec<Edition>);
-
-impl RequestedEditions {
-    /// The editions, in the order the list first names them.
-    #[must_use]
-    pub fn as_slice(&self) -> &[Edition] {
-        &self.0
-    }
-}
-
-/// Read an `--editions` list as the distinct editions it asks about.
-///
-/// # Errors
-///
-/// The message refusing an empty entry or a name that is not an edition.
-pub fn requested_editions(editions: &[String]) -> Result<RequestedEditions, String> {
-    // A comma-separated list with a doubled comma, `java,,bedrock`, gives an empty entry.
-    if editions.iter().any(|e| e.trim().is_empty()) {
-        return Err("--editions value must not contain empty entries".to_owned());
-    }
-    let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
-    for name in editions {
-        let edition: Edition = name.parse().map_err(|err| format!("{err}"))?;
-        if !asked.contains(&edition) {
-            asked.push(edition);
-        }
-    }
-    Ok(RequestedEditions(asked))
-}
-
 /// The editions a command with one optional pin is about: the pin, or both without one.
 #[must_use]
 pub fn weighed_editions(pin: Option<Edition>) -> Vec<Edition> {

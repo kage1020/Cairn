@@ -25,7 +25,8 @@ pub use lower::{
 };
 pub use material::{
     AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, MaterialDeferred,
-    OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, resolve_block_state,
+    OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, bound_canonical_tokens,
+    resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.

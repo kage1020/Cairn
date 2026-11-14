@@ -4,13 +4,15 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::Severity;
 use cairn_lang_core::check::{LineStarts, RenderedNote};
-use cairn_lang_core::resolve::{FloorOrigin, VersionFloor, VersionOrder, versions_satisfying};
+use cairn_lang_core::resolve::{VersionFloor, VersionOrder, versions_satisfying};
 use serde::Serialize;
 
-use super::floors::{DeclaredFloors, FloorRefusal, floor_origin_note, floor_refusing_target};
+use super::conflicts::Conflict;
+use super::floors::{
+    DeclaredFloors, FloorRefusal, floor_keyword, floor_origin_note, floor_refusing_target,
+};
 use crate::bedrock_structure::ParityNote;
 use crate::data_version::UnsupportedTarget;
-use crate::portability::InvalidPalette;
 use crate::registry::builtin_pack;
 use crate::target::{ResolvedTarget, supported_versions};
 
@@ -36,8 +38,22 @@ pub struct RunLevelMessage {
     pub at: RunLevelAt,
     /// The first line's text, after its prefix.
     pub primary: String,
-    /// The lines under the first, without their indent.
-    pub notes: Vec<String>,
+    /// The lines under the first.
+    pub notes: Vec<RunLevelNote>,
+}
+
+/// One line under a run-level message's first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunLevelNote {
+    /// A line as written after its indent: `note: ...`, `fix: ...`, or one continuing the message.
+    Line(String),
+    /// A `note:` about the line holding the byte offset `at`.
+    At {
+        /// The byte offset the note points at.
+        at: usize,
+        /// What the note says.
+        note: String,
+    },
 }
 
 impl RunLevelMessage {
@@ -58,7 +74,12 @@ impl RunLevelMessage {
             self.severity.as_str(),
             self.primary
         )];
-        out.extend(self.notes.iter().map(|note| format!("  {note}")));
+        out.extend(self.notes.iter().map(|note| match note {
+            RunLevelNote::Line(line) => format!("  {line}"),
+            RunLevelNote::At { at, note } => {
+                format!("  note: {file}:{}: {note}", lines.position(source, *at))
+            }
+        }));
         out
     }
 
@@ -78,10 +99,20 @@ impl RunLevelMessage {
             notes: self
                 .notes
                 .iter()
-                .map(|note| RenderedNote {
-                    line: None,
-                    col: None,
-                    message: note.clone(),
+                .map(|note| match note {
+                    RunLevelNote::Line(line) => RenderedNote {
+                        line: None,
+                        col: None,
+                        message: line.clone(),
+                    },
+                    RunLevelNote::At { at, note } => {
+                        let position = lines.position(source, *at);
+                        RenderedNote {
+                            line: Some(position.line.get()),
+                            col: Some(position.col.get()),
+                            message: format!("note: {note}"),
+                        }
+                    }
                 })
                 .collect(),
         }
@@ -123,7 +154,7 @@ pub fn partial_build(dropped: &[String], built: usize, because: &str) -> RunLeve
         ),
         notes: dropped
             .iter()
-            .map(|scope| format!("note: `{scope}` produced no voxels"))
+            .map(|scope| RunLevelNote::Line(format!("note: `{scope}` produced no voxels")))
             .collect(),
     }
 }
@@ -188,35 +219,6 @@ pub fn degraded(scope: &str, note: &ParityNote) -> RunLevelMessage {
     }
 }
 
-/// The refusal of one edition's portability row, over a palette a registry pack should refuse.
-#[must_use]
-pub fn invalid_palette(edition: Edition, invalid: &InvalidPalette) -> RunLevelMessage {
-    let mut notes: Vec<String> = invalid
-        .leaks()
-        .iter()
-        .map(|leak| format!("error: {leak}"))
-        .collect();
-    notes.push(
-        "note: a validated pack cannot produce these, so each is either a state literal in the \
-         source — a property the Java block does not have, or a value outside its domain, which \
-         `E_STATE_DOMAIN` refuses at a pinned target but these figures' range-wide lowering does \
-         not check — or a leak in the pack or this compiler. The figure is withheld rather than \
-         counting a validation gap as ordinary portability"
-            .to_owned(),
-    );
-    RunLevelMessage {
-        severity: Severity::Error,
-        code: None,
-        at: RunLevelAt::Nothing,
-        primary: format!(
-            "the {} palette carries blockstates a registry pack is expected to refuse, so this \
-             edition gets no portability figure:",
-            edition.as_str(),
-        ),
-        notes,
-    }
-}
-
 /// The refusal of a `--target` the source's floors rule out: `E_VERSION_CAP` below a floor,
 /// `E_REQUIRES_UNORDERABLE` for a floor the edition cannot place.
 #[must_use]
@@ -230,32 +232,33 @@ pub fn version_floor_refusal(
         FloorRefusal::Unplaceable(floor) => return Some(unplaceable_floor(floor, edition, order)),
         FloorRefusal::Below(floor) => floor,
     };
-    let mut notes: Vec<String> = floor_origin_note(floor).into_iter().collect();
+    let mut notes = origin_note(floor);
     // `spec/versioning-editions` "Fail-loud and minimum-version inference": name the valid targets.
     let buildable = supported_versions(builtin_pack(edition));
     let usable = versions_satisfying(order, floors, &buildable);
-    if usable.is_empty() {
-        notes.push(format!(
-            "no supported {} target satisfies it: {}",
-            edition.as_str(),
-            builtin_pack(edition).supported_list(),
-        ));
-        notes.push(format!(
-            "fix: lower the {} floor, or build against another edition",
-            floor_keyword(floor),
-        ));
+    let lines = if usable.is_empty() {
+        [
+            format!(
+                "no supported {} target satisfies it: {}",
+                edition.as_str(),
+                builtin_pack(edition).supported_list(),
+            ),
+            format!(
+                "fix: lower the {} floor, or build against another edition",
+                floor_keyword(floor),
+            ),
+        ]
     } else {
-        notes.push(format!(
-            "valid {} targets: {}",
-            edition.as_str(),
-            usable.join(", ")
-        ));
-        notes.push(format!(
-            "fix: --target {}, or lower the {} floor",
-            usable[0],
-            floor_keyword(floor),
-        ));
-    }
+        [
+            format!("valid {} targets: {}", edition.as_str(), usable.join(", ")),
+            format!(
+                "fix: --target {}, or lower the {} floor",
+                usable[0],
+                floor_keyword(floor),
+            ),
+        ]
+    };
+    notes.extend(lines.map(RunLevelNote::Line));
     Some(RunLevelMessage {
         severity: Severity::Error,
         code: Some("E_VERSION_CAP"),
@@ -270,21 +273,14 @@ pub fn version_floor_refusal(
     })
 }
 
-fn floor_keyword(floor: &VersionFloor) -> &'static str {
-    match floor.origin {
-        FloorOrigin::Module => "`@requires`",
-        FloorOrigin::Def(_) | FloorOrigin::Theme(_) => "`requires`",
-    }
-}
-
 /// `E_REQUIRES_UNORDERABLE`: a floor the target edition's table cannot place.
 fn unplaceable_floor(
     floor: &VersionFloor,
     edition: Edition,
     order: &VersionOrder,
 ) -> RunLevelMessage {
-    let mut notes: Vec<String> = floor_origin_note(floor).into_iter().collect();
-    notes.push(match order.neighbours(&floor.version) {
+    let mut notes = origin_note(floor);
+    notes.push(RunLevelNote::Line(match order.neighbours(&floor.version) {
         (Some(below), Some(above)) => format!(
             "{edition_name} ships {below} and then {above}, and nothing between them; Cairn \
              orders versions by DataVersion and a label that names no release has none",
@@ -299,7 +295,7 @@ fn unplaceable_floor(
                 .collect::<Vec<_>>()
                 .join(", "),
         ),
-    });
+    }));
     // Offer an edition scope only where the other edition names the label; elsewhere the floor
     // would go inert.
     let other = match edition {
@@ -312,19 +308,22 @@ fn unplaceable_floor(
             .place(&floor.version)
             .names_release();
     if other_edition_names_it {
-        notes.push(format!(
+        notes.push(RunLevelNote::Line(format!(
             "`{}` is a {} release; if that is the numbering this floor is written in, say so",
             floor.version,
             other.as_str(),
-        ));
-        notes.push(format!(
+        )));
+        notes.push(RunLevelNote::Line(format!(
             "fix: `@requires {} version>={}`, or name a {} release",
             other.as_str(),
             floor.version,
             edition.as_str(),
-        ));
+        )));
     } else {
-        notes.push(format!("fix: name a {} release", edition.as_str()));
+        notes.push(RunLevelNote::Line(format!(
+            "fix: name a {} release",
+            edition.as_str()
+        )));
     }
     RunLevelMessage {
         severity: Severity::Error,
@@ -338,6 +337,54 @@ fn unplaceable_floor(
         ),
         notes,
     }
+}
+
+/// `E_REQUIRES_CONFLICT`: a floor that admits no `edition` target declaring every id the build
+/// paints.
+#[must_use]
+pub fn requires_conflict(edition: Edition, conflict: &Conflict) -> RunLevelMessage {
+    let Conflict { floor, ids } = conflict;
+    let edition = edition.as_str();
+    let bounding = &ids[0];
+    let mut notes = origin_note(floor);
+    notes.extend(ids.iter().map(|b| RunLevelNote::At {
+        at: b.painted.span.start,
+        note: format!(
+            "`{}` is last declared at {edition} {}",
+            b.painted.id, b.version
+        ),
+    }));
+    let replaced: Vec<String> = ids.iter().map(|b| format!("`{}`", b.painted.id)).collect();
+    notes.push(RunLevelNote::Line(format!(
+        "fix: lower the {} floor to {} or below, or replace {} with {} a {edition} target at or \
+         above {} declares",
+        floor_keyword(floor),
+        bounding.version,
+        replaced.join(", "),
+        if ids.len() == 1 { "a block" } else { "blocks" },
+        floor.version,
+    )));
+    RunLevelMessage {
+        severity: Severity::Error,
+        code: Some("E_REQUIRES_CONFLICT"),
+        at: RunLevelAt::Offset(floor.span.start),
+        primary: format!(
+            "{} requires {}, but no {edition} target it admits declares `{}`, which this build \
+             paints.",
+            floor.declarer(),
+            floor.rendered(),
+            bounding.painted.id,
+        ),
+        notes,
+    }
+}
+
+/// The line naming the part that declared `floor`, when a part did.
+fn origin_note(floor: &VersionFloor) -> Vec<RunLevelNote> {
+    floor_origin_note(floor)
+        .map(RunLevelNote::Line)
+        .into_iter()
+        .collect()
 }
 
 #[cfg(test)]

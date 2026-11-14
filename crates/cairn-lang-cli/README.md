@@ -15,7 +15,7 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 |---|---|
 | `cairn parse <file.crn>` | Lex and parse, printing the AST. `--format json\|debug`. Runs no check passes. |
 | `cairn check <file.crn>` | Run the validation passes and print diagnostics. `--format text\|json`. Writes nothing. |
-| `cairn info <file.crn>` | Report the version range the file declares, per-edition portability, buildable targets, declared intended targets, and semantic-sensitive members. `--editions java,bedrock`, `--format text\|json`. |
+| `cairn info <file.crn>` | Report the version range the file declares and the one its blocks imply per edition, per-edition portability, the canonical tokens each edition writes under another id, buildable targets, declared intended targets, semantic-sensitive members, and the target its lockfile verified. `--editions java,bedrock`, `--lock`, `--format text\|json`. |
 | `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--edition`, `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot. Without `--edition` it pins no edition, so it leaves out what `@edition` guards hold and every struct's circuit. |
 | `cairn compile <file.crn> --edition <e>` | Write the structure artifacts and a lockfile. `--target`, `--out`, `--lock`. |
 | `cairn synth <file.crn>` | Print one redstone pipeline stage as JSON. Experimental; see below. |

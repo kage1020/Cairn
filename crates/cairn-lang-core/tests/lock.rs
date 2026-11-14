@@ -3,9 +3,12 @@
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
+use std::path::{Path, PathBuf};
+
 use cairn_lang_core::lock::{
-    HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement, LockTarget,
-    LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
+    HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement,
+    LockReading, LockTarget, LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir,
+    hash_source,
 };
 use cairn_lang_core::{Edition, PlaceId, PortId, SiteName, WalkwayEndpoint};
 use indexmap::IndexMap;
@@ -394,4 +397,176 @@ fn an_encoded_lockfile_ends_with_a_newline() {
 fn sample_lockfile_yaml_snapshot() {
     let body = serde_norway::to_string(&sample_lockfile()).expect("encode");
     insta::assert_snapshot!(body);
+}
+
+const SOURCE: &str = "struct hut size=3x3\n";
+
+/// An empty directory of the test's own under the integration tests' scratch space.
+fn scratch(name: &str) -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("lock-reading")
+        .join(name);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).expect("clear scratch dir");
+    }
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+/// `body` written as a lock in `name`'s scratch directory, read for `source`.
+fn reading(name: &str, body: &str, source: &str) -> LockReading {
+    let path = scratch(name).join("s.crn.lock");
+    std::fs::write(&path, body).expect("write lock");
+    LockReading::of(&path, source)
+}
+
+/// [`lockfile_with_every_container`] written for [`SOURCE`].
+fn lock_for_source() -> Lockfile {
+    Lockfile {
+        source_hash: hash_source(SOURCE),
+        ..lockfile_with_every_container()
+    }
+}
+
+fn read_as(source_unchanged: bool, refused_identifier: Option<&str>) -> LockReading {
+    LockReading::Read {
+        target: sample_lockfile().target,
+        verified: true,
+        source_unchanged,
+        cairn_version: "2026.09".to_owned(),
+        refused_identifier: refused_identifier.map(str::to_owned),
+    }
+}
+
+#[test]
+fn a_lock_reports_its_target_and_whether_the_source_still_hashes_to_it() {
+    let body = lock_for_source().to_yaml().expect("encode");
+    assert_eq!(reading("unchanged", &body, SOURCE), read_as(true, None));
+    let edited = format!("{SOURCE}  floor mat_slot=a\n");
+    assert_eq!(reading("changed", &body, &edited), read_as(false, None));
+}
+
+#[test]
+fn a_lock_recording_verified_false_reads_as_not_verified() {
+    let lock = Lockfile {
+        verified: false,
+        ..lock_for_source()
+    };
+    let body = lock.to_yaml().expect("encode");
+    let LockReading::Read { verified, .. } = reading("unverified", &body, SOURCE) else {
+        panic!("a lock the schema accepts is read");
+    };
+    assert!(!verified);
+}
+
+#[test]
+fn no_file_at_the_path_reads_as_missing() {
+    let path = scratch("missing").join("s.crn.lock");
+    assert_eq!(LockReading::of(&path, SOURCE), LockReading::Missing);
+}
+
+#[test]
+fn an_empty_path_names_no_file_and_reads_as_missing() {
+    assert_eq!(LockReading::of(Path::new(""), SOURCE), LockReading::Missing);
+}
+
+#[test]
+fn a_newer_schema_reads_as_newer_whatever_else_it_holds() {
+    let body = lock_for_source().to_yaml().expect("encode").replace(
+        &format!("lock_schema_version: {LOCK_SCHEMA_VERSION}"),
+        "lock_schema_version: 99\nfuture_only_key: 7",
+    );
+    assert_eq!(
+        reading("newer", &body, SOURCE),
+        LockReading::NewerSchema {
+            lock_schema_version: 99,
+            supported: LOCK_SCHEMA_VERSION,
+        },
+    );
+}
+
+#[test]
+fn a_document_the_schema_refuses_reads_as_unreadable_with_the_cause() {
+    let body = tamper_at(&lock_for_source().to_yaml().expect("encode"), &["target"]);
+    assert_eq!(
+        reading("tampered", &body, SOURCE),
+        LockReading::Unreadable {
+            error: "lockfile YAML: target: unknown field `attacker_controlled`, expected one of \
+                    `edition`, `mc_version`, `data_version` at line 8 column 3"
+                .to_owned(),
+        },
+    );
+}
+
+#[test]
+fn a_path_that_cannot_be_read_as_a_file_reads_as_unreadable() {
+    let dir = scratch("directory");
+    let read = LockReading::of(&dir, SOURCE);
+    assert!(
+        matches!(&read, LockReading::Unreadable { error } if error.starts_with("lockfile I/O: ")),
+        "{read:?}",
+    );
+}
+
+#[test]
+fn a_lock_refused_only_for_an_identifier_still_reports_its_target() {
+    let body = lock_for_source()
+        .to_yaml()
+        .expect("encode")
+        .replace("site: hamlet", "site: a/b");
+    let refused = "identifier `a/b` contains forbidden character `/`";
+    assert_eq!(
+        reading("refused", &body, SOURCE),
+        read_as(true, Some(refused))
+    );
+    assert_eq!(
+        reading("refused-changed", &body, ""),
+        read_as(false, Some(refused))
+    );
+}
+
+#[test]
+fn a_reading_serialises_with_its_status_as_a_tag() {
+    let json = |reading: &LockReading| serde_json::to_value(reading).expect("serialise");
+    assert_eq!(
+        json(&read_as(
+            false,
+            Some("identifier `a/b` contains forbidden character `/`")
+        )),
+        serde_json::json!({
+            "status": "read",
+            "target": { "edition": "java", "mc_version": "1.21.4", "data_version": 4189 },
+            "verified": true,
+            "source_unchanged": false,
+            "cairn_version": "2026.09",
+            "refused_identifier": "identifier `a/b` contains forbidden character `/`",
+        }),
+    );
+    assert_eq!(
+        json(&read_as(true, None)),
+        serde_json::json!({
+            "status": "read",
+            "target": { "edition": "java", "mc_version": "1.21.4", "data_version": 4189 },
+            "verified": true,
+            "source_unchanged": true,
+            "cairn_version": "2026.09",
+        }),
+    );
+    assert_eq!(
+        json(&LockReading::Missing),
+        serde_json::json!({ "status": "missing" })
+    );
+    assert_eq!(
+        json(&LockReading::NewerSchema {
+            lock_schema_version: 2,
+            supported: 1,
+        }),
+        serde_json::json!({ "status": "newer_schema", "lock_schema_version": 2, "supported": 1 }),
+    );
+    assert_eq!(
+        json(&LockReading::Unreadable {
+            error: "lockfile I/O: denied".to_owned(),
+        }),
+        serde_json::json!({ "status": "unreadable", "error": "lockfile I/O: denied" }),
+    );
 }

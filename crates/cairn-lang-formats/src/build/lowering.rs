@@ -8,13 +8,16 @@ use cairn_lang_core::{Diagnostic, Edition, Module, lower};
 use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
 use super::circuits::lay_circuits;
+use super::conflicts::requires_conflicts;
 use super::floors::{DeclaredFloors, floor_refusing_target};
 use super::gate::{build_diagnostics, weighed_editions};
-use super::run_level::{RunLevelMessage, partial_build, unsupported_target, version_floor_refusal};
+use super::run_level::{
+    RunLevelMessage, partial_build, requires_conflict, unsupported_target, version_floor_refusal,
+};
 use super::scopes::{built_scopes, dropped_scopes};
 use crate::data_version::UnsupportedTarget;
 use crate::registry::builtin_pack;
-use crate::target::{ResolvedTarget, resolve_target};
+use crate::target::{ResolvedTarget, resolve_target, supported_versions};
 
 /// What [`check_lowering`] found, and what the run owes a refusal for.
 #[derive(Debug)]
@@ -77,6 +80,9 @@ pub struct Lowered {
     pub dropped_scopes: Vec<String>,
     /// The `@requires` floors this edition's build is held to, if the source declares any.
     pub version_floors: Option<DeclaredFloors>,
+    /// `E_REQUIRES_CONFLICT` for each floor no version declaring every id the build paints
+    /// clears, which refuses the build at every target.
+    pub conflicts: Vec<RunLevelMessage>,
 }
 
 /// Resolve and lower `module` for `edition`'s build, its circuits laid.
@@ -115,18 +121,33 @@ pub fn lower_for_target(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
+    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
+        let pack = builtin_pack(edition);
+        requires_conflicts(
+            &ir,
+            &resolution,
+            pack,
+            &supported_versions(pack),
+            &declared.floors,
+            &declared.order,
+        )
+        .iter()
+        .map(|conflict| requires_conflict(edition, conflict))
+        .collect()
+    });
     Lowered {
         block_ir,
         circuits,
         dropped_scopes,
         version_floors,
+        conflicts,
     }
 }
 
 impl Lowered {
-    /// The target a build whose findings hold no error writes for, or the run-level refusal
-    /// `cairn compile` makes before it writes: a lost scope, an unshipped `--target`, then a floor
-    /// that rules the target out.
+    /// The target a build whose findings hold no error and whose floors raise no conflict writes
+    /// for, or the run-level refusal `cairn compile` makes before it writes: a lost scope, an
+    /// unshipped `--target`, then a floor that rules the target out.
     ///
     /// # Errors
     ///

@@ -1,5 +1,6 @@
 //! Java `.nbt` and Bedrock `.mcstructure` writers for the block-array IR, with the registry packs
-//! and portability reports they rely on, and the build that lowers a source for a target.
+//! and portability reports they rely on, the build a front end runs over a source, and the
+//! `cairn info` report built on it.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
@@ -7,6 +8,7 @@ mod block_id;
 pub mod build;
 pub mod data_version;
 mod dims;
+pub mod info;
 pub mod java_structure;
 pub mod portability;
 pub mod registry;

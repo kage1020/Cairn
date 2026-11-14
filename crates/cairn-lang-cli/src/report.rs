@@ -3,10 +3,11 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts, RenderedDiagnostic};
+use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts};
 use cairn_lang_core::{ParseError, Severity, diagnose_parse_failure};
-use cairn_lang_formats::build::finding::{Finding, render_findings};
-use cairn_lang_formats::build::run_level::RunLevelMessage;
+use cairn_lang_formats::build::finding::{Finding, Found, render_findings};
+use cairn_lang_formats::build::run_level::{RunLevelAt, RunLevelMessage};
+use cairn_lang_formats::info::{FailureDocument, InfoSink};
 
 /// Where a command reports the findings that stopped it: prose on stderr, or the one JSON
 /// document `spec/lint` "Machine-readable payload" promises on stdout.
@@ -16,14 +17,21 @@ pub(crate) enum FailureReport {
     Json,
 }
 
-/// What a pass reports findings with; under [`FailureReport::Json`] errors wait for the failure
-/// document, while warnings still print on stderr.
-#[derive(Copy, Clone)]
-pub(crate) struct Reporting<'a> {
+/// Stderr, as an info run reports to it: each finding gcc-style, each line as written.
+pub(crate) struct Stderr<'a> {
     pub(crate) file: &'a Path,
     pub(crate) source: &'a str,
     pub(crate) lines: &'a LineStarts,
-    pub(crate) report: FailureReport,
+}
+
+impl InfoSink for Stderr<'_> {
+    fn finding(&mut self, finding: &Found) {
+        report_diagnostic(self.file, self.source, self.lines, finding);
+    }
+
+    fn line(&mut self, line: &str) {
+        eprintln!("{line}");
+    }
 }
 
 /// Report one finding and its notes on stderr, gcc-style.
@@ -81,12 +89,6 @@ pub(crate) fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(
     }
 }
 
-/// The document a `--format json` command writes in place of its product.
-#[derive(serde::Serialize)]
-struct DiagnosticsDocument {
-    diagnostics: Vec<RenderedDiagnostic>,
-}
-
 /// Report the findings that stopped a command, and return its exit code.
 pub(crate) fn report_failure_document(
     file: &Path,
@@ -102,7 +104,7 @@ pub(crate) fn report_failure_document(
             }
         }
         FailureReport::Json => {
-            let document = DiagnosticsDocument {
+            let document = FailureDocument {
                 diagnostics: render_findings(source, &lines, diagnostics),
             };
             if let Err(code) = print_json("diagnostics", &document) {
@@ -123,6 +125,12 @@ pub(crate) fn report_run_level(
     for line in message.lines(&file.display().to_string(), source, lines) {
         eprintln!("{line}");
     }
+}
+
+/// Report a run-level message about a structure, which names no place in the source.
+pub(crate) fn report_structure_message(message: &RunLevelMessage) {
+    debug_assert_eq!(message.at, RunLevelAt::Nothing, "{message:?} names a place");
+    report_run_level(Path::new(""), "", &LineStarts::new(""), message);
 }
 
 /// A note without a span prints indented and unprefixed, so it does not read as a second pointer.

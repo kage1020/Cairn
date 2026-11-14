@@ -192,6 +192,64 @@ fn a_scope_that_lowers_to_nothing_refuses_the_partial_build() {
 }
 
 #[test]
+fn a_floor_no_target_declaring_a_painted_block_clears_refuses_the_build_at_every_target() {
+    let source = "@requires bedrock version>=1.21.40\ntheme t:\n  slot wall -> @stonebrick\n\n\
+                  struct s size=2x2\n  floor mat_slot=wall\n";
+    let conflict = RenderedRunLevelMessage {
+        code: Some("E_REQUIRES_CONFLICT"),
+        severity: Severity::Error,
+        line: Some(1),
+        col: Some(1),
+        primary: "this file requires bedrock version>=1.21.40, but no bedrock target it admits \
+                  declares `minecraft:stonebrick`, which this build paints."
+            .to_owned(),
+        notes: vec![
+            RenderedNote {
+                line: Some(3),
+                col: Some(16),
+                message: "note: `minecraft:stonebrick` is last declared at bedrock 1.21.0"
+                    .to_owned(),
+            },
+            note(
+                "fix: lower the `@requires` floor to 1.21.0 or below, or replace \
+                 `minecraft:stonebrick` with a block a bedrock target at or above 1.21.40 declares",
+            ),
+        ],
+    };
+    // Below the floor, the conflict is the refusal, ahead of an `E_VERSION_CAP` it would contradict.
+    let below = compile(source, Edition::Bedrock, "1.21.0");
+    assert!(!below.ok);
+    assert_eq!(codes(&below.diagnostics), []);
+    assert_eq!(below.run_level, std::slice::from_ref(&conflict));
+    assert_eq!(below.artifacts, []);
+    let at_floor = compile(source, Edition::Bedrock, "1.21.40");
+    assert!(!at_floor.ok);
+    assert_eq!(codes(&at_floor.diagnostics), [("E_UNKNOWN_ID", 3, 16)]);
+    assert_eq!(at_floor.run_level, [conflict]);
+    assert!(at_floor.ir.is_none());
+}
+
+#[test]
+fn a_token_the_target_spells_another_way_is_written_as_the_target_spells_it() {
+    let source = "theme t:\n  slot floor -> @chain\nstruct s size=2x2\n  floor mat_slot=floor\n";
+    for (target, written) in [
+        ("1.21.4", "minecraft:chain"),
+        ("26.3", "minecraft:iron_chain"),
+    ] {
+        let compiled = compile(source, Edition::Java, target);
+        assert!(compiled.ok, "{compiled:?}");
+        let ir = compiled.ir.expect("an ok build answers its IR");
+        let ids: Vec<&str> = ir.structures["struct::s"]
+            .palette
+            .entries
+            .iter()
+            .map(|state| state.id.as_str())
+            .collect();
+        assert_eq!(ids, ["minecraft:air", written], "at {target}");
+    }
+}
+
+#[test]
 fn an_intent_the_target_can_only_approximate_warns_and_still_writes() {
     let compiled = compile(&example("themed-tower"), Edition::Bedrock, "1.21.60");
     assert!(compiled.ok, "{compiled:?}");

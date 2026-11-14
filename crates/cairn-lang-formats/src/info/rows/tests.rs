@@ -1,6 +1,19 @@
-use cairn_lang_core::resolve::DroppedIntent;
+use std::path::Path;
 
+use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_core::{lower, parse};
+
+use super::super::Recorded;
 use super::*;
+
+/// A walled three-by-three `struct probe` lowered unpinned, for a test to corrupt.
+fn lowered_probe(edition: Edition) -> BlockArrayIr {
+    let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, Some(edition));
+    lower_to_block_array(&ir, &resolution, Some(&builtin_pack(edition).view(None)))
+}
 
 #[test]
 fn the_notes_answer_the_figure_they_sit_under() {
@@ -69,6 +82,76 @@ fn the_degraded_notes_answer_the_figure_they_sit_under() {
         ],
     );
     assert_eq!(degraded_notes(Edition::Java, &[]), [] as [String; 0]);
+}
+
+#[test]
+fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
+    use cairn_lang_core::block_array::BlockState;
+
+    let pack = builtin_pack(Edition::Bedrock);
+    let mut block_ir = lowered_probe(Edition::Bedrock);
+    let mut leaked = BlockState::bare("minecraft:oak_stairs");
+    leaked
+        .properties
+        .insert("facing".to_owned(), "up".to_owned());
+    block_ir
+        .structures
+        .values_mut()
+        .next()
+        .expect("the probe lowers to one structure")
+        .palette
+        .intern(leaked);
+
+    let invalid = portability_for_bedrock(
+        &block_ir,
+        pack.blocks(),
+        pack.aliases(),
+        pack.absent(),
+        pack.states(),
+    )
+    .expect_err("a value outside the Java domain is not a portability figure");
+
+    let lines = invalid_palette_report(Edition::Bedrock, &invalid);
+    let mut sink = Recorded::default();
+    let source = "";
+    let starts = LineStarts::new(source);
+    let mut out = Reporter::new(Path::new("probe.crn"), source, &starts, &mut sink);
+    assert!(
+        portability_figure(
+            &mut out,
+            Edition::Bedrock,
+            portability_for_bedrock(
+                &block_ir,
+                pack.blocks(),
+                pack.aliases(),
+                pack.absent(),
+                pack.states()
+            ),
+        )
+        .is_none(),
+        "a refused palette costs the edition its row rather than printing counts over it",
+    );
+    assert_eq!(sink.0, lines, "the refusal is reported as it reads");
+    assert_eq!(lines.len(), 3, "header, one leak, closing note: {lines:?}");
+    assert!(
+        lines[0].starts_with("error: the bedrock ") && lines[0].contains("no portability"),
+        "the header names the edition and what it is not getting, got: {}",
+        lines[0],
+    );
+    assert_eq!(
+        lines[1],
+        format!("  error: {}", invalid.leaks()[0]),
+        "the leak is quoted, not reworded",
+    );
+    // Both places such a blockstate can come from, since the leak's own `Fix:` names only one.
+    assert_eq!(
+        lines[2],
+        "  note: a validated pack cannot produce these, so each is either a state literal in the \
+         source — a property the Java block does not have, or a value outside its domain, which \
+         `E_STATE_DOMAIN` refuses at a pinned target but these figures' range-wide lowering does \
+         not check — or a leak in the pack or this compiler. The figure is withheld rather than \
+         counting a validation gap as ordinary portability",
+    );
 }
 
 #[test]

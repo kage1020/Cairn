@@ -1,17 +1,19 @@
-//! What each export answers, as Rust values: the build `cairn compile` runs, the walk `cairn
-//! info` reports, and the versions an edition can build for.
+//! What each export answers, as Rust values: the build `cairn compile` runs, the report `cairn
+//! info` prints, and the versions an edition can build for.
+
+use std::path::Path;
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::{LineStarts, RenderedDiagnostic};
-use cairn_lang_core::resolve::VersionAxes;
-use cairn_lang_core::{Edition, Module, Severity, compute_axes, diagnose_parse_failure, lower};
+use cairn_lang_core::{Edition, Module, Severity, diagnose_parse_failure};
 use cairn_lang_formats::build::artifact::prepare_artifact;
 use cairn_lang_formats::build::finding::{Finding, Found, render_findings};
-use cairn_lang_formats::build::gate::RequestedEditions;
-use cairn_lang_formats::build::info::{edition_runs, info_gate};
 use cairn_lang_formats::build::lowering::lower_for_target;
 use cairn_lang_formats::build::run_level::{
-    RenderedRunLevelMessage, RunLevelMessage, artifact_collision, invalid_palette,
+    RenderedRunLevelMessage, RunLevelMessage, artifact_collision,
+};
+use cairn_lang_formats::info::{
+    FailureDocument, InfoDocument, InfoRequest, InfoSink, RequestedEditions,
 };
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_formats::target::{ResolvedTarget, resolve_target, supported_versions};
@@ -33,7 +35,8 @@ pub struct Compiled {
     pub ok: bool,
     /// Every finding the build reports, in the shape `spec/lint` "Machine-readable payload" gives.
     pub diagnostics: Vec<RenderedDiagnostic>,
-    /// The run-level refusal, and the warnings that name no span, in the order they arose.
+    /// The run-level refusals, `E_REQUIRES_CONFLICT` among them, and the warnings that name no
+    /// span, in the order they arose.
     pub run_level: Vec<RenderedRunLevelMessage>,
     /// The block-array IR the structure files are written from, once no finding is an error.
     pub ir: Option<BlockArrayIr>,
@@ -71,20 +74,30 @@ pub fn compile(source: &str, edition: Edition, target: &str) -> Compiled {
         .chain(lowered.circuits.iter().cloned().map(Found::Circuit))
         .collect();
     compiled.diagnostics = render_findings(source, &lines, &findings);
+    compiled.run_level = lowered
+        .conflicts
+        .iter()
+        .map(|conflict| conflict.render(source, &lines))
+        .collect();
     if findings.iter().any(|d| d.severity() == Severity::Error) {
         return compiled;
     }
-    match lowered.writable_target(edition, resolved) {
-        Ok(target) => match artifacts(&lowered.block_ir, &target, &mut compiled.run_level, |m| {
-            m.render(source, &lines)
-        }) {
-            Ok(artifacts) => {
-                compiled.ok = true;
-                compiled.artifacts = artifacts;
+    // A conflict holds at every target, so it stops the build ahead of the target's floor check.
+    if lowered.conflicts.is_empty() {
+        match lowered.writable_target(edition, resolved) {
+            Ok(target) => {
+                match artifacts(&lowered.block_ir, &target, &mut compiled.run_level, |m| {
+                    m.render(source, &lines)
+                }) {
+                    Ok(artifacts) => {
+                        compiled.ok = true;
+                        compiled.artifacts = artifacts;
+                    }
+                    Err(refusal) => compiled.run_level.push(refusal.render(source, &lines)),
+                }
             }
             Err(refusal) => compiled.run_level.push(refusal.render(source, &lines)),
-        },
-        Err(refusal) => compiled.run_level.push(refusal.render(source, &lines)),
+        }
     }
     compiled.ir = Some(lowered.block_ir);
     compiled
@@ -132,68 +145,40 @@ fn artifacts(
     Ok(written.into_iter().map(|(_, artifact)| artifact).collect())
 }
 
-/// What [`info`] answers.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Informed {
-    /// Whether `cairn info` would print the report: its exit 0.
-    pub ok: bool,
-    /// Every finding the walk reports: the gate's, then those every edition's circuit raises, then
-    /// each edition's own.
-    pub diagnostics: Vec<RenderedDiagnostic>,
-    /// The run-level refusals: a palette a registry pack should have refused, per edition.
-    pub run_level: Vec<RenderedRunLevelMessage>,
-    /// The report `cairn info --format json` prints, when the run is `ok`.
-    pub axes: Option<VersionAxes>,
+/// What [`info`] answers: the document `cairn info --format json` prints.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum Informed {
+    /// The report, when no finding refuses the run.
+    Report(Box<InfoDocument>),
+    /// The findings that refuse it, as `spec/lint` "Machine-readable payload" gives them.
+    Refused(FailureDocument),
 }
 
-/// `cairn info --editions <editions>` over `source`.
+/// `cairn info --editions <editions> --format json` over `source`, which has no path and so no
+/// lock beside it.
 #[must_use]
 pub fn info(source: &str, editions: &RequestedEditions) -> Informed {
-    let lines = LineStarts::new(source);
-    let mut informed = Informed {
-        ok: false,
-        diagnostics: Vec::new(),
-        run_level: Vec::new(),
-        axes: None,
+    let request = InfoRequest {
+        file: Path::new(""),
+        source,
+        editions,
+        lock: Path::new(""),
+        errors_in_document: true,
     };
-    let module = match parse(source, &lines) {
-        Ok(module) => module,
-        Err(parse_failure) => {
-            informed.diagnostics.push(*parse_failure);
-            return informed;
-        }
-    };
-    let ir = lower(&module);
-    let gate = info_gate(&module, &ir, editions);
-    informed.diagnostics = render_findings(source, &lines, &gate);
-    if gate.iter().any(|d| d.severity() == Severity::Error) {
-        return informed;
+    match cairn_lang_formats::info::info(&request, &mut Unsent) {
+        Ok(document) => Informed::Report(Box::new(document)),
+        Err(refused) => Informed::Refused(FailureDocument::new(source, &refused)),
     }
-    let runs = edition_runs(&module, &ir, editions, &gate);
-    informed
-        .diagnostics
-        .extend(render_findings(source, &lines, &runs.shared));
-    for run in &runs.editions {
-        informed
-            .diagnostics
-            .extend(render_findings(source, &lines, &run.found));
-        if let Err(invalid) = &run.portability {
-            informed
-                .run_level
-                .push(invalid_palette(run.edition, invalid).render(source, &lines));
-        }
-    }
-    if runs.refuses() {
-        return informed;
-    }
-    let rows = runs
-        .editions
-        .into_iter()
-        .filter_map(|run| run.report(source, &lines))
-        .collect();
-    informed.ok = true;
-    informed.axes = Some(compute_axes(&module, rows));
-    informed
+}
+
+/// What `cairn info` writes on stderr, which a JSON run leaves outside its document.
+struct Unsent;
+
+impl InfoSink for Unsent {
+    fn finding(&mut self, _: &Found) {}
+
+    fn line(&mut self, _: &str) {}
 }
 
 /// The versions one edition's built-in pack can build for.

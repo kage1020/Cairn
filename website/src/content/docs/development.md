@@ -28,7 +28,7 @@ Each crate maps back to the spec chapter it implements:
 | [`cairn-lang-core`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-core/README.md) | Parser, IR, resolver, lint | lib |
 | [`cairn-lang-cli`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-cli/README.md) | The `cairn` binary | bin |
 | [`cairn-lang-nbt`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-nbt/README.md) | Java / Bedrock NBT codec | lib |
-| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.mcstructure` writers, registry packs, portability, and the build every front end runs | lib |
+| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.mcstructure` writers, registry packs, portability, the build every front end runs, and the `cairn info` report | lib |
 | [`cairn-lang-redstone`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-redstone/README.md) | Logic synthesis, place-and-route, and the tick simulator that checks a circuit against its assertions | lib |
 | [`cairn-lang-lsp`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-lsp/README.md) | Language Server Protocol | lib + bin |
 | [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) | WebAssembly bindings, which run the [playground](/playground/) | cdylib + rlib |
@@ -51,10 +51,12 @@ pages it embeds are the site's own sources, with no copy to drift.
 - **`cairn-lang-redstone` reads sensors, actuators, and `circuit` reservations from core's Intent
   IR**, then lays its own pads and owns its own IR layers
   ([Redstone §14.8](/spec/redstone#148-connection-to-the-ir-and-phases)).
-- **What a front end runs over a source for a build lives in `cairn-lang-formats`' `build`
-  module**: the gate `cairn check` applies, the lowering at a target, the run-level refusals, and
-  the walk `cairn info` reports. `cairn` and the playground call it, so both report the same
-  findings and refusals.
+- **What the front ends report is built in a library.** `cairn-lang-formats`' `build` module
+  holds what a front end runs over a source for a build: the gate `cairn check` applies, the
+  lowering at a target, and the run-level refusals. Its `info` module builds the `cairn info`
+  report on those passes. `cairn`, the language server and the playground all call them, so they
+  report the same findings in the same words, and neither `cairn-lang-lsp` nor `cairn-lang-wasm`
+  depends on `cairn-lang-cli`.
 
 ## Toolchain
 

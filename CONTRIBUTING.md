@@ -63,7 +63,7 @@ cargo xtask lint --site website/dist site-parity   # after `pnpm run build` in w
 |---|---|
 | `crates/cairn-lang-core` | Lexer, parser, Intent IR, check passes, resolution, block-array lowering |
 | `crates/cairn-lang-nbt` | NBT codec — Java big-endian, Bedrock little-endian |
-| `crates/cairn-lang-formats` | Structure writers (`.nbt`, `.mcstructure`), registry packs, portability, and the build the front ends share |
+| `crates/cairn-lang-formats` | Structure writers (`.nbt`, `.mcstructure`), registry packs, portability, and the build and `cairn info` report the front ends share |
 | `crates/cairn-lang-redstone` | Logic IR, netlist, placement, routing, delay, legalization under the struct, simulated assertions |
 | `crates/cairn-lang-cli` | The `cairn` binary |
 | `crates/cairn-lang-lsp` | The `cairn-lsp` language server |
