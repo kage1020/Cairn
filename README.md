@@ -87,7 +87,7 @@ semantic-sensitive:      (none)
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
-- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
+- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, signs with their text, beds, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.

@@ -126,6 +126,11 @@ pub(super) fn lower_body_to_block_array<'a>(
         wall_column,
         written: Written::of(&written_members, interior_w, interior_h),
         patched,
+        openings: flattened
+            .iter()
+            .copied()
+            .filter(|(_, member)| matches!(member.role, MemberRole::Door | MemberRole::Window))
+            .collect(),
     };
     let (canvas, split_doors, derived) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
@@ -165,7 +170,8 @@ pub(super) fn lower_body_to_block_array<'a>(
         body.scope_label,
     );
 
-    let array = finished_array(dims, palette, voxels, body.source_scope, &derived);
+    let mut array = finished_array(dims, palette, voxels, body.source_scope, &derived);
+    array.block_entities = canvas.block_entities();
     let members = resolved_members(&flattened, canvas.owners(), &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));

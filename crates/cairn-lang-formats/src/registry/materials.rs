@@ -30,6 +30,10 @@ pub struct MaterialEntry {
     /// Per-version spellings, for an id that changes inside the edition's supported range.
     #[serde(default)]
     pub overrides: Vec<MaterialOverride>,
+    /// The canonical block the token stands for where the edition spells several as `block`, as
+    /// Bedrock's `bed` is every dyed bed; namespaced as `block` is.
+    #[serde(default)]
+    pub canonical: Option<String>,
 }
 
 /// One `overrides` row of a [`MaterialEntry`].
@@ -55,6 +59,8 @@ struct MaterialMapping {
     default: String,
     /// `mc_version → id`, for the versions that spell it differently.
     by_version: IndexMap<String, String>,
+    /// The canonical block the id stands for, where it stands for one of several.
+    canonical: Option<String>,
 }
 
 impl MaterialsIndex {
@@ -100,6 +106,9 @@ impl MaterialsIndex {
                 MaterialMapping {
                     default: namespaced(namespace, &entry.block),
                     by_version,
+                    canonical: entry
+                        .canonical
+                        .map(|canonical| namespaced(namespace, &canonical)),
                 },
             );
         }
@@ -118,6 +127,12 @@ impl MaterialsIndex {
         let mapping = self.by_token.get(token)?;
         let overridden = mc_version.and_then(|v| mapping.by_version.get(v));
         Some(overridden.unwrap_or(&mapping.default).as_str())
+    }
+
+    /// The canonical block `token` stands for, where its id stands for one of several.
+    #[must_use]
+    pub fn canonical_id(&self, token: &str) -> Option<&str> {
+        self.by_token.get(token)?.canonical.as_deref()
     }
 
     /// Every `(token, mc_version)` pair that carries an override, in declared order.

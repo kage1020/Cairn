@@ -2,7 +2,9 @@
 //! struct, which rises over them (`spec/redstone` "Connection to the IR and phases").
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArrayIr, Dims, PaletteIndex, ResolvedMember};
+use cairn_lang_core::block_array::{
+    BlockArrayIr, BlockEntityData, Dims, PaletteIndex, ResolvedMember,
+};
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
     CircuitEntity, CircuitLayout, Diagnostic, build_circuits, compile_legalize,
@@ -108,9 +110,11 @@ fn each_example_lays_its_circuit_under_its_struct_which_rises_whole() {
             let mut entities: Vec<((u32, u32, u32), i32)> = now
                 .block_entities
                 .iter()
-                .map(|entity| {
-                    assert_eq!(entity.id, "minecraft:comparator", "{name}");
-                    (entity.pos, entity.fields["OutputSignal"])
+                .map(|entity| match &entity.data {
+                    BlockEntityData::Fields { id, fields } if id == "minecraft:comparator" => {
+                        (entity.pos, fields["OutputSignal"])
+                    }
+                    other => panic!("{name}: expected a comparator's, got {other:?}"),
                 })
                 .collect();
             entities.sort_unstable();

@@ -3,8 +3,9 @@
 //! so none is written.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
-use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockState};
+use cairn_lang_core::block_array::{BlockArray, BlockEntityData, BlockState, SignText};
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
@@ -78,6 +79,19 @@ pub enum JavaStructureError {
         id: String,
         /// Which string: the id, a property name or a property value.
         field: String,
+        /// The encoder's refusal.
+        source: NbtIoError,
+    },
+    /// A line of sign text the NBT encoder cannot write.
+    #[error(
+        "the sign at {pos:?} has the line `{text}`, which cannot be written as NBT: {source}. \
+         Fix: write the sign's text in printable ASCII"
+    )]
+    UnencodableSignText {
+        /// The sign's voxel.
+        pos: (u32, u32, u32),
+        /// The line.
+        text: String,
         /// The encoder's refusal.
         source: NbtIoError,
     },
@@ -157,6 +171,20 @@ pub fn prepare_structure<'a>(
     if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(JavaStructureError::PaletteIndexOutOfRange { index, len });
     }
+    for entity in &block_array.block_entities {
+        let BlockEntityData::Sign { front, back } = &entity.data else {
+            continue;
+        };
+        for line in front.lines.iter().chain(&back.lines) {
+            check_string(&sign_message(line, target.data_version)).map_err(|source| {
+                JavaStructureError::UnencodableSignText {
+                    pos: entity.pos,
+                    text: line.clone(),
+                    source,
+                }
+            })?;
+        }
+    }
     Ok(JavaStructure {
         block_array,
         size,
@@ -209,7 +237,7 @@ impl JavaStructure<'_> {
                 self.data_version,
             )),
         )?;
-        let entities = block_entities_at(block_array);
+        let entities = block_entities_at(block_array, self.data_version);
         root.list("blocks", 10, self.volume, |blocks| {
             // `blocks_list`'s (y, z, x) order.
             for y in 0..block_array.dims.y {
@@ -231,7 +259,7 @@ impl JavaStructure<'_> {
                                 pos.item(&Tag::Int(zi))
                             })?;
                             match entities.get(&(x, y, z)) {
-                                Some(entity) => entry.compound_tag("nbt", &entity_nbt(entity)),
+                                Some(nbt) => entry.compound_tag("nbt", nbt),
                                 None => Ok(()),
                             }
                         })?;
@@ -266,7 +294,10 @@ pub fn build_structure_tag(
             prepared.data_version,
         )),
     );
-    root.insert("blocks", Tag::List(blocks_list(block_array)?));
+    root.insert(
+        "blocks",
+        Tag::List(blocks_list(block_array, prepared.data_version)?),
+    );
     root.insert("entities", Tag::List(List::empty()));
     root.insert("DataVersion", Tag::Int(prepared.data_version));
     Ok(root)
@@ -359,29 +390,89 @@ fn palette_entry(state: &BlockState, (id_key, properties_key): (&str, &str)) -> 
     compound
 }
 
-/// Each block entity of `block_array`, by the voxel it sits at.
-fn block_entities_at(block_array: &BlockArray) -> HashMap<(u32, u32, u32), &BlockEntity> {
+/// The `nbt` of each block entity of `block_array` that Java keeps beside its block, by the voxel
+/// it sits at, as `data_version` saves it.
+fn block_entities_at(
+    block_array: &BlockArray,
+    data_version: i32,
+) -> HashMap<(u32, u32, u32), Compound> {
     block_array
         .block_entities
         .iter()
-        .map(|entity| (entity.pos, entity))
+        .filter_map(|entity| Some((entity.pos, entity_nbt(&entity.data, data_version)?)))
         .collect()
 }
 
-/// A block entity as the game saves one in a structure's `blocks`: its id and fields, without the
-/// position its block entry already gives.
-fn entity_nbt(entity: &BlockEntity) -> Compound {
+/// The first `DataVersion` that saves a sign's messages as text components, 1.21.5's.
+const SIGN_TEXT_COMPONENTS_FROM: i32 = 4325;
+
+/// A block entity as the game saves one in a structure's `blocks`, without the position its block
+/// entry already gives; `None` for one whose block holds all of it, as a bed's id names its colour.
+fn entity_nbt(data: &BlockEntityData, data_version: i32) -> Option<Compound> {
     let mut nbt = Compound::new();
-    nbt.insert("id", Tag::String(entity.id.clone()));
-    for (field, value) in &entity.fields {
-        nbt.insert(field.clone(), Tag::Int(*value));
+    match data {
+        BlockEntityData::Fields { id, fields } => {
+            nbt.insert("id", Tag::String(id.clone()));
+            for (field, value) in fields {
+                nbt.insert(field.clone(), Tag::Int(*value));
+            }
+        }
+        BlockEntityData::Sign { front, back } => {
+            nbt.insert("id", Tag::String("minecraft:sign".to_owned()));
+            nbt.insert("front_text", Tag::Compound(sign_text(front, data_version)));
+            nbt.insert("back_text", Tag::Compound(sign_text(back, data_version)));
+            nbt.insert("is_waxed", Tag::Byte(0));
+        }
+        BlockEntityData::Bed { .. } => return None,
     }
-    nbt
+    Some(nbt)
 }
 
-fn blocks_list(block_array: &BlockArray) -> Result<List, JavaStructureError> {
+/// One face of a sign: its four messages, black and glowing or not.
+fn sign_text(text: &SignText, data_version: i32) -> Compound {
+    let messages: Vec<Tag> = (0..4)
+        .map(|line| {
+            let line = text.lines.get(line).map_or("", String::as_str);
+            Tag::String(sign_message(line, data_version))
+        })
+        .collect();
+    let mut face = Compound::new();
+    face.insert("messages", Tag::List(List::of_tags(8, messages)));
+    face.insert("color", Tag::String("black".to_owned()));
+    face.insert("has_glowing_text", Tag::Byte(i8::from(text.glowing)));
+    face
+}
+
+/// One line of a sign as `data_version` saves it: a text component, a JSON string before 1.21.5.
+fn sign_message(line: &str, data_version: i32) -> String {
+    if data_version >= SIGN_TEXT_COMPONENTS_FROM {
+        line.to_owned()
+    } else {
+        json_string(line)
+    }
+}
+
+/// `text` as a JSON string.
+fn json_string(text: &str) -> String {
+    let mut json = String::with_capacity(text.len() + 2);
+    json.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => json.push_str("\\\""),
+            '\\' => json.push_str("\\\\"),
+            c if u32::from(c) < 0x20 => {
+                write!(json, "\\u{:04x}", u32::from(c)).expect("a `String` takes any write");
+            }
+            c => json.push(c),
+        }
+    }
+    json.push('"');
+    json
+}
+
+fn blocks_list(block_array: &BlockArray, data_version: i32) -> Result<List, JavaStructureError> {
     // Air is written too, as the game's structure blocks do, so placement can tell it from void.
-    let entities = block_entities_at(block_array);
+    let entities = block_entities_at(block_array, data_version);
     let mut entries: Vec<Compound> = Vec::with_capacity(block_array.dims.volume());
     for y in 0..block_array.dims.y {
         let yi = dim_to_i32(y, "y")?;
@@ -397,8 +488,8 @@ fn blocks_list(block_array: &BlockArray) -> Result<List, JavaStructureError> {
                 let mut entry = Compound::new();
                 entry.insert("state", Tag::Int(i32::from(palette_index.0)));
                 entry.insert("pos", Tag::List(List::of_ints([xi, yi, zi])));
-                if let Some(entity) = entities.get(&(x, y, z)) {
-                    entry.insert("nbt", Tag::Compound(entity_nbt(entity)));
+                if let Some(nbt) = entities.get(&(x, y, z)) {
+                    entry.insert("nbt", Tag::Compound(nbt.clone()));
                 }
                 entries.push(entry);
             }

@@ -113,6 +113,15 @@ one block ID, and its `overrides` name the versions that spell it differently, a
   "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }] }
 ```
 
+An entry whose block the edition spells for several Java blocks also names, as `canonical`, the
+Java block the token stands for. Bedrock's one `bed` is every dyed bed, and its writer saves the
+colour of the bed `canonical` names in the bed's block entity ([Entities
+§8.1](/spec/entities/#81-two-tiers)):
+
+```json
+{ "token": "bed.blue", "block": "bed", "canonical": "blue_bed" }
+```
+
 The Bedrock pack carries its state maps as two more components. `states` is generated from
 GeyserMC's mappings, one pinned per version, and checked against that version's block palette when
 the pack is extracted and again when it is loaded. The Java states of one block that become one
@@ -157,9 +166,13 @@ one row per property and the blocks it covers, or every other block that drops i
 loses a value other than the Java default (a stair's `shape` up to 1.21.60), and a `derived` one
 loses nothing the lowering derived, because Bedrock works it out itself (a fence's connections), but
 loses at any value one a member's material or line wrote ([Blockstate
-§6.1](/spec/blockstate/#connections)). Its `reason` is the sentence `W_INTENT_DEGRADED` prints
-([§10.7](#107-java--bedrock-portability)). The loader refuses a dropped property no row classifies,
-and the extractor a row nothing drops.
+§6.1](/spec/blockstate/#connections)). A `block_entity` one loses nothing, because Bedrock keeps it
+in the block's block entity, which the writer fills from it: a chest's `type`, as the pairing of its
+two halves, and a note block's `note` ([Entities §8.1](/spec/entities/#81-two-tiers)). A
+`block_entity` row the writer has no block entity for is a defect in the pack, and the writer
+refuses each entry whose value it would have to keep there. A row's `reason` is the sentence
+`W_INTENT_DEGRADED` prints where the property is lost ([§10.7](#107-java--bedrock-portability)).
+The loader refuses a dropped property no row classifies, and the extractor a row nothing drops.
 
 Both packs carry a `connections` component: what each block is to the rules that join panes, fences,
 walls, chests and redstone dust to their neighbours ([Blockstate
@@ -240,13 +253,15 @@ check runs where the ID check runs and nowhere else
 both to a build that pins one.
 
 A state literal ([Syntax](/spec/syntax/)) is checked at its token, and the member or walkway that
-binds it is not built. The finding names the pair, the values the property takes, or the properties
-the block has when it has no such property, and the other versions whose tables take the pair: a
-domain that changed between releases is the likeliest cause of a literal that is valid somewhere,
-and the repair is then a target rather than an edit. Lowering checks the states it derives as well
-(a stair's `facing`, `half` and `shape`), at the member, so a derivation the target's block cannot
-hold is refused rather than written; that is a defect in Cairn or the pack's table, and the finding
-says so.
+binds it is not built. A state a member's own line writes, such as a `note_block`'s `instrument=`
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), is checked
+the same way at its value. The finding names the pair, the values the property takes, or the
+properties the block has when it has no such property, and the other versions whose tables take the
+pair: a domain that changed between releases is the likeliest cause of a literal that is valid
+somewhere, and the repair is then a target rather than an edit. Lowering checks the states it
+derives as well (a stair's `facing`, `half` and `shape`), at the member, so a derivation the
+target's block cannot hold is refused rather than written; that is a defect in Cairn or the pack's
+table, and the finding says so.
 
 A literal on a block the pinned target's pack records no states for is written as given, with
 `W_STATE_LITERAL_UNCHECKED` ([Lint](/spec/lint/)) so that it is said rather than silent. Both

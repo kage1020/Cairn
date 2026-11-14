@@ -10,6 +10,7 @@ struct s size=9x7
   window side=front offset=2 y=2
   roof kind=gable overhang=1
   stair id=up from=0 to=1
+  beam kind=pillar at=front.top axis=x
   pressure_plate id=plate at=front.outside
   lever id=sw at=inside.front offset=2 -> sig.power
   button id=bt at=front.outside offset=5
@@ -19,6 +20,10 @@ struct s size=9x7
   piston id=p1 at=inside.right offset=2 sticky=true
   dispenser id=ds at=front.outside offset=6 fired_by=sig.pulse
   chest id=store at=inside.back offset=2 size=single
+  trapdoor at=inside.left offset=1 y=2 half=top open=true
+  note_block at=2,1,2 instrument=bit note=12
+  sign at=inside.front offset=2 y=1 text=["Inn", "rooms"] glowing=true
+  bed at=inside.back offset=1 facing=left
   repeater at=1,1,1 facing=east delay=2
   comparator at=2,1,1 facing=east mode=subtract
   redstone_torch at=inside.back offset=2
@@ -126,6 +131,23 @@ struct s size=9x7
             (attribute
               (identifier)
               (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
       (member_stmt
         (member_keyword)
         (command_arg_list
@@ -288,6 +310,90 @@ struct s size=9x7
             (attribute
               (identifier)
               (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (boolean)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (signal_ref
+                (identifier)
+                (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (value_list
+                (string)
+                (string))))
+          (command_arg
+            (attribute
+              (identifier)
+              (boolean)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
           (command_arg
             (attribute
               (identifier)

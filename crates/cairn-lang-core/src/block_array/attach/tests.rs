@@ -1,7 +1,9 @@
 use indexmap::IndexMap;
 
 use super::*;
-use crate::block_array::{BlockArray, CellRun, Dims, Entity, PALETTE_CAPACITY, Palette};
+use crate::block_array::{
+    BlockArray, BlockEntityData, CellRun, Dims, Entity, PALETTE_CAPACITY, Palette,
+};
 
 const KEY: &str = "struct::hut";
 
@@ -19,8 +21,10 @@ fn hut() -> BlockArrayIr {
         voxels: vec![PaletteIndex(1); 4],
         block_entities: vec![BlockEntity {
             pos: (1, 0, 1),
-            id: "minecraft:chest".to_owned(),
-            fields: IndexMap::new(),
+            data: BlockEntityData::Fields {
+                id: "minecraft:chest".to_owned(),
+                fields: IndexMap::new(),
+            },
         }],
         entities: vec![Entity {
             pos: (0.5, 1.0, 0.5),
@@ -108,13 +112,17 @@ fn a_circuit_lays_under_the_structure_which_rises_over_it() {
         [
             BlockEntity {
                 pos: (1, 2, 1),
-                id: "minecraft:chest".to_owned(),
-                fields: IndexMap::new(),
+                data: BlockEntityData::Fields {
+                    id: "minecraft:chest".to_owned(),
+                    fields: IndexMap::new(),
+                },
             },
             BlockEntity {
                 pos: (0, 1, 1),
-                id: "minecraft:comparator".to_owned(),
-                fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+                data: BlockEntityData::Fields {
+                    id: "minecraft:comparator".to_owned(),
+                    fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+                },
             },
         ],
     );

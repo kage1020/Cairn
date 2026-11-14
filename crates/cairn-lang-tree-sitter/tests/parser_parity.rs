@@ -348,6 +348,22 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor a=[[1,2],[3]]\n",
         Accept,
     ),
+    (
+        "member_string_list",
+        "struct s size=3x3\n  sign at=1,0,1 text=[\"The Inn\", \"C:\\rooms\"] back=\"x\"\n",
+        Accept,
+    ),
+    // Which kinds a list holds is the member's to judge, so the parsers take any.
+    (
+        "member_mixed_list",
+        "struct s size=3x3\n  sign at=1,0,1 text=[\"a\", 4, b]\n",
+        Accept,
+    ),
+    (
+        "member_string_list_unterminated",
+        "struct s size=3x3\n  sign at=1,0,1 text=[\"a\", \"b]\n",
+        Reject,
+    ),
     // The arrow sits inside the argument loop, so arguments may follow it.
     (
         "member_arrow_then_args",

@@ -1,5 +1,5 @@
-//! Reading the `waterlogged=` a `stair` or `chest` line writes, which keeps its block's state from
-//! a water fill (`spec/blockstate` "`waterlogged`").
+//! Reading the `waterlogged=` a `stair`, `chest` or `trapdoor` line writes, which keeps its block's
+//! state from a water fill (`spec/blockstate` "`waterlogged`").
 
 use indexmap::IndexMap;
 

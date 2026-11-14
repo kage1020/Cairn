@@ -10,7 +10,9 @@ use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
 use thiserror::Error;
 
-use crate::registry::{BedrockForm, DroppedState, StateRefusal, StateValue, VersionStates};
+use crate::registry::{
+    BedrockForm, DroppedState, EntityStates, StateRefusal, StateValue, VersionStates,
+};
 
 /// One palette entry as Bedrock writes it, and the intents it had to drop.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,6 +28,24 @@ pub struct StateTranslation {
     /// not carry at a value other than the Java default, or one it works out itself that the
     /// lowering did not derive.
     pub degraded: Vec<DroppedIntent>,
+    /// What the block's block entity holds of the entry's states, `None` when it holds nothing
+    /// other than the Java default.
+    pub entity: Option<StateEntity>,
+}
+
+/// What a Bedrock block entity holds of a state its Java block carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StateEntity {
+    /// One half of a double chest, as `type=left` or `type=right` makes it.
+    ChestHalf {
+        /// The other half's `(x, z)` offset from this one, as the half's `facing` turns it.
+        toward: (i32, i32),
+        /// Whether this is the half that leads the pair, the left one.
+        lead: bool,
+    },
+    /// A note block's `note`.
+    Note(i8),
 }
 
 /// A palette entry the Bedrock backend cannot write.
@@ -96,6 +116,7 @@ pub fn translate_states(
         waterlogged,
         dropped,
         rederived,
+        in_entity,
     } = map.resolve(state).map_err(|refusal| match refusal {
         StateRefusal::Unmapped { reason } => BedrockStateError::Unmapped {
             id: state.id.clone(),
@@ -143,8 +164,62 @@ pub fn translate_states(
                 reason: dropped.reason,
             })
             .collect(),
+        entity: in_entity
+            .map(|kept| state_entity(map, state, &kept))
+            .transpose()?,
     })
 }
+
+/// What the block entity holds of `kept`, the states of `state` Bedrock keeps there.
+fn state_entity(
+    map: &VersionStates<'_>,
+    state: &BlockState,
+    kept: &EntityStates,
+) -> Result<StateEntity, BedrockStateError> {
+    let held = match kept.kept.as_slice() {
+        [(key, value)] if key == "type" => kept
+            .states
+            .get("facing")
+            .and_then(|facing| HORIZONTAL.iter().position(|(name, _)| name == facing))
+            .filter(|_| value == "left" || value == "right")
+            .map(|at| {
+                let lead = value == "left";
+                // The left half's other half is clockwise of its facing, the right half's counter.
+                let turned = if lead {
+                    at + 1
+                } else {
+                    at + HORIZONTAL.len() - 1
+                };
+                StateEntity::ChestHalf {
+                    toward: HORIZONTAL[turned % HORIZONTAL.len()].1,
+                    lead,
+                }
+            }),
+        [(key, value)] if key == "note" => value.parse().ok().map(StateEntity::Note),
+        _ => None,
+    };
+    held.ok_or_else(|| BedrockStateError::Unmapped {
+        id: state.id.clone(),
+        properties: state.properties_text(),
+        mc_version: map.mc_version().to_owned(),
+        reason: format!(
+            "Bedrock keeps {} in the block's block entity, which Cairn does not write for it",
+            kept.kept
+                .iter()
+                .map(|(key, value)| format!("`{key}={value}`"))
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ),
+    })
+}
+
+/// Each horizontal `facing`, clockwise from north, with the `(x, z)` step it points.
+const HORIZONTAL: [(&str, (i32, i32)); 4] = [
+    ("north", (0, -1)),
+    ("east", (1, 0)),
+    ("south", (0, 1)),
+    ("west", (-1, 0)),
+];
 
 /// A palette value as its NBT tag: Bedrock's booleans are bytes.
 fn tag(value: StateValue) -> Tag {

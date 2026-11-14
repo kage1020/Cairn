@@ -5,13 +5,12 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockState, Covers, Face, Faces, JoinKind, Joins, TargetRegistry,
 };
-use cairn_lang_core::resolve::DroppedIntent;
-use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
+use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag};
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::registry::builtin_pack;
-use cairn_lang_nbt::tag::Tag;
+use cairn_lang_nbt::tag::Compound;
 
-use crate::common::{block_palette, lower_source, note_fields, states_for};
+use crate::common::{lower_source, position_data, states_for, written_palette};
 
 /// `minecraft:{id}` with `properties`.
 fn state(id: &str, properties: &[(&str, &str)]) -> BlockState {
@@ -315,32 +314,7 @@ fn a_bedrock_target_writes_the_connections_a_wall_and_its_gate_derive() {
         build_mcstructure_tag(&out.structures["struct::s"], &target, &states_for(&target))
             .expect("build");
     assert_eq!(notes, []);
-    let mut written: Vec<String> = block_palette(&root)
-        .iter()
-        .map(|entry| {
-            let Tag::Compound(entry) = entry else {
-                panic!("palette entry: {entry:?}");
-            };
-            let (Some(Tag::String(name)), Some(Tag::Compound(states))) =
-                (entry.entries.get("name"), entry.entries.get("states"))
-            else {
-                panic!("palette entry: {entry:?}");
-            };
-            let mut states: Vec<String> = states
-                .entries
-                .iter()
-                .map(|(key, value)| match value {
-                    Tag::Byte(v) => format!("{key}={v}"),
-                    Tag::Int(v) => format!("{key}={v}"),
-                    Tag::String(v) => format!("{key}={v}"),
-                    other => panic!("{key}: {other:?}"),
-                })
-                .collect();
-            states.sort();
-            format!("{name}[{}]", states.join(","))
-        })
-        .collect();
-    written.sort();
+    let written = written_palette(&root);
     let wall = |east, north, south, west, post| {
         format!(
             "minecraft:cobblestone_wall[wall_block_type=cobblestone,\
@@ -365,51 +339,89 @@ fn a_bedrock_target_writes_the_connections_a_wall_and_its_gate_derive() {
     );
 }
 
-#[test]
-fn a_bedrock_target_writes_each_half_of_a_chest_pair_single_and_notes_the_pairing_it_drops() {
-    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
-                  struct s size=5x3\n  walls mat_slot=wall height=3\n  \
-                  chest at=inside.back offset=1 y=1\n  chest at=inside.back offset=2 y=1\n";
-    let version = "1.21.0";
+/// `source`'s `struct::s` written at Bedrock `version`, with the notes the writer raised.
+fn bedrock_root(source: &str, version: &str) -> (Compound, Vec<ParityNote>) {
     let out = lower_source(source, Edition::Bedrock, Some(version));
     assert_eq!(out.diagnostics, []);
     let target = resolve_bedrock_target(version).expect("known target");
-    let (root, notes) =
-        build_mcstructure_tag(&out.structures["struct::s"], &target, &states_for(&target))
-            .expect("build");
-    let dropped = |value: &str| DroppedIntent {
-        key: "type".to_owned(),
-        value: value.to_owned(),
-        mc_versions: vec![version.to_owned()],
-        reason: "Bedrock pairs chests through their block entities, which Cairn does not write, \
-                 so each chest stands single"
-            .to_owned(),
-    };
+    build_mcstructure_tag(&out.structures["struct::s"], &target, &states_for(&target))
+        .expect("build")
+}
+
+#[test]
+fn a_bedrock_target_pairs_the_halves_of_a_chest_pair_through_their_block_entities() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=5x3\n  walls mat_slot=wall height=3\n  \
+                  chest at=inside.back offset=1 y=1\n  chest at=inside.back offset=2 y=1\n";
+    let (root, notes) = bedrock_root(source, "1.21.0");
+    assert_eq!(notes, []);
     assert_eq!(
-        note_fields(&notes),
+        written_palette(&root),
+        [
+            "minecraft:air[]",
+            "minecraft:chest[minecraft:cardinal_direction=south]",
+            "minecraft:cobblestone[]",
+        ],
+    );
+    // The left half, facing south, has its other half to the west, and leads the pair.
+    assert_eq!(
+        position_data(&root),
         [
             (
-                "minecraft:chest",
-                "facing=south,type=left",
-                &dropped("left")
+                "28".to_owned(),
+                "{block_entity_data:{id:\"Chest\",pairlead:0b,pairx:3,pairz:1,x:2,y:1,z:1}}"
+                    .to_owned()
             ),
             (
-                "minecraft:chest",
-                "facing=south,type=right",
-                &dropped("right")
+                "40".to_owned(),
+                "{block_entity_data:{id:\"Chest\",pairlead:1b,pairx:2,pairz:1,x:3,y:1,z:1}}"
+                    .to_owned()
             ),
         ],
     );
-    let chests: Vec<&Tag> = block_palette(&root)
-        .iter()
-        .filter(|entry| {
-            matches!(entry, Tag::Compound(entry)
-                if entry.entries.get("name") == Some(&Tag::String("minecraft:chest".to_owned())))
-        })
-        .collect();
+}
+
+#[test]
+fn a_chest_half_without_its_other_half_beside_it_stands_single_on_bedrock() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=5x3\n  walls mat_slot=wall height=3\n  \
+                  raw_block mat=minecraft:chest[facing=south,type=left] at=3,1,1\n  \
+                  raw_block mat=minecraft:trapped_chest[facing=south,type=right] at=2,1,1\n  \
+                  raw_block mat=minecraft:chest[facing=south,type=left] at=1,2,1\n";
+    let (root, notes) = bedrock_root(source, "1.21.0");
+    assert_eq!(notes, []);
+    assert_eq!(position_data(&root), []);
+}
+
+#[test]
+fn a_chest_pair_facing_east_pairs_along_z_on_bedrock() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=3x5\n  walls mat_slot=wall height=3\n  \
+                  chest at=inside.left offset=1 y=1\n  chest at=inside.left offset=2 y=1\n";
+    let (root, notes) = bedrock_root(source, "1.21.0");
+    assert_eq!(notes, []);
     assert_eq!(
-        chests.len(),
-        1,
-        "both halves write one single chest: {chests:?}"
+        written_palette(&root),
+        [
+            "minecraft:air[]",
+            "minecraft:chest[minecraft:cardinal_direction=east]",
+            "minecraft:cobblestone[]",
+        ],
+    );
+    // The left half, facing east, has its other half to the south.
+    assert_eq!(
+        position_data(&root),
+        [
+            (
+                "26".to_owned(),
+                "{block_entity_data:{id:\"Chest\",pairlead:1b,pairx:1,pairz:2,x:1,y:1,z:1}}"
+                    .to_owned()
+            ),
+            (
+                "27".to_owned(),
+                "{block_entity_data:{id:\"Chest\",pairlead:0b,pairx:1,pairz:1,x:1,y:1,z:2}}"
+                    .to_owned()
+            ),
+        ],
     );
 }

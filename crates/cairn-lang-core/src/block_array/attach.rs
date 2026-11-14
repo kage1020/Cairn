@@ -8,8 +8,8 @@ use indexmap::IndexMap;
 use crate::error::Span;
 
 use super::{
-    BlockArrayIr, BlockEntity, BlockState, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex,
-    ResolvedBlock, ResolvedMember,
+    BlockArrayIr, BlockEntity, BlockEntityData, BlockState, Dims, MAX_STRUCTURE_VOLUME,
+    PaletteFull, PaletteIndex, ResolvedBlock, ResolvedMember,
 };
 
 /// One block of a circuit, at `(x, y, z)` in the layers under the base plane, `y = 0` the lowest.
@@ -150,8 +150,10 @@ impl BlockArrayIr {
             if let Some(entity) = &block.entity {
                 array.block_entities.push(BlockEntity {
                     pos: block.at,
-                    id: entity.id.clone(),
-                    fields: entity.fields.clone(),
+                    data: BlockEntityData::Fields {
+                        id: entity.id.clone(),
+                        fields: entity.fields.clone(),
+                    },
                 });
             }
         }

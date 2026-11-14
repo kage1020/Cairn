@@ -115,9 +115,14 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@wall.wood.broadleaf`, `@wall.wood.conifer`, `@wall.stone.cobble`, `@wall.stone.smooth` | Walls |
 | `@wood.dark`, `@wood.light`, `@wood.warm`, `@wood.cool` | Planks, by tone |
 | `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
-| `@sign.oak`, `@sign.oak_wall` | A standing sign and a wall sign |
+| `@beam.default` | The pillar block a `beam` lays when no `mat_slot=` binds one |
+| `@sign.oak`, `@sign.oak_wall` | The standing sign a `sign` stands, and the wall sign it hangs, when no `mat_slot=` binds one |
+| `@bed.default` | The bed a `bed` lays when no `mat_slot=` binds one, a red one |
+| `@bed.white`, `@bed.orange`, `@bed.magenta`, `@bed.light_blue`, `@bed.yellow`, `@bed.lime`, `@bed.pink`, `@bed.gray`, `@bed.light_gray`, `@bed.cyan`, `@bed.purple`, `@bed.blue`, `@bed.brown`, `@bed.green`, `@bed.red`, `@bed.black` | The bed of each dye's colour |
 | `@door.default` | The door block a `door` places when no `mat_slot=` binds one |
 | `@chest.default` | The chest block a `chest` places when no `mat_slot=` binds one |
+| `@trapdoor.default` | The trapdoor a `trapdoor` sets when no `mat_slot=` binds one |
+| `@note_block.default` | The note block a `note_block` sets |
 | `@pressure_plate.default` | The block a `pressure_plate` places when no `mat_slot=` binds one |
 | `@lever.default` | The lever a `lever` hangs on its wall |
 | `@button.default` | The button a `button` hangs on its wall when no `mat_slot=` binds one |

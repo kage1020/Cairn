@@ -3,7 +3,10 @@
 use indexmap::IndexMap;
 
 use crate::block_array::material::is_stand_in;
-use crate::block_array::{BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull, PaletteIndex};
+use crate::block_array::{
+    BlockEntity, BlockEntityData, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull,
+    PaletteIndex,
+};
 
 use super::phase::Phase;
 
@@ -157,6 +160,8 @@ pub(super) struct Canvas {
     held: Vec<bool>,
     /// The contests a held member took part in, in the order they happened.
     deferred: Vec<Contest>,
+    /// Each block entity a member set beside a block it painted, with that member.
+    block_entities: Vec<(u32, BlockEntity)>,
 }
 
 /// One cell a member wrote over another member's in the same phase.
@@ -180,7 +185,17 @@ impl Canvas {
             painted: vec![false; 1],
             conflicts: IndexMap::new(),
             deferred: Vec::new(),
+            block_entities: Vec::new(),
         }
+    }
+
+    /// Each block entity whose member still holds its cell, in the order they were set.
+    pub(super) fn block_entities(&self) -> Vec<BlockEntity> {
+        self.block_entities
+            .iter()
+            .filter(|(member, entity)| self.owner_at(entity.pos) == Some(*member))
+            .map(|(_, entity)| entity.clone())
+            .collect()
     }
 
     /// Record that a write named `slot`, for a state a member settled on in a cell it no longer
@@ -312,6 +327,14 @@ impl MemberCanvas<'_> {
                 self.canvas.dims,
             );
         }
+    }
+
+    /// Set `data` as the block entity of the block this member painted at `pos`, kept only while
+    /// the member holds that cell.
+    pub(super) fn set_block_entity(&mut self, pos: (u32, u32, u32), data: BlockEntityData) {
+        self.canvas
+            .block_entities
+            .push((self.member, BlockEntity { pos, data }));
     }
 
     /// [`Self::paint`] without the assertion, for a cell the author placed; whether it existed.

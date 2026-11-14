@@ -10,7 +10,7 @@ pub mod java_structure;
 pub mod portability;
 pub mod registry;
 
-pub use bedrock_state::{BedrockStateError, StateTranslation, translate_states};
+pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};
 pub use bedrock_structure::{
     BedrockStructureError, McStructure, ParityNote, build_mcstructure_tag, prepare_mcstructure,
     write_mcstructure,

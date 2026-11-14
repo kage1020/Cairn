@@ -83,6 +83,40 @@ pub(super) fn ident_or_ignore<'m>(
     )
 }
 
+/// [`read_or_ignore`] for a key whose value is a string or a list of strings, each string read as
+/// one; a list item of another kind is unread, pointed at itself.
+pub(super) fn strings_or_ignore(
+    member: &Member,
+    key: &'static str,
+    expected: &'static str,
+) -> Result<Option<Vec<String>>, UnreadArgument> {
+    let Some(raw) = member.written(key) else {
+        return Ok(None);
+    };
+    let items = match &raw.value.kind {
+        ValueKind::Str(text) => return Ok(Some(vec![text.clone()])),
+        ValueKind::List(items) => items,
+        _ => return read_or_ignore(member, key, |_| None, expected),
+    };
+    items
+        .iter()
+        .map(|item| match &item.kind {
+            ValueKind::Str(text) => Ok(text.clone()),
+            _ => Err(UnreadArgument {
+                span: if item.span.start == 0 && item.span.end == 0 {
+                    member_or_slot_span(member, raw)
+                } else {
+                    item.span.clone()
+                },
+                key,
+                written: item.describe(),
+                expected,
+            }),
+        })
+        .collect::<Result<_, _>>()
+        .map(Some)
+}
+
 /// A `key=` written with a value its reader cannot use.
 #[derive(Debug)]
 pub(super) struct UnreadArgument {
@@ -151,13 +185,15 @@ pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
 /// The note [`diag_deferred_member_reason`] gives, listing the roles lowering draws.
 const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls, fill \
      (from=x,y,z to=x,y,z with mat_slot= or fluid=water), door, window, \
-     roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate, lever, button, \
-     daylight, observer, lamp, piston, dispenser and chest (at=<side>.outside|inside.<side>), \
-     repeater, comparator, redstone_torch and redstone_dust (at=x,y,z or at=<side>.outside|\
-     inside.<side>), raw_block (mat=<namespace:path> at=x,y,z) and raw_fill (mat=<namespace:path> from=x,y,z \
-     to=x,y,z), and level y=N grouping, and recognises circuit region=<label> void=<N> (u32, \
-     N>=1) plus actuator patches such as door[id=<name>] opened_by=sig.<name>; other roles will \
-     be added as their lowering rules are spec'd";
+     roof (kind=gable|shed|hip|flat), stair (kind=stairs), beam (kind=pillar), pressure_plate, \
+     lever, button, daylight, observer, lamp, piston, dispenser and chest \
+     (at=<side>.outside|inside.<side>), trapdoor, sign, bed, repeater, comparator, \
+     redstone_torch and redstone_dust (at=x,y,z or at=<side>.outside|inside.<side>), \
+     note_block (at=x,y,z), raw_block (mat=<namespace:path> at=x,y,z) and raw_fill \
+     (mat=<namespace:path> from=x,y,z to=x,y,z), and level y=N grouping, and recognises \
+     circuit region=<label> void=<N> (u32, N>=1) plus actuator patches such as \
+     door[id=<name>] opened_by=sig.<name>; other roles will be added as their lowering rules \
+     are spec'd";
 
 /// The `W_DEFERRED_MEMBER` for a member lowering does not draw, with `reason` as its primary and
 /// the note listing the roles lowering draws.
