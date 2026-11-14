@@ -25,10 +25,14 @@ The parser puts anything that is not `key=`, `-> binding`, or `[selector]` into 
 so a dropped `=` lands there too. `walls mat_slot=wall height 3` is not a `walls` with a shortened
 height. It is not built at all.
 
-Only a member line (a line of a `struct`, `def` or `site` body) keeps a positional list so far. The
-header line of a `struct`, `def`, `site` or `theme`, a `theme` rule, and a `logic` or `assert` line
-do not yet, so the same slip there is `E_PARSE`, which ends the parse: `struct s size 3x3` is refused
-with "expected `=`".
+A header, a `theme` rule and a `logic` or `assert` line keep one too, and the parse goes on past it.
+A `struct` or `def` header and a `theme` selector rule keep their bare values beside their
+`key=value` arguments, so `struct s size 3x3` is `E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as
+`size=3x3`. A `site` or `theme` header reads nothing after its name, a `slot` row nothing after the
+value it binds, and an `assert` line nothing after the end of its form: a bare value there is the
+same finding, and a `key=value` there is `E_PARSE`. A `logic` line whose `=` is dropped,
+`logic sig.a sig.b or sig.c`, still reads the expression after its name, binds nothing, and is
+`E_UNEXPECTED_POSITIONAL` on the whole line.
 
 ### 5.1.1 Literals and separators
 
@@ -189,14 +193,16 @@ and Monaco use the same rule, so a diagnostic's line number and the line under t
 same row. A position always points at the text that is wrong, so an error at the end of a line is
 reported there and never at the first column of the next one.
 
-The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
+The tree-sitter grammar is a known exception in three ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
 correctly. It also accepts nine forms the parser refuses, because tree-sitter cannot express their
 rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
 integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within` or `<=` bound
 or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last component runs
 into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
-literal naming one property twice.
+literal naming one property twice. And it refuses a bare value after the name on a `site` or
+`theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because taking one
+there would let error recovery read an over-indented first body line into the header.
 
 ## 5.2 Nesting
 

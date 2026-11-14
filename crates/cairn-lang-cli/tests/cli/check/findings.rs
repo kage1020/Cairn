@@ -139,10 +139,10 @@ fn parse_failure_exits_one_with_parse_style_message() {
 #[test]
 fn end_of_line_parse_error_names_the_line_that_has_it() {
     for (label, source) in [
-        ("lf", "def foo bar\n"),
-        ("crlf", "def foo bar\r\n"),
-        ("cr", "def foo bar\r"),
-        ("none", "def foo bar"),
+        ("lf", "def foo bar=\n"),
+        ("crlf", "def foo bar=\r\n"),
+        ("cr", "def foo bar=\r"),
+        ("none", "def foo bar="),
     ] {
         let fixture = Fixture::new(source);
         let file = fixture.source();
@@ -150,8 +150,8 @@ fn end_of_line_parse_error_names_the_line_that_has_it() {
         assert_eq!(out.status.code(), Some(1), "{label}");
         let stderr = String::from_utf8(out.stderr).expect("utf-8");
         assert!(
-            stderr.contains(":1:12: "),
-            "{label}: expected the error at 1:12, got: {stderr}",
+            stderr.contains(":1:13: "),
+            "{label}: expected the error at 1:13, got: {stderr}",
         );
     }
 }
