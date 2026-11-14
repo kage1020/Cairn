@@ -10,14 +10,15 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 use crate::suggest::{did_you_mean, nearest_match};
 
-use crate::block_array::BlockState;
 use crate::block_array::args::{
     diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member, ident_or_ignore,
 };
+use crate::block_array::geometry::{Declared, outer_face};
 use crate::block_array::openings::{
     DOOR_HEIGHT, WallSide, WindowArgs, door_anchor_offset, read_window_args, wall_length,
     wall_local_to_grid,
 };
+use crate::block_array::{Bbox, BlockState};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::Refusal;
@@ -118,6 +119,13 @@ fn lay_beam(
     let axis = axis.unwrap_or_else(|| along(run.side));
     properties.insert("axis".to_owned(), axis.to_owned());
     let index = palette.intern(BlockState { id, properties });
+    if let (Some(&anchor), Some(bbox)) = (cells.first(), Bbox::around(cells.iter().copied())) {
+        canvas.declare(Declared {
+            anchor,
+            bbox,
+            host_face: Some(outer_face(run.side)),
+        });
+    }
     for cell in cells {
         canvas.paint(cell, || index);
     }

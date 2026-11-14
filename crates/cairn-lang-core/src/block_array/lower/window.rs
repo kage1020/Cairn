@@ -4,14 +4,15 @@ use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::intent::Member;
 
-use crate::block_array::PaletteIndex;
 use crate::block_array::args::{
     NonNegRead, diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member,
     nonneg_int_or_refuse, read_or_ignore,
 };
+use crate::block_array::geometry::{Declared, outer_face};
 use crate::block_array::openings::{
     WallSide, WindowArgs, read_window_args, wall_length, wall_local_to_grid,
 };
+use crate::block_array::{Bbox, PaletteIndex};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::members::{
@@ -81,28 +82,24 @@ fn cut_window(
     let Some(side) = side_of(member, diagnostics) else {
         return WindowCut::Refused;
     };
-    let WindowArgs {
-        offset,
-        y: y_start_local,
-        width: sw,
-        height: sh,
-    } = match read_window_args(member) {
+    let args = match read_window_args(member) {
         Ok(args) => args,
         Err(fault) => {
             diagnostics.push(diag_invalid_member(
                 member,
                 fault.refusal(),
-                vec![fault.fix().to_owned()],
+                vec![fault.fix()],
             ));
             return WindowCut::Refused;
         }
     };
-    let y_start = y_start_local.saturating_add(y_offset);
+    let (offset, sw, sh) = (args.column(), args.width, args.height);
+    let y_start = args.row().saturating_add(y_offset);
     let Some((repeat, step)) = window_series(member, diagnostics) else {
         return WindowCut::Refused;
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
-    let refusal = window_span_refusal(side, offset, (sw, sh), (repeat, step), len)
+    let refusal = window_span_refusal(side, args, (repeat, step), len)
         .map(|(reason, fix)| diag_invalid_member(member, reason, vec![fix]))
         .or_else(|| window_course_refusal(member, y_start, (sw, sh), ctx));
     // The window's own line is asked before what the pass does not lower yet.
@@ -142,8 +139,15 @@ fn cut_window(
         height: sh,
         palette_index: idx,
     };
-    for i in 0..repeat {
-        let stamped_offset = offset.saturating_add(step.saturating_mul(i));
+    let stamped: Vec<u32> = (0..repeat)
+        .map(|i| offset.saturating_add(step.saturating_mul(i)))
+        .collect();
+    let mirror = (sym == Some(true)).then(|| mirror_offset(base_rect, len));
+    let anchor = (args.offset, args.y.saturating_add(y_offset));
+    if let Some(declared) = window_declared(ctx, base_rect, anchor, stamped.iter().chain(&mirror)) {
+        canvas.declare(declared);
+    }
+    for stamped_offset in stamped {
         paint_window_rect(
             ctx,
             WindowRect {
@@ -154,9 +158,45 @@ fn cut_window(
         );
     }
     if sym == Some(true) {
-        cut_window_mirror(member, base_rect, len, ctx, canvas, diagnostics);
+        cut_window_mirror(member, base_rect, args, len, ctx, canvas, diagnostics);
     }
     WindowCut::Cut
+}
+
+/// What a window's line declares: a `rect` at each of `offsets`, anchored at the wall-local
+/// `(u, y)` its `offset=` and `y=` name.
+fn window_declared<'o>(
+    ctx: &StructCtx<'_>,
+    rect: WindowRect,
+    (anchor_u, anchor_y): (u32, u32),
+    offsets: impl IntoIterator<Item = &'o u32>,
+) -> Option<Declared> {
+    let grid = |u: u32, y: u32| {
+        wall_local_to_grid(
+            rect.side,
+            u,
+            y,
+            ctx.overhang,
+            ctx.interior_w,
+            ctx.interior_h,
+            ctx.dims,
+        )
+    };
+    let top = rect.y_start.saturating_add(rect.height.saturating_sub(1));
+    let corners = offsets
+        .into_iter()
+        .flat_map(|&offset| {
+            let far = offset.saturating_add(rect.width.saturating_sub(1));
+            [grid(offset, rect.y_start), grid(far, top)]
+        })
+        .collect::<Option<Vec<_>>>();
+    // INVARIANT(wall-grid-validated): `cut_window` refused off-wall spans and rows.
+    debug_assert!(corners.is_some(), "a window corner fell off the wall grid");
+    Some(Declared {
+        anchor: grid(anchor_u, anchor_y)?,
+        bbox: Bbox::around(corners?)?,
+        host_face: Some(outer_face(rect.side)),
+    })
 }
 
 /// A window's `repeat=` and `step=`, or `None` after the finding that refuses the window.
@@ -226,30 +266,34 @@ fn series_mirror_deferral(
 /// when it does.
 fn window_span_refusal(
     side: WallSide,
-    offset: u32,
-    (sw, sh): (u32, u32),
+    args: WindowArgs,
     (repeat, step): (u32, u32),
     len: u32,
 ) -> Option<(String, String)> {
-    let span_end = offset
+    let (sw, sh) = (args.width, args.height);
+    let span_end = args
+        .column()
         .saturating_add(step.saturating_mul(repeat.saturating_sub(1)))
         .saturating_add(sw);
+    let first = args.column_term();
     (span_end > len).then(|| {
         let fix = if repeat > 1 {
             format!(
-                "the last instance ends at `offset + step * (repeat - 1) + size.w`, which must be \
-                 at most {len}; lower `offset=`, `step=` or `repeat=`, or narrow `size=`"
+                "the last instance ends at `{first} + step * (repeat - 1) + size.w`, which must \
+                 be at most {len}; lower `offset=`, `step=` or `repeat=`, or narrow `size=`"
             )
         } else {
             format!(
-                "the window ends at `offset + size.w`, which must be at most {len}; lower \
+                "the window ends at `{first} + size.w`, which must be at most {len}; lower \
                  `offset=` or narrow `size=`"
             )
         };
         (
             format!(
-                "window extends beyond the `{}` wall (offset={offset} size={sw}x{sh} repeat={repeat} step={step}, wall length={len})",
+                "window extends beyond the `{}` wall (offset={}{} size={sw}x{sh} repeat={repeat} step={step}, wall length={len})",
                 side_name(side),
+                args.offset,
+                args.anchor_written(),
             ),
             fix,
         )
@@ -347,6 +391,7 @@ fn window_course_refusal(
 fn cut_window_mirror(
     member: &Member,
     rect: WindowRect,
+    args: WindowArgs,
     len: u32,
     ctx: &StructCtx<'_>,
     canvas: &mut MemberCanvas<'_>,
@@ -359,7 +404,7 @@ fn cut_window_mirror(
         height: sh,
         ..
     } = rect;
-    let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
+    let mirror_offset = mirror_offset(rect, len);
     let primary_end = offset.saturating_add(sw);
     let mirror_end = mirror_offset.saturating_add(sw);
     // Strict: a mirror that only touches the primary shares no cell with it, so it is still a
@@ -378,17 +423,20 @@ fn cut_window_mirror(
         } else {
             // On an odd wall the middle column is in neither half, so the two bounds differ.
             let (left_half_end, right_half_start) = (len / 2, len.div_ceil(2));
+            let first = args.column_term();
             format!(
                 "a `sym=true` window and its mirror are a pair only when the window lies in one \
-                 half of the wall (here `offset + size.w <= {left_half_end}` or \
-                 `offset >= {right_half_start}`); move or narrow the window to cut a pair, or \
+                 half of the wall (here `{first} + size.w <= {left_half_end}` or \
+                 `{first} >= {right_half_start}`); move or narrow the window to cut a pair, or \
                  drop `sym=true` to keep the one opening that was cut",
             )
         };
         diagnostics.push(diag_deferred_member_noted(
             member,
             &format!(
-                "`sym=true` window at offset={offset} size={sw}x{sh} on the `{}` wall {relation} its mirror (wall length={len}); the mirror was skipped",
+                "`sym=true` window at offset={}{} size={sw}x{sh} on the `{}` wall {relation} its mirror (wall length={len}); the mirror was skipped",
+                args.offset,
+                args.anchor_written(),
                 side_name(side),
             ),
             &note,
@@ -403,6 +451,11 @@ fn cut_window_mirror(
         },
         canvas,
     );
+}
+
+/// The first column of `rect`'s mirror across the middle of its `len`-long wall.
+fn mirror_offset(rect: WindowRect, len: u32) -> u32 {
+    len.saturating_sub(rect.offset).saturating_sub(rect.width)
 }
 
 #[derive(Debug, Clone, Copy)]

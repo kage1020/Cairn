@@ -12,6 +12,7 @@ use crate::block_array::BlockState;
 use crate::block_array::args::{
     UnreadArgument, diag_invalid_member, ident_or_ignore, read_or_ignore,
 };
+use crate::block_array::geometry::Declared;
 use crate::block_array::joins::Face;
 
 use super::canvas::{MemberCanvas, ScopePalette};
@@ -150,15 +151,20 @@ fn place_trapdoor(
             return last.map_or(Ok(stand), Err);
         }
     };
-    let (cell, facing) = match toward {
+    let (cell, facing, host_face) = match toward {
         Look::Wall(toward) => {
             let (anchor, cell) = fixture_cell(TRAPDOOR, member, y_offset, ctx)?;
             let way = toward.unwrap_or_else(|| Toward::away_from_the_wall(anchor));
-            (cell, Some(way.face(anchor.side())))
+            (
+                cell,
+                Some(way.face(anchor.side())),
+                Some(anchor.host_face()),
+            )
         }
         Look::Compass(facing) => (
             triple_cell(TRAPDOOR, TRAPDOOR.noun, member, y_offset, ctx)?,
             facing,
+            None,
         ),
     };
     let Some(id) = trapdoor_block_id(member, ctx, diagnostics)? else {
@@ -172,6 +178,7 @@ fn place_trapdoor(
     properties.insert("open".to_owned(), written.open.unwrap_or(false).to_string());
     keep_waterlogged(&mut properties, waterlogged);
     let state = BlockState { id, properties };
+    canvas.declare(Declared::cell(cell, host_face));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
         Ok(stand)

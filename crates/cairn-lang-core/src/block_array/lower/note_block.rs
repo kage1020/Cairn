@@ -11,6 +11,7 @@ use crate::block_array::BlockState;
 use crate::block_array::args::{
     UnreadArgument, diag_invalid_member, ident_or_ignore, read_or_ignore,
 };
+use crate::block_array::geometry::Declared;
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::cell_box::{Shape, written_cells};
@@ -132,6 +133,7 @@ fn place_note_block(
     if !check_written_state(member, "instrument", &state, ctx.registry, diagnostics) {
         return Ok(false);
     }
+    canvas.declare(Declared::cell(cell, None));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
         Ok(true)

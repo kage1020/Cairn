@@ -11,6 +11,7 @@ use crate::suggest::{did_you_mean, nearest_match};
 use crate::block_array::args::{
     UnreadArgument, diag_invalid_member, ident_or_ignore, read_or_ignore, strings_or_ignore,
 };
+use crate::block_array::geometry::Declared;
 use crate::block_array::joins::Face;
 use crate::block_array::material::is_stand_in;
 use crate::block_array::{BlockEntityData, BlockState, SignText};
@@ -163,12 +164,16 @@ fn place_sign(
     }
     let stand = stand_of(SIGN, "sign", member)?;
     let hung = hung_facing(member, written.facing, stand)?;
-    let (cell, facing) = match stand {
-        Stand::Triple => (triple_cell(SIGN, "sign", member, y_offset, ctx)?, hung),
+    let (cell, facing, host_face) = match stand {
+        Stand::Triple => (
+            triple_cell(SIGN, "sign", member, y_offset, ctx)?,
+            hung,
+            None,
+        ),
         Stand::ByWall => {
             let (anchor, cell) = fixture_cell(SIGN, member, y_offset, ctx)?;
-            let away = Toward::away_from_the_wall(anchor).face(anchor.side());
-            (cell, Some(away))
+            let away = anchor.host_face();
+            (cell, Some(away), Some(away))
         }
     };
     let Some(id) = sign_block_id(member, ctx, facing.is_some(), diagnostics)? else {
@@ -181,6 +186,7 @@ fn place_sign(
         None => properties.insert("rotation".to_owned(), "0".to_owned()),
     };
     let state = BlockState { id, properties };
+    canvas.declare(Declared::cell(cell, host_face));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if !canvas.try_paint(cell, || palette.intern(state)) {
         return Err(Box::new(outside_the_array(SIGN, member)));

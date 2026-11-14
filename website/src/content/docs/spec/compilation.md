@@ -240,8 +240,10 @@ under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to noth
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under
 `level y=0` the roof draws, and widens and raises the volume as one in the body does. The same
-holds for every way a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=`
-does not widen the footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
+holds for every way a member drops out: a `roof` with no `kind=`, a `shed` with no `slope_to=`
+and a `roof` whose `footprint=` or `bounds=` takes a value other than its one
+([Entities §8.2](/spec/entities/#82-anchor-conventions)) do not widen the footprint, and `walls`
+whose material does not resolve do not raise `Dims.y`.
 
 The material half applies to `walls` and not to `roof`, because a roof whose `mat_slot=` does not
 resolve falls back to a material of its own and still draws. A themeless struct shows the asymmetry:

@@ -9,8 +9,9 @@ use crate::intent::Member;
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, ident_or_ignore};
+use crate::block_array::geometry::Declared;
 use crate::block_array::joins::Face;
-use crate::block_array::{BlockEntityData, BlockState, DYE_COLORS, TargetRegistry};
+use crate::block_array::{Bbox, BlockEntityData, BlockState, DYE_COLORS, TargetRegistry};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::cell_box::Cell;
@@ -85,13 +86,14 @@ fn place_bed(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Stand, Refusal> {
     let stand = stand_of(BED, "bed", member)?;
-    let (head, face, lies_in) = match stand {
+    let (head, face, lies_in, host_face) = match stand {
         Stand::Triple => {
             let face = compass_facing(member, facing)?;
             (
                 triple_cell(BED, "bed", member, y_offset, ctx)?,
                 face,
                 Region::Footprint,
+                None,
             )
         }
         Stand::ByWall => {
@@ -101,7 +103,7 @@ fn place_bed(
                 Anchor::Inside(_) => Region::Interior,
                 Anchor::Outside(_) => Region::Exterior,
             };
-            (head, face, lies_in)
+            (head, face, lies_in, Some(anchor.host_face()))
         }
     };
     let (dx, _, dz) = face.step();
@@ -134,6 +136,11 @@ fn place_bed(
     {
         return Err(Box::new(outside_the_array(BED, member)));
     }
+    canvas.declare(Declared {
+        anchor: head,
+        bbox: Bbox::spanning(head, foot),
+        host_face,
+    });
     for (cell, part) in [(head, "head"), (foot, "foot")] {
         let mut properties = IndexMap::new();
         properties.insert("facing".to_owned(), face.as_str().to_owned());

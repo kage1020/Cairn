@@ -418,28 +418,11 @@ impl MemberRole {
     #[must_use]
     pub fn unread_arguments(&self) -> &'static [UnreadArgument] {
         match self {
-            // Both from `spec/entities` "Anchor conventions".
-            Self::Window => &[
-                UnreadArgument {
-                    key: "shape",
-                    why: Unread::Unreached,
-                },
-                UnreadArgument {
-                    key: "anchor",
-                    why: Unread::Unreached,
-                },
-            ],
-            // Both from `spec/entities` "Anchor conventions".
-            Self::Roof => &[
-                UnreadArgument {
-                    key: "footprint",
-                    why: Unread::Unreached,
-                },
-                UnreadArgument {
-                    key: "bounds",
-                    why: Unread::Unreached,
-                },
-            ],
+            // From `spec/entities` "Anchor conventions".
+            Self::Window => &[UnreadArgument {
+                key: "shape",
+                why: Unread::Unreached,
+            }],
             Self::Lever
             | Self::Daylight
             | Self::Observer
@@ -463,6 +446,7 @@ impl MemberRole {
             Self::Floor
             | Self::Walls
             | Self::Fill
+            | Self::Roof
             | Self::Door
             | Self::Stair
             | Self::Beam

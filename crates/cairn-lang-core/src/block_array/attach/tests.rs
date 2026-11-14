@@ -49,6 +49,12 @@ fn hut() -> BlockArrayIr {
                 },
             ],
         }],
+        geometry: MemberGeometry {
+            anchor: (0, 0, 0),
+            declared_bbox: Bbox::spanning((0, 0, 0), (1, 0, 1)),
+            actual_bbox: Bbox::spanning((0, 0, 0), (1, 0, 1)),
+            host_face: None,
+        },
         span: 0..5,
     };
     BlockArrayIr {
@@ -194,6 +200,53 @@ fn a_circuit_lays_under_the_structure_which_rises_over_it() {
         ],
     );
     assert_eq!(members[0].span, 10..20);
+}
+
+#[test]
+fn a_circuit_raises_every_member_geometry_over_the_layers_it_reserves() {
+    let mut ir = hut();
+    assert_eq!(ir.attach_circuit(KEY, 2, &circuit(), 10..20), Ok(()));
+    let geometry: Vec<MemberGeometry> = ir.members[KEY]
+        .iter()
+        .map(|member| member.geometry)
+        .collect();
+    assert_eq!(
+        geometry,
+        [
+            MemberGeometry {
+                anchor: (0, 0, 0),
+                declared_bbox: Bbox::spanning((0, 0, 0), (1, 1, 1)),
+                actual_bbox: Bbox::spanning((0, 0, 0), (1, 1, 1)),
+                host_face: None,
+            },
+            MemberGeometry {
+                anchor: (0, 2, 0),
+                declared_bbox: Bbox::spanning((0, 2, 0), (1, 2, 1)),
+                actual_bbox: Bbox::spanning((0, 2, 0), (1, 2, 1)),
+                host_face: None,
+            },
+        ],
+    );
+}
+
+#[test]
+fn a_circuit_declares_every_layer_it_reserves_and_holds_the_box_around_its_blocks() {
+    let mut ir = hut();
+    let lone = [LaidBlock {
+        at: (1, 0, 0),
+        state: wire(),
+        entity: None,
+    }];
+    assert_eq!(ir.attach_circuit(KEY, 2, &lone, 10..20), Ok(()));
+    assert_eq!(
+        ir.members[KEY][0].geometry,
+        MemberGeometry {
+            anchor: (0, 0, 0),
+            declared_bbox: Bbox::spanning((0, 0, 0), (1, 1, 1)),
+            actual_bbox: Bbox::cell((1, 0, 0)),
+            host_face: None,
+        },
+    );
 }
 
 #[test]
