@@ -5,6 +5,7 @@ mod comment_length;
 mod diagnostic_catalog;
 mod editor_keywords;
 mod grammar_fields;
+mod keyword_reference;
 mod logic_highlights;
 mod manifest;
 mod module_cycles;
@@ -42,6 +43,7 @@ pub const RULES: &[Rule] = &[
     readme::SYNTH_STAGES,
     diagnostic_catalog::RULE,
     tier_1_tokens::RULE,
+    keyword_reference::RULE,
     grammar_fields::RULE,
     editor_keywords::RULE,
     logic_highlights::RULE,

@@ -1,15 +1,18 @@
-//! Source text + cursor position → the whole closed-vocabulary set valid there.
+//! Source text + cursor position → the closed-vocabulary set valid there: whole for a keyword or a
+//! slot name, and for a material token the tokens matching what is typed, bounded.
 //!
 //! The context is read from the text, not a parse: a document mid-keystroke rarely parses, and
 //! Cairn is line-oriented (`spec/syntax` "Lexical").
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::Span;
 use cairn_lang_core::ast::ItemKind;
 use cairn_lang_core::intent::{BodyKind, role_of};
 use cairn_lang_formats::builtin_pack;
+use cairn_lang_formats::registry::MaterialsIndex;
 
 use crate::line_index::LineIndex;
 
@@ -43,41 +46,48 @@ struct SlotDecl {
     theme: Option<String>,
 }
 
-/// Every completion candidate at `position`, or `None` when the document has no such position.
+/// The most items a material-token answer holds; a longer answer is cut there and marked incomplete.
+pub const MATERIAL_ITEM_LIMIT: usize = 100;
+
+/// The completion candidates at `position`, or `None` when the document has no such position.
 #[must_use]
 pub fn completions(
     source: &str,
     position: lsp_types::Position,
-) -> Option<Vec<lsp_types::CompletionItem>> {
+) -> Option<lsp_types::CompletionList> {
     let index = LineIndex::new(source);
     let offset = index.offset_at(source, position)?;
+    let whole = |items| lsp_types::CompletionList {
+        is_incomplete: false,
+        items,
+    };
     Some(match context_at(source, offset) {
-        None => Vec::new(),
-        Some(Context::TopLevelKeyword { replace }) => keyword_items(
+        None => whole(Vec::new()),
+        Some(Context::TopLevelKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             ItemKind::ALL
                 .into_iter()
                 .map(|kind| (kind.keyword(), "top-level item")),
-        ),
-        Some(Context::MemberKeyword { replace, body }) => keyword_items(
+        )),
+        Some(Context::MemberKeyword { replace, body }) => whole(keyword_items(
             &index,
             source,
             &replace,
             body.allowed_keywords()
                 .into_iter()
                 .map(|kw| (kw, "member command")),
-        ),
-        Some(Context::UnscopedMemberKeyword { replace }) => keyword_items(
+        )),
+        Some(Context::UnscopedMemberKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             cairn_lang_core::intent::known_keywords()
                 .iter()
                 .map(|kw| (*kw, "member command")),
-        ),
-        Some(Context::ThemeBodyKeyword { replace }) => keyword_items(
+        )),
+        Some(Context::ThemeBodyKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
@@ -86,24 +96,26 @@ pub fn completions(
                     .iter()
                     .map(|kw| (*kw, "theme selector")),
             ),
-        ),
-        Some(Context::SlotName { replace }) => slot_name_items(&index, source, &replace),
-        Some(Context::MaterialToken { replace }) => material_items(&index, source, &replace),
-        Some(Context::GuardWord { replace }) => keyword_items(
+        )),
+        Some(Context::SlotName { replace }) => whole(slot_name_items(&index, source, &replace)),
+        Some(Context::MaterialToken { replace }) => {
+            material_items(&index, source, &replace, offset)
+        }
+        Some(Context::GuardWord { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             std::iter::once(("edition", "edition guard")),
-        ),
-        Some(Context::EditionName { replace }) => keyword_items(
+        )),
+        Some(Context::EditionName { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             [Edition::Java, Edition::Bedrock]
                 .into_iter()
                 .map(|edition| (edition.as_str(), "edition")),
-        ),
-        Some(Context::GuardedMemberKeyword { replace }) => keyword_items(
+        )),
+        Some(Context::GuardedMemberKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
@@ -118,7 +130,7 @@ pub fn completions(
                     };
                     (*kw, detail)
                 }),
-        ),
+        )),
     })
 }
 
@@ -379,7 +391,8 @@ fn token_start_of(text: &str) -> usize {
         .map_or(text.len(), |(i, _)| i)
 }
 
-/// One item replacing `replace` with `label`; `order` holds its place against client re-sorting.
+/// One item replacing `replace` with `label`, at `order` in the answer; a client that sorts by
+/// its own match score keeps that order only among items that score alike.
 fn completion_item(
     index: &LineIndex,
     source: &str,
@@ -393,7 +406,7 @@ fn completion_item(
         label: label.to_owned(),
         kind: Some(kind),
         detail: Some(detail),
-        // Six digits keep lexicographic order across tens of thousands of block ids.
+        // A client compares `sortText` as a string.
         sort_text: Some(format!("{order:06}")),
         text_edit: Some(lsp_types::CompletionTextEdit::Edit(lsp_types::TextEdit {
             range: index.range(source, replace),
@@ -455,594 +468,167 @@ fn slot_name_items(
         .collect()
 }
 
-/// The built-in packs' abstract tokens, Java's first, then the canonical ids they resolve to.
+/// A material token a completion may offer, with its detail.
+struct MaterialCandidate {
+    label: String,
+    detail: String,
+}
+
+/// The built-in catalogs' abstract tokens, Java's first, each with what it resolves to in each
+/// edition: the default id, then any version that spells it otherwise.
+fn abstract_tokens() -> &'static [MaterialCandidate] {
+    static TOKENS: OnceLock<Vec<MaterialCandidate>> = OnceLock::new();
+    TOKENS.get_or_init(|| {
+        let catalogs =
+            [Edition::Java, Edition::Bedrock].map(|edition| (edition, builtin_pack(edition)));
+        let mut seen = HashSet::new();
+        catalogs
+            .iter()
+            .flat_map(|(_, pack)| pack.materials().tokens())
+            .filter(|token| seen.insert(*token))
+            .map(|token| MaterialCandidate {
+                label: token.to_owned(),
+                detail: catalogs
+                    .iter()
+                    .filter_map(|(edition, pack)| resolution_in(*edition, pack.materials(), token))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            })
+            .collect()
+    })
+}
+
+/// What `token` resolves to in `edition`'s `catalog`, as `java minecraft:stone_bricks` or
+/// `bedrock minecraft:stone_bricks (1.21.0: minecraft:stonebrick)`, or `None` without the token.
+fn resolution_in(edition: Edition, catalog: &MaterialsIndex, token: &str) -> Option<String> {
+    let mut default = None;
+    let mut overrides = Vec::new();
+    for (_, version, id) in catalog.mappings().filter(|(mapped, ..)| *mapped == token) {
+        match version {
+            None => default = Some(id),
+            Some(version) => overrides.push(format!("{version}: {id}")),
+        }
+    }
+    let default = default?;
+    let edition = edition.as_str();
+    Some(if overrides.is_empty() {
+        format!("{edition} {default}")
+    } else {
+        format!("{edition} {default} ({})", overrides.join(", "))
+    })
+}
+
+/// Every canonical id a built-in pack's blocks table declares, Java's and Bedrock's, sorted, each
+/// with the editions and versions that declare it.
+fn canonical_ids() -> &'static [MaterialCandidate] {
+    static IDS: OnceLock<Vec<MaterialCandidate>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        let mut declared: BTreeMap<&str, Vec<(Edition, Vec<&str>)>> = BTreeMap::new();
+        for edition in [Edition::Java, Edition::Bedrock] {
+            for (version, ids) in builtin_pack(edition).blocks().ids_by_version() {
+                for id in ids {
+                    let editions = declared.entry(id).or_default();
+                    match editions.last_mut() {
+                        Some((seen, versions)) if *seen == edition => versions.push(version),
+                        _ => editions.push((edition, vec![version])),
+                    }
+                }
+            }
+        }
+        declared
+            .into_iter()
+            .map(|(id, editions)| MaterialCandidate {
+                // Built-in canonical tokens are written without `minecraft:`.
+                label: id.strip_prefix("minecraft:").unwrap_or(id).to_owned(),
+                detail: editions
+                    .iter()
+                    .map(|(edition, versions)| {
+                        format!("{} {}", edition.as_str(), versions.join(", "))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            })
+            .collect()
+    })
+}
+
+/// How `label` matches the token typed so far: `Some(0)` when it starts with it, `Some(1)` when
+/// it does from just after some `_` or `.`, `Some(2)` when it holds its characters in order, and
+/// `None` otherwise.
+fn match_rank(label: &str, typed: &str) -> Option<u8> {
+    if label.starts_with(typed) {
+        return Some(0);
+    }
+    if label
+        .match_indices(['_', '.'])
+        .any(|(at, _)| label[at + 1..].starts_with(typed))
+    {
+        return Some(1);
+    }
+    // VS Code's fuzzy matcher accepts only these, so no label it would show is left out.
+    let mut rest = label.chars();
+    typed
+        .chars()
+        .all(|wanted| rest.any(|c| c == wanted))
+        .then_some(2)
+}
+
+/// The candidates matching `typed`, every one of a tier before the next tier's and, within one,
+/// in [`match_rank`]'s order, cut at [`MATERIAL_ITEM_LIMIT`]; and whether the cut dropped any.
+fn rank_and_cut<'c>(
+    tiers: &[&'c [MaterialCandidate]],
+    typed: &str,
+) -> (Vec<&'c MaterialCandidate>, bool) {
+    let mut ranked: Vec<(usize, u8, &MaterialCandidate)> = tiers
+        .iter()
+        .enumerate()
+        .flat_map(|(tier, candidates)| candidates.iter().map(move |candidate| (tier, candidate)))
+        .filter_map(|(tier, candidate)| {
+            match_rank(&candidate.label, typed).map(|rank| (tier, rank, candidate))
+        })
+        .collect();
+    // Stable, so each group keeps the vocabulary's order.
+    ranked.sort_by_key(|(tier, rank, _)| (*tier, *rank));
+    let is_incomplete = ranked.len() > MATERIAL_ITEM_LIMIT;
+    ranked.truncate(MATERIAL_ITEM_LIMIT);
+    let kept = ranked
+        .into_iter()
+        .map(|(_, _, candidate)| candidate)
+        .collect();
+    (kept, is_incomplete)
+}
+
+/// The answer for what is typed between `replace`'s start and `cursor`: abstract tokens before
+/// canonical ids and, within each, in [`match_rank`]'s order, cut at [`MATERIAL_ITEM_LIMIT`] and
+/// marked incomplete when it is.
 fn material_items(
     index: &LineIndex,
     source: &str,
     replace: &Span,
-) -> Vec<lsp_types::CompletionItem> {
-    let java = builtin_pack(Edition::Java).materials();
-    let bedrock = builtin_pack(Edition::Bedrock).materials();
-    let mut items = Vec::new();
-    let mut order = 0;
-    let mut seen = HashSet::new();
-    for token in java.tokens().chain(bedrock.tokens()) {
-        if !seen.insert(token) {
-            continue;
-        }
-        let Some(id) = java.lookup_id(token).or_else(|| bedrock.lookup_id(token)) else {
-            continue;
-        };
-        items.push(completion_item(
-            index,
-            source,
-            replace,
-            token,
-            lsp_types::CompletionItemKind::VALUE,
-            id.to_owned(),
-            order,
-        ));
-        order += 1;
+    cursor: usize,
+) -> lsp_types::CompletionList {
+    let typed = source[replace.start..cursor].to_ascii_lowercase();
+    let (kept, is_incomplete) = rank_and_cut(&[abstract_tokens(), canonical_ids()], &typed);
+    let items = kept
+        .into_iter()
+        .enumerate()
+        .map(|(order, candidate)| {
+            completion_item(
+                index,
+                source,
+                replace,
+                &candidate.label,
+                lsp_types::CompletionItemKind::VALUE,
+                candidate.detail.clone(),
+                order,
+            )
+        })
+        .collect();
+    lsp_types::CompletionList {
+        is_incomplete,
+        items,
     }
-    // Both packs' ids: a token may resolve differently per edition, and both are canonical.
-    let mut seen_ids = HashSet::new();
-    let resolved_ids = java
-        .tokens()
-        .filter_map(|t| java.lookup_id(t))
-        .chain(bedrock.tokens().filter_map(|t| bedrock.lookup_id(t)));
-    for id in resolved_ids {
-        if !seen_ids.insert(id) {
-            continue;
-        }
-        // Built-in canonical tokens are written without `minecraft:`.
-        let label = id.strip_prefix("minecraft:").unwrap_or(id);
-        items.push(completion_item(
-            index,
-            source,
-            replace,
-            label,
-            lsp_types::CompletionItemKind::VALUE,
-            "canonical block id".to_owned(),
-            order,
-        ));
-        order += 1;
-    }
-    items
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-
-    use cairn_lang_core::ast::{Item, ThemeRule};
-    use cairn_lang_core::parse;
-
-    use super::*;
-
-    /// Position immediately after the first occurrence of `needle`.
-    fn at_end_of(source: &str, needle: &str) -> lsp_types::Position {
-        let offset = source.find(needle).expect("needle in source") + needle.len();
-        LineIndex::new(source).position(source, offset)
-    }
-
-    fn complete(source: &str, needle: &str) -> Vec<lsp_types::CompletionItem> {
-        completions(source, at_end_of(source, needle)).expect("position within document")
-    }
-
-    fn labels(items: &[lsp_types::CompletionItem]) -> Vec<&str> {
-        items.iter().map(|i| i.label.as_str()).collect()
-    }
-
-    fn edit_range(item: &lsp_types::CompletionItem) -> lsp_types::Range {
-        match item.text_edit.as_ref().expect("text_edit present") {
-            lsp_types::CompletionTextEdit::Edit(edit) => edit.range,
-            lsp_types::CompletionTextEdit::InsertAndReplace(_) => {
-                panic!("expected plain TextEdit")
-            }
-        }
-    }
-
-    fn range(line: u32, start_character: u32, end_character: u32) -> lsp_types::Range {
-        lsp_types::Range {
-            start: lsp_types::Position {
-                line,
-                character: start_character,
-            },
-            end: lsp_types::Position {
-                line,
-                character: end_character,
-            },
-        }
-    }
-
-    #[test]
-    fn top_level_line_start_offers_exactly_the_item_keywords() {
-        let source = "st";
-        let items = complete(source, "st");
-        assert_eq!(labels(&items), vec!["theme", "def", "site", "struct"]);
-        for item in &items {
-            assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::KEYWORD));
-            assert_eq!(edit_range(item), range(0, 0, 2));
-        }
-    }
-
-    #[test]
-    fn member_position_offers_the_bodys_keywords_with_replace_range() {
-        let source = "struct s size=2x2\n  flo";
-        let items = complete(source, "flo");
-        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
-        for item in &items {
-            assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::KEYWORD));
-            assert_eq!(edit_range(item), range(1, 2, 5));
-        }
-    }
-
-    #[test]
-    fn mid_token_cursor_replaces_the_whole_token() {
-        let source = "struct s size=2x2\n  flotsam";
-        let items = complete(source, "  flo");
-        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
-        for item in &items {
-            assert_eq!(edit_range(item), range(1, 2, 9));
-        }
-    }
-
-    #[test]
-    fn theme_body_offers_slot_and_selector_keywords() {
-        let source = "theme x:\n  s";
-        let items = complete(source, "\n  s");
-        assert_eq!(items[0].label, "slot");
-        assert_eq!(items[0].detail.as_deref(), Some("slot binding"));
-        let window = items
-            .iter()
-            .find(|i| i.label == "window")
-            .expect("member keywords offered as selectors");
-        assert_eq!(window.detail.as_deref(), Some("theme selector"));
-        assert_eq!(
-            items.len(),
-            1 + cairn_lang_core::intent::known_keywords().len(),
-            "a selector is matched against every body, so its vocabulary stays the whole table",
-        );
-    }
-
-    #[test]
-    fn nested_block_body_offers_the_enclosing_items_keywords() {
-        let source = "struct t size=5x5\n  level h=4\n    flo";
-        let items = complete(source, "    flo");
-        assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
-        assert!(!labels(&items).contains(&"slot"));
-    }
-
-    #[test]
-    fn a_site_body_offers_only_the_rows_it_reads() {
-        let source = "site s:\n  p";
-        let items = complete(source, "\n  p");
-        assert_eq!(labels(&items), BodyKind::Site.allowed_keywords());
-    }
-
-    #[test]
-    fn a_truth_table_at_column_zero_is_no_item_header() {
-        for source in [
-            "struct s size=3x3\n  assert truth(a -> b) {\n0 -> 1\n  }\n  flo",
-            "struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1\n}\n  flo",
-        ] {
-            let items = complete(source, "  flo");
-            assert_eq!(
-                labels(&items),
-                BodyKind::Geometry.allowed_keywords(),
-                "for {source:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn a_line_inside_a_truth_table_offers_nothing() {
-        for (source, needle) in [
-            ("struct s size=3x3\n  assert truth(a -> b) {\n0", "{\n0"),
-            (
-                "struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1\n    \n  }\n",
-                "0 -> 1\n    ",
-            ),
-        ] {
-            assert_eq!(
-                labels(&complete(source, needle)),
-                Vec::<&str>::new(),
-                "for {source:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_unresolved_header_offers_the_whole_table_rather_than_nothing() {
-        for source in [
-            "  flo",
-            "stru s size=2x2
-  flo",
-        ] {
-            let items = complete(source, "flo");
-            assert_eq!(
-                labels(&items),
-                cairn_lang_core::intent::known_keywords().to_vec(),
-                "for {source:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn slot_names_union_across_themes_survives_parse_failure() {
-        let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      theme b:\n  slot wall -> @cobblestone\n\
-                      struct s size=2x2\n  floor mat_slot=";
-        parse(source).expect_err("document mid-keystroke should not parse");
-        let items = complete(source, "mat_slot=");
-        assert_eq!(labels(&items), vec!["floor", "wall"]);
-        for item in &items {
-            assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::VARIABLE));
-        }
-        assert_eq!(items[0].detail.as_deref(), Some("-> @oak_planks (theme a)"),);
-    }
-
-    #[test]
-    fn slot_value_replace_range_counts_utf16_units() {
-        let source = "theme a:\n  slot walls -> @cobblestone\n\
-                      struct s size=2x2\n  window id=\"😀\" mat_slot=wa";
-        let items = complete(source, "mat_slot=wa");
-        assert_eq!(labels(&items), vec!["walls"]);
-        let line = "  window id=\"😀\" mat_slot=wa";
-        let byte_col = line.find("wa").expect("partial token");
-        let utf16_col = u32::try_from(line[..byte_col].encode_utf16().count()).expect("fits u32");
-        assert_ne!(u32::try_from(byte_col).expect("fits"), utf16_col);
-        assert_eq!(edit_range(&items[0]), range(3, utf16_col, utf16_col + 2));
-    }
-
-    #[test]
-    fn the_line_scan_answers_both_questions_from_one_walk() {
-        let cases = [
-            ("door id=front", None, false),
-            ("door id=\"front\"", None, false),
-            ("door id=\"front", None, true),
-            // A `#` inside a string is content, not an opener.
-            ("door id=\"a # b\"", None, false),
-            ("door id=\"a # b", None, true),
-            // Quotes past a comment opener are comment text.
-            ("door id=a # say \"hi", Some(10), false),
-            ("# \"", Some(0), false),
-        ];
-        for (line, comment, open_string) in cases {
-            let scan = scan_line(line);
-            assert_eq!(scan.comment, comment, "comment offset for {line:?}");
-            assert_eq!(scan.open_string, open_string, "open string for {line:?}");
-        }
-    }
-
-    #[test]
-    fn a_material_token_inside_a_string_offers_nothing() {
-        let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  door id=\"@oa";
-        // `@oa` alone would match `@oak_planks` above.
-        assert_eq!(
-            completions(source, at_end_of(source, "id=\"@oa")),
-            Some(vec![]),
-        );
-    }
-
-    #[test]
-    fn a_mat_slot_key_inside_a_string_offers_nothing() {
-        let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  window id=\"mat_slot=";
-        assert_eq!(
-            completions(source, at_end_of(source, "id=\"mat_slot=")),
-            Some(vec![]),
-        );
-    }
-
-    #[test]
-    fn a_mat_slot_key_inside_a_longer_string_offers_nothing() {
-        let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  window label=\"pick mat_slot=fl";
-        assert_eq!(
-            completions(source, at_end_of(source, "pick mat_slot=fl")),
-            Some(vec![]),
-        );
-    }
-
-    #[test]
-    fn a_cursor_after_a_closing_quote_still_completes() {
-        let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  window id=\"front\" mat_slot=";
-        let items = complete(source, "mat_slot=");
-        assert_eq!(labels(&items), vec!["floor"]);
-    }
-
-    #[test]
-    fn an_unterminated_string_suppresses_only_its_own_line() {
-        let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  door id=\"oops\n  floor mat_slot=";
-        let items = complete(source, "mat_slot=");
-        assert_eq!(labels(&items), vec!["floor"]);
-    }
-
-    #[test]
-    fn hash_inside_a_string_literal_is_not_a_comment() {
-        let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  window id=\"#front\" mat_slot=";
-        let items = complete(source, "mat_slot=");
-        assert_eq!(labels(&items), vec!["floor"]);
-    }
-
-    #[test]
-    fn mat_slot_offers_no_slot_on_a_keyword_that_reads_none() {
-        let theme = "theme a:\n  slot floor -> @oak_planks\n";
-        for (rest, expected) in [
-            (
-                "struct s size=2x2\n  circuit region=floor mat_slot=",
-                vec![],
-            ),
-            (
-                "struct s size=2x2\n  circuit region=floor mat_slot=fl",
-                vec![],
-            ),
-            (
-                "struct s size=2x2\n  window side=front mat_slot=",
-                vec!["floor"],
-            ),
-            (
-                "struct s size=2x2\n  door side=front mat_slot=",
-                vec!["floor"],
-            ),
-            ("theme b:\n  circuit[mat_slot=", vec![]),
-            ("theme b:\n  window[mat_slot=", vec!["floor"]),
-        ] {
-            let source = format!("{theme}{rest}");
-            let items = completions(&source, at_end_of(&source, rest)).expect("in the document");
-            assert_eq!(labels(&items), expected, "{rest:?}");
-        }
-        for keyword in cairn_lang_core::intent::known_keywords() {
-            let rest = format!("struct s size=2x2\n  {keyword} mat_slot=");
-            let source = format!("{theme}{rest}");
-            let items = completions(&source, at_end_of(&source, &rest)).expect("in the document");
-            let unread = role_of(keyword).unread_argument("mat_slot").is_some();
-            assert_eq!(
-                labels(&items).is_empty(),
-                unread,
-                "`{keyword}`: unread = {unread}, offered {:?}",
-                labels(&items),
-            );
-        }
-    }
-
-    #[test]
-    fn slot_target_detail_strips_comments_outside_strings_only() {
-        let source = "theme a:\n  slot floor -> @oak_planks # the default\n\
-                      theme b:\n  slot sign -> \"#1\"\n\
-                      struct s size=2x2\n  floor mat_slot=";
-        let items = complete(source, "mat_slot=");
-        assert_eq!(items[0].detail.as_deref(), Some("-> @oak_planks (theme a)"),);
-        assert_eq!(items[1].detail.as_deref(), Some("-> \"#1\" (theme b)"));
-    }
-
-    /// The same document written the three ways Cairn accepts.
-    fn renderings(lf_source: &str) -> [(&'static str, String); 3] {
-        [
-            ("LF", lf_source.to_owned()),
-            ("CRLF", lf_source.replace('\n', "\r\n")),
-            ("CR", lf_source.replace('\n', "\r")),
-        ]
-    }
-
-    #[test]
-    fn line_endings_do_not_shift_keyword_classification_or_replace_ranges() {
-        // `wal`, not `flo`: `floor` appears above.
-        for (label, source) in
-            renderings("theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  wal")
-        {
-            let items = complete(&source, "wal");
-            assert_eq!(
-                labels(&items),
-                BodyKind::Geometry.allowed_keywords(),
-                "{label}"
-            );
-            assert_eq!(edit_range(&items[0]), range(3, 2, 5), "{label}");
-        }
-    }
-
-    #[test]
-    fn line_endings_do_not_shift_the_slot_scan() {
-        for (label, source) in renderings(
-            "theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  floor mat_slot=",
-        ) {
-            let items = complete(&source, "mat_slot=");
-            assert_eq!(labels(&items), vec!["floor"], "{label}");
-            assert_eq!(
-                items[0].detail.as_deref(),
-                Some("-> @oak_planks (theme a)"),
-                "{label}",
-            );
-        }
-    }
-
-    #[test]
-    fn position_far_past_the_document_is_refused() {
-        let source = "st";
-        for line in [1, 99] {
-            let position = lsp_types::Position { line, character: 0 };
-            assert_eq!(
-                completions(source, position),
-                None,
-                "line {line} does not exist in a one-line document",
-            );
-        }
-    }
-
-    #[test]
-    fn material_token_position_offers_registry_catalog_in_order() {
-        let source = "theme a:\n  slot floor -> @";
-        let items = complete(source, "@");
-        assert_eq!(items[0].label, "floor.wood.broadleaf");
-        assert_eq!(items[0].detail.as_deref(), Some("minecraft:oak_planks"));
-        for item in &items {
-            assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::VALUE));
-        }
-        let sort_texts: Vec<&str> = items
-            .iter()
-            .map(|i| i.sort_text.as_deref().expect("sort_text present"))
-            .collect();
-        let mut sorted = sort_texts.clone();
-        sorted.sort_unstable();
-        assert_eq!(sort_texts, sorted, "items must carry their own order");
-
-        let java = builtin_pack(Edition::Java).materials();
-        let bedrock = builtin_pack(Edition::Bedrock).materials();
-        let expected_abstract: BTreeSet<&str> = java.tokens().chain(bedrock.tokens()).collect();
-        let (canonical, abstract_items): (Vec<_>, Vec<_>) = items
-            .iter()
-            .partition(|i| i.detail.as_deref() == Some("canonical block id"));
-        let abstract_labels: BTreeSet<&str> =
-            abstract_items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(abstract_labels, expected_abstract);
-        let expected_canonical: BTreeSet<&str> = java
-            .tokens()
-            .filter_map(|t| java.lookup_id(t))
-            .chain(bedrock.tokens().filter_map(|t| bedrock.lookup_id(t)))
-            .map(|id| id.strip_prefix("minecraft:").unwrap_or(id))
-            .collect();
-        let canonical_labels: Vec<&str> = canonical.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(
-            canonical_labels.iter().copied().collect::<BTreeSet<_>>(),
-            expected_canonical,
-            "every id either catalog resolves to is offered, Bedrock-only ones included",
-        );
-        assert_eq!(
-            canonical_labels.len(),
-            expected_canonical.len(),
-            "canonical ids are deduplicated across catalog rows",
-        );
-    }
-
-    #[test]
-    fn material_token_partial_prefix_returns_full_set_replacing_after_at() {
-        let source = "theme a:\n  slot floor -> @flo";
-        let items = complete(source, "@flo");
-        let empty_prefix_source = "theme a:\n  slot floor -> @";
-        let full = complete(empty_prefix_source, "@");
-        assert_eq!(items.len(), full.len());
-        let line = "  slot floor -> @flo";
-        let after_at = u32::try_from(line.find('@').expect("at sign") + 1).expect("fits u32");
-        for item in &items {
-            assert_eq!(edit_range(item), range(1, after_at, after_at + 3));
-        }
-    }
-
-    #[test]
-    fn an_edition_guard_completes_its_word_its_edition_and_the_escape_hatches_under_it() {
-        let guard = "struct s size=3x3\n  @";
-        assert_eq!(labels(&complete(guard, "@")), ["edition"]);
-        let edition = "struct s size=3x3\n  @edition ";
-        assert_eq!(labels(&complete(edition, "@edition ")), ["java", "bedrock"]);
-        let under = "struct s size=3x3\n  floor mat_slot=f\n  @edition java\n    ";
-        assert_eq!(
-            labels(&complete(under, "@edition java\n    ")),
-            [
-                "repeater",
-                "comparator",
-                "redstone_torch",
-                "redstone_dust",
-                "raw_block",
-                "raw_fill"
-            ]
-        );
-        let after = "struct s size=3x3\n  @edition java\n    raw_block at=1,0,1\n  ";
-        assert_eq!(
-            labels(&complete(after, "at=1,0,1\n  ")),
-            [
-                "floor",
-                "walls",
-                "fill",
-                "door",
-                "window",
-                "roof",
-                "stair",
-                "level",
-                "pressure_plate",
-                "lever",
-                "button",
-                "daylight",
-                "observer",
-                "lamp",
-                "piston",
-                "dispenser",
-                "chest",
-                "repeater",
-                "comparator",
-                "redstone_torch",
-                "redstone_dust",
-                "circuit",
-                "raw_block",
-                "raw_fill",
-            ],
-        );
-        let in_site = "site town size=9x9\n  @";
-        assert_eq!(labels(&complete(in_site, "@")), ["edition"]);
-    }
-
-    #[test]
-    fn no_guard_is_offered_where_one_is_refused() {
-        let in_theme = "theme t\n  slot f -> @stone\n  @";
-        assert_eq!(complete(in_theme, "\n  @"), vec![]);
-        let in_theme_edition = "theme t\n  @edition ";
-        assert_eq!(complete(in_theme_edition, "@edition "), vec![]);
-        let in_guard = "struct s size=3x3\n  @edition java\n    @";
-        assert_eq!(complete(in_guard, "java\n    @"), vec![]);
-        let in_guard_edition = "struct s size=3x3\n  @edition java\n    @edition ";
-        assert_eq!(complete(in_guard_edition, "    @edition "), vec![]);
-        let under_in_site = "site town size=9x9\n  @edition java\n    ";
-        assert_eq!(complete(under_in_site, "java\n    "), vec![]);
-    }
-
-    #[test]
-    fn closed_set_free_positions_offer_nothing() {
-        let comment = "# @f";
-        assert_eq!(complete(comment, "@f"), vec![]);
-        let free_value = "struct s size=2x2\n  walls height=";
-        assert_eq!(complete(free_value, "height="), vec![]);
-        let header = "@c";
-        assert_eq!(complete(header, "@c"), vec![]);
-    }
-
-    #[test]
-    fn slot_scan_matches_parsed_theme_slots_on_all_examples() {
-        let examples = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples");
-        let mut themed_examples = 0;
-        for entry in std::fs::read_dir(examples).expect("examples directory") {
-            let path = entry.expect("directory entry").path();
-            if path.extension().and_then(|e| e.to_str()) != Some("crn") {
-                continue;
-            }
-            let source = std::fs::read_to_string(&path).expect("readable example");
-            let module = parse(&source).expect("example parses");
-            let expected: BTreeSet<&str> = module
-                .items
-                .iter()
-                .filter_map(|item| match item {
-                    Item::Theme { body, .. } => Some(body),
-                    _ => None,
-                })
-                .flatten()
-                .filter_map(|rule| match rule {
-                    ThemeRule::Slot { slot, .. } => Some(slot.as_str()),
-                    _ => None,
-                })
-                .collect();
-            let scanned: BTreeSet<String> = document_slot_names(&source)
-                .into_iter()
-                .map(|decl| decl.name)
-                .collect();
-            let scanned: BTreeSet<&str> = scanned.iter().map(String::as_str).collect();
-            assert_eq!(scanned, expected, "slot-scan drift in {}", path.display());
-            if !expected.is_empty() {
-                themed_examples += 1;
-            }
-        }
-        assert!(themed_examples > 0, "guard must cover at least one theme");
-    }
-}
+mod tests;

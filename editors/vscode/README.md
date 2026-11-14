@@ -1,6 +1,6 @@
 # Cairn — VS Code extension
 
-Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside VS Code: push diagnostics, closed-vocabulary completion, and TextMate syntax highlighting. The extension is a thin client — all analysis runs in the `cairn-lsp` binary shipped alongside the `cairn` CLI in the Cairn release archive.
+Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside VS Code: diagnostics as you type, against the edition and target you pin, closed-vocabulary completion, hover, quick-fixes, and TextMate syntax highlighting. The extension is a thin client — all analysis runs in the `cairn-lsp` binary shipped alongside the `cairn` CLI in the Cairn release archive.
 
 ## Install
 
@@ -15,10 +15,14 @@ Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside 
 
 ## Settings
 
-| Setting              | Type   | Default | Purpose                                                                                       |
-| -------------------- | ------ | ------- | --------------------------------------------------------------------------------------------- |
-| `cairn.serverPath`   | string | `""`    | Absolute path to `cairn-lsp`. Empty → look up on `PATH`. Reload the window after changing.    |
-| `cairn.trace.server` | enum   | `off`   | Trace LSP messages in the Output panel (`off` / `messages` / `verbose`) for bug reports.      |
+| Setting              | Type   | Default | Purpose                                                                                                                                                |
+| -------------------- | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cairn.serverPath`   | string | `""`    | Absolute path to `cairn-lsp`. Empty → look up on `PATH`. Reload the window after changing.                                                             |
+| `cairn.edition`      | enum   | `""`    | Edition diagnostics are checked for (`java` / `bedrock`), as `cairn check --edition` checks it. Empty → no edition.                                    |
+| `cairn.target`       | string | `""`    | Version of `cairn.edition` diagnostics are checked against, as `cairn compile --target` checks it, `@requires` floors included. Empty → edition alone. |
+| `cairn.trace.server` | enum   | `off`   | Trace LSP messages in the Output panel (`off` / `messages` / `verbose`) for bug reports.                                                               |
+
+A change to `cairn.edition` or `cairn.target` re-checks every open document, with no reload. A setting the server refuses, such as a target the edition does not ship, is shown as an error message. The quick-fix for a target below a file's `@requires` floor (`E_VERSION_CAP`) can set `cairn.target` to the lowest target the floors admit: it writes the setting where `cairn.target` is already set, or else where `cairn.edition` is.
 
 ## Development
 

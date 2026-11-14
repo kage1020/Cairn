@@ -533,6 +533,30 @@ impl VersionFloor {
             |(keyword, name)| format!("`{keyword} {name}`"),
         )
     }
+
+    /// The line that declared the floor, as a quoted keyword: `` `@requires` `` or `` `requires` ``.
+    #[must_use]
+    pub fn keyword(&self) -> &'static str {
+        match self.origin {
+            FloorOrigin::Module => "`@requires`",
+            FloorOrigin::Def(_) | FloorOrigin::Theme(_) => "`requires`",
+        }
+    }
+
+    /// Which part declared the floor and what inherits it, as a sentence; `None` for an
+    /// `@requires` header.
+    #[must_use]
+    pub fn inheritance(&self) -> Option<String> {
+        let inherited_by = match &self.origin {
+            FloorOrigin::Module => return None,
+            FloorOrigin::Def(name) => format!("every `place use={name}` inherits it"),
+            FloorOrigin::Theme(_) => "every scope that binds the theme inherits it".to_owned(),
+        };
+        Some(format!(
+            "{} declares it, and {inherited_by}",
+            self.declarer()
+        ))
+    }
 }
 
 /// The versions in `considered` that are below no floor

@@ -13,7 +13,7 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { runTests } from "@vscode/test-electron";
-import type { ServerEvent } from "./server-event";
+import type { Pin, ServerEvent } from "./server-event";
 
 const EXTENSION_ROOT = resolve(__dirname, "..", "..");
 const FAKE_SERVER = join(__dirname, "fake-cairn-lsp.js");
@@ -22,6 +22,9 @@ const VSCODE_VERSION = "1.143.1";
 const EXIT_TIMEOUT_MS = 10_000;
 const SERVER_LOG = "Cairn Language Server.log";
 const LIFECYCLE = ["initialize", "initialized", "shutdown", "exit"];
+const SET_TARGET = "cairn.setTarget";
+/** The pin the settings carry while neither `cairn.edition` nor `cairn.target` is set. */
+const UNPINNED: Pin = { edition: "", target: "" };
 const POSIX_ONLY = {
   skip:
     process.platform === "win32" &&
@@ -30,13 +33,41 @@ const POSIX_ONLY = {
 
 /**
  * One run of a stand-in `cairn-lsp`: the path the spawn resolved, its
- * arguments, the lifecycle messages it received, and its exit code.
+ * arguments, the lifecycle messages it received, the client commands its
+ * `initialize` declared, the pins the configuration changes carried, and its
+ * exit code.
  */
 interface Launch {
   readonly server: string;
   readonly argv: string[];
   readonly received: string[];
+  commands: string[];
+  readonly pins: Pin[];
   exitCode?: number;
+}
+
+/** A `--version` probe of `server`, which receives no message. */
+function probe(server: string): Launch {
+  return {
+    server,
+    argv: ["--version"],
+    received: [],
+    commands: [],
+    pins: [],
+    exitCode: 0,
+  };
+}
+
+/** A session with `server`, which receives the lifecycle and `pins`. */
+function session(server: string, pins: Pin[]): Launch {
+  return {
+    server,
+    argv: [],
+    received: LIFECYCLE,
+    commands: [SET_TARGET],
+    pins,
+    exitCode: 0,
+  };
 }
 
 /**
@@ -73,14 +104,17 @@ class Fixture {
   }
 
   /**
-   * Runs VS Code with user `settings` and asserts the stand-ins' launches
-   * equal `expected`, reporting the record and the server log if not.
+   * Runs VS Code with user `settings`, running `cairn.setTarget` with
+   * `setTarget` once the extension is active when it is given, and asserts the
+   * stand-ins' launches equal `expected`, reporting the record and the server
+   * log if not.
    */
   async expectLaunches(
     settings: Record<string, unknown>,
     expected: Launch[],
+    setTarget?: string,
   ): Promise<void> {
-    const failure = await this.open(settings).then(
+    const failure = await this.open(settings, setTarget).then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -102,7 +136,10 @@ class Fixture {
    * Runs VS Code on the document with the extension and user `settings`
    * until it exits.
    */
-  private async open(settings: Record<string, unknown>): Promise<void> {
+  private async open(
+    settings: Record<string, unknown>,
+    setTarget: string | undefined,
+  ): Promise<void> {
     mkdirSync(join(this.userData, "User"), { recursive: true });
     const settingsFile = join(this.userData, "User", "settings.json");
     writeFileSync(settingsFile, JSON.stringify(settings));
@@ -121,6 +158,8 @@ class Fixture {
       ],
       extensionTestsEnv: {
         PATH: [dirname(this.pathServer), process.env.PATH].join(delimiter),
+        CAIRN_TEST_RECORD: this.record,
+        CAIRN_TEST_SET_TARGET: setTarget,
       },
     });
   }
@@ -143,10 +182,18 @@ class Fixture {
         const event = JSON.parse(line) as ServerEvent;
         if ("argv" in event) {
           const { server, argv } = event;
-          launches.set(event.id, { server, argv, received: [] });
+          const launch = { server, argv, received: [], commands: [], pins: [] };
+          launches.set(event.id, launch);
           running.add(event.id);
         } else if ("received" in event) {
           launches.get(event.id)?.received.push(event.received);
+        } else if ("commands" in event) {
+          const launch = launches.get(event.id);
+          if (launch) {
+            launch.commands = event.commands;
+          }
+        } else if ("pin" in event) {
+          launches.get(event.id)?.pins.push(event.pin);
         } else if ("exited" in event) {
           const launch = launches.get(event.id);
           if (launch) {
@@ -209,9 +256,9 @@ test(
     const fixture = new Fixture(t);
     const server = fixture.pathServer;
     await fixture.expectLaunches({}, [
-      { server, argv: ["--version"], received: [], exitCode: 0 },
-      { server, argv: ["--version"], received: [], exitCode: 0 },
-      { server, argv: [], received: LIFECYCLE, exitCode: 0 },
+      probe(server),
+      probe(server),
+      session(server, [UNPINNED]),
     ]);
   },
 );
@@ -223,10 +270,34 @@ test(
     const fixture = new Fixture(t);
     const server = fixture.server("configured");
     await fixture.expectLaunches({ "cairn.serverPath": server }, [
-      { server, argv: ["--version"], received: [], exitCode: 0 },
-      { server, argv: ["--version"], received: [], exitCode: 0 },
-      { server, argv: [], received: LIFECYCLE, exitCode: 0 },
+      probe(server),
+      probe(server),
+      session(server, [UNPINNED]),
     ]);
+  },
+);
+
+test(
+  "sends the pin the settings name, and the target cairn.setTarget writes beside the edition",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const pinned = { edition: "java", target: "1.21" };
+    await fixture.expectLaunches(
+      { "cairn.edition": "java", "cairn.target": "1.21" },
+      [
+        probe(server),
+        probe(server),
+        session(server, [pinned, { edition: "java", target: "1.21.4" }]),
+      ],
+      "1.21.4",
+    );
+    const settings = join(fixture.userData, "User", "settings.json");
+    assert.deepEqual(JSON.parse(readFileSync(settings, "utf8")), {
+      "cairn.edition": "java",
+      "cairn.target": "1.21.4",
+    });
   },
 );
 

@@ -1,22 +1,30 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  ConfigurationTarget,
   ExtensionContext,
   OutputChannel,
   Uri,
+  WorkspaceConfiguration,
+  commands,
   env,
   window,
   workspace,
 } from "vscode";
 import {
+  ClientCapabilities,
+  FeatureState,
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
+  StaticFeature,
 } from "vscode-languageclient/node";
 
 const execFileAsync = promisify(execFile);
 const RELEASE_URL = "https://github.com/kage1020/Cairn/releases";
 const PROBE_TIMEOUT_MS = 5_000;
+/** The command a quick-fix runs to pin another target; its argument is the version. */
+const SET_TARGET = "cairn.setTarget";
 
 let client: LanguageClient | undefined;
 
@@ -52,6 +60,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
     serverOptions,
     clientOptions,
   );
+  client.registerFeature(new ClientCommands());
+  context.subscriptions.push(commands.registerCommand(SET_TARGET, setTarget));
 
   try {
     await client.start();
@@ -77,6 +87,62 @@ export async function deactivate(): Promise<void> {
     // VS Code is tearing the extension host down; nothing user-facing is left.
     console.error("cairn-lsp: stop() failed during deactivate:", err);
   }
+}
+
+/**
+ * Declares the commands the extension runs for the server, under
+ * `experimental.commands`, as no standard client capability lists them.
+ */
+class ClientCommands implements StaticFeature {
+  fillClientCapabilities(capabilities: ClientCapabilities): void {
+    const experimental = (capabilities.experimental ?? {}) as Record<
+      string,
+      unknown
+    >;
+    capabilities.experimental = {
+      ...experimental,
+      commands: { commands: [SET_TARGET] },
+    };
+  }
+
+  initialize(): void {}
+
+  getState(): FeatureState {
+    return { kind: "static" };
+  }
+
+  clear(): void {}
+}
+
+/** Writes `version` to `cairn.target`, which the server reads as the new pin. */
+async function setTarget(version: unknown): Promise<void> {
+  if (typeof version !== "string") {
+    void window.showErrorMessage(
+      `${SET_TARGET} takes a version string, not ${JSON.stringify(version)}.`,
+    );
+    return;
+  }
+  const settings = workspace.getConfiguration("cairn");
+  await settings.update("target", version, pinScope(settings));
+}
+
+/**
+ * The scope that sets `cairn.target`, else the one that sets `cairn.edition`,
+ * so the target lands beside the edition it is read with.
+ */
+function pinScope(settings: WorkspaceConfiguration): ConfigurationTarget {
+  for (const key of ["target", "edition"]) {
+    const set = settings.inspect(key);
+    if (set?.workspaceValue !== undefined) {
+      return ConfigurationTarget.Workspace;
+    }
+    if (set?.globalValue !== undefined) {
+      return ConfigurationTarget.Global;
+    }
+  }
+  return workspace.workspaceFolders
+    ? ConfigurationTarget.Workspace
+    : ConfigurationTarget.Global;
 }
 
 async function resolveServerPath(

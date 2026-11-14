@@ -3,40 +3,19 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::process::ExitCode;
 
 use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::check::{LineStarts, weigh_target};
 use cairn_lang_core::resolve::{
     BuildableRefusal, DeclaredFloor, FloorDeclarer, FloorOrigin, FloorPart, FloorPlacement,
-    FloorVerdict, RefusedTarget, TargetRefusal, VersionFloor, VersionOrder,
-    declared_version_floors, unscoped_version_floors, versions_satisfying,
+    FloorVerdict, RefusedTarget, TargetRefusal, VersionFloor, declared_version_floors,
+    unscoped_version_floors,
 };
-use cairn_lang_core::{Edition, Module, Severity};
+use cairn_lang_core::{Diagnostic, Edition, Module, Severity};
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
 use crate::report::render_diagnostics;
 use crate::target::{ResolvedTarget, supported_versions};
-
-fn floor_keyword(floor: &VersionFloor) -> &'static str {
-    match floor.origin {
-        FloorOrigin::Module => "`@requires`",
-        FloorOrigin::Def(_) | FloorOrigin::Theme(_) => "`requires`",
-    }
-}
-
-/// The line naming the `def` or `theme` that imposed a floor, or `None` for an `@requires` header.
-fn floor_origin_note(floor: &VersionFloor) -> Option<String> {
-    let inherited_by = match &floor.origin {
-        FloorOrigin::Module => return None,
-        FloorOrigin::Def(name) => format!("every `place use={name}` inherits it"),
-        FloorOrigin::Theme(_) => "every scope that binds the theme inherits it".to_owned(),
-    };
-    Some(format!(
-        "  {} declares it, and {inherited_by}",
-        floor.declarer(),
-    ))
-}
 
 /// How each supported version of one edition answered.
 #[derive(Debug, Default)]
@@ -216,165 +195,34 @@ fn declared_floors(
         .collect()
 }
 
-/// The `@requires` floors one edition's build is held to, with that edition's version order.
-pub(crate) struct DeclaredFloors {
-    /// Never empty.
-    pub(crate) floors: Vec<VersionFloor>,
-    /// The target edition's `DataVersion` table.
-    pub(crate) order: VersionOrder,
-}
-
-/// Refuse a `--target` the floors the source declares rule out.
-///
-/// # Errors
-///
-/// Exit code 1 when a floor refuses the target or names a version the edition cannot place.
-pub(crate) fn enforce_version_floor(
-    file: &Path,
-    source: &str,
-    declared: &DeclaredFloors,
+/// The finding that refuses `target` for the `@requires` floors `module` holds `edition`'s build
+/// to, or `None` when every floor admits it.
+pub(crate) fn floor_refusal(
+    module: &Module,
     edition: Edition,
     target: &ResolvedTarget,
-) -> Result<(), ExitCode> {
-    let DeclaredFloors { floors, order } = declared;
-    let floor = match floor_refusing_target(floors, order, target) {
-        None => return Ok(()),
-        Some(FloorRefusal::Unplaceable(floor)) => {
-            report_unplaceable_floor(file, source, floor, edition, order);
-            return Err(ExitCode::from(1));
-        }
-        Some(FloorRefusal::Below(floor)) => floor,
-    };
-    let position = LineStarts::new(source).position(source, floor.span.start);
-    eprintln!(
-        "error[E_VERSION_CAP]: {}:{}: {} requires {} (target {}).",
-        file.display(),
-        position,
-        floor.declarer(),
-        floor.rendered(),
+) -> Option<Diagnostic> {
+    weigh_target(
+        &declared_version_floors(module, edition),
+        edition,
         target.mc_version(),
-    );
-    if let Some(note) = floor_origin_note(floor) {
-        eprintln!("{note}");
-    }
-    // `spec/versioning-editions` "Fail-loud and minimum-version inference": name the valid targets.
-    let buildable = supported_versions(builtin_pack(edition));
-    let usable = versions_satisfying(order, floors, &buildable);
-    if usable.is_empty() {
-        eprintln!(
-            "  no supported {} target satisfies it: {}",
-            edition.as_str(),
-            builtin_pack(edition).supported_list(),
-        );
-        eprintln!(
-            "  fix: lower the {} floor, or build against another edition",
-            floor_keyword(floor),
-        );
-    } else {
-        eprintln!(
-            "  valid {} targets: {}",
-            edition.as_str(),
-            usable.join(", ")
-        );
-        eprintln!(
-            "  fix: --target {}, or lower the {} floor",
-            usable[0],
-            floor_keyword(floor),
-        );
-    }
-    Err(ExitCode::from(1))
+        &supported_versions(builtin_pack(edition)),
+        &|edition| builtin_pack(edition).version_order(),
+    )
 }
 
-/// The floor that refuses a target, and on which ground.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum FloorRefusal<'a> {
-    /// The edition's version table cannot place this floor.
-    Unplaceable(&'a VersionFloor),
-    /// The target sits below this floor.
-    Below(&'a VersionFloor),
-}
-
-/// The floor that refuses `target`, or `None`; an unplaceable floor is named first, since raising
-/// `--target` cannot satisfy it.
-pub(crate) fn floor_refusing_target<'a>(
-    floors: &'a [VersionFloor],
-    order: &VersionOrder,
-    target: &ResolvedTarget,
-) -> Option<FloorRefusal<'a>> {
-    if let Some(floor) = floors
-        .iter()
-        .find(|floor| order.place(&floor.version) == FloorPlacement::Unplaceable)
-    {
-        return Some(FloorRefusal::Unplaceable(floor));
-    }
-    let target_key = target.order_key();
-    floors
-        .iter()
-        .find(|floor| order.verdict(&floor.version, target_key) == FloorVerdict::Below)
-        .map(FloorRefusal::Below)
-}
-
-/// Report a floor the target edition's table cannot place, as `E_REQUIRES_UNORDERABLE`.
-fn report_unplaceable_floor(
-    file: &Path,
-    source: &str,
-    floor: &VersionFloor,
-    edition: Edition,
-    order: &VersionOrder,
-) {
-    let position = LineStarts::new(source).position(source, floor.span.start);
+/// Report a floor's refusal of `--target` on stderr, the way a run-level refusal reads.
+pub(crate) fn report_floor_refusal(file: &Path, source: &str, refusal: &Diagnostic) {
     eprintln!(
-        "error[E_REQUIRES_UNORDERABLE]: {}:{}: {} requires {}, which names no {} release.",
+        "{}[{}]: {}:{}: {}.",
+        refusal.severity().as_str(),
+        refusal.code.as_str(),
         file.display(),
-        position,
-        floor.declarer(),
-        floor.rendered(),
-        edition.as_str(),
+        LineStarts::new(source).position(source, refusal.span.start),
+        refusal.primary,
     );
-    if let Some(note) = floor_origin_note(floor) {
-        eprintln!("{note}");
-    }
-    match order.neighbours(&floor.version) {
-        (Some(below), Some(above)) => eprintln!(
-            "  {edition_name} ships {below} and then {above}, and nothing between them; \
-             Cairn orders versions by DataVersion and a label that names no release has none",
-            edition_name = edition.as_str(),
-        ),
-        _ => eprintln!(
-            "  {} releases: {}",
-            edition.as_str(),
-            order
-                .rows()
-                .map(|(label, _)| label)
-                .collect::<Vec<_>>()
-                .join(", "),
-        ),
-    }
-    // Offer an edition scope only where the other edition names the label; elsewhere the floor
-    // would go inert.
-    let other = match edition {
-        Edition::Java => Edition::Bedrock,
-        Edition::Bedrock => Edition::Java,
-    };
-    let other_edition_names_it = floor.edition.is_none()
-        && builtin_pack(other)
-            .version_order()
-            .place(&floor.version)
-            .names_release();
-    if other_edition_names_it {
-        eprintln!(
-            "  `{}` is a {} release; if that is the numbering this floor is written in, say so",
-            floor.version,
-            other.as_str(),
-        );
-        eprintln!(
-            "  fix: `@requires {} version>={}`, or name a {} release",
-            other.as_str(),
-            floor.version,
-            edition.as_str(),
-        );
-    } else {
-        eprintln!("  fix: name a {} release", edition.as_str());
+    for note in &refusal.notes {
+        eprintln!("  {}", note.message);
     }
 }
 
@@ -439,8 +287,8 @@ pub(crate) fn report_version_notes(
             edition.as_str(),
             edition.as_str(),
         );
-        if let Some(note) = floor_origin_note(floor) {
-            eprintln!("{note}");
+        if let Some(note) = floor.inheritance() {
+            eprintln!("  {note}");
         }
         eprintln!(
             "  note: {} builds against {}",
