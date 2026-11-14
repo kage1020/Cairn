@@ -1,12 +1,14 @@
 //! Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers for the block-array
 //! IR, a reader of each, the import that writes what a reader read as raw members, and the
-//! registry packs and portability reports they rely on, with the `cairn info` report built from
-//! them.
+//! registry packs and portability reports they rely on, with the lowering a build shares and the
+//! `cairn info` and `cairn diff-blocks` reports built from them.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
 mod block_id;
+pub mod build;
 pub mod data_version;
+pub mod diff_blocks;
 mod dims;
 pub mod import;
 pub mod info;

@@ -283,3 +283,48 @@ test(
     );
   },
 );
+
+test(
+  "Cairn: Diff Blocks opens what cairn.diffBlocks answers for the document and a structure file",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const shown = join(fixture.root, "shown.json");
+    const structure = join(fixture.root, "main.nbt");
+    writeFileSync(structure, "");
+    await fixture.expectLaunches(
+      {},
+      [
+        { server, argv: ["--version"], received: [], exitCode: 0 },
+        { server, argv: ["--version"], received: [], exitCode: 0 },
+        {
+          server,
+          argv: [],
+          received: [
+            "initialize",
+            "initialized",
+            "workspace/executeCommand",
+            "shutdown",
+            "exit",
+          ],
+          exitCode: 0,
+        },
+      ],
+      { CAIRN_TEST_DIFF_BLOCKS: shown, CAIRN_TEST_STRUCTURE: structure },
+    );
+    const request = {
+      command: "cairn.diffBlocks",
+      arguments: [
+        {
+          uri: pathToFileURL(fixture.document).href,
+          structure: pathToFileURL(structure).href,
+        },
+      ],
+    };
+    assert.equal(
+      readFileSync(shown, "utf8"),
+      `${JSON.stringify(request, null, 2)}\n`,
+    );
+  },
+);

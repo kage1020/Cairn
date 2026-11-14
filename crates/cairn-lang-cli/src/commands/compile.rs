@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::build::Build;
 use cairn_lang_formats::info::{Reporter, default_lock_path, report_conflicts};
 
 use crate::artifacts::{
@@ -16,7 +17,7 @@ use crate::cli::StructureFormat;
 use crate::floors::enforce_version_floor;
 use crate::lockfile::report_previous_target;
 use crate::name_case::NameCase;
-use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
+use crate::pipeline::{built_scopes, load_and_lower, report_partial_build};
 use crate::report::{Stderr, report_diagnostics};
 use crate::target::{ResolvedTarget, resolve_target};
 
@@ -40,14 +41,16 @@ pub(crate) fn run_compile(
     // Resolved before lowering, which checks ids against it, but reported after the source's
     // own findings.
     let resolved_target = resolve_target(edition, target);
-    let Lowered {
+    let (
         source,
-        block_ir,
-        circuits,
-        dropped_scopes,
-        version_floors,
-        conflicts,
-    } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
+        Build {
+            block_ir,
+            circuits,
+            dropped_scopes,
+            version_floors,
+            conflicts,
+        },
+    ) = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
@@ -87,7 +90,8 @@ pub(crate) fn run_compile(
         }
     };
     if let Some(floors) = &version_floors
-        && let Err(code) = enforce_version_floor(file, &source, floors, edition, &target)
+        && let Err(code) =
+            enforce_version_floor(file, &source, floors, edition, target.build_target())
     {
         return code;
     }

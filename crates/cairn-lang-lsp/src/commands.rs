@@ -1,8 +1,12 @@
 //! The `workspace/executeCommand` commands, run over the documents the editor holds open.
 
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 
 use cairn_lang_core::Edition;
+use cairn_lang_formats::diff_blocks::diff_blocks;
+use cairn_lang_formats::import::{DecodedStructure, ImportFormat, decode_structure};
 use cairn_lang_formats::info::{
     FailureDocument, Found, InfoRequest, InfoSink, default_lock_path, info, requested_editions,
 };
@@ -14,8 +18,12 @@ use crate::store::DocumentStore;
 /// (`spec/versioning-editions` "The report in an editor").
 pub const INFO: &str = "cairn.info";
 
+/// The command answering with the document `cairn diff-blocks --format json` prints for an open
+/// source and a structure file (`spec/ecosystem-interop` "The report in an editor").
+pub const DIFF_BLOCKS: &str = "cairn.diffBlocks";
+
 /// Every command the server runs, as `initialize` advertises them.
-pub const COMMANDS: [&str; 1] = [INFO];
+pub const COMMANDS: [&str; 2] = [INFO, DIFF_BLOCKS];
 
 /// Why a command did not run: the JSON-RPC error its response carries.
 #[derive(Debug, PartialEq, Eq)]
@@ -45,6 +53,15 @@ struct InfoArguments {
     editions: Vec<String>,
 }
 
+/// `cairn.diffBlocks`' one argument.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiffBlocksArguments {
+    uri: lsp_types::Uri,
+    /// The structure file's `file:` URI.
+    structure: lsp_types::Uri,
+}
+
 /// `--editions`' default.
 fn every_edition() -> Vec<String> {
     [Edition::Java, Edition::Bedrock]
@@ -70,6 +87,7 @@ pub fn execute_command(
         })?;
     match params.command.as_str() {
         INFO => run_info(store, params.arguments),
+        DIFF_BLOCKS => run_diff_blocks(store, params.arguments),
         other => Err(CommandRefused::invalid_params(format!(
             "unknown command `{other}`; this server runs {}",
             COMMANDS.map(|command| format!("`{command}`")).join(", "),
@@ -113,10 +131,69 @@ fn run_info(
         Ok(document) => serde_json::to_value(document),
         Err(refused) => serde_json::to_value(FailureDocument::new(source, &refused)),
     };
-    document.map_err(|err| CommandRefused {
+    document.map_err(|err| unserialisable(INFO, &err))
+}
+
+/// `cairn.diffBlocks` over the open document and the structure file its argument names.
+fn run_diff_blocks(
+    store: &DocumentStore,
+    arguments: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, CommandRefused> {
+    let usage = "takes one argument, `{ \"uri\": <document>, \"structure\": <file> }`";
+    let [argument] = <[serde_json::Value; 1]>::try_from(arguments).map_err(|arguments| {
+        CommandRefused::invalid_params(format!(
+            "`{DIFF_BLOCKS}` {usage}, and got {}",
+            arguments.len()
+        ))
+    })?;
+    let DiffBlocksArguments { uri, structure } = serde_json::from_value(argument)
+        .map_err(|err| CommandRefused::invalid_params(format!("`{DIFF_BLOCKS}` {usage}: {err}")))?;
+    let source = store.get(&uri).ok_or_else(|| {
+        CommandRefused::invalid_params(format!("document not open: {}", uri.as_str()))
+    })?;
+    let path = file_path(&structure).ok_or_else(|| {
+        CommandRefused::invalid_params(format!(
+            "`{DIFF_BLOCKS}` reads the structure file from disk, so `structure` needs a local \
+             `file:` URI, and got {}",
+            structure.as_str(),
+        ))
+    })?;
+    let decoded = read_structure(&path).map_err(|message| {
+        CommandRefused::invalid_params(format!("`{DIFF_BLOCKS}` `structure`: {message}"))
+    })?;
+    let run = diff_blocks(source, &decoded);
+    let document = match &run.outcome {
+        Ok(document) => serde_json::to_value(document),
+        Err(_) => serde_json::to_value(run.failure_document(source)),
+    };
+    document.map_err(|err| unserialisable(DIFF_BLOCKS, &err))
+}
+
+/// The structure file at `path`, decoded as its extension names, or why it cannot be.
+fn read_structure(path: &Path) -> Result<DecodedStructure, String> {
+    let Some(format) = ImportFormat::from_path(path) else {
+        return Err(format!(
+            "`{}` is not a structure file `cairn diff-blocks` reads; name a {} file",
+            path.display(),
+            ImportFormat::choices(),
+        ));
+    };
+    let reader = File::open(path)
+        .map(BufReader::new)
+        .map_err(|err| format!("cannot read `{}`: {err}", path.display()))?;
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    decode_structure(reader, format, &name)
+        .map_err(|err| format!("cannot compare `{}`: {err}", path.display()))
+}
+
+/// The error answering a document `command` could not serialise.
+fn unserialisable(command: &str, err: &serde_json::Error) -> CommandRefused {
+    CommandRefused {
         code: ErrorCode::InternalError as i32,
-        message: format!("failed to serialise the `{INFO}` document: {err}"),
-    })
+        message: format!("failed to serialise the `{command}` document: {err}"),
+    }
 }
 
 /// What `cairn info` writes on stderr, which a response has no place for.

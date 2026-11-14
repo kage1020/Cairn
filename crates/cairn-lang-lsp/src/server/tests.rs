@@ -522,37 +522,51 @@ fn capabilities_advertise_the_commands_the_server_runs() {
     let capabilities = serde_json::to_value(server_capabilities()).expect("serialise");
     assert_eq!(
         capabilities["executeCommandProvider"],
-        serde_json::json!({ "commands": ["cairn.info"] }),
+        serde_json::json!({ "commands": ["cairn.info", "cairn.diffBlocks"] }),
     );
 }
 
 #[test]
-fn execute_command_runs_cairn_info_on_the_open_document() {
+fn execute_command_runs_each_command_on_the_open_document() {
     let session = Session::start();
     session.did_open(CLEAN, 1);
-    let execute = |id: i64, command: &str| {
+    let execute = |id: i64, command: &str, argument: serde_json::Value| {
         session.send(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": "workspace/executeCommand",
-            "params": { "command": command, "arguments": [{ "uri": TEST_URI }] },
+            "params": { "command": command, "arguments": [argument] },
         }));
         session.read_response(id)
     };
+    let open = serde_json::json!({ "uri": TEST_URI });
     let lock = if cfg!(windows) {
         r"\test.crn.lock"
     } else {
         "/test.crn.lock"
     };
     assert_eq!(
-        execute(40, "cairn.info")["result"]["verified_target"],
+        execute(40, "cairn.info", open.clone())["result"]["verified_target"],
         serde_json::json!({ "path": lock, "status": "missing" }),
     );
     assert_eq!(
-        execute(41, "cairn.diffBlocks")["error"],
+        execute(
+            41,
+            "cairn.diffBlocks",
+            serde_json::json!({ "uri": TEST_URI, "structure": "untitled:Untitled-1" }),
+        )["error"],
         serde_json::json!({
             "code": -32602,
-            "message": "unknown command `cairn.diffBlocks`; this server runs `cairn.info`",
+            "message": "`cairn.diffBlocks` reads the structure file from disk, so `structure` \
+                        needs a local `file:` URI, and got untitled:Untitled-1",
+        }),
+    );
+    assert_eq!(
+        execute(42, "cairn.lower", open)["error"],
+        serde_json::json!({
+            "code": -32602,
+            "message": "unknown command `cairn.lower`; this server runs `cairn.info`, \
+                        `cairn.diffBlocks`",
         }),
     );
     session.shutdown();

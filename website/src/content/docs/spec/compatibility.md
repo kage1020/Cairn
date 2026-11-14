@@ -60,9 +60,10 @@ Evolving surfaces:
   list), and the syntax a section flags [subject to change](#subject-to-change).
 - New `cairn` subcommands, new flags and flag values of `cairn compile`, `cairn check` and
   `cairn info`, and new language server commands such as `cairn.info`
-  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)), during their first three monthly
-  minors after introduction. What `cairn.info` returns is `cairn info`'s JSON document, at that
-  document's tier.
+  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)) and `cairn.diffBlocks`
+  ([§12.2.5](/spec/ecosystem-interop/#1225-the-report-in-an-editor)), during their first three
+  monthly minors after introduction. What such a command returns is the JSON document of the
+  subcommand it runs, at that document's tier.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.

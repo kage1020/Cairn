@@ -5,21 +5,10 @@ use std::process::ExitCode;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::LineStarts;
-use cairn_lang_core::resolve::{
-    FloorPlacement, FloorVerdict, VersionFloor, VersionOrder, versions_satisfying,
-};
+use cairn_lang_core::resolve::{VersionFloor, VersionOrder, versions_satisfying};
+use cairn_lang_formats::build::{BuildTarget, DeclaredFloors, FloorRefusal};
 use cairn_lang_formats::info::{floor_keyword, floor_origin_note, supported_versions};
 use cairn_lang_formats::registry::builtin_pack;
-
-use crate::target::ResolvedTarget;
-
-/// The `@requires` floors one edition's build is held to, with that edition's version order.
-pub(crate) struct DeclaredFloors {
-    /// Never empty.
-    pub(crate) floors: Vec<VersionFloor>,
-    /// The target edition's `DataVersion` table.
-    pub(crate) order: VersionOrder,
-}
 
 /// Refuse a `--target` the floors the source declares rule out.
 ///
@@ -31,10 +20,10 @@ pub(crate) fn enforce_version_floor(
     source: &str,
     declared: &DeclaredFloors,
     edition: Edition,
-    target: &ResolvedTarget,
+    target: BuildTarget<'_>,
 ) -> Result<(), ExitCode> {
     let DeclaredFloors { floors, order } = declared;
-    let floor = match floor_refusing_target(floors, order, target) {
+    let floor = match declared.refusing(target.order_key) {
         None => return Ok(()),
         Some(FloorRefusal::Unplaceable(floor)) => {
             report_unplaceable_floor(file, source, floor, edition, order);
@@ -49,7 +38,7 @@ pub(crate) fn enforce_version_floor(
         position,
         floor.declarer(),
         floor.rendered(),
-        target.mc_version(),
+        target.mc_version,
     );
     if let Some(note) = floor_origin_note(floor) {
         eprintln!("{note}");
@@ -80,35 +69,6 @@ pub(crate) fn enforce_version_floor(
         );
     }
     Err(ExitCode::from(1))
-}
-
-/// The floor that refuses a target, and on which ground.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum FloorRefusal<'a> {
-    /// The edition's version table cannot place this floor.
-    Unplaceable(&'a VersionFloor),
-    /// The target sits below this floor.
-    Below(&'a VersionFloor),
-}
-
-/// The floor that refuses `target`, or `None`; an unplaceable floor is named first, since raising
-/// `--target` cannot satisfy it.
-pub(crate) fn floor_refusing_target<'a>(
-    floors: &'a [VersionFloor],
-    order: &VersionOrder,
-    target: &ResolvedTarget,
-) -> Option<FloorRefusal<'a>> {
-    if let Some(floor) = floors
-        .iter()
-        .find(|floor| order.place(&floor.version) == FloorPlacement::Unplaceable)
-    {
-        return Some(FloorRefusal::Unplaceable(floor));
-    }
-    let target_key = target.order_key();
-    floors
-        .iter()
-        .find(|floor| order.verdict(&floor.version, target_key) == FloorVerdict::Below)
-        .map(FloorRefusal::Below)
 }
 
 /// Report a floor the target edition's table cannot place, as `E_REQUIRES_UNORDERABLE`.

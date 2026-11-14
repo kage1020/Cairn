@@ -24,6 +24,9 @@ const PROBE_TIMEOUT_MS = 5_000;
 // Not `cairn.info`: the client registers that one itself, from the server's capabilities.
 const SHOW_INFO = "cairn.showInfo";
 const INFO = "cairn.info";
+const SHOW_DIFF_BLOCKS = "cairn.showDiffBlocks";
+const DIFF_BLOCKS = "cairn.diffBlocks";
+const STRUCTURE_EXTENSIONS = ["nbt", "litematic", "schem", "mcstructure"];
 
 let client: LanguageClient | undefined;
 
@@ -32,6 +35,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
   context.subscriptions.push(output);
   // Before the server is found, so the command can say it is missing.
   context.subscriptions.push(commands.registerCommand(SHOW_INFO, showInfo));
+  context.subscriptions.push(
+    commands.registerCommand(SHOW_DIFF_BLOCKS, showDiffBlocks),
+  );
 
   const serverPath = await resolveServerPath(output);
   if (!serverPath) {
@@ -93,38 +99,104 @@ export async function deactivate(): Promise<void> {
  * and returns the opened document.
  */
 async function showInfo(): Promise<TextDocument | undefined> {
+  const source = activeSource(
+    "Cairn: Show Info",
+    "reads the lockfile beside the source",
+  );
+  if (!source) {
+    return undefined;
+  }
+  return showReport(source.client, INFO, { uri: source.uri });
+}
+
+/**
+ * Opens what `cairn.diffBlocks` answers for the active `.crn` editor and a
+ * structure file beside it, and returns the opened document. The structure
+ * file is `structure` when a caller passes one, else the file the user picks.
+ */
+async function showDiffBlocks(
+  structure?: Uri,
+): Promise<TextDocument | undefined> {
+  const source = activeSource(
+    "Cairn: Diff Blocks",
+    "needs the document's text in cairn-lsp, which the extension sends only for a file",
+  );
+  if (!source) {
+    return undefined;
+  }
+  const picked =
+    structure ??
+    (
+      await window.showOpenDialog({
+        canSelectMany: false,
+        openLabel: "Diff Blocks",
+        title: "The structure file to compare the active .crn file with",
+        filters: { "Structure files": STRUCTURE_EXTENSIONS },
+      })
+    )?.[0];
+  if (!picked) {
+    return undefined;
+  }
+  return showReport(source.client, DIFF_BLOCKS, {
+    uri: source.uri,
+    structure: source.client.code2ProtocolConverter.asUri(picked),
+  });
+}
+
+/**
+ * The active `.crn` file's URI and the running client `title` asks, or
+ * `undefined` after saying why there is none. `whyFile` says why the
+ * document must be a saved file.
+ */
+function activeSource(
+  title: string,
+  whyFile: string,
+): { client: LanguageClient; uri: string } | undefined {
   const editor = window.activeTextEditor;
   if (editor?.document.languageId !== "cairn") {
     void window.showErrorMessage(
-      "Cairn: Show Info reports on the active editor, which is not a .crn file. Open one first.",
+      `${title} reports on the active editor, which is not a .crn file. Open one first.`,
     );
     return undefined;
   }
   if (editor.document.uri.scheme !== "file") {
     void window.showErrorMessage(
-      "Cairn: Show Info reads the lockfile beside the source. Save the document to a file first.",
+      `${title} ${whyFile}. Save the document to a file first.`,
     );
     return undefined;
   }
   const current = client;
   if (!current?.isRunning()) {
     void window.showErrorMessage(
-      "Cairn: Show Info needs cairn-lsp, which is not running. " +
+      `${title} needs cairn-lsp, which is not running. ` +
         "See the Output panel (Cairn Language Server) for why.",
     );
     return undefined;
   }
+  return {
+    client: current,
+    uri: current.code2ProtocolConverter.asUri(editor.document.uri),
+  };
+}
+
+/**
+ * Runs `command` on `cairn-lsp` with `argument` and opens its answer beside
+ * the editor as JSON, returning the opened document.
+ */
+async function showReport(
+  current: LanguageClient,
+  command: string,
+  argument: object,
+): Promise<TextDocument | undefined> {
   let report: unknown;
   try {
     report = await current.sendRequest(ExecuteCommandRequest.type, {
-      command: INFO,
-      arguments: [
-        { uri: current.code2ProtocolConverter.asUri(editor.document.uri) },
-      ],
+      command,
+      arguments: [argument],
     });
   } catch (err) {
     void window.showErrorMessage(
-      `cairn-lsp did not run ${INFO}: ${describeError(err)}`,
+      `cairn-lsp did not run ${command}: ${describeError(err)}`,
     );
     return undefined;
   }

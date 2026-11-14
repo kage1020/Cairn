@@ -5,6 +5,7 @@ use std::fmt;
 
 use cairn_lang_core::Edition;
 
+use crate::build::BuildTarget;
 use crate::registry::{DataVersionEntry, builtin_pack};
 
 /// How the stamped target stands to the version a file was saved at.
@@ -53,6 +54,24 @@ impl ImportStamp {
             (Edition::Bedrock, Some(version)) => {
                 format!("block version {}", BlockVersion(version))
             }
+        }
+    }
+
+    /// The target a source is built at to compare it with the file.
+    ///
+    /// # Panics
+    ///
+    /// When [`Self::mc_version`] is no row of its edition's version table, which no import
+    /// stamps.
+    #[must_use]
+    pub fn build_target(&self) -> BuildTarget<'_> {
+        let order_key = builtin_pack(self.edition)
+            .version_order()
+            .key_of(&self.mc_version)
+            .expect("an import stamps a row of its edition's version table");
+        BuildTarget {
+            mc_version: &self.mc_version,
+            order_key,
         }
     }
 

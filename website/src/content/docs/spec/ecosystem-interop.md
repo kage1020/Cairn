@@ -265,9 +265,10 @@ FILE reaches with all of them appended. When no candidate helps, there is no pat
 ### 12.2.4 The report
 
 FILE is built first, and its findings print on stderr as `cairn compile` prints them. An error, a
-scope the build drops ([Lint §11.1](/spec/lint/#lowering)), or a `@requires` floor the stamp falls
-short of ([Versioning and Editions](/spec/versioning-editions/)) refuses the comparison. The floor's
-refusal ends with a note naming the stamp, since the command takes no `--target`.
+`@requires` floor no target declaring the blocks the build paints clears (`E_REQUIRES_CONFLICT`), a
+scope the build drops ([Lint §11.1](/spec/lint/#lowering)), or a floor the stamp falls short of
+([Versioning and Editions](/spec/versioning-editions/)) refuses the comparison, in that order. The
+last refusal ends with a note naming the stamp, since the command takes no `--target`.
 
 The text report prints on stdout:
 
@@ -303,13 +304,32 @@ the raw members build.
 | `patch` | Present when lines are kept: `edits` in order, the metrics reached, and their `counts`. |
 
 Where FILE does not build at the stamp, the document is `{"diagnostics": [ ... ]}` with the
-findings, as `cairn lower` writes it, and a refusal at the run level, a dropped scope or a floor,
-writes `{"diagnostics": []}` and says the rest on stderr.
+findings, as `cairn lower` writes it, and a refusal at the run level, a conflicting floor, a dropped
+scope or a floor the stamp falls short of, writes `{"diagnostics": []}` and says the rest on stderr.
 
 The exit code is 0 when the lift converges; 1 when it does not, when FILE does not parse, raises an
 error, drops a scope or needs a later target than the stamp, or when STRUCTURE cannot be read as its
 format or was saved past every shipped target; and 2 when either file cannot be located or
 STRUCTURE's extension names no format the command reads.
+
+### 12.2.5 The report in an editor
+
+The language server gives the same answer for a document the editor has open, as the
+`workspace/executeCommand` command `cairn.diffBlocks`. Its one argument is an object: `uri`, the
+open document, and `structure`, the `file:` URI of the structure file. The result is the document
+`cairn diff-blocks --format json` prints for the two ([§12.2.4](#1224-the-report)): the report, or
+the `{"diagnostics": [ ... ]}` document where the source does not build at the stamp, empty for a
+refusal at the run level. Two inputs come from the editor rather than a command line:
+
+- The source is the text the editor holds, saved or not, so a lift is compared as it is edited, and
+  `uri` need not name a file.
+- The structure file is read from disk, as `cairn diff-blocks` reads STRUCTURE.
+
+What `cairn diff-blocks` writes on stderr is not sent: the findings it carries on past, why a run is
+refused, and `E_DECOMPILE_DIFF`, which the document carries as `code`. An argument the command
+cannot read, a document the editor does not have open, a `structure` that names no local file, or a
+file the command cannot read as a structure file is answered with an `InvalidParams` error that says
+which.
 
 ## 12.3 Three tiers of transliteration
 

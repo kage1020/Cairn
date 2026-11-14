@@ -37,7 +37,7 @@ Stable な面:
 Evolving な面:
 
 - ドラフトと明記された仕様の章や節 ([未決事項](/ja/spec/open-issues/))。また、節が[変更の余地あり](#変更の余地あり)と示した構文。
-- 新しく追加された `cairn` サブコマンド、`cairn compile`、`cairn check`、`cairn info` に新しく追加されたフラグとフラグの値、`cairn.info` のような言語サーバーの新しいコマンド ([§10.5](/ja/spec/versioning-editions/#エディタでのレポート)) の、最初の 3 か月分の月次マイナーリリース。`cairn.info` が返すのは `cairn info` の JSON 文書で、その文書のティアに従います。
+- 新しく追加された `cairn` サブコマンド、`cairn compile`、`cairn check`、`cairn info` に新しく追加されたフラグとフラグの値、`cairn.info` ([§10.5](/ja/spec/versioning-editions/#エディタでのレポート)) や `cairn.diffBlocks` ([§12.2.5](/ja/spec/ecosystem-interop/#1225-エディタでのレポート)) のような言語サーバーの新しいコマンドの、最初の 3 か月分の月次マイナーリリース。そうしたコマンドが返すのは、それが実行するサブコマンドの JSON 文書で、その文書のティアに従います。
 - レジストリパックと制約カタログのファイル構成 (それらの *ハッシュ* は Stable なロックの意味に含まれますが、*内部構造* は Evolving です)。制約カタログはまだ同梱しておらず、ロックにはそのハッシュとしてゼロを記録します。
 - tier-2 のブロック。各 tier-1 のトークンが、ターゲットごとに解決するブロックです ([§7.2](/ja/spec/materials-themes/#tier-1-のトークン))。
 - 正規ブロックトークン。ターゲットが受け付ける名前 (そのレジストリパックに従います) と、それぞれがそのターゲットで指すブロックです ([§7.3](/ja/spec/materials-themes/#73-バージョンとエディションをまたぐ対応付け))。

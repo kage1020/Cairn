@@ -3,20 +3,20 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::block_array::{BlockArrayIr, findings_without_target, lower_to_block_array};
+use cairn_lang_core::block_array::{findings_without_target, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::IntentModule;
-use cairn_lang_core::resolve::{declared_version_floors, resolve};
-use cairn_lang_core::{Diagnostic, Edition, diagnose_parse_failure, lower, parse};
-use cairn_lang_formats::info::{Conflict, kept_findings, requires_conflicts, supported_versions};
+use cairn_lang_core::resolve::resolve;
+use cairn_lang_core::{Diagnostic, Edition, diagnose_parse_failure, parse};
+use cairn_lang_formats::build::{Build, lower_for_build};
+use cairn_lang_formats::info::kept_findings;
 pub(crate) use cairn_lang_formats::info::{
     build_diagnostics, built_scopes, dropped_scopes, lay_circuits,
 };
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
-use crate::floors::{DeclaredFloors, floor_refusing_target};
 use crate::report::{FailureReport, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target};
 
@@ -137,20 +137,7 @@ pub(crate) fn check_circuits(
     kept_findings(&runs, |run, finding| finding.touches(&guarded[run]))
 }
 
-/// A `.crn` read, parsed, resolved and lowered, plus what the lowering failed to produce.
-pub(crate) struct Lowered {
-    pub(crate) source: String,
-    pub(crate) block_ir: BlockArrayIr,
-    /// The findings of laying each struct's circuit, none when the lowering held an error.
-    pub(crate) circuits: Vec<CircuitDiagnostic>,
-    pub(crate) dropped_scopes: Vec<String>,
-    /// The `@requires` floors this edition's build is held to, if the source declares any.
-    pub(crate) version_floors: Option<DeclaredFloors>,
-    /// The floors no version declaring every id the build paints clears, whatever the target.
-    pub(crate) conflicts: Vec<Conflict>,
-}
-
-/// Read, parse, resolve and lower `file` for `edition`'s build.
+/// Read, parse, resolve and lower `file` for `edition`'s build, with its source.
 ///
 /// Ids are checked against `target` unless it is `None` or the source's floors refuse it: the
 /// floor refusal then explains the failed build, not an `E_UNKNOWN_ID`.
@@ -158,72 +145,17 @@ pub(crate) fn load_and_lower(
     file: &Path,
     edition: Edition,
     target: Option<&ResolvedTarget>,
-) -> Result<Lowered, ExitCode> {
+) -> Result<(String, Build), ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
-    Ok(lower_parsed(source, &module, edition, target).1)
-}
-
-/// `module`, parsed from `source`, resolved and lowered for `edition`'s build as
-/// [`load_and_lower`] lowers a file, with its Intent IR.
-pub(crate) fn lower_parsed(
-    source: String,
-    module: &cairn_lang_core::ast::Module,
-    edition: Edition,
-    target: Option<&ResolvedTarget>,
-) -> (IntentModule, Lowered) {
-    let floors = declared_version_floors(module, edition);
-    let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
-        floors,
-        order: builtin_pack(edition).version_order(),
-    });
-    let mc_version = target
-        .filter(|target| {
-            version_floors.as_ref().is_none_or(|declared| {
-                floor_refusing_target(&declared.floors, &declared.order, target).is_none()
-            })
-        })
-        .map(ResolvedTarget::mc_version);
-    let ir = lower(module);
-    let resolution = resolve(&ir, Some(edition));
-    let registry = builtin_pack(edition).view(mc_version);
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
-    // `check`'s gate, so `compile` never certifies a source `check` rejects.
-    block_ir.diagnostics = build_diagnostics(
-        module,
-        &ir,
-        Some(edition),
-        &weighed_editions(Some(edition)),
-        std::mem::take(&mut block_ir.diagnostics),
-    );
-    let dropped_scopes = dropped_scopes(&resolution, &block_ir);
-    let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
-    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
-        let pack = builtin_pack(edition);
-        requires_conflicts(
-            &ir,
-            &resolution,
-            pack,
-            &supported_versions(pack),
-            &declared.floors,
-            &declared.order,
-        )
-    });
-    let lowered = Lowered {
-        source,
-        block_ir,
-        circuits,
-        dropped_scopes,
-        version_floors,
-        conflicts,
-    };
-    (ir, lowered)
+    let (_, build) = lower_for_build(&module, edition, target.map(ResolvedTarget::build_target));
+    Ok((source, build))
 }
 
 /// A walled three-by-three `struct probe` lowered unpinned, for unit tests to rekey or corrupt.
 #[cfg(test)]
-pub(crate) fn lowered_probe(edition: Edition) -> BlockArrayIr {
+pub(crate) fn lowered_probe(edition: Edition) -> cairn_lang_core::block_array::BlockArrayIr {
     let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
-    let ir = lower(&module);
+    let ir = cairn_lang_core::lower(&module);
     let resolution = resolve(&ir, Some(edition));
     lower_to_block_array(&ir, &resolution, Some(&builtin_pack(edition).view(None)))
 }

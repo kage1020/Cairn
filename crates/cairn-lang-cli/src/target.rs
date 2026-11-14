@@ -3,6 +3,7 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArray;
 use cairn_lang_formats::bedrock_structure::{McStructure, ParityNote, prepare_mcstructure};
+use cairn_lang_formats::build::BuildTarget;
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
@@ -68,6 +69,14 @@ impl ResolvedTarget {
             ResolvedTarget::Java(t) => t.data_version,
             ResolvedTarget::Bedrock(t) => t.order_key,
         })
+    }
+
+    /// The target as a build is pinned to it.
+    pub(crate) fn build_target(&self) -> BuildTarget<'_> {
+        BuildTarget {
+            mc_version: self.mc_version(),
+            order_key: self.order_key(),
+        }
     }
 
     pub(crate) fn registry_pack(&self) -> &'static RegistryPack {

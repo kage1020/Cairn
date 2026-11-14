@@ -1,10 +1,10 @@
 # cairn-lang-lsp
 
-Language Server Protocol implementation for Cairn editors. It puts the parser and lint diagnostics from [`cairn-lang-core`](../cairn-lang-core/README.md) in the margin as you type, completes canonical material tokens, and answers the `cairn info` report as a command, so the write-check-fix loop described in [lint](https://cairn.kage1020.com/spec/lint/) happens in the editor rather than in a terminal. The [VS Code extension](../../editors/vscode/README.md) is a thin client over this binary.
+Language Server Protocol implementation for Cairn editors. It puts the parser and lint diagnostics from [`cairn-lang-core`](../cairn-lang-core/README.md) in the margin as you type, completes canonical material tokens, and answers the `cairn info` and `cairn diff-blocks` reports as commands, so the write-check-fix loop described in [lint](https://cairn.kage1020.com/spec/lint/) happens in the editor rather than in a terminal. The [VS Code extension](../../editors/vscode/README.md) is a thin client over this binary.
 
 ## Status
 
-The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — what a `cairn check` with no `--edition` reports: the same `parse → lower → check` passes and the lowering-stage findings every target that reads their line raises, without the `@intended_targets` findings the CLI merges in — on every `didOpen`/`didChange`, clearing them on `didClose`, answers `textDocument/completion` from the closed vocabularies, and runs `cairn.info` through `workspace/executeCommand`. Diagnostics are computed on a second thread that skips a revision a newer one has replaced, so a request is not kept waiting behind them. Hover and code actions are not yet wired.
+The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — what a `cairn check` with no `--edition` reports: the same `parse → lower → check` passes and the lowering-stage findings every target that reads their line raises, without the `@intended_targets` findings the CLI merges in — on every `didOpen`/`didChange`, clearing them on `didClose`, answers `textDocument/completion` from the closed vocabularies, and runs `cairn.info` and `cairn.diffBlocks` through `workspace/executeCommand`. Diagnostics are computed on a second thread that skips a revision a newer one has replaced, so a request is not kept waiting behind them. Hover and code actions are not yet wired.
 
 ## Shipped capabilities
 
@@ -13,6 +13,7 @@ The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-conten
 | `textDocument/publishDiagnostics` (push) | Stable `E_*`/`W_*` strings in `code`, `source: "cairn"`, span notes as `relatedInformation`, spanless notes folded into `message` as `note:` lines, structured payloads in `data`. Positions are 0-based lines with UTF-16 code-unit columns (the protocol default). |
 | `textDocument/completion` | Three closed-vocabulary contexts, detected line-locally so completion works while the document fails to parse: line-opening keywords (top-level items and `edit`, member commands, `slot` + selector keywords in theme bodies, and on an `edit` line the member keyword of its target, then `set`), `mat_slot=` values (union of slot names declared by the document's themes — edition variants union naturally, matching unpinned `cairn check`), and `@` material tokens from the built-in registry union (java ∪ bedrock): abstract tokens with their resolved canonical id as detail, plus the deduplicated canonical ids from the catalog's value column. The full canonical vocabulary is not offered yet: completion reads the materials catalog, not the blocks table the registry packs also carry and `E_UNKNOWN_ID` answers from. Trigger characters: `@`, `=`, `.`. |
 | `workspace/executeCommand` — `cairn.info` | The document `cairn info --format json` prints for an open `file:` document, as [versioning-editions "The report in an editor"](https://cairn.kage1020.com/spec/versioning-editions/) specifies: one argument, `{ "uri": ..., "editions"?: [...] }`, read against the text the editor holds and the `<source>.lock` beside the file. A run a finding refuses answers with the `{"diagnostics": [...]}` document, as the CLI prints it; the stderr side of a run is not sent. The [VS Code extension](../../editors/vscode/README.md) shows it with **Cairn: Show Info**. |
+| `workspace/executeCommand` — `cairn.diffBlocks` | The document `cairn diff-blocks --format json` prints for an open document and a structure file, as [ecosystem-interop "The report in an editor"](https://cairn.kage1020.com/spec/ecosystem-interop/) specifies: one argument, `{ "uri": ..., "structure": ... }`, the source read from the text the editor holds and the structure from the `file:` URI `structure` names. A source that does not build at the structure's stamp answers with the `{"diagnostics": [...]}` document, empty for a refusal of the whole run; the stderr side of a run is not sent. The [VS Code extension](../../editors/vscode/README.md) shows it with **Cairn: Diff Blocks**. |
 
 ## Planned capabilities
 
@@ -22,7 +23,6 @@ The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-conten
 | `textDocument/completion` over the full canonical block vocabulary, by reading the registry packs' blocks table as well as the materials catalog | [materials-themes "Canonical vocabulary"](https://cairn.kage1020.com/spec/materials-themes/) |
 | `textDocument/hover` — block primitive docs, blockstate intent vs resolved view | [blockstate "`intent_state` and `resolved_state`"](https://cairn.kage1020.com/spec/blockstate/) |
 | `textDocument/codeAction` — apply the "Suggested fix:" payloads from lint messages | [lint](https://cairn.kage1020.com/spec/lint/), [versioning-editions "Fail-loud and minimum-version inference"](https://cairn.kage1020.com/spec/versioning-editions/) |
-| `workspace/executeCommand` — `cairn.diffBlocks`, once `cairn diff-blocks` exists | [ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 
 ## Design notes
 
@@ -32,7 +32,7 @@ The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-conten
 ## Dependencies
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the parser, IR, and lint engine.
-- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the built-in registry packs backing material-token completion and the block ids a check with no target weighs, and for the `cairn info` report `cairn.info` returns.
+- [`cairn-lang-formats`](../cairn-lang-formats/README.md) for the built-in registry packs backing material-token completion and the block ids a check with no target weighs, and for the `cairn info` and `cairn diff-blocks` reports `cairn.info` and `cairn.diffBlocks` return.
 - [`lsp-server`](https://crates.io/crates/lsp-server) / [`lsp-types`](https://crates.io/crates/lsp-types) for the synchronous stdio transport and protocol types (no async runtime).
 
 ## License

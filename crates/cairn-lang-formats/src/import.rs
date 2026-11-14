@@ -52,6 +52,14 @@ impl ImportFormat {
             .find(|format| format.extension() == extension)
     }
 
+    /// Every format's extension, as a refusal lists them: "`.nbt`, `.litematic`, `.schem` or
+    /// `.mcstructure`".
+    #[must_use]
+    pub fn choices() -> String {
+        let [rest @ .., last] = Self::ALL.map(|format| format!("`.{}`", format.extension()));
+        format!("{} or {last}", rest.join(", "))
+    }
+
     /// The extension, without its dot.
     #[must_use]
     pub fn extension(self) -> &'static str {

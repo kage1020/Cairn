@@ -97,12 +97,7 @@ pub(crate) fn refuse_extension(file: &Path, command: &str) {
              and name that"
         );
     }
-    let names: Vec<String> = ImportFormat::ALL
-        .iter()
-        .map(|format| format!("`.{}`", format.extension()))
-        .collect();
-    let (last, rest) = names.split_last().expect("an import reads some format");
-    eprintln!("  note: name a {} or {last} file", rest.join(", "));
+    eprintln!("  note: name a {} file", ImportFormat::choices());
 }
 
 /// `<stem>.raw.crn` beside `file`.

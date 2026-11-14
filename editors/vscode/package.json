@@ -38,12 +38,21 @@
         "command": "cairn.showInfo",
         "title": "Show Info",
         "category": "Cairn"
+      },
+      {
+        "command": "cairn.showDiffBlocks",
+        "title": "Diff Blocks",
+        "category": "Cairn"
       }
     ],
     "menus": {
       "commandPalette": [
         {
           "command": "cairn.showInfo",
+          "when": "editorLangId == cairn"
+        },
+        {
+          "command": "cairn.showDiffBlocks",
           "when": "editorLangId == cairn"
         }
       ]

@@ -1,6 +1,6 @@
 # Cairn — VS Code extension
 
-Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside VS Code: push diagnostics, closed-vocabulary completion, the `cairn info` report, and TextMate syntax highlighting. The extension is a thin client — all analysis runs in the `cairn-lsp` binary shipped alongside the `cairn` CLI in the Cairn release archive.
+Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside VS Code: push diagnostics, closed-vocabulary completion, the `cairn info` and `cairn diff-blocks` reports, and TextMate syntax highlighting. The extension is a thin client — all analysis runs in the `cairn-lsp` binary shipped alongside the `cairn` CLI in the Cairn release archive.
 
 ## Install
 
@@ -18,6 +18,7 @@ Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside 
 | Command | Purpose |
 | ------- | ------- |
 | **Cairn: Show Info** (`cairn.showInfo`) | Asks `cairn-lsp` for the active `.crn` file's `cairn info` report and opens it beside the editor, as the JSON `cairn info --format json` prints. It reads the text in the editor, saved or not, and the `<source>.lock` beside the file. |
+| **Cairn: Diff Blocks** (`cairn.showDiffBlocks`) | Asks for a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file, then asks `cairn-lsp` to compare it with what the active `.crn` file builds at the file's stamp, and opens the report beside the editor, as the JSON `cairn diff-blocks --format json` prints. It compares the text in the editor, saved or not. |
 
 ## Settings
 

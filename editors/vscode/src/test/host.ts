@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { type TextDocument, commands, extensions } from "vscode";
+import { type TextDocument, Uri, commands, extensions } from "vscode";
 
 const EXTENSION_ID = "kage1020.cairn-lang";
 const ACTIVATION_TIMEOUT_MS = 30_000;
@@ -9,7 +9,9 @@ const ACTIVATION_TIMEOUT_MS = 30_000;
 /**
  * Waits for the `.crn` document the window opened with to activate the
  * extension, runs `Cairn: Show Info` when `CAIRN_TEST_SHOW_INFO` names a file
- * for what it shows, then stops its language client through `deactivate`.
+ * for what it shows, and `Cairn: Diff Blocks` on the structure file
+ * `CAIRN_TEST_STRUCTURE` names when `CAIRN_TEST_DIFF_BLOCKS` names one, then
+ * stops its language client through `deactivate`.
  */
 export async function run(): Promise<void> {
   const extension = extensions.getExtension(EXTENSION_ID);
@@ -31,6 +33,15 @@ export async function run(): Promise<void> {
       "cairn.showInfo",
     );
     writeFileSync(shownTo, shown?.getText() ?? "");
+  }
+  const diffShownTo = process.env.CAIRN_TEST_DIFF_BLOCKS;
+  const structure = process.env.CAIRN_TEST_STRUCTURE;
+  if (diffShownTo && structure) {
+    const shown = await commands.executeCommand<TextDocument | undefined>(
+      "cairn.showDiffBlocks",
+      Uri.file(structure),
+    );
+    writeFileSync(diffShownTo, shown?.getText() ?? "");
   }
   const main = join(extension.extensionPath, extension.packageJSON.main);
   const loaded = require.cache[require.resolve(main)];
