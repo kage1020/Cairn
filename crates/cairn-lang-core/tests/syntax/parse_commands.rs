@@ -132,6 +132,55 @@ fn parses_struct_with_size_and_one_child() {
 }
 
 #[test]
+fn a_header_keeps_its_bare_values_beside_its_arguments() {
+    let module = parse("struct s 9x7 size=3x3 tall:\n  floor mat_slot=floor\n").expect("parse");
+    let Item::Struct {
+        args, positional, ..
+    } = &module.items[0]
+    else {
+        panic!("not a struct");
+    };
+    assert_eq!(
+        args.iter().map(|a| a.key.as_str()).collect::<Vec<_>>(),
+        ["size"]
+    );
+    assert_eq!(
+        positional
+            .iter()
+            .map(|v| v.kind.clone())
+            .collect::<Vec<_>>(),
+        [
+            ValueKind::Size { w: nz(9), h: nz(7) },
+            ValueKind::Ident("tall".to_owned())
+        ],
+    );
+}
+
+#[test]
+fn a_logic_line_without_its_equals_sign_still_reads_its_expression() {
+    let module = parse("struct s\n  logic sig.open sig.step or sig.exit\n").expect("parse");
+    let Item::Struct { body, .. } = &module.items[0] else {
+        panic!("not a struct");
+    };
+    let Statement::Logic {
+        lhs, rhs, binds, ..
+    } = &body[0]
+    else {
+        panic!("expected Logic, got {:?}", body[0]);
+    };
+    assert_eq!(lhs, &dr(&["sig", "open"]));
+    assert_eq!(
+        rhs,
+        &infix(
+            LogicPrimitive::Or,
+            name(&["sig", "step"]),
+            name(&["sig", "exit"])
+        ),
+    );
+    assert!(!binds);
+}
+
+#[test]
 fn parses_command_with_selector_head() {
     let module = parse("struct s\n  door[id=front] opened_by=sig.open\n").expect("parse");
     let Item::Struct { body, .. } = &module.items[0] else {
@@ -297,6 +346,7 @@ fn parses_assert_latency() {
         to,
         bound,
         span,
+        ..
     } = &body[0]
     else {
         panic!("expected AssertLatency, got {:?}", body[0]);
@@ -751,10 +801,9 @@ fn assert_always_overflowing_within_reports_out_of_range() {
 }
 
 #[test]
-fn rejects_logic_without_eq() {
-    let err = parse("struct s\n  logic sig.a sig.b\n").expect_err("missing =");
-    let msg = err.user_message();
-    assert!(msg.contains('='), "got: {msg}");
+fn rejects_logic_with_neither_eq_nor_expression() {
+    let err = parse("struct s\n  logic sig.a\n").expect_err("missing =");
+    assert_eq!(err.user_message(), "expected `=`, got end of line");
 }
 
 #[test]
