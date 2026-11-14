@@ -11,7 +11,7 @@ use crate::artifacts::{
     PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
     write_artifacts_and_lock,
 };
-use crate::floors::enforce_version_floor;
+use crate::floors::report_floor_refusal;
 use crate::lockfile::{default_lock_path, report_previous_target};
 use crate::name_case::NameCase;
 use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
@@ -33,7 +33,7 @@ pub(crate) fn run_compile(
         block_ir,
         circuits,
         dropped_scopes,
-        version_floors,
+        floor_refusal,
     } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
         Err(code) => return code,
@@ -62,10 +62,9 @@ pub(crate) fn run_compile(
             return ExitCode::from(1);
         }
     };
-    if let Some(floors) = &version_floors
-        && let Err(code) = enforce_version_floor(file, &source, floors, edition, &target)
-    {
-        return code;
+    if let Some(refusal) = &floor_refusal {
+        report_floor_refusal(file, &source, refusal);
+        return ExitCode::from(1);
     }
 
     let out_dir = match prepare_out_dir(file, out) {

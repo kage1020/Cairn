@@ -17,6 +17,7 @@ mod positional;
 mod requires;
 mod sink;
 mod struct_name;
+mod target_floors;
 mod truth;
 mod type_mismatch;
 
@@ -27,6 +28,7 @@ pub use crate::diagnostic::{
 pub use crate::lines::{LineStarts, position_at};
 pub use intended_targets::weigh_intended_targets;
 pub use sink::DiagnosticSink;
+pub use target_floors::weigh_target;
 
 use crate::ast::Module;
 use crate::diagnostic::{EditionFindings, agreed};
@@ -95,6 +97,7 @@ mod tests {
         ResolverAndLowering,
         LoweringOnly,
         NeedsVersionTable,
+        NeedsTarget,
     }
 
     /// No wildcard arm, so a new code must say which pass raises it.
@@ -170,6 +173,7 @@ mod tests {
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
             }
+            C::VersionCap | C::RequiresUnorderable => RaisedBy::NeedsTarget,
         }
     }
 
@@ -192,6 +196,15 @@ mod tests {
                 "W_INTENDED_TARGET_UNSUPPORTED",
             ],
             "these codes are invisible to `check`",
+        );
+    }
+
+    #[test]
+    fn the_floor_refusals_are_the_codes_only_a_pinned_target_reaches() {
+        assert_eq!(
+            codes_where(|c| raised_by(c) == RaisedBy::NeedsTarget),
+            ["E_REQUIRES_UNORDERABLE", "E_VERSION_CAP"],
+            "`weigh_target` raises these, for a front end that pins a target",
         );
     }
 

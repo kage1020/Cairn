@@ -12,14 +12,14 @@ use cairn_lang_core::block_array::{
 use cairn_lang_core::check::{LineStarts, weigh_intended_targets};
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::IntentModule;
-use cairn_lang_core::resolve::{declared_version_floors, resolve};
+use cairn_lang_core::resolve::resolve;
 use cairn_lang_core::{
     Diagnostic, DiagnosticCode, Edition, Severity, check, diagnose_parse_failure, lower, parse,
 };
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{Diagnostic as CircuitDiagnostic, build_circuits};
 
-use crate::floors::{DeclaredFloors, floor_refusing_target};
+use crate::floors::floor_refusal;
 use crate::report::{FailureReport, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target, supported_versions};
 
@@ -363,8 +363,8 @@ pub(crate) struct Lowered {
     /// The findings of laying each struct's circuit, none when the lowering held an error.
     pub(crate) circuits: Vec<CircuitDiagnostic>,
     pub(crate) dropped_scopes: Vec<String>,
-    /// The `@requires` floors this edition's build is held to, if the source declares any.
-    pub(crate) version_floors: Option<DeclaredFloors>,
+    /// The finding by which the source's floors refuse the target, which then pins no version.
+    pub(crate) floor_refusal: Option<Diagnostic>,
 }
 
 /// Read, parse, resolve and lower `file` for `edition`'s build.
@@ -377,17 +377,9 @@ pub(crate) fn load_and_lower(
     target: Option<&ResolvedTarget>,
 ) -> Result<Lowered, ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
-    let floors = declared_version_floors(&module, edition);
-    let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
-        floors,
-        order: builtin_pack(edition).version_order(),
-    });
+    let refusal = target.and_then(|target| floor_refusal(&module, edition, target));
     let mc_version = target
-        .filter(|target| {
-            version_floors.as_ref().is_none_or(|declared| {
-                floor_refusing_target(&declared.floors, &declared.order, target).is_none()
-            })
-        })
+        .filter(|_| refusal.is_none())
         .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
@@ -408,7 +400,7 @@ pub(crate) fn load_and_lower(
         block_ir,
         circuits,
         dropped_scopes,
-        version_floors,
+        floor_refusal: refusal,
     })
 }
 

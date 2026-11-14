@@ -153,7 +153,7 @@ to compare.
 | `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
 | `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
-| `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
+| `E_VERSION_CAP` | `--target`, or the target the language server pins, is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
 | `W_INTENDED_TARGET_CAP` | Some, not all, of them are. |
@@ -185,12 +185,13 @@ three commands raise them: `cairn compile --target`, `cairn check --edition E
 --target V`, and `cairn info`, which lowers once per supported version for its `buildable targets`
 row and prints each refusing version's findings under `note: <edition> <version> refuses this
 source`, exiting 0 all the same ([Versioning and
-Editions](/spec/versioning-editions/#the-buildable-targets-row)). `lower` lowers against no version,
-as does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
+Editions](/spec/versioning-editions/#the-buildable-targets-row)). The language server raises them as
+well, once the client's settings pin a target (see below). `lower` lowers against no version, as
+does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
-check` with no `--target`, and the language server, lower with no target at all, so they raise
-`E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
-`E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` or `E_STATE_UNMAPPED`
+check` with no `--target`, and a language server that pins no target, lower with no target at all,
+so they raise `E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and
+never `E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` or `E_STATE_UNMAPPED`
 ([§11.3](#113-error-vs-warning)).
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering at a pinned target, in place of the
@@ -208,14 +209,32 @@ the reason [Compilation Model §4.2](/spec/compilation/#42-target-axes) refuses 
 runs the same lowering pass against the same table `compile` does at any target the file's floors
 let through, so a lost scope earns the same `E_PARTIAL_BUILD`. What it does not do is anything
 `compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement. A lock certifies a
-build, and only the command that produces one holds `--target` to the floors (`E_VERSION_CAP`). So
-at a target the floors refuse, the two commands name different causes: `check` pins the target and
-reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty, while
-`compile` checks no id and reports the floor ([Versioning and
+build, so only the command that produces one holds `--target` to the floors (`E_VERSION_CAP`), and
+the language server, which shows what that command would refuse, holds the target it pins to them
+too. So at a target the floors refuse, the two commands name different causes: `check` pins the
+target and reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty,
+while `compile` checks no id and reports the floor ([Versioning and
 Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Leaving the flag off still
 lowers, with no target, and reports only the findings every target that reads their line raises
 ([§11.3](#113-error-vs-warning)). See [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
+
+The language server lowers against what the client pins in its `cairn.edition` and `cairn.target`
+settings, which each `workspace/didChangeConfiguration` carries. With neither set it pins nothing
+and reports what a `cairn check` with no flag does. An edition alone reports what `cairn check
+--edition E` does. An edition and a target report what `cairn compile --edition E --target V`
+refuses on before it writes anything: the target, which may be `latest`, is held to the floors, so a
+target below one is `E_VERSION_CAP`, a floor the edition's table cannot place is
+`E_REQUIRES_UNORDERABLE`, and a target either refuses pins no version ([Versioning and
+Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Where `compile` stops at the
+first error, the server reports every pass's findings together, since an editor shows them all at
+once. A setting the command line would refuse is refused rather than reported at a span: a target
+with no edition, a name that is no edition and a target the edition does not ship are shown to the
+client as a message (`window/showMessage`), and the server pins what the rest of the settings name,
+the edition alone or nothing. `E_PARTIAL_BUILD` is a verdict on a build, so the server does not
+raise it. A new pin re-reports every open document: published again, or, for a client that pulls
+diagnostics, asked for again with `workspace/diagnostic/refresh` where the client takes it, and
+otherwise answered in full at its next pull.
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
 family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)), a `door` bound
@@ -295,8 +314,8 @@ answered. A pack was offered and does not declare the token, so the build stops 
 towards the closest one it does declare; no pack was offered, so nothing was asked and the member
 degrades with a warning. The second is the path only a library caller reaches, by lowering with no
 pack at all, and it is a warning for that reason: refusing there would refuse every source read
-without a pack. A front end with no target (the language server, or a `cairn check` with no
-`--target`) raises neither, and leaves the token to the pack of the target that builds it
+without a pack. A front end with no target (a language server that pins none, or a `cairn check`
+with no `--target`) raises neither, and leaves the token to the pack of the target that builds it
 ([§11.3](#113-error-vs-warning)).
 
 The warning says how the member degrades. A `floor` leaves its cells air, a `fill` paints none of
@@ -486,13 +505,13 @@ state a member writes counts, including one a later member covers, so the limit 
 written rather than the states the finished scope keeps. A vanilla registry has far fewer states, so
 a source reaches it only through block ids or state literals no pinned target checks. Both go
 unchecked wherever lowering runs with no version pinned: in `cairn lower`, the range-wide lowering
-behind `cairn info`'s report, the language server and a `cairn check` with no `--target`, in a
-`cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
-and in a `cairn compile` whose target the file's floors refuse ([Versioning and
-Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A pinned target checks both,
-save a literal on a block its pack records no states for, which `W_STATE_LITERAL_UNCHECKED` names,
-so the note asks a build that pins one to split the scope rather than to pin a target. A warning,
-for the reason above.
+behind `cairn info`'s report, a language server that pins no target and a `cairn check` with no
+`--target`, in a `cairn compile` or `cairn check --edition E --target V` naming a version the
+edition does not ship, and in a `cairn compile` or a language server whose target the file's floors
+refuse ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A
+pinned target checks both, save a literal on a block its pack records no states for, which
+`W_STATE_LITERAL_UNCHECKED` names, so the note asks a build that pins one to split the scope rather
+than to pin a target. A warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it. In a struct body it covers three
@@ -665,9 +684,9 @@ member set by a wall, a block id, a block state's property or value, and a `--ta
 note reads ``did you mean `X`?``, with `X` written as the line would be (`home1.entry` for a port,
 `at=front.outside` for a member set by a wall, `axis=x` for a state). `E_UNKNOWN_ID` instead names
 the target's nearest block, or, when another version of the edition declares the ID, that version.
-The nearest block, and the nearest pair of `E_STATE_DOMAIN`, is carried as `data.suggestion` too
-([§11.2](#112-machine-readable-payload)); on a state lowering derived, `E_STATE_DOMAIN` carries it
-there alone, since the source has no literal to correct.
+The nearest keyword, argument key and block, and the nearest pair of `E_STATE_DOMAIN`, are carried
+as `data.suggestion` too ([§11.2](#112-machine-readable-payload)); on a state lowering derived,
+`E_STATE_DOMAIN` carries it there alone, since the source has no literal to correct.
 
 An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
 ...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
@@ -751,6 +770,8 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 |---|---|
 | `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. Present when cells were dropped; absent when the walkway was past the router's cap and not laid. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
+| `E_UNKNOWN_KEYWORD` | `{ "kind": "unknown_keyword", "keyword", "suggestion"? }`. The keyword as written, and the nearest one the line's body takes, the one the `did you mean` note names; absent when none is within the threshold. |
+| `E_UNKNOWN_ARGUMENT` | `{ "kind": "unknown_argument", "key", "suggestion"? }`. The key as written, without the trailing `=`, and the nearest key the line takes, the one the note names; absent when none is within the threshold. The span is the argument's value, so the key is the word before the value's `=`. |
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"?, "since"?, "until"?, "declared_by"? }`. See below. |
 | `E_PARITY_UNSUPPORTED` | `{ "kind": "parity_unsupported", "id", "registry", "declared_by", "reason" }`. The block ID, the target that cannot build it as `"<edition> <version>"`, the edition that has it (`java` or `bedrock`), and the pack's sentence for what the block is and why the target's edition has none. |
 | `E_STATE_DOMAIN` | `{ "kind": "state_domain", "id", "key", "value", "registry", "reason", "valid", "origin", "suggestion"?, "valid_at"? }`. See below. |
@@ -758,6 +779,7 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`. The keys the row does not declare. Never empty. |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unknown_edition_scope`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `prerelease_not_a_tag`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
+| `E_VERSION_CAP` | `{ "kind": "version_cap", "edition", "target", "floor", "valid" }`. The edition, the refused target as a bare label, the floor that refuses it as its line renders it after the keyword (`version>=1.21.4`, `java version>=1.21.4`), and the targets of the edition every floor admits, oldest first; `valid` is empty when no target does. The span is the floor's line, from its keyword to its version label. |
 | `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`. `reason` is one of `component_count`, `component_not_a_number`, `year_not_four_digits`, `month_out_of_range`, `patch_too_large`, `trailing_tokens`. `found` is the component the reason is about, and is empty when the failure names no fragment: `component_count`, and `component_not_a_number` on a value whose component is itself empty (`2026.`). |
 | `W_FUTURE_CAIRN_VERSION` | `{ "kind": "future_cairn_version", "declared", "compiler" }`. Both verbatim: `declared` is the string in the file, `compiler` is the build that reported it. |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`. See below. |
@@ -816,6 +838,16 @@ combinations. Take the count from `2^inputs - covered`, never from `missing.len(
 carried instead of that total because the grammar puts no ceiling on the input list and no integer
 holds `2^130`.
 
+**Quick-fixes** in the language server are built from these payloads and from nothing else:
+`primary` and the notes are prose for a person. An `authored` `E_UNKNOWN_ID` offers each of its
+`aliases`, the first as the preferred fix, then its `suggestion`, which is not preferred; a
+`catalog` or `builtin` one offers nothing, since the repair is in the pack. `E_UNKNOWN_KEYWORD` and
+`E_UNKNOWN_ARGUMENT` offer their `suggestion`, not preferred. `E_VERSION_CAP` offers lowering
+`floor` to `target` on the floor's line and, to a client that says it runs the `cairn.setTarget`
+command, pinning the first of `valid` instead. A fix rewrites only the text its payload names,
+spelled as the line spells it, with or without the `minecraft:` namespace, so a finding whose span
+no longer holds that text offers none.
+
 ## 11.3 Error vs warning
 
 - **Errors** are things that, left alone, produce unintended results: concept absence, unknown IDs,
@@ -845,8 +877,8 @@ pass raises: parsing precedes them all, and a source that does not parse reaches
 is the one finding a build reports alone.
 
 A finding of block-array lowering is reported wherever a source is checked, whether a target is
-pinned or not. With no `--target`, in a plain `cairn check` and in the language server, which pins
-nothing, lowering runs with no target and reports the findings every target that reads their line
+pinned or not. With no `--target`, in a plain `cairn check` and in a language server that pins no
+target, lowering runs with no target and reports the findings every target that reads their line
 raises, with the code, span and text a pinned check gives them. It weighs the source as if every
 block id some shipped version of the edition declares were declared. An abstract token, and an id no
 shipped version declares, are not deferred: each stands in for the block a target's pack names for

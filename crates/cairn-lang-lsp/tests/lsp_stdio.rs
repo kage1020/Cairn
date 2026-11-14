@@ -1,6 +1,6 @@
 //! The `cairn-lsp` binary over stdio: how each way a session ends exits and logs, the line each
-//! dropped notification logs, and the diagnostics route `initialize` settles. What the dispatch
-//! loop answers is tested beside `server.rs`.
+//! dropped notification logs, and the diagnostics route and client commands `initialize` settles.
+//! What the dispatch loop answers is tested beside `server.rs`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -23,6 +23,14 @@ theme t:
 struct s size=2x2
   floor mat_slot=wall
   walls height=4 mat_slot=wall
+";
+/// A floor above Java 1.21, for a session that pins it.
+const FLOOR: &str = "\
+@requires version>=1.21.4
+theme t:
+  slot wall -> @oak_planks
+struct s size=3x3
+  walls mat_slot=wall height=2
 ";
 const TEST_URI: &str = "file:///test.crn";
 
@@ -282,7 +290,52 @@ fn initialize_advertises_full_sync_and_completion_and_shuts_down_clean() {
         serde_json::json!("cairn"),
     );
     assert_eq!(capabilities["hoverProvider"], serde_json::json!(true));
+    assert_eq!(
+        capabilities["codeActionProvider"],
+        serde_json::json!({ "codeActionKinds": ["quickfix"] }),
+    );
     server.shutdown();
+}
+
+#[test]
+fn a_client_that_declares_it_runs_set_target_is_offered_it() {
+    for (commands, offered) in [
+        (
+            serde_json::json!(["cairn.setTarget"]),
+            vec!["cairn.setTarget"],
+        ),
+        (serde_json::json!([]), vec![]),
+    ] {
+        let (mut server, _) = Server::start_declaring(&serde_json::json!({
+            "experimental": { "commands": { "commands": commands } },
+        }));
+        server.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": { "settings": { "cairn": { "edition": "java", "target": "1.21" } } },
+        }));
+        server.did_open(FLOOR, 1);
+        let published = server.read_until_method("textDocument/publishDiagnostics");
+        server.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "textDocument/codeAction",
+            "params": {
+                "textDocument": { "uri": TEST_URI },
+                "range": published["params"]["diagnostics"][0]["range"],
+                "context": { "diagnostics": published["params"]["diagnostics"] },
+            },
+        }));
+        let actions = server.read_response(2)["result"].take();
+        let run: Vec<_> = actions
+            .as_array()
+            .expect("a list of actions")
+            .iter()
+            .filter_map(|action| action["command"]["command"].as_str())
+            .collect();
+        assert_eq!(run, offered, "{actions}");
+        server.shutdown();
+    }
 }
 
 #[test]

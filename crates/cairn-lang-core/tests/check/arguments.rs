@@ -5,6 +5,7 @@ use cairn_lang_core::intent::{
     MemberRole, UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
 };
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Edition, check, lower, parse};
+use serde_json::json;
 
 use crate::common::{codes, diagnose, exactly_one, of_code};
 
@@ -93,6 +94,53 @@ fn a_key_nothing_resembles_is_named_with_the_closed_set_and_no_suggestion() {
             UNIVERSAL_ARGUMENTS.join(", ")
         )),
         "got: {notes}",
+    );
+}
+
+#[test]
+fn the_payload_names_the_key_and_the_suggestion_its_note_offers() {
+    for (src, key, suggestion) in [
+        (
+            "struct s size=5x5\n  walls mat_slot=wall hieght=3\n",
+            "hieght",
+            "height",
+        ),
+        ("struct s siz=7x7\n  floor mat_slot=m\n", "siz", "size"),
+        (
+            "struct s size=9x7\n  window[clas=outer] side=front offset=2 y=2 size=2x2\n",
+            "clas",
+            "class",
+        ),
+    ] {
+        let d = exactly_one(diagnose(src));
+        assert_eq!(
+            serde_json::to_value(&d.data).expect("serialises"),
+            json!({"kind": "unknown_argument", "key": key, "suggestion": suggestion}),
+            "source:\n{src}",
+        );
+    }
+}
+
+#[test]
+fn a_key_nothing_resembles_carries_no_suggestion() {
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  floor totally_unrelated=1 mat_slot=m\n",
+    ));
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({"kind": "unknown_argument", "key": "totally_unrelated"}),
+    );
+}
+
+#[test]
+fn a_typo_written_twice_carries_the_suggestion_its_note_offers() {
+    let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  \
+               walls[hieght=3] -> frame=@spruce_wood\n\n\
+               struct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({"kind": "unknown_argument", "key": "hieght", "suggestion": "height"}),
     );
 }
 

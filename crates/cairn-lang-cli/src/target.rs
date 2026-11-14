@@ -59,15 +59,6 @@ impl ResolvedTarget {
         }
     }
 
-    /// The row's key in its edition's version order, which a floor is weighed against; two
-    /// Bedrock releases can share a block-palette `version` and never a key.
-    pub(crate) fn order_key(&self) -> i64 {
-        i64::from(match self {
-            ResolvedTarget::Java(t) => t.data_version,
-            ResolvedTarget::Bedrock(t) => t.order_key,
-        })
-    }
-
     pub(crate) fn registry_pack(&self) -> &'static RegistryPack {
         match self {
             ResolvedTarget::Java(_) => builtin_pack(Edition::Java),

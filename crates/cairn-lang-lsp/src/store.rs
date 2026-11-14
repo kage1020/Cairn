@@ -168,6 +168,21 @@ impl DocumentStore {
     pub fn revision(&self, uri: &lsp_types::Uri) -> Option<u64> {
         self.docs.get(uri).map(|document| document.revision)
     }
+
+    /// Every open document's URI and latest text, in no particular order.
+    pub fn documents(&self) -> impl Iterator<Item = (&lsp_types::Uri, &str)> {
+        self.docs
+            .iter()
+            .map(|(uri, document)| (uri, document.text.as_str()))
+    }
+
+    /// Gives every open document a new revision, for findings that changed with no text change.
+    pub fn renumber(&mut self) {
+        for document in self.docs.values_mut() {
+            self.last_revision += 1;
+            document.revision = self.last_revision;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -417,6 +432,21 @@ mod tests {
             Some(4),
             "a reopened text is a new revision"
         );
+    }
+
+    #[test]
+    fn renumbering_gives_every_open_text_a_revision_none_had() {
+        let mut store = DocumentStore::new();
+        let (a, b) = (uri("file:///a.crn"), uri("file:///b.crn"));
+        store.open(a.clone(), "one".to_owned());
+        store.open(b.clone(), "two".to_owned());
+        store.renumber();
+        let mut revisions = [store.revision(&a), store.revision(&b)];
+        revisions.sort_unstable();
+        assert_eq!(revisions, [Some(3), Some(4)]);
+        let mut documents: Vec<_> = store.documents().collect();
+        documents.sort_unstable_by_key(|(uri, _)| uri.as_str().to_owned());
+        assert_eq!(documents, [(&a, "one"), (&b, "two")]);
     }
 
     #[test]

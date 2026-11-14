@@ -5,10 +5,19 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use cairn_lang_core::Edition;
+
 use super::*;
-use crate::test_fixtures::{CLEAN, DUPLICATE};
+use crate::test_fixtures::{CLEAN, DUPLICATE, PALE_OAK, SIGN, VARIANTS, java};
 
 const TEST_URI: &str = "file:///test.crn";
+
+/// A client that takes pushed diagnostics, re-pulls nothing and runs no client command.
+const PUSHED: Client = Client {
+    mode: DiagnosticsMode::Push,
+    refreshes: false,
+    runs_set_target: false,
+};
 
 /// How long a test waits for a message, so one that never arrives fails rather than hangs.
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
@@ -22,18 +31,24 @@ struct Session {
 impl Session {
     /// A session with a client that takes pushed diagnostics.
     fn start() -> Self {
-        Self::start_in(DiagnosticsMode::Push)
+        Self::start_with(PUSHED)
     }
 
     /// A session with a client that pulls diagnostics.
     fn start_pulling() -> Self {
-        Self::start_in(DiagnosticsMode::Pull)
+        Self::start_with(Client {
+            mode: DiagnosticsMode::Pull,
+            ..PUSHED
+        })
     }
 
-    fn start_in(mode: DiagnosticsMode) -> Self {
-        let (server, client) = Connection::memory();
-        let server = thread::spawn(move || main_loop(&server, mode));
-        Self { client, server }
+    fn start_with(client: Client) -> Self {
+        let (server, end) = Connection::memory();
+        let server = thread::spawn(move || main_loop(&server, client));
+        Self {
+            client: end,
+            server,
+        }
     }
 
     /// Send one message, written as the JSON a client puts on the wire.
@@ -169,6 +184,36 @@ impl Session {
         self.read_response(id)
     }
 
+    /// Send `workspace/didChangeConfiguration` with `settings`.
+    fn configure(&self, settings: &serde_json::Value) {
+        self.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": { "settings": settings },
+        }));
+    }
+
+    /// Send a `textDocument/codeAction` request carrying `diagnostics` back, and return its
+    /// response.
+    fn request_code_actions(
+        &self,
+        id: i64,
+        diagnostics: &serde_json::Value,
+        only: Option<&[&str]>,
+    ) -> serde_json::Value {
+        self.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/codeAction",
+            "params": {
+                "textDocument": { "uri": TEST_URI },
+                "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+                "context": { "diagnostics": diagnostics, "only": only },
+            },
+        }));
+        self.read_response(id)
+    }
+
     /// Send `shutdown` and assert its `null` result, leaving the loop running until `exit`.
     fn request_shutdown(&self) {
         self.send(&serde_json::json!({
@@ -300,8 +345,40 @@ fn a_client_that_declares_pulled_diagnostics_pulls_them() {
             DiagnosticsMode::Push,
         ),
     ] {
-        assert_eq!(DiagnosticsMode::negotiate(&params), mode, "{params}");
+        assert_eq!(Client::negotiate(&params).mode, mode, "{params}");
     }
+}
+
+#[test]
+fn capabilities_advertise_quick_fixes() {
+    let capabilities = serde_json::to_value(server_capabilities()).expect("serialise");
+    assert_eq!(
+        capabilities["codeActionProvider"],
+        serde_json::json!({ "codeActionKinds": ["quickfix"] }),
+    );
+}
+
+#[test]
+fn a_client_says_whether_it_re_pulls_on_refresh_and_runs_set_target() {
+    let negotiated = |capabilities: serde_json::Value| {
+        let client = Client::negotiate(&serde_json::json!({ "capabilities": capabilities }));
+        (client.refreshes, client.runs_set_target)
+    };
+    assert_eq!(negotiated(serde_json::json!({})), (false, false));
+    assert_eq!(
+        negotiated(serde_json::json!({
+            "workspace": { "diagnostics": { "refreshSupport": true } },
+            "experimental": { "commands": { "commands": ["other.command", SET_TARGET] } },
+        })),
+        (true, true),
+    );
+    assert_eq!(
+        negotiated(serde_json::json!({
+            "workspace": { "diagnostics": { "refreshSupport": false } },
+            "experimental": { "commands": { "commands": ["other.command"] } },
+        })),
+        (false, false),
+    );
 }
 
 // ---------------------------------------------------------- notifications
@@ -312,7 +389,8 @@ fn did_open_publishes_the_documents_diagnostics_with_its_version() {
     session.did_open(DUPLICATE, 1);
     let message = session.read_until_method("textDocument/publishDiagnostics");
     let uri = lsp_types::Uri::from_str(TEST_URI).expect("valid uri");
-    let expected = serde_json::to_value(compute_diagnostics(&uri, DUPLICATE)).expect("serialise");
+    let expected = serde_json::to_value(compute_diagnostics(&uri, DUPLICATE, &Pin::Nothing))
+        .expect("serialise");
     assert_eq!(message["params"]["diagnostics"], expected);
     assert!(
         !diagnostics_of(&message).is_empty(),
@@ -456,8 +534,9 @@ fn a_document_queued_again_publishes_only_what_was_queued_last() {
     let (queue, queued) = mpsc::channel();
     let uri = |path: &str| lsp_types::Uri::from_str(path).expect("valid uri");
     let findings = |version, text: &str| Publication::Findings {
-        version,
+        version: Some(version),
         text: text.to_owned(),
+        pin: Pin::Nothing,
     };
     for entry in [
         (uri("file:///a.crn"), findings(1, DUPLICATE)),
@@ -493,7 +572,7 @@ fn a_document_queued_again_publishes_only_what_was_queued_last() {
             expected(
                 "file:///b.crn",
                 Some(2),
-                compute_diagnostics(&uri("file:///b.crn"), DUPLICATE),
+                compute_diagnostics(&uri("file:///b.crn"), DUPLICATE, &Pin::Nothing),
             ),
         ],
     );
@@ -508,8 +587,9 @@ fn a_report_is_answered_ahead_of_the_publications_queued_before_it() {
         .send(Job::Publish((
             uri.clone(),
             Publication::Findings {
-                version: 1,
+                version: Some(1),
                 text: DUPLICATE.to_owned(),
+                pin: Pin::Nothing,
             },
         )))
         .expect("the queue is open");
@@ -518,6 +598,7 @@ fn a_report_is_answered_ahead_of_the_publications_queued_before_it() {
             id: RequestId::from(5),
             uri: uri.clone(),
             text: CLEAN.to_owned(),
+            pin: Pin::Nothing,
             result_id: "3".to_owned(),
         }))
         .expect("the queue is open");
@@ -580,7 +661,7 @@ fn a_pull_answers_the_stored_text_with_its_findings_and_a_result_id() {
         serde_json::json!({
             "kind": "full",
             "resultId": "1",
-            "items": compute_diagnostics(&uri, DUPLICATE),
+            "items": compute_diagnostics(&uri, DUPLICATE, &Pin::Nothing),
         }),
     );
     session.shutdown();
@@ -698,6 +779,170 @@ fn a_pull_for_a_document_that_is_not_open_is_invalid_params() {
     session.shutdown();
 }
 
+// ----------------------------------------------------------------- the pin
+
+const PUBLISH: &str = "textDocument/publishDiagnostics";
+
+fn pinning(edition: &str, target: &str) -> serde_json::Value {
+    serde_json::json!({ "cairn": { "edition": edition, "target": target } })
+}
+
+/// The findings `compute_diagnostics` reports for `text` at `uri`, as the wire carries them.
+fn findings(uri: &str, text: &str, pin: &Pin) -> serde_json::Value {
+    let uri = lsp_types::Uri::from_str(uri).expect("valid uri");
+    serde_json::to_value(compute_diagnostics(&uri, text, pin)).expect("serialise")
+}
+
+#[test]
+fn a_setting_that_pins_a_target_republishes_every_open_document_against_it() {
+    let session = Session::start();
+    session.did_open_uri("file:///a.crn", SIGN, 1);
+    session.did_open_uri("file:///b.crn", PALE_OAK, 1);
+    for _ in 0..2 {
+        let opened = session.read_until_method(PUBLISH);
+        assert_eq!(
+            opened["params"]["diagnostics"],
+            serde_json::json!([]),
+            "{opened}"
+        );
+    }
+    session.configure(&pinning("java", "1.21"));
+    let mut republished = [
+        session.read_until_method(PUBLISH)["params"].take(),
+        session.read_until_method(PUBLISH)["params"].take(),
+    ];
+    republished.sort_by_key(|params| params["uri"].to_string());
+    assert_eq!(
+        republished,
+        [
+            serde_json::json!({
+                "uri": "file:///a.crn",
+                "diagnostics": findings("file:///a.crn", SIGN, &java("1.21")),
+            }),
+            serde_json::json!({
+                "uri": "file:///b.crn",
+                "diagnostics": findings("file:///b.crn", PALE_OAK, &java("1.21")),
+            }),
+        ],
+        "republished with no version, since no text changed",
+    );
+    session.did_change("file:///a.crn", PALE_OAK, 2);
+    let changed = session.read_until_method(PUBLISH);
+    assert_eq!(
+        changed["params"],
+        serde_json::json!({
+            "uri": "file:///a.crn",
+            "version": 2,
+            "diagnostics": findings("file:///a.crn", PALE_OAK, &java("1.21")),
+        }),
+    );
+    session.shutdown();
+}
+
+#[test]
+fn settings_that_pin_what_is_pinned_already_republish_nothing() {
+    let session = Session::start();
+    session.configure(&pinning("java", "1.21.4"));
+    session.did_open_uri("file:///a.crn", SIGN, 1);
+    session.did_open_uri("file:///b.crn", SIGN, 1);
+    for _ in 0..2 {
+        session.read_until_method(PUBLISH);
+    }
+    session.configure(&pinning("java", "1.21.4"));
+    session.did_change("file:///b.crn", CLEAN, 2);
+    let next = session.read_until_method(PUBLISH);
+    assert_eq!(
+        (&next["params"]["uri"], &next["params"]["version"]),
+        (&serde_json::json!("file:///b.crn"), &serde_json::json!(2)),
+        "the change is the next publication, with nothing queued ahead of it: {next}",
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_refused_setting_is_shown_and_the_rest_of_the_settings_still_pin() {
+    let session = Session::start();
+    session.did_open(VARIANTS, 1);
+    session.read_until_method(PUBLISH);
+    let settings = pinning("bedrock", "0.1");
+    let refused = Pin::from_settings(&settings).expect_err("Bedrock ships no 0.1 target");
+    assert_eq!(refused.pinned, Pin::Edition(Edition::Bedrock));
+    session.configure(&settings);
+    let shown = session.read_until_method("window/showMessage");
+    assert_eq!(
+        shown["params"],
+        serde_json::json!({ "type": 1, "message": format!("cairn-lsp: {}", refused.reason) }),
+    );
+    let republished = session.read_until_method(PUBLISH);
+    assert_eq!(
+        republished["params"]["diagnostics"],
+        findings(TEST_URI, VARIANTS, &refused.pinned),
+    );
+    assert_ne!(republished["params"]["diagnostics"], serde_json::json!([]));
+    session.shutdown();
+}
+
+#[test]
+fn a_new_pin_asks_a_client_that_pulls_and_can_be_told_to_pull_again() {
+    let session = Session::start_with(Client {
+        mode: DiagnosticsMode::Pull,
+        refreshes: true,
+        ..PUSHED
+    });
+    session.did_open(SIGN, 1);
+    let held = session.pull(80, TEST_URI, None);
+    assert_eq!(held["result"]["items"], serde_json::json!([]));
+    for (n, pin) in [(1, "1.21.4"), (2, "1.21")] {
+        session.configure(&pinning("java", pin));
+        let refresh = session.read_message();
+        assert_eq!(
+            refresh,
+            serde_json::json!({
+                "id": format!("cairn-refresh-{n}"),
+                "method": "workspace/diagnostic/refresh",
+            }),
+        );
+        session.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": format!("cairn-refresh-{n}"),
+            "result": null,
+        }));
+    }
+    let after = session.pull(81, TEST_URI, Some("1"));
+    assert_eq!(
+        after["result"],
+        serde_json::json!({
+            "kind": "full",
+            "resultId": "3",
+            "items": findings(TEST_URI, SIGN, &java("1.21")),
+        }),
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_client_that_pulls_but_cannot_be_told_to_gets_the_new_findings_when_it_next_pulls() {
+    let session = Session::start_pulling();
+    session.did_open(SIGN, 1);
+    session.pull(82, TEST_URI, None);
+    session.configure(&pinning("java", "1.21.4"));
+    session.send_pull(83, TEST_URI, Some("1"));
+    let next = session.read_message();
+    assert_eq!(
+        next,
+        serde_json::json!({
+            "id": 83,
+            "result": {
+                "kind": "full",
+                "resultId": "2",
+                "items": findings(TEST_URI, SIGN, &java("1.21.4")),
+            },
+        }),
+        "the pull's answer is the next message, with no refresh asked",
+    );
+    session.shutdown();
+}
+
 // ---------------------------------------------------------------- requests
 
 #[test]
@@ -750,6 +995,54 @@ fn a_hover_on_an_unopened_document_or_with_malformed_params_is_invalid_params() 
         "params": { "textDocument": { "uri": TEST_URI } },
     }));
     let malformed = session.read_response(73);
+    assert_eq!(malformed["error"]["code"], serde_json::json!(-32602));
+    session.shutdown();
+}
+
+#[test]
+fn a_code_action_request_answers_the_quick_fixes_for_the_diagnostics_it_carries_back() {
+    let session = Session::start_with(Client {
+        runs_set_target: true,
+        ..PUSHED
+    });
+    session.configure(&pinning("java", "1.21"));
+    session.did_open(PALE_OAK, 1);
+    let published = session.read_until_method(PUBLISH);
+    let diagnostics = &published["params"]["diagnostics"];
+    let uri = lsp_types::Uri::from_str(TEST_URI).expect("valid uri");
+    let carried = serde_json::from_value::<Vec<_>>(diagnostics.clone()).expect("diagnostics");
+    let fixes = serde_json::to_value(code_actions(&uri, PALE_OAK, &carried, true)).expect("ok");
+    assert_eq!(fixes.as_array().map(Vec::len), Some(2), "{fixes}");
+    for (id, only) in [
+        (90, None),
+        (91, Some(&["quickfix"][..])),
+        (92, Some(&[""][..])),
+    ] {
+        let answer = session.request_code_actions(id, diagnostics, only);
+        assert_eq!(answer["result"], fixes, "only {only:?}");
+    }
+    for (id, only) in [(93, &["refactor"][..]), (94, &["quickfix.cairn"][..])] {
+        let answer = session.request_code_actions(id, diagnostics, Some(only));
+        assert_eq!(answer["result"], serde_json::json!([]), "only {only:?}");
+    }
+    session.shutdown();
+}
+
+#[test]
+fn a_code_action_request_on_an_unopened_document_or_with_malformed_params_is_invalid_params() {
+    let session = Session::start();
+    let unopened = session.request_code_actions(95, &serde_json::json!([]), None);
+    assert_eq!(
+        unopened["error"],
+        serde_json::json!({ "code": -32602, "message": format!("document not open: {TEST_URI}") }),
+    );
+    session.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 96,
+        "method": "textDocument/codeAction",
+        "params": { "textDocument": { "uri": TEST_URI } },
+    }));
+    let malformed = session.read_response(96);
     assert_eq!(malformed["error"]["code"], serde_json::json!(-32602));
     session.shutdown();
 }
