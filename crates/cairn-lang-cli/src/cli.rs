@@ -201,9 +201,16 @@ pub(crate) enum Command {
             `--target` pins the one version a block id and its states have an answer for, which \
             is what lets the compile check them (`E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, \
             `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`); `cairn check --edition E --target V` pins the \
-            same pair to reach those findings without building anything. Exits 0 on success, 1 \
-            on parse, lowering, or I/O failure (including an unsupported `--target` or a state \
-            literal outside its block's states), and 2 when the source file cannot be located"
+            same pair to reach those findings without building anything. \
+            `--structure-format litematic` writes Java's artifacts as Litematica `.litematic` \
+            schematics instead: a struct to a file of its own and a site to one file with a \
+            region per placement and walkway (`spec/ecosystem-interop` \"Litematica\"); \
+            `--structure-format schem` writes them as Sponge Schematic version 3 `.schem` files, \
+            one per struct, placement and walkway, each offset by where it sits in its site \
+            (`spec/ecosystem-interop` \"Sponge Schematic\"). Exits 0 on success, 1 on parse, \
+            lowering, or I/O failure (including an unsupported `--target` or a state literal \
+            outside its block's states), and 2 when the source file cannot be located or \
+            `--structure-format` is given with `--edition bedrock`"
     )]
     Compile {
         /// Path to the .crn file to compile.
@@ -228,12 +235,26 @@ pub(crate) enum Command {
                 `DataVersionTable::latest`)"
         )]
         target: String,
+        /// Java structure file format; defaults to `nbt`.
+        #[arg(
+            long,
+            value_enum,
+            long_help = "The file format Java's structures are written in: `nbt` (the default), \
+                one vanilla structure file per struct, placement and walkway; `litematic`, one \
+                Litematica schematic per struct and per site; or `schem`, one Sponge Schematic \
+                per struct, placement and walkway (`spec/ecosystem-interop` \"Forward \
+                direction\"). Whichever is written, the artifacts share one naming rule, the \
+                same collision guards and the same lockfile. Bedrock writes only `.mcstructure`, \
+                so the flag with `--edition bedrock` is refused with exit 2 before the file is \
+                read"
+        )]
+        structure_format: Option<StructureFormat>,
         /// Output directory for the structure files; defaults to the source file's directory.
         #[arg(
             long,
-            long_help = "Output directory for the generated structure files (`.nbt` for Java, \
-                `.mcstructure` for Bedrock). Created if missing. Defaults to the source file's \
-                parent directory"
+            long_help = "Output directory for the generated structure files (`.nbt`, \
+                `.litematic` or `.schem` for Java, `.mcstructure` for Bedrock). Created if \
+                missing. Defaults to the source file's parent directory"
         )]
         out: Option<PathBuf>,
         /// Lockfile path; defaults to `<source>.lock` next to the source.
@@ -244,6 +265,57 @@ pub(crate) enum Command {
                 several `.crn` files share an output directory"
         )]
         lock: Option<PathBuf>,
+    },
+    /// Write a structure file as a .crn of raw members, stamped with the target it compiles for.
+    #[command(
+        long_about = "Read a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file and write it \
+            as a `.crn` of `raw_block`, `raw_fill` and `raw_repeat` lines marked \
+            `origin=imported`, which `cairn compile` builds back into the blocks the file holds \
+            (`spec/ecosystem-interop` \"Reverse direction: the compiler transliterates, an LLM \
+            lifts\"). The extension names the format, and the format the edition: `.mcstructure` \
+            is Bedrock's, the other three Java's.\n\n\
+            The source is stamped with one shipped target, which its `@requires` and \
+            `@intended_targets` name: the one the file was saved at, the nearest after it when \
+            the file was saved between two, the earliest when it was saved before every one, or \
+            the latest when it names no version (`spec/ecosystem-interop` \"Import stamping and \
+            pitfalls\"). A file saved past every \
+            target this build ships is refused. The written source is compiled against the \
+            stamp and compared cell by cell before anything is written, so a file whose blocks \
+            the stamped target does not declare is refused with the compile's errors.\n\n\
+            An import recovers blocks and their regularity, not intent: every run warns with \
+            `W_SEMANTIC_LOSS`, once for that and once for each thing a raw member cannot carry, \
+            such as a chest's contents, an entity or a structure void. A Litematica region is a \
+            struct of its own, and a structure wider or deeper than 48 blocks is a `site` of \
+            48 by 48 chunks.\n\n\
+            Exits 0 when the source is written, warnings included; 1 when the file cannot be \
+            read as its format, is saved past every shipped target, holds blocks the stamped \
+            target refuses or that no raw member builds, or cannot be read or written for a \
+            reason other than absence; and 2 when the file cannot be located, its extension names no format this command \
+            reads, or `--out` names the file itself"
+    )]
+    Import {
+        /// Path to the structure file to import.
+        file: PathBuf,
+        /// How far the import goes; `raw` is the one mode.
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = ImportMode::Raw,
+            long_help = "How far the import goes. `raw` is the compiler's ceiling: a faithful \
+                transliteration that names nothing (`spec/ecosystem-interop` \"Three tiers of \
+                transliteration\"). Naming what the raw members build, as walls, windows and \
+                material slots, is a refactor of the written source rather than a mode of this \
+                command"
+        )]
+        mode: ImportMode,
+        /// Path to write the .crn to; defaults to `<stem>.raw.crn` beside the file.
+        #[arg(
+            long,
+            long_help = "Path to write the `.crn` to, its directory created if missing. Defaults \
+                to `<stem>.raw.crn` beside the file, so `house.litematic` → `house.raw.crn`. An \
+                existing file there is replaced"
+        )]
+        out: Option<PathBuf>,
     },
     /// Experimental: print one stage of a .crn source file's redstone pipeline as JSON.
     #[command(
@@ -408,6 +480,25 @@ pub(crate) enum SynthStage {
             its bound, then an `assert truth` or `assert always` a run of the circuit breaks"
     )]
     Legalize,
+}
+
+/// The file format `cairn compile` writes Java's structures in.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum StructureFormat {
+    /// Vanilla structure files (`.nbt`), one per struct, placement and walkway (default).
+    #[default]
+    Nbt,
+    /// Litematica schematics (`.litematic`), one per struct and per site.
+    Litematic,
+    /// Sponge Schematic version 3 (`.schem`), one per struct, placement and walkway.
+    Schem,
+}
+
+/// How far `cairn import` takes a structure file.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ImportMode {
+    /// Raw members that build the file's blocks, with no name given to anything (default).
+    Raw,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

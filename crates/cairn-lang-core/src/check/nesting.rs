@@ -1,5 +1,6 @@
 //! The `nesting` pass: an indented body that never reaches the build. Only a `level y=N` directly
-//! in a `struct` or `def` body has a reader; every other body is dropped before any block lands.
+//! in a `struct` or `def` body, and the `raw_block` and `raw_fill` lines under a `raw_repeat`, have
+//! a reader; every other body is dropped before any block lands.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
@@ -14,6 +15,7 @@ enum Loss {
     NotAGroupingConstruct,
     LevelInsideLevel,
     LevelWithoutOffset,
+    NotRepeatable,
 }
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
@@ -34,6 +36,18 @@ fn walk(members: &[Member], scope: BodyKind, inside_level: bool, sink: &mut Diag
         if matches!(member.role, MemberRole::Other(_)) || !member.role.is_read_in(scope) {
             continue;
         }
+        if matches!(member.role, MemberRole::RawRepeat) {
+            for child in &member.children.members {
+                if child.role.is_repeatable() {
+                    walk(std::slice::from_ref(child), scope, true, sink);
+                } else if !matches!(child.role, MemberRole::Other(_))
+                    && child.role.is_read_in(scope)
+                {
+                    report(member, child, child, Loss::NotRepeatable, scope, sink);
+                }
+            }
+            continue;
+        }
         match loss(member, inside_level) {
             Some(loss) => report(member, first, last, loss, scope, sink),
             None => walk(&member.children.members, scope, true, sink),
@@ -46,7 +60,15 @@ pub(super) fn body_reaches_the_build(member: &Member, inside_level: bool) -> boo
     loss(member, inside_level).is_none()
 }
 
+/// Whether `child`, indented under `member` in a body that reaches the build, reaches it too.
+pub(super) fn child_reaches_the_build(member: &Member, child: &Member) -> bool {
+    !matches!(member.role, MemberRole::RawRepeat) || child.role.is_repeatable()
+}
+
 fn loss(member: &Member, inside_level: bool) -> Option<Loss> {
+    if matches!(member.role, MemberRole::RawRepeat) {
+        return None;
+    }
     if !matches!(member.role, MemberRole::Level) {
         return Some(Loss::NotAGroupingConstruct);
     }
@@ -86,6 +108,21 @@ fn report(
         (Loss::NotAGroupingConstruct, BodyKind::Geometry) => (
             geometry_primary(&format!("`{keyword}` does not group members"), count, subject),
             "only `level y=N` groups members inside a `struct` or `def` body — move these out to the enclosing body, or into a `level`".to_owned(),
+        ),
+        (Loss::NotRepeatable, _) => (
+            geometry_primary(
+                &format!(
+                    "`{keyword}` writes again only the `raw_block` and `raw_fill` lines under it, \
+                     not a `{}`",
+                    first.role.keyword(),
+                ),
+                1,
+                "member",
+            ),
+            format!(
+                "move the `{}` out of the `{keyword}`, to the body that holds the `{keyword}`",
+                first.role.keyword(),
+            ),
         ),
         (Loss::LevelInsideLevel, _) => (
             geometry_primary("a `level` inside another `level` does not group members", count, subject),

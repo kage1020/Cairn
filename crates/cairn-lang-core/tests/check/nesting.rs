@@ -432,3 +432,84 @@ mod lowering {
         );
     }
 }
+
+/// A finding as the text it points at, its primary, and its first two notes with their spans.
+type Nested<'a> = (&'a str, &'a str, Vec<(Option<&'a str>, &'a str)>);
+
+#[test]
+fn a_raw_repeat_reads_the_raw_members_under_it_and_reports_any_other_line() {
+    let src = format!(
+        "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
+         raw_repeat count=2 step=1,0,0\n    raw_block mat=minecraft:stone at=0,1,0\n    \
+         walls mat_slot=wall height=3\n    raw_repeat count=2 step=0,1,0\n      \
+         raw_block mat=minecraft:stone at=1,1,1\n    \
+         raw_fill mat=minecraft:stone from=0,1,1 to=0,1,2\n      \
+         raw_block mat=minecraft:stone at=2,1,2\n"
+    );
+    let diags = of_code(&src, DiagnosticCode::UnsupportedNesting);
+    let found: Vec<Nested<'_>> = diags
+        .iter()
+        .map(|d| {
+            let notes = d
+                .notes
+                .iter()
+                .take(2)
+                .map(|n| (n.span.clone().map(|span| &src[span]), n.message.as_str()))
+                .collect();
+            (slice(&src, d), d.primary.as_str(), notes)
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (
+                "walls mat_slot=wall height=3",
+                "`raw_repeat` writes again only the `raw_block` and `raw_fill` lines under it, \
+                 not a `walls`: the 1 member indented under it produces no blocks",
+                vec![
+                    (
+                        Some("raw_repeat count=2 step=1,0,0"),
+                        "`raw_repeat` declared here"
+                    ),
+                    (
+                        None,
+                        "move the `walls` out of the `raw_repeat`, to the body that holds the \
+                         `raw_repeat`",
+                    ),
+                ],
+            ),
+            (
+                "raw_repeat count=2 step=0,1,0\n      raw_block mat=minecraft:stone at=1,1,1",
+                "`raw_repeat` writes again only the `raw_block` and `raw_fill` lines under it, \
+                 not a `raw_repeat`: the 1 member indented under it produces no blocks",
+                vec![
+                    (
+                        Some("raw_repeat count=2 step=1,0,0"),
+                        "`raw_repeat` declared here"
+                    ),
+                    (
+                        None,
+                        "move the `raw_repeat` out of the `raw_repeat`, to the body that holds \
+                         the `raw_repeat`",
+                    ),
+                ],
+            ),
+            (
+                "raw_block mat=minecraft:stone at=2,1,2",
+                "`raw_fill` does not group members: the 1 member indented under it produces no \
+                 blocks",
+                vec![
+                    (
+                        Some("raw_fill mat=minecraft:stone from=0,1,1 to=0,1,2"),
+                        "`raw_fill` declared here",
+                    ),
+                    (
+                        None,
+                        "only `level y=N` groups members inside a `struct` or `def` body — move \
+                         these out to the enclosing body, or into a `level`",
+                    ),
+                ],
+            ),
+        ],
+    );
+}

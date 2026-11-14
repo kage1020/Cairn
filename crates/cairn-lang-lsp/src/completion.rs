@@ -33,6 +33,8 @@ enum Context {
     EditionName { replace: Span },
     /// First word of a line indented under an `@edition` guard: a raw member or a Tier 0 part.
     GuardedMemberKeyword { replace: Span },
+    /// First word of a line indented under a `raw_repeat`: a raw member it writes again.
+    RepeatedMemberKeyword { replace: Span },
 }
 
 /// A `slot NAME -> TARGET` declaration found by the document scan.
@@ -118,6 +120,15 @@ pub fn completions(
                     };
                     (*kw, detail)
                 }),
+        ),
+        Some(Context::RepeatedMemberKeyword { replace }) => keyword_items(
+            &index,
+            source,
+            &replace,
+            cairn_lang_core::intent::known_keywords()
+                .iter()
+                .filter(|kw| role_of(kw).is_repeatable())
+                .map(|kw| (*kw, "repeated raw member")),
         ),
     })
 }
@@ -219,7 +230,13 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     if indent == 0 {
         return Some(Context::TopLevelKeyword { replace });
     }
-    if parent_line(&outside, indent).is_some_and(opens_a_guard) {
+    let parent = parent_line(&outside, indent);
+    if parent.is_some_and(|line| line_keyword(line) == "raw_repeat")
+        && matches!(enclosing_item_keyword(&outside), Some("struct" | "def"))
+    {
+        return Some(Context::RepeatedMemberKeyword { replace });
+    }
+    if parent.is_some_and(opens_a_guard) {
         // What a guard holds is misplaced in a `site` body, guarded or not.
         return (enclosing_item_keyword(&outside) != Some("site"))
             .then_some(Context::GuardedMemberKeyword { replace });
@@ -948,7 +965,8 @@ mod tests {
                 "redstone_torch",
                 "redstone_dust",
                 "raw_block",
-                "raw_fill"
+                "raw_fill",
+                "raw_repeat"
             ]
         );
         let after = "struct s size=3x3\n  @edition java\n    raw_block at=1,0,1\n  ";
@@ -979,10 +997,33 @@ mod tests {
                 "circuit",
                 "raw_block",
                 "raw_fill",
+                "raw_repeat",
             ],
         );
         let in_site = "site town size=9x9\n  @";
         assert_eq!(labels(&complete(in_site, "@")), ["edition"]);
+    }
+
+    #[test]
+    fn a_raw_repeat_offers_only_the_raw_members_it_writes_again() {
+        let under = "struct s size=3x3\n  raw_repeat count=2 step=1,0,0\n    r";
+        let items = complete(under, "1,0,0\n    r");
+        assert_eq!(labels(&items), ["raw_block", "raw_fill"]);
+        for item in &items {
+            assert_eq!(item.detail.as_deref(), Some("repeated raw member"));
+            assert_eq!(edit_range(item), range(2, 4, 5));
+        }
+        let guarded = "def d size=3x3\n  @edition java\n    raw_repeat count=2 step=0,1,0\n      ";
+        assert_eq!(
+            labels(&complete(guarded, "0,1,0\n      ")),
+            ["raw_block", "raw_fill"]
+        );
+        let after =
+            "struct s size=3x3\n  raw_repeat count=2 step=1,0,0\n    raw_block at=0,0,0\n  ";
+        assert_eq!(
+            labels(&complete(after, "at=0,0,0\n  ")),
+            BodyKind::Geometry.allowed_keywords()
+        );
     }
 
     #[test]

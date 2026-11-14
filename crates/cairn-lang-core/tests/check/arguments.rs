@@ -427,11 +427,15 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "raw_block",
-        "  raw_block id=r class=c mat=minecraft:stone at=1,0,1\n",
+        "  raw_block id=r class=c mat=minecraft:stone at=1,0,1 origin=imported\n",
     ),
     (
         "raw_fill",
-        "  raw_fill id=q class=c mat=minecraft:stone from=0,0,0 to=1,0,1\n",
+        "  raw_fill id=q class=c mat=minecraft:stone from=0,0,0 to=1,0,1 origin=imported\n",
+    ),
+    (
+        "raw_repeat",
+        "  raw_repeat id=rr class=c count=2 step=1,0,0\n",
     ),
 ];
 
@@ -1073,6 +1077,11 @@ const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
         keyword: "raw_fill",
         body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_fill mat=minecraft:stone from=1,1,1 to=2,1,2 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "raw_repeat",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_repeat count=2 step=2,0,0 mat_slot=%SLOT%\n    raw_block mat=minecraft:stone at=1,1,1\n",
         why: Unread::Inapplicable,
     },
 ];

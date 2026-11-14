@@ -53,8 +53,8 @@ footprint's `W` from its low-`x` corner, `z` along its `H` from its low-`z` corn
 the base plane, or from the `level`'s under `level y=N`. A cell named this way shifts with a roof's
 `overhang=`, as every member does. No component is negative, since none counts back past the low
 corner, and each is read under the same ceiling as any integer. A key a later chapter defines as a
-distance rather than a cell, such as the `step=` of `raw_repeat`
-([Ecosystem Interop](/spec/ecosystem-interop/)), reads the same three integers as the distance from
+distance rather than a cell, such as the `step=` of `raw_repeat` ([Materials and Themes
+§7.4](/spec/materials-themes/#74-raw-blocks)), reads the same three integers as the distance from
 one repeat to the next.
 
 A triple is a `key=` value: it is what a key reads when an integer, a `,` and another integer
@@ -205,9 +205,13 @@ generation errors. (`room` is not on this list; it is still open, so writing one
 `E_UNKNOWN_KEYWORD`. See [Open Issues](/spec/open-issues/).)
 
 Inside a body, `level y=N` is the only member that groups other members, and only in a `struct` or a
-`def`. A `site` body is a flat list of `place` and `connect` rows with no grouping construct at all.
-An indented body anywhere else is `E_UNSUPPORTED_NESTING` rather than a silent drop. It lowers to
-nothing, places nothing, and lays no walkway.
+`def`. A `raw_repeat` holds lines too, but only the `raw_block` and `raw_fill` lines it writes
+again, each indented under it on a line of its own ([Materials and Themes
+§7.4](/spec/materials-themes/#74-raw-blocks)); any other line under it is `E_UNSUPPORTED_NESTING`,
+and a member written after a `:` on its own line is `E_PARSE`. A `site` body is a flat list of
+`place` and `connect` rows with no grouping construct at all. An indented body anywhere else is
+`E_UNSUPPORTED_NESTING` rather than a silent drop. It lowers to nothing, places nothing, and lays no
+walkway.
 
 That rule is about members, and reaches only bodies that hold them. A `theme` body holds rules,
 which bind materials and open nothing, so a line indented under one is a syntax error and not a
@@ -224,13 +228,13 @@ Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-ha
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
 `pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
-`repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A
-`site` body describes a layout: `place`, `connect`. The keyword table is global, so writing one in
-the other body parses and classifies and then reaches nothing. That is `E_MISPLACED_MEMBER`,
-reported once at the offending row, taking anything indented under it along. A `level` groups the
-other members of a `struct` / `def` body, but not a `circuit` line, whose reservation spans the
-whole scope: a `circuit` line under a `level` reaches nothing either, and is `E_MISPLACED_MEMBER` on
-that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+`repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`,
+`raw_repeat`. A `site` body describes a layout: `place`, `connect`. The keyword table is global, so
+writing one in the other body parses and classifies and then reaches nothing. That is
+`E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along. A
+`level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
+reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
+`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:

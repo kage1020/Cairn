@@ -25,6 +25,7 @@ mod part;
 mod phase;
 mod plate;
 mod raw;
+mod repeat;
 mod roof_fill;
 mod roof_kind;
 mod site_floor;

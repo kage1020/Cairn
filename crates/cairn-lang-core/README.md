@@ -14,6 +14,7 @@ This crate is the dependency root of every crate above the byte layer; [`cairn-l
 | `check` | The diagnostic-collecting pipeline: arguments, arity, duplicates, nesting, positional form, `@requires`, `@cairn`, `@intended_targets`, materials, member scope, type mismatches | [lint](https://cairn.kage1020.com/spec/lint/) |
 | `resolve` | Theme binding, per-edition theme variants, `@requires` parsing, and the three version axes | [materials-themes](https://cairn.kage1020.com/spec/materials-themes/), [versioning-editions "The `edition portability` row" and "The `buildable targets` row"](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `block_array` | The universal pivot: walls, openings, roofs, walkways, and material lowering into a palette + index array | [architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/) |
+| `transliterate` | L1 transliteration: the blocks of an imported structure written back as raw members, folded into `raw_repeat`, with every connection state the compile derives left out, and checked by compiling the result against the stamped target | [ecosystem-interop "Three tiers of transliteration"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `lock` | Lockfile schema and the hashes that make a build reproducible | [versioning-editions "Provenance and lock"](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `calver`, `edition`, `ids` | The `@cairn` version value, the edition axis, and the identifier newtypes shared across passes | [versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `suggest`, `error`, `lines` | "Did you mean …?" lookup over closed vocabularies, spans and positions, line boundaries | [lint](https://cairn.kage1020.com/spec/lint/) |
@@ -26,7 +27,7 @@ Everything past the block-array IR — the NBT codec, the format backends, redst
 
 ## Not yet here
 
-Entity placement, the editing and patch DSL ([components-editing-sites "Editing model"](https://cairn.kage1020.com/spec/components-editing-sites/)), and the reverse direction — lifting an imported structure back into idiomatic Cairn — are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
+Entity placement, the editing and patch DSL ([components-editing-sites "Editing model"](https://cairn.kage1020.com/spec/components-editing-sites/)), and the L2 and L3 tiers of the reverse direction — lifting a transliterated structure into named, themed Cairn — are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
 
 ## Versioning
 

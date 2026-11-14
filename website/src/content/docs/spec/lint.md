@@ -84,15 +84,17 @@ report that line as well. A `level` that groups nothing, such as one inside anot
 `E_UNSUPPORTED_NESTING` as well: that finding is about the blocks its members lose, and a `circuit`
 line writes none.
 
-`E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, and a `site`
-body is a flat list. Reported once per dropped subtree, at its root.
+`E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, a `raw_repeat`
+holds only the `raw_block` and `raw_fill` lines it writes again, and a `site` body is a flat list. A
+line under a `raw_repeat` that is neither is reported on its own, with a note at the `raw_repeat`.
+Reported once per dropped subtree, at its root.
 
 `E_SEMANTIC_IN_EDITION_GUARD`: the semantic layer is edition-neutral, so a guard holds only the
 escape hatch. Reported once at the outermost refused line, with a note at the guard, and anything
 indented under that line goes with it. No other check reads the refused line or what goes with it,
 so it draws no other finding. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD` instead,
-offered `raw_block`, `raw_fill`, `repeater`, `comparator`, `redstone_torch` and `redstone_dust`, or
-nothing in a `site` body, where none of them builds.
+offered `raw_block`, `raw_fill`, `raw_repeat`, `repeater`, `comparator`, `redstone_torch` and
+`redstone_dust`, or nothing in a `site` body, where none of them builds.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
 `theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.
@@ -511,23 +513,25 @@ Multi-building](/spec/components-editing-sites/).
 incomplete side is its own line rather than the compiler. A line does that with an argument the
 member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose
 `y=` is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=`
-is no block id), a value outside the ones its key takes (a `roof kind=` that names no kind,
-`side=middle`, an eave `stair` whose `half=` is an identifier other than `top` or `bottom`), or
-arguments that put it outside its struct as written: a `window` past the end of its wall, a `door`
-or `window` whose rows no course of the walls holds, an eave `stair` above the struct or on one
-where no `roof` has an `overhang=` of at least 1, a `fill` or `raw_fill` with a corner outside the
-struct, or a `raw_block` whose `at=` is outside it
-([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member
-at the size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
+is no block id, a `raw_repeat` with no `count=` or `step=` or with nothing under it), a value
+outside the ones its key takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair`
+whose `half=` is an identifier other than `top` or `bottom`, a `raw_repeat` `count=` below 1 or a
+`step=0,0,0` over more than one copy, a raw member's `origin=` other than `imported`), or arguments
+that put it outside its struct as written: a `window` past the end of its wall, a `door` or `window`
+whose rows no course of the walls holds, an eave `stair` above the struct or on one where no `roof`
+has an `overhang=` of at least 1, a `fill` or `raw_fill` with a corner outside the struct, or a
+`raw_block` whose `at=` is outside it, by any copy a `raw_repeat` writes ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member at the
+size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
 overhangs as its line says, and an unreadable value counts as the default its `W_IGNORED_ARGUMENT`
 puts in its place. A `roof` whose `kind=` or `slope_to=` does not read may rise as far as any roof
 on its footprint, and `walls` under a `level` that is not placed may hold any row, so a member only
 they could hold is deferred to them. A `circuit` line that reserves no region and an actuator patch
-that binds no component are refused the same way. [Redstone §14.2](/spec/redstone/#142-signal-binding)
-lists the lines that put a `pressure_plate` nowhere, which put a `chest` and every other sensor or
-actuator but `door` nowhere too, and for a sensor or actuator the drop reaches past the block array
-as well: its binding is still read, so its signal stays in the netlist with no component behind it,
-and the finding says so in a note.
+that binds no component are refused the same way. [Redstone
+§14.2](/spec/redstone/#142-signal-binding) lists the lines that put a `pressure_plate` nowhere,
+which put a `chest` and every other sensor or actuator but `door` nowhere too, and for a sensor or
+actuator the drop reaches past the block array as well: its binding is still read, so its signal
+stays in the netlist with no component behind it, and the finding says so in a note.
 
 A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with a
 note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws nothing,
@@ -624,6 +628,18 @@ wording the editions give it, and an edition's own by the rule for its guards
 | `E_NO_PORTABLE_IMPL` | A component of the built struct reads another through a block update, so what it does depends on update order ([Redstone §14.6](/spec/redstone/#146-edition-differences)). |
 | `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start, or an `assert truth` or `assert always` a run of the circuit breaks ([Redstone §14.7](/spec/redstone/#147-verification)). |
 | `W_SIM_ASSERTION_UNCHECKED` | An `assert truth` or `assert always` no run of the circuit judges, so it is not checked: one in a scope that lays no circuit, one whose signals depend on more than 10 sensors, too many to run every combination of, or one a run is still changing at the end of; or a truth table with rows no run reaches ([Redstone §14.7](/spec/redstone/#147-verification)). |
+
+### Import
+
+`cairn import` raises this one ([Ecosystem Interop
+§12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls)). It is about the structure file
+read rather than a line of a source, so it carries no span, it prints on stderr as
+`warning[W_SEMANTIC_LOSS]: …`, the body it concerns first when it concerns one, and no other command
+raises it.
+
+| Code | Meaning |
+|---|---|
+| `W_SEMANTIC_LOSS` | What the raw members an import writes do not carry. Every import raises it once for the author's intent, which no transliteration recovers, and then once for each kind of thing a body holds that no raw member writes: block entity data, entities, structure voids, the palettes of a `.nbt` past its first, and on Bedrock a block with no canonical state and water or a second-layer block the written block does not hold. |
 
 ### Semantic categories
 
@@ -940,18 +956,18 @@ reads where it is written, carried into the IR and never consulted. It comes in 
 reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
 ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
 accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
-`circuit`, `place`, `connect`, `raw_block` or `raw_fill` is that key today. A `mat_slot=` of either kind is not looked up in
-the theme, so a slot name the theme does not declare is this warning rather than
-`E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword
-reads only under some ways of writing a sibling argument, on a member that writes it another way.
-The boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this
-way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are
-not judged at all. All three make the build differ from the source. The rule forbids *silent*
-substitution, and all three are announced. For an unreached key the gap is the compiler's rather
-than the source's, which is why it is not a refusal. An inapplicable key is no gap at all: the key
-is one every member accepts and its value changes nothing in the build, so the warning asks for its
-removal, where a refusal would make a key every member accepts one that some refuse. Whether autofix
-is offered is up to the implementation.
+`circuit`, `place`, `connect`, `raw_block`, `raw_fill` or `raw_repeat` is that key today. A
+`mat_slot=` of either kind is not looked up in the theme, so a slot name the theme does not declare
+is this warning rather than `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key
+**routed past**: one the keyword reads only under some ways of writing a sibling argument, on a
+member that writes it another way. The boundary is the keyword: a spec-defined key on a keyword the
+compiler knows is reported this way, while a spec-defined *keyword* it does not know is
+`E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three make the build differ from
+the source. The rule forbids *silent* substitution, and all three are announced. For an unreached
+key the gap is the compiler's rather than the source's, which is why it is not a refusal. An
+inapplicable key is no gap at all: the key is one every member accepts and its value changes nothing
+in the build, so the warning asks for its removal, where a refusal would make a key every member
+accepts one that some refuse. Whether autofix is offered is up to the implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong wherever
 the member ends up, so it is a repair of its own, and holding the finding back until a refusal on

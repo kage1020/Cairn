@@ -1,0 +1,96 @@
+==================
+A raw_repeat holds the raw members indented under it, guarded or not (field labels)
+==================
+
+struct row size=9x3
+  raw_repeat count=3 step=3,0,0
+    raw_fill mat=minecraft:glass_pane from=0,1,0 to=1,2,0 origin=imported
+    raw_block mat=minecraft:torch at=2,1,0 origin=imported
+  @edition java
+    raw_repeat count=2 step=0,1,0
+      raw_block mat=minecraft:light at=4,1,1
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (struct_body
+      (member_stmt_with_body
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (integer)))
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (coordinate))))
+        body: (struct_body
+          (member_stmt
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (block_id)))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (coordinate)))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (coordinate)))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (identifier)))))
+          (member_stmt
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (block_id)))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (coordinate)))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (identifier)))))))
+      (edition_guard
+        edition: (edition_name)
+        body: (edition_guard_body
+          (member_stmt_with_body
+            keyword: (member_keyword)
+            args: (command_arg_list
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (integer)))
+              (command_arg
+                (attribute
+                  key: (identifier)
+                  value: (coordinate))))
+            body: (struct_body
+              (member_stmt
+                keyword: (member_keyword)
+                args: (command_arg_list
+                  (command_arg
+                    (attribute
+                      key: (identifier)
+                      value: (block_id)))
+                  (command_arg
+                    (attribute
+                      key: (identifier)
+                      value: (coordinate))))))))))))

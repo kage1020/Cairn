@@ -1,7 +1,10 @@
 //! A [`BlockArray`] as a Bedrock `.mcstructure`. Each `block_indices` layer runs z fastest,
 //! `(x * size_y + y) * size_z + z`, unlike Java's `blocks`; the second layer holds water where a
 //! waterlogged entry stands and `-1` everywhere else. A block entity is written under
-//! `block_position_data`, keyed by its voxel's place in that order.
+//! `block_position_data`, keyed by its voxel's place in that order. [`read_mcstructure`] reads
+//! such a file back, whichever tool saved it.
+
+mod read;
 
 use std::collections::HashMap;
 
@@ -20,6 +23,10 @@ use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, list_volume};
 use crate::registry::VersionStates;
+
+pub use read::{
+    BedrockBlock, BedrockVolume, McStructureReadError, StoredMcStructure, read_mcstructure,
+};
 
 /// One intent a palette entry dropped to fit Bedrock, reported as `W_INTENT_DEGRADED`.
 #[derive(Debug, Clone, PartialEq, Eq)]

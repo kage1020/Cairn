@@ -11,6 +11,7 @@ use crate::artifacts::{
     PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
     write_artifacts_and_lock,
 };
+use crate::cli::StructureFormat;
 use crate::floors::enforce_version_floor;
 use crate::lockfile::{default_lock_path, report_previous_target};
 use crate::name_case::NameCase;
@@ -22,9 +23,19 @@ pub(crate) fn run_compile(
     file: &Path,
     edition: Edition,
     target: &str,
+    structure_format: Option<StructureFormat>,
     out: Option<&Path>,
     lock: Option<&Path>,
 ) -> ExitCode {
+    if edition == Edition::Bedrock && structure_format.is_some() {
+        eprintln!(
+            "error: `--structure-format` picks a Java format; `--edition bedrock` writes only \
+             `.mcstructure`"
+        );
+        eprintln!("  note: drop `--structure-format`, or compile with `--edition java`");
+        return ExitCode::from(2);
+    }
+    let structure_format = structure_format.unwrap_or_default();
     // Resolved before lowering, which checks ids against it, but reported after the source's
     // own findings.
     let resolved_target = resolve_target(edition, target);
@@ -74,7 +85,15 @@ pub(crate) fn run_compile(
     };
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
-    check_and_write(&block_ir, &source, edition, &target, &out_dir, &lock_path)
+    check_and_write(
+        &block_ir,
+        &source,
+        edition,
+        &target,
+        structure_format,
+        &out_dir,
+        &lock_path,
+    )
 }
 
 /// Check every structure, then write them all and the lockfile.
@@ -83,12 +102,13 @@ fn check_and_write(
     source: &str,
     edition: Edition,
     target: &ResolvedTarget,
+    structure_format: StructureFormat,
     out_dir: &Path,
     lock_path: &Path,
 ) -> ExitCode {
     // A lock can share an entry with an artifact only inside `--out`, so `--out` alone is probed.
     let case = NameCase::of_dir(out_dir);
-    let prepared = match prepare_artifacts(block_ir, target, out_dir, case) {
+    let prepared = match prepare_artifacts(block_ir, target, structure_format, out_dir, case) {
         Ok(p) => p,
         Err(PrepareRefusal::Collision(collision)) => {
             collision.report();
@@ -137,6 +157,7 @@ mod tests {
             "",
             Edition::Java,
             &target,
+            StructureFormat::Nbt,
             dir.path(),
             &lock_path,
         );

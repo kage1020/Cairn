@@ -170,7 +170,8 @@ impl MemberRole {
                 | Self::RedstoneDust
                 | Self::Circuit
                 | Self::RawBlock
-                | Self::RawFill,
+                | Self::RawFill
+                | Self::RawRepeat,
             )
             | (BodyKind::Site, Self::Place | Self::Connect) => true,
             (BodyKind::Geometry, Self::Place | Self::Connect)
@@ -199,7 +200,8 @@ impl MemberRole {
                 | Self::RedstoneDust
                 | Self::Circuit
                 | Self::RawBlock
-                | Self::RawFill,
+                | Self::RawFill
+                | Self::RawRepeat,
             )
             | (_, Self::Other(_)) => false,
         }
@@ -233,6 +235,7 @@ impl MemberRole {
             Self::Circuit => "circuit",
             Self::RawBlock => "raw_block",
             Self::RawFill => "raw_fill",
+            Self::RawRepeat => "raw_repeat",
             Self::Place => "place",
             Self::Connect => "connect",
             Self::Other(keyword) => keyword,
