@@ -1,9 +1,11 @@
-//! Bedrock NBT writer: little-endian and uncompressed. It has no gzip form because the game fails
-//! to load a gzip-wrapped `.mcstructure`.
+//! Bedrock NBT writer and reader: little-endian and uncompressed. It has no gzip form because the
+//! game fails to load a gzip-wrapped `.mcstructure`.
 
-use std::io::Write;
+use std::io::{Read, Write};
 
 use crate::error::NbtIoError;
+use crate::read::{NbtReadError, NbtRoot, ReadOptions};
+use crate::reader::read_named_root;
 use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
 use crate::writer::{Endian, write_named_root};
@@ -40,4 +42,16 @@ where
     F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
 {
     stream_named_root(writer, Endian::Little, root_name, body)
+}
+
+/// Reads a named Bedrock NBT root, building the entries `options` keeps.
+///
+/// # Errors
+///
+/// An I/O failure on `reader`, or bytes that do not decode as an NBT root within `options`.
+pub fn read_bedrock_uncompressed<R: Read>(
+    reader: R,
+    options: &ReadOptions<'_>,
+) -> Result<NbtRoot, NbtReadError> {
+    read_named_root(reader, Endian::Little, options)
 }

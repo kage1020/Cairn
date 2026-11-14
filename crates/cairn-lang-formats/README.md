@@ -1,12 +1,14 @@
 # cairn-lang-formats
 
-Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has.
+Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has, and the Java world a structure file is installed into.
 
 Each format is a serializer or deserializer around the **block-array IR**, which the specification names as the universal pivot ([architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/)). Adding a format means adding a backend here — the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
 
 ## Status
 
 Java vanilla `.nbt` and Bedrock `.mcstructure` writers ship, and so do the built-in registry packs behind `cairn info` and every id check. The Bedrock writer translates each palette entry's canonical blockstate, which is Java's, into the target version's Bedrock block and `states` through the built-in pack's state map ([`bedrock_state`](src/bedrock_state.rs)). A state the map has no form for, or one the Java block does not have, is a hard error (`BedrockStructureError::State`); intent a version can only approximate (stair `shape` before 1.26.60) is dropped with a `W_INTENT_DEGRADED` parity note rather than in silence; and `waterlogged` becomes the structure's water layer.
+
+The [`world`](src/world/mod.rs) module reads what `cairn install` needs from a Java world save: the version its `level.dat` records, the `DataVersion` a structure file is stamped with, and the file a structure id names in the world's `generated` folder. It decodes NBT through [`cairn-lang-nbt`](../cairn-lang-nbt/README.md)'s readers, keeping only the root entries it reads, and tells a Bedrock `level.dat` or `.mcstructure` apart so the command can refuse it by name.
 
 Litematica `.litematic` and WorldEdit `.schem` are still to land, and no reverse-direction (file → IR) backend ships yet.
 
@@ -48,6 +50,16 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a reader can tell which directory was read. |
 | `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. An unknown edition, such as `"BEDROCK"`, is refused. |
 | `registry::PackFiles` | The component references inside a manifest. New components arrive as `Option` fields, so an older pack stays loadable. |
+| `world::read_level_dat` / `world::WorldVersion` | A Java world folder's `level.dat` → its `Data.DataVersion` and the `Data.Version.Name` that names its release, decoding the `Data` compound alone. |
+| `world::LevelDatError` | `Missing`, `Io`, `Bedrock` (with the release that last opened the world, read from its little-endian NBT), `NotGzip`, `Nbt`, `NoDataVersion`. `#[non_exhaustive]`. |
+| `world::LEVEL_DAT` | `level.dat`, the file that makes a folder a world's. |
+| `world::worlds_in` | The folders inside a folder that hold a `level.dat`, sorted, for a diagnostic that names the worlds a `saves` folder holds. |
+| `world::read_structure_data_version` | The root `DataVersion` a Java structure file is stamped with, read without building its blocks, after checking its root holds `size`, `blocks` and a `palette`. |
+| `world::StructureFileError` | `Bedrock` (a `.mcstructure`), `NotGzip`, `Nbt`, `NotAStructure` (the root lists missing), `NoDataVersion`. `#[non_exhaustive]`. |
+| `world::StructureId` / `world::DEFAULT_NAMESPACE` | `namespace:name`, held to the rules the game reads a generated structure's path under; `file_in` is the `generated/<namespace>/structures/<name>.nbt` the game loads it from. `minecraft` is the namespace an id without one is read in. |
+| `world::IdPart` / `world::StructureIdError` | Which side of the `:` breaks a rule, and the rules: `Empty`, `Character`, `EmptySegment`, `TrailingDot`, `DeviceName`. `#[non_exhaustive]`. |
+| `world::CrossVersion` | `Same`, `Upgrade` or `Downgrade`: how a structure's `DataVersion` stands to its world's ([versioning-editions "Cross-version application"](https://cairn.kage1020.com/spec/versioning-editions/#cross-version-application)). |
+| `world::recompile_target` | The newest targetable row at or below a world's `DataVersion`, the `--target` a structure refused for that world is recompiled at. |
 
 ## Registry packs
 

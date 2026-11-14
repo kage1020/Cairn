@@ -15,6 +15,10 @@ fn long_help_states_each_subcommands_exit_codes() {
         ),
         ("lower", "and 2 when the file cannot be located"),
         ("compile", "and 2 when the source file cannot be located"),
+        (
+            "install",
+            "and 2 when the world's `level.dat` or a structure file cannot be located",
+        ),
         ("synth", "with exit 2, before the file is read"),
         (
             "docs",

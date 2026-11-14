@@ -18,6 +18,7 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 | `cairn info <file.crn>` | Report the version range the file declares, per-edition portability, buildable targets, declared intended targets, and semantic-sensitive members. `--editions java,bedrock`, `--format text\|json`. |
 | `cairn lower <file.crn>` | Lower all the way to the block-array IR and print it. `--edition`, `--format ascii\|json\|debug`. A debugging surface for the universal voxel pivot. Without `--edition` it pins no edition, so it leaves out what `@edition` guards hold and every struct's circuit. |
 | `cairn compile <file.crn> --edition <e>` | Write the structure artifacts and a lockfile. `--target`, `--out`, `--lock`. |
+| `cairn install <file.nbt>... --world <world>` | Install compiled Java structure files into a world, where `/place template` loads them, held to the world's version. `--namespace`, `--name`, `--replace`, `--allow-cross-version`, `--dry-run`. See below. |
 | `cairn synth <file.crn>` | Print one redstone pipeline stage as JSON. Experimental; see below. |
 | `cairn docs [page] [title]` | Print a page of the documentation site as Markdown, from the copy embedded in the binary, or list the pages. `--toc` lists a page's headings. See below. |
 
@@ -38,12 +39,28 @@ Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 | Code | Meaning |
 |---|---|
 | `0` | Success. Warnings do not change it. |
-| `1` | A parse failure, an `Error`-severity diagnostic, an I/O error, or a run-level refusal such as a `--target` the edition does not ship. |
-| `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`), or `cairn docs` was asked for a page or part the binary does not carry, for a title more than one part has, or for a `#fragment` together with a title or `--toc`. |
+| `1` | A parse failure, an `Error`-severity diagnostic, an I/O error, or a run-level refusal such as a `--target` the edition does not ship or a structure file `cairn install` refuses. |
+| `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`), or `cairn docs` was asked for a page or part the binary does not carry, for a title more than one part has, or for a `#fragment` together with a title or `--toc`, or `cairn install` found no `level.dat` in `--world` or no structure file it was named, or was given `--name` with more than one file or two files to install under one id. |
 
 A reader of stdout that stops early (`cairn lower f.crn | head -1`) does not change the code: output written after stdout has been closed is dropped, and the command exits as it would have with stdout open. This holds for stdout only: diagnostics go to stderr, and a stderr whose reader has gone still ends the run with a panic.
 
 A run-level refusal is reported on stderr and by the exit code in both output formats, never as an element of the `--format json` array: it is not a finding at a span in the file, and giving it a line number would put a position on a fact that has none. A `check --format json` consumer reads the verdict from the exit code and treats stderr as unstructured prose: an exit of `1` over an array with no `"severity": "error"` element is a run-level refusal, and nothing else reads that way ([lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/)).
+
+## `cairn install`
+
+`cairn install` copies the Java structure files `cairn compile --edition java` wrote into a world folder, each at `generated/<namespace>/structures/<name>.nbt`, where `/place template <namespace>:<name>` and a structure block load it:
+
+```sh
+cairn compile cottage.crn --edition java --target 1.21.4
+cairn install cottage.nbt --world ~/.minecraft/saves/MyWorld   # then /place template minecraft:cottage
+```
+
+The name is the file's name without `.nbt`, or `--name` for a single file, and may hold `/` between folders; the namespace is `--namespace`, `minecraft` by default. Each file is held to the version the world's `level.dat` records ([versioning-editions "Cross-version application"](https://cairn.kage1020.com/spec/versioning-editions/#cross-version-application)):
+
+- A file built for a newer version than the world is refused, `E_CROSS_VERSION_DOWNGRADE`, and `--allow-cross-version` does not change that.
+- A file built for an older version is refused, `E_CROSS_VERSION_UPGRADE`, unless `--allow-cross-version` is given. With it the file is installed byte for byte, keeping its own `DataVersion` so the game's DataFixer upgrades it as it loads, and `W_CROSS_VERSION_UPGRADE` warns that the upgrade can lose items, signs, paintings and block entities.
+
+Either refusal names the `--target` to recompile at. A file already at an id's path is refused, `E_STRUCTURE_EXISTS`, unless `--replace` is given. Every file is checked before any is written and they are written together, so a run that refuses one installs none; `--dry-run` checks the same and prints where each file would go. Only Java worlds are installed into: a Bedrock world, or a `.mcstructure`, is `E_INSTALL_EDITION_UNSUPPORTED`. A world open in the game keeps each structure it has looked up until `/reload`.
 
 ## `cairn docs`
 

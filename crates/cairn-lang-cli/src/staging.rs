@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 pub enum Kind {
     Artifact,
     Lockfile,
+    Structure,
 }
 
 impl fmt::Display for Kind {
@@ -18,6 +19,7 @@ impl fmt::Display for Kind {
         match self {
             Self::Artifact => f.write_str("artifact"),
             Self::Lockfile => f.write_str("lockfile"),
+            Self::Structure => f.write_str("structure file"),
         }
     }
 }

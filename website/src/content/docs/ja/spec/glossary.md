@@ -72,6 +72,8 @@ title: "用語集"
 - **`@edition` ガード (`@edition` guard)**: 本体の中の行で、その下にインデントした生のメンバーと Tier 0 の部品を 1 つのエディションのビルドだけに残します。本体の中で、行を 1 つのエディションのビルドだけに残す唯一の行で、意味層を囲むことはありません。[バージョンとエディション §10.7](/ja/spec/versioning-editions/#edition-ガードはエスケープハッチを囲む) を参照してください。
 - **Cairn のバージョンと MC のターゲット (Cairn version vs MC target)**: **別々の軸** です。書式ではなく、フィールド、フラグ、キーワードで区別します。文章の中で紛らわしいときは、`cairn:2026.06`、`mc:1.21.4` のように書きます。[仕様書の目次](/ja/spec/) と [バージョンとエディション](/ja/spec/versioning-editions/) を参照してください。
 - **変換せずに再コンパイルする (Recompile, don't transcode)**: 言語仕様は、バージョンやエディションをまたいだ NBT の可搬性を **保証しません**。新しいバージョンを対象にするときは、NBT を変換するのではなく、DSL を再コンパイルします。[バージョンとエディション §10.2](/ja/spec/versioning-editions/#102-言語の契約-変換ではなく再コンパイル) を参照してください。
+- **バージョンをまたいだ適用 (Cross-version application)**: あるバージョン向けにビルドした構造ファイルを、別のバージョンで保存したワールドに入れることです。ワールドより新しい構造は拒否し、古い構造は `--allow-cross-version` を付けたときだけ入れます。そのときファイルは自身の `DataVersion` を保ち、ゲームが読み込むときにアップグレードします。`cairn install` が両方を強制します。[バージョンとエディション](/ja/spec/versioning-editions/#バージョンをまたいだ適用) を参照してください。
+- **構造 ID (Structure id)**: `/place template` とストラクチャーブロックが構造を読み込むときの `namespace:name` で、Java のワールドの `generated/<namespace>/structures/<name>.nbt` から読み込まれます。`cairn install` は、名前をファイル名か `--name` から、名前空間を `--namespace` (既定は `minecraft`) から取ります。[バージョンとエディション](/ja/spec/versioning-editions/#バージョンをまたいだ適用) を参照してください。
 
 ## エコシステム連携
 

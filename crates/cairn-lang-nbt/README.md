@@ -13,7 +13,9 @@ Both writers ship. The full tag taxonomy (`Byte` through `LongArray`), an `Index
 
 Each uncompressed writer also has a streaming form, which writes a root compound entry by entry instead of from a built tree: a list declares its length up front and takes its items one at a time, so a list with an entry per voxel never has to be in memory. It goes through the same encoder core, so a streamed root is the bytes the tree writer writes for the same tags.
 
-The streaming reader is still to land. It is what the reverse direction needs — reading large files such as Litematica regions and structure blocks split across many chunks — so no `.nbt` → IR path exists until it does.
+Both readers ship too, as one endian-parameterised decoder. A read builds the root entries its caller names and skips the rest without building them, so the `DataVersion` of a structure file with a compound per voxel costs no more than the file's bytes to find. It refuses what the game refuses: nesting past 512 levels, a negative length, a list of untyped items, a string that is not the dialect's encoding (Modified UTF-8 on Java, UTF-8 on Bedrock). What it builds is held to a byte budget the caller gives, and nesting is followed on the heap rather than the stack, so a hostile file is refused instead of exhausting either.
+
+A streaming reader, one that hands a large list to its caller an item at a time, is still to land. It is what the reverse direction needs — turning large files such as Litematica regions and structure blocks split across many chunks back into the IR — so no `.nbt` → IR path exists until it does.
 
 ## Public API
 
@@ -30,6 +32,12 @@ Every item the crate root re-exports, and nothing else — the same rule [`cairn
 | `java::stream_java_uncompressed` / `bedrock::stream_bedrock_uncompressed` | Streaming twins of the two uncompressed writers: a closure writes the root's entries through a `CompoundStream`. Same bytes as the tree writer for the same tags. For gzip, wrap the writer in an encoder at `Compression::default()`; no `flate2` type is in this crate's signatures. |
 | `stream::CompoundStream` | A compound being written: `tag` appends a named tag, `compound_tag` a compound the caller holds, `compound` and `list` open a nested one. `TAG_End` is written when the closure returns successfully. A key named twice is written twice. |
 | `stream::ListStream` | A list being written after its declared length: `item`, `compound` and `list` append one item each. An empty list declares `TAG_End`, as `List::of_tags` does. Writing a number of items other than the declared length panics; a wrong item type is refused before any of its bytes, so it returns `HeterogeneousList` instead. |
+| `java::read_java_uncompressed` / `java::read_java_gzip` | Read a big-endian root, raw or gzip-wrapped (concatenated gzip members included, as Java reads them), into an `NbtRoot`. |
+| `bedrock::read_bedrock_uncompressed` | Read a little-endian root, the `.mcstructure` form and the payload of a Bedrock `level.dat`. |
+| `read::ReadOptions` | What a read keeps: the root entries to build by name, or all of them, and the most bytes the built tree may take. |
+| `read::NbtRoot` | A read's result: the root's name, the entries it built, and the name and tag id of each one it skipped. |
+| `read::MAX_DEPTH` | 512, the deepest a read follows compounds and lists, the game's own limit. |
+| `read::NbtReadError` | `RootNotCompound`, `UnknownTagId`, `NegativeLength`, `UntypedList`, `TooDeep`, `TooLarge`, `InvalidString`, `Truncated`, `Io`. `#[non_exhaustive]`. |
 | `tag::check_string` | Whether a string can be written as an NBT string, by the rule the writers apply: the error they would raise, ahead of the write. |
 | `java::NbtIoError` | `InvalidString`, `HeterogeneousList`, `EmptyListWithElementType`, `LengthOverflow`, `Io`. `#[non_exhaustive]`. |
 
