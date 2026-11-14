@@ -153,6 +153,11 @@ name (`E_INVALID_STRUCT_NAME` when that name spells such a device), and every wa
 case, are `E_OUTPUT_NAME_COLLISION`: a `place` named after a `struct`, or one `id=` placed in two
 sites, is refused rather than written over the other.
 
+`cairn compile --structure-format litematic` writes a site as one `.litematic` named after the site
+instead, each placement and walkway a region in it named as its `.nbt` file would be. A `struct`
+named after a site would write the same file, and the compile refuses it
+([§12.1.1](/spec/ecosystem-interop/#1211-litematica)).
+
 The world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
 the lockfile, by default `<source>.lock` beside the source (`village.crn.lock` for `village.crn`),
 under `placements`, so a downstream consumer can rebuild the layout without re-running the

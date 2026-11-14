@@ -7,6 +7,7 @@ use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
 use cairn_lang_formats::java_structure::{JavaStructure, OutputExt, prepare_structure};
+use cairn_lang_formats::litematic::Litematic;
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
@@ -94,10 +95,11 @@ pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
         .collect()
 }
 
-/// A structure its edition's backend has checked, waiting to be written.
+/// A structure file its backend has checked, waiting to be written.
 pub(crate) enum PreparedStructure<'a> {
     Java(JavaStructure<'a>),
     Bedrock(McStructure<'a>),
+    Litematic(Litematic<'a>),
 }
 
 impl PreparedStructure<'_> {
@@ -105,6 +107,7 @@ impl PreparedStructure<'_> {
         let encoded = match self {
             PreparedStructure::Java(structure) => structure.write_gzip(writer),
             PreparedStructure::Bedrock(structure) => structure.write(writer),
+            PreparedStructure::Litematic(schematic) => schematic.write_gzip(writer),
         };
         encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }

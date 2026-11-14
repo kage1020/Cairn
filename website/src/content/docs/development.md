@@ -28,7 +28,7 @@ Each crate maps back to the spec chapter it implements:
 | [`cairn-lang-core`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-core/README.md) | Parser, IR, resolver, lint | lib |
 | [`cairn-lang-cli`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-cli/README.md) | The `cairn` binary | bin |
 | [`cairn-lang-nbt`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-nbt/README.md) | Java / Bedrock NBT codec | lib |
-| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.mcstructure` writers, registry packs, portability | lib |
+| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.litematic` / `.mcstructure` writers, a `.litematic` reader, registry packs, portability | lib |
 | [`cairn-lang-redstone`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-redstone/README.md) | Logic synthesis, place-and-route, and the tick simulator that checks a circuit against its assertions | lib |
 | [`cairn-lang-lsp`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-lsp/README.md) | Language Server Protocol | lib + bin |
 | [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) | WebAssembly bindings | cdylib + rlib |
@@ -251,11 +251,15 @@ there is nothing to gain by skipping ahead.
 ## Adding a format backend
 
 Format support lives in `cairn-lang-formats`. A new file type needs a writer from the block-array IR
-to bytes. Importing it, the reverse direction, needs two more things, and no format has them yet:
+to bytes, streamed so its peak memory does not grow with the volume (`tests/writer_memory.rs`).
+Importing it, the reverse direction, needs two more things:
 
-1. A reader from bytes to the block-array IR.
+1. A reader from bytes to voxels, built on `cairn-lang-nbt`'s pull reader so one region or one
+   list item is in memory at a time. `.litematic` has one, returning each region as a
+   `BlockVolume`.
 2. An `(edition, version)` provenance stamp on import
-   ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)).
+   ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)), which no
+   format has yet.
 
 If you find yourself reaching into `cairn-lang-core` to add format-specific fields, format concerns
 are leaking into the block-array IR. Discuss it before merging.

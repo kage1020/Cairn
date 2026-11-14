@@ -4,7 +4,26 @@ title: "12. エコシステム連携と逆変換"
 
 ## 12.1 順方向の変換
 
-block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem` / `.mcstructure` が出力されます ([アーキテクチャ](/ja/spec/architecture/))。各形式はシリアライザで、既存の形式は、ピボットの周りに追加するバックエンドという位置付けです。現在あるのは `.nbt` と `.mcstructure` のシリアライザだけで、`cairn compile` は Java には `.nbt` を、Bedrock には `.mcstructure` を書き出します。
+block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem` / `.mcstructure` が出力されます ([アーキテクチャ](/ja/spec/architecture/))。各形式はシリアライザで、既存の形式は、ピボットの周りに追加するバックエンドという位置付けです。現在あるのは `.nbt`、`.litematic`、`.mcstructure` のシリアライザで、`.schem` のものはまだありません。
+
+`cairn compile --edition bedrock` は `.mcstructure` を書き出します。`--edition java` は `.nbt` を書き出すか、`--structure-format` が指定した形式で書き出します。
+
+| `--structure-format` | 書き出すもの | `site` の書き出し方 |
+|---|---|---|
+| `nbt` (既定) | struct、配置、通路ごとに 1 つのバニラ構造ファイル | 配置ごと、通路ごとに 1 ファイル ([§9.3.4](/ja/spec/components-editing-sites/#934-出力ファイル名)) |
+| `litematic` | struct ごと、site ごとに 1 つの Litematica schematic ([§12.1.1](#1211-litematica)) | 1 ファイルにまとめ、配置ごと、通路ごとに 1 つのリージョン |
+
+形式で変わるのはファイルだけです。block array は同じで、成果物は同じ規則で名付け、同じ衝突で拒否し、ロックファイルはもう一方の形式が書き出すものとバイト単位で同じです。Bedrock の構造形式は 1 つだけなので、`--edition bedrock` と一緒に `--structure-format` を指定すると使い方の誤り (終了コード 2) になり、ソースを読む前に拒否します。
+
+### 12.1.1 Litematica
+
+`.litematic` は、Litematica が保存して読み込む、gzip で包んだ Java の NBT です。struct はそれだけで 1 ファイルになり、struct の名前を付けて (`cottage.litematic`)、原点に 1 つのリージョンを置きます。site は site の名前を付けた 1 ファイル (`hamlet.litematic`) になり、配置ごと、通路ごとに 1 つのリージョンを、ソルバーが決めた原点に置きます。この原点はロックファイルに記録するものです。リージョンには、その配列を `.nbt` に書き出すときのファイル名を付けます (`home1`、`hamlet_walkway_home1_entry__home2_entry`)。これは取り込みが来歴として残す形です ([§12.4](#124-取り込み時の記録と落とし穴))。site のリージョンは、読み戻すとその配置になります。同じ名前の site と struct は 1 つのファイルに書き出すことになるので、`.nbt` のファイル名が重なる 2 つを拒否するのと同じく、何も書き出す前に拒否します。
+
+ルートには次のものを入れます。
+
+- `MinecraftDataVersion` はターゲットの DataVersion、`Version` はそのリリース向けの Litematica が読める schematic のバージョンで、1.20.5 の DataVersion (3837) より前なら 6、それ以降なら 7 です。`SubVersion` は 1 です。
+- `Metadata`: ファイルの名前にあたる `Name`、ソースには作者を書かないので `Cairn` とする `Author`、空の `Description`、`RegionCount`、リージョンのボクセル数を合計した `TotalVolume`、そのうち air、cave air、void air 以外の数を数えた `TotalBlocks`、すべてのリージョンを囲む箱の大きさの `EnclosingSize` です。作成時刻、更新時刻、プレビュー画像は入れません。そのため、同じソースからは常に同じバイト列が書き出されます。
+- `Regions`: 各リージョンには、最小の角にあたる `Position` と、どの軸も正の `Size` を入れます。`BlockStatePalette` には、リージョンのブロック状態を air を先頭にして並べ、どの DataVersion でも `Name` と `Properties` のキーで書きます。構造ファイルが `id` と `properties` に切り替わる版でも、Litematica はこのキーのままだからです。`BlockStates` には、各ボクセルのパレット番号を `(y, z, x)` の順に、最大の番号に必要なビット数 (2 ビット以上) で、各 long の下位から詰めます。1 つの long の残りに収まらない番号は、次の long にまたがります。`TileEntities` には、各ブロックエンティティを `.nbt` の書き出しが `nbt` に書くのと同じ形で入れ、リージョンの角からの `x`、`y`、`z` を加えます。`Entities`、`PendingBlockTicks`、`PendingFluidTicks` は空です。
 
 ## 12.2 逆方向の変換: コンパイラは写し取り、LLM がリフトする
 

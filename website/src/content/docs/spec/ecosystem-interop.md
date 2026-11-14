@@ -6,8 +6,51 @@ title: "12. Ecosystem Interop and Reverse Conversion"
 
 Serializing the block-array IR emits `.nbt`, `.litematic`, `.schem`, and `.mcstructure`
 ([Architecture](/spec/architecture/)). Each format is a serializer, and an existing format is one
-more backend around the pivot. Only the `.nbt` and `.mcstructure` serializers exist today:
-`cairn compile` writes `.nbt` for Java and `.mcstructure` for Bedrock.
+more backend around the pivot. The `.nbt`, `.litematic` and `.mcstructure` serializers exist today,
+and the `.schem` one does not yet.
+
+`cairn compile --edition bedrock` writes `.mcstructure`. `--edition java` writes `.nbt`, or the
+format `--structure-format` names:
+
+| `--structure-format` | Writes | A `site` becomes |
+|---|---|---|
+| `nbt` (the default) | a vanilla structure file per struct, placement and walkway | a file per placement and per walkway ([§9.3.4](/spec/components-editing-sites/#934-output-naming)) |
+| `litematic` | a Litematica schematic per struct and per site ([§12.1.1](#1211-litematica)) | one file, with a region per placement and per walkway |
+
+The format changes the files and nothing else. The block array is the same, an artifact is named by
+the same rule and refused on the same collisions, and the lockfile is the one the other format
+writes, byte for byte. Bedrock has one structure format, so `--structure-format` with
+`--edition bedrock` is a usage error, exit 2, refused before the source is read.
+
+### 12.1.1 Litematica
+
+A `.litematic` is the gzip-wrapped Java NBT that Litematica saves and loads. A struct is a file of
+its own, named after the struct (`cottage.litematic`), with one region at the origin. A site is one
+file named after the site (`hamlet.litematic`), with a region per placement and per walkway, each at
+the origin the solver gave it, which the lockfile records. A region is named after the `.nbt` file
+its array would be (`home1`, `hamlet_walkway_home1_entry__home2_entry`). This is the shape the
+reverse direction keeps as provenance ([§12.4](#124-import-stamping-and-pitfalls)): a site's regions
+read back as its placements. A site and a struct that share a name would write one file, and the
+compile refuses the pair before writing anything, as it refuses two `.nbt` files of one name.
+
+The root holds:
+
+- `MinecraftDataVersion`, the target's DataVersion, and `Version`, the schematic version a
+  Litematica for that release reads: 6 below 1.20.5's DataVersion (3837), and 7 from it.
+  `SubVersion` is 1.
+- `Metadata`: `Name`, the file's stem; `Author`, `Cairn`, since a source names no author; an empty
+  `Description`; `RegionCount`; `TotalVolume`, the regions' voxels; `TotalBlocks`, those that are
+  not air, cave air or void air; and `EnclosingSize`, the box around every region. The times the
+  file was created and modified and its preview image are left out, so a source always compiles to
+  the same bytes.
+- `Regions`, each with `Position`, its minimum corner, and `Size`, positive on every axis.
+  `BlockStatePalette` lists the region's block states with air first, under `Name` and `Properties`
+  at every DataVersion, since Litematica keeps those keys where structure files turn to `id` and
+  `properties`. `BlockStates` packs each voxel's palette index, in `(y, z, x)` order, into as many
+  bits as the largest index needs, and at least 2, from the low end of each long. An index that
+  does not fit what is left of one long runs on into the next. `TileEntities` holds each block
+  entity as the `.nbt` writer writes its `nbt`, with its `x`, `y` and `z` from the region's corner.
+  `Entities`, `PendingBlockTicks` and `PendingFluidTicks` are empty.
 
 ## 12.2 Reverse direction: the compiler transliterates, an LLM lifts
 

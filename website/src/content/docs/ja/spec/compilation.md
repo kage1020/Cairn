@@ -54,6 +54,8 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 
 `--edition` は必須で、`--target` だけを指定すると拒否されます。同じ「1.21」でも、Java と Bedrock では意味が違います。Java の DataVersion と Bedrock の block_version にも関係はありません。
 
+ファイル形式はターゲットに含まれません。`--structure-format` は Java の形式のどれかを選び、書き出すファイルを変えますが、block array とロックファイルは変えません ([§12.1](/ja/spec/ecosystem-interop/#121-順方向の変換))。
+
 ## 4.3 切妻屋根のボクセル規則
 
 `roof kind=gable [overhang=N] mat_slot=...` は、棟で向かい合わせに出会う 2 つの階段の斜面になります。
