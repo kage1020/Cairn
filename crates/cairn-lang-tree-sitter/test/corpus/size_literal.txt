@@ -1,12 +1,24 @@
 ==================
-Space around x is not size
-:error
+Space around x is not size, so a header keeps the integer and two bare values
 ==================
 
 @cairn 2026.06
 struct s size=9 x 7
 
 ---
+
+(source_file
+  (directive
+    (directive_name)
+    (directive_literal))
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (integer))
+      (identifier)
+      (integer))))
 
 ==================
 A space after x leaves three values, not a size

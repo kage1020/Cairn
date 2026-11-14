@@ -372,6 +372,83 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     (
+        "theme_header_args",
+        "theme t dark=1:\n  slot a -> @b\n",
+        Reject,
+    ),
+    // -- bare values on the lines that are not members ---------------
+    (
+        "struct_header_dropped_equals",
+        "struct s size 3x3\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "def_header_dropped_equals",
+        "def d size 3x3:\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "header_bare_value_before_an_argument",
+        "struct s 9x7 size=3x3 tall:\n  floor a=1\n",
+        Accept,
+    ),
+    (
+        "slot_row_bare_value",
+        "theme t:\n  slot a -> @b @c\n",
+        Accept,
+    ),
+    ("slot_row_args", "theme t:\n  slot a -> @b c=1\n", Reject),
+    (
+        "selector_rule_dropped_equals",
+        "theme t:\n  window[side=front] -> mat_slot glass\n",
+        Accept,
+    ),
+    (
+        "selector_rule_bare_value_among_bindings",
+        "theme t:\n  window[side=front] -> a=1 [b] c=@d\n",
+        Accept,
+    ),
+    (
+        "assert_truth_bare_value",
+        "struct s size=3x3\n  assert truth(a.b -> c.d) { 0 -> 1 } strict\n",
+        Accept,
+    ),
+    (
+        "assert_always_bare_value",
+        "struct s size=3x3\n  assert always(a.b -> eventually c.d within 4) twice\n",
+        Accept,
+    ),
+    (
+        "assert_latency_bare_values",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= 4 ticks 2\n",
+        Accept,
+    ),
+    (
+        "assert_latency_args",
+        "struct s size=3x3\n  assert latency(a.b -> c.d) <= 4 ticks=2\n",
+        Reject,
+    ),
+    (
+        "logic_dropped_equals",
+        "struct s size=3x3\n  logic s.out a.b and not c.d\n",
+        Accept,
+    ),
+    (
+        "logic_dropped_equals_before_a_call",
+        "struct s size=3x3\n  logic s.out latch(set=a.b, reset=c.d)\n",
+        Accept,
+    ),
+    (
+        "logic_dropped_equals_before_parentheses",
+        "struct s size=3x3\n  logic s.out (a.b or c.d)\n",
+        Accept,
+    ),
+    (
+        "logic_name_alone",
+        "struct s size=3x3\n  logic s.out\n",
+        Reject,
+    ),
+    (
         "top_level_unknown",
         "widget w\n  floor mat_slot=f\n",
         Reject,
@@ -872,27 +949,21 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  slot a-b -> @c\n",
         Reject,
     ),
-    // A header refuses any trailing token; `size_with_a_third_extent` is where the size rule is.
+    // A header keeps a bare value after its arguments, as a member line does.
     (
-        "a_header_refuses_a_trailing_token",
-        "struct s size=2x2x9\n  floor a=1\n",
-        Reject,
-    ),
-    (
-        "a_header_refuses_a_trailing_token_whatever_it_is",
+        "a_header_keeps_a_trailing_bare_value",
         "struct s size=2x2 junk\n  floor a=1\n",
-        Reject,
+        Accept,
     ),
     (
         "size_spaced",
         "struct s size=9 x 7\n  floor mat_slot=f\n",
-        Reject,
+        Accept,
     ),
-    // Refused left of the separator, which is scanned before any run of spaces.
     (
         "size_space_before_x",
         "struct s size=9 x7\n  floor mat_slot=f\n",
-        Reject,
+        Accept,
     ),
     // No size at all: an `x` with no digit behind it ends the number in both parsers, so the `x`
     // and the `2` are positional values.
@@ -936,11 +1007,10 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor size=2x-1\n",
         Reject,
     ),
-    // A header refuses any trailing bare token, as it refuses `size=2x2 junk`.
     (
         "size_separator_before_a_space_in_a_header",
         "struct s size=2x 2\n  floor a=1\n",
-        Reject,
+        Accept,
     ),
     // A string ends at the first quote and never spans a line.
     (
@@ -1587,6 +1657,12 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
         Accept,
     ),
+    // On a header, the grammar reads `x9` as a bare value after the size.
+    (
+        "size_with_a_third_extent_in_a_header",
+        "struct s size=2x2x9\n  floor a=1\n",
+        Accept,
+    ),
     // The grammar's coordinate ends at `3` and reads `x4` as a positional word.
     (
         "coordinate_running_into_a_size",
@@ -1599,6 +1675,19 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "truth_row_wider_than_the_input_list",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 00 -> 1 }\n",
         Accept,
+    ),
+    // -- a bare value on a header that takes no argument -----------------
+    // Core reports it as `E_UNEXPECTED_POSITIONAL`. Taking it here would let error recovery read an
+    // over-indented first body line into the header and lose the header with it.
+    (
+        "site_header_bare_value",
+        "site s extra:\n  place id=a\n",
+        Reject,
+    ),
+    (
+        "theme_header_bare_value",
+        "theme t dark:\n  slot a -> @b\n",
+        Reject,
     ),
     // -- a state literal naming one property twice ----------------------
     // Comparing two property names' text is beyond a context-free grammar.

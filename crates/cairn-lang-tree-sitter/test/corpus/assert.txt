@@ -447,3 +447,59 @@ struct s size=3x3
   }
 
 ---
+
+==================
+Assertions with bare values after their forms (field labels)
+==================
+
+struct s
+  assert truth(a.b -> c.d) { 0 -> 1; 1 -> 0 } strict
+  assert always(a.b -> eventually c.d within 4) twice
+  assert latency(a.b -> c.d) <= 4 ticks
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    body: (struct_body
+      (assert_stmt
+        (truth_form
+          inputs: (signal_list
+            (signal_ref
+              (identifier)
+              (identifier)))
+          output: (signal_ref
+            (identifier)
+            (identifier))
+          (truth_row
+            inputs: (bit_pattern)
+            output: (bit))
+          (truth_row
+            inputs: (bit_pattern)
+            output: (bit)))
+        positional: (positional_list
+          (identifier)))
+      (assert_stmt
+        (temporal_form
+          (temporal_expr
+            trigger: (signal_ref
+              (identifier)
+              (identifier))
+            target: (signal_ref
+              (identifier)
+              (identifier))
+            bound: (integer)))
+        positional: (positional_list
+          (identifier)))
+      (assert_stmt
+        (latency_form
+          from: (signal_ref
+            (identifier)
+            (identifier))
+          to: (signal_ref
+            (identifier)
+            (identifier))
+          bound: (integer))
+        positional: (positional_list
+          (identifier))))))
