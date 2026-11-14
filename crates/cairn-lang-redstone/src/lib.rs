@@ -1,3 +1,7 @@
+//! This crate's Rust API is in the
+//! [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no
+//! promise: any release may change it.
+//!
 //! Redstone for Cairn: lowers the Intent IR's `logic` to a Logic IR and a netlist, then places,
 //! routes, buffers and legalizes it under the struct, in the order of `spec/redstone`
 //! "Place-and-route".

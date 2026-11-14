@@ -4,13 +4,23 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// A workspace member as `cargo metadata` reports it.
+#[derive(Debug, PartialEq, Eq)]
 pub struct Member {
     pub name: String,
     /// The directory holding its `Cargo.toml`, relative to the repository root.
     pub dir: PathBuf,
     /// Its library and binary crate roots, relative to the repository root.
     pub roots: Vec<PathBuf>,
+    /// Its library crate root, relative to the repository root, when it has a library.
+    pub library: Option<PathBuf>,
+    /// Its README, relative to the repository root, when it has one.
+    pub readme: Option<PathBuf>,
+    /// Whether `cargo publish` may publish it.
+    pub published: bool,
 }
+
+/// The `kind`s `cargo metadata` gives a library target: its crate types.
+const LIBRARY_KINDS: &[&str] = &["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"];
 
 pub struct Repo {
     pub root: PathBuf,
@@ -113,46 +123,134 @@ impl Repo {
         }
         let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
             .map_err(|error| format!("cargo metadata printed invalid JSON: {error}"))?;
-        let mut members = Vec::new();
-        for package in metadata["packages"].as_array().into_iter().flatten() {
-            let (Some(name), Some(manifest)) =
-                (package["name"].as_str(), package["manifest_path"].as_str())
-            else {
-                return Err("cargo metadata lists a package without a name or manifest".into());
-            };
-            let relative = |path: &str| {
-                Path::new(path)
-                    .strip_prefix(&self.root)
-                    .map(Path::to_path_buf)
-                    .map_err(|_| format!("{path} is outside {}", self.root.display()))
-            };
-            let dir = relative(manifest)?
-                .parent()
-                .ok_or_else(|| format!("{manifest} has no parent directory"))?
-                .to_path_buf();
-            let mut roots = Vec::new();
-            for target in package["targets"].as_array().into_iter().flatten() {
-                let crate_root = target["kind"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .any(|kind| kind == "lib" || kind == "bin");
-                if crate_root && let Some(src) = target["src_path"].as_str() {
-                    roots.push(relative(src)?);
-                }
-            }
-            members.push(Member {
-                name: name.to_owned(),
-                dir,
-                roots,
-            });
-        }
+        let mut members = metadata["packages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|package| member(package, &self.root))
+            .collect::<Result<Vec<_>, _>>()?;
         members.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(members)
     }
 }
 
+/// The member an entry of `cargo metadata`'s `packages` describes, in the workspace at `root`.
+fn member(package: &serde_json::Value, root: &Path) -> Result<Member, String> {
+    let (Some(name), Some(manifest)) =
+        (package["name"].as_str(), package["manifest_path"].as_str())
+    else {
+        return Err("cargo metadata lists a package without a name or manifest".into());
+    };
+    let relative = |path: &str| {
+        Path::new(path)
+            .strip_prefix(root)
+            .map(Path::to_path_buf)
+            .map_err(|_| format!("{path} is outside {}", root.display()))
+    };
+    let dir = relative(manifest)?
+        .parent()
+        .ok_or_else(|| format!("{manifest} has no parent directory"))?
+        .to_path_buf();
+    let mut roots = Vec::new();
+    let mut library = None;
+    for target in package["targets"].as_array().into_iter().flatten() {
+        let kinds: Vec<&str> = target["kind"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        let is_library = kinds.iter().any(|kind| LIBRARY_KINDS.contains(kind));
+        if (is_library || kinds.contains(&"bin"))
+            && let Some(src) = target["src_path"].as_str()
+        {
+            let src = relative(src)?;
+            if is_library {
+                library = Some(src.clone());
+            }
+            roots.push(src);
+        }
+    }
+    Ok(Member {
+        name: name.to_owned(),
+        readme: package["readme"].as_str().map(|readme| dir.join(readme)),
+        dir,
+        roots,
+        library,
+        // `publish = false` lists no registry, and `null` allows every one.
+        published: package["publish"]
+            .as_array()
+            .is_none_or(|registries| !registries.is_empty()),
+    })
+}
+
 /// The 1-based line of a byte offset into `text`.
 pub fn line_of(text: &str, offset: usize) -> usize {
     text[..offset].matches('\n').count() + 1
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_library_of_any_crate_type_is_the_members_library_and_a_root() {
+        let package = json!({
+            "name": "a",
+            "manifest_path": "/w/crates/a/Cargo.toml",
+            "publish": null,
+            "readme": "docs/README.md",
+            "targets": [
+                {"kind": ["cdylib", "rlib"], "src_path": "/w/crates/a/src/lib.rs"},
+                {"kind": ["bin"], "src_path": "/w/crates/a/src/main.rs"},
+                {"kind": ["test"], "src_path": "/w/crates/a/tests/t.rs"},
+                {"kind": ["custom-build"], "src_path": "/w/crates/a/build.rs"},
+            ],
+        });
+        assert_eq!(
+            member(&package, Path::new("/w")),
+            Ok(Member {
+                name: "a".to_owned(),
+                dir: PathBuf::from("crates/a"),
+                roots: vec![
+                    PathBuf::from("crates/a/src/lib.rs"),
+                    PathBuf::from("crates/a/src/main.rs"),
+                ],
+                library: Some(PathBuf::from("crates/a/src/lib.rs")),
+                readme: Some(PathBuf::from("crates/a/docs/README.md")),
+                published: true,
+            })
+        );
+    }
+
+    #[test]
+    fn publish_false_is_an_empty_list_of_registries() {
+        let package = |publish| {
+            json!({
+                "name": "x",
+                "manifest_path": "/w/x/Cargo.toml",
+                "publish": publish,
+                "targets": [{"kind": ["bin"], "src_path": "/w/x/src/main.rs"}],
+            })
+        };
+        let unpublished = Member {
+            name: "x".to_owned(),
+            dir: PathBuf::from("x"),
+            roots: vec![PathBuf::from("x/src/main.rs")],
+            library: None,
+            readme: None,
+            published: false,
+        };
+        assert_eq!(
+            member(&package(json!([])), Path::new("/w")),
+            Ok(unpublished)
+        );
+        assert!(
+            member(&package(json!(["internal"])), Path::new("/w"))
+                .unwrap()
+                .published
+        );
+    }
 }

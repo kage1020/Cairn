@@ -1,3 +1,7 @@
+//! This crate's Rust API is in the
+//! [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no
+//! promise: any release may change it.
+//!
 //! Core of the Cairn language: lexer, parser, AST, Intent IR, `check`, and the passes that
 //! resolve intent down to the block-array IR.
 
