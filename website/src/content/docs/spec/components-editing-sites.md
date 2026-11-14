@@ -4,9 +4,6 @@ title: "9. Components, Editing, and Multi-building"
 
 ## 9.1 `def`, the component construct
 
-**Subject to change.** A header's `class=` is accepted, but no pass reads it yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
 `def` defines a slot-bearing Component, unified with `theme` and `site` by the same mechanism, so
 the reference system does not fracture across editing, theming, and multi-building.
 
@@ -15,13 +12,13 @@ Parameterization (variable size and so on) is allowed; recursion is forbidden. A
 ([Versioning and Editions](/spec/versioning-editions/)).
 
 Until a parameter mechanism is specified, the header vocabulary is closed. A `def` header takes
-`size=`, which lowering reads, and `class=`, which no pass reads yet, and a `struct` header takes
-the same two. Any other key on either is refused as `E_UNKNOWN_ARGUMENT`, and a header `class=` is
-reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), so the sample
-below carries that warning.
+`size=`, which lowering reads, and nothing else, and a `struct` header takes the same. Any other
+key on either is refused as `E_UNKNOWN_ARGUMENT`. A key every member takes, `id=`, `class=` or
+`mat_slot=`, is one of them: it belongs to a member, so it goes on a line in the body, as
+`class=outer` does on the `walls` below ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 ```
-def cottage class=house size=9x7:
+def cottage size=9x7:
   floor  id=floor mat_slot=floor
   walls  id=walls class=outer mat_slot=wall height=4
   door   id=door  class=entry side=front at=center
@@ -171,8 +168,7 @@ and roof ports, and ports on level-scoped members, are reserved for a future ext
 `front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` ([§9.3.1](#931-coordinate-convention)).
 The wall-local offset comes from:
 
-- a `door`'s `at=` value of `center`, `left`, or `right` ([§5.4](/spec/syntax/#54-selectors)). Numeric
-  offsets are reserved.
+- a `door`'s column, from its `at=` anchor or its `offset=` ([§5.4](/spec/syntax/#54-selectors)).
 - a `window`'s geometric centre, `offset + size.w / 2`, with an absent `offset=` read as `0` the
   way the cut reads it.
 

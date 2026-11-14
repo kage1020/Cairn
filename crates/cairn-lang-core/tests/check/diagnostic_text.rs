@@ -117,12 +117,9 @@ fn the_corpus_reaches_the_header_vocabulary_prose() {
             "`siz=` is not an argument a `struct` header reads",
         ),
         (
-            "W_IGNORED_ARGUMENT primary",
-            "`class=` is an argument a `def` header takes and no pass reads yet",
-        ),
-        (
-            "W_IGNORED_ARGUMENT note 0",
-            "the `def` is built without it — remove the argument",
+            "E_UNKNOWN_ARGUMENT note 1",
+            "`class=` is a member's key, written on a line in the body; remove it from the `def` \
+             header",
         ),
     ] {
         assert!(
@@ -360,7 +357,7 @@ fn circuit_under_level_sources() -> Vec<String> {
     ]
 }
 
-/// The sources for a misspelled header `size=` and the unread `class=`.
+/// The sources for a misspelled header `size=` and a member's `class=` on a header.
 fn header_sources() -> Vec<String> {
     vec![
         format!("{THEME}struct s siz=7x7\n  floor mat_slot=floor\n"),

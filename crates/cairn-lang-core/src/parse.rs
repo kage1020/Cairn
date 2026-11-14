@@ -9,7 +9,7 @@ use crate::ast::{
 use crate::calver::future_version_note;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition::Edition;
-use crate::error::{IntContext, ParseError, Position};
+use crate::error::{IntContext, LexError, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
 use crate::logic_library::{CallSignature, LogicPrimitive, Notation, StageCount, infix_rank_above};
@@ -409,6 +409,7 @@ impl<'a> Parser<'a> {
 
     fn parse_theme_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
+        let (_, positional) = self.parse_line_tail(Some("a `theme` header"))?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let mut requires = Vec::new();
@@ -446,6 +447,7 @@ impl<'a> Parser<'a> {
         Ok(Item::Theme {
             name,
             name_span,
+            positional,
             requires,
             body,
             span,
@@ -463,9 +465,15 @@ impl<'a> Parser<'a> {
                 return Err(self.block_id_in_a_slot_row());
             }
             let value = self.parse_value()?;
+            let (_, positional) = self.parse_line_tail(Some("a `slot` row"))?;
             let span = start_byte..self.last_byte();
             self.expect_newline()?;
-            return Ok(ThemeRule::Slot { slot, value, span });
+            return Ok(ThemeRule::Slot {
+                slot,
+                value,
+                positional,
+                span,
+            });
         }
         // Selector form: KEYWORD '[' attrs ']' '->' key=value (key=value)*
         let attrs = if self.peek_is(&TokenKind::LBracket) {
@@ -480,23 +488,21 @@ impl<'a> Parser<'a> {
             });
         };
         self.expect(&TokenKind::Arrow)?;
-        let mut bindings = Vec::new();
-        while !self.peek_is(&TokenKind::Newline) && !self.at_eof() {
-            bindings.push(self.parse_arg()?);
-        }
+        let (bindings, positional) = self.parse_line_tail(None)?;
         let span = start_byte..self.last_byte();
         self.expect_newline()?;
         Ok(ThemeRule::Selector {
             keyword: kw,
             attrs,
             bindings,
+            positional,
             span,
         })
     }
 
     fn parse_def_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
-        let args = self.parse_header_args_until_eol()?;
+        let (args, positional) = self.parse_line_tail(None)?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let (requires, body) = self.parse_optional_command_body(RequiresPolicy::Accepted)?;
@@ -505,6 +511,7 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             args,
+            positional,
             requires,
             body,
             span,
@@ -513,6 +520,7 @@ impl<'a> Parser<'a> {
 
     fn parse_site_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
+        let (_, positional) = self.parse_line_tail(Some("a `site` header"))?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
@@ -520,6 +528,7 @@ impl<'a> Parser<'a> {
         Ok(Item::Site {
             name,
             name_span,
+            positional,
             body,
             span,
         })
@@ -527,7 +536,7 @@ impl<'a> Parser<'a> {
 
     fn parse_struct_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
-        let args = self.parse_header_args_until_eol()?;
+        let (args, positional) = self.parse_line_tail(None)?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
@@ -536,6 +545,7 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             args,
+            positional,
             body,
             span,
         })
@@ -788,11 +798,23 @@ impl<'a> Parser<'a> {
 
     fn parse_logic_command(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
         let lhs = self.parse_dotted_ref()?;
-        self.expect(&TokenKind::Eq)?;
+        // With its `=` dropped, the line still reads the expression it would have bound.
+        let binds = !matches!(
+            self.peek().map(|t| &t.kind),
+            Some(TokenKind::Ident(_) | TokenKind::LParen)
+        );
+        if binds {
+            self.expect(&TokenKind::Eq)?;
+        }
         let rhs = self.parse_expr()?;
         let span = start_byte..self.last_byte();
         self.expect_operand_end(&[TokenKind::Newline])?;
-        Ok(Statement::Logic { lhs, rhs, span })
+        Ok(Statement::Logic {
+            lhs,
+            rhs,
+            binds,
+            span,
+        })
     }
 
     fn parse_assert_command(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
@@ -899,11 +921,13 @@ impl<'a> Parser<'a> {
         }
         self.expect(&TokenKind::RBrace)?;
         let span = start_byte..self.last_byte();
+        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
         self.expect_newline()?;
         Ok(Statement::AssertTruth {
             inputs,
             output,
             rows,
+            positional,
             span,
         })
     }
@@ -940,11 +964,13 @@ impl<'a> Parser<'a> {
                 })?;
         self.expect(&TokenKind::RParen)?;
         let span = start_byte..self.last_byte();
+        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
         self.expect_newline()?;
         Ok(Statement::AssertAlways {
             antecedent,
             consequent,
             within,
+            positional,
             span,
         })
     }
@@ -975,11 +1001,13 @@ impl<'a> Parser<'a> {
                     kind: *err.kind(),
                 })?;
         let span = start_byte..self.last_byte();
+        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
         self.expect_newline()?;
         Ok(Statement::AssertLatency {
             from,
             to,
             bound,
+            positional,
             span,
         })
     }
@@ -1478,15 +1506,30 @@ impl<'a> Parser<'a> {
         false
     }
 
-    fn parse_header_args_until_eol(&mut self) -> Result<Vec<Arg>, ParseError> {
+    /// Read a line's `key=value` arguments and its bare values up to the first token no value
+    /// starts with, such as a header's `:`. A line that takes no argument names itself in
+    /// `no_arguments`.
+    fn parse_line_tail(
+        &mut self,
+        no_arguments: Option<&str>,
+    ) -> Result<(Vec<Arg>, Vec<Value>), ParseError> {
         let mut args = Vec::new();
-        while !self.peek_is(&TokenKind::Newline)
-            && !self.peek_is(&TokenKind::Colon)
-            && !self.at_eof()
-        {
-            args.push(self.parse_arg()?);
+        let mut positional = Vec::new();
+        while self.at_value_start() {
+            if !self.is_at_key_eq() {
+                positional.push(self.parse_value()?);
+            } else if let Some(line) = no_arguments {
+                let position = self.position();
+                let key = self.expect_ident()?;
+                return Err(ParseError::Syntax {
+                    position,
+                    message: format!("{line} takes no `key=value` argument, got `{key}=`"),
+                });
+            } else {
+                args.push(self.parse_arg()?);
+            }
         }
-        Ok(args)
+        Ok((args, positional))
     }
 
     fn parse_arg_list_until(&mut self, end: &TokenKind) -> Result<Vec<Arg>, ParseError> {
@@ -1543,14 +1586,20 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Whether the next tokens are an integer, a `,` and another component, or a `-` before the
+    /// Whether the next tokens are a number, a `,` and another component, or a `-` before the
     /// first: only a coordinate triple puts those after `=`, since a selector's `,` precedes a key.
     fn at_coordinate(&self) -> bool {
         let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        let number = |offset| {
+            matches!(
+                kind(offset),
+                Some(TokenKind::Int { .. } | TokenKind::Decimal { .. })
+            )
+        };
         let first = usize::from(matches!(kind(0), Some(TokenKind::Minus)));
-        matches!(kind(first), Some(TokenKind::Int { .. }))
+        number(first)
             && matches!(kind(first + 1), Some(TokenKind::Comma))
-            && (first == 1 || matches!(kind(2), Some(TokenKind::Int { .. } | TokenKind::Minus)))
+            && (first == 1 || number(2) || matches!(kind(2), Some(TokenKind::Minus)))
     }
 
     /// Read a coordinate triple `X,Y,Z`, three integers joined by `,` with nothing between.
@@ -1616,24 +1665,35 @@ impl<'a> Parser<'a> {
         matches!(kind(0), Some(TokenKind::Comma))
             && matches!(
                 kind(1),
-                Some(TokenKind::Int { .. } | TokenKind::Minus | TokenKind::Size(..))
+                Some(
+                    TokenKind::Int { .. }
+                        | TokenKind::Decimal { .. }
+                        | TokenKind::Minus
+                        | TokenKind::Size(..)
+                )
             )
     }
 
-    /// The refusal for a coordinate component that is a `-` or a size rather than an integer.
+    /// The refusal for a coordinate component that is a `-`, a size or a decimal rather than an
+    /// integer.
     fn coordinate_component_refusal(&self, position: Position) -> ParseError {
         let token = &self.tokens[self.pos];
-        let message = if let TokenKind::Size(..) = token.kind {
-            let written = &self.source[token.span.clone()];
-            let rest = &written[written.find('x').unwrap_or_default()..];
-            format!(
-                "a coordinate component runs into `{rest}`: `{written}` reads as a size, and a \
-                 coordinate triple is three integers, `x,y,z`, as `4,3,2`"
-            )
-        } else {
-            "a coordinate component is never negative: a coordinate counts from the low corner \
-             of the footprint, as `0,0,0`"
-                .to_owned()
+        let written = &self.source[token.span.clone()];
+        let message = match token.kind {
+            TokenKind::Size(..) => {
+                let rest = &written[written.find('x').unwrap_or_default()..];
+                format!(
+                    "a coordinate component runs into `{rest}`: `{written}` reads as a size, and \
+                     a coordinate triple is three integers, `x,y,z`, as `4,3,2`"
+                )
+            }
+            TokenKind::Decimal { .. } => format!(
+                "a coordinate component is a whole number, and `{written}` is a decimal: a \
+                 coordinate triple names a cell by three integers, `x,y,z`, as `4,3,2`"
+            ),
+            _ => "a coordinate component is never negative: a coordinate counts from the low \
+                  corner of the footprint, as `0,0,0`"
+                .to_owned(),
         };
         ParseError::Syntax { position, message }
     }
@@ -1883,6 +1943,27 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Value::new(ValueKind::Str(s), token.span))
             }
+            TokenKind::Decimal { lexeme } => {
+                self.advance();
+                // The lexer leaves a touching `.` to the parse, since a raw directive value
+                // reads `1.21.4` as text.
+                if self
+                    .peek()
+                    .is_some_and(|t| t.kind == TokenKind::Dot && t.span.start == token.span.end)
+                {
+                    return Err(LexError::TrailingDecimalSegment {
+                        position,
+                        literal: lexeme,
+                        found: '.',
+                    }
+                    .into());
+                }
+                Ok(Value::new(ValueKind::Decimal(lexeme), token.span))
+            }
+            TokenKind::Nbt(text) => {
+                self.advance();
+                Ok(Value::new(ValueKind::Nbt(text), token.span))
+            }
             TokenKind::Ident(first) => {
                 self.advance();
                 if self.peek_is(&TokenKind::Dot) {
@@ -1929,6 +2010,23 @@ impl<'a> Parser<'a> {
             tail.push(self.expect_ident()?);
         }
         Ok(DottedRef::new(head, tail))
+    }
+
+    /// Whether the next token can open a value.
+    fn at_value_start(&self) -> bool {
+        matches!(
+            self.peek().map(|t| &t.kind),
+            Some(
+                TokenKind::Ident(_)
+                    | TokenKind::Int { .. }
+                    | TokenKind::Decimal { .. }
+                    | TokenKind::Bool(_)
+                    | TokenKind::Str(_)
+                    | TokenKind::Size(..)
+                    | TokenKind::At
+                    | TokenKind::LBracket
+            )
+        )
     }
 
     fn is_at_key_eq(&self) -> bool {

@@ -7,7 +7,7 @@ title: "4. コンパイルモデル"
 コマンドは、順番を気にせず並べて書けます。コンパイラが各コマンドをフェーズに振り分け、フェーズを次の決まった順番で評価します。
 
 ```
-massing     floor / walls / volume / fill
+massing     floor / walls / fill
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / chest / センサー / アクチュエーター / Tier 0 の部品
@@ -20,7 +20,7 @@ raw         raw_block / raw_fill (エスケープハッチ)
 
 水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
 
-ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
+ただし、今のところすべての行が動くわけではありません。`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
@@ -64,7 +64,7 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 
 階段の系統でも、独自のブロックステートを持つ割り当ての場合は、id はそのまま使い、ステートは屋根の形状が決めた値で置き換えて、`W_DEFERRED_MEMBER` を出します。軒に置く `stair kind=stairs` も同じ材質の規則に従いますが、ステートは自分の引数から取ります。
 
-その引数は `facing=out | in`、`half=top | bottom`、`shape=straight | outer_left | outer_right` で、どれも裸の識別子です。既定値はそれぞれ `out`、`top`、`straight` です。一覧にない識別子は `E_INVALID_MEMBER` になり、その階段は作られません。識別子ではない形の値 (`half="bottom"`、`facing=1`) は読み取れない値として扱います。階段はそのキーの既定値で作られ、その値は `W_IGNORED_ARGUMENT` として報告されます。階段が別の理由で拒否された場合も、この値は報告されます。その際は、どちらにしても階段は作られないという注記が付きます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
+その引数は `facing=out | in`、`half=top | bottom`、`shape=straight | inner_left | inner_right | outer_left | outer_right` で、どれも裸の識別子です。既定値はそれぞれ `out`、`top`、`straight` です。`shape=` の値は階段の 5 つの形で、Java には書いたとおりに書き出します。階段の `shape` ステートを持たない Bedrock のバージョンは `straight` 以外の形を落とし、その階段はまっすぐに描かれ、`W_INTENT_DEGRADED` が報告されます ([§10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。一覧にない識別子は `E_INVALID_MEMBER` になり、その階段は作られません。識別子ではない形の値 (`half="bottom"`、`facing=1`) は読み取れない値として扱います。階段はそのキーの既定値で作られ、その値は `W_IGNORED_ARGUMENT` として報告されます。階段が別の理由で拒否された場合も、この値は報告されます。その際は、どちらにしても階段は作られないという注記が付きます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
 
 **棟の向き。** 棟は、敷地 (footprint) の長いほうの水平軸に沿って走ります。正方形の敷地 (`size=WxW`) では `x` 軸を選び、東西方向の棟になります。
 

@@ -67,27 +67,25 @@ fn check_selector_bindings(module: &Module, sink: &mut DiagnosticSink) {
 }
 
 /// Keys a `struct` / `def` header may carry, in the closed-set note's order.
-///
-/// `class=` is from `spec/components-editing-sites` "`def`, the component construct".
-const HEADER_ARGUMENTS: &[&str] = &["size", "class"];
-
-/// Keys in [`HEADER_ARGUMENTS`] that no pass reads yet.
-const UNREAD_HEADER_ARGUMENTS: &[&str] = &["class"];
+const HEADER_ARGUMENTS: &[&str] = &["size"];
 
 /// A `size=` left in `args` is not `WxH`, which `check::type_mismatch` reports instead.
 fn check_header(keyword: &str, args: &IndexMap<String, ValueWithSpan>, sink: &mut DiagnosticSink) {
     for (key, value) in args {
-        if !HEADER_ARGUMENTS.contains(&key.as_str()) {
-            sink.push(unknown_key(
-                Field::Header,
-                keyword,
-                key,
-                &value.span,
-                HEADER_ARGUMENTS,
-            ));
-        } else if UNREAD_HEADER_ARGUMENTS.contains(&key.as_str()) {
-            sink.push(unread_header_argument(keyword, key, &value.span));
+        if HEADER_ARGUMENTS.contains(&key.as_str()) {
+            continue;
         }
+        let mut finding = unknown_key(Field::Header, keyword, key, &value.span, HEADER_ARGUMENTS);
+        if UNIVERSAL_ARGUMENTS.contains(&key.as_str()) {
+            finding.notes.push(DiagnosticNote {
+                span: None,
+                message: format!(
+                    "`{key}=` is a member's key, written on a line in the body; remove it from \
+                     the `{keyword}` header"
+                ),
+            });
+        }
+        sink.push(finding);
     }
 }
 
@@ -422,39 +420,5 @@ fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span, why: Unr
             message: note,
         }],
         data: None,
-    }
-}
-
-fn unread_header_argument(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
-    Diagnostic {
-        code: DiagnosticCode::IgnoredArgument,
-        span: span.clone(),
-        primary: format!(
-            "`{key}=` is an argument a `{keyword}` header takes and no pass reads yet; the value \
-             was ignored",
-        ),
-        notes: vec![DiagnosticNote {
-            span: None,
-            message: format!(
-                "the `{keyword}` is built without it — remove the argument, or keep it and \
-                 expect no effect until a pass reads it"
-            ),
-        }],
-        data: None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{HEADER_ARGUMENTS, UNREAD_HEADER_ARGUMENTS};
-
-    #[test]
-    fn every_unread_header_argument_is_in_the_header_vocabulary() {
-        for key in UNREAD_HEADER_ARGUMENTS {
-            assert!(
-                HEADER_ARGUMENTS.contains(key),
-                "`{key}` is called unread but the header vocabulary does not list it",
-            );
-        }
     }
 }

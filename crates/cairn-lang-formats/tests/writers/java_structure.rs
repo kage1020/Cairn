@@ -8,7 +8,7 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_nbt::tag::{Compound, Tag};
 
-use crate::common::{comparator_array, latest, lower_example};
+use crate::common::{comparator_array, latest, lower_example, lower_source};
 
 fn target_1_21_4() -> JavaTarget {
     resolve_java_target("1.21.4").expect("known target")
@@ -381,6 +381,45 @@ fn cottage_end_to_end_palette_carries_spruce_stairs_properties() {
         stair_entries >= 3,
         "expected at least 3 spruce_stairs blockstates, got {stair_entries}",
     );
+}
+
+#[test]
+fn an_eave_at_an_inner_shape_is_written_with_that_shape() {
+    for shape in ["inner_left", "inner_right"] {
+        let ir = lower_source(
+            &format!(
+                "theme t:\n  slot wall -> @cobblestone\n  slot eave -> @oak_stairs\n\n\
+                 struct s size=3x1\n  walls mat_slot=wall height=1\n  \
+                 roof kind=flat mat_slot=wall overhang=1\n  \
+                 stair kind=stairs mat_slot=eave side=front half=top facing=out shape={shape}\n"
+            ),
+            Edition::Java,
+            Some("1.21.4"),
+        );
+        assert_eq!(ir.diagnostics, [], "shape={shape}");
+        let root =
+            build_structure_tag(&ir.structures["struct::s"], &target_1_21_4()).expect("build");
+        let Tag::List(palette) = &root.entries["palette"] else {
+            panic!("palette must be a list")
+        };
+        let shapes: Vec<&Tag> = palette
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Tag::Compound(c)
+                    if c.entries.get("Name")
+                        == Some(&Tag::String("minecraft:oak_stairs".to_owned())) =>
+                {
+                    match c.entries.get("Properties") {
+                        Some(Tag::Compound(props)) => props.entries.get("shape"),
+                        other => panic!("oak_stairs Properties: {other:?}"),
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shapes, [&Tag::String(shape.to_owned())], "shape={shape}");
+    }
 }
 
 #[test]

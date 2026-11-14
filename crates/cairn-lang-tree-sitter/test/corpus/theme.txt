@@ -242,3 +242,36 @@ theme t:
         (identifier)
         (material_ref
           (identifier))))))
+
+==================
+Slot row and selector rule with bare values (field labels)
+==================
+
+theme t:
+  slot wall -> @stone @brick
+  window[side=front] -> mat_slot glass
+
+---
+
+(source_file
+  (theme_decl
+    name: (identifier)
+    body: (theme_body
+      (slot_binding
+        name: (identifier)
+        target: (material_ref
+          (identifier))
+        positional: (positional_list
+          (material_ref
+            (identifier))))
+      (selector_rule
+        selector: (selector
+          keyword: (identifier)
+          filter: (selector_filter
+            (filter_list
+              (attribute
+                key: (identifier)
+                value: (identifier)))))
+        bindings: (attribute_list
+          (identifier)
+          (identifier))))))
