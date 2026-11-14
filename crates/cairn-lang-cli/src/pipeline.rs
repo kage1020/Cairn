@@ -377,7 +377,18 @@ pub(crate) fn load_and_lower(
     target: Option<&ResolvedTarget>,
 ) -> Result<Lowered, ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
-    let floors = declared_version_floors(&module, edition);
+    Ok(lower_parsed(source, &module, edition, target).1)
+}
+
+/// `module`, parsed from `source`, resolved and lowered for `edition`'s build as
+/// [`load_and_lower`] lowers a file, with its Intent IR.
+pub(crate) fn lower_parsed(
+    source: String,
+    module: &cairn_lang_core::ast::Module,
+    edition: Edition,
+    target: Option<&ResolvedTarget>,
+) -> (IntentModule, Lowered) {
+    let floors = declared_version_floors(module, edition);
     let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
         floors,
         order: builtin_pack(edition).version_order(),
@@ -389,13 +400,13 @@ pub(crate) fn load_and_lower(
             })
         })
         .map(ResolvedTarget::mc_version);
-    let ir = lower(&module);
+    let ir = lower(module);
     let resolution = resolve(&ir, Some(edition));
     let registry = builtin_pack(edition).view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     // `check`'s gate, so `compile` never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
-        &module,
+        module,
         &ir,
         Some(edition),
         &weighed_editions(Some(edition)),
@@ -403,13 +414,14 @@ pub(crate) fn load_and_lower(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
-    Ok(Lowered {
+    let lowered = Lowered {
         source,
         block_ir,
         circuits,
         dropped_scopes,
         version_floors,
-    })
+    };
+    (ir, lowered)
 }
 
 /// A walled three-by-three `struct probe` lowered unpinned, for unit tests to rekey or corrupt.

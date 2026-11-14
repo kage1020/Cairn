@@ -3,6 +3,8 @@
 mod agreement;
 pub(crate) use agreement::{EditionFindings, agreed};
 
+use std::collections::HashSet;
+
 use serde::{Serialize, Serializer};
 
 use crate::error::{Position, Span};
@@ -87,6 +89,12 @@ pub enum DiagnosticCode {
     UnknownSlotTarget,
     /// A `theme` selector rule that matches no member; a warning despite its `E_` prefix.
     ThemeSelectorUnmatched,
+    /// An `edit` line that selects no member of a `struct` or `def` body.
+    EditUnmatched,
+    /// A key an `edit` line sets that the keyword it selects does not take, or its `id=`.
+    EditUnknownKey,
+    /// A member no `edit` selected whose resolved state the edits change.
+    EditRipple,
     /// A member, or part of one, the block-array pass leaves out because another member did not
     /// build or because the pass does not lower what its line writes yet.
     DeferredMember,
@@ -216,6 +224,9 @@ impl DiagnosticCode {
             Self::UnresolvedSlot => "E_UNRESOLVED_SLOT",
             Self::UnknownSlotTarget => "E_UNKNOWN_SLOT_TARGET",
             Self::ThemeSelectorUnmatched => "E_THEME_SELECTOR_UNMATCHED",
+            Self::EditUnmatched => "E_EDIT_UNMATCHED",
+            Self::EditUnknownKey => "E_EDIT_UNKNOWN_KEY",
+            Self::EditRipple => "W_EDIT_RIPPLE",
             Self::DeferredMember => "W_DEFERRED_MEMBER",
             Self::InvalidMember => "E_INVALID_MEMBER",
             Self::IgnoredArgument => "W_IGNORED_ARGUMENT",
@@ -313,6 +324,8 @@ impl DiagnosticCode {
             | Self::TruthTableEmpty
             | Self::TruthTableDuplicateInput
             | Self::IntendedTargetCap
+            | Self::EditUnmatched
+            | Self::EditUnknownKey
             | Self::TruthTableConflict => Severity::Error,
             Self::InvalidCairnVersion
             | Self::FutureCairnVersion
@@ -337,6 +350,7 @@ impl DiagnosticCode {
             | Self::TruthTableDuplicateRow
             | Self::IntendedTargetCapPartial
             | Self::IntendedTargetUnsupported
+            | Self::EditRipple
             | Self::TruthTablePartial => Severity::Warning,
         }
     }
@@ -567,6 +581,37 @@ impl Diagnostic {
                 source,
                 lines,
             )
+        }
+    }
+}
+
+/// Drop each finding within one of `lines` that repeats an earlier one exactly, as a value an
+/// `edit` line sets does when it is judged on each member the edit selected.
+pub(crate) fn drop_repeats_within(diagnostics: &mut Vec<Diagnostic>, lines: &[Span]) {
+    if lines.is_empty() {
+        return;
+    }
+    let mut seen = HashSet::new();
+    diagnostics.retain(|d| {
+        let within = lines
+            .iter()
+            .any(|line| line.start <= d.span.start && d.span.end <= line.end);
+        !within || seen.insert(d.clone())
+    });
+}
+
+/// Point each finding on a member line an `edit` selected at the edits that changed the member,
+/// since what the finding quotes may be an edit's rather than the line's; `edited` pairs each
+/// such line with its edit's.
+pub(crate) fn note_edits(diagnostics: &mut [Diagnostic], edited: &[(Span, Span)]) {
+    for d in diagnostics {
+        for (line, edit) in edited {
+            if *line == d.span {
+                d.notes.push(DiagnosticNote {
+                    span: Some(edit.clone()),
+                    message: "this edit changes this member".to_owned(),
+                });
+            }
         }
     }
 }

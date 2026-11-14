@@ -31,9 +31,9 @@ pub use load::{
 };
 pub use manifest::{PackFiles, PackManifest};
 pub use states::{
-    BedrockForm, DroppedState, SUPPORTED_SENSITIVITY_SCHEMA, SUPPORTED_STATES_SCHEMA,
-    SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal, StatesCatalog, StatesError,
-    VersionStates,
+    BedrockForm, CanonicalSpelling, DroppedState, SUPPORTED_SENSITIVITY_SCHEMA,
+    SUPPORTED_STATES_SCHEMA, SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal,
+    StatesCatalog, StatesError, VersionStates,
 };
 
 /// Prepends `namespace` to a component entry that does not carry one.

@@ -36,12 +36,14 @@ structs:
       h: 5
     args: {}
     members:
-      - role:
+      - address: "floor[0]"
+        role:
           kind: Floor
         mat_slot: floor
         arguments: {}
         intent_state: {}
-      - role:
+      - address: "walls[0]"
+        role:
           kind: Walls
         mat_slot: wall
         arguments:
@@ -49,7 +51,8 @@ structs:
             kind: Int
             value: 4
         intent_state: {}
-      - role:
+      - address: "window@front[0]"
+        role:
           kind: Window
         mat_slot: glass
         arguments:
@@ -69,6 +72,7 @@ structs:
               h: 2
         intent_state: {}
       - id: bed
+        address: "fill[0]"
         role:
           kind: Fill
         mat_slot: bed
@@ -87,6 +91,7 @@ structs:
               z: 3
         intent_state: {}
       - id: divider
+        address: "fill[2]"
         role:
           kind: Fill
         mat_slot: pane
@@ -105,6 +110,7 @@ structs:
               z: 3
         intent_state: {}
       - id: sunken
+        address: "chest@inside.back[0]"
         role:
           kind: Chest
         arguments:
@@ -121,6 +127,7 @@ structs:
             value: 2
         intent_state: {}
       - id: dry
+        address: "chest@inside.back[1]"
         role:
           kind: Chest
         arguments:
@@ -140,6 +147,7 @@ structs:
             kind: Bool
             value: false
       - id: water
+        address: "fill[1]"
         role:
           kind: Fill
         arguments:

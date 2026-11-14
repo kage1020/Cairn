@@ -870,8 +870,10 @@ path. No constraint catalog ships yet ([§10.3](#103-backend--data-tables)), so 
 `constraint_catalog_hash` is all zeros and `member_version_sensitivity` is `[]`.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
-filling, and auto-address assignment. Auto-address assignment is not implemented yet: a member has
-an address only where it carries `id=` ([§9.2](/spec/components-editing-sites/#92-editing-model)).
+filling, and address assignment. Each member's `resolved_state` record carries the address the
+compiler gave it ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), so a change that moves an
+address, such as a member added ahead of others of its role on its wall, moves the hash as a change
+to what is built does.
 
 `lock_schema_version` leads the document so a reader can decide whether it understands the rest
 before parsing it. Version `1` is the shape above plus two keys written only when they are
@@ -1040,8 +1042,8 @@ A guard opens no scope. Its lines are read as if written where the guard stands,
 `level` takes the level's `y=`, and a raw member or a Tier 0 part gets every check under a guard
 that it would get outside one. What the guard adds is the edition whose build keeps the line.
 
-What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
-§7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
+What it may hold is the escape-hatch layer: `raw_block`, `raw_fill` and `raw_repeat` ([Materials and
+Themes §7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
 §14.1](/spec/redstone/#tier-0-parts): `repeater`, `comparator`, `redstone_torch` and
 `redstone_dust`. Any other member, and a `logic` or `assert` line, is
 `E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking

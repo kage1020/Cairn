@@ -18,18 +18,27 @@ Every format's frontend and backend meets at this layer, and diff, IoU, and seri
 here. It holds a voxel grid, a palette, block entities, and entities, and is neutral to format,
 edition, and version.
 
-It is the output target of the forward direction and the input destination of the reverse one
-([Ecosystem Interop](/spec/ecosystem-interop/)).
+It is the output target of the forward direction and what the reverse one reads, and an import is
+checked here: the source it writes must lower to the block array its file holds ([Ecosystem
+Interop](/spec/ecosystem-interop/)).
 
 ## 3.2 The Intent IR is rich and carries invariants
 
-A named member carries `id`, `class`, `role`, `mat_slot`, `intent_state`, and `resolved_state`
-([Blockstate Model](/spec/blockstate/)). Lowering derives `resolved_state`, so it is recorded with
-the block-array IR the member was lowered to, keyed by structure, and not on the Intent IR the
-lowering reads.
+A named member carries `id`, `class`, `role`, its address
+([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), `mat_slot`, `intent_state`, and
+`resolved_state` ([Blockstate Model](/spec/blockstate/)). Lowering derives `resolved_state`, so it
+is recorded with the block-array IR the member was lowered to, keyed by structure, and not on the
+Intent IR the lowering reads. A source's `edit` lines are applied to the Intent IR before any pass
+reads it, so every pass after it sees the edited members ([Components, Editing, and Multi-building
+§9.2](/spec/components-editing-sites/#92-editing-model)).
 
-A raw import does not produce a valid Intent IR. It reaches one only after a semantic lift, and an
-artifact's progress along that path is `semantic_level: raw | grouped | lifted`.
+An import adds no IR of its own. `cairn import` writes source, a `.crn` of the raw members that are
+the Intent IR's escape hatch, and the source parses and lowers as any other does, to the block array
+the file held ([Ecosystem Interop
+§12.2](/spec/ecosystem-interop/#122-reverse-direction-the-compiler-transliterates-an-llm-lifts)). A
+raw member names its block and reads no `mat_slot`, so what it writes sits at
+`semantic_level: grouped`, L1, and a lift refactors the source toward `lifted`, the members the
+invariants above describe.
 
 ## 3.3 Redstone sub-layers
 

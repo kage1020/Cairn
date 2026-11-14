@@ -1162,22 +1162,7 @@ impl VersionStates<'_> {
         full: &IndexMap<String, String>,
         given: &IndexMap<String, String>,
     ) -> BedrockForm {
-        let states = family
-            .states
-            .iter()
-            .map(|(name, rule)| {
-                let value = match rule {
-                    Rule::Constant(value) => value.clone(),
-                    Rule::Lookup { reads, map } => {
-                        let joined: Vec<&str> = reads.iter().map(|k| full[k].as_str()).collect();
-                        // INVARIANT(rules-cover-holds): the loader refuses a lookup that does not map
-                        // every combination its reads hold, and `full` is one of them.
-                        map[&joined.join(",")].clone()
-                    }
-                };
-                (name.clone(), value)
-            })
-            .collect();
+        let states = family.bedrock_states(full);
         let mut dropped = Vec::new();
         let mut rederived = Vec::new();
         for key in &family.dropped {
@@ -1233,6 +1218,25 @@ fn several(id: &str, forms: &[&(String, usize)]) -> String {
 }
 
 impl Family {
+    /// The Bedrock states the family writes for `full`, a whole state of the Java block it holds.
+    fn bedrock_states(&self, full: &IndexMap<String, String>) -> Vec<(String, StateValue)> {
+        self.states
+            .iter()
+            .map(|(name, rule)| {
+                let value = match rule {
+                    Rule::Constant(value) => value.clone(),
+                    Rule::Lookup { reads, map } => {
+                        let joined: Vec<&str> = reads.iter().map(|k| full[k].as_str()).collect();
+                        // INVARIANT(rules-cover-holds): the loader refuses a lookup that does not map
+                        // every combination its reads hold, and `full` is one of them.
+                        map[&joined.join(",")].clone()
+                    }
+                };
+                (name.clone(), value)
+            })
+            .collect()
+    }
+
     /// Whether every property of `full`, a whole state of the Java block, holds a value it holds.
     fn holds(&self, full: &IndexMap<String, String>) -> bool {
         self.java
@@ -1292,5 +1296,8 @@ fn and_or_list(names: &[&str]) -> String {
     }
 }
 
+mod inverse;
 #[cfg(test)]
 mod tests;
+
+pub use inverse::CanonicalSpelling;

@@ -15,7 +15,7 @@ fluids      fill fluid= / water
 logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
 logic_place 床下へのパッド、ライザー、セルの配置 → Placement IR
 logic_route Placement IR 上での配線、遅延の挿入、合法化。遅延が確定
-raw         raw_block / raw_fill (エスケープハッチ)
+raw         raw_block / raw_fill / raw_repeat (エスケープハッチ)
 ```
 
 水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
@@ -53,6 +53,8 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 ```
 
 `--edition` は必須で、`--target` だけを指定すると拒否されます。同じ「1.21」でも、Java と Bedrock では意味が違います。Java の DataVersion と Bedrock の block_version にも関係はありません。
+
+ファイル形式はターゲットに含まれません。`--structure-format` は Java の形式のどれかを選び、書き出すファイルを変えますが、block array とロックファイルは変えません ([§12.1](/ja/spec/ecosystem-interop/#121-順方向の変換))。
 
 ## 4.3 切妻屋根のボクセル規則
 
@@ -130,7 +132,7 @@ struct が lowering される体積は、自分で書くものではなく、導
 ```
 Dims.x = size.W + 2 × overhang
 Dims.z = size.H + 2 × overhang
-Dims.y = void + 1 + wall_top + roof_extra
+Dims.y = void + max(1 + wall_top + roof_extra, imported)
 ```
 
 それぞれの項が数えるのは、実際にブロックを置くメンバーだけです。
@@ -139,11 +141,12 @@ Dims.y = void + 1 + wall_top + roof_extra
 - `wall_top`: `mat_slot=` が解決できる walls の `N + height` のうち、最大の値。`N` はそれを囲む level のオフセットで、本体に直接書いた場合は `0` です。
 - `roof_extra`: 種類ごとの寄与 ([§4.3](#43-切妻屋根のボクセル規則)–[§4.6](#46-陸屋根のボクセル規則)) のうち、最大のもの。
 - `1`: どの struct にもある基準面。
+- `imported`: `origin=imported` の生のメンバーが指す最も高い段 (その `raw_repeat` の最後のコピーも含み、`N` はそれを囲む level のオフセット) に 1 を足した値 ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。そういうメンバーがなければ `0` です。
 - `void`: struct のロジックが回路を敷くときに、`circuit` 行が基準面の下に確保する層の数。ほかのすべての行はその分だけ上がり、`site` に置いた `def` はその分だけ原点が下がります ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。回路を敷かないときは `0` です。
 
-`level` の中のメンバーも、この 3 つの項すべてに、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
+`level` の中のメンバーも、どの項にも、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 
-**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `chest` / すべてのセンサーとアクチュエーター / `fill` / `raw_block` / `raw_fill` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
+**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `chest` / すべてのセンサーとアクチュエーター / `fill` / `raw_block` / `raw_fill` は、`raw_repeat` の下にあってもなくても、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
 
 **ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof` や `slope_to=` のない `shed` は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
 

@@ -1384,6 +1384,11 @@ const SLOT_IGNORERS: &[(&str, &str)] = &[
         "raw_fill",
         "struct s size=3x3\n  raw_fill mat=minecraft:stone from=0,0,0 to=1,0,1 mat_slot=d\n",
     ),
+    (
+        "raw_repeat",
+        "struct s size=3x3\n  raw_repeat count=2 step=1,0,0 mat_slot=d\n    raw_block \
+         mat=minecraft:stone at=0,0,1\n",
+    ),
 ];
 
 #[test]

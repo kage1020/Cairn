@@ -33,12 +33,14 @@ structs:
       h: 13
     args: {}
     members:
-      - role:
+      - address: "floor[0]"
+        role:
           kind: Floor
         mat_slot: floor
         arguments: {}
         intent_state: {}
-      - role:
+      - address: "walls[0]"
+        role:
           kind: Walls
         mat_slot: wall
         arguments:
@@ -47,6 +49,7 @@ structs:
             value: 4
         intent_state: {}
       - id: entry
+        address: "door@front[0]"
         role:
           kind: Door
         arguments:
@@ -57,7 +60,8 @@ structs:
             kind: Ident
             value: center
         intent_state: {}
-      - role:
+      - address: "roof[0]"
+        role:
           kind: Roof
         mat_slot: roof
         arguments:
@@ -69,6 +73,7 @@ structs:
             value: 1
         intent_state: {}
       - id: power
+        address: "lever@inside.front[0]"
         role:
           kind: Lever
         binding:
@@ -90,6 +95,7 @@ structs:
             value: 0
         intent_state: {}
       - id: sun
+        address: "daylight@back.outside[0]"
         role:
           kind: Daylight
         binding:
@@ -111,6 +117,7 @@ structs:
             value: 0
         intent_state: {}
       - id: bell
+        address: "button@inside.front[0]"
         role:
           kind: Button
         mat_slot: knob
@@ -133,6 +140,7 @@ structs:
             value: 0
         intent_state: {}
       - id: watch
+        address: "observer@inside.left[0]"
         role:
           kind: Observer
         binding:
@@ -157,6 +165,7 @@ structs:
             kind: Ident
             value: up
       - id: light
+        address: "lamp@inside.back[0]"
         role:
           kind: Lamp
         arguments:
@@ -178,6 +187,7 @@ structs:
               - light
         intent_state: {}
       - id: chute
+        address: "dispenser@front.outside[0]"
         role:
           kind: Dispenser
         arguments:
@@ -202,6 +212,7 @@ structs:
             kind: Ident
             value: out
       - id: ram
+        address: "piston@inside.right[0]"
         role:
           kind: Piston
         arguments:
@@ -236,7 +247,8 @@ structs:
               - sig
               - tick
         intent_state: {}
-      - role:
+      - address: "circuit[0]"
+        role:
           kind: Circuit
         arguments:
           region:

@@ -152,7 +152,7 @@ site hamlet:
 
 | したいこと | 読む場所 |
 |---|---|
-| 全体を書き直さずに一部だけ変える (予定) | [編集モデル §9.2](/ja/spec/components-editing-sites#92-編集モデル)。例: `edit window[class=vent] set shape=arch` |
+| 全体を書き直さずに一部だけ変える | [編集モデル §9.2](/ja/spec/components-editing-sites#92-編集モデル)。例: `edit window[class=vent] set shape=arch` |
 | ファイルがどの Minecraft バージョンで動くかを知る | [バージョンとエディション §10.5](/ja/spec/versioning-editions#105-どのバージョン向けかの答えは-3-つある)。`cairn info` が報告する内容 |
 | 既存の schematic を Cairn に取り込む (予定) | [エコシステム連携](/ja/spec/ecosystem-interop/)。写し取り、引き上げ、voxel-diff |
 | 他の種類の屋根を試す | [サンプル](/ja/examples/)の `roof-shed` / `roof-hip` / `roof-flat` |

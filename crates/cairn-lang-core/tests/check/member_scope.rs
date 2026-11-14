@@ -31,6 +31,7 @@ const GEOMETRY_ROWS: &[&str] = &[
     "circuit region=floor void=1",
     "raw_block mat=minecraft:stone at=1,0,1",
     "raw_fill mat=minecraft:stone from=0,0,0 to=1,0,1",
+    "raw_repeat count=2 step=1,0,0",
 ];
 
 const SITE_ROWS: &[&str] = &[
@@ -204,7 +205,7 @@ fn the_candidate_list_is_scoped_to_the_body() {
         notes(&geometry).contains(
             &"expected one of: floor, walls, fill, door, window, roof, stair, level, pressure_plate, \
              lever, button, daylight, observer, lamp, piston, dispenser, chest, repeater, \
-             comparator, redstone_torch, redstone_dust, circuit, raw_block, raw_fill"
+             comparator, redstone_torch, redstone_dust, circuit, raw_block, raw_fill, raw_repeat"
         ),
         "got {:#?}",
         notes(&geometry),

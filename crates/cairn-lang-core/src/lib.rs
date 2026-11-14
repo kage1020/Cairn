@@ -1,6 +1,7 @@
 //! Core of the Cairn language: lexer, parser, AST, Intent IR, `check`, and the passes that
 //! resolve intent down to the block-array IR.
 
+pub(crate) mod address;
 pub mod ast;
 pub mod block_array;
 pub mod calver;
@@ -18,7 +19,9 @@ pub mod parse;
 pub(crate) mod prose;
 pub mod resolve;
 pub mod suggest;
+pub mod transliterate;
 pub(crate) mod version;
+pub mod voxel_diff;
 
 pub use ast::{DottedRef, Module, Statement};
 pub use block_array::{

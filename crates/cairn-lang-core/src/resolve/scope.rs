@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberBody, ValueWithSpan};
+use crate::intent::{Member, MemberBody, ValueWithSpan, levels_under};
 
 use super::binding::ThemeBinding;
 use super::resolution::{ResolvedMemberBinding, ScopeResolution};
@@ -60,6 +60,7 @@ pub(super) fn resolve_struct_or_def(
     };
     resolve_members(
         members,
+        &[],
         bound.as_ref().map(|(name, slots)| (name.as_str(), slots)),
         sibling_slots,
         &mut resolution,
@@ -68,8 +69,10 @@ pub(super) fn resolve_struct_or_def(
     resolution
 }
 
+/// Resolve `members`, which stand under the `level`s whose ids are `levels`.
 fn resolve_members(
     members: &[Member],
+    levels: &[&str],
     bound: Option<(&str, &IndexMap<String, ValueWithSpan>)>,
     sibling_slots: &HashSet<String>,
     out: &mut ScopeResolution,
@@ -105,7 +108,7 @@ fn resolve_members(
             && let Some(theme_binding) = ctx.themes.get_mut(tname)
         {
             for sel in &mut theme_binding.selectors {
-                if selector_matches(sel, member) {
+                if selector_matches(sel, member, levels) {
                     sel.matched_member_spans.push(member.span.clone());
                     for (k, v) in &sel.bindings {
                         binding.selector_extras.insert(k.clone(), v.clone());
@@ -120,7 +123,8 @@ fn resolve_members(
             members: children, ..
         } = &member.children;
         if !children.is_empty() {
-            resolve_members(children, bound, sibling_slots, out, ctx);
+            let under = levels_under(levels, member);
+            resolve_members(children, &under, bound, sibling_slots, out, ctx);
         }
     }
 }

@@ -86,9 +86,12 @@ semantic-sensitive:      (none)
 ## What works today
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
-- Java `.nbt` and Bedrock `.mcstructure` output from one source.
-- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
+- Java `.nbt`, Litematica `.litematic` or Sponge Schematic `.schem`, and Bedrock `.mcstructure`, output from one source.
+- `cairn import`, which reads any of those four files back as a `.crn` of raw members that compiles back to the same blocks. It recovers blocks and their regularity, not intent, and says so with `W_SEMANTIC_LOSS`.
+- `cairn diff-blocks`, which compares a structure file with what a `.crn` builds at the file's target: the block IoU, the regions that differ with their likely causes, and `edit` lines that close them, until a lift converges.
+- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`, `raw_repeat`), and `level` grouping.
 - Themes with slots and per-edition variants.
+- `edit` patches that change the members a selector or an address selects, without rewriting their lines.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
@@ -100,8 +103,7 @@ semantic-sensitive:      (none)
 
 - Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
-- `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
-- `.litematic` and `.schem` writers, and importing existing schematics.
+- Lifting an import into walls, windows and themes, which the reverse direction leaves to an LLM and `cairn diff-blocks` checks.
 - The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas

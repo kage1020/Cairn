@@ -306,6 +306,7 @@ fn is_opening(role: &MemberRole) -> bool {
         | MemberRole::Circuit
         | MemberRole::RawBlock
         | MemberRole::RawFill
+        | MemberRole::RawRepeat
         | MemberRole::Place
         | MemberRole::Connect
         | MemberRole::Other(_) => false,

@@ -86,9 +86,12 @@ semantic-sensitive:      (none)
 ## いま使える機能
 
 - `cairn parse` / `check` / `info` / `lower` / `compile`
-- 1 つのソースから Java の `.nbt` と Bedrock の `.mcstructure` を出力
-- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
+- 1 つのソースから Java の `.nbt`、Litematica の `.litematic`、Sponge Schematic の `.schem` のいずれかと、Bedrock の `.mcstructure` を出力
+- `cairn import`。この 4 つのどのファイルも、同じブロックへコンパイルし直せる生のメンバーの `.crn` として読み戻します。復元するのはブロックとその規則性で、意図ではないことを `W_SEMANTIC_LOSS` で示します。
+- `cairn diff-blocks`。構造ファイルを、`.crn` がそのファイルのターゲットで組むものと比べ、block IoU、食い違う領域とその考えられる原因、それを埋める `edit` の行を示します。リフトが収束するまで繰り返せます。
+- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill` / `raw_repeat`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
+- `edit` によるパッチ。セレクタやアドレスが選ぶメンバーを、その行を書き換えずに変えます
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
 - 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
@@ -100,8 +103,7 @@ semantic-sensitive:      (none)
 
 - テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
-- `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
-- `.litematic` と `.schem` の書き出し、既存の schematic の読み込み
+- 取り込んだものを壁や窓やテーマへ引き上げるリフト。逆方向の変換はこれを LLM に任せ、`cairn diff-blocks` が確かめます
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
 ## 基本の考え方

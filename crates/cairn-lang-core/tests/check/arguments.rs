@@ -232,6 +232,16 @@ fn a_theme_selector_widens_the_vocabulary_of_the_keyword_it_names() {
 }
 
 #[test]
+fn a_level_attribute_names_a_level_and_widens_no_vocabulary() {
+    let src = "theme t:\n  slot glass -> @glass_pane\n  \
+               window[level=floor2] -> frame=@spruce_wood\n\n\
+               struct s size=9x7\n  level id=floor2 y=0\n    \
+               window level=floor2 side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "E_UNKNOWN_ARGUMENT"]);
+    assert_eq!(ignored_at(src), ["@spruce_wood"]);
+}
+
+#[test]
 fn a_selector_widens_one_keyword_and_not_the_others() {
     // The window is there so the row matches and raises no `E_THEME_SELECTOR_UNMATCHED`.
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
@@ -427,11 +437,15 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "raw_block",
-        "  raw_block id=r class=c mat=minecraft:stone at=1,0,1\n",
+        "  raw_block id=r class=c mat=minecraft:stone at=1,0,1 origin=imported\n",
     ),
     (
         "raw_fill",
-        "  raw_fill id=q class=c mat=minecraft:stone from=0,0,0 to=1,0,1\n",
+        "  raw_fill id=q class=c mat=minecraft:stone from=0,0,0 to=1,0,1 origin=imported\n",
+    ),
+    (
+        "raw_repeat",
+        "  raw_repeat id=rr class=c count=2 step=1,0,0\n",
     ),
 ];
 
@@ -1073,6 +1087,11 @@ const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
         keyword: "raw_fill",
         body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_fill mat=minecraft:stone from=1,1,1 to=2,1,2 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "raw_repeat",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  raw_repeat count=2 step=2,0,0 mat_slot=%SLOT%\n    raw_block mat=minecraft:stone at=1,1,1\n",
         why: Unread::Inapplicable,
     },
 ];

@@ -160,6 +160,20 @@ pub enum JoinKind {
     Dust,
 }
 
+impl JoinKind {
+    /// The state keys the connection rules set on a block of this kind where its state leaves
+    /// them out (`spec/blockstate` "Connections").
+    #[must_use]
+    pub const fn connection_keys(self) -> &'static [&'static str] {
+        match self {
+            Self::Pane | Self::Fence { .. } | Self::Dust => &["north", "east", "south", "west"],
+            Self::Wall => &["north", "east", "south", "west", "up"],
+            Self::FenceGate { .. } => &["in_wall"],
+            Self::Chest { .. } => &["type"],
+        }
+    }
+}
+
 /// The parts of a wall that the bottom of the block above it covers, which stand them tall.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Covers {

@@ -86,6 +86,7 @@ pub fn build_circuits(
             layout.region.void,
             &blocks,
             layout.region.span.clone(),
+            layout.region.address.clone(),
         ) {
             found.all.push(refused(&scope, layout, &err));
             return found.all;

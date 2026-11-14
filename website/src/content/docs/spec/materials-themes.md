@@ -27,6 +27,13 @@ theme medieval:
   window[class=small] -> frame=@spruce_wood
 ```
 
+**What a row selects.** A selector is a member keyword and its attributes in brackets, and it
+selects the members of that keyword that match each attribute. `level=NAME` matches a member that
+stands under a `level` whose `id=` is `NAME`, and any other attribute matches the value its key
+holds on the member's line. Brackets may follow one another: `window[class=small][side=front]` is
+`window[class=small,side=front]`. An `edit` line selects by the same grammar ([Components, Editing,
+and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
+
 **The cascade.** A member collects the bindings of every selector row it matches, in source order,
 so when two rows bind the same key the member keeps the later value. CSS applies the same rule to
 two rules of equal weight. Bindings are reserved (below), so today the cascade decides what a member
@@ -42,8 +49,8 @@ value is dead text whatever a binding comes to mean. That is
 `E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error even while
 bindings are reserved, for the reason `E_DUPLICATE_ARG` refuses one key written twice inside one row
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Sameness is by meaning: attribute
-order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
-`window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
+order does not count, and `class=` / `id=` / `mat_slot=` / `level=` values compare as label text,
+so `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
 different keys are not reported. They compose, and splitting a long binding list over two lines is
 allowed.
 
@@ -207,10 +214,10 @@ stands as a lone post to the wall under it
 ([Blockstate Model §6.1](/spec/blockstate/#connections)).
 A raw block over one half of a `door` replaces that half, and the game then drops the other; the
 line asks for that block, so nothing warns. Two raw members writing one cell contest it in their
-phase, and the later line wins with `W_PHASE_CONFLICT`. A raw member does not size the volume. As
-with a `fill`, a cell outside the footprint, or above every row the struct as written reaches, is
-`E_INVALID_MEMBER`, and a cell in a row the struct reaches but does not build is
-`W_DEFERRED_MEMBER`.
+phase, and the later line wins with `W_PHASE_CONFLICT`. A raw member does not size the volume unless
+`origin=imported` marks it (below). As with a `fill`, a cell outside the footprint, or above every
+row the struct as written reaches, is `E_INVALID_MEMBER`, and a cell in a row the struct reaches but
+does not build is `W_DEFERRED_MEMBER`.
 
 A `mat=` that is missing or not a block id is `E_INVALID_MEMBER`. That includes `@stone`, a
 canonical token, which a slot binds. So is an `at=`, `from=` or `to=` that is missing or not a
@@ -224,7 +231,37 @@ check at the pinned target keeps an unguarded one honest: `minecraft:light` buil
 edition under `@edition` ([Versioning and Editions
 §10.7](/spec/versioning-editions/#writing-an-alternative)).
 
-`raw_repeat` and the `origin=imported` that marks what import writes belong to import
-([Ecosystem Interop §12.3](/spec/ecosystem-interop/#123-three-tiers-of-transliteration)), which
-does not exist yet. Until it does, `raw_repeat` is `E_UNKNOWN_KEYWORD` and `origin=` is
-`E_UNKNOWN_ARGUMENT`.
+A `raw_repeat` writes the raw members indented under it again at a fixed step:
+
+```
+raw_repeat count=4 step=3,0,0
+  raw_fill  mat=minecraft:glass_pane from=1,2,0 to=1,3,0
+  raw_block mat=minecraft:lantern at=2,3,0
+```
+
+`count=` is how many copies are written, a positive integer, and `step=` how far each copy lies from
+the one before, a coordinate triple read as a distance ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)); the first copy is the lines as written. It
+holds only `raw_block` and `raw_fill` lines, and any other line under it is `E_UNSUPPORTED_NESTING`,
+another `raw_repeat` included ([Syntax §5.2](/spec/syntax/#52-nesting)). It may stand under a
+`level`, whose `y=` every copy takes, and under an `@edition` guard, which keeps every copy to its
+edition's build. Each copy is the raw member moved by its offset, and the member is judged by its
+last copy, which is the farthest on every axis since no step is negative: a member whose last copy
+lies outside the footprint or above every row the struct as written reaches is `E_INVALID_MEMBER`,
+one whose last copy lies in a row the struct reaches but does not build is `W_DEFERRED_MEMBER`, and
+either way no copy is built. Copies of one member that overlap contest nothing, so they raise no
+`W_PHASE_CONFLICT`, while a copy and another line still contest their cells. A `raw_repeat` with no
+`count=` or `step=`, a `count=` that is not a positive integer, a `step=` that is not a triple, a
+`step=0,0,0` over more than one copy, or no raw member under it is `E_INVALID_MEMBER`, and none of
+its members is built. It puts down nothing of its own, so a `mat_slot=` on its line is
+`W_IGNORED_ARGUMENT`.
+
+`origin=imported` marks a raw member `cairn import` wrote ([Ecosystem Interop
+§12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls)), and changes two things. The
+member sizes the volume: the struct is at least as tall as the highest row it, or its `raw_repeat`'s
+last copy, names, so an import is as tall as the file it came from ([Compilation Model
+§4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)). And its block takes the
+connection states its `mat=` leaves out from the blocks beside it, as a material's block does, while
+a state its `mat=` writes is kept ([Blockstate Model §6.1](/spec/blockstate/#connections)).
+Everything else above holds of it. `origin=` takes only `imported`, and any other value is
+`E_INVALID_MEMBER`: the mark says where a line came from, and a line written by hand leaves it out.

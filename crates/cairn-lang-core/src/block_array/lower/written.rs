@@ -115,6 +115,18 @@ impl Written {
     }
 }
 
+impl Written {
+    /// The struct with its height and reach raised to at least `rows`, the `y` extent its imported
+    /// raw members reach (`spec/materials-themes` "Raw blocks").
+    pub(super) fn raised_to(self, rows: u32) -> Self {
+        Self {
+            height: self.height.max(rows),
+            reach: self.reach.max(rows),
+            ..self
+        }
+    }
+}
+
 /// A positive `height=` that fits `u32`, else `None` rather than a saturated height.
 pub(super) fn height_value(member: &Member) -> Option<u32> {
     let raw = member.arguments.get("height")?;

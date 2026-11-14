@@ -12,6 +12,7 @@ pub mod common;
 
 mod block_ids;
 mod coordinates;
+mod edit_lines;
 mod edition_guards;
 mod lex;
 mod line_positions;
@@ -21,6 +22,7 @@ mod parse_diagnostic;
 mod parse_refusal_positions;
 mod parse_truth_rows;
 mod raw_directive_values;
+mod raw_repeat;
 mod span_propagation;
 mod state_literals;
 
