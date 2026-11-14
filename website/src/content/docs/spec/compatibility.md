@@ -68,6 +68,11 @@ Evolving surfaces:
 - The CLI's human-readable diagnostic format and prose (the *codes* are Stable; the *prose*
   is not).
 - The `--features` set on `cairn-lang-cli` (cargo features) and `[features]` on workspace crates.
+- The JavaScript API of the module `cairn-lang-wasm` builds for the [playground](/playground/):
+  the names and arguments of `cairn_version`, `compile`, `info` and `targets`, and the fields of
+  what they answer. A finding in it takes the shape
+  [Lint §11.2](/spec/lint/#112-machine-readable-payload) gives, and the `ir` it carries is the
+  block-array IR, which is Internal.
 
 #### Subject to change
 

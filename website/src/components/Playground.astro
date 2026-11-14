@@ -1,0 +1,263 @@
+---
+/**
+ * The live playground: a Cairn editor compiled by `cairn-lang-wasm` in a worker as it changes,
+ * with the findings, a view of each structure, and its structure files to download.
+ */
+import { type Lang, strings } from "../playground/strings";
+
+interface Props {
+  lang?: Lang;
+}
+
+const { lang = "en" } = Astro.props;
+const t = strings[lang];
+---
+
+<cairn-playground data-strings={JSON.stringify(t)}>
+  <div class="cp-bar not-content">
+    <label>{t.example} <select data-role="example"></select></label>
+    <label>{t.edition} <select data-role="edition"></select></label>
+    <label>{t.target} <select data-role="target"></select></label>
+  </div>
+  <p class="cp-status" data-role="status" role="status"></p>
+
+  <div class="cp-editor not-content">
+    <pre class="cp-code" data-role="code" aria-hidden="true"></pre>
+    <textarea
+      class="cp-input"
+      data-role="input"
+      aria-label={t.editor}
+      aria-describedby="cp-editor-hint"
+      spellcheck="false"
+      autocapitalize="off"
+      autocomplete="off"
+      wrap="off"></textarea>
+  </div>
+  <p class="cp-hint" id="cp-editor-hint">{t.editorHint}</p>
+
+  <section aria-labelledby="cp-findings-heading">
+    <h2 id="cp-findings-heading">{t.findings}</h2>
+    <p data-role="summary" aria-live="polite"></p>
+    <ul class="cp-findings" data-role="findings"></ul>
+  </section>
+
+  <section aria-labelledby="cp-result-heading">
+    <h2 id="cp-result-heading">{t.result}</h2>
+    <p data-role="empty-view">{t.noResult}</p>
+    <div data-role="viewer" hidden>
+      <div class="cp-bar not-content">
+        <label>{t.structure} <select data-role="structure"></select></label>
+        <label>
+          {t.layers}
+          <input type="range" min="1" max="1" step="1" value="1" data-role="layers" />
+          <output data-role="layers-value"></output>
+        </label>
+        <button type="button" data-role="rotate">{t.rotate}</button>
+      </div>
+      <canvas class="cp-canvas" data-role="canvas" role="img"></canvas>
+      <p class="cp-hint">{t.cubes}</p>
+      <h3>{t.palette}</h3>
+      <ul class="cp-legend" data-role="legend"></ul>
+    </div>
+    <details data-role="ir">
+      <summary>{t.ir}</summary>
+      <pre class="cp-ir" data-role="ir-text"></pre>
+    </details>
+  </section>
+
+  <section aria-labelledby="cp-downloads-heading">
+    <h2 id="cp-downloads-heading">{t.downloads}</h2>
+    <div data-role="downloads"><p>{t.noDownloads}</p></div>
+  </section>
+</cairn-playground>
+
+<script>
+  import "../playground/main";
+</script>
+
+<style is:global>
+  cairn-playground {
+    display: block;
+    --cp-canvas: var(--sl-color-gray-6);
+    --cp-error: var(--sl-color-red);
+    --cp-warning: var(--sl-color-orange);
+  }
+
+  cairn-playground .cp-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    align-items: center;
+  }
+
+  cairn-playground label {
+    display: inline-flex;
+    gap: 0.4rem;
+    align-items: center;
+    font-size: var(--sl-text-sm);
+  }
+
+  cairn-playground select,
+  cairn-playground button {
+    font: inherit;
+    color: var(--sl-color-text);
+    background: var(--sl-color-bg);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.3rem;
+    padding: 0.2rem 0.4rem;
+  }
+
+  cairn-playground .cp-status,
+  cairn-playground .cp-hint {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  cairn-playground .cp-editor {
+    position: relative;
+    height: 26rem;
+    min-height: 8rem;
+    resize: vertical;
+    overflow: hidden;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.4rem;
+    background: var(--sl-color-gray-7, var(--sl-color-bg));
+  }
+
+  cairn-playground .cp-code,
+  cairn-playground .cp-input {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0.75rem;
+    border: 0;
+    font-family: var(--sl-font-mono, var(--sl-font-system-mono));
+    font-size: var(--sl-text-code);
+    font-variant-ligatures: none;
+    line-height: 1.6;
+    tab-size: 2;
+    white-space: pre;
+    overflow-wrap: normal;
+    box-sizing: border-box;
+  }
+
+  cairn-playground .cp-code {
+    overflow: hidden;
+    pointer-events: none;
+    background: transparent;
+    color: var(--sl-color-text);
+  }
+
+  cairn-playground .cp-code span {
+    color: var(--shiki-light);
+  }
+
+  :root[data-theme="dark"] cairn-playground .cp-code span {
+    color: var(--shiki-dark);
+  }
+
+  cairn-playground .cp-input {
+    width: 100%;
+    height: 100%;
+    resize: none;
+    overflow: auto;
+    color: transparent;
+    background: transparent;
+    caret-color: var(--sl-color-text);
+  }
+
+  cairn-playground .cp-input::selection {
+    color: transparent;
+    background: color-mix(in srgb, var(--sl-color-accent) 30%, transparent);
+  }
+
+  cairn-playground .cp-input:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: -2px;
+  }
+
+  cairn-playground .cp-mark-error {
+    text-decoration: underline wavy var(--cp-error);
+    text-decoration-skip-ink: none;
+  }
+
+  cairn-playground .cp-mark-warning {
+    text-decoration: underline wavy var(--cp-warning);
+    text-decoration-skip-ink: none;
+  }
+
+  cairn-playground .cp-findings {
+    list-style: none;
+    padding: 0;
+  }
+
+  cairn-playground .cp-finding {
+    border-inline-start: 3px solid var(--cp-warning);
+    padding: 0.2rem 0 0.2rem 0.6rem;
+    margin-block: 0.4rem;
+  }
+
+  cairn-playground .cp-finding-error {
+    border-inline-start-color: var(--cp-error);
+  }
+
+  cairn-playground .cp-finding-head {
+    font-family: var(--sl-font-mono, var(--sl-font-system-mono));
+    font-size: var(--sl-text-code-sm, var(--sl-text-sm));
+    text-align: start;
+    overflow-wrap: anywhere;
+  }
+
+  cairn-playground button.cp-finding-head {
+    cursor: pointer;
+    border: 0;
+    padding: 0;
+    background: none;
+    color: inherit;
+  }
+
+  cairn-playground .cp-finding ul {
+    font-size: var(--sl-text-sm);
+    margin-block: 0.2rem 0;
+    overflow-wrap: anywhere;
+  }
+
+  cairn-playground .cp-canvas {
+    display: block;
+    width: 100%;
+    height: 22rem;
+    border-radius: 0.4rem;
+    margin-block-start: 0.6rem;
+  }
+
+  cairn-playground .cp-legend {
+    list-style: none;
+    padding: 0;
+    font-size: var(--sl-text-sm);
+  }
+
+  cairn-playground .cp-legend li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  cairn-playground .cp-legend code {
+    overflow-wrap: anywhere;
+  }
+
+  cairn-playground .cp-swatch {
+    flex: none;
+    width: 0.9rem;
+    height: 0.9rem;
+    border-radius: 0.2rem;
+    border: 1px solid var(--sl-color-gray-4);
+  }
+
+  cairn-playground .cp-ir {
+    max-height: 24rem;
+    overflow: auto;
+    font-size: var(--sl-text-code-sm, var(--sl-text-sm));
+  }
+</style>

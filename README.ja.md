@@ -93,6 +93,7 @@ semantic-sensitive:      (none)
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
 - 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)
+- ドキュメントサイトの[プレイグラウンド](https://cairn.kage1020.com/ja/playground/)。`cairn-lang-wasm` が入力に合わせてソースをブラウザ内でコンパイルし、構造物ファイルをダウンロードできます。
 
 **実験的な機能。** `cairn synth --experimental-logic-synth` は、レッドストーンのパイプラインの各ステージ (合成、ネットリスト構築、エディション選択、配置、配線、遅延挿入、合法化) を JSON で出力します。出力の形式は今後変わる可能性があります。
 
@@ -102,7 +103,6 @@ semantic-sensitive:      (none)
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
 - `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
 - `.litematic` と `.schem` の書き出し、既存の schematic の読み込み
-- ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
 ## 基本の考え方
 

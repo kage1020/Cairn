@@ -43,6 +43,7 @@ Evolving な面:
 - 正規ブロックトークン。ターゲットが受け付ける名前 (そのレジストリパックに従います) と、それぞれがそのターゲットで指すブロックです ([§7.3](/ja/spec/materials-themes/#73-バージョンとエディションをまたぐ対応付け))。
 - CLI の人間向け診断の書式と文言 (*コード* は Stable ですが、*文言* は違います)。
 - `cairn-lang-cli` の `--features` の組 (cargo features) と、ワークスペースの各クレートの `[features]`。
+- `cairn-lang-wasm` が[プレイグラウンド](/ja/playground/)向けにビルドするモジュールの JavaScript API。`cairn_version`・`compile`・`info`・`targets` の名前と引数、および返すオブジェクトのフィールドです。その中の指摘は [Lint §11.2](/ja/spec/lint/#112-機械可読ペイロード) の形をとり、含まれる `ir` は Internal な block-array IR です。
 
 #### 変更の余地あり
 

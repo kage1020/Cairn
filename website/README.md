@@ -13,9 +13,14 @@ website/
 ├── package.json
 ├── Cargo.toml              # the cairn-lang-docs crate, which embeds the pages in `cairn`
 ├── rust/                   # its build script, library and README
+├── scripts/
+│   └── build-wasm.sh       # builds the playground's compiler module, within its size budget
 ├── public/
 │   └── favicon.svg
 ├── src/
+│   ├── components/
+│   │   └── Playground.astro     # the playground's markup and styles
+│   ├── playground/          # its editor, worker and view; `pkg/` is the built module
 │   ├── content.config.ts   # Starlight docs collection
 │   ├── llms.ts             # the Markdown pages, as llms.txt and index.md serve them
 │   ├── pages/
@@ -60,13 +65,16 @@ pnpm dev            # astro dev at http://localhost:4321/
 pnpm check          # astro check — types in astro.config.mjs and src/
 pnpm build          # astro build → ./dist, and resolves every internal link
 pnpm preview        # serves ./dist
+pnpm build:wasm     # the playground's compiler module, into src/playground/pkg
 ```
+
+The playground compiles with `cairn-lang-wasm`, which `pnpm build:wasm` builds with Rust and `wasm-pack`. Without the module the site still builds, and the playground says it was built without one. The [developer guide](https://cairn.kage1020.com/development/#the-playgrounds-module) has the details. The playground also reads the VS Code extension's TextMate grammar and the `.crn` files in `../examples/`, so a change to either changes the page.
 
 `pnpm check` and `pnpm build` answer different questions and CI runs both. The build does not type-check anything; the checker does not render a page, so it cannot see a link. Link validation is a build hook, which is why a dead link fails `pnpm build` rather than `pnpm check`.
 
 ## Editing content
 
-- Every chapter is a plain `.md` (or `.mdx` for the landing pages and playground placeholder) with Starlight YAML frontmatter. Add `title:` and an optional `description:` and you are done.
+- Every chapter is a plain `.md` (or `.mdx` for the landing pages and the playground) with Starlight YAML frontmatter. Add `title:` and an optional `description:` and you are done.
 - Internal links are **root-absolute** and carry a trailing slash: `[Overview](/spec/overview/)`, `[概要](/ja/spec/overview/)`. Astro does not rewrite a link's href, so whatever is written is what ships, and the site canonicalises to a trailing slash — which makes a relative link a broken link. `](lint)` written in `spec/syntax.md` is served from `/spec/syntax/` and resolves to `/spec/syntax/lint`, a 404. The build refuses a relative link for that reason, and resolves every root-absolute one, and every `#anchor` fragment, against the pages it just rendered.
 - A heading's anchor is its slug, so renaming one breaks every link that names it — in the `ja/` tree as well as the `en` one. The slug is not always what the heading looks like: `10.4` becomes `104-`, and a `、` is dropped without leaving a hyphen. The build resolves these too, across pages as well as within one.
 - Japanese pages live under `src/content/docs/ja/` mirroring the English layout. The sidebar in `sidebar.mjs` uses `translations: { ja: "…" }` so a single sidebar definition serves both locales.
@@ -81,7 +89,7 @@ Every `.md` page under `src/content/docs/` that is not a draft reaches readers b
 
 ## Deploying
 
-The site is hosted on **Cloudflare Pages** (project name `cairn`) with the built-in Git integration. Cloudflare watches `main` on GitHub and rebuilds on every push that changes files under `website/`.
+The site is hosted on **Cloudflare Pages** (project name `cairn`) with the built-in Git integration. Cloudflare watches `main` on GitHub and rebuilds on every push that changes a file under the build watch paths below.
 
 Cloudflare Pages project settings:
 
@@ -89,12 +97,15 @@ Cloudflare Pages project settings:
 |---|---|
 | Production branch | `main` |
 | Root directory | `website` |
-| Build command | `pnpm install --frozen-lockfile && pnpm build` |
+| Build command | `pnpm install --frozen-lockfile && pnpm build:wasm --install && pnpm build` |
+| Build watch paths (include) | `website/*`, `crates/*`, `examples/*`, `editors/vscode/syntaxes/*`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml` |
 | Build output directory | `dist` |
 | Node.js version | `24` (also pinned via [`.nvmrc`](.nvmrc)) |
 | Compatibility date | `2026-06-14` (in [`wrangler.jsonc`](wrangler.jsonc)) |
 
-Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. Deployment is Cloudflare's Git integration, not a workflow. The `Documentation site` job in [`editors-website.yml`](../.github/workflows/editors-website.yml) runs `pnpm check` and `pnpm build` on `website/**` changes, so a type error or a dead link fails a PR instead of reaching the deploy. Cloudflare runs the build too, so a dead link that got past review would fail the deploy rather than ship — but the type check is CI's alone.
+Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. Deployment is Cloudflare's Git integration, not a workflow. `pnpm build:wasm --install` installs rustup, the Rust toolchain [`rust-toolchain.toml`](../rust-toolchain.toml) pins and `wasm-pack` on the build image, which has none of them, before it builds the playground's module. A build command without it, such as `pnpm install --frozen-lockfile && pnpm build`, still deploys the site, and the playground then says it was built without the module.
+
+The `Documentation site` job in [`editors-website.yml`](../.github/workflows/editors-website.yml) builds the module, then runs `pnpm check` and `pnpm build`, on changes to `website/**` and to what the module is built from, so a type error or a dead link fails a PR instead of reaching the deploy. Cloudflare runs the build too, so a dead link that got past review would fail the deploy rather than ship — but the type check is CI's alone.
 
 To deploy a one-off preview from the CLI:
 

@@ -11,12 +11,16 @@
     "dev": "astro dev",
     "start": "astro dev",
     "build": "astro build",
+    "build:wasm": "sh scripts/build-wasm.sh",
     "check": "astro check",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.9",
+    "@shikijs/core": "4.6.0",
+    "@shikijs/engine-javascript": "4.6.0",
+    "@shikijs/themes": "4.6.0",
     "astro": "^7.4.5",
     "sharp": "^0.35.5",
     "starlight-links-validator": "^0.27.0"

@@ -6,17 +6,16 @@ use std::process::ExitCode;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::target::{ResolvedTarget, resolve_target};
 
 use crate::artifacts::{
     PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
     write_artifacts_and_lock,
 };
-use crate::floors::enforce_version_floor;
 use crate::lockfile::{default_lock_path, report_previous_target};
 use crate::name_case::NameCase;
-use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
-use crate::report::report_diagnostics;
-use crate::target::{ResolvedTarget, resolve_target};
+use crate::pipeline::load_and_lower;
+use crate::report::{report_diagnostics, report_run_level};
 
 pub(crate) fn run_compile(
     file: &Path,
@@ -28,45 +27,23 @@ pub(crate) fn run_compile(
     // Resolved before lowering, which checks ids against it, but reported after the source's
     // own findings.
     let resolved_target = resolve_target(edition, target);
-    let Lowered {
-        source,
-        block_ir,
-        circuits,
-        dropped_scopes,
-        version_floors,
-    } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
+    let (source, lowered) = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
     let lines = LineStarts::new(&source);
-    if report_diagnostics(file, &source, &lines, &block_ir.diagnostics)
-        | report_diagnostics(file, &source, &lines, &circuits)
+    if report_diagnostics(file, &source, &lines, &lowered.block_ir.diagnostics)
+        | report_diagnostics(file, &source, &lines, &lowered.circuits)
     {
         return ExitCode::from(1);
     }
-    // Every code that drops a scope is a warning, so this is what refuses a partial build.
-    if !dropped_scopes.is_empty() {
-        report_partial_build(
-            file,
-            &dropped_scopes,
-            built_scopes(&block_ir),
-            "refusing to certify a partial build",
-        );
-        return ExitCode::from(1);
-    }
-
-    let target = match resolved_target {
-        Ok(t) => t,
-        Err(err) => {
-            eprintln!("error: {err}");
+    let target = match lowered.writable_target(edition, resolved_target) {
+        Ok(target) => target,
+        Err(refusal) => {
+            report_run_level(file, &source, &lines, &refusal);
             return ExitCode::from(1);
         }
     };
-    if let Some(floors) = &version_floors
-        && let Err(code) = enforce_version_floor(file, &source, floors, edition, &target)
-    {
-        return code;
-    }
 
     let out_dir = match prepare_out_dir(file, out) {
         Ok(d) => d,
@@ -74,11 +51,20 @@ pub(crate) fn run_compile(
     };
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
-    check_and_write(&block_ir, &source, edition, &target, &out_dir, &lock_path)
+    check_and_write(
+        file,
+        &lowered.block_ir,
+        &source,
+        edition,
+        &target,
+        &out_dir,
+        &lock_path,
+    )
 }
 
 /// Check every structure, then write them all and the lockfile.
 fn check_and_write(
+    file: &Path,
     block_ir: &BlockArrayIr,
     source: &str,
     edition: Edition,
@@ -88,10 +74,10 @@ fn check_and_write(
 ) -> ExitCode {
     // A lock can share an entry with an artifact only inside `--out`, so `--out` alone is probed.
     let case = NameCase::of_dir(out_dir);
-    let prepared = match prepare_artifacts(block_ir, target, out_dir, case) {
+    let prepared = match prepare_artifacts(file, source, block_ir, target, out_dir, case) {
         Ok(p) => p,
         Err(PrepareRefusal::Collision(collision)) => {
-            collision.report();
+            collision.report(file, source);
             return ExitCode::from(1);
         }
         Err(PrepareRefusal::Other(code)) => return code,
@@ -133,6 +119,7 @@ mod tests {
         let lock_path = dir.path().join("probe.crn.lock");
 
         let code = check_and_write(
+            Path::new("probe.crn"),
             &block_ir,
             "",
             Edition::Java,

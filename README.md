@@ -93,6 +93,7 @@ semantic-sensitive:      (none)
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
+- A [playground](https://cairn.kage1020.com/playground/) on the documentation site, where `cairn-lang-wasm` compiles a source in the browser as it is typed and offers its structure files to download.
 
 **Experimental.** `cairn synth --experimental-logic-synth` prints each stage of the redstone pipeline as JSON: synthesis, netlist construction, edition selection, placement, routing, delay insertion, and legalization. The output shape is free to change.
 
@@ -102,7 +103,6 @@ semantic-sensitive:      (none)
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
 - `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
 - `.litematic` and `.schem` writers, and importing existing schematics.
-- The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas
 

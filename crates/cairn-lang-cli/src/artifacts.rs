@@ -5,13 +5,15 @@ use std::process::ExitCode;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
-use cairn_lang_formats::java_structure::output_filename;
+use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::build::artifact::{PreparedArtifact, prepare_artifact};
+use cairn_lang_formats::build::run_level::{RunLevelMessage, artifact_collision};
+use cairn_lang_formats::target::{PreparedStructure, ResolvedTarget};
 
 use crate::lockfile::build_lockfile;
 use crate::name_case::NameCase;
-use crate::report::degraded_warning;
+use crate::report::report_run_level;
 use crate::staging;
-use crate::target::{PreparedStructure, ResolvedTarget};
 
 pub(crate) fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, ExitCode> {
     let Some(out_dir) = resolve_out_dir(file, requested) else {
@@ -44,8 +46,11 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
-/// Check every structure against the backend before any I/O, so only I/O can fail a write.
+/// Check every structure of `file`'s build against the backend before any I/O, so only I/O can
+/// fail a write.
 pub(crate) fn prepare_artifacts<'a>(
+    file: &Path,
+    source: &str,
     block_ir: &'a BlockArrayIr,
     target: &ResolvedTarget,
     out_dir: &Path,
@@ -54,15 +59,20 @@ pub(crate) fn prepare_artifacts<'a>(
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
     let mut seen_paths: std::collections::HashMap<EntryLocation, (PathBuf, String)> =
         std::collections::HashMap::with_capacity(block_ir.structures.len());
+    let lines = LineStarts::new(source);
+    let report = |message: &RunLevelMessage| report_run_level(file, source, &lines, message);
     for (scope, array) in &block_ir.structures {
-        let (structure, degraded) = target.prepare(array).map_err(|err| {
-            eprintln!("error: checking `{scope}`: {err}");
+        let PreparedArtifact {
+            file_name,
+            structure,
+            degraded,
+        } = prepare_artifact(block_ir, scope, array, target).map_err(|refusal| {
+            report(&refusal);
             ExitCode::from(1)
         })?;
-        for note in &degraded {
-            eprintln!("{}", degraded_warning(scope, note));
+        for warning in &degraded {
+            report(warning);
         }
-        let file_name = output_filename(&block_ir.artifact_stem(scope), target.output_ext());
         let path = artifact_path(out_dir, scope, &file_name)?;
         // Distinct scope keys can name one file, and the resolver's `E_OUTPUT_NAME_COLLISION`
         // sees only resolved scopes.
@@ -109,26 +119,25 @@ pub(crate) struct ArtifactCollision {
 }
 
 impl ArtifactCollision {
-    /// Print the refusal; the note covers spellings only a case-folding file system makes one.
-    pub(crate) fn report(&self) {
+    /// Print the refusal of `file`'s build; the note covers spellings only a case-folding file
+    /// system makes one.
+    pub(crate) fn report(&self, file: &Path, source: &str) {
         let Self {
             first,
             first_path,
             scope,
             path,
         } = self;
-        eprintln!(
-            "error: output filename `{}` collides between scopes `{first}` and `{scope}`",
-            path.display(),
-        );
+        let mut refusal = artifact_collision(&path.display().to_string(), first, scope);
         if first_path != path {
-            eprintln!(
-                "  note: `{}` and `{}` name one file on this file system; rename one of \
-                 the scopes so their names differ by more than case",
+            refusal.notes.push(format!(
+                "note: `{}` and `{}` name one file on this file system; rename one of the scopes \
+                 so their names differ by more than case",
                 first_path.display(),
                 path.display(),
-            );
+            ));
         }
+        report_run_level(file, source, &LineStarts::new(source), &refusal);
     }
 }
 

@@ -1,6 +1,6 @@
 # cairn-lang-formats
 
-Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has.
+Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has, and the build every front end runs over a source to reach them.
 
 Each format is a serializer or deserializer around the **block-array IR**, which the specification names as the universal pivot ([architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/)). Adding a format means adding a backend here — the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
 
@@ -62,6 +62,10 @@ python3 .github/scripts/extract_registry.py bedrock --java <a Java 25 or later>
 
 Because the tables are closed, a suggestion cannot name a block that does not exist in the target — the "valid candidates" half of a diagnostic is looked up, never generated ([principles P3](https://cairn.kage1020.com/spec/principles/)).
 
+## The build a front end runs
+
+The `build` module holds the passes [`cairn`](../cairn-lang-cli/README.md) and [`cairn-lang-wasm`](../cairn-lang-wasm/README.md) both run over a source, so the CLI and the playground report the same findings and refusals in the same words: the gate `cairn check` applies (`build::gate`), the lowering at a pinned target with each struct's circuit laid (`build::lowering`, `build::circuits`), the run-level refusals and the warnings that name no span, which [lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/) keeps apart from the findings (`build::run_level`), each structure checked for its writer (`build::artifact`), and the per-edition walk `cairn info` reports (`build::info`). The `target` module resolves a `--target` for an edition to the backend that writes it. The crate root re-exports neither, so the table above does not list them.
+
 ## Planned backends
 
 | Format | Edition | Direction | Spec reference |
@@ -85,6 +89,7 @@ Because the tables are closed, a suggestion cannot name a block that does not ex
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the block-array IR types.
 - [`cairn-lang-nbt`](../cairn-lang-nbt/README.md) for the byte-level codec.
+- [`cairn-lang-redstone`](../cairn-lang-redstone/README.md) for the circuit the build lays under each struct.
 
 ## License
 

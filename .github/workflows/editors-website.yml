@@ -8,6 +8,15 @@ on:
       - "xtask/**"
       - "Cargo.toml"
       - ".github/workflows/editors-website.yml"
+      # What the playground's compiler module is built from.
+      - "crates/cairn-lang-core/**"
+      - "crates/cairn-lang-nbt/**"
+      - "crates/cairn-lang-formats/**"
+      - "crates/cairn-lang-redstone/**"
+      - "crates/cairn-lang-wasm/**"
+      - "examples/**"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
   pull_request:
     paths:
       - "editors/vscode/**"
@@ -15,6 +24,15 @@ on:
       - "xtask/**"
       - "Cargo.toml"
       - ".github/workflows/editors-website.yml"
+      # What the playground's compiler module is built from.
+      - "crates/cairn-lang-core/**"
+      - "crates/cairn-lang-nbt/**"
+      - "crates/cairn-lang-formats/**"
+      - "crates/cairn-lang-redstone/**"
+      - "crates/cairn-lang-wasm/**"
+      - "examples/**"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
   workflow_dispatch:
 
 permissions:
@@ -78,10 +96,6 @@ jobs:
           cache-dependency-path: website/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
 
-      # The build does not type-check, and `astro check` neither renders pages nor validates links.
-      - run: pnpm run check
-      - run: pnpm run build
-
       - name: Install Rust toolchain
         run: rustup show
       - name: Cache cargo
@@ -89,6 +103,14 @@ jobs:
         with:
           shared-key: website
           save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
+      # The site builds without it too, but then the playground has nothing to bundle or check.
+      - name: Build the playground's compiler module
+        run: pnpm run build:wasm --install
+
+      # The build does not type-check, and `astro check` neither renders pages nor validates links.
+      - run: pnpm run check
+      - run: pnpm run build
+
       # `cairn docs` prints the pages cairn-lang-docs embeds, so they must be the ones just built.
       - name: Embedded pages match the build
         working-directory: .

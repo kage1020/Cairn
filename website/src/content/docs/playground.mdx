@@ -1,52 +1,26 @@
 ---
 title: Playground
-description: A browser-hosted Cairn compiler powered by cairn-lang-wasm. Coming soon.
+description: Write Cairn in the browser and watch it compile, with the findings, a view of each structure, and the structure files to download.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import Playground from '../../components/Playground.astro';
 
-<Aside type="caution" title="Not implemented yet">
-This page is a placeholder for the browser-hosted playground that will use the
-[`cairn-lang-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-lang-wasm) bindings
-once they exist. For now the compiler runs only as the `cairn` CLI, so the sample below is text
-to read.
-</Aside>
+Edit the source below and it compiles as you type: the same compiler as the `cairn` CLI, built to
+WebAssembly from [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-lang-wasm)
+and run in your browser, so nothing you write leaves the page. Each build is
+`cairn compile --edition <edition> --target <target>`, with the built-in registry packs.
 
-## What this page will eventually be
+<Playground lang="en" />
 
-A two-pane Cairn workbench, all client-side:
+## What the page shows
 
-- A `.crn` editor on the left, with syntax highlighting and inline diagnostics from the
-  Cairn LSP.
-- A target selector (`--edition java|bedrock`, `--target <version>`) and a compile button.
-- A right-hand pane that flips between:
-  - **Resolved IR:** the block-array IR after phase evaluation.
-  - **Diagnostics:** lint output in the same "what is wrong / valid candidates / suggested
-    fix" shape used by `cairn` and the LSP ([Lint](/spec/lint/)).
-  - **Bytes:** the per-edition NBT / schematic bytes the compiler would emit.
-
-The lift loop ([Ecosystem Interop](/spec/ecosystem-interop/)) will live here too: drop a
-`.litematic` or `.mcstructure` file in and watch the compiler produce a raw-centric `.crn`
-plus a voxel diff against the source.
-
-## A sample to read in the meantime
-
-```text
-@cairn 2026.06
-@requires version>=1.20
-
-theme medieval:
-  slot floor -> @oak_planks
-  slot wall  -> @cobblestone
-  slot roof  -> @spruce_stairs
-
-struct cottage size=9x7
-  floor  mat_slot=floor
-  walls  class=outer mat_slot=wall height=4
-  door   side=front at=center
-  window class=small side=front offset=2 y=2 size=2x2 sym=true
-  roof   kind=gable mat_slot=roof overhang=1
-```
-
-Track progress on the [Cairn GitHub repository](https://github.com/kage1020/Cairn). The
-playground unlocks the moment `cairn-lang-wasm` exposes a `compile()` binding.
+- **Findings** are the ones `cairn check` and `cairn compile` report, in the shape
+  [Lint](/spec/lint/) gives them: what is wrong, what would be valid, and how to fix it. Select
+  one to put the cursor where it points. A refusal of the whole run, such as a `--target` the
+  edition does not ship or one a `@requires` floor rules out, is listed with them.
+- **Result** draws the [block-array IR](/spec/architecture/) the structure files are written
+  from, layer by layer, with the palette its cells index into. It appears whenever no finding is an
+  error, even when the run itself is refused.
+- **Structure files** are the `.nbt` (Java) or `.mcstructure` (Bedrock) files `cairn compile`
+  would write, one per structure. The lockfile is not written here: it records a build on disk, and
+  this one is never saved.

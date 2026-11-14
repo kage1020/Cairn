@@ -6,15 +6,15 @@ use std::process::ExitCode;
 
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, Severity, diagnose_parse_failure, lower, parse};
+use cairn_lang_formats::build::circuits::check_circuits;
+use cairn_lang_formats::build::finding::{Finding, Found, render_findings};
+use cairn_lang_formats::build::gate::{build_diagnostics, weighed_editions};
+use cairn_lang_formats::build::lowering::{CheckLowering, check_lowering};
+use cairn_lang_formats::build::run_level::{partial_build, unsupported_target};
 
 use crate::cli::CheckFormat;
-use crate::pipeline::{
-    CheckLowering, build_diagnostics, check_circuits, check_lowering, read_source,
-    report_partial_build, weighed_editions,
-};
-use crate::report::{
-    Finding, Found, print_json, render_diagnostics, report_diagnostic, report_parse_failure,
-};
+use crate::pipeline::read_source;
+use crate::report::{print_json, report_diagnostic, report_parse_failure, report_run_level};
 
 pub(crate) fn run_check(
     file: &Path,
@@ -36,7 +36,7 @@ pub(crate) fn run_check(
                     let parse_failure = [diagnose_parse_failure(&source, &lines, &err)];
                     if let Err(code) = print_json(
                         "diagnostics",
-                        &render_diagnostics(&source, &lines, &parse_failure),
+                        &render_findings(&source, &lines, &parse_failure),
                     ) {
                         return code;
                     }
@@ -79,7 +79,7 @@ pub(crate) fn run_check(
         CheckFormat::Json => {
             if let Err(code) = print_json(
                 "diagnostics",
-                &render_diagnostics(&source, &lines, &diagnostics),
+                &render_findings(&source, &lines, &diagnostics),
             ) {
                 return code;
             }
@@ -88,18 +88,18 @@ pub(crate) fn run_check(
 
     // Run-level refusals: stderr in both formats, after the file's own findings, as in `compile`.
     if !dropped_scopes.is_empty() {
-        report_partial_build(
-            file,
+        let refusal = partial_build(
             &dropped_scopes,
             built_scopes,
             "`cairn compile` at this target would refuse the build, for this or for a \
              `@requires` floor that refuses the target",
         );
+        report_run_level(file, &source, &lines, &refusal);
         return ExitCode::from(1);
     }
     // A check that could not check the ids it was asked to must not exit 0.
     if let Some(err) = unsupported {
-        eprintln!("error: {err}");
+        report_run_level(file, &source, &lines, &unsupported_target(&err));
         return ExitCode::from(1);
     }
 

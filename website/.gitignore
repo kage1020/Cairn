@@ -2,6 +2,8 @@
 dist/
 # generated types
 .astro/
+# the playground's compiler module, which `pnpm run build:wasm` writes
+src/playground/pkg/
 
 # dependencies
 node_modules/
