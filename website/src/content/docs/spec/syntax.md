@@ -380,3 +380,202 @@ A `place` row is the exception: its `id=` is required, and omitting it is `E_INC
 auto-address names nothing outside the body it sits in. A `place`'s `id=` is what `east_of=` and
 `connect` refer to, and what its `.nbt` is written under, so an invented one would be a name the
 author never wrote and cannot point at.
+
+## 5.6 Keyword reference
+
+Each item and member keyword, and each `key=` a member's line accepts, in one line with the
+section that specifies it. That section is normative, and this list is its index:
+``cairn docs spec/syntax "`door`"`` prints one entry, and the language server shows it on hover.
+
+**Items.**
+
+- **`struct`.** One building, built from its body over the `size=WxH` footprint its line declares.
+  See [§5.2](#52-nesting).
+- **`def`.** A reusable building with slots, which the `place` rows of a `site` put down. See
+  [Components, Editing, and Multi-building
+  §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
+- **`theme`.** Binds each slot name to a material token. See
+  [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
+- **`site`.** Places `def`s beside one another and lays walkways between them. See
+  [Components, Editing, and Multi-building
+  §9.3](/spec/components-editing-sites/#93-multi-building-with-site).
+
+**Keys every member accepts.**
+
+- **`id=`.** The member's name, which selectors, ports and `connect` rows refer to. See
+  [§5.5](#55-ids-classes-addresses).
+- **`class=`.** A group the member belongs to, which a theme's selector rows can match. See
+  [§5.5](#55-ids-classes-addresses).
+- **`mat_slot=`.** The slot whose material the member is built from. See [Materials and Themes
+  §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
+
+**Members.**
+
+- **`floor`.** One layer of its material over the whole footprint, on the base plane. See
+  [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
+- **`walls`.** The footprint's outer ring in its material, from the row above the floor. See
+  [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
+  - **`height=`.** How many rows the walls rise.
+- **`fill`.** A box of its material, or of water poured once the blocks it may hold are placed.
+  See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+  - **`from=`.** One corner of the box, a coordinate triple.
+  - **`to=`.** The opposite corner of the box, a coordinate triple.
+  - **`fluid=`.** The fluid it pours in place of a material: `water`.
+  - **`kind=`.** The kind of water it pours: `source`.
+- **`door`.** A door cut into a wall, two rows tall. See [§5.4](#54-selectors).
+  - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
+  - **`at=`.** Where along the wall it is cut: `center`, `left` or `right`.
+  - **`opened_by=`.** The signal that opens it. See
+    [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`hinge=`.** The side its hinge is on, `left` or `right`, in place of the derived side.
+  - **`open=`.** Whether it is built open, `true`, or closed, `false`.
+- **`window`.** An opening cut into a wall and filled with its material. See
+  [§5.4](#54-selectors).
+  - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
+  - **`y=`.** The row its lowest cells are on, counted from the floor.
+  - **`offset=`.** Its first column along the wall, counted from the wall's left end as seen
+    from outside.
+  - **`size=`.** Its width and height, `WxH`.
+  - **`sym=`.** With `true`, a mirrored copy across the wall's midpoint is cut too.
+  - **`repeat=`.** How many copies are cut along the wall.
+  - **`step=`.** How many columns each copy starts after the one before it.
+  - **`shape=`.** The opening's outline, read by nothing yet. See
+    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+  - **`anchor=`.** The opening's reference point, read by nothing yet. See
+    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+- **`roof`.** A roof over the walls, in the shape its `kind=` names. See [Compilation Model
+  §4.3](/spec/compilation/#43-gable-roof-voxel-rules).
+  - **`kind=`.** Its shape: `gable`, `shed`, `hip` or `flat`.
+  - **`overhang=`.** How many columns it reaches past the walls on every side.
+  - **`slope_to=`.** The wall a `shed` roof rises toward.
+  - **`footprint=`.** An anchor key, read by nothing yet. See
+    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+  - **`bounds=`.** An anchor key, read by nothing yet. See
+    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+- **`stair`.** An eave: a band of stairs in the overhang outside one wall. See [Compilation Model
+  §4.3](/spec/compilation/#43-gable-roof-voxel-rules).
+  - **`kind=`.** The kind of stair: `stairs`.
+  - **`side=`.** The wall the band runs outside.
+  - **`half=`.** The half of the cell the stairs sit in: `top` or `bottom`.
+  - **`facing=`.** Which way the stairs face: `out` from the wall or `in` toward it.
+  - **`shape=`.** The stairs' shape: `straight`, `outer_left` or `outer_right`.
+  - **`y=`.** The row the band is on.
+  - **`waterlogged=`.** `true` or `false` written into the stairs' state, or `auto` to let a water
+    `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`level`.** Groups the members under it, each standing its `y=` rows above the base plane. See
+  [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
+  - **`y=`.** How many rows above the base plane its members stand.
+- **`pressure_plate`.** A pressure plate by a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+- **`lever`.** A lever on a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+- **`button`.** A button on a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+- **`daylight`.** A daylight detector by a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+- **`observer`.** An observer by a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`facing=`.** The way it faces, in place of away from the wall: `in`, `out`, `left`,
+    `right`, `up` or `down`. See
+    [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+- **`lamp`.** A redstone lamp by a wall, an actuator. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`lit_by=`.** The signal that lights it.
+- **`piston`.** A piston by a wall, an actuator. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`powered_by=`.** The signal that powers it.
+  - **`facing=`.** The way it pushes, in place of away from the wall: `in`, `out`, `left`,
+    `right`, `up` or `down`.
+  - **`sticky=`.** With `true`, a sticky piston.
+- **`dispenser`.** A dispenser by a wall, an actuator. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`fired_by=`.** The signal that fires it.
+  - **`facing=`.** The way it fires, in place of away from the wall: `in`, `out`, `left`,
+    `right`, `up` or `down`.
+- **`chest`.** A chest by a wall, paired with a chest beside it. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`facing=`.** The way it faces, in place of away from the wall: `in`, `out`, `left` or
+    `right`.
+  - **`size=`.** With `single`, the chest is not paired.
+  - **`waterlogged=`.** `true` or `false` written into the chest's state, or `auto` to let a water
+    `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`repeater`.** A redstone repeater placed by hand, a Tier 0 part. See
+  [Redstone §14.1](/spec/redstone/#tier-0-parts).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it drives: `in`, `out`, `left` or `right` by a wall, a compass word at
+    a triple.
+  - **`delay=`.** Its delay, a whole number from 1 to 4.
+- **`comparator`.** A redstone comparator placed by hand, a Tier 0 part. See
+  [Redstone §14.1](/spec/redstone/#tier-0-parts).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it drives: `in`, `out`, `left` or `right` by a wall, a compass word at
+    a triple.
+  - **`mode=`.** Its mode: `compare` or `subtract`.
+- **`redstone_torch`.** A redstone torch placed by hand, a Tier 0 part. See
+  [Redstone §14.1](/spec/redstone/#tier-0-parts).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the compass word naming the way it points from the side of the
+    block it hangs on.
+- **`redstone_dust`.** Redstone dust placed by hand, a Tier 0 part. See
+  [Redstone §14.1](/spec/redstone/#tier-0-parts).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`connect=`.** `none` for a dot or `all` for a cross, in place of the derived sides.
+- **`circuit`.** Reserves the layers under the base plane that the scope's logic is laid in. See
+  [Redstone §14.5](/spec/redstone/#145-place-and-route).
+  - **`region=`.** The label naming the reservation.
+  - **`void=`.** How many layers it reserves, at least 1.
+- **`raw_block`.** One block named by its id, in one cell. See [Materials and Themes
+  §7.4](/spec/materials-themes/#74-raw-blocks).
+  - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
+  - **`at=`.** The cell, a coordinate triple.
+- **`raw_fill`.** One block named by its id, in every cell of a box. See [Materials and Themes
+  §7.4](/spec/materials-themes/#74-raw-blocks).
+  - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
+  - **`from=`.** One corner of the box, a coordinate triple.
+  - **`to=`.** The opposite corner of the box, a coordinate triple.
+- **`place`.** Places a `def` in a `site`. See [Components, Editing, and Multi-building
+  §9.3.2](/spec/components-editing-sites/#932-origin-selectors).
+  - **`use=`.** The `def` it places.
+  - **`theme=`.** The theme the `def` is built with.
+  - **`at=`.** `origin`, which anchors it at world `(0, 0, 0)`.
+  - **`east_of=`.** The earlier place it stands east of.
+  - **`north_of=`.** The earlier place it stands north of.
+  - **`gap=`.** How many cells it leaves between itself and the place it stands beside.
+- **`connect`.** A walkway between two ports, `FROM.PORT to TO.PORT`. See [Components, Editing,
+  and Multi-building §9.3.5](/spec/components-editing-sites/#935-ports-and-connect).
+  - **`path=`.** The material token the walkway is laid with.

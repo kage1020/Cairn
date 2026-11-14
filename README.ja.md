@@ -91,7 +91,7 @@ semantic-sensitive:      (none)
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
-- 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
+- 診断・補完・ホバーを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)
 
 **実験的な機能。** `cairn synth --experimental-logic-synth` は、レッドストーンのパイプラインの各ステージ (合成、ネットリスト構築、エディション選択、配置、配線、遅延挿入、合法化) を JSON で出力します。出力の形式は今後変わる可能性があります。

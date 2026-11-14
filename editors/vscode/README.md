@@ -1,6 +1,6 @@
 # Cairn — VS Code extension
 
-Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside VS Code: push diagnostics, closed-vocabulary completion, and TextMate syntax highlighting. The extension is a thin client — all analysis runs in the `cairn-lsp` binary shipped alongside the `cairn` CLI in the Cairn release archive.
+Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside VS Code: diagnostics as you type, closed-vocabulary completion, hover, and TextMate syntax highlighting. The extension is a thin client — all analysis runs in the `cairn-lsp` binary shipped alongside the `cairn` CLI in the Cairn release archive.
 
 ## Install
 
