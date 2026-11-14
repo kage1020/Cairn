@@ -578,17 +578,20 @@ There is no single "for-version". `cairn info` reports three axes:
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  1.21.40 .. latest
-edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
-buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
-intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
+registry compatibility:    1.21.40 .. latest
+edition portability:       Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+buildable targets:         Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
+intended targets:          1.21.40, 1.21.60
+semantic-sensitive:        Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
+recommended test targets:  Java: (none)   Bedrock: 1.21.40, 1.26.60
 ```
 
 Every version named is one the built-in packs declare. The file behind this output carries
 `@requires version>=1.21.40`, which is what puts every Java target below the floor, and Bedrock
 1.21.0 with them. The `semantic-sensitive` row names Java members alone, since the built-in
-catalog's boundaries are all Java's.
+catalog's boundaries are all Java's. The `recommended test targets` row names no Java version, since
+none builds, and the oldest and newest Bedrock versions that do, since no Bedrock boundary lies
+between them.
 
 `intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
 declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
@@ -596,8 +599,8 @@ contradict. [§10.4](#the-hint-is-weighed-against-the-floor) automates the compa
 that is decidable, and the reader makes it for the rest. A file declaring none gets `(none
 declared)` rather than a missing row.
 
-The five lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A pipeline
-reading the rows sees the same five lines every time `cairn info` runs to completion. A run that
+The six lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A pipeline
+reading the rows sees the same six lines every time `cairn info` runs to completion. A run that
 does not complete is a different case: a finding refuses the command before any row is computed, so
 stdout is empty rather than short a line.
 
@@ -644,11 +647,12 @@ struct hut size=5x5
   walls mat_slot=wall height=3
 
 $ cairn info hut.crn --editions java
-registry compatibility:  1.20.4 .. latest
-edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
-intended targets:        (none declared)
-semantic-sensitive:      Java: (none)
+registry compatibility:    1.20.4 .. latest
+edition portability:       Java: portable: 2  degraded: 0  unsupported: 0
+buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)
+recommended test targets:  Java: 1.21.4, 26.3
 ```
 
 `1.20.4 .. latest` reads as an answer, and the row two below disproves it, with `1.20.4` itself in
@@ -845,9 +849,6 @@ cannot carry prints a `note:` naming the entry, and a refused lowering prints th
 themselves under the version, each with its own position. Only the JSON lacks them, and `reason`
 fills that gap.
 
-A fifth line, `recommended test targets`, belongs to this axis and answers a different question
-again: which versions are worth testing against. No code path emits it yet.
-
 ### The `semantic-sensitive` row
 
 The row answers the second axis per requested edition, as `Java: <members>   Bedrock: <members>`:
@@ -868,6 +869,33 @@ listed under an edition for another's boundary; the built-in catalog's are all J
 A compile records its target's own answer in the lock's `member_version_sensitivity`, reading the
 blocks as that version does, and warns on a recompile for another version of the edition whose
 boundary lies between the two ([§10.6](#106-provenance-and-lock)).
+
+### The `recommended test targets` row
+
+The row answers which versions are worth loading a build in to test it, per requested edition, as
+`Java: <versions>   Bedrock: <versions>`. It picks from the edition's [buildable
+targets](#the-buildable-targets-row), the supported versions whose pinned lowering raises no error:
+
+- the oldest and the newest of them;
+- for each boundary of the edition's [`semantic-sensitive`](#the-semantic-sensitive-row) entries,
+  the newest of them before the boundary and the oldest at or after it, where some lie on each side.
+
+Each version is listed once, oldest first, in the order of the edition's version table. A source
+with no semantic-sensitive member gets its oldest and newest buildable versions alone, and so does
+one whose buildable versions lie on one side of every boundary. An edition no version builds gets
+`(none)`. `--format json` carries the row as `recommended_test_targets`, one `{edition, versions}`
+per requested edition, in the order requested.
+
+The oldest and newest buildable versions are the ends of what the build claims. A boundary between
+them is where one source is read two ways, so the row adds the two buildable versions nearest it,
+one on each side: the closest pair that shows both readings. A boundary outside them changes nothing
+a build of this source meets, and the row leaves it out though the `semantic-sensitive` row lists
+the member. A source with a chest, whose item format changes at Java 1.20.5, that builds at every
+supported version gets `Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60`: 1.20.4 and 1.21 lie
+either side of 1.20.5, and 1.21.4 shows nothing that 1.21 and 26.3 do not.
+
+Like the other rows, it reports and refuses nothing. A buildable version it leaves out builds all the
+same.
 
 ## 10.6 Provenance and lock
 

@@ -211,7 +211,7 @@ fn a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
         .expect("the row is printed");
     assert_eq!(
         row,
-        "buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   Bedrock: none \
+        "buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   Bedrock: none \
          (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)",
         "the floor is a Java release and no Bedrock release",
     );
@@ -242,7 +242,7 @@ fn a_scoped_floor_is_weighed_only_against_its_own_edition() {
         .expect("the row is printed");
     assert_eq!(
         row,
-        "buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   \
+        "buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   \
          Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60",
         "a Java-scoped floor says nothing about Bedrock",
     );
@@ -287,7 +287,7 @@ fn a_scoped_only_file_says_why_the_neutral_row_is_empty() {
     );
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     assert!(
-        stdout.contains("registry compatibility:  0.0 .. latest"),
+        stdout.contains("registry compatibility:    0.0 .. latest"),
         "the neutral row reads only unscoped floors: {stdout}",
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -379,11 +379,11 @@ fn the_neutral_row_reads_a_floor_a_placed_def_declares() {
     );
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     assert!(
-        stdout.contains("registry compatibility:  1.21.4 .. latest"),
+        stdout.contains("registry compatibility:    1.21.4 .. latest"),
         "{stdout}",
     );
     assert!(
-        stdout.contains("buildable targets:       Java: 1.21.4"),
+        stdout.contains("buildable targets:         Java: 1.21.4"),
         "and the per-edition row is held to it too: {stdout}",
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -409,11 +409,11 @@ fn a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
     );
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     assert!(
-        stdout.contains("registry compatibility:  0.0 .. latest"),
+        stdout.contains("registry compatibility:    0.0 .. latest"),
         "a floor Bedrock does not inherit must not set the row's edge: {stdout}",
     );
     assert!(
-        stdout.contains("buildable targets:       Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60\n"),
+        stdout.contains("buildable targets:         Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60\n"),
         "and the per-edition row refuses nothing, so the two agree: {stdout}",
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -439,11 +439,11 @@ fn the_declared_range_is_not_an_answer_about_which_versions_build() {
         "the row's own lower edge is among the versions that refuse: {stdout}",
     );
     assert!(
-        stdout.contains("registry compatibility:  1.20.4 .. latest"),
+        stdout.contains("registry compatibility:    1.20.4 .. latest"),
         "the declared floor is the row's lower edge: {stdout}",
     );
     assert!(
-        stdout.contains("buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)"),
+        stdout.contains("buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)"),
         "and the derived row names what actually builds: {stdout}",
     );
 
@@ -454,12 +454,12 @@ fn the_declared_range_is_not_an_answer_about_which_versions_build() {
     let floorless = floorless_fixture.source();
     let stdout = info_rows(&floorless, "java,bedrock");
     assert!(
-        stdout.contains("registry compatibility:  0.0 .. latest"),
+        stdout.contains("registry compatibility:    0.0 .. latest"),
         "no `@requires` line and no part declaring one, so nothing feeds the row: {stdout}",
     );
     assert!(
         stdout.contains(
-            "buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   \
+            "buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   \
              Bedrock: 1.21.60, 1.26.60 (1.21.0, 1.21.40 refuse)"
         ),
         "four of the six supported versions refuse it, on both editions: {stdout}",
@@ -571,7 +571,7 @@ fn the_semantic_row_names_each_editions_sensitive_members() {
         .unwrap_or_else(|| panic!("no semantic row: {stdout}"));
     assert_eq!(
         row,
-        "semantic-sensitive:      Java: pot(cauldron split @1.17), raw_fill(item format @1.20.5)   \
+        "semantic-sensitive:        Java: pot(cauldron split @1.17), raw_fill(item format @1.20.5)   \
          Bedrock: (none)",
     );
     let out = cairn(
@@ -599,6 +599,71 @@ fn the_semantic_row_names_each_editions_sensitive_members() {
         info_rows(&fixture.source(), "bedrock")
             .lines()
             .find(|line| line.starts_with("semantic-sensitive:")),
-        Some("semantic-sensitive:      Bedrock: (none)"),
+        Some("semantic-sensitive:        Bedrock: (none)"),
+    );
+}
+
+#[test]
+fn the_recommended_row_names_the_buildable_ends_and_the_pair_across_each_boundary() {
+    // A chest's item format changes at Java 1.20.5; pale moss reaches Java at 1.21.4 and Bedrock
+    // at 1.21.60.
+    let chest = "  raw_fill mat=minecraft:chest from=2,1,1 to=3,1,1\n";
+    let moss = "  raw_block mat=minecraft:pale_moss_block at=1,1,1\n";
+    let cases = [
+        (
+            "",
+            String::new(),
+            "Java: 1.20.4, 26.3   Bedrock: 1.21.0, 1.26.60",
+        ),
+        (
+            "",
+            chest.to_owned(),
+            "Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60",
+        ),
+        (
+            "",
+            format!("{chest}{moss}"),
+            "Java: 1.21.4, 26.3   Bedrock: 1.21.60, 1.26.60",
+        ),
+        (
+            "@requires version>=1.21.40\n\n",
+            chest.to_owned(),
+            "Java: (none)   Bedrock: 1.21.40, 1.26.60",
+        ),
+    ];
+    for (head, members, expected) in cases {
+        let fixture = Fixture::new(&format!(
+            "{head}theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  \
+             floor mat_slot=wall\n  walls mat_slot=wall height=3\n{members}"
+        ));
+        let stdout = info_rows(&fixture.source(), "java,bedrock");
+        assert_eq!(
+            stdout.lines().last(),
+            Some(format!("recommended test targets:  {expected}").as_str()),
+            "{head}{members}",
+        );
+    }
+    let fixture = Fixture::new(&format!(
+        "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  floor mat_slot=wall\n  \
+         walls mat_slot=wall height=3\n{chest}"
+    ));
+    let out = cairn(
+        "info",
+        &[
+            fixture.source().to_str().unwrap(),
+            "--editions",
+            "bedrock,java",
+            "--format",
+            "json",
+        ],
+    );
+    assert!(out.status.success(), "stderr={}", stderr_of(&out));
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid JSON");
+    assert_eq!(
+        parsed["recommended_test_targets"],
+        serde_json::json!([
+            {"edition": "bedrock", "versions": ["1.21.0", "1.26.60"]},
+            {"edition": "java", "versions": ["1.20.4", "1.21", "26.3"]},
+        ]),
     );
 }

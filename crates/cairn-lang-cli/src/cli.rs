@@ -127,11 +127,14 @@ pub(crate) enum Command {
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
-    /// Report a .crn source file's version range, edition portability and semantic-sensitive
-    /// members.
+    /// Report a .crn source file's version range, edition portability, semantic-sensitive members
+    /// and the versions worth testing it in.
     #[command(
         long_about = "Report the three version axes (declared registry range, edition portability, \
-            semantic-sensitive members) for a .crn source file. Exits 0 on success; 1 on a parse \
+            semantic-sensitive members) for a .crn source file, with the versions each edition \
+            builds it for and the `recommended test targets` among them: the oldest and the \
+            newest, and the pair either side of each semantic-sensitivity boundary that falls \
+            between them. Exits 0 on success; 1 on a parse \
             failure, on any `Error`-severity diagnostic (the check passes run here, as does each \
             requested edition's lowering with its circuits laid, and a range derived from a file \
             `cairn check` rejects is a confident wrong answer), or on any \
@@ -147,8 +150,9 @@ pub(crate) enum Command {
             value_delimiter = ',',
             default_values_t = vec!["java".to_owned(), "bedrock".to_owned()],
             long_help = "Comma-separated editions to evaluate portability against. Each distinct \
-                edition produces one entry in the output's `edition portability` and `buildable \
-                targets` sections; a repeated name is reported once",
+                edition produces one entry in the output's `edition portability`, `buildable \
+                targets`, `semantic-sensitive` and `recommended test targets` sections; a \
+                repeated name is reported once",
         )]
         editions: Vec<String>,
         /// Output format for the report.

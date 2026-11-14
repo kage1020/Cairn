@@ -260,18 +260,19 @@ Java のリリースは `1.20.4 / 1.21 / 1.21.4 / 26.3`、Bedrock のリリー�
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  1.21.40 .. latest
-edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
-buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
-intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
+registry compatibility:    1.21.40 .. latest
+edition portability:       Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+buildable targets:         Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
+intended targets:          1.21.40, 1.21.60
+semantic-sensitive:        Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
+recommended test targets:  Java: (none)   Bedrock: 1.21.40, 1.26.60
 ```
 
-名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。`semantic-sensitive` の行が Java のメンバーだけを示すのは、組み込みのカタログの境界がすべて Java のものだからです。
+名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。`semantic-sensitive` の行が Java のメンバーだけを示すのは、組み込みのカタログの境界がすべて Java のものだからです。`recommended test targets` の行は、どのバージョンでもビルドできない Java には何も挙げず、Bedrock にはビルドできる最も古いバージョンと最も新しいバージョンを挙げます。その間に Bedrock の境界はないからです。
 
 `intended targets` はファイル自身の `@intended_targets` 行をそのまま写したもので、答えではなく宣言である唯一の行です。`buildable targets` の隣にあるのは、矛盾しうる相手がその行だからです。判定できる半分の比較は [§10.4](#ヒントは下限と突き合わせる) が自動で行い、残りは読み手が突き合わせます。何も宣言していないファイルでも行は消えず、`(none declared)` と表示します。
 
-5 行は stdout に、それぞれの数値の内訳は stderr に `note:` 行として出ます。行を読むパイプラインは、`cairn info` が最後まで完了するかぎり、毎回同じ 5 行を受け取ります。完了しない場合は別です。指摘がどの行も計算する前にコマンドを拒否するので、stdout は 1 行欠けるのではなく空になります。
+6 行は stdout に、それぞれの数値の内訳は stderr に `note:` 行として出ます。行を読むパイプラインは、`cairn info` が最後まで完了するかぎり、毎回同じ 6 行を受け取ります。完了しない場合は別です。指摘がどの行も計算する前にコマンドを拒否するので、stdout は 1 行欠けるのではなく空になります。
 
 ### `registry compatibility` の行
 
@@ -299,11 +300,12 @@ struct hut size=5x5
   walls mat_slot=wall height=3
 
 $ cairn info hut.crn --editions java
-registry compatibility:  1.20.4 .. latest
-edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
-buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
-intended targets:        (none declared)
-semantic-sensitive:      Java: (none)
+registry compatibility:    1.20.4 .. latest
+edition portability:       Java: portable: 2  degraded: 0  unsupported: 0
+buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)
+recommended test targets:  Java: 1.21.4, 26.3
 ```
 
 `1.20.4 .. latest` は答えのように読めますが、2 行下の行がそれを否定しています。しかも拒否されたリストには `1.20.4` 自身が入っています。宣言した下限が間違っているのではなく、別の問いに答えているのです。`minecraft:pale_moss_block` が 1.21.4 で追加されたことはパックについての事実で、この行が読むのはファイルが宣言した内容だけです。
@@ -391,8 +393,6 @@ semantic-sensitive:      Java: (none)
 
 テキストの行からは、これらは何もわかりません。`buildable targets: Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)` は 5 つの原因のどれでも成り立ちます。どの原因も stderr には出ますが、形は同じではありません。下限に関する 2 つの原因は行の位置を持つ `note:` として、落ちたスコープは位置を持たずスコープ名だけを示す `note:` として、ライターが書き出せないエントリはそのエントリを示す `note:` として、拒否された lowering はそのバージョンの下に指摘そのものとして、それぞれの位置とともに出力します。`reason` が補うのは、この情報を読み取れない JSON の側です。
 
-5 つ目の行 `recommended test targets` もこの軸に属し、また別の問い (どのバージョンでテストする価値があるか) に答えます。まだこれを出力するコードはありません。
-
 ### `semantic-sensitive` の行
 
 この行は、2 つ目の軸に、指定されたエディションごとに `Java: <members>   Bedrock: <members>` の形で答えます。各メンバーは `name(reason @boundary)` と書き、そのエディションに該当がなければ `(none)` と書きます。メンバーが建てるブロックを、そのエディションの `semantic_sensitivity` の行が挙げているとき ([Lint §11.4](/ja/spec/lint/#114-制約カタログ))、そのメンバーを、該当する行ごとに 1 回、メンバーの順に挙げます。名前はその `id=` で、持たない場合はキーワードです。ブロックは範囲全体の lowering が建てるもので、`edition portability` の行が読むのも同じなので、Bedrock のブロックは、いずれかのバージョンのステートマップがそれから作るすべての正規のブロックとして読みます。`--format json` はこの行を `semantic_sensitive` として、項目ごとに `{edition, member, reason, boundary_version}` を、指定されたエディションの順に出力します。
@@ -400,6 +400,19 @@ semantic-sensitive:      Java: (none)
 この行が示すのは、何が変わりうるかであって、どこで変わるかではありません。メンバーは、それをビルドするバージョンが境界のどちら側にあっても挙げます。この行はソースを読むもので、そのソースをどのバージョン向けにビルドするかは、ほかの行が答えるからです。境界はそのエディション自身のバージョンなので、別のエディションの境界のためにメンバーを挙げることはありません。組み込みのカタログの境界はすべて Java のものです。
 
 コンパイルは、ターゲット自身についての答えを、そのバージョンがブロックを読むとおりに読んで、ロックの `member_version_sensitivity` に記録します。そして同じエディションの別のバージョン向けに再コンパイルするとき、2 つのバージョンの間に境界があるメンバーについて警告します ([§10.6](#106-来歴-provenance-とロック))。
+
+### `recommended test targets` の行
+
+この行は、ビルドをどのバージョンで読み込んでテストする価値があるかに、指定されたエディションごとに `Java: <versions>   Bedrock: <versions>` の形で答えます。選ぶ対象は、そのエディションの [buildable targets](#buildable-targets-の行)、つまりターゲットを固定した lowering がエラーを出さないサポート対象のバージョンです。
+
+- そのうち最も古いものと最も新しいもの
+- そのエディションの [`semantic-sensitive`](#semantic-sensitive-の行) の項目の境界ごとに、境界より前で最も新しいものと、境界以降で最も古いもの。境界の両側にビルドできるバージョンがある場合に限る
+
+各バージョンは 1 回ずつ、エディションのバージョン表の順に古いものから並べます。意味が変わりうるメンバーのないソースは、ビルドできる最も古いバージョンと最も新しいバージョンだけになります。ビルドできるバージョンがどの境界についても片側にしかないソースも同じです。どのバージョンでもビルドできないエディションは `(none)` です。`--format json` はこの行を `recommended_test_targets` として、指定されたエディションごとに 1 件の `{edition, versions}` を、指定された順に出力します。
+
+ビルドできる最も古いバージョンと最も新しいバージョンは、ビルドが主張する範囲の両端です。その間にある境界では 1 つのソースが 2 通りに読まれるので、この行は、境界に最も近いビルドできるバージョンを両側に 1 つずつ加えます。2 通りの読み方を両方示す、最も近い組です。範囲の外にある境界は、このソースのビルドが出会うものを何も変えないので、`semantic-sensitive` の行がそのメンバーを挙げていても、この行には入れません。Java 1.20.5 でアイテムフォーマットが変わるチェストを持ち、サポート対象のすべてのバージョンでビルドできるソースは、`Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60` になります。1.20.4 と 1.21 が 1.20.5 の両側にあり、1.21.4 は 1.21 と 26.3 が示さないことを何も示さないからです。
+
+ほかの行と同じく、この行は報告するだけで、何も拒否しません。この行が挙げないバージョンでも、ビルドできることに変わりはありません。
 
 ## 10.6 来歴 (provenance) とロック
 

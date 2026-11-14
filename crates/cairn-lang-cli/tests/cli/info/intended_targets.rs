@@ -128,7 +128,7 @@ fn info_prints_the_declared_targets_beside_the_buildable_ones() {
     let (code, stdout, stderr) = run("info", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
     assert!(
-        stdout.contains("intended targets:        1.20.4, 1.21.4"),
+        stdout.contains("intended targets:          1.20.4, 1.21.4"),
         "expected the declared row, got: {stdout}",
     );
     assert!(
@@ -143,7 +143,7 @@ fn info_says_so_when_no_targets_are_declared() {
     let (code, stdout, stderr) = run("info", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
     assert!(
-        stdout.contains("intended targets:        (none declared)"),
+        stdout.contains("intended targets:          (none declared)"),
         "got: {stdout}",
     );
 }
