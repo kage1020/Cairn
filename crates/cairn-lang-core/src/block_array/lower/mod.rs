@@ -16,6 +16,7 @@ mod circuit;
 mod component;
 mod connect;
 mod connections;
+mod constraints;
 mod diag;
 mod display;
 mod door;

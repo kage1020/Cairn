@@ -182,6 +182,36 @@ fn an_id_no_shipped_version_declares_is_left_to_a_pinned_check() {
     }
 }
 
+#[test]
+fn a_constraint_finding_is_left_to_a_pinned_check() {
+    // A lever on the side of a glass pane, which gives it no whole face.
+    let source = concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n\n",
+        "struct s size=5x5\n",
+        "  floor mat_slot=wall\n",
+        "  walls mat_slot=wall height=3\n",
+        "  raw_block mat=minecraft:glass_pane at=2,1,2\n",
+        "  raw_block mat=minecraft:lever[face=wall, facing=south] at=2,1,3\n",
+    );
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = write_source(tmp.path(), "s.crn", source);
+    for flags in [&[][..], &["--edition", "java"], &["--edition", "bedrock"]] {
+        let bare = check(&src, flags);
+        assert_eq!(bare.code, Some(0), "{flags:?}: {}", bare.stderr);
+        assert_eq!(bare.stderr, "", "{flags:?}");
+    }
+    // A version the edition does not ship lowers unpinned before it is refused.
+    let unshipped = check(&src, &["--edition", "java", "--target", "9.9.9"]);
+    assert_eq!(unshipped.code, Some(1), "{}", unshipped.stderr);
+    assert_stream(&unshipped.stderr, &[]);
+    for (edition, target) in [("java", "1.21.4"), ("bedrock", "1.21.60")] {
+        let pinned = check(&src, &["--edition", edition, "--target", target]);
+        assert_eq!(pinned.code, Some(0), "{edition}: {}", pinned.stderr);
+        assert_stream(&pinned.stderr, &[(8, 3, "warning", "W_NO_ATTACHMENT_FACE")]);
+    }
+}
+
 /// `t_java` and `t_bedrock` binding the roof slot of a gable roof to `java` and `bedrock`.
 fn variant_roofs(java: &str, bedrock: &str) -> String {
     format!(

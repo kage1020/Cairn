@@ -8,6 +8,7 @@ mod absent;
 mod aliases;
 mod blockstate_members;
 mod connections;
+mod constraints;
 mod declared_elsewhere;
 mod ids_exist;
 mod spelling;

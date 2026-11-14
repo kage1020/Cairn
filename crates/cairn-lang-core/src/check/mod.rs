@@ -167,7 +167,10 @@ mod tests {
             | C::StructureTooLarge
             | C::PaletteTooLarge
             | C::InvalidWalkwayIdent
-            | C::PhaseConflict => RaisedBy::LoweringOnly,
+            | C::PhaseConflict
+            | C::NoAttachmentFace
+            | C::UnsupportedBlock
+            | C::WaterSpill => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
             }

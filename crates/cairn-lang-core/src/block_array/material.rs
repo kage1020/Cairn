@@ -10,7 +10,8 @@ use crate::resolve::{TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
-use super::joins::Joins;
+use super::constraint::Constraint;
+use super::joins::{Face, Joins};
 
 /// A block state the pinned target's state map has no form for, as
 /// [`TargetRegistry::unmapped_state`] reports it.
@@ -93,6 +94,28 @@ pub trait TargetRegistry {
     /// (`spec/blockstate` "`waterlogged`"), or `None` when the registry cannot say.
     fn holds_water(&self, state: &BlockState) -> Option<bool> {
         let _ = state;
+        None
+    }
+
+    /// What `state` needs of the cells beside it for the game to keep it at the pinned target
+    /// (`spec/lint` "Constraint checks"), or `None` when it needs nothing or the registry cannot
+    /// say.
+    fn constraint(&self, state: &BlockState) -> Option<Constraint> {
+        let _ = state;
+        None
+    }
+
+    /// Whether `host`, the block in the cell [`Self::constraint`] names for `state`, holds `state`
+    /// there, or `None` when the registry cannot say.
+    fn holds(&self, state: &BlockState, host: &BlockState) -> Option<bool> {
+        let _ = (state, host);
+        None
+    }
+
+    /// Whether `face` of `state` keeps in the water `state` holds, or `None` when the registry
+    /// cannot say.
+    fn keeps_water(&self, state: &BlockState, face: Face) -> Option<bool> {
+        let _ = (state, face);
         None
     }
 

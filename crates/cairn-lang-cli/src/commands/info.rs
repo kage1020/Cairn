@@ -7,15 +7,15 @@ use std::process::ExitCode;
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::resolve::{
-    BuildableTargets, DegradedEntry, EditionReport, UnsupportedEntry, UnsupportedReason,
-    VersionAxes, compute_axes, declared_version_floors, resolve,
+    BuildableTargets, DegradedEntry, EditionReport, SemanticSensitiveFinding, UnsupportedEntry,
+    UnsupportedReason, VersionAxes, compute_axes, declared_version_floors, resolve,
 };
 use cairn_lang_core::suggest::{candidate_list, did_you_mean};
 use cairn_lang_core::{Diagnostic, Edition, Module, Resolution, Severity, lower};
 use cairn_lang_formats::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
 };
-use cairn_lang_formats::registry::builtin_pack;
+use cairn_lang_formats::registry::{builtin_constraints, builtin_pack};
 use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
 use crate::cli::InfoFormat;
@@ -150,6 +150,14 @@ fn backticked(names: &[String]) -> String {
         .join(", ")
 }
 
+/// The members of `block_ir` the constraint catalog lists for `edition`, at any of its versions.
+fn semantic_sensitive(edition: Edition, block_ir: &BlockArrayIr) -> Vec<SemanticSensitiveFinding> {
+    builtin_pack(edition)
+        .view(None)
+        .with_constraints(builtin_constraints())
+        .semantic_sensitive(block_ir)
+}
+
 /// Each requested edition's report row, from a dry-run lower per edition, its circuits laid, and
 /// one per version.
 ///
@@ -259,6 +267,7 @@ fn edition_rows(
                 buildable: verdicts.buildable,
                 considered,
                 refusal,
+                semantic_sensitive: semantic_sensitive(edition, &block_ir),
             });
         }
     }
@@ -542,11 +551,19 @@ fn print_axes_report(axes: &VersionAxes) {
     outln!("intended targets:        {intended_line}");
 
     let semantic_line = joined_or(
-        "(none)",
-        ", ",
-        axes.semantic_sensitive
-            .iter()
-            .map(|f| format!("{}({} @{})", f.member, f.reason, f.boundary_version)),
+        "(no editions requested)",
+        "   ",
+        axes.edition_portability.iter().map(|ep| {
+            let members = joined_or(
+                "(none)",
+                ", ",
+                axes.semantic_sensitive
+                    .iter()
+                    .filter(|f| f.edition == ep.edition)
+                    .map(|f| format!("{}({} @{})", f.member, f.reason, f.boundary_version)),
+            );
+            format!("{}: {members}", capitalise(ep.edition.as_str()))
+        }),
     );
     outln!("semantic-sensitive:      {semantic_line}");
 }

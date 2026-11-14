@@ -65,7 +65,7 @@ fn json_format_is_valid_version_axes() {
     let sensitive = parsed["semantic_sensitive"]
         .as_array()
         .expect("semantic_sensitive is an array");
-    // Nothing populates the semantic-sensitivity catalog, so this is empty.
+    // The cottage builds nothing the constraint catalog lists.
     assert_eq!(*sensitive, [] as [serde_json::Value; 0]);
 }
 
@@ -555,4 +555,50 @@ fn an_edition_named_twice_is_reported_once() {
             );
         }
     }
+}
+
+#[test]
+fn the_semantic_row_names_each_editions_sensitive_members() {
+    let fixture = Fixture::new(
+        "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  floor mat_slot=wall\n  \
+         walls mat_slot=wall height=3\n  raw_block id=pot mat=minecraft:cauldron at=1,1,1\n  \
+         raw_fill mat=minecraft:chest from=2,1,1 to=3,1,1\n",
+    );
+    let stdout = info_rows(&fixture.source(), "java,bedrock");
+    let row = stdout
+        .lines()
+        .find(|line| line.starts_with("semantic-sensitive:"))
+        .unwrap_or_else(|| panic!("no semantic row: {stdout}"));
+    assert_eq!(
+        row,
+        "semantic-sensitive:      Java: pot(cauldron split @1.17), raw_fill(item format @1.20.5)   \
+         Bedrock: (none)",
+    );
+    let out = cairn(
+        "info",
+        &[
+            fixture.source().to_str().unwrap(),
+            "--editions",
+            "bedrock,java",
+            "--format",
+            "json",
+        ],
+    );
+    assert!(out.status.success(), "stderr={}", stderr_of(&out));
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid JSON");
+    assert_eq!(
+        parsed["semantic_sensitive"],
+        serde_json::json!([
+            {"edition": "java", "member": "pot", "reason": "cauldron split",
+             "boundary_version": "1.17"},
+            {"edition": "java", "member": "raw_fill", "reason": "item format",
+             "boundary_version": "1.20.5"},
+        ]),
+    );
+    assert_eq!(
+        info_rows(&fixture.source(), "bedrock")
+            .lines()
+            .find(|line| line.starts_with("semantic-sensitive:")),
+        Some("semantic-sensitive:      Bedrock: (none)"),
+    );
 }

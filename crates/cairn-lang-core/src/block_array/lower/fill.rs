@@ -193,7 +193,7 @@ fn water_source() -> BlockState {
     let mut properties = IndexMap::new();
     properties.insert("level".to_owned(), "0".to_owned());
     BlockState {
-        id: "minecraft:water".to_owned(),
+        id: BlockState::WATER_ID.to_owned(),
         properties,
     }
 }

@@ -170,6 +170,13 @@ pub enum DiagnosticCode {
     ConnectArity,
     /// Two members in one phase wrote one voxel to different blocks; the later line wins.
     PhaseConflict,
+    /// A member built a block that hangs on a face the cell it hangs on does not give whole, so
+    /// the game drops it.
+    NoAttachmentFace,
+    /// A member built a block the cell under or over it does not hold, or a block that falls.
+    UnsupportedBlock,
+    /// A member holds water that flows into air the build leaves beside it.
+    WaterSpill,
     /// An `assert truth(...)` with no rows, or none whose output is `0` or `1`.
     TruthTableEmpty,
     /// An `assert truth(...)` lists one signal as two or more of its inputs.
@@ -256,6 +263,9 @@ impl DiagnosticCode {
             Self::InvalidWalkwayIdent => "W_INVALID_WALKWAY_IDENT",
             Self::ConnectArity => "E_CONNECT_ARITY",
             Self::PhaseConflict => "W_PHASE_CONFLICT",
+            Self::NoAttachmentFace => "W_NO_ATTACHMENT_FACE",
+            Self::UnsupportedBlock => "W_UNSUPPORTED_BLOCK",
+            Self::WaterSpill => "W_WATER_SPILL",
             Self::TruthTableEmpty => "E_TRUTH_TABLE_EMPTY",
             Self::TruthTableDuplicateInput => "E_TRUTH_TABLE_DUPLICATE_INPUT",
             Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
@@ -338,6 +348,9 @@ impl DiagnosticCode {
             | Self::DeferredPlace
             | Self::InvalidWalkwayIdent
             | Self::PhaseConflict
+            | Self::NoAttachmentFace
+            | Self::UnsupportedBlock
+            | Self::WaterSpill
             | Self::TruthTableDuplicateRow
             | Self::IntendedTargetCapPartial
             | Self::IntendedTargetUnsupported
