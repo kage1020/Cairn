@@ -12,6 +12,7 @@ use crate::block_array::BlockState;
 use crate::block_array::args::{
     UnreadArgument, diag_invalid_member, ident_or_ignore, read_or_ignore,
 };
+use crate::block_array::geometry::Declared;
 use crate::block_array::joins::Face;
 
 use super::canvas::{MemberCanvas, ScopePalette};
@@ -228,14 +229,14 @@ fn place(
     let mut properties = states(part, member, written)?;
     let stand = stand_of(fixture, member)?;
     let (block, facing) = turn(part, member, written.facing, stand)?;
-    let cell = match stand {
-        Stand::Triple => triple_cell(fixture, member, y_offset, ctx)?,
+    let (cell, host_face) = match stand {
+        Stand::Triple => (triple_cell(fixture, member, y_offset, ctx)?, None),
         Stand::ByWall => {
             let (anchor, cell) = fixture_cell(fixture, member, y_offset, ctx)?;
             if let Some(facing) = by_the_wall(part, anchor, facing) {
                 properties.insert("facing".to_owned(), facing.as_str().to_owned());
             }
-            cell
+            (cell, Some(anchor.host_face()))
         }
     };
     if let Some(Look::Compass(face)) = facing {
@@ -245,6 +246,7 @@ fn place(
     properties.sort_keys();
     let id = default_block_id(member, ctx.registry, block.token, block.base_id)?;
     let state = BlockState { id, properties };
+    canvas.declare(Declared::cell(cell, host_face));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
         Ok(stand)

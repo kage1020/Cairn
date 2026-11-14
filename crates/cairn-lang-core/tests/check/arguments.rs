@@ -353,11 +353,11 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "window",
-        "  window id=n class=c mat_slot=m side=front y=2 offset=1 size=1x1 sym=false repeat=1 step=1\n",
+        "  window id=n class=c mat_slot=m side=front y=2 offset=1 size=1x1 sym=false repeat=1 step=1 anchor=bottom_left\n",
     ),
     (
         "roof",
-        "  roof id=r class=c mat_slot=m kind=shed overhang=1 slope_to=front\n",
+        "  roof id=r class=c mat_slot=m kind=shed overhang=1 slope_to=front footprint=struct bounds=expand\n",
     ),
     (
         "stair",
@@ -551,17 +551,8 @@ fn a_stair_reads_the_height_it_is_written_at() {
 
 #[test]
 fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // Each is written on a known keyword in `spec/entities` "Anchor conventions".
-    let rows = [
-        ("window side=front y=2 offset=4 size=3x3", "shape", "arch"),
-        (
-            "window side=front y=2 offset=4 size=3x3",
-            "anchor",
-            "bottom_center",
-        ),
-        ("roof kind=gable", "footprint", "struct"),
-        ("roof kind=gable", "bounds", "expand"),
-    ];
+    // Written on a known keyword in `spec/entities` "Anchor conventions".
+    let rows = [("window side=front y=2 offset=4 size=3x3", "shape", "arch")];
     for (line, key, value) in rows {
         let keyword = keyword_of(line);
         let src = format!("struct s size=9x9\n  {line} {key}={value}\n");
