@@ -1,5 +1,7 @@
 # cairn-lang-nbt
 
+This crate's Rust API is in the [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no promise: any release may change it.
+
 NBT codec for the Cairn language, in both on-disk dialects.
 
 - **Java**: big-endian, gzip-wrapped, root compound tags.

@@ -1,5 +1,7 @@
 # cairn-lang-redstone
 
+This crate's Rust API is in the [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no promise: any release may change it.
+
 Redstone for Cairn: lowers a *signal graph* to the blocks of a circuit laid under each struct, and verifies the result with a headless per-tick simulator.
 
 Per [redstone](https://cairn.kage1020.com/spec/redstone/), the logical redstone surface is where Cairn's "declare intent, the compiler resolves the physics" thesis pays off most. Signal attenuation, crosstalk, delay, and the Java/Bedrock divergence — all things an LLM handles poorly — are derived deterministically from a small dataflow description.
