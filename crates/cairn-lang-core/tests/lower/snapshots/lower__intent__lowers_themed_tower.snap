@@ -34,12 +34,14 @@ structs:
     args: {}
     members:
       - id: base
+        address: "floor[0]"
         role:
           kind: Floor
         mat_slot: floor
         arguments: {}
         intent_state: {}
       - id: shell
+        address: "walls[0]"
         role:
           kind: Walls
         mat_slot: wall
@@ -49,6 +51,7 @@ structs:
             value: 5
         intent_state: {}
       - id: roof
+        address: "roof[0]"
         role:
           kind: Roof
         mat_slot: roof
@@ -61,6 +64,7 @@ structs:
             value: 1
         intent_state: {}
       - id: floor1
+        address: "level[0]"
         role:
           kind: Level
         arguments:
@@ -71,6 +75,7 @@ structs:
         children:
           members:
             - id: entry
+              address: "level[0].door@front[0]"
               role:
                 kind: Door
               arguments:
@@ -82,6 +87,7 @@ structs:
                   value: center
               intent_state: {}
             - id: front_window
+              address: "level[0].window@front[0]"
               role:
                 kind: Window
               mat_slot: trim
@@ -102,6 +108,7 @@ structs:
                     h: 2
               intent_state: {}
       - id: floor2
+        address: "level[1]"
         role:
           kind: Level
         arguments:
@@ -113,6 +120,7 @@ structs:
           members:
             - id: upper
               class: outer
+              address: "level[1].walls[0]"
               role:
                 kind: Walls
               mat_slot: wall
@@ -122,6 +130,7 @@ structs:
                   value: 4
               intent_state: {}
             - class: arrow_slit
+              address: "level[1].window@front[0]"
               role:
                 kind: Window
               arguments:
@@ -144,6 +153,7 @@ structs:
                     h: 2
               intent_state: {}
             - id: eave
+              address: "level[1].stair@front[0]"
               role:
                 kind: Stair
               mat_slot: roof

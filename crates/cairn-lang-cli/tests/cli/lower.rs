@@ -208,6 +208,37 @@ fn a_guarded_line_check_refuses_fails_the_lowering_that_leaves_it_out() {
 }
 
 #[test]
+fn the_ascii_dump_lists_each_member_that_built_a_cell_by_its_address() {
+    let source = concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "struct s size=3x3\n",
+        "  level y=2\n",
+        "    walls mat_slot=wall height=1\n",
+        "  walls id=shell mat_slot=wall height=1\n",
+    );
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write_source(tmp.path(), "members.crn", source);
+    let run = Run::from(cairn("lower", &[path.to_str().unwrap()]));
+    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    let listing: Vec<&str> = run
+        .stdout
+        .lines()
+        .skip_while(|line| *line != "  members:")
+        .take_while(|line| !line.starts_with("  y="))
+        .collect();
+    assert_eq!(
+        listing,
+        [
+            "  members:",
+            "    walls[0]  id=shell",
+            "    level[0].walls[0]"
+        ],
+    );
+}
+
+#[test]
 fn deferred_member_warnings_print_to_stderr() {
     // Lowering has no roof under a raised `level`, so it defers.
     let source = concat!(

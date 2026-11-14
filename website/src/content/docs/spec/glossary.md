@@ -41,6 +41,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   and no type, and no keyword places a block entity or an entity yet; `type` will sit beside `role`.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
+- **Address.** The name the compiler gives every member of a `struct` or `def` body from where it
+  stands, `ROLE@SIDE[N]` per step, such as `level[1].window@front[0]`: never from line order, so
+  reordering lines or appending a member elsewhere moves none. See
+  [syntax §5.5](/spec/syntax/#55-ids-classes-addresses).
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).

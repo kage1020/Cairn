@@ -412,7 +412,7 @@ pub(crate) enum SynthStage {
 
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum ParseFormat {
-    /// Pretty JSON (default).
+    /// Pretty JSON (default), each member line of a `struct` or `def` body carrying its address.
     Json,
     /// Rust `{:#?}` debug formatting (developer-facing).
     Debug,
@@ -436,8 +436,8 @@ pub(crate) enum InfoFormat {
 
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum LowerFormat {
-    /// Per-structure ASCII Y-slice plus a palette listing (default; easiest way to eyeball
-    /// whether the walls came out right).
+    /// Per-structure ASCII Y-slice plus a palette listing and the address of each member that
+    /// built a cell (default; easiest way to eyeball whether the walls came out right).
     Ascii,
     /// Pretty JSON serialisation of `BlockArrayIr`, for tools.
     Json,

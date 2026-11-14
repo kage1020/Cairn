@@ -191,6 +191,7 @@ snow, covers here what its model does.
 ```yaml
 member:
   id: eave
+  address: stair@front[0]                  # where it stands, derived (Syntax §5.5)
   type: block | block_entity | entity      # typed in the IR; the distinction is the compiler's job
   primitive: stairs
   intent_state:   { half: top, facing: out, shape: outer_left }  # author intent
@@ -215,7 +216,9 @@ member's cells hold once the body is painted, with the cells that hold it as run
 from its first cell, in block-array order. A cell belongs to the member that painted it last, so a
 door's block is recorded on the door and not on the wall it was set into, and a member none of whose
 cells survive records nothing. `cairn lower --format json` prints the record under `members`, keyed
-like `structures`, which is what lets two builds be compared member by member. A body lists its
+like `structures`. Each record names its member by keyword, by `id=` where the line writes one, and
+by its address ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), which is what lets two
+builds be compared member by member. A body lists its
 members in the order of the first cell each owns, so reordering lines that share no cell leaves the
 record as it was, as it leaves the grid ([Compilation Model
 §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The record is made each time a

@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 
 use crate::error::Span;
+use crate::intent::MemberAddress;
 
 use super::{
     BlockArrayIr, BlockEntity, BlockState, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex,
@@ -74,8 +75,8 @@ pub enum AttachError {
 
 impl BlockArrayIr {
     /// Lays `blocks` in `void` new layers under the structure `key`, which rises over them while a
-    /// placement's origin moves down, filing the blocks under the `circuit` line `span`, or leaves
-    /// the structure as it was.
+    /// placement's origin moves down, filing the blocks under the `circuit` line `span` at
+    /// `address`, or leaves the structure as it was.
     ///
     /// # Errors
     ///
@@ -86,6 +87,7 @@ impl BlockArrayIr {
         void: u32,
         blocks: &[LaidBlock],
         span: Span,
+        address: Option<MemberAddress>,
     ) -> Result<(), AttachError> {
         let array = self
             .structures
@@ -102,6 +104,7 @@ impl BlockArrayIr {
         let mut member = ResolvedMember {
             role: "circuit".to_owned(),
             id: None,
+            address,
             resolved_state: Vec::new(),
             span,
         };

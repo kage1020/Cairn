@@ -131,6 +131,20 @@ fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
                 );
             }
         }
+        let members = block_ir.members.get(key).map_or(&[][..], Vec::as_slice);
+        if !members.is_empty() {
+            outln!("  members:");
+        }
+        for member in members {
+            let address = member
+                .address
+                .as_ref()
+                .map_or_else(|| member.role.clone(), ToString::to_string);
+            match &member.id {
+                Some(id) => outln!("    {address}  id={id}"),
+                None => outln!("    {address}"),
+            }
+        }
         for y in 0..array.dims.y {
             outln!("  y={y}");
             print_y_slice(array, y);
