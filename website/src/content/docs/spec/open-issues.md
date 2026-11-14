@@ -47,7 +47,9 @@ provenance.
 ## 15.2 Untouched topics
 
 **Primitive promotion.** Whether columns and arches should become semantic primitives. The
-decision rests on experimental data from the [Evaluation Framework](/spec/evaluation/).
+decision rests on experimental data from the [Evaluation Framework](/spec/evaluation/): the
+prompt set's columns and arches topic and its edit prompts measure how a model builds them today.
 
 **Interiors.** Whether the `inside.front` prefix suffices or a higher-level `room` concept is
-needed, and whether furniture can be served by a `def` library.
+needed, and whether furniture can be served by a `def` library. The prompt set's interiors topic
+and its edit prompts measure how a model builds them today.

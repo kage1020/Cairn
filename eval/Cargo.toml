@@ -1,0 +1,23 @@
+[package]
+name = "eval"
+description = "The evaluation harness of the Cairn specification, run as `cargo eval`"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+cairn-lang-core.workspace = true
+cairn-lang-docs.workspace = true
+clap = { version = "4.6.1", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+toml = "1.1.8"
+ureq = { version = "3.5.2", default-features = false, features = ["rustls"] }

@@ -57,6 +57,13 @@ cargo xtask lint versions   # one rule
 cargo xtask lint --site website/dist site-parity   # after `pnpm run build` in website/
 ```
 
+The evaluation harness measures the spec against a model. `cargo test --workspace` already runs it on recorded replies, so CI makes no request; a live run needs an Anthropic API key and names its model, edition and target. The [developer guide](https://cairn.kage1020.com/development/#the-evaluation-harness) covers it:
+
+```sh
+ANTHROPIC_API_KEY=<key> cargo eval run --model <model id> --edition java --target 1.21.4 --out run.json
+cargo eval compare baseline.json proposal.json
+```
+
 ### The repository
 
 | Path | What lives there |
@@ -72,6 +79,7 @@ cargo xtask lint --site website/dist site-parity   # after `pnpm run build` in w
 | `editors/vscode` | VS Code extension — a thin client over `cairn-lsp` |
 | `website` | Astro + Starlight docs site: spec, tutorial and guides in English and 日本語, and the developer guide in English. Also the `cairn-lang-docs` crate, which embeds the site's Markdown pages for `cairn docs` |
 | `examples` | `.crn` sources (lockfiles are generated output and stay untracked) |
+| `eval` | The evaluation harness, run as `cargo eval`: the prompt set, the model backends and the metrics of the spec's Evaluation Framework |
 
 The [Developer Guide](https://cairn.kage1020.com/development/) covers the dependency rules between crates in more detail.
 
@@ -106,7 +114,7 @@ A section number is the same kind of coordinate. `§14.5` is true only while "Pl
 
 Write the chapter as its file stem without the extension (`spec/redstone`, `spec/versioning-editions`) and copy the section title verbatim. Cite the chapter alone when you mean the whole chapter. Once a comment has given the full citation, later sentences in it refer back in prose ("that pipeline", "the phase order") rather than repeat it.
 
-`cargo xtask lint spec-citations` checks the `.rs`, `.md` and `.crn` files in `crates/`, `examples/`, `website/rust/`, `xtask/`, `.github/`, `.claude/` and `CLAUDE.md` for three things:
+`cargo xtask lint spec-citations` checks the `.rs`, `.md` and `.crn` files in `crates/`, `examples/`, `website/rust/`, `eval/`, `xtask/`, `.github/`, `.claude/` and `CLAUDE.md` for three things:
 
 - no `§` or "section 11.3" appears in any of them;
 - every `spec/<chapter>` names a chapter that exists;
@@ -191,7 +199,7 @@ Some decisions are deliberately closed: `key=value` over positional arguments, p
 - the decision, and where it lives in the spec;
 - a concrete case it fails;
 - an alternative, with syntax, IR, and message examples;
-- the effect on the [evaluation metrics](https://cairn.kage1020.com/spec/evaluation/).
+- the effect on the [evaluation metrics](https://cairn.kage1020.com/spec/evaluation/), measured with `cargo eval` on a baseline run and a proposal run as the [Operating rule](https://cairn.kage1020.com/spec/evaluation/#133-operating-rule) asks.
 
 ## Bumping the toolchain
 

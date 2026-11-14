@@ -57,6 +57,13 @@ cargo xtask lint versions   # 1 つのルールだけ
 cargo xtask lint --site website/dist site-parity   # website/ で `pnpm run build` を実行した後
 ```
 
+評価ハーネスは、仕様をモデルに対して測ります。`cargo test --workspace` が記録した返答ですでに実行するので、CI はリクエストを送りません。実際に実行するには Anthropic の API キーが必要で、モデル、エディション、ターゲットを指定します。詳しくは[開発者ガイド](https://cairn.kage1020.com/development/#the-evaluation-harness) (英語のみ) を参照してください。
+
+```sh
+ANTHROPIC_API_KEY=<key> cargo eval run --model <model id> --edition java --target 1.21.4 --out run.json
+cargo eval compare baseline.json proposal.json
+```
+
 ### リポジトリの構成
 
 | パス | 内容 |
@@ -72,6 +79,7 @@ cargo xtask lint --site website/dist site-parity   # website/ で `pnpm run buil
 | `editors/vscode` | VS Code 拡張。`cairn-lsp` の薄いクライアント |
 | `website` | Astro + Starlight のドキュメントサイト。仕様・チュートリアル・ガイドを英語と日本語で、開発者ガイドを英語で公開。サイトの Markdown ページを `cairn docs` 用に埋め込む `cairn-lang-docs` クレートもここにあります |
 | `examples` | `.crn` ソース (ロックファイルは生成物なので追跡しません) |
+| `eval` | `cargo eval` で実行する評価ハーネス。仕様の評価フレームワークのプロンプト集、モデルのバックエンド、指標 |
 
 クレート間の依存関係のルールは[開発者ガイド](https://cairn.kage1020.com/development/) (英語のみ) で詳しく説明しています。
 
@@ -106,7 +114,7 @@ Rust のソース、仕様の本文、サンプル、ドキュメントは、何
 
 章は拡張子を除いたファイル名で書き (`spec/redstone`、`spec/versioning-editions`)、節の見出しは一字一句そのまま写します。章全体を指すときは章だけを書きます。同じコメントの中で一度引用したら、後の文では「that pipeline」「the phase order」のように普通の言葉で受けてください。同じ引用を繰り返す必要はありません。
 
-`cargo xtask lint spec-citations` が、`crates/`、`examples/`、`website/rust/`、`xtask/`、`.github/`、`.claude/`、`CLAUDE.md` にある `.rs`、`.md`、`.crn` ファイルを対象に、次の 3 点を検査します。
+`cargo xtask lint spec-citations` が、`crates/`、`examples/`、`website/rust/`、`eval/`、`xtask/`、`.github/`、`.claude/`、`CLAUDE.md` にある `.rs`、`.md`、`.crn` ファイルを対象に、次の 3 点を検査します。
 
 - `§` や "section 11.3" のような番号での参照が残っていないこと
 - `spec/<章>` が実在する章を指していること
@@ -191,7 +199,7 @@ PR では [CHANGELOG.md](CHANGELOG.md) を直接編集しません。代わり�
 - 見直したい決定と、仕様のどこに書かれているか
 - その決定ではうまく扱えない具体的なケース
 - 構文・IR・メッセージの例を添えた代案
-- [評価指標](https://cairn.kage1020.com/ja/spec/evaluation/)への影響
+- [評価指標](https://cairn.kage1020.com/ja/spec/evaluation/)への影響。[運用のルール](https://cairn.kage1020.com/ja/spec/evaluation/#133-運用のルール) に従い、`cargo eval` でベースラインの実行と提案の実行を測ります
 
 ## ツールチェーンの更新
 

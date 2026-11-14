@@ -48,13 +48,15 @@ edit door[id=entry]                   set side=front at=center
 ```
 
 `edit` is not accepted yet. A top-level `edit` line is `E_PARSE`, since the only top-level items
-are `theme`, `def`, `site` and `struct`, so no edit is applied today and the edit-diff rule below
-has nothing to compare.
+are `theme`, `def`, `site` and `struct`, so no edit is applied today. An edit is measured on two
+whole programs instead, before and after a follow-up request
+([Evaluation Framework](/spec/evaluation/#131-primary-metrics)).
 
 Editing at the level of a concept, such as "make only the second-floor windows arched", must be
-possible without breaking the whole. Edit diffs look only at what a line writes, its `intent_state`
-and its arguments ([Blockstate Model](/spec/blockstate/)), so a change in derived results does not
-harm edit stability.
+possible without breaking the whole. An edit's AST diff looks only at what a line writes, its
+`intent_state` and its arguments ([Blockstate Model](/spec/blockstate/)), so a change in derived
+results does not count against it. Its NBT diff counts every cell whose block changed, derived
+states included, which is where a change that ripples into an unrelated member shows.
 
 ## 9.3 Multi-building with `site`
 

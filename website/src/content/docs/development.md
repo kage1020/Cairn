@@ -17,6 +17,7 @@ language spec rather than the compiler, start at the [Specification](/spec/) and
 | `rust-toolchain.toml` | The exact Rust version CI runs, with `rustfmt` and `clippy`. |
 | `rustfmt.toml` | Edition 2024, `max_width = 100`. |
 | `crates/` | The Rust workspace (below). |
+| `eval/` | The evaluation harness and its prompt set ([below](#the-evaluation-harness)). |
 | `editors/vscode/` | VS Code extension. |
 | `examples/` | Worked `.crn` examples. |
 | `website/` | This site: Astro + Starlight, including the specification, and the `cairn-lang-docs` crate that embeds its pages. |
@@ -34,13 +35,16 @@ Each crate maps back to the spec chapter it implements:
 | [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) | WebAssembly bindings | cdylib + rlib |
 | [`cairn-lang-tree-sitter`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-tree-sitter/README.md) | Grammar for editor highlighting, also published to npm | lib |
 | [`cairn-lang-docs`](https://github.com/kage1020/Cairn/blob/main/website/rust/README.md) | This site's Markdown pages, embedded for `cairn docs` | lib |
+| `eval` | The harness the [Evaluation Framework](/spec/evaluation/) calls for, run as `cargo eval` | lib + bin, unpublished |
 
 ## Dependency rules
 
 `cairn-lang-core` sits at the root. `cairn-lang-cli`, `cairn-lang-lsp`, and `cairn-lang-wasm` are
 leaf integrations that nothing depends on. `cairn-lang-formats` is the only crate that pulls in
 `cairn-lang-nbt`. `cairn-lang-docs` depends on nothing. Its manifest is `website/Cargo.toml`, so the
-pages it embeds are the site's own sources, with no copy to drift.
+pages it embeds are the site's own sources, with no copy to drift. `eval` reads the spec pages from
+`cairn-lang-docs` and lexes and parses with `cairn-lang-core`, but checks every program by running
+the `cairn` binary, so it measures what an author sees; nothing depends on it.
 
 - **`cairn-lang-core` knows nothing about NBT, file formats, redstone simulation, or editor
   protocols.** The block-array IR is the universal pivot ([Architecture](/spec/architecture/));
@@ -219,6 +223,46 @@ run refuses until it has one. The edition's hand-written `absent.json` lists the
 blocks it lacks, so a new version that adds one of them makes the pack refuse to load until that
 row goes. The pack hash moves with every table, so the `builtin_*_pack_hash`
 snapshots in `cairn-lang-formats` move too.
+
+### The evaluation harness
+
+`cargo eval` runs the loop of the [Evaluation Framework](/spec/evaluation/) over the prompt set in
+`eval/prompts/`. `cargo test --workspace` covers the whole loop and every metric through recorded
+replies, so CI makes no request. A live run asks the Anthropic Messages API with the key in
+`ANTHROPIC_API_KEY`, and names its model, edition and target on the command line, since the harness
+has no default for any of them:
+
+```sh
+export ANTHROPIC_API_KEY=<key>
+cargo eval run --model <model id> --edition java --target 1.21.4 --out baseline.json
+cargo eval compare baseline.json proposal.json
+```
+
+`run` builds this checkout's `cairn` and checks every reply with it, so run it at the commit you
+measure. It reports each prompt on stderr as it ends and writes the
+[run record](/spec/evaluation/#135-run-record) to `--out`, or to stdout without it. Other flags:
+
+- `--only <id>` runs that prompt, and an edit prompt's base with it; repeat it for several. A run of
+  one prompt is a cheap first check of a key and a model.
+- `--max-tokens <n>` caps each reply, 16000 by default.
+- `--prompts <dir>` reads another prompt set, as a baseline does for a proposal that changes the
+  set, and `--cairn <path>` checks with a `cairn` already built.
+- `--replay <file>` answers from recorded replies instead of the API: `[[conversation]]` tables,
+  each with an `id` and its `replies` in order.
+
+Each conversation makes one to four requests, and an edit prompt whose base did not converge makes
+none, so the 50 prompts cost between 50 and 200 requests. Every request carries the English spec
+pages, about 370 KB, as a system prompt marked for caching, and the record's `usage` counts the
+input tokens written to the cache, read from it and sent uncached.
+
+`compare` takes a baseline record, then a proposal record, and refuses two that did not ask the same
+model, prompt set, edition, target and `max_tokens`. It prints each metric for both runs and the
+change, taking token efficiency and edit stability over the prompts both runs converged on.
+
+A prompt is a file `eval/prompts/<id>.toml` holding its `topic` and `prompt`, and for an edit prompt
+the `base` it edits, which must be a generation prompt. A change to a prompt, or to the messages the
+harness sends around one, changes the record's `prompt_set` hash, so the record no longer compares
+with one made before it. `eval/tests/harness/prompts.rs` pins how many prompts each topic holds.
 
 ## Conventions for Rust code
 

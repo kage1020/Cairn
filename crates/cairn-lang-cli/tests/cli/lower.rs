@@ -274,7 +274,15 @@ fn a_target_checks_block_ids_against_its_version() {
     assert_eq!(unpinned.code, Some(0), "stderr={}", unpinned.stderr);
     let since = Run::from(cairn(
         "lower",
-        &[path, "--edition", "java", "--target", "1.21.4", "--format", "json"],
+        &[
+            path,
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--format",
+            "json",
+        ],
     ));
     assert_eq!(since.code, Some(0), "stderr={}", since.stderr);
     assert_eq!(
@@ -303,7 +311,10 @@ fn a_target_the_edition_does_not_ship_is_refused_before_the_file_is_read() {
 #[test]
 fn a_target_without_an_edition_is_a_usage_error() {
     let path = examples_dir().join("cottage.crn");
-    let run = Run::from(cairn("lower", &[path.to_str().unwrap(), "--target", "1.21.4"]));
+    let run = Run::from(cairn(
+        "lower",
+        &[path.to_str().unwrap(), "--target", "1.21.4"],
+    ));
     assert_eq!(run.code, Some(2), "stderr={}", run.stderr);
     assert_eq!(run.stdout, "");
 }
