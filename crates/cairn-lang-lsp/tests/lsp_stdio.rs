@@ -281,6 +281,7 @@ fn initialize_advertises_full_sync_and_completion_and_shuts_down_clean() {
         capabilities["diagnosticProvider"]["identifier"],
         serde_json::json!("cairn"),
     );
+    assert_eq!(capabilities["hoverProvider"], serde_json::json!(true));
     server.shutdown();
 }
 

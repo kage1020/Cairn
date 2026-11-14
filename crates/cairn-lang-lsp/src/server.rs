@@ -1,5 +1,5 @@
 //! The stdio JSON-RPC loop: diagnostics pushed on each change or answered when the client pulls
-//! them, and completion from the stored text.
+//! them, and completion and hover from the stored text.
 
 use std::collections::VecDeque;
 use std::sync::mpsc;
@@ -10,10 +10,13 @@ use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Notification as _,
     PublishDiagnostics,
 };
-use lsp_types::request::{Completion, DocumentDiagnosticRequest, Request as _, Shutdown};
+use lsp_types::request::{
+    Completion, DocumentDiagnosticRequest, HoverRequest, Request as _, Shutdown,
+};
 
 use crate::completion::completions;
 use crate::diagnostics::compute_diagnostics;
+use crate::hover::hover;
 use crate::store::DocumentStore;
 
 /// A transport or protocol failure, which ends the process.
@@ -33,6 +36,7 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
             trigger_characters: Some(vec!["@".to_owned(), "=".to_owned(), ".".to_owned()]),
             ..lsp_types::CompletionOptions::default()
         }),
+        hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
         diagnostic_provider: Some(lsp_types::DiagnosticServerCapabilities::Options(
             lsp_types::DiagnosticOptions {
                 identifier: Some("cairn".to_owned()),
@@ -282,6 +286,8 @@ fn handle_request(
                 }
             }
         }
+    } else if request.method == HoverRequest::METHOD {
+        answer_hover(store, request)
     } else {
         Response::new_err(
             request.id,
@@ -291,6 +297,29 @@ fn handle_request(
     };
     connection.sender.send(Message::Response(response))?;
     Ok(())
+}
+
+/// The answer to a `textDocument/hover` request: `null` where nothing has a description.
+fn answer_hover(store: &DocumentStore, request: Request) -> Response {
+    let params = match serde_json::from_value::<lsp_types::HoverParams>(request.params) {
+        Ok(params) => params.text_document_position_params,
+        Err(err) => {
+            return Response::new_err(
+                request.id,
+                ErrorCode::InvalidParams as i32,
+                format!("malformed `{}` params: {err}", HoverRequest::METHOD),
+            );
+        }
+    };
+    let uri = params.text_document.uri;
+    match store.get(&uri) {
+        Some(source) => Response::new_ok(request.id, hover(source, params.position)),
+        None => Response::new_err(
+            request.id,
+            ErrorCode::InvalidParams as i32,
+            format!("document not open: {}", uri.as_str()),
+        ),
+    }
 }
 
 /// Answers a `textDocument/diagnostic` request: at once when the client holds the stored

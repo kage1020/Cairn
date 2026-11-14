@@ -1,6 +1,6 @@
 # cairn-lang-docs
 
-Every Markdown page of the [Cairn documentation site](https://cairn.kage1020.com/), the specification among them, compiled into the crate. It is what `cairn docs` prints from: the pages a binary carries are the ones of the release it was built from, and reading them needs no network.
+Every Markdown page of the [Cairn documentation site](https://cairn.kage1020.com/), the specification among them, compiled into the crate. It is what `cairn docs` prints from, and what `cairn-lsp` quotes on hover: the pages a binary carries are the ones of the release it was built from, and reading them needs no network.
 
 The crate's manifest lives in the site's own directory, `website/`, so its package carries the site's page sources as they are rather than a copy that could drift from them. A build script walks `src/content/docs/`, takes each `.md` page's path and front-matter title, and embeds the file; an `.mdx` page is left out, since its components do not read as Markdown, and so is a draft, as Starlight leaves it out of a production build.
 

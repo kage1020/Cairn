@@ -136,6 +136,20 @@ impl Session {
         self.read_response(id)
     }
 
+    /// Send a `textDocument/hover` request and return its response.
+    fn request_hover(&self, id: i64, uri: &str, line: u32, character: u32) -> serde_json::Value {
+        self.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+            },
+        }));
+        self.read_response(id)
+    }
+
     /// Send a `textDocument/diagnostic` request for a test that reads the next message itself.
     fn send_pull(&self, id: i64, uri: &str, previous_result_id: Option<&str>) {
         self.send(&serde_json::json!({
@@ -237,6 +251,12 @@ fn capabilities_advertise_full_sync_and_the_completion_triggers() {
         capabilities["completionProvider"]["triggerCharacters"],
         serde_json::json!(["@", "=", "."]),
     );
+}
+
+#[test]
+fn capabilities_advertise_hover() {
+    let capabilities = serde_json::to_value(server_capabilities()).expect("serialise");
+    assert_eq!(capabilities["hoverProvider"], serde_json::json!(true));
 }
 
 #[test]
@@ -687,11 +707,50 @@ fn an_unknown_request_gets_method_not_found() {
     session.send(&serde_json::json!({
         "jsonrpc": "2.0",
         "id": 42,
-        "method": "textDocument/hover",
+        "method": "textDocument/definition",
         "params": {},
     }));
     let response = session.read_response(42);
     assert_eq!(response["error"]["code"], serde_json::json!(-32601));
+    session.shutdown();
+}
+
+#[test]
+fn a_hover_answers_from_the_stored_text_and_null_where_nothing_is_described() {
+    let session = Session::start();
+    let source = "struct s size=2x2\n  floor\n";
+    session.did_open(source, 1);
+    let floor = session.request_hover(70, TEST_URI, 1, 3);
+    let expected = crate::hover::hover(source, lsp_types::Position::new(1, 3));
+    assert!(expected.is_some(), "`floor` has a hover");
+    assert_eq!(
+        floor["result"],
+        serde_json::to_value(expected).expect("serialise")
+    );
+    session.did_change(TEST_URI, "struct s size=2x2\n  tower\n", 2);
+    let tower = session.request_hover(71, TEST_URI, 1, 3);
+    assert_eq!(tower["result"], serde_json::Value::Null);
+    assert!(tower.get("error").is_none(), "{tower}");
+    session.shutdown();
+}
+
+#[test]
+fn a_hover_on_an_unopened_document_or_with_malformed_params_is_invalid_params() {
+    let session = Session::start();
+    let unopened = session.request_hover(72, TEST_URI, 0, 0);
+    assert_eq!(unopened["error"]["code"], serde_json::json!(-32602));
+    assert_eq!(
+        unopened["error"]["message"],
+        serde_json::json!(format!("document not open: {TEST_URI}")),
+    );
+    session.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 73,
+        "method": "textDocument/hover",
+        "params": { "textDocument": { "uri": TEST_URI } },
+    }));
+    let malformed = session.read_response(73);
+    assert_eq!(malformed["error"]["code"], serde_json::json!(-32602));
     session.shutdown();
 }
 
