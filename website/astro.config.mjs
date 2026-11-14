@@ -6,15 +6,21 @@ import starlightLinksValidator from "starlight-links-validator";
 import { sidebar } from "./sidebar.mjs";
 
 const githubRepo = "https://github.com/kage1020/Cairn";
+const site = "https://cairn.kage1020.com";
 
 export default defineConfig({
-  site: "https://cairn.kage1020.com",
+  site,
   integrations: [
     starlight({
       title: "Cairn",
       description:
         "A description language for Minecraft builds. Declare intent — walls, roofs, windows, redstone — and the compiler resolves the voxels.",
       favicon: "/favicon.svg",
+      head: [
+        { tag: "meta", attrs: { property: "og:image", content: `${site}/og.png` } },
+        { tag: "meta", attrs: { property: "og:image:alt", content: "A pyramid of blue cubes" } },
+      ],
+      routeMiddleware: "./src/routeData.ts",
       logo: {
         light: "./src/assets/logo.light.svg",
         dark: "./src/assets/logo.dark.svg",

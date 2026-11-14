@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": ["/_astro/*", "/pagefind/*", "/favicon.svg", "/og.png", "/llms.txt", "/llms-full.txt", "/sitemap-*"]
+}
