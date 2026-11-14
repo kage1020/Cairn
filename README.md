@@ -51,6 +51,14 @@ You get two files:
 - `cottage.nbt`, a vanilla structure file a structure block can load.
 - `cottage.crn.lock`, which records the source hash, the resolved target, and the registry pack the build used.
 
+Put the structure into a Java world saved by 1.21.4, and `/place template minecraft:cottage` builds it there:
+
+```sh
+cairn install cottage.nbt --world ~/.minecraft/saves/MyWorld
+```
+
+A world saved by another release refuses it and names the `--target` to recompile at: the game cannot read a structure newer than itself, and upgrades an older one only with losses, so an older one goes in only with `--allow-cross-version`.
+
 The same file builds for Bedrock:
 
 ```sh
@@ -85,8 +93,9 @@ semantic-sensitive:      (none)
 
 ## What works today
 
-- `cairn parse`, `check`, `info`, `lower`, and `compile`.
+- `cairn parse`, `check`, `info`, `lower`, `compile`, `install`, and `docs`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
+- `cairn install`, which puts Java structure files into a world for `/place template` to load, refusing one built for a newer version than the world, and one built for an older version unless `--allow-cross-version` is given.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.

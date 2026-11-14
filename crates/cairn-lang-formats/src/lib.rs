@@ -1,5 +1,5 @@
 //! Java `.nbt` and Bedrock `.mcstructure` writers for the block-array IR, with the registry packs
-//! and portability reports they rely on.
+//! and portability reports they rely on, and the Java world a structure file is installed into.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
@@ -9,6 +9,7 @@ mod dims;
 pub mod java_structure;
 pub mod portability;
 pub mod registry;
+pub mod world;
 
 pub use bedrock_state::{BedrockStateError, StateTranslation, translate_states};
 pub use bedrock_structure::{
@@ -29,4 +30,9 @@ pub use portability::{
 pub use registry::{
     PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
     load_builtin_pack, load_from_dir,
+};
+pub use world::{
+    CrossVersion, DEFAULT_NAMESPACE, IdPart, LEVEL_DAT, LevelDatError, StructureFileError,
+    StructureId, StructureIdError, WorldVersion, read_level_dat, read_structure_data_version,
+    recompile_target, worlds_in,
 };

@@ -182,6 +182,16 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Recompile, don't transcode.** The language spec does **not** guarantee NBT portability across
   version or edition. To target a new version, recompile the DSL; do not convert the NBT. See
   [versioning-editions §10.2](/spec/versioning-editions/#102-language-contract-recompile-dont-transcode).
+- **Cross-version application.** Putting a structure file built for one version into a world saved
+  by another. A structure newer than the world is refused; an older one goes in only with
+  `--allow-cross-version`, keeping its own `DataVersion` so the game upgrades it as it loads.
+  `cairn install` enforces both. See
+  [versioning-editions](/spec/versioning-editions/#cross-version-application).
+- **Structure id.** The `namespace:name` that `/place template` and a structure block load a
+  structure by, from `generated/<namespace>/structures/<name>.nbt` in a Java world. `cairn install`
+  takes the name from the file's name or from `--name`, and the namespace from `--namespace`,
+  `minecraft` by default. See
+  [versioning-editions](/spec/versioning-editions/#cross-version-application).
 
 ## Ecosystem interop
 

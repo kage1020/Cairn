@@ -262,6 +262,23 @@ struct の回路を組み上げるどのコマンドも、これらを報告し�
 | `E_SIM_ASSERTION_FAILED` | 合法化した回路が `assert latency` の上限より長くかかる。上限の終点が始点に依存しない。または回路の実行が `assert truth` か `assert always` を破る ([レッドストーン §14.7](/ja/spec/redstone/#147-検証))。 |
 | `W_SIM_ASSERTION_UNCHECKED` | `assert truth` か `assert always` を回路のどの実行も判定しないので、検査しない。回路を敷かないスコープにある。信号が 10 個を超えるセンサーに依存し、すべての組み合わせを実行するには多すぎる。または最後まで変化し続ける実行がある。あるいは真理値表に、どの実行も届かない行がある ([レッドストーン §14.7](/ja/spec/redstone/#147-検証))。 |
 
+### インストール
+
+`cairn install` は、構造ファイルをワールドに置くときにこれらを報告します ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#バージョンをまたいだ適用))。
+
+| コード | 意味 |
+|---|---|
+| `E_CROSS_VERSION_DOWNGRADE` | 構造ファイルに刻まれた `DataVersion` がワールドのものより新しく、そのワールドのリリースでは読めない。`--allow-cross-version` を付けても変わらない。 |
+| `E_CROSS_VERSION_UPGRADE` | 構造ファイルに刻まれた `DataVersion` がワールドのものより古く、`--allow-cross-version` が付いていない。 |
+| `W_CROSS_VERSION_UPGRADE` | 同じ状況で `--allow-cross-version` が付いている。ファイルは刻印を保ったままインストールされ、ゲームは読み込むときに DataFixerUpper でアップグレードする。 |
+| `E_WORLD_UNREADABLE` | `--world` が `level.dat` のないフォルダを指している。または `level.dat` が読めないか、整数の `Data.DataVersion` を記録していない。 |
+| `E_INSTALL_EDITION_UNSUPPORTED` | `--world` が Bedrock のワールドを指しているか、構造ファイルが `.mcstructure` である。`cairn install` は Java の構造ファイルを Java のワールドにインストールする。 |
+| `E_STRUCTURE_UNREADABLE` | 構造ファイルが読めない。または、ルートに `size`、`blocks`、`palette`、整数の `DataVersion` を持つ gzip の NBT ではない。 |
+| `E_INVALID_STRUCTURE_ID` | ファイルをインストールする名前空間か名前を、ゲームが読み込めない。`a`–`z`、`0`–`9`、`_`、`-`、`.` (名前ではさらに `/`) 以外の文字、空のフォルダ名、`.` で終わるかデバイス用に予約されたフォルダ名やファイル名がある。 |
+| `E_STRUCTURE_EXISTS` | 構造の ID が指すパスに、ワールドがすでにファイルを持っていて `--replace` が付いていない。またはそこにフォルダがある。 |
+
+どれもソースの行ではなくファイルやフォルダについての事実なので、スパンを持たず、`install` は `--format json` を受け付けません。実行は、終了する前にすべてのファイルで見つけた拒否をすべて報告し、1 つでも見つけたら何も書き込みません。`W_CROSS_VERSION_UPGRADE` が警告なのは、報告する内容をフラグが求めたからです。フラグのない同じファイルはエラーになります。
+
 ### 意味カテゴリ
 
 上のコードに加えて、lint は次の項目を検査します。

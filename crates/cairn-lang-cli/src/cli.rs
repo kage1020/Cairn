@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::Edition;
+use cairn_lang_formats::world::DEFAULT_NAMESPACE;
 use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::report::FailureReport;
 
@@ -245,6 +246,34 @@ pub(crate) enum Command {
         )]
         lock: Option<PathBuf>,
     },
+    /// Install compiled Java structure files into a world, where `/place template` loads them.
+    #[command(
+        long_about = "Install the Java structure files `cairn compile --edition java` wrote into \
+            the world folder `--world`, each at `generated/<namespace>/structures/<name>.nbt`, \
+            where `/place template <namespace>:<name>` and a structure block load it. The name is \
+            the file's name without `.nbt`, or `--name` for a single file, and may hold `/` \
+            between folders; the namespace is `--namespace`, `minecraft` by default.\n\n\
+            Each file is held to the world's version as `spec/versioning-editions` \
+            \"Cross-version application\" requires, comparing the `DataVersion` the file is \
+            stamped with to the `Data.DataVersion` the world's `level.dat` records. A file newer \
+            than the world is refused (`E_CROSS_VERSION_DOWNGRADE`), since that release cannot \
+            read it, and `--allow-cross-version` does not change that. A file older than the \
+            world is refused too (`E_CROSS_VERSION_UPGRADE`) unless `--allow-cross-version` is \
+            given; with it the file is installed as built, keeping its stamp, and \
+            `W_CROSS_VERSION_UPGRADE` warns that the game upgrades it through DataFixerUpper as it \
+            loads. A file already at an id's path is refused (`E_STRUCTURE_EXISTS`) unless \
+            `--replace` is given. Every file is checked before any is written, and they are \
+            written together, so a run that refuses one installs none; `--dry-run` checks the \
+            same and writes nothing.\n\n\
+            Only Java worlds are installed into: a Bedrock world or a `.mcstructure` file is \
+            refused (`E_INSTALL_EDITION_UNSUPPORTED`). A world open in the game keeps each \
+            structure it has looked up until `/reload`.\n\n\
+            Exits 0 when every file is installed, or would be under `--dry-run`, warnings \
+            allowed; 1 when a file is refused, the world's `level.dat` cannot be read, or a write \
+            fails; and 2 when the world's `level.dat` or a structure file cannot be located, \
+            `--name` is given with more than one file, or two files would install under one id."
+    )]
+    Install(InstallArgs),
     /// Experimental: print one stage of a .crn source file's redstone pipeline as JSON.
     #[command(
         long_about = "Lower a .crn source file's `logic` bindings, sensors, and actuators through \
@@ -341,6 +370,45 @@ pub(crate) enum Command {
         #[arg(long, requires = "page", conflicts_with = "title")]
         toc: bool,
     },
+}
+
+/// `cairn install`'s arguments.
+#[derive(Args)]
+pub(crate) struct InstallArgs {
+    /// The Java structure files to install, as `cairn compile --edition java` wrote them.
+    #[arg(required = true)]
+    pub(crate) structures: Vec<PathBuf>,
+    /// The world folder, the one holding the world's `level.dat`.
+    #[arg(long)]
+    pub(crate) world: PathBuf,
+    /// The namespace of every structure id installed.
+    #[arg(long, default_value = DEFAULT_NAMESPACE)]
+    pub(crate) namespace: String,
+    /// The name to install a single structure file under, in place of its file name.
+    #[arg(
+        long,
+        long_help = "The name to install a single structure file under, in place of its file \
+            name without `.nbt`. It may hold `/` between folders, as `houses/cottage` does, and \
+            holds only `a`-`z`, `0`-`9`, `_`, `-` and `.` besides, as the game requires \
+            (`E_INVALID_STRUCTURE_ID`)"
+    )]
+    pub(crate) name: Option<String>,
+    /// Overwrite a structure file already at an id's path.
+    #[arg(long)]
+    pub(crate) replace: bool,
+    /// Install a file older than the world, which the game upgrades as it loads.
+    #[arg(
+        long,
+        long_help = "Install a file whose `DataVersion` is older than the world's, which is \
+            refused without it (`E_CROSS_VERSION_UPGRADE`). The file keeps its own `DataVersion`, \
+            so the game upgrades it through DataFixerUpper as it loads, which can lose items, \
+            signs, paintings and block entities; `W_CROSS_VERSION_UPGRADE` says so. A file newer \
+            than the world stays refused (`E_CROSS_VERSION_DOWNGRADE`)"
+    )]
+    pub(crate) allow_cross_version: bool,
+    /// Check every file and print where each would go, writing nothing.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
 }
 
 /// The parser for `--edition`: core's edition names, each with the line `--help` gives it.

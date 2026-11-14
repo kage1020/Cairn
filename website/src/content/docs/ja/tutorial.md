@@ -36,6 +36,14 @@ cairn compile examples/cottage.crn --edition java    --target 1.21.4
 cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 ```
 
+`cairn install` は、Java のビルドを 1.21.4 で保存したワールドに入れます。そこで `/place template minecraft:cottage` を実行すると建ちます。
+
+```sh
+cairn install examples/cottage.nbt --world ~/.minecraft/saves/MyWorld
+```
+
+別のリリースで保存したワールドはファイルを拒否し、必要な `--target` を示します ([バージョンとエディション](/ja/spec/versioning-editions/#バージョンをまたいだ適用))。
+
 **Minecraft のバージョンはソースでは決めません。** バージョンは `--target` で指定し、`--edition` も必ず一緒に指定します。ソースに書けるのは、ターゲットが満たすべき下限を示す `@requires`、作者が想定しているバージョンをヒントとして示す `@intended_targets`、このファイルが対象とする言語バージョンを示す `@cairn` です。
 
 **struct は「どこに」を、theme は「何で」を書きます。** `mat_slot=wall` はブロック名ではなく、素材を差し込む場所を表します。そこにブロックを割り当てるのが theme です。`theme medieval` を別のテーマに差し替えても、形は変わりません。CSS の考え方をブロックに当てはめたものです。

@@ -7,6 +7,7 @@ mod compile;
 mod contract;
 mod docs;
 mod info;
+mod install;
 mod limits;
 mod lower;
 mod parse;

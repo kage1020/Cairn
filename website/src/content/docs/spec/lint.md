@@ -625,6 +625,27 @@ wording the editions give it, and an edition's own by the rule for its guards
 | `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start, or an `assert truth` or `assert always` a run of the circuit breaks ([Redstone §14.7](/spec/redstone/#147-verification)). |
 | `W_SIM_ASSERTION_UNCHECKED` | An `assert truth` or `assert always` no run of the circuit judges, so it is not checked: one in a scope that lays no circuit, one whose signals depend on more than 10 sensors, too many to run every combination of, or one a run is still changing at the end of; or a truth table with rows no run reaches ([Redstone §14.7](/spec/redstone/#147-verification)). |
 
+### Installing
+
+`cairn install` reports these as it places structure files in a world ([Versioning and Editions
+§10.7](/spec/versioning-editions/#cross-version-application)).
+
+| Code | Meaning |
+|---|---|
+| `E_CROSS_VERSION_DOWNGRADE` | A structure file is stamped with a `DataVersion` newer than the world's, which that world's release cannot read; `--allow-cross-version` does not change that. |
+| `E_CROSS_VERSION_UPGRADE` | A structure file is stamped with a `DataVersion` older than the world's, and `--allow-cross-version` was not given. |
+| `W_CROSS_VERSION_UPGRADE` | The same with `--allow-cross-version` given: the file is installed, keeping its stamp, and the game upgrades it through DataFixerUpper as it loads. |
+| `E_WORLD_UNREADABLE` | `--world` names a folder with no `level.dat`, or one whose `level.dat` does not decode or records no integer `Data.DataVersion`. |
+| `E_INSTALL_EDITION_UNSUPPORTED` | `--world` names a Bedrock world, or a structure file is a `.mcstructure`: `cairn install` installs Java structure files into Java worlds. |
+| `E_STRUCTURE_UNREADABLE` | A structure file cannot be read, or is not gzip NBT whose root holds `size`, `blocks`, a `palette` and an integer `DataVersion`. |
+| `E_INVALID_STRUCTURE_ID` | The namespace or name a file would be installed under is not one the game loads: it holds a character other than `a`–`z`, `0`–`9`, `_`, `-`, `.` and, in a name, `/`, an empty folder or file name, or one that ends in `.` or that Windows reserves for a device. |
+| `E_STRUCTURE_EXISTS` | The world already has a file at the path a structure's id names, and `--replace` was not given, or has a folder there. |
+
+Each is a fact about a file or a folder rather than about a line of a source, so none carries a
+span, and `install` takes no `--format json`. A run reports every refusal it finds across its files
+before it exits, and writes nothing when it found one. `W_CROSS_VERSION_UPGRADE` is a warning
+because the flag asked for what it reports; the same file without the flag is the error.
+
 ### Semantic categories
 
 Beyond the codes above, lint covers:

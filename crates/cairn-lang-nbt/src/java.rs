@@ -1,9 +1,11 @@
-//! Java NBT writer: big-endian, optionally gzip-wrapped. The default gzip level matches the
-//! game's own output, which keeps snapshots byte-stable against its samples.
+//! Java NBT writer and reader: big-endian, optionally gzip-wrapped. The default gzip level matches
+//! the game's own output, which keeps snapshots byte-stable against its samples.
 
-use std::io::Write;
+use std::io::{BufReader, Read, Write};
 
 pub use crate::error::NbtIoError;
+use crate::read::{NbtReadError, NbtRoot, ReadOptions};
+use crate::reader::read_named_root;
 use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
 use crate::writer::{Endian, write_named_root};
@@ -56,4 +58,29 @@ where
     F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
 {
     stream_named_root(writer, Endian::Big, root_name, body)
+}
+
+/// Reads a named Java NBT root that is not gzip-wrapped, building the entries `options` keeps.
+///
+/// # Errors
+///
+/// An I/O failure on `reader`, or bytes that do not decode as an NBT root within `options`.
+pub fn read_java_uncompressed<R: Read>(
+    reader: R,
+    options: &ReadOptions<'_>,
+) -> Result<NbtRoot, NbtReadError> {
+    read_named_root(reader, Endian::Big, options)
+}
+
+/// Reads a gzip-wrapped named Java NBT root, as `.nbt` structure files and `level.dat` hold one.
+///
+/// # Errors
+///
+/// Those of [`read_java_uncompressed`], a gzip stream that does not decode among the I/O failures.
+pub fn read_java_gzip<R: Read>(
+    reader: R,
+    options: &ReadOptions<'_>,
+) -> Result<NbtRoot, NbtReadError> {
+    let gz = BufReader::new(flate2::read::MultiGzDecoder::new(reader));
+    read_java_uncompressed(gz, options)
 }
