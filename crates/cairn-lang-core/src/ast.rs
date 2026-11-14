@@ -301,6 +301,9 @@ pub enum ThemeRule {
         slot: String,
         /// Token or value bound to the slot.
         value: Value,
+        /// `key=value` arguments of a member form (`-> text_display scale=2.0`), in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        arguments: Vec<Arg>,
         /// Bare values after the bound one, in source order.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         positional: Vec<Value>,

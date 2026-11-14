@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberRole};
-use crate::resolve::ScopeResolution;
+use crate::intent::{Member, MemberRole, ValueWithSpan};
+use crate::resolve::{ScopeResolution, member_form};
 
 use crate::block_array::args::{
     diag_deferred_member_reason, diag_invalid_member, member_or_slot_span,
@@ -47,6 +47,8 @@ pub(super) struct StructCtx<'a> {
     /// Every `door` and `window` of the paint set, with its level's `y` offset, for a `beam` to
     /// rest on.
     pub(super) openings: Vec<(u32, &'a Member)>,
+    /// Every `villager` of the paint set, for a `trade` to name.
+    pub(super) villagers: Vec<&'a Member>,
 }
 
 impl StructCtx<'_> {
@@ -164,6 +166,16 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         | MemberRole::NoteBlock
         | MemberRole::Sign
         | MemberRole::Bed
+        | MemberRole::Painting
+        | MemberRole::ItemFrame
+        | MemberRole::ArmorStand
+        | MemberRole::Villager
+        | MemberRole::Trade
+        | MemberRole::TextDisplay
+        | MemberRole::BlockDisplay
+        | MemberRole::ItemDisplay
+        | MemberRole::Hologram
+        | MemberRole::Spawn
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
@@ -282,6 +294,16 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::NoteBlock
         | MemberRole::Sign
         | MemberRole::Bed
+        | MemberRole::Painting
+        | MemberRole::ItemFrame
+        | MemberRole::ArmorStand
+        | MemberRole::Villager
+        | MemberRole::Trade
+        | MemberRole::TextDisplay
+        | MemberRole::BlockDisplay
+        | MemberRole::ItemDisplay
+        | MemberRole::Hologram
+        | MemberRole::Spawn
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
@@ -327,7 +349,7 @@ pub(super) fn resolve_member_state(
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
 ) -> MemberState {
-    if theme_missing {
+    if theme_missing || member.read_slot().is_none() {
         return MemberState::Unbound;
     }
     let Some(binding) = scope.and_then(|scope| scope.members.get(&member.span.start)) else {
@@ -338,6 +360,10 @@ pub(super) fn resolve_member_state(
     let Some(slot_value) = binding.slot_value.as_ref() else {
         return MemberState::Unbound;
     };
+    if member_form(&slot_value.value).is_some() {
+        diagnostics.push(diag_member_form_bound(member, slot_value));
+        return MemberState::Unbound;
+    }
     let unbound = match resolve_block_state(slot_value, registry) {
         Ok(state) if check_state_literal(slot_value, &state, registry, diagnostics) => {
             return MemberState::Bound(state);
@@ -374,6 +400,26 @@ pub(super) fn resolve_member_state(
         MaterialDeferred::AlreadyDiagnosed => {}
     }
     MemberState::Unbound
+}
+
+/// The `E_INVALID_MEMBER` on a member other than a `hologram` whose slot binds a member form.
+fn diag_member_form_bound(member: &Member, slot_value: &ValueWithSpan) -> Diagnostic {
+    let keyword = member.role.keyword();
+    let slot = member.read_slot().unwrap_or_default();
+    let mut diagnostic = diag_invalid_member(
+        member,
+        format!(
+            "{keyword} `mat_slot={slot}` binds the member form {}, which only a `hologram` is \
+             built as",
+            slot_value.value.describe(),
+        ),
+        vec![format!(
+            "bind `{slot}` to a block, as `slot {slot} -> @oak_planks`, or give the {keyword} a \
+             slot that binds one"
+        )],
+    );
+    diagnostic.span = member_or_slot_span(member, slot_value);
+    diagnostic
 }
 
 /// The block a member is built from when no `mat_slot=` binds one: the pack's `token`, or

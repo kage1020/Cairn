@@ -26,7 +26,7 @@ const EDITION: &str = "edition";
 
 /// The refusal for an `@edition` guard written outside every body.
 const GUARD_OUTSIDE_A_BODY: &str = "an `@edition` guard stands inside a `struct`, `def` or \
-     `site` body, around the raw members and Tier 0 parts it guards: the items of a file are \
+     `site` body, around the escape-hatch lines it guards: the items of a file are \
      edition-neutral, so move the guard into the body that places those blocks";
 
 /// The refusal for an `@edition` guard written in a `theme` body.
@@ -465,12 +465,18 @@ impl<'a> Parser<'a> {
                 return Err(self.block_id_in_a_slot_row());
             }
             let value = self.parse_value()?;
-            let (_, positional) = self.parse_line_tail(Some("a `slot` row"))?;
+            // Only a member form, named by a bare word, takes arguments.
+            let (arguments, positional) = if matches!(value.kind, ValueKind::Ident(_)) {
+                self.parse_line_tail(None)?
+            } else {
+                self.parse_line_tail(Some("a `slot` row binding a material token"))?
+            };
             let span = start_byte..self.last_byte();
             self.expect_newline()?;
             return Ok(ThemeRule::Slot {
                 slot,
                 value,
+                arguments,
                 positional,
                 span,
             });

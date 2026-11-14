@@ -29,6 +29,16 @@ const GEOMETRY_ROWS: &[&str] = &[
     "note_block at=1,0,1",
     "sign at=1,0,1",
     "bed at=1,0,1 facing=north",
+    "painting at=inside.front variant=kebab",
+    "item_frame at=inside.front",
+    "armor_stand at=1,0,1",
+    "villager id=vg at=1,0,1",
+    "trade villager=vg buy=emerald sell=bread",
+    "text_display at=1,1,1 text=\"Inn\"",
+    "block_display at=1,1,1",
+    "item_display at=1,1,1 item=diamond",
+    "hologram at=1,1,1 text=\"Inn\"",
+    "spawn type=cat at=1,0,1",
     "repeater at=1,0,1 facing=east",
     "comparator at=1,0,1 facing=east",
     "redstone_torch at=1,0,1",
@@ -209,8 +219,9 @@ fn the_candidate_list_is_scoped_to_the_body() {
         notes(&geometry).contains(
             &"expected one of: floor, walls, fill, door, window, roof, stair, beam, level, \
              pressure_plate, lever, button, daylight, observer, lamp, piston, dispenser, chest, \
-             trapdoor, note_block, sign, bed, repeater, comparator, redstone_torch, redstone_dust, \
-             circuit, raw_block, raw_fill"
+             trapdoor, note_block, sign, bed, painting, item_frame, armor_stand, villager, trade, \
+             text_display, block_display, item_display, hologram, spawn, repeater, comparator, \
+             redstone_torch, redstone_dust, circuit, raw_block, raw_fill"
         ),
         "got {:#?}",
         notes(&geometry),

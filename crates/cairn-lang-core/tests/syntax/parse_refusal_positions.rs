@@ -381,7 +381,8 @@ fn a_key_on_a_line_that_takes_none_is_refused_at_the_key() {
         ),
         (
             "theme t:\n  slot a -> @b c=1\n",
-            "2:16: a `slot` row takes no `key=value` argument, got `c=`",
+            "2:16: a `slot` row binding a material token takes no `key=value` argument, got \
+             `c=`",
         ),
         (
             "struct s size=3x3\n  assert latency(a -> b) <= 4 ticks=2\n",

@@ -112,6 +112,7 @@ mod tests {
             | C::UnsupportedNesting
             | C::MisplacedMember
             | C::SemanticInEditionGuard
+            | C::NbtOutsideEditionGuard
             | C::UnknownKeyword
             | C::UnknownArgument
             | C::MisplacedBinding
@@ -214,6 +215,7 @@ mod tests {
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
+                "E_NBT_OUTSIDE_EDITION_GUARD",
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "E_TRUTH_TABLE_CONFLICT",
                 "E_TRUTH_TABLE_DUPLICATE_INPUT",

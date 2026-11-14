@@ -303,6 +303,16 @@ fn is_opening(role: &MemberRole) -> bool {
         | MemberRole::NoteBlock
         | MemberRole::Sign
         | MemberRole::Bed
+        | MemberRole::Painting
+        | MemberRole::ItemFrame
+        | MemberRole::ArmorStand
+        | MemberRole::Villager
+        | MemberRole::Trade
+        | MemberRole::TextDisplay
+        | MemberRole::BlockDisplay
+        | MemberRole::ItemDisplay
+        | MemberRole::Hologram
+        | MemberRole::Spawn
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch

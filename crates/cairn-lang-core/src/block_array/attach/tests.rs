@@ -2,7 +2,8 @@ use indexmap::IndexMap;
 
 use super::*;
 use crate::block_array::{
-    BlockArray, BlockEntityData, CellRun, Dims, Entity, PALETTE_CAPACITY, Palette,
+    BlockArray, BlockEntityData, CellRun, Dims, Entity, EntityData, Face, PALETTE_CAPACITY,
+    Palette,
 };
 
 const KEY: &str = "struct::hut";
@@ -27,8 +28,12 @@ fn hut() -> BlockArrayIr {
             },
         }],
         entities: vec![Entity {
+            id: "minecraft:armor_stand".to_owned(),
             pos: (0.5, 1.0, 0.5),
-            id: "minecraft:item_frame".to_owned(),
+            block_pos: (0, 1, 0),
+            facing: Face::South,
+            data: EntityData::ArmorStand,
+            nbt: None,
         }],
         source_scope: KEY.to_owned(),
         derived: Vec::new(),
@@ -133,6 +138,7 @@ fn a_circuit_lays_under_the_structure_which_rises_over_it() {
         ],
     );
     assert_eq!(array.entities[0].pos, (0.5, 3.0, 0.5));
+    assert_eq!(array.entities[0].block_pos, (0, 3, 0));
 
     let members = &ir.members[KEY];
     let layout: Vec<(&str, Blocks<'_>)> = members

@@ -1,6 +1,6 @@
 //! An `nbt={...}` compound: the subset of Minecraft's SNBT that every Java version Cairn targets
 //! reads alike (`spec/syntax` "Literals and separators"). The lexer checks it here and keeps it as
-//! written; nothing in core reads what it holds.
+//! written, and [`parse_compound`] reads it into the values a writer saves.
 
 /// Deepest nesting of compounds, lists and arrays an `nbt={...}` value holds, itself included.
 pub const MAX_NBT_DEPTH: usize = 64;
@@ -21,6 +21,81 @@ pub(super) fn scan(src: &str, start: usize) -> Result<usize, Refusal> {
     };
     scanner.compound()?;
     Ok(scanner.pos)
+}
+
+/// One value of an `nbt={...}` compound, typed as SNBT reads it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NbtValue {
+    /// A byte, as `1b`, `true` or `false`.
+    Byte(i8),
+    /// A short, as `1s`.
+    Short(i16),
+    /// An int, as `1`.
+    Int(i32),
+    /// A long, as `1L`.
+    Long(i64),
+    /// A float, as `1.5f`.
+    Float(f32),
+    /// A double, as `1.5` or `1d`.
+    Double(f64),
+    /// A quoted string, its escapes undone.
+    String(String),
+    /// A list, every value of one type.
+    List(Vec<NbtValue>),
+    /// A compound.
+    Compound(NbtCompound),
+    /// A byte array, as `[B; 1b]`.
+    ByteArray(Vec<i8>),
+    /// An int array, as `[I; 1]`.
+    IntArray(Vec<i32>),
+    /// A long array, as `[L; 1L]`.
+    LongArray(Vec<i64>),
+}
+
+/// An `nbt={...}` compound's entries, in the order written.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NbtCompound {
+    /// Each key with its value; no key repeats.
+    pub entries: Vec<(String, NbtValue)>,
+}
+
+/// The values of `text`, a compound as an `nbt={...}` value holds it, `None` for text the lexer
+/// refuses.
+#[must_use]
+pub fn parse_compound(text: &str) -> Option<NbtCompound> {
+    let mut scanner = Scanner {
+        src: text,
+        bytes: text.as_bytes(),
+        pos: 0,
+        depth: 0,
+    };
+    if scanner.peek() != Some(b'{') {
+        return None;
+    }
+    match scanner.compound() {
+        Ok(NbtValue::Compound(compound)) if scanner.pos == text.len() => Some(compound),
+        _ => None,
+    }
+}
+
+impl NbtValue {
+    /// The value's type.
+    fn tag(&self) -> Tag {
+        match self {
+            Self::Byte(_) => Tag::Byte,
+            Self::Short(_) => Tag::Short,
+            Self::Int(_) => Tag::Int,
+            Self::Long(_) => Tag::Long,
+            Self::Float(_) => Tag::Float,
+            Self::Double(_) => Tag::Double,
+            Self::String(_) => Tag::String,
+            Self::List(_) => Tag::List,
+            Self::Compound(_) => Tag::Compound,
+            Self::ByteArray(_) => Tag::ByteArray,
+            Self::IntArray(_) => Tag::IntArray,
+            Self::LongArray(_) => Tag::LongArray,
+        }
+    }
 }
 
 /// The type of an NBT value, which a list holds one of.
@@ -73,9 +148,9 @@ struct Scanner<'a> {
 }
 
 impl Scanner<'_> {
-    fn compound(&mut self) -> Result<Tag, Refusal> {
+    fn compound(&mut self) -> Result<NbtValue, Refusal> {
         self.enter()?;
-        let mut keys: Vec<String> = Vec::new();
+        let mut entries: Vec<(String, NbtValue)> = Vec::new();
         self.skip_spaces();
         if self.peek() == Some(b'}') {
             self.pos += 1;
@@ -83,7 +158,7 @@ impl Scanner<'_> {
             loop {
                 let key_at = self.pos;
                 let key = self.key()?;
-                if keys.contains(&key) {
+                if entries.iter().any(|(named, _)| *named == key) {
                     return Err(Refusal {
                         at: key_at,
                         reason: format!(
@@ -92,14 +167,14 @@ impl Scanner<'_> {
                         ),
                     });
                 }
-                keys.push(key);
                 self.skip_spaces();
                 if self.peek() != Some(b':') {
                     return Err(self.expected("`:` after the key"));
                 }
                 self.pos += 1;
                 self.skip_spaces();
-                self.value()?;
+                let value = self.value()?;
+                entries.push((key, value));
                 self.skip_spaces();
                 if !self.separator(b'}', "entries")? {
                     break;
@@ -107,7 +182,7 @@ impl Scanner<'_> {
             }
         }
         self.depth -= 1;
-        Ok(Tag::Compound)
+        Ok(NbtValue::Compound(NbtCompound { entries }))
     }
 
     fn key(&mut self) -> Result<String, Refusal> {
@@ -122,11 +197,11 @@ impl Scanner<'_> {
         }
     }
 
-    fn value(&mut self) -> Result<Tag, Refusal> {
+    fn value(&mut self) -> Result<NbtValue, Refusal> {
         match self.peek() {
             Some(b'{') => self.compound(),
             Some(b'[') => self.list_or_array(),
-            Some(quote @ (b'"' | b'\'')) => self.quoted(quote).map(|_| Tag::String),
+            Some(quote @ (b'"' | b'\'')) => self.quoted(quote).map(NbtValue::String),
             Some(b'+' | b'-' | b'0'..=b'9') => self.number(),
             Some(b) if is_unquoted(b) => self.word(),
             _ => Err(self.expected("a value")),
@@ -134,11 +209,12 @@ impl Scanner<'_> {
     }
 
     /// An unquoted word in value position, which only `true` and `false` may be.
-    fn word(&mut self) -> Result<Tag, Refusal> {
+    fn word(&mut self) -> Result<NbtValue, Refusal> {
         let start = self.pos;
         self.skip_unquoted();
         match &self.src[start..self.pos] {
-            "true" | "false" => Ok(Tag::Byte),
+            "true" => Ok(NbtValue::Byte(1)),
+            "false" => Ok(NbtValue::Byte(0)),
             word => Err(Refusal {
                 at: start,
                 reason: format!(
@@ -149,7 +225,7 @@ impl Scanner<'_> {
         }
     }
 
-    fn number(&mut self) -> Result<Tag, Refusal> {
+    fn number(&mut self) -> Result<NbtValue, Refusal> {
         let start = self.pos;
         if matches!(self.peek(), Some(b'+' | b'-')) {
             self.pos += 1;
@@ -231,25 +307,13 @@ impl Scanner<'_> {
                 ),
             });
         }
-        let digits = &self.src[start..digits_end];
-        let in_range = match tag {
-            Tag::Byte => digits.parse::<i8>().is_ok(),
-            Tag::Short => digits.parse::<i16>().is_ok(),
-            Tag::Int => digits.parse::<i32>().is_ok(),
-            Tag::Long => digits.parse::<i64>().is_ok(),
-            Tag::Float => digits.parse::<f32>().is_ok_and(f32::is_finite),
-            _ => digits.parse::<f64>().is_ok_and(f64::is_finite),
-        };
-        if !in_range {
-            return Err(Refusal {
-                at: start,
-                reason: format!("`{text}` is past the range of {}", range_of(tag)),
-            });
-        }
-        Ok(tag)
+        typed(tag, &self.src[start..digits_end]).ok_or_else(|| Refusal {
+            at: start,
+            reason: format!("`{text}` is past the range of {}", range_of(tag)),
+        })
     }
 
-    fn list_or_array(&mut self) -> Result<Tag, Refusal> {
+    fn list_or_array(&mut self) -> Result<NbtValue, Refusal> {
         self.enter()?;
         let array = match (self.peek(), self.peek_at(1)) {
             (Some(kind @ (b'B' | b'I' | b'L')), Some(b';')) => {
@@ -264,18 +328,20 @@ impl Scanner<'_> {
         };
         self.skip_spaces();
         let mut first: Option<Tag> = None;
+        let mut values: Vec<NbtValue> = Vec::new();
         if self.peek() == Some(b']') {
             self.pos += 1;
         } else {
             loop {
                 let at = self.pos;
-                let tag = match array {
+                let value = match array {
                     Some((_, element)) => {
-                        let tag = if matches!(self.peek(), Some(b'+' | b'-' | b'0'..=b'9')) {
+                        let value = if matches!(self.peek(), Some(b'+' | b'-' | b'0'..=b'9')) {
                             self.number()?
                         } else {
                             return Err(self.expected(element.noun()));
                         };
+                        let tag = value.tag();
                         if tag != element {
                             return Err(Refusal {
                                 at,
@@ -288,10 +354,12 @@ impl Scanner<'_> {
                                 ),
                             });
                         }
-                        tag
+                        value
                     }
                     None => self.value()?,
                 };
+                let tag = value.tag();
+                values.push(value);
                 match first {
                     None => first = Some(tag),
                     Some(first) if first != tag => {
@@ -314,7 +382,12 @@ impl Scanner<'_> {
             }
         }
         self.depth -= 1;
-        Ok(array.map_or(Tag::List, |(tag, _)| tag))
+        Ok(match array.map(|(array, _)| array) {
+            None => NbtValue::List(values),
+            Some(Tag::ByteArray) => NbtValue::ByteArray(values.iter().filter_map(byte).collect()),
+            Some(Tag::IntArray) => NbtValue::IntArray(values.iter().filter_map(int).collect()),
+            Some(_) => NbtValue::LongArray(values.iter().filter_map(long).collect()),
+        })
     }
 
     /// Read a quoted string from its opening `quote`, returning its text without the escapes.
@@ -452,6 +525,47 @@ impl Scanner<'_> {
 
     fn peek_at(&self, offset: usize) -> Option<u8> {
         self.bytes.get(self.pos + offset).copied()
+    }
+}
+
+/// The number `digits` spells as a value of type `tag`, or `None` past its range.
+fn typed(tag: Tag, digits: &str) -> Option<NbtValue> {
+    match tag {
+        Tag::Byte => digits.parse().ok().map(NbtValue::Byte),
+        Tag::Short => digits.parse().ok().map(NbtValue::Short),
+        Tag::Int => digits.parse().ok().map(NbtValue::Int),
+        Tag::Long => digits.parse().ok().map(NbtValue::Long),
+        Tag::Float => digits
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(NbtValue::Float),
+        _ => digits
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(NbtValue::Double),
+    }
+}
+
+fn byte(value: &NbtValue) -> Option<i8> {
+    match value {
+        NbtValue::Byte(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn int(value: &NbtValue) -> Option<i32> {
+    match value {
+        NbtValue::Int(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn long(value: &NbtValue) -> Option<i64> {
+    match value {
+        NbtValue::Long(value) => Some(*value),
+        _ => None,
     }
 }
 

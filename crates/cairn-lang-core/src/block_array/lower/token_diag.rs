@@ -29,6 +29,8 @@ pub(super) enum MemberFallback {
     /// A `roof`, an eave `stair`, a `beam`, a `door`, a `pressure_plate`, a `button`, a `chest`, a
     /// `trapdoor`, a `sign` or a `bed`: built from its default block.
     DefaultBlock,
+    /// A `block_display`: it shows no block, so none is placed.
+    Unplaced,
 }
 
 impl MemberFallback {
@@ -51,6 +53,7 @@ impl MemberFallback {
             | MemberRole::Trapdoor
             | MemberRole::Sign
             | MemberRole::Bed => Self::DefaultBlock,
+            MemberRole::BlockDisplay => Self::Unplaced,
             MemberRole::Level
             | MemberRole::Lever
             | MemberRole::Daylight
@@ -68,6 +71,15 @@ impl MemberFallback {
             | MemberRole::RawFill
             | MemberRole::Place
             | MemberRole::Connect
+            | MemberRole::Painting
+            | MemberRole::ItemFrame
+            | MemberRole::ArmorStand
+            | MemberRole::Villager
+            | MemberRole::Trade
+            | MemberRole::TextDisplay
+            | MemberRole::ItemDisplay
+            | MemberRole::Hologram
+            | MemberRole::Spawn
             | MemberRole::Other(_) => {
                 unreachable!(
                     "no painter resolves the `mat_slot=` of a `{}`",
@@ -111,6 +123,7 @@ impl TokenSite {
             Self::MemberSlot(MemberFallback::DefaultBlock) => {
                 "the member is built from its default block"
             }
+            Self::MemberSlot(MemberFallback::Unplaced) => "no block display is placed",
         }
     }
 

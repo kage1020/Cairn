@@ -50,7 +50,7 @@ fn a_key_the_role_does_not_read_is_refused() {
     assert!(d.primary.contains("`walls`"), "got: {}", d.primary);
 }
 
-/// No keyword reads `nbt=` yet, so it is a key like any other a role does not take.
+/// A keyword that does not read `nbt=` refuses it like any other key it does not take.
 #[test]
 fn a_compound_on_a_key_no_role_reads_is_refused_as_that_key() {
     let src = "struct s size=5x5\n  walls mat_slot=wall height=3 nbt={CustomName:\"x\"}\n";
@@ -436,6 +436,46 @@ const SWEEP: &[(&str, &str)] = &[
         "  bed id=bd class=c mat_slot=m at=inside.front offset=1 y=0\n  bed at=1,0,1 facing=east\n",
     ),
     (
+        "painting",
+        "  painting id=pt class=c at=inside.front offset=1 y=1 variant=kebab\n  @edition java\n    painting at=1,1,1 facing=north variant=kebab nbt={}\n",
+    ),
+    (
+        "item_frame",
+        "  item_frame id=if class=c at=inside.front offset=2 y=1 item=diamond glowing=true\n  @edition java\n    item_frame at=1,1,1 facing=up nbt={}\n",
+    ),
+    (
+        "armor_stand",
+        "  armor_stand id=as class=c at=inside.front offset=3 y=0\n  @edition java\n    armor_stand at=1,0,1 facing=east nbt={}\n",
+    ),
+    (
+        "villager",
+        "  villager id=vg class=c at=inside.back offset=1 y=0 profession=librarian level=master\n  @edition java\n    villager at=1,0,1 facing=east nbt={}\n",
+    ),
+    (
+        "trade",
+        "  trade id=tr class=c villager=vg buy=emerald count=2 sell=iron_sword sell_count=1 enchant=sharpness enchant_level=2\n",
+    ),
+    (
+        "text_display",
+        "  text_display id=tx class=c at=inside.back offset=2 y=2 text=\"Inn\" billboard=center scale=1.5\n  @edition java\n    text_display at=1,1,1 facing=east text=\"Inn\" nbt={}\n",
+    ),
+    (
+        "block_display",
+        "  block_display id=bk class=c mat_slot=m at=inside.left offset=1 y=1 scale=0.5\n  @edition java\n    block_display at=1,1,1 facing=east mat_slot=m nbt={}\n",
+    ),
+    (
+        "item_display",
+        "  item_display id=it class=c at=inside.left offset=2 y=1 item=diamond scale=2\n  @edition java\n    item_display at=1,1,1 facing=east item=diamond nbt={}\n",
+    ),
+    (
+        "hologram",
+        "  hologram id=hg class=c mat_slot=m at=inside.right offset=1 y=2 text=\"Inn\"\n  hologram at=1,1,1 facing=east text=\"Inn\" mat_slot=m\n",
+    ),
+    (
+        "spawn",
+        "  spawn id=sp class=c type=cat at=inside.right offset=2 y=0\n  spawn type=cat at=2,0,2 facing=east\n  @edition java\n    spawn type=cat at=1,0,1 nbt={}\n",
+    ),
+    (
         "repeater",
         "  repeater id=rp class=c at=inside.front offset=1 y=1 facing=in delay=2\n",
     ),
@@ -462,7 +502,7 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "raw_block",
-        "  raw_block id=r class=c mat=minecraft:stone at=1,0,1\n",
+        "  raw_block id=r class=c mat=minecraft:stone at=1,0,1\n  @edition java\n    raw_block mat=minecraft:chest at=2,0,2 nbt={}\n",
     ),
     (
         "raw_fill",
@@ -1094,6 +1134,46 @@ const UNREAD_SLOTS: &[UnreadSlot] = &[
     UnreadSlot {
         keyword: "connect",
         body: "def hut size=3x3:\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door id=entry side=front at=center\n\nsite v:\n  place id=a use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=4\n  connect a.entry to b.entry path=@gravel mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "painting",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  painting at=inside.front offset=1 y=1 variant=kebab mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "item_frame",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  item_frame at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "armor_stand",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  armor_stand at=1,1,1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "villager",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  villager at=1,1,1 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "trade",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  villager id=v at=1,1,1\n  trade villager=v buy=emerald sell=bread mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "text_display",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  text_display at=1,1,1 text=\"Inn\" mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "item_display",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  item_display at=1,1,1 item=diamond mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "spawn",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  spawn type=cat at=1,1,1 mat_slot=%SLOT%\n",
         why: Unread::Inapplicable,
     },
     UnreadSlot {

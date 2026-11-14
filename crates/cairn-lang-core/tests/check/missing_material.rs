@@ -285,6 +285,15 @@ const PAINTERS: &[(&str, &str, &str)] = &[
     ("note_block", "note_block at=1,1,1 note=12", ""),
     ("sign", "sign at=1,1,1 text=\"Inn\"", ""),
     ("bed", "bed at=inside.front offset=1 y=1", ""),
+    ("painting", "painting at=inside.front offset=1 y=1 variant=kebab", ""),
+    ("item_frame", "item_frame at=inside.front offset=1 y=1", ""),
+    ("armor_stand", "armor_stand at=1,1,1", ""),
+    ("villager", "villager id=v at=1,1,1", ""),
+    ("text_display", "text_display at=1,1,1 text=\"Inn\"", ""),
+    ("block_display", "block_display at=1,1,1", ""),
+    ("item_display", "item_display at=1,1,1 item=diamond", ""),
+    ("hologram", "hologram at=1,1,1 text=\"Inn\"", ""),
+    ("spawn", "spawn type=cat at=1,1,1", ""),
     ("repeater", "repeater at=1,1,1 facing=east", ""),
     ("comparator", "comparator at=inside.front offset=1 y=1", ""),
     ("redstone_torch", "redstone_torch at=1,1,1", ""),
@@ -298,7 +307,8 @@ const PAINTERS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// The lowered structure's extents, its sorted painted block ids, and its finding count.
+/// The lowered structure's extents, its sorted painted block ids and entity ids, and its finding
+/// count.
 fn footprint(src: &str) -> (String, Vec<String>, usize) {
     let module = parse(src).expect("parse");
     let ir = lower(&module);
@@ -314,6 +324,7 @@ fn footprint(src: &str) -> (String, Vec<String>, usize) {
         .iter()
         .filter(|index| index.0 != 0)
         .map(|index| array.palette.entries[index.0 as usize].id.clone())
+        .chain(array.entities.iter().map(|entity| entity.id.clone()))
         .collect();
     painted.sort();
     (
@@ -389,14 +400,24 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::NoteBlock
             | MemberRole::Sign
             | MemberRole::Bed
+            | MemberRole::Painting
+            | MemberRole::ItemFrame
+            | MemberRole::ArmorStand
+            | MemberRole::Villager
+            | MemberRole::TextDisplay
+            | MemberRole::BlockDisplay
+            | MemberRole::ItemDisplay
+            | MemberRole::Hologram
+            | MemberRole::Spawn
             | MemberRole::Repeater
             | MemberRole::Comparator
             | MemberRole::RedstoneTorch
             | MemberRole::RedstoneDust
             | MemberRole::RawBlock
             | MemberRole::RawFill => true,
-            // None of these lays a block of its own material.
-            MemberRole::Level
+            // None of these lays a block of its own material; a trade adds to a villager.
+            MemberRole::Trade
+            | MemberRole::Level
             | MemberRole::Circuit
             | MemberRole::Place
             | MemberRole::Connect
@@ -427,6 +448,16 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         MemberRole::NoteBlock,
         MemberRole::Sign,
         MemberRole::Bed,
+        MemberRole::Painting,
+        MemberRole::ItemFrame,
+        MemberRole::ArmorStand,
+        MemberRole::Villager,
+        MemberRole::Trade,
+        MemberRole::TextDisplay,
+        MemberRole::BlockDisplay,
+        MemberRole::ItemDisplay,
+        MemberRole::Hologram,
+        MemberRole::Spawn,
         MemberRole::Repeater,
         MemberRole::Comparator,
         MemberRole::RedstoneTorch,

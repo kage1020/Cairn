@@ -132,6 +132,7 @@ pub(super) fn lower_body_to_block_array<'a>(
             .copied()
             .filter(|(_, member)| matches!(member.role, MemberRole::Door | MemberRole::Window))
             .collect(),
+        villagers: villagers_of(&flattened),
     };
     let (canvas, split_doors, derived) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
@@ -173,6 +174,7 @@ pub(super) fn lower_body_to_block_array<'a>(
 
     let mut array = finished_array(dims, palette, voxels, body.source_scope, &derived);
     array.block_entities = canvas.block_entities();
+    array.entities = canvas.entities();
     let members = resolved_members(&flattened, &canvas, &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));
@@ -184,6 +186,15 @@ pub(super) fn lower_body_to_block_array<'a>(
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// Every `villager` of `flattened`, for a `trade` to name.
+fn villagers_of<'a>(flattened: &[(u32, &'a Member)]) -> Vec<&'a Member> {
+    flattened
+        .iter()
+        .map(|(_, member)| *member)
+        .filter(|member| matches!(member.role, MemberRole::Villager))
+        .collect()
 }
 
 /// The body's array over the pruned `voxels`, its palette put in canonical order, with the keys
@@ -269,7 +280,8 @@ fn state_findings<'a>(
 }
 
 /// Each member of `flattened` that owns a cell of `array`, with the states its cells hold and its
-/// geometry, in the order of the first cell each owns.
+/// geometry, in the order of the first cell each owns, then each that placed an entity, in the
+/// order of the entities.
 fn resolved_members(
     flattened: &[(u32, &Member)],
     canvas: &Canvas,
@@ -304,6 +316,17 @@ fn resolved_members(
             })
             .push(cell);
     }
+    let placed = canvas.entity_members().into_iter().filter_map(|index| {
+        let (_, member) = flattened[index as usize];
+        let declared = canvas.declared(index)?;
+        Some(ResolvedMember {
+            role: member.role.keyword().to_owned(),
+            id: member.id.clone(),
+            resolved_state: Vec::new(),
+            geometry: declared.holding(declared.bbox),
+            span: member.span.clone(),
+        })
+    });
     built
         .into_iter()
         .map(|(index, (held, blocks))| {
@@ -325,6 +348,7 @@ fn resolved_members(
                 span: member.span.clone(),
             }
         })
+        .chain(placed)
         .collect()
 }
 

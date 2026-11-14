@@ -110,6 +110,62 @@ pub trait TargetRegistry {
         let _ = token;
         None
     }
+
+    /// What the target's painting table says of `variant`, a name without its namespace
+    /// (`spec/entities` "Hanging entities").
+    fn painting(&self, variant: &str) -> PaintingLookup {
+        let _ = variant;
+        PaintingLookup::Unrecorded
+    }
+
+    /// The other edition's entity `id` names, when the target's edition has none; `None` when it
+    /// has one or the registry cannot say.
+    fn absent_entity(&self, id: &str) -> Option<AbsentEntity> {
+        let _ = id;
+        None
+    }
+}
+
+/// What a target's painting table says of one variant, as [`TargetRegistry::painting`] answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PaintingLookup {
+    /// The target has the variant.
+    Known(PaintingVariant),
+    /// The target has no such variant.
+    Unknown {
+        /// The target, as a diagnostic names it, such as `"java 1.20.4"`.
+        registry: String,
+        /// The variants the target has, in table order.
+        known: Vec<String>,
+        /// The edition's other targetable versions that have it, oldest first.
+        elsewhere: Vec<String>,
+    },
+    /// No table answers, so the variant is not checked and hangs as one cell.
+    Unrecorded,
+}
+
+/// One painting variant of a target's table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaintingVariant {
+    /// The variant as the target's entity data spells it, as `minecraft:kebab` or `Kebab`.
+    pub spelling: String,
+    /// Its width in blocks.
+    pub width: u32,
+    /// Its height in blocks.
+    pub height: u32,
+}
+
+/// An entity of one edition that the other has no counterpart for, as
+/// [`TargetRegistry::absent_entity`] answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbsentEntity {
+    /// The target that lacks it, as a diagnostic names it, such as `"bedrock 1.21.60"`.
+    pub registry: String,
+    /// The edition that has it.
+    pub declared_by: Edition,
+    /// What the entity is and why the target's edition has none, as the registry pack words it.
+    pub reason: String,
 }
 
 /// The registry of a lowering with no target. It lifts every abstract token, and every id no

@@ -31,7 +31,10 @@ fn walk(members: &[Member], body: BodyKind, sink: &mut DiagnosticSink) {
                     (Some(_), _) => known_keywords()
                         .iter()
                         .copied()
-                        .filter(|keyword| role_of(keyword).is_escape_hatch())
+                        .filter(|keyword| {
+                            let role = role_of(keyword);
+                            role.is_escape_hatch() || role.reads_nbt()
+                        })
                         .collect(),
                     (None, _) => body.allowed_keywords(),
                 };
@@ -53,8 +56,8 @@ fn push_unknown_keyword(
     notes.push(DiagnosticNote {
         span: None,
         message: if candidates.is_empty() {
-            "nothing builds under an `@edition` guard in a `site` body: the raw members and Tier 0 \
-             parts a guard holds go in a `struct` or `def` body"
+            "nothing builds under an `@edition` guard in a `site` body: the escape-hatch lines a \
+             guard holds go in a `struct` or `def` body"
                 .to_owned()
         } else {
             format!("expected one of: {}", candidates.join(", "))

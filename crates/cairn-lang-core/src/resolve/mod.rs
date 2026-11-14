@@ -20,7 +20,9 @@ pub use crate::version::{
     FloorPlacement, FloorVerdict, Requirement, RequirementError, VersionOrder, compare_versions,
     parse_min_version, parse_requirement,
 };
-pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
+pub use binding::{
+    MEMBER_FORMS, SelectorMatch, ThemeBinding, TokenKind, classify_token, member_form,
+};
 pub use resolution::{
     PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
 };

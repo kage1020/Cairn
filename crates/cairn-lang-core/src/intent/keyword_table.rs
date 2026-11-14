@@ -26,6 +26,16 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "note_block",
     "sign",
     "bed",
+    "painting",
+    "item_frame",
+    "armor_stand",
+    "villager",
+    "trade",
+    "text_display",
+    "block_display",
+    "item_display",
+    "hologram",
+    "spawn",
     "repeater",
     "comparator",
     "redstone_torch",
@@ -152,6 +162,26 @@ pub enum MemberRole {
     Sign,
     /// `bed` fixture, a bed's head and foot.
     Bed,
+    /// `painting` entity, hung on a wall's face.
+    Painting,
+    /// `item_frame` entity, hung on a face, holding an item or none.
+    ItemFrame,
+    /// `armor_stand` entity.
+    ArmorStand,
+    /// `villager` entity, offering the trades its `trade` lines name.
+    Villager,
+    /// `trade` line, one offer of the `villager` its `villager=` names.
+    Trade,
+    /// `text_display` entity, Java's.
+    TextDisplay,
+    /// `block_display` entity, Java's, showing the block its `mat_slot=` binds.
+    BlockDisplay,
+    /// `item_display` entity, Java's.
+    ItemDisplay,
+    /// `hologram` member, floating text built as the member form its `mat_slot=` binds.
+    Hologram,
+    /// `spawn` escape hatch: any entity, by its id.
+    Spawn,
     /// `repeater` Tier 0 part.
     Repeater,
     /// `comparator` Tier 0 part.
@@ -294,6 +324,16 @@ impl MemberRole {
             | Self::NoteBlock
             | Self::Sign
             | Self::Bed
+            | Self::Painting
+            | Self::ItemFrame
+            | Self::ArmorStand
+            | Self::Villager
+            | Self::Trade
+            | Self::TextDisplay
+            | Self::BlockDisplay
+            | Self::ItemDisplay
+            | Self::Hologram
+            | Self::Spawn
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -307,11 +347,45 @@ impl MemberRole {
         }
     }
 
-    /// Whether this is a role of the escape-hatch layer, a raw member or a Tier 0 part, the only
-    /// kind an `@edition` guard holds.
+    /// Whether this is a role of the escape-hatch layer, a raw member, a `spawn` or a Tier 0 part,
+    /// which an `@edition` guard holds whatever its line writes.
     #[must_use]
     pub fn is_escape_hatch(&self) -> bool {
-        matches!(self, Self::RawBlock | Self::RawFill) || self.is_tier0_part()
+        matches!(self, Self::RawBlock | Self::RawFill | Self::Spawn) || self.is_tier0_part()
+    }
+
+    /// Whether this role reads an `nbt={...}` compound, which puts the line that writes one in
+    /// the escape-hatch layer (`spec/entities` "Two tiers").
+    #[must_use]
+    pub fn reads_nbt(&self) -> bool {
+        matches!(
+            self,
+            Self::Painting
+                | Self::ItemFrame
+                | Self::ArmorStand
+                | Self::Villager
+                | Self::TextDisplay
+                | Self::BlockDisplay
+                | Self::ItemDisplay
+                | Self::Spawn
+                | Self::RawBlock
+        )
+    }
+
+    /// Whether this role places an entity rather than a block (`spec/entities` "Two tiers").
+    #[must_use]
+    pub fn places_an_entity(&self) -> bool {
+        matches!(
+            self,
+            Self::Painting
+                | Self::ItemFrame
+                | Self::ArmorStand
+                | Self::Villager
+                | Self::TextDisplay
+                | Self::BlockDisplay
+                | Self::ItemDisplay
+                | Self::Spawn
+        )
     }
 
     /// Whether this is a Tier 0 part, a redstone part placed by hand (`spec/redstone` "Tier 0
@@ -359,11 +433,38 @@ impl MemberRole {
             Self::Trapdoor => &["at", "offset", "y", "facing", "half", "open", "waterlogged"],
             Self::NoteBlock => &["at", "note", "instrument"],
             Self::Sign => &["at", "offset", "y", "facing", "text", "back", "glowing"],
+            Self::Painting => &["at", "offset", "y", "facing", "variant", "nbt"],
+            Self::ItemFrame => &["at", "offset", "y", "facing", "item", "glowing", "nbt"],
+            Self::ArmorStand => &["at", "offset", "y", "facing", "nbt"],
+            Self::Villager => &["at", "offset", "y", "facing", "profession", "level", "nbt"],
+            Self::Trade => &[
+                "villager",
+                "buy",
+                "count",
+                "sell",
+                "sell_count",
+                "enchant",
+                "enchant_level",
+            ],
+            Self::TextDisplay => &[
+                "at",
+                "offset",
+                "y",
+                "facing",
+                "text",
+                "billboard",
+                "scale",
+                "nbt",
+            ],
+            Self::BlockDisplay => &["at", "offset", "y", "facing", "scale", "nbt"],
+            Self::ItemDisplay => &["at", "offset", "y", "facing", "item", "scale", "nbt"],
+            Self::Hologram => &["at", "offset", "y", "facing", "text"],
+            Self::Spawn => &["type", "at", "offset", "y", "facing", "nbt"],
             Self::Repeater => &["at", "offset", "y", "facing", "delay"],
             Self::Comparator => &["at", "offset", "y", "facing", "mode"],
             Self::RedstoneDust => &["at", "offset", "y", "connect"],
             Self::Circuit => &["region", "void"],
-            Self::RawBlock => &["mat", "at"],
+            Self::RawBlock => &["mat", "at", "nbt"],
             Self::RawFill => &["mat", "from", "to"],
             // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
             // fix this set.
@@ -409,6 +510,16 @@ impl MemberRole {
             | Self::RawFill
             | Self::Place
             | Self::Connect
+            | Self::Painting
+            | Self::ItemFrame
+            | Self::ArmorStand
+            | Self::Villager
+            | Self::Trade
+            | Self::TextDisplay
+            | Self::BlockDisplay
+            | Self::ItemDisplay
+            | Self::Hologram
+            | Self::Spawn
             | Self::Other(_) => &[],
         }
     }
@@ -439,7 +550,15 @@ impl MemberRole {
             | Self::RawBlock
             | Self::RawFill
             | Self::Place
-            | Self::Connect => &[UnreadArgument {
+            | Self::Connect
+            | Self::Painting
+            | Self::ItemFrame
+            | Self::ArmorStand
+            | Self::Villager
+            | Self::Trade
+            | Self::TextDisplay
+            | Self::ItemDisplay
+            | Self::Spawn => &[UnreadArgument {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
             }],
@@ -456,6 +575,8 @@ impl MemberRole {
             | Self::Trapdoor
             | Self::Sign
             | Self::Bed
+            | Self::BlockDisplay
+            | Self::Hologram
             | Self::Other(_) => &[],
         }
     }
@@ -556,6 +677,16 @@ impl MemberRole {
             | Self::RawBlock
             | Self::RawFill
             | Self::Connect
+            | Self::Painting
+            | Self::ItemFrame
+            | Self::ArmorStand
+            | Self::Villager
+            | Self::Trade
+            | Self::TextDisplay
+            | Self::BlockDisplay
+            | Self::ItemDisplay
+            | Self::Hologram
+            | Self::Spawn
             | Self::Other(_) => &[],
         }
     }
@@ -602,6 +733,16 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "note_block" => MemberRole::NoteBlock,
         "sign" => MemberRole::Sign,
         "bed" => MemberRole::Bed,
+        "painting" => MemberRole::Painting,
+        "item_frame" => MemberRole::ItemFrame,
+        "armor_stand" => MemberRole::ArmorStand,
+        "villager" => MemberRole::Villager,
+        "trade" => MemberRole::Trade,
+        "text_display" => MemberRole::TextDisplay,
+        "block_display" => MemberRole::BlockDisplay,
+        "item_display" => MemberRole::ItemDisplay,
+        "hologram" => MemberRole::Hologram,
+        "spawn" => MemberRole::Spawn,
         "repeater" => MemberRole::Repeater,
         "comparator" => MemberRole::Comparator,
         "redstone_torch" => MemberRole::RedstoneTorch,

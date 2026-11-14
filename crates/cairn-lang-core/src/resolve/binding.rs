@@ -18,6 +18,25 @@ pub enum TokenKind {
     NotAToken,
 }
 
+/// Each member form a `slot` rule may bind, with the keys it takes, which only a `hologram` is
+/// built as (`spec/versioning-editions` "Writing an alternative").
+pub const MEMBER_FORMS: [(&str, &[&str]); 2] = [
+    ("text_display", &["billboard", "scale"]),
+    ("sign", &["glowing"]),
+];
+
+/// The keys of the member form `value` names, or `None` for a value that names none.
+#[must_use]
+pub fn member_form(value: &Value) -> Option<&'static [&'static str]> {
+    let ValueKind::Ident(word) = &value.kind else {
+        return None;
+    };
+    MEMBER_FORMS
+        .iter()
+        .find(|(form, _)| form == word)
+        .map(|(_, keys)| *keys)
+}
+
 /// Classifies a token value: a `.` before any `[` makes it abstract, anything else canonical.
 #[must_use]
 pub fn classify_token(value: &Value) -> TokenKind {
@@ -45,6 +64,9 @@ pub struct ThemeBinding {
     pub name: String,
     /// `slot NAME -> VALUE` map, in source order.
     pub slots: IndexMap<String, ValueWithSpan>,
+    /// The `key=value` arguments of each slot bound to a member form, keyed like [`Self::slots`].
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub slot_arguments: IndexMap<String, IndexMap<String, ValueWithSpan>>,
     /// One entry per `KEYWORD[attrs] -> bindings` row, in source order.
     pub selectors: Vec<SelectorMatch>,
     /// Byte range of the originating `theme NAME ...` block.

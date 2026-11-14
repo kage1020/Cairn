@@ -13,8 +13,10 @@ use super::chest::fill_chest;
 use super::component::{
     BUTTON, DAYLIGHT, DISPENSER, LAMP, LEVER, OBSERVER, PISTON, fill_component,
 };
+use super::display::{fill_block_display, fill_hologram, fill_item_display, fill_text_display};
 use super::door::{HungDoor, fill_door};
 use super::fill::fill_material;
+use super::hanging::{fill_item_frame, fill_painting};
 use super::members::{StructCtx, palette_index_for};
 use super::note_block::fill_note_block;
 use super::part::{Part, fill_part};
@@ -24,6 +26,7 @@ use super::roof_fill::fill_roof;
 use super::sign::fill_sign;
 use super::sizing::wall_height;
 use super::stair::fill_stair;
+use super::standing::{fill_armor_stand, fill_spawn, fill_trade, fill_villager};
 use super::trapdoor::fill_trapdoor;
 use super::window::fill_window;
 
@@ -112,6 +115,20 @@ pub(super) fn paint_member(
         }
         MemberRole::Sign => fill_sign(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Bed => fill_bed(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Painting => fill_painting(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::ItemFrame => fill_item_frame(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::ArmorStand => fill_armor_stand(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::Villager => fill_villager(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::Trade => fill_trade(member, ctx, canvas, diagnostics),
+        MemberRole::TextDisplay => fill_text_display(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::BlockDisplay => {
+            fill_block_display(member, y_offset, ctx, canvas, diagnostics);
+        }
+        MemberRole::ItemDisplay => fill_item_display(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::Hologram => {
+            fill_hologram(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Spawn => fill_spawn(member, y_offset, ctx, canvas, diagnostics),
         MemberRole::Repeater => {
             fill_part(
                 Part::Repeater,

@@ -58,9 +58,11 @@ pub enum DiagnosticCode {
     /// A known statement keyword whose enclosing body has no reader for it, or a `circuit` line
     /// under a `level`.
     MisplacedMember,
-    /// A known member other than a raw member or a Tier 0 part, or a `logic` or `assert` line,
-    /// under an `@edition` guard.
+    /// A known member outside the escape-hatch layer, or a `logic` or `assert` line, under an
+    /// `@edition` guard.
     SemanticInEditionGuard,
+    /// An `nbt={...}` compound on a line no `@edition` guard holds.
+    NbtOutsideEditionGuard,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// A key outside the vocabulary of the member's role, or of a `struct` / `def` header.
@@ -203,6 +205,7 @@ impl DiagnosticCode {
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::SemanticInEditionGuard => "E_SEMANTIC_IN_EDITION_GUARD",
+            Self::NbtOutsideEditionGuard => "E_NBT_OUTSIDE_EDITION_GUARD",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
             Self::MisplacedBinding => "E_MISPLACED_BINDING",
@@ -277,6 +280,7 @@ impl DiagnosticCode {
             | Self::DuplicateCircuit
             | Self::MisplacedMember
             | Self::SemanticInEditionGuard
+            | Self::NbtOutsideEditionGuard
             | Self::UnknownKeyword
             | Self::UnknownArgument
             | Self::MisplacedBinding

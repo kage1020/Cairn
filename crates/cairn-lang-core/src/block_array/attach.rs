@@ -32,6 +32,17 @@ pub struct LaidEntity {
     pub fields: IndexMap<String, i32>,
 }
 
+/// Raise `array`'s block entities and entities by the `void` rows laid under them.
+fn raise_entities(array: &mut super::BlockArray, void: u32) {
+    for entity in &mut array.block_entities {
+        entity.pos.1 += void;
+    }
+    for entity in &mut array.entities {
+        entity.pos.1 += f64::from(void);
+        entity.block_pos.1 += void;
+    }
+}
+
 /// The fields a writer fills from a block entity's own id and position.
 const POSITIONED_FIELDS: [&str; 4] = ["id", "x", "y", "z"];
 
@@ -156,12 +167,7 @@ impl BlockArrayIr {
         array.palette = palette;
         array.derived = derived;
         array.dims = dims;
-        for entity in &mut array.block_entities {
-            entity.pos.1 += void;
-        }
-        for entity in &mut array.entities {
-            entity.pos.1 += f64::from(void);
-        }
+        raise_entities(array, void);
         for (_, block) in &sorted {
             if let Some(entity) = &block.entity {
                 array.block_entities.push(BlockEntity {

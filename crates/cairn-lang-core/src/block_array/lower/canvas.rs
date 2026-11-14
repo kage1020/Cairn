@@ -5,8 +5,8 @@ use indexmap::IndexMap;
 use crate::block_array::geometry::Declared;
 use crate::block_array::material::is_stand_in;
 use crate::block_array::{
-    BlockEntity, BlockEntityData, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull,
-    PaletteIndex,
+    BlockEntity, BlockEntityData, BlockState, Dims, Entity, EntityData, PALETTE_CAPACITY, Palette,
+    PaletteFull, PaletteIndex, Trade,
 };
 
 use super::phase::Phase;
@@ -165,6 +165,10 @@ pub(super) struct Canvas {
     deferred: Vec<Contest>,
     /// Each block entity a member set beside a block it painted, with that member.
     block_entities: Vec<(u32, BlockEntity)>,
+    /// Each entity a member placed, with that member and the start of its line.
+    entities: Vec<(u32, usize, Entity)>,
+    /// Each trade a `trade` line offers, with the start of the line of the villager it names.
+    trades: Vec<(usize, Trade)>,
 }
 
 /// One cell a member wrote over another member's in the same phase.
@@ -190,7 +194,48 @@ impl Canvas {
             conflicts: IndexMap::new(),
             deferred: Vec::new(),
             block_entities: Vec::new(),
+            entities: Vec::new(),
+            trades: Vec::new(),
         }
+    }
+
+    /// Each entity the members placed, a villager holding the trades that name it, in the order of
+    /// their cells and in line order within one cell (`spec/entities` "Two tiers").
+    pub(super) fn entities(&self) -> Vec<Entity> {
+        let mut placed: Vec<(usize, Entity)> = self
+            .entities
+            .iter()
+            .map(|(_, line, entity)| {
+                let mut entity = entity.clone();
+                if let EntityData::Villager { trades, .. } = &mut entity.data {
+                    trades.extend(
+                        self.trades
+                            .iter()
+                            .filter(|(villager, _)| villager == line)
+                            .map(|(_, trade)| trade.clone()),
+                    );
+                }
+                let (x, y, z) = entity.block_pos;
+                (self.dims.index(x, y, z).unwrap_or(usize::MAX), entity)
+            })
+            .collect();
+        placed.sort_by_key(|(cell, _)| *cell);
+        placed.into_iter().map(|(_, entity)| entity).collect()
+    }
+
+    /// The members of the flattened paint list that placed an entity, in the order of
+    /// [`Self::entities`].
+    pub(super) fn entity_members(&self) -> Vec<u32> {
+        let mut placed: Vec<(usize, u32)> = self
+            .entities
+            .iter()
+            .map(|(member, _, entity)| {
+                let (x, y, z) = entity.block_pos;
+                (self.dims.index(x, y, z).unwrap_or(usize::MAX), *member)
+            })
+            .collect();
+        placed.sort_by_key(|(cell, _)| *cell);
+        placed.into_iter().map(|(_, member)| member).collect()
     }
 
     /// Each block entity whose member still holds its cell, in the order they were set.
@@ -351,6 +396,16 @@ impl MemberCanvas<'_> {
         self.canvas
             .block_entities
             .push((self.member, BlockEntity { pos, data }));
+    }
+
+    /// Place `entity` for this member, whose line starts at byte `line`.
+    pub(super) fn place_entity(&mut self, line: usize, entity: Entity) {
+        self.canvas.entities.push((self.member, line, entity));
+    }
+
+    /// Offer `trade` from the villager whose line starts at byte `villager`.
+    pub(super) fn offer_trade(&mut self, villager: usize, trade: Trade) {
+        self.canvas.trades.push((villager, trade));
     }
 
     /// [`Self::paint`] without the assertion, for a cell the author placed; whether it existed.

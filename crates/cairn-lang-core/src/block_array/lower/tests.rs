@@ -1325,6 +1325,14 @@ const SLOT_READERS: &[(&str, &str)] = &[
     ),
     ("sign", "struct s size=3x3\n  sign at=1,0,1 mat_slot=s\n"),
     (
+        "block_display",
+        "struct s size=3x3\n  block_display at=1,0,1 mat_slot=s\n",
+    ),
+    (
+        "hologram",
+        "struct s size=3x3\n  hologram at=1,0,1 text=\"Inn\" mat_slot=s\n",
+    ),
+    (
         "bed",
         "struct s size=3x3\n  bed at=1,0,1 facing=north mat_slot=b\n",
     ),
@@ -1393,6 +1401,36 @@ const SLOT_IGNORERS: &[(&str, &str)] = &[
         "redstone_dust",
         "struct s size=3x3\n  redstone_dust at=1,0,1 mat_slot=d\n",
     ),
+    (
+        "painting",
+        "struct s size=3x3\n  painting at=1,0,1 facing=north variant=kebab mat_slot=d\n",
+    ),
+    (
+        "item_frame",
+        "struct s size=3x3\n  item_frame at=1,0,1 facing=up mat_slot=d\n",
+    ),
+    (
+        "armor_stand",
+        "struct s size=3x3\n  armor_stand at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "villager",
+        "struct s size=3x3\n  villager id=v at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "trade",
+        "struct s size=3x3\n  villager id=v at=1,0,1\n  trade villager=v buy=emerald sell=bread \
+         mat_slot=d\n",
+    ),
+    (
+        "text_display",
+        "struct s size=3x3\n  text_display at=1,0,1 text=\"Inn\" mat_slot=d\n",
+    ),
+    (
+        "item_display",
+        "struct s size=3x3\n  item_display at=1,0,1 item=diamond mat_slot=d\n",
+    ),
+    ("spawn", "struct s size=3x3\n  spawn type=cat at=1,0,1 mat_slot=d\n"),
     (
         "raw_block",
         "struct s size=3x3\n  raw_block mat=minecraft:stone at=1,0,1 mat_slot=d\n",
