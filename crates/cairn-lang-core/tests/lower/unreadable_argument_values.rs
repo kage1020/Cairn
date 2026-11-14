@@ -257,7 +257,7 @@ fn an_unreadable_stair_state_builds_the_default_and_says_so() {
         (
             "shape",
             "outer_left",
-            "`straight`, `outer_left`, or `outer_right`",
+            "`straight`, `inner_left`, `inner_right`, `outer_left`, or `outer_right`",
             "straight",
         ),
         ("waterlogged", "true", "`auto`, `true` or `false`", "auto"),
@@ -307,8 +307,8 @@ fn every_unreadable_stair_state_is_reported_once_on_its_own_value() {
         vec![
             (
                 "W_IGNORED_ARGUMENT",
-                "`shape=` must be `straight`, `outer_left`, or `outer_right`, not string \
-                 `\"outer_left\"`; the value was ignored",
+                "`shape=` must be `straight`, `inner_left`, `inner_right`, `outer_left`, or \
+                 `outer_right`, not string `\"outer_left\"`; the value was ignored",
             ),
             (
                 "W_IGNORED_ARGUMENT",
@@ -338,8 +338,8 @@ fn an_unreadable_stair_state_on_a_stair_that_is_not_built_is_still_reported() {
             ),
             (
                 "W_IGNORED_ARGUMENT",
-                "`shape=` must be `straight`, `outer_left`, or `outer_right`, not string \
-                 `\"straight\"`; the value was ignored",
+                "`shape=` must be `straight`, `inner_left`, `inner_right`, `outer_left`, or \
+                 `outer_right`, not string `\"straight\"`; the value was ignored",
             ),
         ],
     );

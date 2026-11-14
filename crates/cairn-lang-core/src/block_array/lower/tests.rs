@@ -3864,9 +3864,11 @@ fn a_stair_with_an_unknown_state_is_refused_with_the_values_it_takes() {
             vec!["`facing=` takes one of out, in"],
         ),
         (
-            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left",
-            "unknown stair `shape=inner_left`",
-            vec!["`shape=` takes one of straight, outer_left, outer_right"],
+            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner",
+            "unknown stair `shape=inner`",
+            vec![
+                "`shape=` takes one of straight, inner_left, inner_right, outer_left, outer_right",
+            ],
         ),
     ] {
         assert_eq!(

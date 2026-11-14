@@ -25,6 +25,15 @@ use super::waterlogged::{
     WrittenWaterlogged, keep_waterlogged, read_waterlogged, waterlogged_state,
 };
 
+/// The `shape=` values an eave stair takes, in the order Minecraft lists a stair's shapes.
+const STAIR_SHAPES: [&str; 5] = [
+    "straight",
+    "inner_left",
+    "inner_right",
+    "outer_left",
+    "outer_right",
+];
+
 /// The note on a stair refused for its `kind=`, naming the one kind there is.
 const STAIR_KINDS: &str = "write `kind=stairs`, the one stair kind: a band of stairs in the \
                            overhang outside a wall";
@@ -50,7 +59,7 @@ pub(super) fn fill_stair(
     let half = ident("half", "`top` or `bottom`", "top");
     let shape = ident(
         "shape",
-        "`straight`, `outer_left`, or `outer_right`",
+        "`straight`, `inner_left`, `inner_right`, `outer_left`, or `outer_right`",
         "straight",
     );
     let waterlogged = read_waterlogged(member).unwrap_or_else(|argument| {
@@ -201,10 +210,12 @@ impl EaveStates<'_> {
         };
         let shape = match self.shape {
             Some("straight") | None => StairShape::Straight,
+            Some("inner_left") => StairShape::InnerLeft,
+            Some("inner_right") => StairShape::InnerRight,
             Some("outer_left") => StairShape::OuterLeft,
             Some("outer_right") => StairShape::OuterRight,
             Some(other) => {
-                refuse("shape", other, &["straight", "outer_left", "outer_right"]);
+                refuse("shape", other, &STAIR_SHAPES);
                 return None;
             }
         };
