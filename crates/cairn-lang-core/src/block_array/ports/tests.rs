@@ -1,5 +1,5 @@
 use super::*;
-use crate::block_array::openings::{WindowAnchor, door_at_refusal};
+use crate::block_array::openings::WindowAnchor;
 
 fn pid(name: &str) -> PortId {
     PortId::new(name).expect("valid port id")
@@ -463,6 +463,22 @@ fn port_world_position_door_at_left_resolves_to_origin_corner_on_front() {
 }
 
 #[test]
+fn port_world_position_door_at_an_offset_resolves_to_that_column() {
+    let src = concat!(
+        "def cottage size=5x3:\n",
+        "  walls mat_slot=w height=3\n",
+        "  door id=entry side=front offset=3\n",
+    );
+    let module = crate::parse(src).expect("parse");
+    let ir = crate::lower(&module);
+    let def = ir.defs.first().expect("def lowered");
+    let dims = Dims { x: 5, y: 1, z: 3 };
+    let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        .expect("port resolves");
+    assert_eq!(pos, (13, 0, 23));
+}
+
+#[test]
 fn port_world_position_door_at_right_resolves_to_far_corner_on_front() {
     let src = concat!(
         "def cottage size=3x3:\n",
@@ -597,7 +613,8 @@ fn port_world_position_door_refuses_for_unknown_at_value() {
     let dims = Dims { x: 3, y: 1, z: 3 };
     assert!(matches!(
         port_at((0, 0, 0), dims, def, &pid("entry"), &declared_column(def)),
-        Err(PortRejection::DoorAt { written: Written::Ident(ref s), .. }) if s == "middle",
+        Err(PortRejection::DoorColumn { fault: DoorColumnFault::At(Written::Ident(ref s)), .. })
+            if s == "middle",
     ));
 }
 
@@ -649,21 +666,38 @@ fn port_world_position_refuses_a_non_cardinal_side_with_what_was_written() {
 }
 
 #[test]
-fn port_world_position_refuses_a_missing_door_at_as_absent() {
+fn port_world_position_refuses_a_door_with_no_column_as_absent() {
     assert!(matches!(
         port_in("  walls mat_slot=w height=3\n  door id=e side=front\n", "e"),
-        Err(PortRejection::DoorAt {
-            written: Written::Absent,
+        Err(PortRejection::DoorColumn {
+            fault: DoorColumnFault::At(Written::Absent),
             ..
         }),
     ));
 }
 
 #[test]
-fn port_world_position_asks_the_door_at_before_the_masonry() {
+fn port_world_position_refuses_a_corner_offset_as_the_cut_does() {
+    assert!(matches!(
+        port_in(
+            "  walls mat_slot=w height=3\n  door id=e side=back offset=0\n",
+            "e"
+        ),
+        Err(PortRejection::DoorColumn {
+            fault: DoorColumnFault::Corner {
+                offset: 0,
+                side: WallSide::Back,
+            },
+            ..
+        }),
+    ));
+}
+
+#[test]
+fn port_world_position_asks_the_door_column_before_the_masonry() {
     assert!(matches!(
         port_in("  door id=e side=front at=middle\n", "e"),
-        Err(PortRejection::DoorAt { .. }),
+        Err(PortRejection::DoorColumn { .. }),
     ));
 }
 
@@ -861,8 +895,8 @@ fn every_rejection() -> Vec<PortRejection> {
             member: 0..0,
         },
         PortRejection::Sizeless,
-        PortRejection::DoorAt {
-            written: Written::Absent,
+        PortRejection::DoorColumn {
+            fault: DoorColumnFault::Both,
             member: 0..0,
         },
         PortRejection::DoorNoWalls { member: 0..0 },
@@ -919,10 +953,10 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
             })
             .collect(),
         PortRejection::Sizeless => vec![PortRejection::Sizeless],
-        PortRejection::DoorAt { .. } => written_samples("middle")
+        PortRejection::DoorColumn { .. } => door_column_samples()
             .into_iter()
-            .map(|written| PortRejection::DoorAt {
-                written,
+            .map(|fault| PortRejection::DoorColumn {
+                fault,
                 member: span.clone(),
             })
             .collect(),
@@ -1012,6 +1046,32 @@ fn window_args(offset: u32, width: u32, anchor: Option<&str>) -> WindowArgs {
     }
 }
 
+/// One [`DoorColumnFault`] per variant, and per way of writing an `at=`.
+fn door_column_samples() -> Vec<DoorColumnFault> {
+    let mut samples: Vec<DoorColumnFault> = written_samples("middle")
+        .into_iter()
+        .map(DoorColumnFault::At)
+        .collect();
+    samples.extend([
+        DoorColumnFault::Both,
+        DoorColumnFault::OffsetMalformed("decimal `1.5`".to_owned()),
+        DoorColumnFault::Corner {
+            offset: 0,
+            side: WallSide::Front,
+        },
+        DoorColumnFault::Corner {
+            offset: 4,
+            side: WallSide::Left,
+        },
+        DoorColumnFault::PastTheWall {
+            offset: 5,
+            side: WallSide::Back,
+            length: 5,
+        },
+    ]);
+    samples
+}
+
 fn written_samples(ident: &str) -> [Written; 4] {
     [
         Written::Absent,
@@ -1037,10 +1097,15 @@ fn every_rejection_note_renders_in_full() {
         (format!("`a.p` has `side=3`, which is not one of front, back, left, right{OWN}"), true),
         (format!("`a.p` has a `side=` that is coordinate `1,2,3`, not one of front, back, left, right{OWN}"), true),
         ("`a.p` belongs to a `def` with no `size=`, so its walls have no length".to_owned(), false),
-        (format!("`a.p` is a door that has no `at=`{OWN}"), true),
+        (format!("`a.p` is a door that has no `at=` or `offset=`{OWN}"), true),
         (format!("`a.p` is a door that has `at=middle`, which is not one of center, left, right{OWN}"), true),
-        (format!("`a.p` is a door that has `at=3`, which is not one of center, left, right (numeric offsets are reserved){OWN}"), true),
+        (format!("`a.p` is a door that has `at=3`, which is not one of center, left, right{OWN}"), true),
         (format!("`a.p` is a door that has an `at=` that is coordinate `1,2,3`, not one of center, left, right{OWN}"), true),
+        (format!("`a.p` is a door that names its column twice, with `at=` and with `offset=`{OWN}"), true),
+        (format!("`a.p` is a door that has an `offset=` that is decimal `1.5`, not a non-negative integer that fits in u32{OWN}"), true),
+        (format!("`a.p` is a door that has `offset=0`, the front wall's corner with the left wall{OWN}"), true),
+        (format!("`a.p` is a door that has `offset=4`, the left wall's corner with the front wall{OWN}"), true),
+        (format!("`a.p` is a door that has `offset=5`, past the end of the back wall (length 5){OWN}"), true),
         (format!("`a.p` is a door with no wall to open: {NO_WALLS}{OWN}"), true),
         (format!("`a.p` is a door that opens at y=1, the row above the floor slab, which is not inside any wall course (the walls occupy y=7..=10){OWN}"), true),
         (format!("`a.p` is a door that stands at y=1..=2, and the wall course holding y=1 ends there (the walls occupy y=1..=1){OWN}"), true),
@@ -1077,16 +1142,16 @@ fn every_rejection_note_renders_in_full() {
 }
 
 #[test]
-fn the_member_line_and_the_note_word_a_door_at_fault_alike() {
-    for written in written_samples("middle") {
-        let refusal = door_at_refusal(&written);
-        let note = PortRejection::DoorAt {
-            written: written.clone(),
+fn the_member_line_and_the_note_word_a_door_column_fault_alike() {
+    for fault in door_column_samples() {
+        let refusal = fault.refusal();
+        let note = PortRejection::DoorColumn {
+            fault: fault.clone(),
             member: 0..0,
         }
         .note("a.p")
         .message;
-        let clause = door_at_clause(&written);
+        let clause = fault.clause();
         assert!(refusal.starts_with(&format!("door {clause}")), "{refusal}");
         assert!(note.contains(&clause), "{note}");
     }

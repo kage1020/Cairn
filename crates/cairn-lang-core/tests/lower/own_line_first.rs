@@ -46,9 +46,12 @@ fn a_door_whose_at_names_no_anchor_is_refused_beside_walls_that_paint_nothing() 
         [(
             DiagnosticCode::InvalidMember,
             "door side=front at=middle",
-            "door has `at=middle`, which is not one of center, left, right — use `at=center | \
-             left | right`",
-            vec![],
+            "door has `at=middle`, which is not one of center, left, right",
+            vec![
+                "name the door's column once: `at=center`, `at=left` or `at=right` for an \
+                 anchor, or `offset=N` for a column between the wall's corners, counted from 0 \
+                 at its left end seen from outside",
+            ],
         )],
     );
 }

@@ -2216,8 +2216,7 @@ fn door_at_unknown_value_is_refused_naming_the_anchors() {
         invalid_lines(src, &out),
         [(
             "door side=front at=middle",
-            "door has `at=middle`, which is not one of center, left, right — use \
-             `at=center | left | right`",
+            "door has `at=middle`, which is not one of center, left, right",
         )],
     );
     assert_eq!(deferred_count(&out), 0);

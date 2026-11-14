@@ -13,6 +13,7 @@ use crate::block_array::material::{
     IdOrigin, MaterialDeferred, TargetRegistry, resolve_block_state, validated_id,
 };
 use crate::block_array::openings::WallSide;
+pub(super) use crate::block_array::openings::side_name;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{Bbox, BlockState, Dims, PaletteIndex};
 
@@ -449,13 +450,4 @@ pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Opt
         Vec::new(),
     ));
     None
-}
-
-pub(super) fn side_name(side: WallSide) -> &'static str {
-    match side {
-        WallSide::Front => "front",
-        WallSide::Back => "back",
-        WallSide::Left => "left",
-        WallSide::Right => "right",
-    }
 }

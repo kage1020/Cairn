@@ -175,8 +175,7 @@ and roof ports, and ports on level-scoped members, are reserved for a future ext
 `front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` ([§9.3.1](#931-coordinate-convention)).
 The wall-local offset comes from:
 
-- a `door`'s `at=` value of `center`, `left`, or `right` ([§5.4](/spec/syntax/#54-selectors)). Numeric
-  offsets are reserved.
+- a `door`'s column, from its `at=` anchor or its `offset=` ([§5.4](/spec/syntax/#54-selectors)).
 - a `window`'s geometric centre, `offset + size.w / 2`, where `offset` is the window's first
   column, read the way the cut reads it: an absent `offset=` as `0`, and an `anchor=` naming a
   later column moving it left ([§5.4](/spec/syntax/#54-selectors)).
