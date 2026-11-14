@@ -50,7 +50,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
     nesting::run(ir, &mut sink);
-    positional::run(ir, &mut sink);
+    positional::run(module, ir, &mut sink);
     requires::run(module, &mut sink);
     struct_name::run(module, &mut sink);
     truth::run(ir, &mut sink);
@@ -112,6 +112,7 @@ mod tests {
             | C::UnsupportedNesting
             | C::MisplacedMember
             | C::SemanticInEditionGuard
+            | C::NbtOutsideEditionGuard
             | C::UnknownKeyword
             | C::UnknownArgument
             | C::MisplacedBinding
@@ -166,7 +167,11 @@ mod tests {
             | C::StructureTooLarge
             | C::PaletteTooLarge
             | C::InvalidWalkwayIdent
-            | C::PhaseConflict => RaisedBy::LoweringOnly,
+            | C::PhaseConflict
+            | C::NoAttachmentFace
+            | C::UnsupportedBlock
+            | C::WaterSpill
+            | C::EntityClipping => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
             }
@@ -214,6 +219,7 @@ mod tests {
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
+                "E_NBT_OUTSIDE_EDITION_GUARD",
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "E_TRUTH_TABLE_CONFLICT",
                 "E_TRUTH_TABLE_DUPLICATE_INPUT",

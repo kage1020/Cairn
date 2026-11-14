@@ -15,6 +15,7 @@ use cairn_lang_formats::java_structure::{
     write_structure_gzip,
 };
 use cairn_lang_nbt::NbtIoError;
+use cairn_lang_nbt::tag::Tag;
 
 use cairn_lang_formats::registry::builtin_pack;
 
@@ -73,7 +74,7 @@ fn latest_bedrock() -> BedrockTarget {
 }
 
 /// Asserts the Bedrock write path at `target` agrees with the tree and its `block_palette` is a
-/// set, returning the parity notes and how many palette entries translation merged.
+/// set, returning the parity notes and how many of the array's palette entries translation merged.
 fn assert_bedrock_streams_the_tree(
     label: &str,
     array: &BlockArray,
@@ -94,7 +95,23 @@ fn assert_bedrock_streams_the_tree(
             "{label}: block_palette lists {entry:?} twice"
         );
     }
-    (notes, array.palette.entries.len() - written.len())
+    (
+        notes,
+        array.palette.entries.len() + frame_blocks(written) - written.len(),
+    )
+}
+
+/// How many of `palette`'s entries are frame blocks, which the writer adds for an item frame.
+fn frame_blocks(palette: &[Tag]) -> usize {
+    palette
+        .iter()
+        .filter(|entry| {
+            matches!(entry, Tag::Compound(block) if matches!(
+                block.entries.get("name"),
+                Some(Tag::String(name)) if name == "minecraft:frame" || name == "minecraft:glow_frame"
+            ))
+        })
+        .count()
 }
 
 #[test]

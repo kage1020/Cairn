@@ -58,9 +58,11 @@ pub enum DiagnosticCode {
     /// A known statement keyword whose enclosing body has no reader for it, or a `circuit` line
     /// under a `level`.
     MisplacedMember,
-    /// A known member other than a raw member or a Tier 0 part, or a `logic` or `assert` line,
-    /// under an `@edition` guard.
+    /// A known member outside the escape-hatch layer, or a `logic` or `assert` line, under an
+    /// `@edition` guard.
     SemanticInEditionGuard,
+    /// An `nbt={...}` compound on a line no `@edition` guard holds.
+    NbtOutsideEditionGuard,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// A key outside the vocabulary of the member's role, or of a `struct` / `def` header.
@@ -168,6 +170,15 @@ pub enum DiagnosticCode {
     ConnectArity,
     /// Two members in one phase wrote one voxel to different blocks; the later line wins.
     PhaseConflict,
+    /// A member built a block that hangs on a face the cell it hangs on does not give whole, so
+    /// the game drops it.
+    NoAttachmentFace,
+    /// A member built a block the cell under or over it does not hold, or a block that falls.
+    UnsupportedBlock,
+    /// A member holds water that flows into air the build leaves beside it.
+    WaterSpill,
+    /// An entity's box overlaps a full block, a door's cell or another entity's box.
+    EntityClipping,
     /// An `assert truth(...)` with no rows, or none whose output is `0` or `1`.
     TruthTableEmpty,
     /// An `assert truth(...)` lists one signal as two or more of its inputs.
@@ -203,6 +214,7 @@ impl DiagnosticCode {
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::SemanticInEditionGuard => "E_SEMANTIC_IN_EDITION_GUARD",
+            Self::NbtOutsideEditionGuard => "E_NBT_OUTSIDE_EDITION_GUARD",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
             Self::MisplacedBinding => "E_MISPLACED_BINDING",
@@ -253,6 +265,10 @@ impl DiagnosticCode {
             Self::InvalidWalkwayIdent => "W_INVALID_WALKWAY_IDENT",
             Self::ConnectArity => "E_CONNECT_ARITY",
             Self::PhaseConflict => "W_PHASE_CONFLICT",
+            Self::NoAttachmentFace => "W_NO_ATTACHMENT_FACE",
+            Self::UnsupportedBlock => "W_UNSUPPORTED_BLOCK",
+            Self::WaterSpill => "W_WATER_SPILL",
+            Self::EntityClipping => "W_ENTITY_CLIPPING",
             Self::TruthTableEmpty => "E_TRUTH_TABLE_EMPTY",
             Self::TruthTableDuplicateInput => "E_TRUTH_TABLE_DUPLICATE_INPUT",
             Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
@@ -277,6 +293,7 @@ impl DiagnosticCode {
             | Self::DuplicateCircuit
             | Self::MisplacedMember
             | Self::SemanticInEditionGuard
+            | Self::NbtOutsideEditionGuard
             | Self::UnknownKeyword
             | Self::UnknownArgument
             | Self::MisplacedBinding
@@ -334,6 +351,10 @@ impl DiagnosticCode {
             | Self::DeferredPlace
             | Self::InvalidWalkwayIdent
             | Self::PhaseConflict
+            | Self::NoAttachmentFace
+            | Self::UnsupportedBlock
+            | Self::WaterSpill
+            | Self::EntityClipping
             | Self::TruthTableDuplicateRow
             | Self::IntendedTargetCapPartial
             | Self::IntendedTargetUnsupported

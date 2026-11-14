@@ -46,12 +46,11 @@ pub(super) enum PortRejection {
     DoorOutsideCourse { walls: WallColumn, member: Span },
     /// The course holding the row a door opens at ends there, leaving no row for its upper half.
     DoorShortCourse { walls: WallColumn, member: Span },
-    /// A window's `offset=` / `y=` / `size=` cannot be used.
+    /// A window's `offset=` / `y=` / `size=` / `anchor=` cannot be used.
     WindowArgument { fault: WindowArgFault, member: Span },
     /// A window's rectangle runs past the far end of its wall.
     WindowPastWall {
-        offset: u32,
-        width: u32,
+        args: WindowArgs,
         wall_length: u32,
         member: Span,
     },
@@ -153,13 +152,13 @@ impl PortRejection {
             ),
             Self::WindowArgument { fault, .. } => format!("is a window that {}", fault.clause()),
             Self::WindowPastWall {
-                offset,
-                width,
-                wall_length,
-                ..
+                args, wall_length, ..
             } => format!(
-                "is a window that runs past the end of its wall (`offset + size.w` = {offset} + \
-                 {width}, wall length {wall_length})",
+                "is a window that runs past the end of its wall (`{} + size.w` = {} + {}, wall \
+                 length {wall_length})",
+                args.column_term(),
+                args.column(),
+                args.width,
             ),
             Self::WindowNoWalls { .. } => {
                 format!("is a window with no wall to cut into: {NO_WALLS}")
@@ -289,6 +288,7 @@ fn is_opening(role: &MemberRole) -> bool {
         | MemberRole::Fill
         | MemberRole::Roof
         | MemberRole::Stair
+        | MemberRole::Beam
         | MemberRole::Level
         | MemberRole::PressurePlate
         | MemberRole::Lever
@@ -299,6 +299,20 @@ fn is_opening(role: &MemberRole) -> bool {
         | MemberRole::Piston
         | MemberRole::Dispenser
         | MemberRole::Chest
+        | MemberRole::Trapdoor
+        | MemberRole::NoteBlock
+        | MemberRole::Sign
+        | MemberRole::Bed
+        | MemberRole::Painting
+        | MemberRole::ItemFrame
+        | MemberRole::ArmorStand
+        | MemberRole::Villager
+        | MemberRole::Trade
+        | MemberRole::TextDisplay
+        | MemberRole::BlockDisplay
+        | MemberRole::ItemDisplay
+        | MemberRole::Hologram
+        | MemberRole::Spawn
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
@@ -328,7 +342,7 @@ fn opening_was_cut<S: BuildHasher>(
     }
 }
 
-/// A window port's wall-local `u`, its rectangle's centre `offset + size.w / 2`.
+/// A window port's wall-local `u`, its rectangle's centre: its first column plus `size.w / 2`.
 ///
 /// Bounds are checked in the cut's order, so a window wrong both ways gets its own line's reason.
 fn window_center_offset(
@@ -336,21 +350,16 @@ fn window_center_offset(
     len: u32,
     wall_column: &WallColumn,
 ) -> Result<u32, PortRejection> {
-    let WindowArgs {
-        offset,
-        y,
-        width: sw,
-        height: sh,
-    } = read_window_args(member).map_err(|fault| PortRejection::WindowArgument {
+    let args = read_window_args(member).map_err(|fault| PortRejection::WindowArgument {
         fault,
         member: member.span.clone(),
     })?;
+    let (offset, y, sw, sh) = (args.column(), args.row(), args.width, args.height);
     match offset.checked_add(sw) {
         Some(end) if end <= len => {}
         _ => {
             return Err(PortRejection::WindowPastWall {
-                offset,
-                width: sw,
+                args,
                 wall_length: len,
                 member: member.span.clone(),
             });

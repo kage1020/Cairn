@@ -55,18 +55,30 @@ pub fn lower(module: &Module) -> IntentModule {
 
 fn lower_theme(name: &str, body: &[ThemeRule], span: crate::error::Span) -> ThemeIr {
     let mut slots: IndexMap<String, ValueWithSpan> = IndexMap::new();
+    let mut slot_arguments: IndexMap<String, IndexMap<String, ValueWithSpan>> = IndexMap::new();
     let mut selectors = Vec::new();
 
     for rule in body {
         match rule {
-            ThemeRule::Slot { slot, value, .. } => {
+            ThemeRule::Slot {
+                slot,
+                value,
+                arguments,
+                ..
+            } => {
                 slots.insert(slot.clone(), ValueWithSpan::from_value(value.clone()));
+                if arguments.is_empty() {
+                    slot_arguments.shift_remove(slot);
+                } else {
+                    slot_arguments.insert(slot.clone(), args_to_map(arguments));
+                }
             }
             ThemeRule::Selector {
                 keyword,
                 attrs,
                 bindings,
                 span: rule_span,
+                ..
             } => {
                 selectors.push(SelectorRule {
                     keyword: keyword.clone(),
@@ -81,6 +93,7 @@ fn lower_theme(name: &str, body: &[ThemeRule], span: crate::error::Span) -> Them
     ThemeIr {
         name: name.to_owned(),
         slots,
+        slot_arguments,
         selectors,
         span,
     }
@@ -189,16 +202,27 @@ fn lower_body(body: &[Statement]) -> MemberBody {
 fn push_statement(stmt: &Statement, out: &mut MemberBody) {
     match stmt {
         Statement::Generic { .. } => out.members.push(lower_member(stmt)),
-        Statement::Logic { lhs, rhs, span } => out.logic.push(LogicBinding {
-            lhs: lhs.clone(),
-            rhs: rhs.clone(),
-            span: span.clone(),
-        }),
+        Statement::Logic {
+            lhs,
+            rhs,
+            binds,
+            span,
+            ..
+        } => {
+            if *binds {
+                out.logic.push(LogicBinding {
+                    lhs: lhs.clone(),
+                    rhs: rhs.clone(),
+                    span: span.clone(),
+                });
+            }
+        }
         Statement::AssertTruth {
             inputs,
             output,
             rows,
             span,
+            ..
         } => out.asserts.push(AssertIr::Truth {
             inputs: inputs.clone(),
             output: output.clone(),
@@ -210,6 +234,7 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             consequent,
             within,
             span,
+            ..
         } => out.asserts.push(AssertIr::Always {
             antecedent: antecedent.clone(),
             consequent: consequent.clone(),
@@ -221,6 +246,7 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             to,
             bound,
             span,
+            ..
         } => out.asserts.push(AssertIr::Latency {
             from: from.clone(),
             to: to.clone(),

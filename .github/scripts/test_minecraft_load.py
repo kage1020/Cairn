@@ -178,6 +178,31 @@ class Differences(unittest.TestCase):
             ["2 blocks were read as 1", "(1, 0, 0): minecraft:oak_planks was dropped"],
         )
 
+    def test_an_entity_moved_or_missing_a_key_it_was_written_with_is_named(self) -> None:
+        stand = {
+            "pos": [0.5, 0.0, 0.5],
+            "blockPos": [0, 0, 0],
+            "nbt": {"id": "minecraft:armor_stand", "Rotation": [180.0, 0.0], "Invisible": 1},
+        }
+        value = structure(((0, 0, 0), STAIR), ((1, 0, 0), PLANKS))
+        value["entities"] = [stand]
+        same = copy.deepcopy(value)
+        same["entities"][0]["nbt"]["Pose"] = {}
+        self.assertEqual(load.differences(value, same), [])
+        loaded = copy.deepcopy(value)
+        loaded["entities"][0]["pos"] = [0.0, 0.0, 0.0]
+        loaded["entities"][0]["nbt"]["Rotation"] = [0.0, 0.0]
+        del loaded["entities"][0]["nbt"]["Invisible"]
+        stand_name = "entity 0 (minecraft:armor_stand)"
+        self.assertEqual(
+            load.differences(value, loaded),
+            [
+                f"{stand_name}: `pos` [0.5, 0.0, 0.5] was read as [0.0, 0.0, 0.0]",
+                f"{stand_name}: `Rotation` [180.0, 0.0] was read as [0.0, 0.0]",
+                f"{stand_name}: `Invisible` was dropped",
+            ],
+        )
+
 
 class Targets(unittest.TestCase):
     def test_only_targetable_rows_are_checked_and_a_row_that_does_not_say_is_one(self) -> None:

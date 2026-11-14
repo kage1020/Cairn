@@ -1,11 +1,11 @@
-//! What a `roof` member's line says it draws: its `kind=`, a shed's `slope_to=`, and the rows that
-//! shape rises above the walls.
+//! What a `roof` member's line says it draws: its `kind=`, a shed's `slope_to=`, its `footprint=`
+//! and `bounds=`, and the rows that shape rises above the walls.
 
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::args::diag_invalid_member;
-use crate::block_array::openings::WallSide;
+use crate::block_array::openings::{WallSide, Written};
 use crate::block_array::roof::{
     RoofKind, flat_extra_height, gable_extra_height, hip_extra_height, shed_extra_height,
     shed_slope_span,
@@ -80,18 +80,61 @@ pub(super) fn shed_slope_to(
 
 /// Whether the roof's own line keeps it from drawing, after the `E_INVALID_MEMBER` that says so.
 pub(super) fn roof_line_refused(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
-    match parse_roof_kind(member, diagnostics) {
-        None => true,
+    let refused = match parse_roof_kind(member, diagnostics) {
+        None => return true,
         Some(RoofKind::Shed) => shed_slope_to(member, diagnostics).is_none(),
         Some(_) => false,
-    }
+    };
+    refused || extent_refused(member, diagnostics)
 }
 
-/// The kind this roof will draw with, or `None` when it draws nothing, such as a `shed` with no
+/// A roof's `footprint=` and `bounds=`, each with the one value it takes and what that value
+/// builds.
+const EXTENT: [(&str, &str, &str); 2] = [
+    (
+        "footprint",
+        "struct",
+        "a roof covers its struct's `size=` footprint, which `footprint=struct` names",
+    ),
+    (
+        "bounds",
+        "expand",
+        "a roof's `overhang=` widens its body's block array past the footprint on every side, \
+         which `bounds=expand` names",
+    ),
+];
+
+/// Whether `footprint=` and `bounds=` are each absent or the value [`EXTENT`] gives it.
+fn extent_readable(member: &Member) -> bool {
+    EXTENT.iter().all(|&(key, value, _)| {
+        member.written(key).is_none() || member.ident_value(key) == Some(value)
+    })
+}
+
+/// Whether the roof's `footprint=` or `bounds=` keeps it from drawing, after the
+/// `E_INVALID_MEMBER` refusing the first that does.
+fn extent_refused(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
+    for (key, value, what) in EXTENT {
+        let clause = match Written::of_ident(member, key) {
+            Written::Absent => continue,
+            Written::Ident(s) if s == value => continue,
+            Written::Ident(s) => format!("has `{key}={s}`"),
+            Written::Int(n) => format!("has `{key}={n}`"),
+            Written::OtherShape(described) => format!("has a `{key}=` that is {described}"),
+        };
+        diagnostics.push(diag_invalid_member(
+            member,
+            format!("roof {clause}, not `{value}`"),
+            vec![format!("{what}; write `{key}={value}` or drop `{key}=`")],
+        ));
+        return true;
+    }
+    false
+}
+
+/// The kind the roof's `kind=` names, or `None` when it names none or names a `shed` with no
 /// usable `slope_to=`.
-///
-/// Both roof walks ask this, so the footprint and the height agree on which roofs are real.
-pub(super) fn roof_draws(member: &Member) -> Option<RoofKind> {
+fn roof_shape(member: &Member) -> Option<RoofKind> {
     let kind = RoofKind::from_ident(member.ident_value("kind")?)?;
     if matches!(kind, RoofKind::Shed) && slope_to_of(member).is_none() {
         return None;
@@ -99,10 +142,24 @@ pub(super) fn roof_draws(member: &Member) -> Option<RoofKind> {
     Some(kind)
 }
 
-/// The rows the roof rises above the wall top on a `roof_w` by `roof_h` box, or `None` when its
-/// line does not say: no readable `kind=`, or a shed with no readable `slope_to=`.
+/// The kind this roof will draw with, or `None` when it draws nothing, such as a `shed` with no
+/// usable `slope_to=` or a roof whose `footprint=` or `bounds=` names another extent.
+///
+/// Both roof walks ask this, so the footprint and the height agree on which roofs are real.
+pub(super) fn roof_draws(member: &Member) -> Option<RoofKind> {
+    roof_shape(member).filter(|_| extent_readable(member))
+}
+
+/// The rows the roof rises above the wall top on a `roof_w` by `roof_h` box, or `None` when it
+/// draws nothing.
 pub(super) fn roof_rise(member: &Member, roof_w: u32, roof_h: u32) -> Option<u32> {
     roof_draws(member).map(|kind| kind_rise(kind, slope_to_of(member), roof_w, roof_h))
+}
+
+/// The rows the roof's shape rises on a `roof_w` by `roof_h` box, drawn or not, or `None` when its
+/// line does not say: no readable `kind=`, or a shed with no readable `slope_to=`.
+pub(super) fn shape_rise(member: &Member, roof_w: u32, roof_h: u32) -> Option<u32> {
+    roof_shape(member).map(|kind| kind_rise(kind, slope_to_of(member), roof_w, roof_h))
 }
 
 /// The most rows any roof could rise on a `roof_w` by `roof_h` box, whatever its `kind=` and

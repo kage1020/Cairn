@@ -11,6 +11,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "window",
     "roof",
     "stair",
+    "beam",
     "level",
     "pressure_plate",
     "lever",
@@ -21,6 +22,20 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "piston",
     "dispenser",
     "chest",
+    "trapdoor",
+    "note_block",
+    "sign",
+    "bed",
+    "painting",
+    "item_frame",
+    "armor_stand",
+    "villager",
+    "trade",
+    "text_display",
+    "block_display",
+    "item_display",
+    "hologram",
+    "spawn",
     "repeater",
     "comparator",
     "redstone_torch",
@@ -117,6 +132,8 @@ pub enum MemberRole {
     Roof,
     /// `stair` command.
     Stair,
+    /// `beam` command, a run of pillar blocks laid along a wall top or over an opening.
+    Beam,
     /// `level` grouping block.
     Level,
     /// `pressure_plate` sensor.
@@ -137,6 +154,34 @@ pub enum MemberRole {
     Dispenser,
     /// `chest` fixture.
     Chest,
+    /// `trapdoor` fixture.
+    Trapdoor,
+    /// `note_block` fixture, placed at a coordinate triple.
+    NoteBlock,
+    /// `sign` fixture, a standing or a wall sign holding text.
+    Sign,
+    /// `bed` fixture, a bed's head and foot.
+    Bed,
+    /// `painting` entity, hung on a wall's face.
+    Painting,
+    /// `item_frame` entity, hung on a face, holding an item or none.
+    ItemFrame,
+    /// `armor_stand` entity.
+    ArmorStand,
+    /// `villager` entity, offering the trades its `trade` lines name.
+    Villager,
+    /// `trade` line, one offer of the `villager` its `villager=` names.
+    Trade,
+    /// `text_display` entity, Java's.
+    TextDisplay,
+    /// `block_display` entity, Java's, showing the block its `mat_slot=` binds.
+    BlockDisplay,
+    /// `item_display` entity, Java's.
+    ItemDisplay,
+    /// `hologram` member, floating text built as the member form its `mat_slot=` binds.
+    Hologram,
+    /// `spawn` escape hatch: any entity, by its id.
+    Spawn,
     /// `repeater` Tier 0 part.
     Repeater,
     /// `comparator` Tier 0 part.
@@ -267,6 +312,7 @@ impl MemberRole {
             | Self::Window
             | Self::Roof
             | Self::Stair
+            | Self::Beam
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -274,6 +320,20 @@ impl MemberRole {
             | Self::Daylight
             | Self::Observer
             | Self::Chest
+            | Self::Trapdoor
+            | Self::NoteBlock
+            | Self::Sign
+            | Self::Bed
+            | Self::Painting
+            | Self::ItemFrame
+            | Self::ArmorStand
+            | Self::Villager
+            | Self::Trade
+            | Self::TextDisplay
+            | Self::BlockDisplay
+            | Self::ItemDisplay
+            | Self::Hologram
+            | Self::Spawn
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -287,11 +347,45 @@ impl MemberRole {
         }
     }
 
-    /// Whether this is a role of the escape-hatch layer, a raw member or a Tier 0 part, the only
-    /// kind an `@edition` guard holds.
+    /// Whether this is a role of the escape-hatch layer, a raw member, a `spawn` or a Tier 0 part,
+    /// which an `@edition` guard holds whatever its line writes.
     #[must_use]
     pub fn is_escape_hatch(&self) -> bool {
-        matches!(self, Self::RawBlock | Self::RawFill) || self.is_tier0_part()
+        matches!(self, Self::RawBlock | Self::RawFill | Self::Spawn) || self.is_tier0_part()
+    }
+
+    /// Whether this role reads an `nbt={...}` compound, which puts the line that writes one in
+    /// the escape-hatch layer (`spec/entities` "Two tiers").
+    #[must_use]
+    pub fn reads_nbt(&self) -> bool {
+        matches!(
+            self,
+            Self::Painting
+                | Self::ItemFrame
+                | Self::ArmorStand
+                | Self::Villager
+                | Self::TextDisplay
+                | Self::BlockDisplay
+                | Self::ItemDisplay
+                | Self::Spawn
+                | Self::RawBlock
+        )
+    }
+
+    /// Whether this role places an entity, not a block (`spec/entities` "Two tiers").
+    #[must_use]
+    pub fn places_an_entity(&self) -> bool {
+        matches!(
+            self,
+            Self::Painting
+                | Self::ItemFrame
+                | Self::ArmorStand
+                | Self::Villager
+                | Self::TextDisplay
+                | Self::BlockDisplay
+                | Self::ItemDisplay
+                | Self::Spawn
+        )
     }
 
     /// Whether this is a Tier 0 part, a redstone part placed by hand (`spec/redstone` "Tier 0
@@ -326,20 +420,51 @@ impl MemberRole {
                 "y",
                 "waterlogged",
             ],
+            Self::Beam => &["kind", "at", "axis"],
             Self::Level => &["y"],
             Self::PressurePlate | Self::Lever | Self::Button | Self::Daylight => {
                 &["at", "offset", "y"]
             }
-            Self::Observer | Self::RedstoneTorch => &["at", "offset", "y", "facing"],
+            Self::Observer | Self::RedstoneTorch | Self::Bed => &["at", "offset", "y", "facing"],
             Self::Lamp => &["at", "offset", "y", "lit_by"],
             Self::Piston => &["at", "offset", "y", "powered_by", "facing", "sticky"],
             Self::Dispenser => &["at", "offset", "y", "fired_by", "facing"],
             Self::Chest => &["at", "offset", "y", "facing", "size", "waterlogged"],
+            Self::Trapdoor => &["at", "offset", "y", "facing", "half", "open", "waterlogged"],
+            Self::NoteBlock => &["at", "note", "instrument"],
+            Self::Sign => &["at", "offset", "y", "facing", "text", "back", "glowing"],
+            Self::Painting => &["at", "offset", "y", "facing", "variant", "nbt"],
+            Self::ItemFrame => &["at", "offset", "y", "facing", "item", "glowing", "nbt"],
+            Self::ArmorStand => &["at", "offset", "y", "facing", "nbt"],
+            Self::Villager => &["at", "offset", "y", "facing", "profession", "level", "nbt"],
+            Self::Trade => &[
+                "villager",
+                "buy",
+                "count",
+                "sell",
+                "sell_count",
+                "enchant",
+                "enchant_level",
+            ],
+            Self::TextDisplay => &[
+                "at",
+                "offset",
+                "y",
+                "facing",
+                "text",
+                "billboard",
+                "scale",
+                "nbt",
+            ],
+            Self::BlockDisplay => &["at", "offset", "y", "facing", "scale", "nbt"],
+            Self::ItemDisplay => &["at", "offset", "y", "facing", "item", "scale", "nbt"],
+            Self::Hologram => &["at", "offset", "y", "facing", "text"],
+            Self::Spawn => &["type", "at", "offset", "y", "facing", "nbt"],
             Self::Repeater => &["at", "offset", "y", "facing", "delay"],
             Self::Comparator => &["at", "offset", "y", "facing", "mode"],
             Self::RedstoneDust => &["at", "offset", "y", "connect"],
             Self::Circuit => &["region", "void"],
-            Self::RawBlock => &["mat", "at"],
+            Self::RawBlock => &["mat", "at", "nbt"],
             Self::RawFill => &["mat", "from", "to"],
             // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
             // fix this set.
@@ -357,7 +482,15 @@ impl MemberRole {
             Self::Stair => &["half", "facing", "shape", "waterlogged"],
             Self::Door => &["hinge", "open"],
             Self::Chest => &["facing", "size", "waterlogged"],
-            Self::Observer | Self::Piston | Self::Dispenser | Self::RedstoneTorch => &["facing"],
+            Self::Beam => &["axis"],
+            Self::Trapdoor => &["facing", "half", "open", "waterlogged"],
+            Self::NoteBlock => &["note", "instrument"],
+            Self::Observer
+            | Self::Piston
+            | Self::Dispenser
+            | Self::RedstoneTorch
+            | Self::Sign
+            | Self::Bed => &["facing"],
             Self::Repeater => &["facing", "delay"],
             Self::Comparator => &["facing", "mode"],
             Self::RedstoneDust => &["connect"],
@@ -377,6 +510,16 @@ impl MemberRole {
             | Self::RawFill
             | Self::Place
             | Self::Connect
+            | Self::Painting
+            | Self::ItemFrame
+            | Self::ArmorStand
+            | Self::Villager
+            | Self::Trade
+            | Self::TextDisplay
+            | Self::BlockDisplay
+            | Self::ItemDisplay
+            | Self::Hologram
+            | Self::Spawn
             | Self::Other(_) => &[],
         }
     }
@@ -386,34 +529,18 @@ impl MemberRole {
     #[must_use]
     pub fn unread_arguments(&self) -> &'static [UnreadArgument] {
         match self {
-            // Both from `spec/entities` "Anchor conventions".
-            Self::Window => &[
-                UnreadArgument {
-                    key: "shape",
-                    why: Unread::Unreached,
-                },
-                UnreadArgument {
-                    key: "anchor",
-                    why: Unread::Unreached,
-                },
-            ],
-            // Both from `spec/entities` "Anchor conventions".
-            Self::Roof => &[
-                UnreadArgument {
-                    key: "footprint",
-                    why: Unread::Unreached,
-                },
-                UnreadArgument {
-                    key: "bounds",
-                    why: Unread::Unreached,
-                },
-            ],
+            // From `spec/entities` "Anchor conventions".
+            Self::Window => &[UnreadArgument {
+                key: "shape",
+                why: Unread::Unreached,
+            }],
             Self::Lever
             | Self::Daylight
             | Self::Observer
             | Self::Lamp
             | Self::Piston
             | Self::Dispenser
+            | Self::NoteBlock
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -423,18 +550,33 @@ impl MemberRole {
             | Self::RawBlock
             | Self::RawFill
             | Self::Place
-            | Self::Connect => &[UnreadArgument {
+            | Self::Connect
+            | Self::Painting
+            | Self::ItemFrame
+            | Self::ArmorStand
+            | Self::Villager
+            | Self::Trade
+            | Self::TextDisplay
+            | Self::ItemDisplay
+            | Self::Spawn => &[UnreadArgument {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
             }],
             Self::Floor
             | Self::Walls
             | Self::Fill
+            | Self::Roof
             | Self::Door
             | Self::Stair
+            | Self::Beam
             | Self::PressurePlate
             | Self::Button
             | Self::Chest
+            | Self::Trapdoor
+            | Self::Sign
+            | Self::Bed
+            | Self::BlockDisplay
+            | Self::Hologram
             | Self::Other(_) => &[],
         }
     }
@@ -512,6 +654,7 @@ impl MemberRole {
             | Self::Walls
             | Self::Door
             | Self::Window
+            | Self::Beam
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -522,6 +665,10 @@ impl MemberRole {
             | Self::Piston
             | Self::Dispenser
             | Self::Chest
+            | Self::Trapdoor
+            | Self::NoteBlock
+            | Self::Sign
+            | Self::Bed
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -530,6 +677,16 @@ impl MemberRole {
             | Self::RawBlock
             | Self::RawFill
             | Self::Connect
+            | Self::Painting
+            | Self::ItemFrame
+            | Self::ArmorStand
+            | Self::Villager
+            | Self::Trade
+            | Self::TextDisplay
+            | Self::BlockDisplay
+            | Self::ItemDisplay
+            | Self::Hologram
+            | Self::Spawn
             | Self::Other(_) => &[],
         }
     }
@@ -561,6 +718,7 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "window" => MemberRole::Window,
         "roof" => MemberRole::Roof,
         "stair" => MemberRole::Stair,
+        "beam" => MemberRole::Beam,
         "level" => MemberRole::Level,
         "pressure_plate" => MemberRole::PressurePlate,
         "lever" => MemberRole::Lever,
@@ -571,6 +729,20 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "piston" => MemberRole::Piston,
         "dispenser" => MemberRole::Dispenser,
         "chest" => MemberRole::Chest,
+        "trapdoor" => MemberRole::Trapdoor,
+        "note_block" => MemberRole::NoteBlock,
+        "sign" => MemberRole::Sign,
+        "bed" => MemberRole::Bed,
+        "painting" => MemberRole::Painting,
+        "item_frame" => MemberRole::ItemFrame,
+        "armor_stand" => MemberRole::ArmorStand,
+        "villager" => MemberRole::Villager,
+        "trade" => MemberRole::Trade,
+        "text_display" => MemberRole::TextDisplay,
+        "block_display" => MemberRole::BlockDisplay,
+        "item_display" => MemberRole::ItemDisplay,
+        "hologram" => MemberRole::Hologram,
+        "spawn" => MemberRole::Spawn,
         "repeater" => MemberRole::Repeater,
         "comparator" => MemberRole::Comparator,
         "redstone_torch" => MemberRole::RedstoneTorch,

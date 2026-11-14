@@ -116,6 +116,13 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        "E_NBT_OUTSIDE_EDITION_GUARD",
+        Source::WithPrologue(
+            "struct s size=5x5\n  walls class=outer mat_slot=wall height=3\n  \
+             armor_stand at=2,1,2 nbt={Invisible:1b}\n",
+        ),
+    ),
+    (
         "E_MISPLACED_BINDING",
         Source::WithPrologue(
             "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n",

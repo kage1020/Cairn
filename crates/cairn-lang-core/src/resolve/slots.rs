@@ -11,7 +11,9 @@ use crate::intent::{Member, MemberRole, ValueWithSpan, role_of};
 use crate::prose::selector_text;
 use crate::suggest::{did_you_mean_note, nearest_match};
 
-use super::binding::{ThemeBinding, TokenKind, classify_token};
+use super::binding::{
+    MEMBER_FORMS, ThemeBinding, TokenKind, classify_token, form_word, member_form,
+};
 
 /// The `E_UNRESOLVED_SLOT` for `slot`, listing every slot resolution accepts: the bound variant's,
 /// then the sibling variants' that an unpinned build also takes.
@@ -60,10 +62,20 @@ pub(super) fn unresolved_slot_diag(
     }
 }
 
-/// Slot values that are not material tokens, in every declared theme, shadowed ones included.
+/// Slot values that are neither material tokens nor member forms, and member form arguments
+/// the form does not take, in every declared theme, shadowed ones included.
 pub(super) fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<Diagnostic>) {
     for theme in themes {
         for (slot_name, v) in &theme.slots {
+            if let Some(keys) = member_form(&v.value) {
+                let arguments = theme.slot_arguments.get(slot_name);
+                for (key, value) in arguments.into_iter().flatten() {
+                    if !keys.contains(&key.as_str()) {
+                        diagnostics.push(unknown_form_argument(key, value, &v.value, keys));
+                    }
+                }
+                continue;
+            }
             if classify_token(&v.value) == TokenKind::NotAToken {
                 diagnostics.push(Diagnostic {
                     code: DiagnosticCode::UnknownSlotTarget,
@@ -75,13 +87,51 @@ pub(super) fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<
                     ),
                     notes: vec![DiagnosticNote {
                         span: None,
-                        message: "expected a `@canonical_block` or `@abstract.material` value"
-                            .to_owned(),
+                        message: format!(
+                            "expected a `@canonical_block` or `@abstract.material` value, or the \
+                             member form {}, which a `hologram` is built as",
+                            MEMBER_FORMS
+                                .iter()
+                                .map(|(form, _)| format!("`{form}`"))
+                                .collect::<Vec<_>>()
+                                .join(" or ")
+                        ),
                     }],
                     data: None,
                 });
             }
         }
+    }
+}
+
+/// The `E_UNKNOWN_ARGUMENT` for `key=`, which the member form `form` does not take.
+fn unknown_form_argument(
+    key: &str,
+    value: &ValueWithSpan,
+    form: &crate::ast::Value,
+    keys: &[&str],
+) -> Diagnostic {
+    let form = form_word(form);
+    let mut notes: Vec<DiagnosticNote> = nearest_match(key, keys.iter().copied())
+        .map(did_you_mean_note)
+        .into_iter()
+        .collect();
+    notes.push(DiagnosticNote {
+        span: None,
+        message: format!(
+            "the member form `{form}` takes {}; the `hologram` line places it and writes its text",
+            keys.iter()
+                .map(|key| format!("`{key}=`"))
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ),
+    });
+    Diagnostic {
+        code: DiagnosticCode::UnknownArgument,
+        span: value.span.clone(),
+        primary: format!("member form `{form}` takes no `{key}=`"),
+        notes,
+        data: None,
     }
 }
 

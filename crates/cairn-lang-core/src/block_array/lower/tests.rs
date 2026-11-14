@@ -1315,11 +1315,36 @@ const SLOT_READERS: &[(&str, &str)] = &[
         "chest",
         "struct s size=3x3\n  chest at=inside.front offset=1 mat_slot=c\n",
     ),
+    (
+        "beam",
+        "struct s size=3x3\n  walls height=2\n  beam kind=pillar at=front.top mat_slot=b\n",
+    ),
+    (
+        "trapdoor",
+        "struct s size=3x3\n  trapdoor at=inside.front offset=1 mat_slot=t\n",
+    ),
+    ("sign", "struct s size=3x3\n  sign at=1,0,1 mat_slot=s\n"),
+    (
+        "block_display",
+        "struct s size=3x3\n  block_display at=1,0,1 mat_slot=s\n",
+    ),
+    (
+        "hologram",
+        "struct s size=3x3\n  hologram at=1,0,1 text=\"Inn\" mat_slot=s\n",
+    ),
+    (
+        "bed",
+        "struct s size=3x3\n  bed at=1,0,1 facing=north mat_slot=b\n",
+    ),
 ];
 
 /// A themeless struct per keyword whose role reads no `mat_slot=`, `mat_slot=d` on its member;
 /// a misplaced `place` or `connect` still reaches the list the gate reads.
 const SLOT_IGNORERS: &[(&str, &str)] = &[
+    (
+        "note_block",
+        "struct s size=3x3\n  note_block at=1,0,1 mat_slot=d\n",
+    ),
     (
         "lever",
         "struct s size=3x3\n  lever at=inside.front offset=1 mat_slot=d\n",
@@ -1375,6 +1400,39 @@ const SLOT_IGNORERS: &[(&str, &str)] = &[
     (
         "redstone_dust",
         "struct s size=3x3\n  redstone_dust at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "painting",
+        "struct s size=3x3\n  painting at=1,0,1 facing=north variant=kebab mat_slot=d\n",
+    ),
+    (
+        "item_frame",
+        "struct s size=3x3\n  item_frame at=1,0,1 facing=up mat_slot=d\n",
+    ),
+    (
+        "armor_stand",
+        "struct s size=3x3\n  armor_stand at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "villager",
+        "struct s size=3x3\n  villager id=v at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "trade",
+        "struct s size=3x3\n  villager id=v at=1,0,1\n  trade villager=v buy=emerald sell=bread \
+         mat_slot=d\n",
+    ),
+    (
+        "text_display",
+        "struct s size=3x3\n  text_display at=1,0,1 text=\"Inn\" mat_slot=d\n",
+    ),
+    (
+        "item_display",
+        "struct s size=3x3\n  item_display at=1,0,1 item=diamond mat_slot=d\n",
+    ),
+    (
+        "spawn",
+        "struct s size=3x3\n  spawn type=cat at=1,0,1 mat_slot=d\n",
     ),
     (
         "raw_block",
@@ -1631,7 +1689,7 @@ fn abstract_token_deferral_says_what_each_member_does_instead() {
                       window side=front offset=1 y=1 size=1x2 mat_slot=wall",
             consequence: Some(
                 "the walls are not built and take up no rows, so a door or window cut into \
-                 them is refused",
+                 them, or a beam laid on them, is deferred",
             ),
             voxels: |out| {
                 assert_eq!(struct_s(out).dims.y, 1);
@@ -2424,9 +2482,11 @@ fn a_side_typo_is_refused_with_what_was_written() {
 #[test]
 fn a_window_missing_or_misreading_an_argument_it_needs_is_refused_with_its_form() {
     let offset = "write `offset=N`, where `N` is a non-negative integer: the window's first column \
-                  along the wall, counted from 0 at its left end seen from outside";
+                  along the wall, counted from 0 at its left end seen from outside, or the column \
+                  of the cell its `anchor=` names";
     let y = "write `y=N`, where `N` is a non-negative integer: the window's lowest row, counted up \
-             from 0, the base row of the struct or of the window's `level`";
+             from 0, the base row of the struct or of the window's `level`, or the row of the cell \
+             its `anchor=` names";
     let size = "write `size=WxH`, where `W` and `H` are positive integers: the window's width \
                 along the wall and its height in rows";
     for (window, primary, note) in [
@@ -2455,9 +2515,75 @@ fn a_window_missing_or_misreading_an_argument_it_needs_is_refused_with_its_form(
             "window has a `size=` that is not a `WxH` of two positive integers",
             size,
         ),
+        (
+            "window side=front offset=1 y=1 size=3 anchor=middle",
+            "window has a `size=` that is not a `WxH` of two positive integers",
+            size,
+        ),
     ] {
         assert_refused_alone(&walled_6x5_source(window), window, primary, &[note]);
     }
+}
+
+#[test]
+fn a_window_anchor_that_names_no_cell_or_leaves_the_wall_is_refused_with_its_form() {
+    const NAMES: &str = "bottom_left, bottom_center, bottom_right, middle_left, center, \
+                         middle_right, top_left, top_center, top_right";
+    let unknown = format!(
+        "write `anchor=` as one of {NAMES}: the cell of the window, seen from outside, that \
+         `offset=` and `y=` place; without `anchor=` they place its bottom-left cell"
+    );
+    for (window, primary, note) in [
+        (
+            "window side=front offset=1 y=1 size=1x1 anchor=middle",
+            format!("window has `anchor=middle`, which is not one of {NAMES}"),
+            unknown.clone(),
+        ),
+        (
+            "window side=front offset=1 y=1 size=1x1 anchor=3",
+            format!("window has `anchor=3`, which is not one of {NAMES}"),
+            unknown.clone(),
+        ),
+        (
+            "window side=front offset=1 y=1 size=1x1 anchor=\"center\"",
+            format!("window has an `anchor=` that is string `\"center\"`, not one of {NAMES}"),
+            unknown,
+        ),
+        (
+            "window side=front offset=1 y=1 size=3x1 anchor=bottom_right",
+            "window has `offset=1` at `anchor=bottom_right`, which puts its first column at \
+             `offset - 2` = -1, before the left end of its wall"
+                .to_owned(),
+            "`anchor=bottom_right` names the cell 2 along from the window's first column, so \
+             `offset=` must be at least 2; raise `offset=`, or choose an `anchor=` further left"
+                .to_owned(),
+        ),
+        (
+            "window side=front offset=1 y=1 size=1x3 anchor=top_left",
+            "window has `y=1` at `anchor=top_left`, which puts its lowest row at `y - 2` = -1, \
+             below the base row"
+                .to_owned(),
+            "`anchor=top_left` names the cell 2 up from the window's lowest row, so `y=` must be \
+             at least 2; raise `y=`, or choose an `anchor=` further down"
+                .to_owned(),
+        ),
+    ] {
+        assert_refused_alone(&walled_6x5_source(window), window, &primary, &[&note]);
+    }
+}
+
+#[test]
+fn an_anchored_window_past_its_wall_is_refused_by_its_first_column() {
+    let window = "window side=front anchor=bottom_center offset=5 y=1 size=3x1";
+    assert_refused_alone(
+        &walled_6x5_source(window),
+        window,
+        "window extends beyond the `front` wall (offset=5 anchor=bottom_center size=3x1 repeat=1 step=0, wall length=6)",
+        &[
+            "the window ends at `offset - 1 + size.w`, which must be at most 6; lower `offset=` or \
+           narrow `size=`",
+        ],
+    );
 }
 
 #[test]
@@ -2525,6 +2651,38 @@ fn a_sym_window_that_coincides_with_its_mirror_is_reported() {
             assert_eq!(block_id(ba, x, 1, 4), "minecraft:glass_pane", "x={x}");
         }
     }
+}
+
+#[test]
+fn an_anchored_sym_window_mirrors_the_rectangle_its_anchor_places() {
+    let src = |anchor: &str, offset: u32| {
+        format!(
+            "{}  slot g -> @glass_pane\n\n\
+             struct s size=6x5\n  walls mat_slot=w height=3\n  \
+             window side=front{anchor} offset={offset} y=1 size=3x1 sym=true mat_slot=g\n",
+            theme_t!("w", ""),
+        )
+    };
+    let anchored = lowered(&src(" anchor=bottom_center", 3));
+    assert_eq!(
+        anchored
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.primary.as_str(), d.notes[0].message.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            DiagnosticCode::DeferredMember,
+            "`sym=true` window at offset=3 anchor=bottom_center size=3x1 on the `front` wall \
+             would overlap its mirror (wall length=6); the mirror was skipped",
+            "a `sym=true` window and its mirror are a pair only when the window lies in one half \
+             of the wall (here `offset - 1 + size.w <= 3` or `offset - 1 >= 3`); move or narrow \
+             the window to cut a pair, or drop `sym=true` to keep the one opening that was cut",
+        )],
+    );
+    assert_eq!(
+        lowered(&src(" anchor=bottom_center", 1)).structures,
+        lowered(&src("", 0)).structures,
+    );
 }
 
 #[test]

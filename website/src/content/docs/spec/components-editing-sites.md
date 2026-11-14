@@ -173,8 +173,9 @@ The wall-local offset comes from:
 
 - a `door`'s `at=` value of `center`, `left`, or `right` ([§5.4](/spec/syntax/#54-selectors)). Numeric
   offsets are reserved.
-- a `window`'s geometric centre, `offset + size.w / 2`, with an absent `offset=` read as `0` the
-  way the cut reads it.
+- a `window`'s geometric centre, `offset + size.w / 2`, where `offset` is the window's first
+  column, read the way the cut reads it: an absent `offset=` as `0`, and an `anchor=` naming a
+  later column moving it left ([§5.4](/spec/syntax/#54-selectors)).
 
 The placement's overhang shifts the port out into the overhang ring beyond the outer face. A
 `window`'s authored `y=` does **not** lift the port off the ground row: the walkway is a 1-voxel
@@ -193,6 +194,9 @@ rows 1 and 2 in one course                       # door (a port's door is a def-
 offset + size.w ≤ wall_length                    # window, horizontal
 every row of y … y + size.h - 1 in one course    # window, vertical
 ```
+
+There `offset` and `y` are the window's first column and lowest row, which its `anchor=` moves off
+the values written ([§5.4](/spec/syntax/#54-selectors)).
 
 Those are the rules a port reads for itself. It also anchors only on an opening the openings pass
 actually cut. A `window` left uncut by an argument only the cut reads (`repeat=` or `step=`,

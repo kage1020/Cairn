@@ -18,7 +18,7 @@ use serde::Serialize;
 use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
-pub(crate) use self::guard::{guarded_lines, refused_under_guard};
+pub(crate) use self::guard::{guarded_lines, is_escape_hatch_line, refused_under_guard};
 pub use self::keyword_table::{
     Actuator, MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue,
     UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
@@ -88,6 +88,9 @@ pub struct ThemeIr {
     pub name: String,
     /// `slot NAME -> VALUE` bindings in source order; a repeated slot keeps its last value.
     pub slots: IndexMap<String, ValueWithSpan>,
+    /// The `key=value` arguments of each slot bound to a member form, keyed like [`Self::slots`].
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub slot_arguments: IndexMap<String, IndexMap<String, ValueWithSpan>>,
     /// `KEYWORD[...] -> ...` selector bindings, in source order.
     pub selectors: Vec<SelectorRule>,
     /// Byte range of the originating `theme NAME ...` block.

@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "name": "cairn-builtin-constraints",
+  "description": "Built-in constraint catalog bundled with the Cairn reference compiler, hand-written for what the game's data does not carry. Every id is a canonical one, a block the Java registry pack declares, and a Bedrock build reads it through its state maps. `semantic_sensitivity` names the blocks whose meaning changes across a boundary version of one edition: walls' connection states went from true/false to none/low/tall at 1.16, the cauldron split into one block per contents at 1.17, and an item stored in a block entity moved from its `tag` to data components at 1.20.5. A row lists only the blocks that existed on both sides of its boundary. `attachment` names the blocks that hang on the face of the block behind, under or over them, read from `face` and `facing` as the game reads them; the face must be whole. `support` names the blocks that stand on the block below them or hang from the block above, and what that block's face must give: `sturdy` is the whole face, `center` its centre, which a post gives as a whole face does; `also_on` names a block that holds them whatever its faces, as a hopper holds redstone dust. `gravity` names the blocks that fall through air or a fluid below them. `center_support` names the blocks beyond full faces and posts whose faces give a centre: a chain along y, and the top of a closed fence gate. `entity_aabb` gives each entity's box in blocks: `width` across and `height` up for one that stands, and `depth` out of the face for one that hangs; a painting's `width` and `height` are per block of its variant, and a display's box is empty, as the game gives it none. A standing sign, a wall sign, an item frame and a painting hold only on a block the game counts as solid, which no table here records: the checks hold a frame or a painting to a block behind it, which air, water and lava are not, and a sign to nothing; a hanging sign under a ceiling holds by the centre of the face above it, as `support` says.",
+  "namespace": "minecraft",
+  "semantic_sensitivity": [
+    {
+      "edition": "java",
+      "boundary": "1.16",
+      "reason": "wall connections",
+      "ids": [
+        "andesite_wall",
+        "brick_wall",
+        "cobblestone_wall",
+        "diorite_wall",
+        "end_stone_brick_wall",
+        "granite_wall",
+        "mossy_cobblestone_wall",
+        "mossy_stone_brick_wall",
+        "nether_brick_wall",
+        "prismarine_wall",
+        "red_nether_brick_wall",
+        "red_sandstone_wall",
+        "sandstone_wall",
+        "stone_brick_wall"
+      ]
+    },
+    {
+      "edition": "java",
+      "boundary": "1.17",
+      "reason": "cauldron split",
+      "ids": ["cauldron", "lava_cauldron", "powder_snow_cauldron", "water_cauldron"]
+    },
+    {
+      "edition": "java",
+      "boundary": "1.20.5",
+      "reason": "item format",
+      "ids": [
+        "barrel",
+        "black_shulker_box",
+        "blast_furnace",
+        "blue_shulker_box",
+        "brewing_stand",
+        "brown_shulker_box",
+        "campfire",
+        "chest",
+        "chiseled_bookshelf",
+        "crafter",
+        "cyan_shulker_box",
+        "decorated_pot",
+        "dispenser",
+        "dropper",
+        "furnace",
+        "gray_shulker_box",
+        "green_shulker_box",
+        "hopper",
+        "jukebox",
+        "lectern",
+        "light_blue_shulker_box",
+        "light_gray_shulker_box",
+        "lime_shulker_box",
+        "magenta_shulker_box",
+        "orange_shulker_box",
+        "pink_shulker_box",
+        "purple_shulker_box",
+        "red_shulker_box",
+        "shulker_box",
+        "smoker",
+        "soul_campfire",
+        "suspicious_gravel",
+        "suspicious_sand",
+        "trapped_chest",
+        "white_shulker_box",
+        "yellow_shulker_box"
+      ]
+    }
+  ],
+  "attachment": [
+    {
+      "ids": [
+        "acacia_button",
+        "bamboo_button",
+        "birch_button",
+        "cherry_button",
+        "crimson_button",
+        "dark_oak_button",
+        "jungle_button",
+        "lever",
+        "mangrove_button",
+        "oak_button",
+        "pale_oak_button",
+        "polished_blackstone_button",
+        "poplar_button",
+        "spruce_button",
+        "stone_button",
+        "warped_button"
+      ],
+      "hangs_by": "face",
+      "defaults": { "face": "wall", "facing": "north" }
+    },
+    {
+      "ids": [
+        "copper_wall_torch",
+        "ladder",
+        "redstone_wall_torch",
+        "soul_wall_torch",
+        "tripwire_hook",
+        "wall_torch"
+      ],
+      "hangs_by": "facing",
+      "defaults": { "facing": "north" }
+    }
+  ],
+  "support": [
+    {
+      "ids": [
+        "acacia_pressure_plate",
+        "bamboo_pressure_plate",
+        "birch_pressure_plate",
+        "cherry_pressure_plate",
+        "copper_torch",
+        "crimson_pressure_plate",
+        "dark_oak_pressure_plate",
+        "heavy_weighted_pressure_plate",
+        "jungle_pressure_plate",
+        "light_weighted_pressure_plate",
+        "mangrove_pressure_plate",
+        "oak_pressure_plate",
+        "pale_oak_pressure_plate",
+        "polished_blackstone_pressure_plate",
+        "poplar_pressure_plate",
+        "redstone_torch",
+        "soul_torch",
+        "spruce_pressure_plate",
+        "stone_pressure_plate",
+        "torch",
+        "warped_pressure_plate"
+      ],
+      "on": "below",
+      "needs": "center"
+    },
+    {
+      "ids": [
+        "copper_lantern",
+        "exposed_copper_lantern",
+        "lantern",
+        "oxidized_copper_lantern",
+        "soul_lantern",
+        "waxed_copper_lantern",
+        "waxed_exposed_copper_lantern",
+        "waxed_oxidized_copper_lantern",
+        "waxed_weathered_copper_lantern",
+        "weathered_copper_lantern"
+      ],
+      "when": { "hanging": "false" },
+      "defaults": { "hanging": "false" },
+      "on": "below",
+      "needs": "center"
+    },
+    {
+      "ids": [
+        "copper_lantern",
+        "exposed_copper_lantern",
+        "lantern",
+        "oxidized_copper_lantern",
+        "soul_lantern",
+        "waxed_copper_lantern",
+        "waxed_exposed_copper_lantern",
+        "waxed_oxidized_copper_lantern",
+        "waxed_weathered_copper_lantern",
+        "weathered_copper_lantern"
+      ],
+      "when": { "hanging": "true" },
+      "defaults": { "hanging": "false" },
+      "on": "above",
+      "needs": "center"
+    },
+    {
+      "ids": [
+        "acacia_hanging_sign",
+        "bamboo_hanging_sign",
+        "birch_hanging_sign",
+        "cherry_hanging_sign",
+        "crimson_hanging_sign",
+        "dark_oak_hanging_sign",
+        "jungle_hanging_sign",
+        "mangrove_hanging_sign",
+        "oak_hanging_sign",
+        "pale_oak_hanging_sign",
+        "poplar_hanging_sign",
+        "spruce_hanging_sign",
+        "warped_hanging_sign"
+      ],
+      "on": "above",
+      "needs": "center"
+    },
+    {
+      "ids": ["redstone_wire"],
+      "on": "below",
+      "needs": "sturdy",
+      "also_on": ["hopper"]
+    },
+    {
+      "ids": ["comparator", "repeater"],
+      "on": "below",
+      "needs": "sturdy"
+    },
+    {
+      "ids": [
+        "acacia_door",
+        "bamboo_door",
+        "birch_door",
+        "cherry_door",
+        "copper_door",
+        "crimson_door",
+        "dark_oak_door",
+        "exposed_copper_door",
+        "iron_door",
+        "jungle_door",
+        "mangrove_door",
+        "oak_door",
+        "oxidized_copper_door",
+        "pale_oak_door",
+        "poplar_door",
+        "spruce_door",
+        "warped_door",
+        "waxed_copper_door",
+        "waxed_exposed_copper_door",
+        "waxed_oxidized_copper_door",
+        "waxed_weathered_copper_door",
+        "weathered_copper_door"
+      ],
+      "when": { "half": "lower" },
+      "defaults": { "half": "lower" },
+      "on": "below",
+      "needs": "sturdy"
+    }
+  ],
+  "gravity": [
+    {
+      "ids": [
+        "anvil",
+        "black_concrete_powder",
+        "blue_concrete_powder",
+        "brown_concrete_powder",
+        "chipped_anvil",
+        "cyan_concrete_powder",
+        "damaged_anvil",
+        "dragon_egg",
+        "gravel",
+        "gray_concrete_powder",
+        "green_concrete_powder",
+        "light_blue_concrete_powder",
+        "light_gray_concrete_powder",
+        "lime_concrete_powder",
+        "magenta_concrete_powder",
+        "orange_concrete_powder",
+        "pink_concrete_powder",
+        "purple_concrete_powder",
+        "red_concrete_powder",
+        "red_sand",
+        "sand",
+        "suspicious_gravel",
+        "suspicious_sand",
+        "white_concrete_powder",
+        "yellow_concrete_powder"
+      ]
+    }
+  ],
+  "center_support": [
+    {
+      "ids": [
+        "chain",
+        "copper_chain",
+        "exposed_copper_chain",
+        "iron_chain",
+        "oxidized_copper_chain",
+        "waxed_copper_chain",
+        "waxed_exposed_copper_chain",
+        "waxed_oxidized_copper_chain",
+        "waxed_weathered_copper_chain",
+        "weathered_copper_chain"
+      ],
+      "when": { "axis": "y" },
+      "defaults": { "axis": "y" },
+      "faces": ["down", "up"]
+    },
+    {
+      "ids": [
+        "acacia_fence_gate",
+        "bamboo_fence_gate",
+        "birch_fence_gate",
+        "cherry_fence_gate",
+        "crimson_fence_gate",
+        "dark_oak_fence_gate",
+        "jungle_fence_gate",
+        "mangrove_fence_gate",
+        "oak_fence_gate",
+        "pale_oak_fence_gate",
+        "poplar_fence_gate",
+        "spruce_fence_gate",
+        "warped_fence_gate"
+      ],
+      "when": { "open": "false" },
+      "defaults": { "open": "false" },
+      "faces": ["up"]
+    }
+  ],
+  "entity_aabb": [
+    { "entities": ["armor_stand"], "width": 0.5, "height": 1.975 },
+    { "entities": ["block_display", "item_display", "text_display"], "width": 0, "height": 0 },
+    { "entities": ["villager"], "width": 0.6, "height": 1.95 },
+    { "entities": ["glow_item_frame", "item_frame"], "width": 0.75, "height": 0.75, "depth": 0.0625 },
+    { "entities": ["painting"], "width": 1, "height": 1, "depth": 0.0625 }
+  ]
+}

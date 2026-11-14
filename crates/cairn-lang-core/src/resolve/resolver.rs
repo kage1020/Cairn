@@ -144,6 +144,7 @@ fn build_theme_binding(theme: &ThemeIr) -> ThemeBinding {
     ThemeBinding {
         name: theme.name.clone(),
         slots: theme.slots.clone(),
+        slot_arguments: theme.slot_arguments.clone(),
         selectors,
         span: theme.span.clone(),
     }

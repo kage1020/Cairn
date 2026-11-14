@@ -31,7 +31,8 @@ enum Context {
     GuardWord { replace: Span },
     /// The word after an indented line's `@edition`: an edition.
     EditionName { replace: Span },
-    /// First word of a line indented under an `@edition` guard: a raw member or a Tier 0 part.
+    /// First word of a line indented under an `@edition` guard: a keyword of the escape-hatch
+    /// layer, or an entity's, whose line stands there when it writes `nbt=`.
     GuardedMemberKeyword { replace: Span },
 }
 
@@ -109,10 +110,15 @@ pub fn completions(
             &replace,
             cairn_lang_core::intent::known_keywords()
                 .iter()
-                .filter(|kw| role_of(kw).is_escape_hatch())
+                .filter(|kw| role_of(kw).is_escape_hatch() || role_of(kw).reads_nbt())
                 .map(|kw| {
-                    let detail = if role_of(kw).is_tier0_part() {
+                    let role = role_of(kw);
+                    let detail = if role.is_tier0_part() {
                         "Tier 0 part"
+                    } else if role.is_escape_hatch() && role.places_an_entity() {
+                        "entity by id"
+                    } else if role.places_an_entity() {
+                        "entity with nbt="
                     } else {
                         "raw member"
                     };
@@ -940,15 +946,27 @@ mod tests {
         let edition = "struct s size=3x3\n  @edition ";
         assert_eq!(labels(&complete(edition, "@edition ")), ["java", "bedrock"]);
         let under = "struct s size=3x3\n  floor mat_slot=f\n  @edition java\n    ";
+        let guarded = complete(under, "@edition java\n    ");
         assert_eq!(
-            labels(&complete(under, "@edition java\n    ")),
+            guarded
+                .iter()
+                .map(|item| (item.label.as_str(), item.detail.as_deref().unwrap_or("")))
+                .collect::<Vec<_>>(),
             [
-                "repeater",
-                "comparator",
-                "redstone_torch",
-                "redstone_dust",
-                "raw_block",
-                "raw_fill"
+                ("painting", "entity with nbt="),
+                ("item_frame", "entity with nbt="),
+                ("armor_stand", "entity with nbt="),
+                ("villager", "entity with nbt="),
+                ("text_display", "entity with nbt="),
+                ("block_display", "entity with nbt="),
+                ("item_display", "entity with nbt="),
+                ("spawn", "entity by id"),
+                ("repeater", "Tier 0 part"),
+                ("comparator", "Tier 0 part"),
+                ("redstone_torch", "Tier 0 part"),
+                ("redstone_dust", "Tier 0 part"),
+                ("raw_block", "raw member"),
+                ("raw_fill", "raw member"),
             ]
         );
         let after = "struct s size=3x3\n  @edition java\n    raw_block at=1,0,1\n  ";
@@ -962,6 +980,7 @@ mod tests {
                 "window",
                 "roof",
                 "stair",
+                "beam",
                 "level",
                 "pressure_plate",
                 "lever",
@@ -972,6 +991,20 @@ mod tests {
                 "piston",
                 "dispenser",
                 "chest",
+                "trapdoor",
+                "note_block",
+                "sign",
+                "bed",
+                "painting",
+                "item_frame",
+                "armor_stand",
+                "villager",
+                "trade",
+                "text_display",
+                "block_display",
+                "item_display",
+                "hologram",
+                "spawn",
                 "repeater",
                 "comparator",
                 "redstone_torch",

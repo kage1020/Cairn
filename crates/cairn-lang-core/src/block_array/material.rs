@@ -10,7 +10,8 @@ use crate::resolve::{TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
-use super::joins::Joins;
+use super::constraint::{Constraint, EntityBox};
+use super::joins::{Face, Joins};
 
 /// A block state the pinned target's state map has no form for, as
 /// [`TargetRegistry::unmapped_state`] reports it.
@@ -96,6 +97,42 @@ pub trait TargetRegistry {
         None
     }
 
+    /// What `state` needs of the cells beside it for the game to keep it at the pinned target
+    /// (`spec/lint` "Constraint checks"), or `None` when it needs nothing or the registry cannot
+    /// say.
+    fn constraint(&self, state: &BlockState) -> Option<Constraint> {
+        let _ = state;
+        None
+    }
+
+    /// Whether `host`, the block in the cell [`Self::constraint`] names for `state`, holds `state`
+    /// there, or `None` when the registry cannot say.
+    fn holds(&self, state: &BlockState, host: &BlockState) -> Option<bool> {
+        let _ = (state, host);
+        None
+    }
+
+    /// Whether `face` of `state` keeps in the water `state` holds, or `None` when the registry
+    /// cannot say.
+    fn keeps_water(&self, state: &BlockState, face: Face) -> Option<bool> {
+        let _ = (state, face);
+        None
+    }
+
+    /// Whether every face of `state` is whole, so an entity in its cell stands inside it, or
+    /// `None` when the registry cannot say.
+    fn solid(&self, state: &BlockState) -> Option<bool> {
+        let _ = state;
+        None
+    }
+
+    /// The box of the entity `id` at the pinned target (`spec/lint` "Entity AABB"), or `None`
+    /// when the registry gives it none.
+    fn entity_box(&self, id: &str) -> Option<EntityBox> {
+        let _ = id;
+        None
+    }
+
     /// Whether a version this registry covers may declare `id`, asked only when
     /// [`Self::block_ids`] is `None`. Lowering paints an id this denies as a stand-in, which no
     /// structure file can hold, so a registry whose lowering is written out denies none.
@@ -103,6 +140,69 @@ pub trait TargetRegistry {
         let _ = id;
         true
     }
+
+    /// The canonical block `token` stands for where the target spells several canonical blocks
+    /// as the one it resolves to, as Bedrock's `bed` is every dyed bed; `None` otherwise.
+    fn canonical_block(&self, token: &str) -> Option<String> {
+        let _ = token;
+        None
+    }
+
+    /// What the target's painting table says of `variant`, a name without its namespace
+    /// (`spec/entities` "Hanging entities").
+    fn painting(&self, variant: &str) -> PaintingLookup {
+        let _ = variant;
+        PaintingLookup::Unrecorded
+    }
+
+    /// The other edition's entity `id` names, when the target's edition has none; `None` when it
+    /// has one or the registry cannot say.
+    fn absent_entity(&self, id: &str) -> Option<AbsentEntity> {
+        let _ = id;
+        None
+    }
+}
+
+/// What a target's painting table says of one variant, as [`TargetRegistry::painting`] answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PaintingLookup {
+    /// The target has the variant.
+    Known(PaintingVariant),
+    /// The target has no such variant.
+    Unknown {
+        /// The target, as a diagnostic names it, such as `"java 1.20.4"`.
+        registry: String,
+        /// The variants the target has, in table order.
+        known: Vec<String>,
+        /// The edition's other targetable versions that have it, oldest first.
+        elsewhere: Vec<String>,
+    },
+    /// No table answers, so the variant is not checked and hangs as one cell.
+    Unrecorded,
+}
+
+/// One painting variant of a target's table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaintingVariant {
+    /// The variant as the target's entity data spells it, as `minecraft:kebab` or `Kebab`.
+    pub spelling: String,
+    /// Its width in blocks.
+    pub width: u32,
+    /// Its height in blocks.
+    pub height: u32,
+}
+
+/// An entity of one edition that the other has no counterpart for, as
+/// [`TargetRegistry::absent_entity`] answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbsentEntity {
+    /// The target that lacks it, as a diagnostic names it, such as `"bedrock 1.21.60"`.
+    pub registry: String,
+    /// The edition that has it.
+    pub declared_by: Edition,
+    /// What the entity is and why the target's edition has none, as the registry pack words it.
+    pub reason: String,
 }
 
 /// The registry of a lowering with no target. It lifts every abstract token, and every id no

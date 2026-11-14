@@ -1,6 +1,6 @@
-//! `E_SEMANTIC_IN_EDITION_GUARD`: an `@edition` guard holds only raw members and Tier 0 parts,
-//! since the semantic layer is edition-neutral
-//! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
+//! `E_SEMANTIC_IN_EDITION_GUARD`: an `@edition` guard holds only the escape-hatch layer, since the
+//! semantic layer is edition-neutral, and `E_NBT_OUTSIDE_EDITION_GUARD`: an `nbt={...}` compound
+//! stands under one (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::check;
@@ -56,8 +56,8 @@ fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
     assert_eq!(slice(&source, d), "walls mat_slot=f height=2");
     assert_eq!(
         d.primary,
-        "a `walls` stands under an `@edition java` guard, which holds only raw members and Tier 0 \
-         parts: the semantic layer is edition-neutral",
+        "a `walls` stands under an `@edition java` guard, which holds only the escape-hatch layer: \
+         the semantic layer is edition-neutral",
     );
     assert_eq!(
         notes(d),
@@ -65,8 +65,8 @@ fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
             "the guard opens here",
             "dedent the line out of the guard so that every edition builds it, and bind what \
              differs per edition from a `theme NAME_java` and a `theme NAME_bedrock`; the guard is \
-             for `raw_block`, `raw_fill` and the Tier 0 parts `repeater`, `comparator`, \
-             `redstone_torch` and `redstone_dust`",
+             for `raw_block`, `raw_fill`, `spawn`, the Tier 0 parts `repeater`, `comparator`, \
+             `redstone_torch` and `redstone_dust`, and an entity's line that writes `nbt={...}`",
         ],
     );
     assert_eq!(
@@ -93,20 +93,20 @@ fn a_logic_or_assert_line_under_a_guard_is_refused() {
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "logic sig.a = sig.b",
-                "a `logic` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members and Tier 0 parts: the semantic layer is edition-neutral",
+                "a `logic` line stands under an `@edition bedrock` guard, which holds only the \
+                 escape-hatch layer: the semantic layer is edition-neutral",
             ),
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "assert always(sig.a -> eventually sig.b within 4)",
-                "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members and Tier 0 parts: the semantic layer is edition-neutral",
+                "an `assert` line stands under an `@edition bedrock` guard, which holds only the \
+                 escape-hatch layer: the semantic layer is edition-neutral",
             ),
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "assert latency(sig.b -> sig.a) <= 2",
-                "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members and Tier 0 parts: the semantic layer is edition-neutral",
+                "an `assert` line stands under an `@edition bedrock` guard, which holds only the \
+                 escape-hatch layer: the semantic layer is edition-neutral",
             ),
         ],
     );
@@ -163,14 +163,14 @@ fn a_logic_line_in_a_guard_under_a_guarded_raw_member_is_refused_and_lowered_int
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "logic sig.a = sig.b",
-                "a `logic` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members and Tier 0 parts: the semantic layer is edition-neutral",
+                "a `logic` line stands under an `@edition bedrock` guard, which holds only the \
+                 escape-hatch layer: the semantic layer is edition-neutral",
             ),
             (
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "assert always(sig.a -> eventually sig.b within 4)",
-                "an `assert` line stands under an `@edition bedrock` guard, which holds only raw \
-                 members and Tier 0 parts: the semantic layer is edition-neutral",
+                "an `assert` line stands under an `@edition bedrock` guard, which holds only the \
+                 escape-hatch layer: the semantic layer is edition-neutral",
             ),
         ],
     );
@@ -385,8 +385,9 @@ fn an_unknown_keyword_under_a_guard_is_offered_what_a_guard_body_holds() {
         notes(d),
         [
             "did you mean `raw_block`?",
-            "expected one of: repeater, comparator, redstone_torch, redstone_dust, raw_block, \
-             raw_fill"
+            "expected one of: painting, item_frame, armor_stand, villager, text_display, \
+             block_display, item_display, spawn, repeater, comparator, redstone_torch, \
+             redstone_dust, raw_block, raw_fill"
         ],
     );
 }
@@ -408,8 +409,8 @@ fn an_unknown_keyword_under_a_guard_in_a_site_body_is_offered_nothing() {
     assert_eq!(
         notes(d),
         [
-            "nothing builds under an `@edition` guard in a `site` body: the raw members and Tier \
-             0 parts a guard holds go in a `struct` or `def` body"
+            "nothing builds under an `@edition` guard in a `site` body: the escape-hatch lines a \
+             guard holds go in a `struct` or `def` body"
         ],
     );
 }
@@ -515,4 +516,57 @@ fn one_id_under_two_guards_is_one_port_to_each_edition() {
             .collect();
         assert_eq!(noted, [("W_DEFERRED_MEMBER", vec![line])], "{edition:?}");
     }
+}
+
+#[test]
+fn an_nbt_compound_outside_a_guard_is_refused_at_its_value() {
+    let source = struct_with(
+        "  painting at=1,1,1 facing=north variant=kebab nbt={Invisible:1b}\n  \
+         raw_block mat=minecraft:chest at=2,1,2 nbt={Lock:\"key\"}\n",
+    );
+    let found = diagnose(&source);
+    let fix = "indent the line under `@edition java` or `@edition bedrock`, the edition whose \
+               field names the compound spells, or drop `nbt=`";
+    assert_eq!(
+        found
+            .iter()
+            .map(|d| (
+                d.code.as_str(),
+                slice(&source, d),
+                d.primary.as_str(),
+                notes(d)
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "E_NBT_OUTSIDE_EDITION_GUARD",
+                "{Invisible:1b}",
+                "`painting` writes an `nbt={...}` compound outside an `@edition` guard: the \
+                 compound spells one edition's field names, and the semantic layer is \
+                 edition-neutral",
+                vec![fix],
+            ),
+            (
+                "E_NBT_OUTSIDE_EDITION_GUARD",
+                "{Lock:\"key\"}",
+                "`raw_block` writes an `nbt={...}` compound outside an `@edition` guard: the \
+                 compound spells one edition's field names, and the semantic layer is \
+                 edition-neutral",
+                vec![fix],
+            ),
+        ],
+    );
+}
+
+#[test]
+fn an_entity_line_stands_under_a_guard_only_when_it_writes_nbt() {
+    let source = struct_with(
+        "  @edition java\n    painting at=1,1,1 facing=north variant=kebab nbt={Invisible:1b}\n    \
+         raw_block mat=minecraft:chest at=2,1,2 nbt={Lock:\"key\"}\n    \
+         spawn type=cat at=3,1,3\n    armor_stand at=2,1,3\n",
+    );
+    assert_eq!(
+        located(&source),
+        [("E_SEMANTIC_IN_EDITION_GUARD", "armor_stand at=2,1,3")],
+    );
 }

@@ -71,6 +71,10 @@ const FIXTURES: &[(&str, &str)] = &[
         "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  dispenser at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
     ),
     (
+        "note_block",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  note_block at=2,1,2 note=3 mat_slot=%SLOT%\n",
+    ),
+    (
         "repeater",
         "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  repeater at=2,1,2 facing=east mat_slot=%SLOT%\n",
     ),
@@ -85,6 +89,38 @@ const FIXTURES: &[(&str, &str)] = &[
     (
         "redstone_dust",
         "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  redstone_dust at=2,1,2 mat_slot=%SLOT%\n",
+    ),
+    (
+        "painting",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  painting at=inside.front offset=1 y=1 variant=kebab mat_slot=%SLOT%\n",
+    ),
+    (
+        "item_frame",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  item_frame at=inside.front offset=1 y=1 item=diamond mat_slot=%SLOT%\n",
+    ),
+    (
+        "armor_stand",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  armor_stand at=2,1,2 mat_slot=%SLOT%\n",
+    ),
+    (
+        "villager",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  villager id=v at=2,1,2 mat_slot=%SLOT%\n",
+    ),
+    (
+        "trade",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  villager id=v at=2,1,2\n  trade villager=v buy=emerald sell=bread mat_slot=%SLOT%\n",
+    ),
+    (
+        "text_display",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  text_display at=2,1,2 text=\"Inn\" mat_slot=%SLOT%\n",
+    ),
+    (
+        "item_display",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  item_display at=2,1,2 item=diamond mat_slot=%SLOT%\n",
+    ),
+    (
+        "spawn",
+        "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  spawn type=cat at=2,1,2 mat_slot=%SLOT%\n",
     ),
     // The control: a `window` reads its `mat_slot=`, so it builds differently under the two names.
     (

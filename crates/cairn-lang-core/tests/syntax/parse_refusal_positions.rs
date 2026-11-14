@@ -91,16 +91,12 @@ fn a_latency_bound_is_a_whole_number_of_ticks() {
         "2:29: expected integer literal, got `-`",
     );
     assert_eq!(
-        refusal("struct s size=3x3\n  assert latency(a -> b) <= 4 ticks\n"),
-        "2:31: expected end of line, got identifier `ticks`",
-    );
-    assert_eq!(
         refusal("struct s size=3x3\n  assert latency(a -> b) <=\n"),
         "2:28: expected integer literal, got end of line",
     );
     assert_eq!(
         refusal("struct s size=3x3\n  assert latency(a -> b) <= 1.5\n"),
-        "2:30: expected end of line, got `.`",
+        "2:29: expected integer literal, got decimal `1.5`",
     );
 }
 
@@ -347,15 +343,13 @@ fn a_requires_member_with_a_body_still_parses_where_no_floor_may_stand() {
 
 // -- size literals ----------------------------------------------------------
 
-/// Every form whose arguments all need their `=` is listed, so a check in only one of them fails.
+/// A selector is the one list whose arguments all need their `=`, so both kinds are listed.
 #[test]
 fn a_size_with_no_height_is_named_as_one() {
     for (source, at) in [
-        ("struct s size=9x\n", "1:15"),
-        ("struct s size=9x 7\n", "1:15"),
-        ("def d size=9x\n", "1:12"),
         ("struct s size=3x3\n  floor[size=9x] mat=f\n", "2:14"),
-        ("theme t:\n  block[a=1] -> size=9x\n", "2:22"),
+        ("struct s size=3x3\n  floor[size=9x 7]\n", "2:14"),
+        ("theme t:\n  block[size=9x] -> a=1\n", "2:14"),
     ] {
         assert_eq!(
             refusal(source),
@@ -368,9 +362,35 @@ fn a_size_with_no_height_is_named_as_one() {
 #[test]
 fn a_size_with_no_height_is_named_under_any_key() {
     assert_eq!(
-        refusal("struct s a=9x\n"),
-        "1:12: size literal `9x` has no height; a size is two extents, as in `9x7`",
+        refusal("struct s size=3x3\n  floor[a=9x]\n"),
+        "2:11: size literal `9x` has no height; a size is two extents, as in `9x7`",
     );
+}
+
+/// A bare value on these lines is `E_UNEXPECTED_POSITIONAL`, so only a key has nowhere to go.
+#[test]
+fn a_key_on_a_line_that_takes_none_is_refused_at_the_key() {
+    for (source, expected) in [
+        (
+            "site s size=3x3\n",
+            "1:8: a `site` header takes no `key=value` argument, got `size=`",
+        ),
+        (
+            "theme t dark=1:\n",
+            "1:9: a `theme` header takes no `key=value` argument, got `dark=`",
+        ),
+        (
+            "theme t:\n  slot a -> @b c=1\n",
+            "2:16: a `slot` row binding a material token takes no `key=value` argument, got \
+             `c=`",
+        ),
+        (
+            "struct s size=3x3\n  assert latency(a -> b) <= 4 ticks=2\n",
+            "2:31: an `assert` line takes no `key=value` argument, got `ticks=`",
+        ),
+    ] {
+        assert_eq!(refusal(source), expected, "{source:?}");
+    }
 }
 
 /// `size=9x=2` is `size=9` and `x=2`; `codes` panics if the source does not parse.
@@ -383,12 +403,12 @@ fn a_glued_x_with_its_own_value_is_an_argument() {
 #[test]
 fn an_x_key_apart_from_a_size_is_an_ordinary_key() {
     assert_eq!(
-        refusal("struct s size=9 x\n"),
-        "1:18: expected `=`, got end of line",
+        refusal("struct s size=3x3\n  floor[size=9 x]\n"),
+        "2:17: expected `=`, got `]`",
     );
     assert_eq!(
-        refusal("struct s size=9y\n"),
-        "1:17: expected `=`, got end of line",
+        refusal("struct s size=3x3\n  floor[size=9y]\n"),
+        "2:16: expected `=`, got `]`",
     );
 }
 
@@ -633,7 +653,13 @@ fn a_stage_count_is_refused_where_it_is_wrong() {
         ),
         (
             "delay(sig.x, 1.5)",
-            "2:31: expected `)`, got `.`: a stage count is a whole number of stages, as in \
+            "2:30: expected a stage count, a whole number of at least 1, got decimal `1.5`: \
+             `delay` is applied to its operand and a stage count, as in `delay(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x, 1 .)",
+            "2:32: expected `)`, got `.`: a stage count is a whole number of stages, as in \
              `delay(…, N)`"
                 .to_owned(),
         ),

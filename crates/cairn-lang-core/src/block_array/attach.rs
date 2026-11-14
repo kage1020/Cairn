@@ -8,8 +8,8 @@ use indexmap::IndexMap;
 use crate::error::Span;
 
 use super::{
-    BlockArrayIr, BlockEntity, BlockState, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex,
-    ResolvedBlock, ResolvedMember,
+    Bbox, BlockArrayIr, BlockEntity, BlockEntityData, BlockState, Dims, MAX_STRUCTURE_VOLUME,
+    MemberGeometry, PaletteFull, PaletteIndex, ResolvedBlock, ResolvedMember,
 };
 
 /// One block of a circuit, at `(x, y, z)` in the layers under the base plane, `y = 0` the lowest.
@@ -30,6 +30,17 @@ pub struct LaidEntity {
     pub id: String,
     /// Its integer fields, such as a comparator's `OutputSignal`, none named `id`, `x`, `y` or `z`.
     pub fields: IndexMap<String, i32>,
+}
+
+/// Raise `array`'s block entities and entities by the `void` rows laid under them.
+fn raise_entities(array: &mut super::BlockArray, void: u32) {
+    for entity in &mut array.block_entities {
+        entity.pos.1 += void;
+    }
+    for entity in &mut array.entities {
+        entity.pos.1 += f64::from(void);
+        entity.block_pos.1 += void;
+    }
 }
 
 /// The fields a writer fills from a block entity's own id and position.
@@ -99,10 +110,26 @@ impl BlockArrayIr {
         let mut palette = array.palette.clone();
         let layer = (array.dims.x as usize) * (array.dims.z as usize);
         let mut voxels = vec![PaletteIndex::AIR; layer * void as usize];
+        let reserved = Bbox::spanning(
+            (0, 0, 0),
+            (
+                dims.x.saturating_sub(1),
+                void.saturating_sub(1),
+                dims.z.saturating_sub(1),
+            ),
+        );
+        // A circuit that lays no block still writes air over every layer it reserves.
+        let actual = Bbox::around(blocks.iter().map(|block| block.at)).unwrap_or(reserved);
         let mut member = ResolvedMember {
             role: "circuit".to_owned(),
             id: None,
             resolved_state: Vec::new(),
+            geometry: MemberGeometry {
+                anchor: reserved.min,
+                declared_bbox: reserved,
+                actual_bbox: actual,
+                host_face: None,
+            },
             span,
         };
         let sorted = indexed(blocks, dims, void)?;
@@ -140,23 +167,21 @@ impl BlockArrayIr {
         array.palette = palette;
         array.derived = derived;
         array.dims = dims;
-        for entity in &mut array.block_entities {
-            entity.pos.1 += void;
-        }
-        for entity in &mut array.entities {
-            entity.pos.1 += f64::from(void);
-        }
+        raise_entities(array, void);
         for (_, block) in &sorted {
             if let Some(entity) = &block.entity {
                 array.block_entities.push(BlockEntity {
                     pos: block.at,
-                    id: entity.id.clone(),
-                    fields: entity.fields.clone(),
+                    data: BlockEntityData::Fields {
+                        id: entity.id.clone(),
+                        fields: entity.fields.clone(),
+                    },
                 });
             }
         }
         if let Some(members) = self.members.get_mut(key) {
             for resolved in members.iter_mut() {
+                resolved.geometry = resolved.geometry.raised(void);
                 for state in &mut resolved.resolved_state {
                     for run in &mut state.runs {
                         run.from.1 += void;

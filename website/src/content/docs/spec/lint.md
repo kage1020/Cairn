@@ -64,7 +64,8 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
-| `E_SEMANTIC_IN_EDITION_GUARD` | A known member other than a raw member or a Tier 0 part ([Redstone §14.1](/spec/redstone/#tier-0-parts)) under an `@edition` guard, or a `logic` or `assert` line under one, directly or under a guarded raw member or Tier 0 part ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). |
+| `E_SEMANTIC_IN_EDITION_GUARD` | A known member outside the escape-hatch layer under an `@edition` guard, one other than a raw member, a `spawn`, a Tier 0 part ([Redstone §14.1](/spec/redstone/#tier-0-parts)) or an entity's line that writes `nbt=`, or a `logic` or `assert` line under one, directly or under a guarded line of that layer ([§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). |
+| `E_NBT_OUTSIDE_EDITION_GUARD` | An `nbt={...}` compound on a line that reads one, an entity's or a `raw_block`'s, that no `@edition` guard holds ([Entities §8.1](/spec/entities/#81-two-tiers)). |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
 | `E_TYPE_MISMATCH_SIZE` | A `size=` value is not a `WxH` literal, on any line but a `chest`'s, where `size=` is a blockstate ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). |
 | `E_CONNECT_ARITY` | A `connect` row's shape is not `FROM.PORT to TO.PORT`. |
@@ -91,8 +92,12 @@ body is a flat list. Reported once per dropped subtree, at its root.
 escape hatch. Reported once at the outermost refused line, with a note at the guard, and anything
 indented under that line goes with it. No other check reads the refused line or what goes with it,
 so it draws no other finding. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD` instead,
-offered `raw_block`, `raw_fill`, `repeater`, `comparator`, `redstone_torch` and `redstone_dust`, or
-nothing in a `site` body, where none of them builds.
+offered the keywords a guard may hold: `raw_block`, `raw_fill`, `spawn`, the Tier 0 parts and the
+entities that read `nbt=`, or nothing in a `site` body, where none of them builds.
+
+`E_NBT_OUTSIDE_EDITION_GUARD`: a compound spells one edition's field names, so it stands under that
+edition's guard, as a raw id does ([Entities §8.1](/spec/entities/#81-two-tiers)). Reported at the
+compound, once per line that writes one.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
 `theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.
@@ -150,9 +155,9 @@ to compare.
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
-| `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
+| `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)), or a member places an entity only the other edition has, such as a display on Bedrock ([Entities §8.1](/spec/entities/#displays)). |
 | `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
-| `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
+| `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal, from a state a member's line writes, or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
@@ -161,7 +166,7 @@ to compare.
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
-| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
+| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token nor a member form a `hologram` is built as ([Materials and Themes](/spec/materials-themes/)). |
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member of the scopes the theme is bound to. A theme no scope binds is not checked. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
@@ -172,7 +177,7 @@ to compare.
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 | `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned version has no form for, such as a stair's `shape` on Bedrock before 1.26.60, or a state a member wrote that the version works out itself, such as a dust's `connect=` there, in the words of the pack's `sensitivity`; one line per intent lost ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
-| `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members the previous lock's `member_version_sensitivity` lists, as ones that may resolve differently at the new target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). No lock the compiler writes lists any yet, since no constraint catalog ships, so a build over one does not raise it today. |
+| `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members of this build that may resolve differently at the new target: those whose block a `semantic_sensitivity` row lists at a boundary version lying between the lock's verified version and the target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
 
 The last three are `cairn compile`'s alone: they are about the artifact and the lock it writes, so
 they carry no span and no other command raises them.
@@ -221,7 +226,11 @@ lowers, with no target, and reports only the findings every target that reads th
 family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)), a `door` bound
 outside the door family ([Syntax §5.4](/spec/syntax/#54-selectors)), a `chest` bound outside the
 chest family ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)),
-or a `button` bound outside the button family ([Redstone §14.2](/spec/redstone/#142-signal-binding)).
+a `button` bound outside the button family ([Redstone §14.2](/spec/redstone/#142-signal-binding)),
+or a `trapdoor` bound outside the trapdoor family, a `beam` bound to a block whose `axis` does not
+take `x`, `y` and `z`, a `sign` bound to a block that is no standing sign with a wall sign at the
+target, or a `bed` bound outside the bed family ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
@@ -242,12 +251,13 @@ from the `severity` field rather than from the first letter.
 `E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: no `mat_slot=` pointing at a slot bound to
 something other than a material token resolves. A `floor` that names it is left air; a `fill` that
 names it paints none of its box; a `walls` that names it is not built and takes up no rows, so a
-`door` or `window` cut into it is deferred; a `window` that names it is not cut, so its wall stays;
-and a `roof`, eave `stair`, `door`, `pressure_plate`, `button` or `chest` that names it is built
-from its default block. Were it a warning, a theme whose slots are all mistyped would still build at
-exit 0 every scope that keeps something to draw, such as a `roof`: shorter than asked, with no floor
-and no walls, and only default blocks, less any eave `stair`, `chest`, sensor or actuator set higher
-than the shorter structure reaches.
+`door` or `window` cut into it, or a `beam` laid on it, is deferred; a `window` that names it is not
+cut, so its wall stays; and a `roof`, eave `stair`, `beam`, `door`, `pressure_plate`, `button`,
+`chest`, `trapdoor`, `sign` or `bed` that names it is built from its default block. Were it a
+warning, a theme whose slots are all mistyped would still build at exit 0 every scope that keeps
+something to draw, such as a `roof`: shorter than asked, with no floor and no walls, and only
+default blocks, less any eave `stair`, `chest`, `trapdoor`, `sign`, `bed`, sensor or actuator set
+higher than the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member earns
 both: the key is absent for the first and present-but-unusable for the second. They have different
@@ -262,11 +272,10 @@ and a `fill` with no `fluid=` reach the palette through the applied theme's slot
 default block, so a bare one contributes no voxel. A `fill` with a `fluid=` pours that fluid and is
 not reported. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
 reported; that is how a narrow slit is punched through a wall without choosing a species for it. A
-`roof`, `stair`, `door`, `pressure_plate`, `button` or `chest` paints a default block and is not
-reported either, and a `raw_block` or `raw_fill` names its block with `mat=`, whose absence is
-`E_INVALID_MEMBER`.
-`cairn check` raises it, before any lowering, and it needs no theme: a module that declares none is
-still told which of its members name no material.
+`roof`, `stair`, `beam`, `door`, `pressure_plate`, `button`, `chest`, `trapdoor`, `sign` or `bed`
+paints a default block and is not reported either, and a `raw_block` or `raw_fill` names its block
+with `mat=`, whose absence is `E_INVALID_MEMBER`. `cairn check` raises it, before any lowering, and
+it needs no theme: a module that declares none is still told which of its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
 resolved once as its own scope and once again for every `place` that instantiates it, and each of
@@ -300,24 +309,26 @@ without a pack. A front end with no target (the language server, or a `cairn che
 ([§11.3](#113-error-vs-warning)).
 
 The warning says how the member degrades. A `floor` leaves its cells air, a `fill` paints none of
-its box, and a `roof`, eave `stair`, `door`, `pressure_plate`, `button` or `chest` is built from its
-default block. A `walls` is not built and takes up no rows, so a `door` or `window` cut into it is
-deferred. A `window` is not cut, so its wall stays, and a port on it is refused with it
+its box, and a `roof`, eave `stair`, `beam`, `door`, `pressure_plate`, `button`, `chest`,
+`trapdoor`, `sign` or `bed` is built from its default block. A `walls` is not built and takes up no
+rows, so a `door` or `window` cut into it, or a `beam` laid on it, is deferred. A `window` is not
+cut, so its wall stays, and a port on it is refused with it
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
 all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
-or takes up rows, so no `door` or `window` is cut and the structure is shorter than asked. A `floor`
-leaves its cells air, a `fill` with a `mat_slot=` paints none of its box, and a `roof` is still
-built from its default block, as is an eave `stair`, `pressure_plate`, `button` or `chest` that
-still fits the shorter structure. Any other sensor or actuator, a `raw_block` and a `raw_fill` need
-no theme and are built where the shorter structure still holds them. Any of these set higher than it
-reaches is deferred. It is judged per scope: a scope with no theme bound that reads no `mat_slot=`
-is not reported, whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none,
-such as a `level`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
-([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
-nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
-is `E_UNSUPPORTED_NESTING`.
+or takes up rows, so no `door` or `window` is cut, no `beam` is laid, and the structure is shorter
+than asked. A `floor` leaves its cells air, a `fill` with a `mat_slot=` paints none of its box, and
+a `roof` is still built from its default block, as is an eave `stair`, `pressure_plate`, `button`,
+`chest`, `trapdoor`, `sign` or `bed` that still fits the shorter structure. Any other sensor or
+actuator, a `note_block`, a `raw_block` and a `raw_fill` need no theme and are built where the
+shorter structure still holds them. Any of these set higher than it reaches is deferred. It is
+judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported, whatever
+the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a `level`'s, is
+not a read. Nor, for this warning, is one on a member a `level` drops ([Compilation Model
+§4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints nothing whatever
+the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body is
+`E_UNSUPPORTED_NESTING`.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A
@@ -551,6 +562,56 @@ author restating a member is; two footprints that happen to intersect is not, an
 tell the two apart. The resolution the spec mandates still happens, and the finding says which voxel
 it happened at.
 
+### Constraint checks
+
+| Code | Meaning |
+|---|---|
+| `W_NO_ATTACHMENT_FACE` | A member built a block that hangs on a face of the block behind, under or over it, such as a lever, a button, a wall torch or a ladder, where that face is not sturdy, or hung an item frame or a painting where a cell behind it holds air, water or lava, so the game drops it. |
+| `W_UNSUPPORTED_BLOCK` | A member built a block that needs the face of the block below or above it, such as a torch, a lantern, a pressure plate, redstone dust or a door, where that face does not hold it, or a block that falls, such as sand or gravel, over air or a fluid. |
+| `W_WATER_SPILL` | A member built water, from a water `fill` or a block with `waterlogged=true`, that flows into air inside the structure. |
+| `W_ENTITY_CLIPPING` | A member placed an entity whose box reaches into a full block, a door's cells or the box of an entity an earlier line places ([§11.4](#entity-aabb)). |
+
+The four are the checks of the constraint catalog ([§11.4](#114-constraint-catalog)), and each reads
+only the blocks and entities its tables list. They run in the block-array lowering at a pinned
+target, the one `cairn compile --target` and `cairn check --edition E --target V` run, on each
+`struct` or `place` body once every member of it is painted and its connections are derived
+([Blockstate](/spec/blockstate/#connections)). So a block is judged against what the build put
+beside it, whichever member put it there. What a block needs of its neighbour is the catalog's
+answer, and what the neighbour gives is the pinned version's, read from the registry pack the way
+the connection rules read it: a face of a block is sturdy when its model covers it whole, which a
+full block's every face is, glass among them, and a glass pane's side is not. A Bedrock target reads
+each block as the canonical blocks its state map names. With no version pinned, they are not raised
+([§11.3](#113-error-vs-warning)).
+
+- **Attachment** (`W_NO_ATTACHMENT_FACE`). A block of the `attachment` table hangs on the block its
+  states point away from: a lever or button with `face=floor` on the block below it, with
+  `face=ceiling` on the block above it, and with `face=wall` on the block behind its `facing`, as a
+  wall torch, a ladder and a tripwire hook do. That block's face toward it must be sturdy.
+- **Support** (`W_UNSUPPORTED_BLOCK`). A block of the `support` table stands on the block below it
+  or hangs from the block above it, as its row says, and needs that block's face toward it to be
+  sturdy, or only its centre to be. A centre is held by a sturdy face, by the top or bottom of the
+  post of a pane, fence or wall, and by a face of the `center_support` table: the ends of an upright
+  chain, the top of a closed fence gate. A block the row names in `also_on` holds it whatever its
+  faces, as a hopper holds redstone dust. So a torch stands on a fence post and a hanging lantern
+  under a chain, and a repeater on neither.
+- **Gravity** (`W_UNSUPPORTED_BLOCK`). A block of the `gravity` table falls where the cell below it
+  holds air, water or lava.
+- **Fluid** (`W_WATER_SPILL`). Water flows down and to the four sides. From a cell of water it
+  reaches each such neighbour that holds air, and from a block with `waterlogged=true` each one
+  through a face of the block that is not sturdy. A neighbour holding any block keeps it out.
+
+A cell outside the body's array is not judged: what stands there is the world's, which the build
+does not know. Nor is a neighbour the pack cannot answer for at the target, as when the canonical
+blocks a Bedrock block may be disagree. A body whose lowering raised an error is not judged at all,
+since a member an error refuses paints nothing and the cells it would have filled read as air.
+
+Each check reports a member once, at its line, however many of its blocks fail it. The message
+names the block and its cell, and the neighbour it fails against, air or a block; for a member with
+more than one, it gives their count and names the first its `resolved_state` records. A cell is
+written as the member's `at=` would write it, counted from the corner of the struct's interior, so
+one in an overhang's ring has a negative coordinate. `W_WATER_SPILL` names the cells of air the water
+reaches, each once.
+
 ### Truth tables
 
 | Code | Meaning |
@@ -632,28 +693,37 @@ Beyond the codes above, lint covers:
 | Category | Checks |
 |---|---|
 | **Geometry** | AABB expansion: a window outside the wall, a door hanging in mid-air. |
-| **attachment** | A frame, painting, sign, button, lever, or torch on a valid attachment face. |
+| **attachment** | A button, lever, wall torch, ladder or tripwire hook on a sturdy face; a frame, painting or sign on a solid one. |
 | **entity_aabb** | Entities not clipping walls or paths, not blocking a door's swing, not cramming. |
-| **support** | Hanging lanterns, torches, campfires, and gravity blocks such as gravel. |
-| **fluid** | Consistency of water source, flow, and `waterlogged`. |
+| **support** | Torches, lanterns, hanging signs, pressure plates, redstone dust, repeaters, comparators and doors on the face they need, and gravity blocks such as gravel over air. |
+| **fluid** | Water, and blocks with `waterlogged=true`, kept in by the blocks around them. |
 | **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
-| **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
+| **AABB interference** | Members of one body that overlap priority-merge by phase; bodies of two `place` rows that overlap are an error ([Entities §8.2](/spec/entities/#82-anchor-conventions)). Boundary blockstate re-resolution is the IR layer's job. |
 
-Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
-and no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
-holds only in part: a door, window, eave stair, chest, sensor or actuator its own line puts outside
-its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
-keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
-`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
-pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other
-edition has, `E_STATE_DOMAIN` a state its block does not take there,
+attachment, support and fluid run at a pinned target, as the [constraint
+checks](#constraint-checks), over the blocks the catalog lists, and entity_aabb runs with them, over
+the entities a build places ([§11.4](#entity-aabb)). A frame, a painting and a sign need a block the
+game counts as solid, which no table records, so attachment holds a frame and a painting only to a
+block behind them, which air, water and lava are not, and a sign, standing or on a wall, to nothing.
+edit_stability is planned, and no command checks it yet. AABB interference holds inside a body,
+where the phase order merges the members and `W_PHASE_CONFLICT` reports two of one phase that take a
+cell from each other ([Compilation Model
+§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and is planned between bodies:
+two `place` rows whose bodies overlap are not reported yet. Geometry holds only in part: a door,
+window, eave stair, chest, trapdoor, note block, sign, bed, entity, sensor or actuator its own line
+puts outside its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a
+member left unbuilt keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part,
+through codes of its own: `E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID`
+refuses a block id the pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's
+block or entity only the other edition has, `E_STATE_DOMAIN` a state its block does not take there,
 `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
-version cannot carry, while no entity schema is checked. The redstone row runs through codes of its
-own: the truth-table codes check a table against itself, and the codes of [Redstone](#redstone)
-check a truth table, a temporal assertion and a latency bound against the circuit, and check its
-routing and its dependence on update order.
+version cannot carry, while no entity schema is checked: an `nbt={...}` compound is written as given
+([Entities](/spec/entities/)). The redstone row runs through codes of its own: the truth-table codes
+check a table against itself, and the codes of [Redstone](#redstone) check a truth table, a temporal
+assertion and a latency bound against the circuit, and check its routing and its dependence on
+update order.
 
 ### "did you mean"
 
@@ -661,13 +731,13 @@ A diagnostic that rejects a name against a closed vocabulary attaches the neares
 sits within a length-scaled Damerau-Levenshtein cap of ≤ 1 edit for 1–3 characters, ≤ 2 for 4–6, and
 ≤ 3 beyond. The names are a keyword, an argument key, a `mat_slot=` name, a place, def, theme or
 port reference, an abstract token, the side in the `at=` of a `pressure_plate`, `chest` or other
-member set by a wall, a block id, a block state's property or value, and a `--target` version. The
-note reads ``did you mean `X`?``, with `X` written as the line would be (`home1.entry` for a port,
-`at=front.outside` for a member set by a wall, `axis=x` for a state). `E_UNKNOWN_ID` instead names
-the target's nearest block, or, when another version of the edition declares the ID, that version.
-The nearest block, and the nearest pair of `E_STATE_DOMAIN`, is carried as `data.suggestion` too
-([§11.2](#112-machine-readable-payload)); on a state lowering derived, `E_STATE_DOMAIN` carries it
-there alone, since the source has no literal to correct.
+member set by a wall, the anchor in a `beam`'s `at=`, a block id, a block state's property or value,
+and a `--target` version. The note reads ``did you mean `X`?``, with `X` written as the line would
+be (`home1.entry` for a port, `at=front.outside` for a member set by a wall, `axis=x` for a state).
+`E_UNKNOWN_ID` instead names the target's nearest block, or, when another version of the edition
+declares the ID, that version. The nearest block, and the nearest pair of `E_STATE_DOMAIN`, is
+carried as `data.suggestion` too ([§11.2](#112-machine-readable-payload)); on a state lowering
+derived, `E_STATE_DOMAIN` carries it there alone, since the source has no literal to correct.
 
 An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
 ...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
@@ -752,7 +822,7 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 | `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. Present when cells were dropped; absent when the walkway was past the router's cap and not laid. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"?, "since"?, "until"?, "declared_by"? }`. See below. |
-| `E_PARITY_UNSUPPORTED` | `{ "kind": "parity_unsupported", "id", "registry", "declared_by", "reason" }`. The block ID, the target that cannot build it as `"<edition> <version>"`, the edition that has it (`java` or `bedrock`), and the pack's sentence for what the block is and why the target's edition has none. |
+| `E_PARITY_UNSUPPORTED` | `{ "kind": "parity_unsupported", "id", "registry", "declared_by", "reason" }`. The block or entity ID, the target that cannot build it as `"<edition> <version>"`, the edition that has it (`java` or `bedrock`), and the pack's sentence for what it is and why the target's edition has none. |
 | `E_STATE_DOMAIN` | `{ "kind": "state_domain", "id", "key", "value", "registry", "reason", "valid", "origin", "suggestion"?, "valid_at"? }`. See below. |
 | `E_STATE_UNMAPPED` | `{ "kind": "state_unmapped", "id", "states", "registry" }`. The block ID, its `key=value` pairs comma-joined, and the target whose state map has no form for them, as `"<edition> <version>"`. |
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
@@ -799,17 +869,19 @@ Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)).
 
 **`E_STATE_DOMAIN`** is about one pair of one state, so a literal with two faults is two findings.
 `key` and `value` are the pair as the state carries it. `reason` is `unknown_property` when the
-block has no such property, and `valid` then lists the properties it has, or `value_outside` when
-it has the property but not the value, and `valid` lists the values the property takes; both are
-the pinned target's, in its table's order. `origin` is `literal` for a state literal and `derived`
-for a state lowering wrote itself, which is a defect in Cairn or the pack rather than in the source.
+block has no such property, and `valid` then lists the properties it has, or `value_outside` when it
+has the property but not the value, and `valid` lists the values the property takes; both are the
+pinned target's, in its table's order. `origin` is `literal` for a state literal, `argument` for a
+state a member's own `key=` wrote, such as a `note_block`'s `instrument=`, and `derived` for a state
+lowering wrote itself, which is a defect in Cairn or the pack rather than in the source.
 `suggestion` is the nearest of `valid` within the typo threshold, and `valid_at` lists the other
 versions of the edition whose tables take the pair, oldest first; each is absent when it is empty.
 
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
-mapping is what to correct rather than the source line. `required` is `stair`, `door`, `chest` or
-`button`, named rather than implied so that a further family is a new value here, not a new code.
+mapping is what to correct rather than the source line. `required` is `stair`, `door`, `chest`,
+`button`, `trapdoor`, `pillar`, `sign` or `bed`, named rather than implied so that a further family
+is a new value here, not a new code.
 
 `W_TRUTH_TABLE_PARTIAL.missing` is a **sample** rather than the set: twenty inputs have a million
 combinations. Take the count from `2^inputs - covered`, never from `missing.len()`. `inputs` is
@@ -827,15 +899,23 @@ holds `2^130`.
 The `E_` / `W_` prefix is not the severity, in either direction. Most `W_` codes mark a
 partial-build degradation, but some are warnings without being one, among them `W_UNUSED_DEF`, the
 two truth-table warnings, the two `@cairn` codes, `W_INTENDED_TARGET_CAP`,
-`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`, and
-`W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged; and two `E_`-prefixed codes are
-decided by the rule above rather than by their name:
+`W_INTENDED_TARGET_UNSUPPORTED`, `W_THEME_VARIANT_REBOUND`, `W_DUPLICATE_WALKWAY`,
+`W_STATE_LITERAL_UNCHECKED`, whose literal is written unchanged, and the four constraint checks;
+and two `E_`-prefixed codes are decided by the rule above rather than by their name:
 
 - `E_UNKNOWN_SLOT_TARGET` is an **error**, because the fault is in the source: the slot is written
   with a value that is not a material token. Its members degrade as they would with no theme bound,
   so what is built does not set it apart from `W_NO_THEME_BOUND`.
 - `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule that matches nothing overrides
   nothing.
+
+`W_NO_ATTACHMENT_FACE`, `W_UNSUPPORTED_BLOCK`, `W_WATER_SPILL` and `W_ENTITY_CLIPPING` are warnings
+by the second rule. The structure file holds the blocks the source asked for, and what the game does
+with them once they are placed is the behaviour [Versioning and Editions
+§10.2](/spec/versioning-editions/#102-language-contract-recompile-dont-transcode) does not
+guarantee. The catalog is written by hand and lists the blocks it knows, so a build it passes may
+still lose a block it does not list, and one it warns on may be meant: a lever its author will hang
+a wall behind once the structure is placed.
 
 `E_PARSE` is one code for every shape a parse fails in (a stray character, an odd indent, an integer
 past `i64`, a keyword where an item was expected), with the message saying which. A code per shape
@@ -853,22 +933,23 @@ shipped version declares, are not deferred: each stands in for the block a targe
 it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no
 `W_PHASE_CONFLICT` between it and another block, and no `W_PALETTE_TOO_LARGE` that only it could
 cause, since the palette is counted without it. A stand-in overwritten by air, or air by a stand-in,
-is still a `W_PHASE_CONFLICT`, since no pack names air. A `door`, `chest`, sensor or actuator built
-from its default block takes the block the pack names for it, so it is such a block too, and a
-`W_WALKWAY_BLOCKED` note says "a block" where a pinned check would name it. `E_UNKNOWN_ID`,
-`E_STATE_DOMAIN`, `E_STATE_UNMAPPED`, `E_PARITY_UNSUPPORTED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the
-pack's verdicts and are not raised, nor are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned
-target's tables, and `E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition`
-alone picks that edition's theme variants and keeps its `@edition` guards. With neither flag, each
-edition's variants are lowered, with that edition's guards: a finding whose span is on a line only
-one edition's variant reads, or whose span or one of whose notes' spans is on a line under that
-edition's guard, is that edition's verdict and is reported, and any other finding is reported when
-every edition raises it with the same code at the same span, once for each wording the editions give
-it. Where some line stands under a guard, resolution's findings are kept by the same rule, each
-edition's branch resolved with no variant pinned, so the edition-variant softening of
-`E_UNRESOLVED_SLOT` ([§11.1](#materials-and-targets)) holds on every line as it does in a source
-with no guard. A check with `--target` lowers once, against the target, so no finding is reported
-twice.
+is still a `W_PHASE_CONFLICT`, since no pack names air. A `beam`, `door`, `chest`, `trapdoor`,
+`note_block`, `sign`, `bed`, sensor or actuator built from its default block takes the block the
+pack names for it, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a block" where a
+pinned check would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`,
+`E_PARITY_UNSUPPORTED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised,
+nor are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, the four [constraint
+checks](#constraint-checks), which read the pinned version's blocks, and `E_PARTIAL_BUILD`, which
+counts what a build at a target loses. `--edition` alone picks that edition's theme variants and
+keeps its `@edition` guards. With neither flag, each edition's variants are lowered, with that
+edition's guards: a finding whose span is on a line only one edition's variant reads, or whose span
+or one of whose notes' spans is on a line under that edition's guard, is that edition's verdict and
+is reported, and any other finding is reported when every edition raises it with the same code at
+the same span, once for each wording the editions give it. Where some line stands under a guard,
+resolution's findings are kept by the same rule, each edition's branch resolved with no variant
+pinned, so the edition-variant softening of `E_UNRESOLVED_SLOT` ([§11.1](#materials-and-targets))
+holds on every line as it does in a source with no guard. A check with `--target` lowers once,
+against the target, so no finding is reported twice.
 
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a
@@ -934,8 +1015,8 @@ the key itself decides whether the member is built at all, the member is left ou
 `W_DEFERRED_MEMBER` (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
 [§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
 reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
-*unreached* key is one this specification defines that no pass reads yet. `window shape=` /
-`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today. Every
+*unreached* key is one this specification defines that no pass reads yet. `window shape=` and a
+header's `class=` are those keys today. Every
 `key=value` on the right of a `theme` selector row whose keyword the compiler knows is one too,
 reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
 ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
@@ -1008,6 +1089,114 @@ told its keyword is unknown and not that its host cannot emit.
 
 ## 11.4 Constraint catalog
 
-In-game constraints are cataloged and managed per version: gravity blocks, attachment conditions,
-fluid flow, and disallowed attachment combinations ([Versioning and Editions](/spec/versioning-editions/)).
-"A frame cannot hang on glass" lives there.
+The constraint catalog says what the registry packs cannot: how the game treats a block once it
+stands in the world, and where a block's meaning changes between versions. The packs are extracted
+from the game; the catalog is written by hand ([Versioning and
+Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). The built-in one ships beside
+the packs, as `registry-data/constraints.json` in `cairn-lang-formats`, and is loaded and checked as
+they are. A lock records the sha256 of its text as `constraint_catalog_hash`
+([§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
+
+One catalog serves both editions. It names blocks by their canonical ids, which are Java's
+([Materials and Themes §7.2](/spec/materials-themes/#72-canonical-vocabulary)), without the
+`namespace` it declares once, and a Bedrock build reads each of its blocks as the canonical blocks
+the pack's state map names. Its rules hold at every version that declares their blocks; what differs
+between versions is the faces the pack gives each block there, and a meaning that changes at a
+version is a `semantic_sensitivity` row.
+
+| Table | A row gives | Read by |
+|---|---|---|
+| `semantic_sensitivity` | `edition`, a `boundary` version of it, the `reason`, and the `ids` whose meaning changes there. | `cairn info`'s `semantic-sensitive` row, the lock's `member_version_sensitivity` and `W_SEMANTIC_SENSITIVITY` ([Versioning and Editions](/spec/versioning-editions/#the-semantic-sensitive-row)) |
+| `attachment` | `ids` and `hangs_by`, `face` for a block that reads `face` and `facing`, `facing` for one that reads `facing` alone. | `W_NO_ATTACHMENT_FACE` |
+| `support` | `ids`, `on` (`below` or `above`), `needs` (`sturdy` or `center`), and `also_on`, the blocks that hold them whatever their faces. | `W_UNSUPPORTED_BLOCK` |
+| `gravity` | `ids`. | `W_UNSUPPORTED_BLOCK` |
+| `center_support` | `ids` and the `faces` of each that hold a centre. | `W_UNSUPPORTED_BLOCK`, for a `center` row |
+| `entity_aabb` | `entities`, and the `width` and `height` of each one's box, in blocks, with its `depth` for one that hangs on a face. | `W_ENTITY_CLIPPING`, and `W_NO_ATTACHMENT_FACE` for one that hangs ([Entity AABB](#entity-aabb)) |
+
+A `support` or `center_support` row may hold for some states only: its `when` names them,
+`key: value` each. A row reads a state the build leaves unwritten as its `defaults` give it, and
+`defaults` names each state the row reads, no more. So a lantern has two rows, `hanging: "false"` on
+the block below and `hanging: "true"` from the block above, a door one for `half: "lower"`, and an
+`attachment` row gives `face` and `facing` their defaults. No state of a block meets two rules of
+`attachment`, `support` and `gravity`, so a block with two rows, as the lantern, gives each a
+different value of one state in `when`.
+
+```json
+{
+  "schema_version": 1,
+  "name": "cairn-builtin-constraints",
+  "namespace": "minecraft",
+  "semantic_sensitivity": [
+    {"edition": "java", "boundary": "1.17", "reason": "cauldron split",
+     "ids": ["cauldron", "lava_cauldron", "powder_snow_cauldron", "water_cauldron"]}
+  ],
+  "attachment": [
+    {"ids": ["lever", "stone_button"], "hangs_by": "face",
+     "defaults": {"face": "wall", "facing": "north"}}
+  ],
+  "support": [
+    {"ids": ["lantern"], "when": {"hanging": "true"}, "defaults": {"hanging": "false"},
+     "on": "above", "needs": "center"},
+    {"ids": ["redstone_wire"], "on": "below", "needs": "sturdy", "also_on": ["hopper"]}
+  ],
+  "gravity": [{"ids": ["gravel", "sand"]}],
+  "center_support": [
+    {"ids": ["chain"], "when": {"axis": "y"}, "defaults": {"axis": "y"}, "faces": ["down", "up"]}
+  ],
+  "entity_aabb": [
+    {"entities": ["armor_stand"], "width": 0.5, "height": 1.975},
+    {"entities": ["text_display"], "width": 0, "height": 0},
+    {"entities": ["item_frame"], "width": 0.75, "height": 0.75, "depth": 0.0625}
+  ]
+}
+```
+
+The loader refuses a catalog whose `schema_version` it does not read, a key no table has, a row that
+names no block or entity, an id no Java version declares, a `when` or `defaults` value no Java
+version gives the block, a state a row reads with no default or a default it does not read, a state
+of a block that meets two rules, a `boundary` its edition's version table cannot place, a `reason`
+that is empty, a `width` or `height` below 0, a `depth` that is not above 0, and an entity given two
+boxes. A build never reads a half-understood catalog.
+
+The built-in catalog's `semantic_sensitivity` has three rows, all Java's, each listing the blocks
+that exist on both sides of its boundary: walls, whose connection states went from `true` / `false`
+to `none` / `low` / `tall` at 1.16; the cauldron, which split into one block per contents at 1.17;
+and the blocks that store items in a block entity, whose items moved from a `tag` to data components
+at 1.20.5. A lever on a glass pane is dropped and one on glass is kept, since glass is a full block.
+
+### Entity AABB
+
+An entity's box is the space it takes in the world, from its `entity_aabb` row, in blocks. An
+entity that stands has a box `width` across in x and z, centred on its point, and `height` up from
+it. One that hangs on a face, an item frame or a painting, has a `depth` as well: its box is `width`
+along the face, `height` up it and `depth` out of it, from the face it hangs on, centred on its cell
+along the face. A frame on a floor or under a ceiling lies with its `width` along x and its
+`height` along z. A painting's `width` and `height` are per block of its variant, so its box spans
+every cell it covers ([Entities §8.1](/spec/entities/#hanging-entities)). A display's box is
+empty, `width` and `height` 0, as the game gives a display none: nothing clips it, and it clips
+nothing.
+
+The check reads each entity a member places and reports `W_ENTITY_CLIPPING` at the member where its
+box overlaps:
+
+- a cell holding a block all six of whose faces are sturdy, which the entity would stand inside;
+- a cell of a door, open or closed, which its swing passes through;
+- the box of an entity a line written before it places, which would push the two apart.
+
+A box that only touches one of these, meeting it at a face, does not overlap it, so a frame flat on
+its wall and an armor stand beside a block are not reported. An entity the table gives no box is not
+checked, as a block the catalog does not list is not. The built-in catalog boxes every entity a
+keyword places, so only a `spawn` of another entity goes unchecked.
+
+An entity that hangs MUST hang on blocks the game counts as solid, one behind each cell its box
+reaches into, or the game drops it. Which blocks are solid no table records, so the check holds a
+hanging entity only to what is surely not: where a cell behind it holds air, water or lava, it is
+`W_NO_ATTACHMENT_FACE`. So a painting taller than the wall it hangs on, or a frame at a coordinate
+triple with open air behind it, is reported.
+
+Both checks run as the [constraint checks](#constraint-checks) do: at a pinned target, on each body
+once every member of it is painted, and never on a body whose lowering raised an error. Each
+reports a member once, at its line, with the count of what its entity fails against and the first,
+a cell written as the member's `at=` would write it; a cell outside the body's array is not judged.
+`W_ENTITY_CLIPPING` is a warning for the reason the constraint checks are
+([§11.3](#113-error-vs-warning)).

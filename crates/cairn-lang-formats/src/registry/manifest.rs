@@ -44,6 +44,10 @@ pub struct PackFiles {
     /// The `connections` file; without it, lowering derives no connection state.
     #[serde(default)]
     pub connections: Option<String>,
+    /// The `paintings` file; without it, a painting's `variant=` is not checked and it hangs as
+    /// one cell.
+    #[serde(default)]
+    pub paintings: Option<String>,
 }
 
 #[cfg(test)]

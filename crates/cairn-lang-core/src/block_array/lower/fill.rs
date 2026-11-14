@@ -10,6 +10,7 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::args::{diag_invalid_member, ident_or_ignore};
+use crate::block_array::geometry::Declared;
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::{BlockState, PaletteIndex};
 
@@ -51,6 +52,7 @@ pub(super) fn fill_material(
     ) else {
         return;
     };
+    canvas.declare(Declared::boxed(cells.bbox(), None));
     for cell in cells.cells() {
         canvas.paint(cell, || idx);
     }
@@ -152,6 +154,9 @@ fn pour_water(
     palette: &mut ScopePalette,
     canvas: &mut Canvas,
 ) {
+    canvas
+        .for_member(index)
+        .declare(Declared::boxed(cells.bbox(), None));
     let mut waterlogs: HashMap<PaletteIndex, bool> = HashMap::new();
     for cell in cells.cells() {
         let Some(slot) = canvas.slot_at(cell) else {
@@ -188,7 +193,7 @@ fn water_source() -> BlockState {
     let mut properties = IndexMap::new();
     properties.insert("level".to_owned(), "0".to_owned());
     BlockState {
-        id: "minecraft:water".to_owned(),
+        id: BlockState::WATER_ID.to_owned(),
         properties,
     }
 }

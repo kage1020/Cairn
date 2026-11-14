@@ -133,6 +133,9 @@ pub enum Item {
         /// Byte range of the name token alone.
         #[serde(skip)]
         name_span: Span,
+        /// Bare values after the name, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// `requires version>=X` lines the body declares, in source order.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         requires: Vec<MemberRequires>,
@@ -152,6 +155,9 @@ pub enum Item {
         name_span: Span,
         /// Inline `key=value` arguments on the definition header.
         args: Vec<Arg>,
+        /// Bare values on the definition header, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// `requires version>=X` lines the body declares, in source order.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         requires: Vec<MemberRequires>,
@@ -162,12 +168,16 @@ pub enum Item {
         span: Span,
     },
     /// `site NAME[:]` block — multi-building placement.
+    #[non_exhaustive]
     Site {
         /// Site name following the `site` keyword.
         name: String,
         /// Byte range of the name token alone.
         #[serde(skip)]
         name_span: Span,
+        /// Bare values after the name, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range of the whole block, indented body included.
@@ -175,6 +185,7 @@ pub enum Item {
         span: Span,
     },
     /// `struct NAME[ ARGS]` block — single building / structural composition.
+    #[non_exhaustive]
     Struct {
         /// Struct name following the `struct` keyword.
         name: String,
@@ -183,6 +194,9 @@ pub enum Item {
         name_span: Span,
         /// Inline `key=value` arguments on the struct header.
         args: Vec<Arg>,
+        /// Bare values on the struct header, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range of the whole block, indented body included.
@@ -281,16 +295,24 @@ impl Item {
 #[non_exhaustive]
 pub enum ThemeRule {
     /// `slot NAME -> VALUE` mapping.
+    #[non_exhaustive]
     Slot {
         /// Slot name on the LHS.
         slot: String,
         /// Token or value bound to the slot.
         value: Value,
+        /// `key=value` arguments of a member form (`-> text_display scale=2.0`), in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        arguments: Vec<Arg>,
+        /// Bare values after the bound one, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the entire `slot NAME -> VALUE` line.
         #[serde(skip)]
         span: Span,
     },
     /// `KEYWORD[ATTRS] -> KEY=VALUE [KEY=VALUE...]` selector binding.
+    #[non_exhaustive]
     Selector {
         /// Member keyword on the LHS (`window`, `door`, ...).
         keyword: String,
@@ -298,6 +320,9 @@ pub enum ThemeRule {
         attrs: Vec<Arg>,
         /// `key=value` bindings on the RHS of the arrow.
         bindings: Vec<Arg>,
+        /// Bare values among the bindings, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the entire selector rule line.
         #[serde(skip)]
         span: Span,
@@ -343,16 +368,22 @@ pub enum Statement {
         span: Span,
     },
     /// `logic LHS = EXPR` line — binds a boolean signal.
+    #[non_exhaustive]
     Logic {
         /// LHS reference being defined.
         lhs: DottedRef,
         /// RHS boolean expression.
         rhs: Expr,
+        /// Whether an `=` stands between the name and the expression: a line without one binds
+        /// nothing (`spec/syntax` "Lexical").
+        #[serde(skip_serializing_if = "is_true")]
+        binds: bool,
         /// Byte range of the whole `logic ...` line.
         #[serde(skip)]
         span: Span,
     },
     /// `assert truth(INPUTS -> OUTPUT) { ROWS }` — a truth table over input signals.
+    #[non_exhaustive]
     AssertTruth {
         /// Input signal references inside `truth(...)`.
         inputs: Vec<DottedRef>,
@@ -360,11 +391,15 @@ pub enum Statement {
         output: DottedRef,
         /// One `bits -> result` per row.
         rows: Vec<TruthRow>,
+        /// Bare values after the closing `}`, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert truth(...) { ... }` form.
         #[serde(skip)]
         span: Span,
     },
     /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` — bounded liveness.
+    #[non_exhaustive]
     AssertAlways {
         /// Antecedent reference on the LHS of `->`.
         antecedent: DottedRef,
@@ -372,11 +407,15 @@ pub enum Statement {
         consequent: DottedRef,
         /// `within N` bound in ticks.
         within: u32,
+        /// Bare values after the closing `)`, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert always(...)` form.
         #[serde(skip)]
         span: Span,
     },
     /// `assert latency(FROM -> TO) <= N` — an upper bound on the ticks from one signal to another.
+    #[non_exhaustive]
     AssertLatency {
         /// Signal reference the path starts at, before `->`.
         from: DottedRef,
@@ -384,6 +423,9 @@ pub enum Statement {
         to: DottedRef,
         /// `<= N` bound in ticks.
         bound: u32,
+        /// Bare values after the bound, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert latency(...) <= N` form.
         #[serde(skip)]
         span: Span,
@@ -399,6 +441,15 @@ pub enum Statement {
         #[serde(skip)]
         span: Span,
     },
+}
+
+/// Whether `value` is `true`, the default a serialized `binds` leaves out.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "`skip_serializing_if` passes the field by reference"
+)]
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 impl Statement {
@@ -439,6 +490,8 @@ pub enum ValueKind {
     Bool(bool),
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
+    /// Decimal literal as written (`1.5`): the key that reads one picks a float or a double.
+    Decimal(String),
     /// Size literal `WxH` (`9x7`), in blocks.
     Size {
         /// Width in blocks.
@@ -459,6 +512,8 @@ pub enum ValueKind {
     Token(String),
     /// Block id as Minecraft spells it, with its state literal if any: `minecraft:light[level=15]`.
     BlockId(String),
+    /// `nbt={...}` compound as written, braces included, in the SNBT subset the lexer checks.
+    Nbt(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(DottedRef),
     /// Double-quoted string literal.
@@ -514,6 +569,7 @@ impl Value {
             ValueKind::Str(s) => Some(format!("\"{s}\"")),
             ValueKind::Bool(b) => Some(b.to_string()),
             ValueKind::Int(i) => Some(i.to_string()),
+            ValueKind::Decimal(text) | ValueKind::Nbt(text) => Some(text.clone()),
             ValueKind::Size { w, h } => Some(format!("{w}x{h}")),
             ValueKind::Coord { x, y, z } => Some(format!("{x},{y},{z}")),
             ValueKind::Token(t) => Some(format!("@{t}")),
@@ -539,10 +595,12 @@ impl Value {
             ValueKind::Ident(..) => "identifier",
             ValueKind::Bool(..) => "boolean",
             ValueKind::Int(..) => "integer",
+            ValueKind::Decimal(..) => "decimal",
             ValueKind::Size { .. } => "size",
             ValueKind::Coord { .. } => "coordinate",
             ValueKind::Token(..) => "token",
             ValueKind::BlockId(..) => "block id",
+            ValueKind::Nbt(..) => "NBT compound",
             ValueKind::DotRef(..) => "reference",
             ValueKind::Str(..) => "string",
             ValueKind::List(..) => "list",

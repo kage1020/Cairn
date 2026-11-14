@@ -7,10 +7,11 @@ mod block_id;
 pub mod data_version;
 mod dims;
 pub mod java_structure;
+mod nbt_text;
 pub mod portability;
 pub mod registry;
 
-pub use bedrock_state::{BedrockStateError, StateTranslation, translate_states};
+pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};
 pub use bedrock_structure::{
     BedrockStructureError, McStructure, ParityNote, build_mcstructure_tag, prepare_mcstructure,
     write_mcstructure,
@@ -27,6 +28,7 @@ pub use portability::{
     portability_for_java,
 };
 pub use registry::{
-    PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
-    load_builtin_pack, load_from_dir,
+    ConstraintIndex, ConstraintsError, PackFiles, PackManifest, PackSource, RegistryError,
+    RegistryPack, builtin_constraints, builtin_pack, load_builtin_constraints, load_builtin_pack,
+    load_from_dir, parse_constraints,
 };

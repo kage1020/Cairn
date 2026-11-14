@@ -6,6 +6,9 @@
 
 mod args;
 mod attach;
+mod constraint;
+mod entity;
+mod geometry;
 mod joins;
 mod lower;
 mod material;
@@ -19,13 +22,17 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
+pub use constraint::{Constraint, EntityBox, Support};
+pub use entity::{Enchantment, Entity, EntityData, Item, Trade};
+pub use geometry::{Bbox, MemberGeometry};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{
     BUILTIN_BLOCK_IDS, findings_under_guards, findings_without_target, lower_to_block_array,
 };
 pub use material::{
-    AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, MaterialDeferred,
-    OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, resolve_block_state,
+    AbsentConcept, AbsentEntity, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin,
+    MaterialDeferred, OutOfDomain, PaintingLookup, PaintingVariant, StateDomain, TargetRegistry,
+    UnknownId, UnmappedState, resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.
@@ -118,10 +125,11 @@ pub struct BlockArray {
     pub palette: Palette,
     /// Palette indices in `(y, z, x)` order, as [`Dims::index`] lays them out.
     pub voxels: Vec<PaletteIndex>,
-    /// Block entities on the grid: a circuit's comparators, as no member lowers to one.
+    /// Block entities on the grid, each beside the block that keeps it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
-    /// Free entities; always empty, as no member lowers to one.
+    /// The entities the body's members place, in the order of their cells, as [`Dims::index`]
+    /// lays them out, and in line order within one cell.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<Entity>,
     /// The [`crate::resolve::Resolution`] key this volume was lowered from (`struct::cottage`).
@@ -143,6 +151,8 @@ pub struct ResolvedMember {
     pub id: Option<String>,
     /// Each block state the member resolved to, in the order its first cell is laid out.
     pub resolved_state: Vec<ResolvedBlock>,
+    /// Where the member sits and what it occupies (`spec/entities` "Anchor conventions").
+    pub geometry: MemberGeometry,
     /// Byte range of the member's own line.
     #[serde(skip)]
     pub span: Span,
@@ -456,6 +466,9 @@ impl BlockState {
     /// Canonical Minecraft id for the air block.
     pub const AIR_ID: &'static str = "minecraft:air";
 
+    /// Canonical Minecraft id for water, which a water `fill` pours.
+    pub const WATER_ID: &'static str = "minecraft:water";
+
     /// The [`Self::AIR_ID`] state, with no properties.
     #[must_use]
     pub fn air() -> Self {
@@ -496,25 +509,77 @@ impl BlockState {
     }
 }
 
-/// A block entity on the grid, with the integer fields of its NBT payload.
+/// A block entity on the grid: what its block keeps beside its state, which each writer saves in
+/// its own edition's shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockEntity {
     /// Voxel coordinate the block entity sits at.
     pub pos: (u32, u32, u32),
-    /// Block entity id, e.g. `minecraft:comparator`.
-    pub id: String,
-    /// Integer fields of its payload, such as a comparator's `OutputSignal`.
-    #[serde(skip_serializing_if = "IndexMap::is_empty")]
-    pub fields: IndexMap<String, i32>,
+    /// What the block entity holds.
+    #[serde(flatten)]
+    pub data: BlockEntityData,
 }
 
-/// An entity (frames, paintings, item displays, ...), without its payload.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Entity {
-    /// World-space coordinate the entity sits at.
-    pub pos: (f64, f64, f64),
-    /// Entity id, e.g. `minecraft:item_frame`.
-    pub id: String,
+/// What a [`BlockEntity`] holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BlockEntityData {
+    /// Integer fields under a Java block entity id, as a circuit comparator keeps its
+    /// `OutputSignal` under `minecraft:comparator`.
+    Fields {
+        /// Block entity id, e.g. `minecraft:comparator`.
+        id: String,
+        /// Integer fields of its payload.
+        #[serde(skip_serializing_if = "IndexMap::is_empty")]
+        fields: IndexMap<String, i32>,
+    },
+    /// A sign's two faces (`spec/entities` "Two tiers").
+    Sign {
+        /// The face toward the way the sign faces, which its `text=` writes.
+        front: SignText,
+        /// The face its `back=` writes.
+        back: SignText,
+    },
+    /// One half of a bed, with the dye colour its block names.
+    Bed {
+        /// The dye's name, such as `red`; `None` for a block that names no colour.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+    },
+    /// The `nbt={...}` compound a `raw_block` writes, as written, which a writer saves as given.
+    Nbt {
+        /// The compound's text.
+        compound: String,
+    },
+}
+
+/// The sixteen dye colours, in the order the game numbers them.
+pub const DYE_COLORS: [&str; 16] = [
+    "white",
+    "orange",
+    "magenta",
+    "light_blue",
+    "yellow",
+    "lime",
+    "pink",
+    "gray",
+    "light_gray",
+    "cyan",
+    "purple",
+    "blue",
+    "brown",
+    "green",
+    "red",
+    "black",
+];
+
+/// One face of a sign.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SignText {
+    /// Its lines, top first, at most four.
+    pub lines: Vec<String>,
+    /// Whether the text glows.
+    pub glowing: bool,
 }
 
 #[cfg(test)]

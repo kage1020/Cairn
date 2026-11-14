@@ -41,7 +41,11 @@ Some residue is unsolvable and is stated rather than hidden:
 - Visual consistency (colour-temperature drift).
 - Physics rule changes (1.21 wind charges breaking old traps).
 
-Geometrically correct NBT is emitted; the gameplay experience is not guaranteed.
+Geometrically correct NBT is emitted; the gameplay experience is not guaranteed. Where the
+constraint catalog knows the game will drop a block, let it fall or let water run out, a pinned
+build warns ([Lint](/spec/lint/#constraint-checks)), and where it knows a member's meaning changes at
+a version, `cairn info` and the lock name the member ([§10.5](#the-semantic-sensitive-row)). Neither
+is a guarantee: the catalog lists what it knows.
 
 ## 10.3 Backend = data tables
 
@@ -56,24 +60,22 @@ table. The block tables are extracted: Java's from the server jar's `--reports`,
 release's block palette, every block state the game accepts. Each `pack.json` names the file every
 table was extracted from and that file's hash, and rerunning the extraction against them is a check.
 
-**Hand-written, version-tagged constraint catalog** for what the data does not carry: attachment (a
-frame cannot go on glass), gravity and support (gravel, hanging lanterns), fluid behaviour, entity
-AABB, redstone. Defined once per new version, and every user benefits. No constraint catalog ships
-yet, so a lock records its `constraint_catalog_hash` as zeros and no member is reported
-semantic-sensitive ([§10.5](#105-which-version-is-it-for-has-three-answers)).
+**Hand-written constraint catalog** for what the data does not carry: attachment (a lever cannot
+hang on a glass pane), gravity and support (gravel, hanging lanterns), fluid behaviour, entity AABB,
+redstone, and the versions at which a block's meaning changes. Defined once, and every user
+benefits. The built-in catalog ships beside the packs, one file for both editions in canonical IDs.
+Its rules hold at every version that declares their blocks, and read each version's faces from the
+pack; a meaning that changes at a version is tagged with that version. Its tables, and the checks
+that read them, are [Lint §11.4](/spec/lint/#114-constraint-catalog)'s. A lock records the sha256 of
+its text ([§10.6](#106-provenance-and-lock)).
 
-```yaml
-constraints:
-  minecraft:item_frame:
-    type: entity_attachment
-    since: "1.13"
-    targets: { solid_full_face: true, glass_pane: false }
-    error: "item_frame requires a solid attachable face"
-  minecraft:lantern:
-    type: support
-    states:
-      hanging=true:  { requires_above: solid_or_chain }
-      hanging=false: { requires_below: solid_top }
+```json
+"support": [
+  {"ids": ["lantern"], "when": {"hanging": "false"}, "defaults": {"hanging": "false"},
+   "on": "below", "needs": "center"},
+  {"ids": ["lantern"], "when": {"hanging": "true"}, "defaults": {"hanging": "false"},
+   "on": "above", "needs": "center"}
+]
 ```
 
 ### Folding the `(edition, version)` matrix
@@ -111,6 +113,15 @@ one block ID, and its `overrides` name the versions that spell it differently, a
 ```json
 { "token": "floor.stone.smooth", "block": "stone_bricks",
   "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }] }
+```
+
+An entry whose block the edition spells for several Java blocks also names, as `canonical`, the
+Java block the token stands for. Bedrock's one `bed` is every dyed bed, and its writer saves the
+colour of the bed `canonical` names in the bed's block entity ([Entities
+§8.1](/spec/entities/#81-two-tiers)):
+
+```json
+{ "token": "bed.blue", "block": "bed", "canonical": "blue_bed" }
 ```
 
 The Bedrock pack carries its state maps as two more components. `states` is generated from
@@ -157,9 +168,13 @@ one row per property and the blocks it covers, or every other block that drops i
 loses a value other than the Java default (a stair's `shape` up to 1.21.60), and a `derived` one
 loses nothing the lowering derived, because Bedrock works it out itself (a fence's connections), but
 loses at any value one a member's material or line wrote ([Blockstate
-§6.1](/spec/blockstate/#connections)). Its `reason` is the sentence `W_INTENT_DEGRADED` prints
-([§10.7](#107-java--bedrock-portability)). The loader refuses a dropped property no row classifies,
-and the extractor a row nothing drops.
+§6.1](/spec/blockstate/#connections)). A `block_entity` one loses nothing, because Bedrock keeps it
+in the block's block entity, which the writer fills from it: a chest's `type`, as the pairing of its
+two halves, and a note block's `note` ([Entities §8.1](/spec/entities/#81-two-tiers)). A
+`block_entity` row the writer has no block entity for is a defect in the pack, and the writer
+refuses each entry whose value it would have to keep there. A row's `reason` is the sentence
+`W_INTENT_DEGRADED` prints where the property is lost ([§10.7](#107-java--bedrock-portability)).
+The loader refuses a dropped property no row classifies, and the extractor a row nothing drops.
 
 Both packs carry a `connections` component: what each block is to the rules that join panes, fences,
 walls, chests and redstone dust to their neighbours ([Blockstate
@@ -205,6 +220,24 @@ no sideways face or whose `open` is no boolean, a chest whose default `facing` i
 and a `dust` face that is no sideways face, since dust lies on the block under it. On Java it also
 refuses a row naming a block, or a value of a state, that the version's block table does not give.
 
+Both packs carry a `paintings` component too: the paintings each targetable version has, each with
+its `width` and `height` in blocks, which a `painting`'s `variant=` names and hangs by ([Entities
+§8.1](/spec/entities/#hanging-entities)). It is written by hand from the game: Java's from each
+version's server jar, whose data files give each painting's size from 1.21, and Bedrock's from the
+painting table GeyserMC ships with the block palette each version's `blocks` came from, which also
+gives the `spelling` Bedrock saves a painting's `Motive` as. Rows group the versions that share
+their paintings:
+
+```json
+{ "versions": ["1.21", "1.21.4", "26.3"],
+  "paintings": [{"variant": "orb", "width": 4, "height": 4}] }
+```
+
+The loader refuses a table that names no version or no painting, a version no targetable row of
+the version table names, a targetable version given no painting, a painting given twice at one
+version, a `variant` that is no bare name, a side outside 1 to 16 blocks, and a `spelling` that is
+empty.
+
 ## 10.4 Fail-loud and minimum-version inference
 
 Unknown IDs, out-of-domain states, and parity gaps are hard errors. Silent substitution and implicit
@@ -240,13 +273,15 @@ check runs where the ID check runs and nowhere else
 both to a build that pins one.
 
 A state literal ([Syntax](/spec/syntax/)) is checked at its token, and the member or walkway that
-binds it is not built. The finding names the pair, the values the property takes, or the properties
-the block has when it has no such property, and the other versions whose tables take the pair: a
-domain that changed between releases is the likeliest cause of a literal that is valid somewhere,
-and the repair is then a target rather than an edit. Lowering checks the states it derives as well
-(a stair's `facing`, `half` and `shape`), at the member, so a derivation the target's block cannot
-hold is refused rather than written; that is a defect in Cairn or the pack's table, and the finding
-says so.
+binds it is not built. A state a member's own line writes, such as a `note_block`'s `instrument=`
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), is checked
+the same way at its value. The finding names the pair, the values the property takes, or the
+properties the block has when it has no such property, and the other versions whose tables take the
+pair: a domain that changed between releases is the likeliest cause of a literal that is valid
+somewhere, and the repair is then a target rather than an edit. Lowering checks the states it
+derives as well (a stair's `facing`, `half` and `shape`), at the member, so a derivation the
+target's block cannot hold is refused rather than written; that is a defect in Cairn or the pack's
+table, and the finding says so.
 
 A literal on a block the pinned target's pack records no states for is written as given, with
 `W_STATE_LITERAL_UNCHECKED` ([Lint](/spec/lint/)) so that it is said rather than silent. Both
@@ -568,9 +603,8 @@ There is no single "for-version". `cairn info` reports three axes:
    disappear, so deciding Vmax from the registry alone is dangerous. The constraint catalog carries
    a `semantic_sensitivity` (boundary version + reason) separate from `since`/`until`, and a compile
    crossing one warns. Examples: the cauldron split at 1.17, wall connections going bool →
-   `none/low/tall` at 1.16, the item format at 1.20.5. No constraint catalog ships yet
-   ([§10.3](#103-backend--data-tables)), so the `semantic-sensitive` row is always `(none)` and no
-   compile warns.
+   `none/low/tall` at 1.16, the item format at 1.20.5, the three the built-in catalog ships. See
+   [the `semantic-sensitive` row](#the-semantic-sensitive-row).
 3. **The verified lock target** ([§10.6](#106-provenance-and-lock)). `cairn info` does not report
    it yet, because it reads no lockfile. `cairn compile` does compare a lock's target with the one
    it builds, and reports a change as `W_PREVIOUSLY_VERIFIED_TARGET`.
@@ -581,13 +615,13 @@ registry compatibility:  1.21.40 .. latest
 edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
 buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
 intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16)
+semantic-sensitive:      Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
 ```
 
 Every version named is one the built-in packs declare. The file behind this output carries
 `@requires version>=1.21.40`, which is what puts every Java target below the floor, and Bedrock
-1.21.0 with them. The `semantic-sensitive` row shows what a constraint catalog would add; today it
-reads `(none)`.
+1.21.0 with them. The `semantic-sensitive` row names Java members alone, since the built-in
+catalog's boundaries are all Java's.
 
 `intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
 declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
@@ -647,7 +681,7 @@ registry compatibility:  1.20.4 .. latest
 edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
 buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
 intended targets:        (none declared)
-semantic-sensitive:      (none)
+semantic-sensitive:      Java: (none)
 ```
 
 `1.20.4 .. latest` reads as an answer, and the row two below disproves it, with `1.20.4` itself in
@@ -847,6 +881,27 @@ fills that gap.
 A fifth line, `recommended test targets`, belongs to this axis and answers a different question
 again: which versions are worth testing against. No code path emits it yet.
 
+### The `semantic-sensitive` row
+
+The row answers the second axis per requested edition, as `Java: <members>   Bedrock: <members>`:
+each member as `name(reason @boundary)`, or `(none)` where the edition has none. A member is listed
+when a block it builds is one a `semantic_sensitivity` row of that edition names ([Lint
+§11.4](/spec/lint/#114-constraint-catalog)), once for each such row, in the order of the members. Its
+name is its `id=`, or its keyword where it carries none. The blocks are the ones the range-wide
+lowering builds, which the `edition portability` row reads too, so a Bedrock block is read as every
+canonical block a version's state map makes of it. `--format json` carries the row as
+`semantic_sensitive`, one `{edition, member, reason, boundary_version}` per entry, edition by
+edition in the order requested.
+
+The row lists what may change, not where it does. A member is listed whichever side of its boundary
+the versions it builds for lie: the row reads the source, and which versions that source is built
+for is the other rows' answer. The boundaries are the edition's own versions, so a member is never
+listed under an edition for another's boundary; the built-in catalog's are all Java's.
+
+A compile records its target's own answer in the lock's `member_version_sensitivity`, reading the
+blocks as that version does, and warns on a recompile for another version of the edition whose
+boundary lies between the two ([§10.6](#106-provenance-and-lock)).
+
 ## 10.6 Provenance and lock
 
 The `.crn` carries the language version it is written against (`@cairn`) and, about targets, only
@@ -862,12 +917,17 @@ target: { edition: java, mc_version: 1.20.4, data_version: 3700 }
 inputs: { registry_pack_hash: sha256:..., constraint_catalog_hash: sha256:... }
 resolved_ir_hash: sha256:...
 verified: true
-member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17" } ]
+member_version_sensitivity:
+  - { id: yard_water, reason: "cauldron split at 1.17" }
+  - { id: pantry, reason: "item format at 1.20.5" }
 ```
 
 A compile writes the lock next to its source as `<source>.lock` unless `--lock` names another
-path. No constraint catalog ships yet ([§10.3](#103-backend--data-tables)), so today
-`constraint_catalog_hash` is all zeros and `member_version_sensitivity` is `[]`.
+path. `constraint_catalog_hash` is the sha256 of the constraint catalog's text
+([§10.3](#103-backend--data-tables)). `member_version_sensitivity` lists what [the
+`semantic-sensitive` row](#the-semantic-sensitive-row) finds for the target's edition, reading the
+blocks as the target does, and each `reason` is the row's reason and boundary as `<reason> at
+<boundary>`.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and auto-address assignment. Auto-address assignment is not implemented yet: a member has
@@ -886,11 +946,16 @@ Recompiling for a different target shows the difference from the verified one lo
 ```text
 $ cairn compile build.crn --edition java --target 1.21.4 --lock build.crn.lock
 W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
-W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
+W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: pantry (item format at 1.20.5)
 ```
 
-The second warning reads the members the previous lock lists, so no lock a compile writes today
-produces it.
+The second warning names the members of this build whose boundary lies between the version the lock
+verified and the target, each with the boundaries it crosses. 1.20.4 and 1.21.4 lie either side of
+1.20.5 alone, so `yard_water`'s 1.17 is not named. It reads this build rather than the list the lock
+recorded: that list carries no boundary to weigh, and may name members the source no longer builds.
+Across editions it names no member, since two editions' versions are not ordered against each
+other. A lock whose version the edition's table cannot place has every sensitive member named, since
+where it stood cannot be told.
 
 ## 10.7 Java / Bedrock portability
 
@@ -937,7 +1002,7 @@ The canonical vocabulary absorbs only ID, state, and serialization differences. 
 and game-behaviour differences are not absorbed.** The cases that cannot be:
 
 - blocks only one edition has ([below](#a-block-only-the-other-edition-has))
-- display entities (absent on Bedrock)
+- display entities (absent on Bedrock; [below](#a-block-only-the-other-edition-has))
 - stairs `shape` on Bedrock before 1.26.60 (no such state there)
 - armor_stand pose
 - redstone propagation
@@ -964,6 +1029,13 @@ component, each row with the sentence a diagnostic prints for it:
 The loader refuses an `absent` ID that the pack's own `blocks` declare at some version, under that
 spelling or another of its `aliases` group, since the edition then has the block.
 
+The component's `entities` lists the other edition's entities a member places that the edition has
+no counterpart for, in the same rows: Bedrock's lists the display entities. A member that places
+one is `E_PARITY_UNSUPPORTED` at its line in a build of that edition, pinned or not, with the
+pack's reason, and the notes ask for the next step down the hierarchy below: a `hologram` for
+floating text, or a block or an `item_frame`, which both editions have ([Entities
+§8.1](/spec/entities/#displays)).
+
 A semantic member whose `mat_slot=` resolves to such a block, and a `connect … path=` that does, is
 `E_PARITY_UNSUPPORTED` ([Lint](/spec/lint/)) at the token, at a pinned target of the edition that
 lacks it. The block is no typo, so no nearest ID is offered. The notes give the pack's reason and
@@ -986,9 +1058,6 @@ answers an entry the edition's `absent` lists with the same reason
 
 ### Writing an alternative
 
-**Subject to change.** `hologram` and `slot` rules that take arguments are not built yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
 `@edition` conditionals in the semantic layer are forbidden. When an alternative is needed, work
 down this hierarchy:
 
@@ -1002,54 +1071,78 @@ down this hierarchy:
 ```
 @requires bedrock version>=1.21.40   # the Bedrock branch below is spelled for the flattened ids
 
-theme shop_java:    slot floating_text -> text_display scale=2.0
-theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
+theme shop_java:
+  slot stone         -> @cobblestone
+  slot floating_text -> text_display scale=2.0
+
+theme shop_bedrock:
+  slot stone         -> @cobblestone
+  slot floating_text -> sign glowing=true   # Bedrock fallback
 
 struct shop size=9x7
-  hologram id=shop_sign text="Weapon" mat_slot=floating_text   # the semantic layer is always neutral
+  floor    mat_slot=stone
+  walls    mat_slot=stone height=4
+  hologram id=shop_sign at=4,1,2 text="Weapon" mat_slot=floating_text   # a neutral semantic line
   @edition java
-    raw_block mat=minecraft:light[level=15] at=4,3,2
+    raw_block mat=minecraft:light[level=15] at=4,3,4
   @edition bedrock
-    raw_block mat=minecraft:light_block_15 at=4,3,2
+    raw_block mat=minecraft:light_block_15 at=4,3,4
 ```
 
-Of the snippet, the `@requires` line parses today, and so would all of the `struct`: its header, the
-`hologram` line and the two guards with what they hold. The parse never reaches the `struct`,
-though. A `theme` takes its rules on indented lines under its header, so the one-line form is
-`E_PARSE` at the first `slot`, and the parse ends there. Even indented, a `slot` rule binds one
-token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. Inside a body
-`hologram` is `E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is raised where a member is bound to a
-block only the other edition has ([above](#a-block-only-the-other-edition-has)). The `edition-fallback`
-example builds the steps that do exist: a per-edition theme, and the light block under its guards.
+A `hologram` is floating text that each edition builds its own way: it is built as the member
+form its `mat_slot=` binds. A `slot` row binds a member form by its bare word, `text_display` or
+`sign`, with the keys the form takes after it, `billboard=` and `scale=` for a text display and
+`glowing=` for a sign ([Materials and Themes
+§7.1](/spec/materials-themes/#71-slots-as-dependency-injection)). The hologram's line writes its
+`text=` and places it, and its `at=`, `offset=`, `y=` and `facing=` place it as they place the
+member it is built as: a text display stands where its line says ([Entities
+§8.1](/spec/entities/#displays)), and a sign stands on the block under it or hangs on a wall as a
+`sign` line's does ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). A key the form does not take
+is `E_UNKNOWN_ARGUMENT` at the slot row. A hologram whose slot binds a block is `E_INVALID_MEMBER`,
+and so is a member of another keyword whose slot binds a member form, since only a hologram is
+built as one. A hologram built as a text display in a Bedrock build is `E_PARITY_UNSUPPORTED`,
+and its note asks the Bedrock theme to bind the slot to `sign`.
+
+The snippet builds on both editions. Java's build stands a text display at 2 scale on the floor and
+lays the light block its guard holds; Bedrock's stands a glowing sign there, the text on its front,
+and lays Bedrock's light block. `E_PARITY_UNSUPPORTED` is raised where a member is bound to a block
+only the other edition has, or places an entity only the other edition has
+([above](#a-block-only-the-other-edition-has)). The `edition-fallback` example takes the second step
+for a block, a per-edition theme binding a sign each edition has, and `trading-post` takes it for a
+hologram.
 
 ### An `@edition` guard holds the escape hatch
 
 A guard is a line of its own: `@edition`, then `java` or `bedrock`, and nothing after it. The lines
 it guards are indented one level under it, and it stands in a `struct`, `def` or `site` body, or in
 the body of a member there. It shares the sigil with the file directives but is not one. The items
-of a file are edition-neutral, so a guard at top level is `E_PARSE`, and so is one in a `theme` body,
-where the `NAME_java` and `NAME_bedrock` variants say what differs
+of a file are edition-neutral, so a guard at top level is `E_PARSE`, and so is one in a `theme`
+body, where the `NAME_java` and `NAME_bedrock` variants say what differs
 ([below](#the-build-picks-the-variant-not-the-source)). A guard that names no edition or another
 word, takes anything after its edition, holds its lines in braces or has nothing indented under it
 is `E_PARSE` too. A guard does not nest: the one around it already picks the edition, so a guard
 directly under a guard is `E_PARSE`. Deeper down, a line is judged by the line it stands under, as
-it would be outside the guard: a member under a raw member or a Tier 0 part, guarded again or not,
-is `E_UNSUPPORTED_NESTING`, and anything under a refused line goes with that line.
+it would be outside the guard: a member under a line of the escape-hatch layer, guarded again or
+not, is `E_UNSUPPORTED_NESTING`, and anything under a refused line goes with that line.
 
 A guard opens no scope. Its lines are read as if written where the guard stands, so one under a
-`level` takes the level's `y=`, and a raw member or a Tier 0 part gets every check under a guard
+`level` takes the level's `y=`, and a line of the escape-hatch layer gets every check under a guard
 that it would get outside one. What the guard adds is the edition whose build keeps the line.
 
 What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
-§7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
+§7.4](/spec/materials-themes/#74-raw-blocks)), `spawn`, which places any entity by its id ([Entities
+§8.1](/spec/entities/#standing-entities)), and the Tier 0 parts of [Redstone
 §14.1](/spec/redstone/#tier-0-parts): `repeater`, `comparator`, `redstone_torch` and
-`redstone_dust`. Any other member, and a `logic` or `assert` line, is
-`E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking
-anything indented under it along. So is a `logic` or `assert` line under a guarded raw member or
-Tier 0 part, which outside a guard would still reach redstone synthesis. No build and no other
-check reads a refused line or what goes with it, so it draws that finding alone. A raw member or a
-Tier 0 part in a `site` body is `E_MISPLACED_MEMBER`, with a guard around it or not, so a guard
-there holds nothing that builds.
+`redstone_dust`. An entity's line that writes an `nbt={...}` compound belongs to that layer too, and
+stands under the guard of the edition whose fields the compound spells ([Entities
+§8.1](/spec/entities/#81-two-tiers)); the same line without one is a semantic member. Any other
+member, and a `logic` or `assert` line, is `E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once
+at the outermost such line, taking anything indented under it along. So is a `logic` or `assert`
+line under a guarded line of that layer, which outside a guard would still reach redstone synthesis.
+No build and no other check reads a refused line or what goes with it, so it draws that finding
+alone. A line of that layer in a `site` body is `E_MISPLACED_MEMBER`, with a guard around it or not,
+so a guard there holds nothing that builds.
 
 A pinned build keeps the lines under its own edition's guards and drops the other edition's.
 `cairn compile --edition java` builds the snippet's `minecraft:light` and never builds

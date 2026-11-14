@@ -38,7 +38,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Member.** A named element of the Intent IR. Types: `block`, `block_entity`, `entity`. The
   IR carries the type, but the author writes one selector grammar across all of them
   ([principles P4](/spec/principles/)). Today a member carries the `role` its keyword classifies to
-  and no type, and no keyword places a block entity or an entity yet; `type` will sit beside `role`.
+  and no type. A `sign` and a `bed` are block members whose blocks keep block entities, a
+  `painting`, an `item_frame`, an `armor_stand`, a `villager`, a display and a `spawn` place
+  entities ([entities §8.1](/spec/entities/#81-two-tiers)), and `type` will sit beside `role`.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
@@ -58,8 +60,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   [blockstate §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
 - **Anchor / bbox.** Every primitive carries an `anchor` (reference point), a declared bbox, an
   actual bbox, and a host face in the IR. Primitives like paintings, item frames, and arch windows
-  have a declared size that differs from the occupied AABB, and these four resolve it. The IR
-  carries none of them yet. See [entities §8.2](/spec/entities/#82-anchor-conventions).
+  have a declared size that differs from the occupied AABB, and these four resolve it. Lowering
+  records the four for every member that builds a cell, beside its `resolved_state`. See
+  [entities §8.2](/spec/entities/#82-anchor-conventions).
 
 ## Materials and themes
 
@@ -157,10 +160,18 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Fail-loud.** Silent substitution and implicit dropping of unknown IDs / out-of-domain states
   are forbidden. Errors return the closed set of valid candidates plus a suggested DSL fix.
   See [versioning-editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
-- **`semantic_sensitivity`.** A constraint-catalog field distinguishing "the ID stays valid but
-  meaning/behavior/appearance changed at this version" from `since/until`. Cauldron split @1.17,
-  wall connection bool→none/low/tall @1.16, item format @1.20.5 are examples. See
-  [versioning-editions §10.5](/spec/versioning-editions/#105-which-version-is-it-for-has-three-answers).
+- **Constraint catalog.** The hand-written tables of how the game treats a block once it stands in
+  the world, beside the extracted registry packs: what a block hangs on or stands on, what falls,
+  and where a meaning changes between versions. A pinned build checks what it builds against them.
+  See [lint §11.4](/spec/lint/#114-constraint-catalog).
+- **Sturdy face.** A face of a block its model covers whole: a full block's every face, a bottom
+  slab's bottom, an upright stair's bottom and back. What a pane, fence or wall joins, and what an
+  attached block hangs on. See [blockstate](/spec/blockstate/#connections).
+- **`semantic_sensitivity`.** A constraint-catalog table distinguishing "the ID stays valid but
+  meaning/behavior/appearance changed at this version" from `since/until`, one row per edition,
+  boundary version and reason. Cauldron split @1.17, wall connection bool→none/low/tall @1.16, item
+  format @1.20.5 are the built-in catalog's. See
+  [versioning-editions](/spec/versioning-editions/#the-semantic-sensitive-row).
 - **Block IoU.** Voxel intersection-over-union used for the import self-correction loop. Convergence
   threshold ≥ 0.985. See
   [ecosystem-interop §12.2](/spec/ecosystem-interop/#122-reverse-direction-the-compiler-transliterates-an-llm-lifts),
@@ -172,8 +183,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 
 - **Edition.** `java` or `bedrock`. Compile-time only; never present in the DSL semantic layer.
   See [versioning-editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability).
-- **`@edition` guard.** A line in a body that keeps the raw members and Tier 0 parts indented
-  under it to one edition's build. It is the one line inside a body that keeps lines to one
+- **`@edition` guard.** A line in a body that keeps the escape-hatch layer indented under it, the
+  raw members, `spawn`, the Tier 0 parts and an entity's line that writes `nbt=`, to one edition's
+  build. It is the one line inside a body that keeps lines to one
   edition's build, and it never holds the semantic layer. See
   [versioning-editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch).
 - **Cairn version vs MC target.** Two **separate axes** distinguished by field/flag/keyword, never

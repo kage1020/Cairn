@@ -253,7 +253,7 @@ fn a_guard_in_a_theme_body_is_refused_for_a_theme_named_for_its_edition() {
 #[test]
 fn a_guard_outside_every_body_is_refused() {
     let outside = "an `@edition` guard stands inside a `struct`, `def` or `site` body, around \
-                   the raw members and Tier 0 parts it guards: the items of a file are \
+                   the escape-hatch lines it guards: the items of a file are \
                    edition-neutral, so move the guard into the body that places those blocks";
     let at_the_top = "@cairn 2026.11\n@edition java\nstruct s size=3x3\n  floor mat_slot=f\n";
     assert_eq!(refusal(at_the_top), (outside.to_owned(), (2, 1)));

@@ -59,8 +59,9 @@ Evolving surfaces:
   list), and the syntax a section flags [subject to change](#subject-to-change).
 - New `cairn` subcommands during their first three monthly minors after introduction.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
-  but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
-  its hash as zeros.
+  but the *internal structure* is Evolving), and which blocks the built-in catalog lists, so a
+  release may raise a constraint check or a `semantic-sensitive` entry on a source an earlier one
+  passed ([Lint §11.4](/spec/lint/#114-constraint-catalog)).
 - The tier-2 material vocabulary: the block each tier-1 token resolves to at a target
   ([§7.2](/spec/materials-themes/#tier-1-tokens)).
 - Canonical block tokens: the names a target accepts, which follow its registry pack, and the
@@ -187,10 +188,9 @@ placeholder's code still means what it meant. A placeholder stands in only for w
 build yet, or what the spec reserves for a later extension. Source the spec itself refuses keeps its
 code. The placeholders today include:
 
-- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as decimals,
-  `nbt={...}` values and `edit`;
+- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as `edit`;
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
-  `spawn`, `bed`, `sign` and `raw_repeat`;
+  `volume` and `raw_repeat`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists, a theme selector's bindings among them;
 - `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which

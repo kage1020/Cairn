@@ -7,6 +7,10 @@
 //! A bad indentation ends the scan. A failure inside a line becomes a [`TokenKind::Unlexed`] in
 //! the parser's own pass, since a directive that takes raw text to end of line judges it itself.
 
+mod snbt;
+
+pub use snbt::{MAX_NBT_DEPTH, NbtCompound, NbtValue, parse_compound};
+
 use crate::error::{IntContext, LexError, Position, Span};
 
 const INDENT_STACK_NONEMPTY: &str = "indent_stack invariant: bottom 0 sentinel is never popped";
@@ -35,6 +39,13 @@ pub enum TokenKind {
         /// Raw source lexeme.
         lexeme: String,
     },
+    /// Two runs of decimal digits joined by `.`, verbatim, e.g. `1.5`.
+    Decimal {
+        /// Raw source lexeme.
+        lexeme: String,
+    },
+    /// An `nbt={...}` compound, verbatim with its braces: a `{` after `=` opens one.
+    Nbt(String),
     /// Boolean literal `true` / `false`.
     Bool(bool),
     /// Double-quoted string literal, verbatim and without the quotes.
@@ -92,6 +103,8 @@ impl std::fmt::Display for TokenKind {
         match self {
             Self::Ident(name) => write!(f, "identifier `{name}`"),
             Self::Int { lexeme, .. } => write!(f, "integer `{lexeme}`"),
+            Self::Decimal { lexeme } => write!(f, "decimal `{lexeme}`"),
+            Self::Nbt(_) => f.write_str("NBT compound"),
             Self::Bool(b) => write!(f, "`{b}`"),
             Self::Str(_) => f.write_str("string literal"),
             Self::Size(w, h) => write!(f, "size `{w}x{h}`"),
@@ -381,6 +394,7 @@ impl<'src> Lexer<'src> {
                 self.advance();
                 self.push_at(TokenKind::Less, start..self.pos, position);
             }
+            b'.' if self.starts_a_fraction(start) => return Err(self.scan_bare_fraction(position)),
             b'.' => {
                 self.advance();
                 self.push_at(TokenKind::Dot, start..self.pos, position);
@@ -412,6 +426,9 @@ impl<'src> Lexer<'src> {
             b')' => {
                 self.advance();
                 self.push_at(TokenKind::RParen, start..self.pos, position);
+            }
+            b'{' if matches!(self.out.last().map(|t| &t.kind), Some(TokenKind::Eq)) => {
+                self.scan_nbt(start, position)?;
             }
             b'{' => {
                 self.advance();
@@ -462,27 +479,23 @@ impl<'src> Lexer<'src> {
     }
 
     fn scan_number(&mut self, start: usize, position: Position) -> Result<(), LexError> {
-        while let Some(b) = self.peek() {
-            if b.is_ascii_digit() {
-                self.advance();
-            } else {
-                break;
-            }
-        }
+        self.skip_digits();
         let lexeme_end = self.pos;
+        if self.peek() == Some(b'.') {
+            return self.scan_decimal(start, position);
+        }
         if self.peek() == Some(b'x') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
             self.advance();
             let h_start = self.pos;
-            while let Some(b) = self.peek() {
-                if b.is_ascii_digit() {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
+            self.skip_digits();
             let w_str = &self.src[start..lexeme_end];
             let h_str = &self.src[h_start..self.pos];
-            if let Some(found) = self.peek().filter(|b| is_ident_continue(*b)) {
+            let fraction_follows =
+                self.peek() == Some(b'.') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit());
+            if let Some(found) = self
+                .peek()
+                .filter(|&b| is_ident_continue(b) || fraction_follows)
+            {
                 return Err(LexError::TrailingSizeSegment {
                     position,
                     literal: self.src[start..self.pos].to_owned(),
@@ -507,6 +520,79 @@ impl<'src> Lexer<'src> {
         let lexeme = self.src[start..lexeme_end].to_owned();
         self.push_at(TokenKind::Int { lexeme }, start..self.pos, position);
         Ok(())
+    }
+
+    /// Read the `.` and the digits after a decimal's whole part, which starts at `start`.
+    fn scan_decimal(&mut self, start: usize, position: Position) -> Result<(), LexError> {
+        self.advance();
+        let fraction_start = self.pos;
+        self.skip_digits();
+        if self.pos == fraction_start {
+            return Err(LexError::DecimalWithoutFraction {
+                position,
+                whole: self.src[start..fraction_start - 1].to_owned(),
+            });
+        }
+        if let Some(found) = self.peek().filter(|&b| is_ident_continue(b)) {
+            return Err(LexError::TrailingDecimalSegment {
+                position,
+                literal: self.src[start..self.pos].to_owned(),
+                found: char::from(found),
+            });
+        }
+        let lexeme = self.src[start..self.pos].to_owned();
+        self.push_at(TokenKind::Decimal { lexeme }, start..self.pos, position);
+        Ok(())
+    }
+
+    /// Whether the `.` at `start` opens a decimal written without its whole part, as `.5`: a
+    /// digit follows it, and no name, `]` or `)` it could continue stands before it.
+    fn starts_a_fraction(&self, start: usize) -> bool {
+        self.peek_at(1).is_some_and(|c| c.is_ascii_digit())
+            && !start
+                .checked_sub(1)
+                .and_then(|before| self.bytes.get(before))
+                .is_some_and(|&c| is_ident_continue(c) || c == b']' || c == b')')
+    }
+
+    /// Step past a `.` and the digits after it, which no whole part stands before.
+    fn scan_bare_fraction(&mut self, position: Position) -> LexError {
+        self.advance();
+        let fraction_start = self.pos;
+        self.skip_digits();
+        LexError::DecimalWithoutWhole {
+            position,
+            fraction: self.src[fraction_start..self.pos].to_owned(),
+        }
+    }
+
+    /// Read the compound whose `{` is at `start`, or refuse it with the rest of its line.
+    fn scan_nbt(&mut self, start: usize, position: Position) -> Result<(), LexError> {
+        match snbt::scan(self.src, start) {
+            Ok(end) => {
+                self.advance_to(end);
+                let text = self.src[start..end].to_owned();
+                self.push_at(TokenKind::Nbt(text), start..end, position);
+                Ok(())
+            }
+            Err(refusal) => {
+                self.advance_to(refusal.at);
+                let at = self.position();
+                while self.peek().is_some_and(|b| b != b'\n' && b != b'\r') {
+                    self.advance_char();
+                }
+                Err(LexError::InvalidNbt {
+                    position: at,
+                    reason: refusal.reason,
+                })
+            }
+        }
+    }
+
+    fn skip_digits(&mut self) {
+        while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+            self.advance();
+        }
     }
 
     fn scan_ident(&mut self, start: usize, position: Position) {
@@ -554,6 +640,13 @@ impl<'src> Lexer<'src> {
         if let Some(ch) = self.peek_char() {
             self.pos += ch.len_utf8();
             self.col += 1;
+        }
+    }
+
+    /// Advance by whole characters to `end`, a byte on the current line.
+    fn advance_to(&mut self, end: usize) {
+        while self.pos < end {
+            self.advance_char();
         }
     }
 

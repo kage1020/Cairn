@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockEntity, BlockState, Dims, Palette, PaletteIndex,
-    lower_to_block_array,
+    BlockArray, BlockArrayIr, BlockEntity, BlockEntityData, BlockState, Dims, Palette,
+    PaletteIndex, lower_to_block_array,
 };
 use cairn_lang_core::resolve::{DroppedIntent, declared_version_floors, versions_satisfying};
 use cairn_lang_core::{Edition, lower, parse, resolve};
@@ -23,7 +23,7 @@ pub fn examples_dir() -> PathBuf {
 }
 
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
-pub const SHIPPED_EXAMPLES: usize = 15;
+pub const SHIPPED_EXAMPLES: usize = 17;
 
 /// Every `.crn` under `examples/`, as `(file name, source)` sorted by name, refusing any set but
 /// the shipped one, since a sweep over nothing passes.
@@ -173,6 +173,87 @@ pub fn block_palette(root: &Compound) -> &[Tag] {
     }
 }
 
+/// `tag` in SNBT, its compounds' entries in the order the writer inserted them.
+pub fn snbt(tag: &Tag) -> String {
+    let joined = |items: Vec<String>| items.join(",");
+    match tag {
+        Tag::Byte(value) => format!("{value}b"),
+        Tag::Short(value) => format!("{value}s"),
+        Tag::Int(value) => value.to_string(),
+        Tag::Long(value) => format!("{value}L"),
+        Tag::Float(value) => format!("{value}f"),
+        Tag::Double(value) => format!("{value}d"),
+        Tag::String(value) => format!("{value:?}"),
+        Tag::List(list) => format!("[{}]", joined(list.items.iter().map(snbt).collect())),
+        Tag::Compound(compound) => format!(
+            "{{{}}}",
+            joined(
+                compound
+                    .entries
+                    .iter()
+                    .map(|(name, value)| format!("{name}:{}", snbt(value)))
+                    .collect()
+            )
+        ),
+        Tag::ByteArray(values) => format!("[B;{values:?}]"),
+        Tag::IntArray(values) => format!("[I;{values:?}]"),
+        Tag::LongArray(values) => format!("[L;{values:?}]"),
+    }
+}
+
+/// Each `block_position_data` entry of a `.mcstructure` root, its key and its block entity in SNBT.
+///
+/// # Panics
+///
+/// When the root holds no `block_position_data` compound.
+pub fn position_data(root: &Compound) -> Vec<(String, String)> {
+    match default_palette(root).entries.get("block_position_data") {
+        Some(Tag::Compound(data)) => data
+            .entries
+            .iter()
+            .map(|(index, block)| (index.clone(), snbt(block)))
+            .collect(),
+        other => panic!("block_position_data is not a Compound: {other:?}"),
+    }
+}
+
+/// Each `block_palette` entry of a `.mcstructure` root as `name[key=value,…]`, its states sorted
+/// by key and the entries sorted.
+///
+/// # Panics
+///
+/// When an entry is not a compound with a `name` and `states`, or a state is not a byte, an int or
+/// a string.
+pub fn written_palette(root: &Compound) -> Vec<String> {
+    let mut written: Vec<String> = block_palette(root)
+        .iter()
+        .map(|entry| {
+            let Tag::Compound(entry) = entry else {
+                panic!("palette entry: {entry:?}");
+            };
+            let (Some(Tag::String(name)), Some(Tag::Compound(states))) =
+                (entry.entries.get("name"), entry.entries.get("states"))
+            else {
+                panic!("palette entry: {entry:?}");
+            };
+            let mut states: Vec<String> = states
+                .entries
+                .iter()
+                .map(|(key, value)| match value {
+                    Tag::Byte(v) => format!("{key}={v}"),
+                    Tag::Int(v) => format!("{key}={v}"),
+                    Tag::String(v) => format!("{key}={v}"),
+                    other => panic!("{key}: {other:?}"),
+                })
+                .collect();
+            states.sort();
+            format!("{name}[{}]", states.join(","))
+        })
+        .collect();
+    written.sort();
+    written
+}
+
 /// A blockstate property map from `(key, value)` pairs, in the order given.
 pub fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
     pairs
@@ -249,8 +330,10 @@ pub fn comparator_array(id: &str) -> BlockArray {
         voxels,
         block_entities: vec![BlockEntity {
             pos: (1, 1, 1),
-            id: "minecraft:comparator".to_owned(),
-            fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+            data: BlockEntityData::Fields {
+                id: "minecraft:comparator".to_owned(),
+                fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+            },
         }],
         entities: vec![],
         source_scope: "struct::comparator".to_owned(),

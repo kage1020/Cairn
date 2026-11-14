@@ -36,6 +36,8 @@ theme medieval:
 
 ただし、同じメンバーに同じキーを 2 回割り当てると拒否します。割り当てが今後どんな意味を持つことになっても、前の値は効かない記述だからです。1 つの行の中なら `E_DUPLICATE_ARG`、同じメンバーを選ぶ 2 つの行にまたがるなら `E_DUPLICATE_SELECTOR` です。行の割り当て以外の部分は検査します。`E_THEME_SELECTOR_UNMATCHED` は、その診断の項目に書かれたとおりに適用されます。
 
+**スロットはマテリアルかメンバーの形を束縛します。** `slot` の行は、メンバーがそのブロックとして組み上げる正規トークンか抽象マテリアルトークンを束縛し、その後には何も書けません。そこに `key=value` を書くと `E_PARSE` です。代わりにメンバーの形を束縛することもできます。`hologram` を何として組み上げるかを示す名前だけの語 `text_display` か `sign` で、その後にその形が取るキーを書きます。テキストの display なら `billboard=` と `scale=`、看板なら `glowing=` で、`slot floating_text -> text_display scale=2.0` のように書きます ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#代替を書くとき))。メンバーの形として組み上げるのは `hologram` だけなので、スロットがメンバーの形を束縛するほかのキーワードのメンバーは `E_INVALID_MEMBER` で、スロットがトークンを束縛する hologram も同じです。形が取らないキーは `E_UNKNOWN_ARGUMENT` で、ほかの語は `E_UNKNOWN_SLOT_TARGET` です。
+
 `def`、`theme`、`site` は、どれも同じ「スロットを持つコンポーネント」の仕組みで統一されています ([コンポーネント・編集・複数建築](/ja/spec/components-editing-sites/))。
 
 ## 7.2 正規トークン
@@ -70,9 +72,14 @@ theme exact_oak:
 | `@wall.wood.broadleaf`、`@wall.wood.conifer`、`@wall.stone.cobble`、`@wall.stone.smooth` | 壁 |
 | `@wood.dark`、`@wood.light`、`@wood.warm`、`@wood.cool` | 色味で選ぶ板材 |
 | `@roof.dark_wood`、`@roof.light_wood`、`@roof.warm_wood`、`@roof.cool_wood` | 色味で選ぶ屋根の階段 |
-| `@sign.oak`、`@sign.oak_wall` | 立てた看板と壁の看板 |
+| `@beam.default` | `mat_slot=` で割り当てていない `beam` が敷く柱状のブロック |
+| `@sign.oak`、`@sign.oak_wall` | `mat_slot=` で割り当てていない `sign` が立てる看板と、掛ける壁の看板 |
+| `@bed.default` | `mat_slot=` で割り当てていない `bed` が置くベッド。赤いベッド |
+| `@bed.white`、`@bed.orange`、`@bed.magenta`、`@bed.light_blue`、`@bed.yellow`、`@bed.lime`、`@bed.pink`、`@bed.gray`、`@bed.light_gray`、`@bed.cyan`、`@bed.purple`、`@bed.blue`、`@bed.brown`、`@bed.green`、`@bed.red`、`@bed.black` | それぞれの染料の色のベッド |
 | `@door.default` | `mat_slot=` で割り当てていない `door` が置くドアのブロック |
 | `@chest.default` | `mat_slot=` で割り当てていない `chest` が置くチェストのブロック |
+| `@trapdoor.default` | `mat_slot=` で割り当てていない `trapdoor` が置くトラップドア |
+| `@note_block.default` | `note_block` が置く音符ブロック |
 | `@pressure_plate.default` | `mat_slot=` で割り当てていない `pressure_plate` が置くブロック |
 | `@lever.default` | `lever` が壁に掛けるレバー |
 | `@button.default` | `mat_slot=` で割り当てていない `button` が壁に掛けるボタン |

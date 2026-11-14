@@ -3,21 +3,31 @@
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 
+use crate::block_array::geometry::Declared;
+
+use super::beam::fill_beam;
+use super::bed::fill_bed;
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::cell_box::Shape;
 use super::chest::fill_chest;
 use super::component::{
     BUTTON, DAYLIGHT, DISPENSER, LAMP, LEVER, OBSERVER, PISTON, fill_component,
 };
+use super::display::{fill_block_display, fill_hologram, fill_item_display, fill_text_display};
 use super::door::{HungDoor, fill_door};
 use super::fill::fill_material;
+use super::hanging::{fill_item_frame, fill_painting};
 use super::members::{StructCtx, palette_index_for};
+use super::note_block::fill_note_block;
 use super::part::{Part, fill_part};
 use super::plate::fill_pressure_plate;
 use super::raw::fill_raw;
 use super::roof_fill::fill_roof;
+use super::sign::fill_sign;
 use super::sizing::wall_height;
 use super::stair::fill_stair;
+use super::standing::{fill_armor_stand, fill_spawn, fill_trade, fill_villager};
+use super::trapdoor::fill_trapdoor;
 use super::window::fill_window;
 
 /// Paint one member of the paint set with the generator its role names; a `door` that stands is
@@ -43,6 +53,7 @@ pub(super) fn paint_member(
         // `flatten_members` drops a `roof` at a non-zero offset, so this is the struct's plane.
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Beam => fill_beam(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Door => {
             fill_door(member, y_offset, ctx, palette, canvas, hung, diagnostics);
         }
@@ -96,6 +107,28 @@ pub(super) fn paint_member(
             );
         }
         MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Trapdoor => {
+            fill_trapdoor(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::NoteBlock => {
+            fill_note_block(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Sign => fill_sign(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Bed => fill_bed(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Painting => fill_painting(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::ItemFrame => fill_item_frame(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::ArmorStand => fill_armor_stand(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::Villager => fill_villager(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::Trade => fill_trade(member, ctx, canvas, diagnostics),
+        MemberRole::TextDisplay => fill_text_display(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::BlockDisplay => {
+            fill_block_display(member, y_offset, ctx, canvas, diagnostics);
+        }
+        MemberRole::ItemDisplay => fill_item_display(member, y_offset, ctx, canvas, diagnostics),
+        MemberRole::Hologram => {
+            fill_hologram(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::Spawn => fill_spawn(member, y_offset, ctx, canvas, diagnostics),
         MemberRole::Repeater => {
             fill_part(
                 Part::Repeater,
@@ -190,6 +223,7 @@ fn fill_floor(
         return;
     };
     let y = 0;
+    canvas.declare(Declared::boxed(ctx.footprint_box(y, y), None));
     for z_local in 0..ctx.interior_h {
         for x_local in 0..ctx.interior_w {
             let x = ctx.overhang + x_local;
@@ -225,6 +259,7 @@ fn fill_walls(
     let end = height
         .saturating_add(y_offset)
         .min(ctx.dims.y.saturating_sub(1));
+    canvas.declare(Declared::boxed(ctx.footprint_box(start, end), None));
     for y in start..=end {
         for z_local in 0..ctx.interior_h {
             for x_local in 0..ctx.interior_w {

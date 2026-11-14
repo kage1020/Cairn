@@ -1,0 +1,292 @@
+---
+source: crates/cairn-lang-core/tests/examples/parse.rs
+expression: module
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: post_java
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: spruce_planks
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+      - kind: Slot
+        slot: roof
+        value:
+          kind: Token
+          value: spruce_stairs
+      - kind: Slot
+        slot: shop_sign
+        value:
+          kind: Ident
+          value: text_display
+        arguments:
+          - key: billboard
+            value:
+              kind: Ident
+              value: center
+          - key: scale
+            value:
+              kind: Decimal
+              value: "1.5"
+  - kind: Theme
+    name: post_bedrock
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: spruce_planks
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: cobblestone
+      - kind: Slot
+        slot: roof
+        value:
+          kind: Token
+          value: spruce_stairs
+      - kind: Slot
+        slot: shop_sign
+        value:
+          kind: Ident
+          value: sign
+        arguments:
+          - key: glowing
+            value:
+              kind: Bool
+              value: true
+  - kind: Struct
+    name: trading_post
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 9
+            h: 7
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 4
+      - kind: Generic
+        keyword: door
+        args:
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: center
+      - kind: Generic
+        keyword: roof
+        args:
+          - key: kind
+            value:
+              kind: Ident
+              value: gable
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: roof
+          - key: overhang
+            value:
+              kind: Int
+              value: 1
+      - kind: Generic
+        keyword: villager
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: librarian
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - back
+          - key: offset
+            value:
+              kind: Int
+              value: 4
+          - key: y
+            value:
+              kind: Int
+              value: 1
+          - key: profession
+            value:
+              kind: Ident
+              value: librarian
+          - key: level
+            value:
+              kind: Ident
+              value: journeyman
+      - kind: Generic
+        keyword: trade
+        args:
+          - key: villager
+            value:
+              kind: Ident
+              value: librarian
+          - key: buy
+            value:
+              kind: Ident
+              value: emerald
+          - key: count
+            value:
+              kind: Int
+              value: 9
+          - key: sell
+            value:
+              kind: Ident
+              value: bookshelf
+      - kind: Generic
+        keyword: trade
+        args:
+          - key: villager
+            value:
+              kind: Ident
+              value: librarian
+          - key: buy
+            value:
+              kind: Ident
+              value: emerald
+          - key: count
+            value:
+              kind: Int
+              value: 20
+          - key: sell
+            value:
+              kind: Ident
+              value: enchanted_book
+          - key: enchant
+            value:
+              kind: Ident
+              value: mending
+      - kind: Generic
+        keyword: painting
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: sunset
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - left
+          - key: offset
+            value:
+              kind: Int
+              value: 2
+          - key: y
+            value:
+              kind: Int
+              value: 2
+          - key: variant
+            value:
+              kind: Ident
+              value: sunset
+      - kind: Generic
+        keyword: item_frame
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: relic
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - inside
+                - right
+          - key: offset
+            value:
+              kind: Int
+              value: 3
+          - key: y
+            value:
+              kind: Int
+              value: 2
+          - key: item
+            value:
+              kind: Ident
+              value: compass
+      - kind: Generic
+        keyword: armor_stand
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: mannequin
+          - key: at
+            value:
+              kind: Coord
+              value:
+                x: 6
+                y: 1
+                z: 4
+          - key: facing
+            value:
+              kind: Ident
+              value: west
+      - kind: Generic
+        keyword: hologram
+        args:
+          - key: id
+            value:
+              kind: Ident
+              value: shop_sign
+          - key: at
+            value:
+              kind: DotRef
+              value:
+                - front
+                - outside
+          - key: offset
+            value:
+              kind: Int
+              value: 4
+          - key: y
+            value:
+              kind: Int
+              value: 3
+          - key: text
+            value:
+              kind: Str
+              value: Trading Post
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: shop_sign

@@ -25,22 +25,71 @@ The parser puts anything that is not `key=`, `-> binding`, or `[selector]` into 
 so a dropped `=` lands there too. `walls mat_slot=wall height 3` is not a `walls` with a shortened
 height. It is not built at all.
 
-Only a member line (a line of a `struct`, `def` or `site` body) keeps a positional list so far. The
-header line of a `struct`, `def`, `site` or `theme`, a `theme` rule, and a `logic` or `assert` line
-do not yet, so the same slip there is `E_PARSE`, which ends the parse: `struct s size 3x3` is refused
-with "expected `=`".
+A header, a `theme` rule and a `logic` or `assert` line keep one too, and the parse goes on past it.
+A `struct` or `def` header and a `theme` selector rule keep their bare values beside their
+`key=value` arguments, so `struct s size 3x3` is `E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as
+`size=3x3`. A `site` or `theme` header reads nothing after its name, a `slot` row nothing after the
+value it binds, and an `assert` line nothing after the end of its form: a bare value there is the
+same finding, and a `key=value` there is `E_PARSE`. A `slot` row that binds a bare word reads the
+`key=value` arguments of a member form after it, as `slot floating_text -> text_display scale=2.0`
+([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)). A `logic`
+line whose `=` is dropped, `logic sig.a sig.b or sig.c`, still reads the expression after its name,
+binds nothing, and is `E_UNEXPECTED_POSITIONAL` on the whole line.
 
 ### 5.1.1 Literals and separators
 
-**Subject to change.** Decimals (`scale=1.5`) and `nbt={...}` values, which other chapters write,
-do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
-No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
-parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
+No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` and `scale=-1.5`
+are `E_PARSE`. An **integer** is a run of decimal digits, up to 2^63 − 1, or 2^32 − 1 for the
 `within` bound of an `assert always`, the `<=` bound of an `assert latency` and the stage count of
 a macro such as `pulse(sig.ring, 4)`, which is at least 1 ([Redstone
-§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)). A decimal such as `scale=1.5`
-([Entities](/spec/entities/)) is therefore `E_PARSE` too until the parser reads one.
+§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)).
+
+A **decimal** is two runs of decimal digits joined by `.`, as in `scale=1.5`. It has no exponent
+and no type suffix, so a run that continues past its digits, such as `1.5e3`, `1.5f` or `1.5.2`, is
+refused at the literal, as a size's is. A `.` with no digit after it, `1.`, or none before it, `.5`,
+is refused too, and the finding names `1.0` and `0.5`. A decimal stands where an integer stands as
+a value: after a key's `=`, in a value list and as a bare value. It is not an integer, so a
+coordinate triple's component, a size's extent, a stage count, an assertion's bound and a value in
+a block-state literal each refuse one at the literal. The parser keeps it as written, digit for
+digit. The key that reads one says whether the writer stores it as a float or a double, and the
+writer rounds the written value to the nearest one of that type. Such a key reads an integer as the
+same number, so `scale=2` and `scale=2.0` are one value.
+
+The key that reads one is a display's `scale=`, which the writer stores as a float ([Entities
+§8.1](/spec/entities/#displays)). A key that reads another kind of value treats a decimal as it
+treats a coordinate triple (below): a label or size key refuses it as a type mismatch, a member key
+such as `height=` or `offset=` refuses its member as `E_INVALID_MEMBER`, and a key that falls back
+to its default, such as `sym=` or `overhang=`, says so with `W_IGNORED_ARGUMENT`.
+
+An **NBT compound** is raw NBT written as SNBT in braces, as in `nbt={variant:"black"}`. It is what
+a key reads when a `{` follows its `=`, with a space between them or none. Anywhere else a `{` keeps
+its own meaning, so a bare `{a:1}` and a compound in a value list are `E_PARSE`. A compound closes
+on the line it opens on, since only a truth table's braces run onto the lines below, and one left
+open at the end of its line is `E_PARSE` there. What it holds is the part of Java's SNBT that every
+version Cairn targets reads alike:
+
+- A compound is `{}`, or entries `key:value` with exactly one `,` between two of them. A key is
+  quoted, or a run of letters, digits, `_`, `-`, `.` and `+`, and a compound names each key once.
+- A list is `[]`, or values with exactly one `,` between two of them, all of one type. An array
+  opens with `[B;`, `[I;` or `[L;`, nothing between the three characters, and holds bytes, ints or
+  longs.
+- A number is an optional sign, digits, an optional `.` and digits, and an optional suffix, in
+  either case: `b`, `s` and `l` for a byte, a short and a long, `f` and `d` for a float and a
+  double. With no suffix it is an int, or a double when it has a `.`. A byte, a short, an int or a
+  long has no `.` and no leading zero, and every number is inside its type's range.
+- A string is quoted with `"` or `'`, and escapes only `\` and its own quote. `true` and `false` are
+  the bytes `1b` and `0b`, and any other unquoted word is refused, so a value is a string only
+  where it is quoted: `variant:black` is written `variant:"black"`.
+- Compounds, lists and arrays nest at most 64 deep, the outermost compound included.
+
+Anything else is `E_PARSE` where it starts, an exponent, a hexadecimal or binary number, a `_`
+between digits, an escape such as `\n`, a function such as `bool(...)` and a comment among them. The
+parser keeps the compound as written, braces included, and checks no field in it against the
+target: what its fields mean, and the `@edition` guard a line that writes one stands under, are
+[Entities §8.1](/spec/entities/#81-two-tiers)'s. The keywords that read `nbt=` are the entities'
+and `raw_block`. On any other line it is a key like any other that its line does not read:
+`E_UNKNOWN_ARGUMENT` on a header or a member, and `W_IGNORED_ARGUMENT` as a theme selector's
+binding. A key that reads another kind of value treats a compound as it treats a decimal.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
@@ -70,14 +119,16 @@ space on either side of a `,` inside the triple, two components alone, a fourth 
 A cell outside the footprint, or above the top row the scope as written reaches ([Compilation Model
 §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), is outside the scope. The member
 that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offset=` at or past its
-wall's length. The `from=` and `to=` of a `fill`
-([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and a `raw_block`'s
-`at=` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), read a triple, and no
-other key does yet: `note_block` and the entities that take one are not keywords. A key that reads
-another kind of value treats a triple as any value of the wrong kind. A label or size key refuses
-it as a type mismatch, a member key such as `side=` or `height=` refuses its member as
-`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says
-so with `W_IGNORED_ARGUMENT`.
+wall's length. The `from=` and `to=` of a `fill` ([Blockstate Model
+§6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and the `at=` of a `raw_block`
+([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), a Tier 0 part ([Redstone
+§14.1](/spec/redstone/#tier-0-parts)), a `trapdoor`, a `note_block`, a `sign` and a `bed`
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), and an entity
+([Entities §8.1](/spec/entities/#81-two-tiers)) read a triple, and no other key does. A key that
+reads another kind of value treats a triple as any value of the wrong kind. A label or size key
+refuses it as a type mismatch, a member key such as `side=` or `height=` refuses its member as
+`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says so
+with `W_IGNORED_ARGUMENT`.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
@@ -189,14 +240,18 @@ and Monaco use the same rule, so a diagnostic's line number and the line under t
 same row. A position always points at the text that is wrong, so an error at the end of a line is
 reported there and never at the first column of the next one.
 
-The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
+The tree-sitter grammar is a known exception in three ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts nine forms the parser refuses, because tree-sitter cannot express their
-rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within` or `<=` bound
-or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last component runs
-into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
-literal naming one property twice.
+correctly. It also accepts fourteen forms the parser refuses, because tree-sitter cannot express
+their rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word
+(`2x2y`), an integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within`
+or `<=` bound or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last
+component runs into a size (`1,2,3x4`), a truth row whose width differs from the input count, a
+block-state literal naming one property twice, a decimal that runs into a word (`1.5e3`), and an
+NBT compound that names one key twice, holds a list of mixed types or a number past its type's
+range, or nests past 64. And it refuses a bare value after the name on a `site` or
+`theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because taking one
+there would let error recovery read an over-indented first body line into the header.
 
 ## 5.2 Nesting
 
@@ -215,22 +270,26 @@ nesting diagnostic. So is a line indented after a directive: a directive is one 
 under it belongs to no construct.
 
 An `@edition` guard indents the lines under it too, but it is not a member and groups nothing. Its
-lines stand in the body around it, and it holds only raw members and Tier 0 parts ([Versioning and
-Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
+lines stand in the body around it, and it holds only the escape-hatch layer: raw members, `spawn`,
+Tier 0 parts, and an entity's line that writes `nbt=` ([Versioning and Editions
+§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
 
 [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what
 `y=N` means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
-building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
+building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `beam`, `level`,
 `pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
-`repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A
-`site` body describes a layout: `place`, `connect`. The keyword table is global, so writing one in
-the other body parses and classifies and then reaches nothing. That is `E_MISPLACED_MEMBER`,
-reported once at the offending row, taking anything indented under it along. A `level` groups the
-other members of a `struct` / `def` body, but not a `circuit` line, whose reservation spans the
-whole scope: a `circuit` line under a `level` reaches nothing either, and is `E_MISPLACED_MEMBER` on
-that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+`trapdoor`, `note_block`, `sign`, `bed`, `painting`, `item_frame`, `armor_stand`, `villager`,
+`trade`, `text_display`, `block_display`, `item_display`, `hologram`, `spawn`, `repeater`,
+`comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A `site` body
+describes a layout: `place`,
+`connect`. The keyword table is global, so writing one in the other body parses and classifies and
+then reaches nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking
+anything indented under it along. A `level` groups the other members of a `struct` / `def` body,
+but not a `circuit` line, whose reservation spans the whole scope: a `circuit` line under a `level`
+reaches nothing either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
@@ -316,6 +375,25 @@ entities, and entities all use one selector grammar.
 `front` and `back` walls anchor at low `x`, `front` from the +z viewpoint and `back` mirrored along
 x so a `sym=true` opening looks symmetric from either side. The `left` and `right` walls anchor at
 low `z` and mirror the same way.
+
+**`anchor=` window anchors.** `offset=` and `y=` place one cell of a window, and `anchor=` names
+which, seen from outside the wall:
+
+| Anchor | Column from the window's first | Row from its lowest |
+|---|---|---|
+| `bottom_left`, `middle_left`, `top_left` | `0` | `0`, `size_h / 2`, `size_h - 1` |
+| `bottom_center`, `center`, `top_center` | `size_w / 2` | `0`, `size_h / 2`, `size_h - 1` |
+| `bottom_right`, `middle_right`, `top_right` | `size_w - 1` | `0`, `size_h / 2`, `size_h - 1` |
+
+The three rows are the anchors in the order the first column lists them, so `top_center` is the
+column `size_w / 2` and the row `size_h - 1`. Division rounds down, so on an even span the middle is
+the later of the two middle cells, as `at=center` picks on an even wall. A window without `anchor=`
+is placed by `bottom_left`, its first column and lowest row. `anchor=bottom_center offset=4
+size=3x3` cuts the columns `3` to `5`, as `offset=3` does without it. Any other value is
+`E_INVALID_MEMBER`, and so is an anchor that puts the window's first column before the left end of
+its wall or its lowest row below the base row of its struct or `level`. In what follows, `offset`
+is the window's first column, which is `offset=` itself unless `anchor=` names a later one, and a
+`repeat=` series steps from it ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
 
 `sym=true` mirrors the opening across the wall's midpoint
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle

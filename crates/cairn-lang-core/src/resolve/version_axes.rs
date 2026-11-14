@@ -23,7 +23,8 @@ pub struct VersionAxes {
     pub registry_compat: RegistryRange,
     /// Per-edition portability counts, in the caller's order (the CLI's `--editions`).
     pub edition_portability: Vec<EditionPortability>,
-    /// Axis 2: members whose meaning shifts at a boundary version. Always empty: no catalog exists.
+    /// Axis 2: members whose meaning shifts at a boundary version, per edition in
+    /// `edition_portability` order.
     pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
     /// Per edition, in `edition_portability` order, the supported versions that build the source.
     pub buildable_targets: Vec<BuildableTargets>,
@@ -48,6 +49,9 @@ pub struct EditionReport {
     pub considered: Vec<String>,
     /// Why [`Self::buildable`] is empty, when it is.
     pub refusal: Option<BuildableRefusal>,
+    /// The members the constraint catalog lists as meaning something else across one of this
+    /// edition's boundary versions.
+    pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
 }
 
 /// Which supported versions of one edition can build the source.
@@ -226,14 +230,17 @@ pub enum UnsupportedReason {
     },
 }
 
-/// One semantic-sensitivity finding; never produced, since no catalog exists.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// A member whose blocks mean something else across a boundary version of one edition
+/// (`spec/versioning-editions` "The `semantic-sensitive` row").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SemanticSensitiveFinding {
-    /// Identifier or keyword the finding refers to (`yard_water`, `wall`, ...).
+    /// The edition whose versions the boundary is one of.
+    pub edition: Edition,
+    /// The member's `id=`, or its keyword when it carries none (`yard_water`, `walls`).
     pub member: String,
-    /// Human-readable reason (`"cauldron split at 1.17"`).
+    /// What changes at the boundary, as the catalog words it (`"cauldron split"`).
     pub reason: String,
-    /// Version at which the meaning shifts.
+    /// The first version that reads the member the new way.
     pub boundary_version: String,
 }
 
@@ -242,7 +249,9 @@ pub struct SemanticSensitiveFinding {
 pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxes {
     let mut edition_portability = Vec::with_capacity(editions.len());
     let mut buildable_targets = Vec::with_capacity(editions.len());
+    let mut semantic_sensitive = Vec::new();
     for report in editions {
+        semantic_sensitive.extend(report.semantic_sensitive);
         edition_portability.push(EditionPortability {
             edition: report.edition,
             portable: report.portable,
@@ -264,7 +273,7 @@ pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxe
             max: "latest".to_owned(),
         },
         edition_portability,
-        semantic_sensitive: Vec::new(),
+        semantic_sensitive,
         buildable_targets,
         intended_targets: declared_intended_targets(module),
     }

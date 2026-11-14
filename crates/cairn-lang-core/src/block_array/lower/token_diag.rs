@@ -4,7 +4,7 @@
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::{MemberRole, ValueWithSpan};
+use crate::intent::{Member, MemberRole, ValueWithSpan};
 use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
@@ -26,9 +26,11 @@ pub(super) enum MemberFallback {
     ///
     /// [`fill_window`]: super::window::fill_window
     WallStays,
-    /// A `roof`, an eave `stair`, a `door`, a `pressure_plate`, a `button` or a `chest`: built
-    /// from its default block.
+    /// A `roof`, an eave `stair`, a `beam`, a `door`, a `pressure_plate`, a `button`, a `chest`, a
+    /// `trapdoor`, a `sign` or a `bed`: built from its default block.
     DefaultBlock,
+    /// A `block_display`: it shows no block, so none is placed.
+    Unplaced,
 }
 
 impl MemberFallback {
@@ -43,10 +45,15 @@ impl MemberFallback {
             MemberRole::Window => Self::WallStays,
             MemberRole::Roof
             | MemberRole::Stair
+            | MemberRole::Beam
             | MemberRole::Door
             | MemberRole::PressurePlate
             | MemberRole::Button
-            | MemberRole::Chest => Self::DefaultBlock,
+            | MemberRole::Chest
+            | MemberRole::Trapdoor
+            | MemberRole::Sign
+            | MemberRole::Bed => Self::DefaultBlock,
+            MemberRole::BlockDisplay => Self::Unplaced,
             MemberRole::Level
             | MemberRole::Lever
             | MemberRole::Daylight
@@ -54,6 +61,7 @@ impl MemberFallback {
             | MemberRole::Lamp
             | MemberRole::Piston
             | MemberRole::Dispenser
+            | MemberRole::NoteBlock
             | MemberRole::Repeater
             | MemberRole::Comparator
             | MemberRole::RedstoneTorch
@@ -63,6 +71,15 @@ impl MemberFallback {
             | MemberRole::RawFill
             | MemberRole::Place
             | MemberRole::Connect
+            | MemberRole::Painting
+            | MemberRole::ItemFrame
+            | MemberRole::ArmorStand
+            | MemberRole::Villager
+            | MemberRole::Trade
+            | MemberRole::TextDisplay
+            | MemberRole::ItemDisplay
+            | MemberRole::Hologram
+            | MemberRole::Spawn
             | MemberRole::Other(_) => {
                 unreachable!(
                     "no painter resolves the `mat_slot=` of a `{}`",
@@ -97,8 +114,8 @@ impl TokenSite {
             Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
             Self::MemberSlot(MemberFallback::Unpainted) => "the fill paints none of its box",
             Self::MemberSlot(MemberFallback::Absent) => {
-                "the walls are not built and take up no rows, so a door or window cut into them \
-                 is refused"
+                "the walls are not built and take up no rows, so a door or window cut into them, \
+                 or a beam laid on them, is deferred"
             }
             Self::MemberSlot(MemberFallback::WallStays) => {
                 "the window is not cut, and the wall stays"
@@ -106,6 +123,7 @@ impl TokenSite {
             Self::MemberSlot(MemberFallback::DefaultBlock) => {
                 "the member is built from its default block"
             }
+            Self::MemberSlot(MemberFallback::Unplaced) => "no block display is placed",
         }
     }
 
@@ -241,6 +259,35 @@ pub(super) fn diag_derived_state_domain(
         .collect()
 }
 
+/// Whether the `key` of `state`, which `member`'s own `key=` wrote, is one its block takes at the
+/// pinned target; each pair outside is reported on that value.
+pub(super) fn check_written_state(
+    member: &Member,
+    key: &str,
+    state: &BlockState,
+    registry: Option<&dyn TargetRegistry>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let (Some(registry), Some(written)) = (registry, member.written(key)) else {
+        return true;
+    };
+    let StateDomain::Checked(faults) = registry.state_domain(state) else {
+        return true;
+    };
+    let target = target_label(registry);
+    let before = diagnostics.len();
+    diagnostics.extend(faults.iter().filter(|fault| fault.key == key).map(|fault| {
+        diag_state_domain(
+            written.span.clone(),
+            &state.id,
+            fault,
+            &target,
+            StateOrigin::Argument,
+        )
+    }));
+    diagnostics.len() == before
+}
+
 /// How the pinned target reads in a finding.
 fn target_label(registry: &dyn TargetRegistry) -> String {
     registry
@@ -255,6 +302,8 @@ enum StateOrigin {
     Literal,
     /// Lowering, for the member's geometry.
     Derived,
+    /// A `key=` on the member's own line.
+    Argument,
 }
 
 impl StateOrigin {
@@ -262,6 +311,7 @@ impl StateOrigin {
         match self {
             Self::Literal => "literal",
             Self::Derived => "derived",
+            Self::Argument => "argument",
         }
     }
 }
@@ -302,8 +352,8 @@ fn diag_state_domain(
         ),
     };
     let mut notes = Vec::with_capacity(2);
-    // A derived pair is lowering's, so the author has no literal to correct.
-    if origin == StateOrigin::Literal {
+    // A derived pair is lowering's, so the author has no value to correct.
+    if origin != StateOrigin::Derived {
         notes.extend(suggestion.as_ref().map(|(_, pair)| did_you_mean_note(pair)));
     }
     let elsewhere = (!valid_at.is_empty())
@@ -325,6 +375,17 @@ fn diag_state_domain(
              pack's table for the block is wrong; bind the member's material to another block",
             elsewhere.map_or_else(String::new, |at| format!("{at}, but ")),
         ),
+        (StateOrigin::Argument, Some(at), _) => format!(
+            "{at}: pass {} as `--target`, or give `{key}=` a value {target} takes",
+            if valid_at.len() == 1 {
+                "that version"
+            } else {
+                "one of them"
+            },
+        ),
+        (StateOrigin::Argument, None, _) => {
+            format!("give `{key}=` a value {target} takes, or leave `{key}=` out")
+        }
         (StateOrigin::Literal, Some(at), _) => format!(
             "{at}: pass {} as `--target`, or {correct}",
             if valid_at.len() == 1 {

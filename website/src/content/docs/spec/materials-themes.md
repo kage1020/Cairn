@@ -64,6 +64,16 @@ text whatever a binding comes to mean. Within one row that is `E_DUPLICATE_ARG`;
 that select the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is still checked:
 `E_THEME_SELECTOR_UNMATCHED` applies to it exactly as its own entry says.
 
+**A slot binds a material or a member form.** A `slot` row binds a canonical or abstract material
+token, which a member builds as its block, and takes nothing after it: a `key=value` there is
+`E_PARSE`. It may instead bind a member form, a bare word naming what a `hologram` is built as,
+`text_display` or `sign`, followed by the keys that form takes: `billboard=` and `scale=` for a
+text display and `glowing=` for a sign, as `slot floating_text -> text_display scale=2.0`
+([Versioning and Editions §10.7](/spec/versioning-editions/#writing-an-alternative)). Only a
+`hologram` is built as a member form, so a member of another keyword whose slot binds one is
+`E_INVALID_MEMBER`, and so is a hologram whose slot binds a token. A key the form does not take is
+`E_UNKNOWN_ARGUMENT`, and any other word is `E_UNKNOWN_SLOT_TARGET`.
+
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
 ([Components, Editing, and Multi-building](/spec/components-editing-sites/)).
 
@@ -115,9 +125,14 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@wall.wood.broadleaf`, `@wall.wood.conifer`, `@wall.stone.cobble`, `@wall.stone.smooth` | Walls |
 | `@wood.dark`, `@wood.light`, `@wood.warm`, `@wood.cool` | Planks, by tone |
 | `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
-| `@sign.oak`, `@sign.oak_wall` | A standing sign and a wall sign |
+| `@beam.default` | The pillar block a `beam` lays when no `mat_slot=` binds one |
+| `@sign.oak`, `@sign.oak_wall` | The standing sign a `sign` stands, and the wall sign it hangs, when no `mat_slot=` binds one |
+| `@bed.default` | The bed a `bed` lays when no `mat_slot=` binds one, a red one |
+| `@bed.white`, `@bed.orange`, `@bed.magenta`, `@bed.light_blue`, `@bed.yellow`, `@bed.lime`, `@bed.pink`, `@bed.gray`, `@bed.light_gray`, `@bed.cyan`, `@bed.purple`, `@bed.blue`, `@bed.brown`, `@bed.green`, `@bed.red`, `@bed.black` | The bed of each dye's colour |
 | `@door.default` | The door block a `door` places when no `mat_slot=` binds one |
 | `@chest.default` | The chest block a `chest` places when no `mat_slot=` binds one |
+| `@trapdoor.default` | The trapdoor a `trapdoor` sets when no `mat_slot=` binds one |
+| `@note_block.default` | The note block a `note_block` sets |
 | `@pressure_plate.default` | The block a `pressure_plate` places when no `mat_slot=` binds one |
 | `@lever.default` | The lever a `lever` hangs on its wall |
 | `@button.default` | The button a `button` hangs on its wall when no `mat_slot=` binds one |

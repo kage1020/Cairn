@@ -1,4 +1,5 @@
-//! Loads a [`RegistryPack`] from the packs embedded at compile time, or from a directory.
+//! Loads a [`RegistryPack`] from the packs embedded at compile time, or from a directory, and the
+//! constraint catalog checked against a pair of them.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -6,11 +7,12 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    AbsentConcept, BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, Joins, OutOfDomain,
-    StateDomain, TargetRegistry, UnmappedState,
+    AbsentConcept, AbsentEntity, BlockArrayIr, BlockIdSet, BlockState, Constraint,
+    DeclaredElsewhere, DomainFault, EntityBox, Face, Faces, JoinKind, Joins, OutOfDomain,
+    PaintingLookup, PaintingVariant, StateDomain, Support, TargetRegistry, UnmappedState,
 };
 use cairn_lang_core::lock::HashHex;
-use cairn_lang_core::resolve::{VersionOrder, compare_versions};
+use cairn_lang_core::resolve::{SemanticSensitiveFinding, VersionOrder, compare_versions};
 use cairn_lang_core::suggest::nearest_match;
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
@@ -20,12 +22,14 @@ use super::absent::{AbsentError, AbsentIndex};
 use super::aliases::{AliasError, AliasIndex};
 use super::blocks::{BlocksError, BlocksIndex};
 use super::connections::{ConnectionIndex, ConnectionsError};
+use super::constraints::{ConstraintIndex, ConstraintsCatalog, ConstraintsError};
 use super::data_versions::{
     BedrockTarget, DataVersionEntry, DataVersionTable, JavaTarget, UnsupportedTarget,
 };
 use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
+use super::paintings::{PaintingIndex, PaintingsError};
 use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates, WATER_LAYER_STATE};
 
 /// The state of a slab that fills its cell, which the game never lets hold water although its
@@ -41,6 +45,7 @@ struct BuiltinFiles {
     aliases: &'static str,
     absent: &'static str,
     connections: &'static str,
+    paintings: &'static str,
     states: Option<&'static str>,
     sensitivity: Option<&'static str>,
 }
@@ -77,6 +82,7 @@ macro_rules! builtin_files {
             aliases: include_str!(concat!("../../registry-data/", $dir, "/aliases.json")),
             absent: include_str!(concat!("../../registry-data/", $dir, "/absent.json")),
             connections: include_str!(concat!("../../registry-data/", $dir, "/connections.json")),
+            paintings: include_str!(concat!("../../registry-data/", $dir, "/paintings.json")),
             states: $states,
             sensitivity: $sensitivity,
         }
@@ -114,6 +120,7 @@ pub struct RegistryPack {
     absent: AbsentIndex,
     states: Option<StateMapIndex>,
     connections: ConnectionIndex,
+    paintings: PaintingIndex,
     bytes_hash: HashHex,
     source: PackSource,
 }
@@ -137,6 +144,9 @@ pub struct PackView<'a> {
     /// The targetable versions, which alone a note may offer as a `--target`.
     targetable: Vec<&'a str>,
     connections: &'a ConnectionIndex,
+    paintings: &'a PaintingIndex,
+    /// The constraint catalog the view's checks read; `None` runs none.
+    constraints: Option<&'a ConstraintIndex>,
     /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
     label: String,
 }
@@ -150,6 +160,10 @@ impl TargetRegistry for PackView<'_> {
 
     fn known_tokens(&self) -> Vec<String> {
         self.materials.tokens().map(str::to_owned).collect()
+    }
+
+    fn canonical_block(&self, token: &str) -> Option<String> {
+        self.materials.canonical_id(token).map(str::to_owned)
     }
 
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
@@ -323,12 +337,216 @@ impl TargetRegistry for PackView<'_> {
             .cloned()
             .collect()
     }
+
+    fn constraint(&self, state: &BlockState) -> Option<Constraint> {
+        let catalog = self.constraints?;
+        self.agreed_of(state, |id| catalog.constraint(id, &state.properties))?
+    }
+
+    fn holds(&self, state: &BlockState, host: &BlockState) -> Option<bool> {
+        let catalog = self.constraints?;
+        let (toward, needs) = match self.constraint(state)? {
+            Constraint::Hangs { host } => (host, Support::Sturdy),
+            Constraint::Rests { host, needs } => (host, needs),
+            Constraint::Falls => return None,
+        };
+        let face = toward.opposite();
+        if self.sturdy(host)?.contains(face) {
+            return Some(true);
+        }
+        let on_any_face = self
+            .agreed_of(host, |host_id| {
+                self.agreed_of(state, |id| {
+                    catalog.rests_on_any_face(id, &state.properties, host_id)
+                }) == Some(true)
+            })
+            .unwrap_or(false);
+        if on_any_face || needs == Support::Sturdy {
+            return Some(on_any_face);
+        }
+        let post = matches!(face, Face::Down | Face::Up)
+            && matches!(
+                self.joins(host)?.kind,
+                Some(JoinKind::Pane | JoinKind::Wall | JoinKind::Fence { .. })
+            );
+        let centre = self
+            .agreed_of(host, |id| catalog.gives_centre(id, &host.properties, face))
+            .unwrap_or(false);
+        Some(post || centre)
+    }
+
+    fn keeps_water(&self, state: &BlockState, face: Face) -> Option<bool> {
+        self.constraints?;
+        Some(self.sturdy(state)?.contains(face))
+    }
+
+    fn solid(&self, state: &BlockState) -> Option<bool> {
+        self.constraints?;
+        Some(self.sturdy(state)? == Faces::ALL)
+    }
+
+    fn entity_box(&self, id: &str) -> Option<EntityBox> {
+        let shape = self.constraints?.entity_box(id)?;
+        Some(EntityBox {
+            width: shape.width,
+            height: shape.height,
+            depth: shape.depth,
+        })
+    }
+
+    fn painting(&self, variant: &str) -> PaintingLookup {
+        if self.paintings.is_empty() {
+            return PaintingLookup::Unrecorded;
+        }
+        let known = |painting: &super::paintings::Painting| {
+            PaintingLookup::Known(PaintingVariant {
+                spelling: painting.spelling.clone(),
+                width: painting.width,
+                height: painting.height,
+            })
+        };
+        if let Some(version) = self.mc_version {
+            if let Some(painting) = self.paintings.at(version, variant) {
+                return known(painting);
+            }
+            return PaintingLookup::Unknown {
+                registry: self.label.clone(),
+                known: self
+                    .paintings
+                    .variants_at(version)
+                    .map(str::to_owned)
+                    .collect(),
+                elsewhere: self
+                    .paintings
+                    .everywhere(variant)
+                    .map(|(version, _)| version.to_owned())
+                    .collect(),
+            };
+        }
+        // Unpinned, a variant some version has hangs as every version that has it agrees.
+        let mut found = self
+            .paintings
+            .everywhere(variant)
+            .map(|(_, painting)| painting);
+        let Some(first) = found.next() else {
+            return PaintingLookup::Unknown {
+                registry: self.label.clone(),
+                known: self
+                    .paintings
+                    .every_variant()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+                elsewhere: Vec::new(),
+            };
+        };
+        if found.all(|other| other == first) {
+            known(first)
+        } else {
+            PaintingLookup::Unrecorded
+        }
+    }
+
+    fn absent_entity(&self, id: &str) -> Option<AbsentEntity> {
+        self.absent
+            .entity_reason_for(id)
+            .map(|reason| AbsentEntity {
+                registry: self.label.clone(),
+                declared_by: self.edition.other(),
+                reason: reason.to_owned(),
+            })
+    }
 }
 
 /// A block's canonical states at one version: each property with the values it takes.
 type Domain = IndexMap<String, Vec<String>>;
 
+impl<'a> PackView<'a> {
+    /// This view, with `catalog`'s checks run on what it lowers (`spec/lint` "Constraint checks").
+    #[must_use]
+    pub fn with_constraints(self, catalog: &'a ConstraintIndex) -> Self {
+        Self {
+            constraints: Some(catalog),
+            ..self
+        }
+    }
+
+    /// The members of `block_ir` the constraint catalog lists as meaning something else across a
+    /// boundary version of this view's edition, each once per boundary, in member order.
+    #[must_use]
+    pub fn semantic_sensitive(&self, block_ir: &BlockArrayIr) -> Vec<SemanticSensitiveFinding> {
+        let Some(catalog) = self.constraints else {
+            return Vec::new();
+        };
+        let mut found: Vec<SemanticSensitiveFinding> = Vec::new();
+        for member in block_ir.members.values().flatten() {
+            let name = member.id.as_ref().unwrap_or(&member.role);
+            for block in &member.resolved_state {
+                for id in self.canonical_ids(&block.state) {
+                    for boundary in catalog.boundaries_of(self.edition, &id) {
+                        let finding = SemanticSensitiveFinding {
+                            edition: self.edition,
+                            member: name.clone(),
+                            reason: boundary.reason.to_owned(),
+                            boundary_version: boundary.version.to_owned(),
+                        };
+                        if !found.contains(&finding) {
+                            found.push(finding);
+                        }
+                    }
+                }
+            }
+        }
+        found
+    }
+}
+
 impl PackView<'_> {
+    /// The canonical blocks `state` names at the pinned version, or at any version unpinned.
+    fn canonical_ids(&self, state: &BlockState) -> Vec<String> {
+        let Edition::Bedrock = self.edition else {
+            return vec![state.id.clone()];
+        };
+        let Some(maps) = self.state_maps else {
+            return Vec::new();
+        };
+        let versions: Vec<&str> = self
+            .mc_version
+            .map_or_else(|| maps.versions().collect(), |version| vec![version]);
+        let mut ids: Vec<String> = Vec::new();
+        for states in versions.into_iter().filter_map(|version| maps.at(version)) {
+            for id in states.java_ids(&state.id, &state.properties) {
+                if !ids.iter().any(|held| held == id) {
+                    ids.push(id.to_owned());
+                }
+            }
+        }
+        ids
+    }
+
+    /// What `ask` answers of each canonical block `state` names, or `None` when they disagree or
+    /// it names none.
+    fn agreed_of<T: PartialEq>(&self, state: &BlockState, ask: impl Fn(&str) -> T) -> Option<T> {
+        let mut answers = self.canonical_ids(state).into_iter().map(|id| ask(&id));
+        let first = answers.next()?;
+        answers.all(|other| other == first).then_some(first)
+    }
+
+    /// The faces of `state` its model covers whole, at the pinned version or at every version
+    /// alike unpinned; `None` when the tables cannot say or the versions disagree.
+    fn sturdy(&self, state: &BlockState) -> Option<Faces> {
+        if let Some(version) = self.mc_version {
+            return Some(self.joins_at(version, state)?.sturdy);
+        }
+        let mut said = self
+            .connections
+            .versions()
+            .filter_map(|version| self.joins_at(version, state))
+            .map(|joins| joins.sturdy);
+        let first = said.next()?;
+        said.all(|other| other == first).then_some(first)
+    }
+
     /// What `state` is to the connection rules at `version`, read as the canonical blocks its id
     /// names there, or `None` when the version's tables do not declare it or those blocks disagree.
     fn joins_at(&self, version: &str, state: &BlockState) -> Option<Joins> {
@@ -514,6 +732,13 @@ pub enum RegistryError {
         /// The validation error.
         #[from]
         source: ConnectionsError,
+    },
+    /// The pack's `paintings` component failed to validate.
+    #[error(transparent)]
+    Paintings {
+        /// The validation error.
+        #[from]
+        source: PaintingsError,
     },
     /// `connections` lacks a table for a targetable version, or has one for a version not in the
     /// table.
@@ -720,6 +945,12 @@ impl RegistryPack {
         &self.connections
     }
 
+    /// The painting tables, empty without the component.
+    #[must_use]
+    pub fn paintings(&self) -> &PaintingIndex {
+        &self.paintings
+    }
+
     /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
     #[must_use]
     pub fn bytes_hash(&self) -> &HashHex {
@@ -880,6 +1111,8 @@ impl RegistryPack {
                 .map(|e| e.mc_version.as_str())
                 .collect(),
             connections: &self.connections,
+            paintings: &self.paintings,
+            constraints: None,
             label: match mc_version {
                 Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
                 None => self.manifest.edition.as_str().to_owned(),
@@ -931,6 +1164,58 @@ pub fn load_builtin_pack(edition: Edition) -> Result<RegistryPack, RegistryError
     load_pack(&files, edition)
 }
 
+/// The built-in constraint catalog's text.
+const BUILTIN_CONSTRAINTS: &str = include_str!("../../registry-data/constraints.json");
+
+/// Parse and validate `text` as a constraint catalog against the registry packs.
+///
+/// # Errors
+///
+/// [`ConstraintsError`] when `text` does not parse or validate.
+pub fn parse_constraints(
+    text: &str,
+    java: &RegistryPack,
+    bedrock: &RegistryPack,
+) -> Result<ConstraintIndex, ConstraintsError> {
+    let catalog: ConstraintsCatalog =
+        serde_json::from_str(text).map_err(|err| ConstraintsError::Parse {
+            message: err.to_string(),
+        })?;
+    ConstraintIndex::from_catalog(
+        catalog,
+        HashHex::from_bytes(text.as_bytes()),
+        java.blocks(),
+        [&java.version_order(), &bedrock.version_order()],
+    )
+}
+
+/// Parse the built-in catalog against the built-in packs, returning the error
+/// [`builtin_constraints`] panics on.
+///
+/// # Errors
+///
+/// [`ConstraintsError`] when the embedded catalog is corrupt.
+pub fn load_builtin_constraints() -> Result<ConstraintIndex, ConstraintsError> {
+    parse_constraints(
+        BUILTIN_CONSTRAINTS,
+        builtin_pack(Edition::Java),
+        builtin_pack(Edition::Bedrock),
+    )
+}
+
+/// The built-in constraint catalog, parsed once per process.
+///
+/// # Panics
+///
+/// When the embedded catalog fails to load, which means the build itself is broken.
+pub fn builtin_constraints() -> &'static ConstraintIndex {
+    static CATALOG: OnceLock<ConstraintIndex> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        load_builtin_constraints()
+            .expect("built-in constraint catalog failed to load — this is a build invariant")
+    })
+}
+
 /// Loads a Java pack from a directory holding `pack.json` and the files it names.
 ///
 /// # Errors
@@ -951,6 +1236,7 @@ enum Component {
     States,
     Sensitivity,
     Connections,
+    Paintings,
 }
 
 impl Component {
@@ -965,6 +1251,7 @@ impl Component {
             Component::States => "states",
             Component::Sensitivity => "sensitivity",
             Component::Connections => "connections",
+            Component::Paintings => "paintings",
         };
         RegistryError::File {
             file: file.to_owned(),
@@ -996,6 +1283,7 @@ impl ComponentSource for BuiltinFiles {
             Component::States => embedded(self.states, "states")?,
             Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
             Component::Connections => self.connections,
+            Component::Paintings => self.paintings,
         }))
     }
 
@@ -1091,6 +1379,13 @@ fn load_pack(
         ConnectionIndex::empty,
     )?;
     validate_connections(&connections, &data_versions, &blocks, expected_edition)?;
+    let (paintings, paintings_text) = optional_component(
+        source,
+        Component::Paintings,
+        manifest.files.paintings.as_deref(),
+        |catalog| PaintingIndex::from_catalog(catalog, &data_versions),
+        PaintingIndex::empty,
+    )?;
 
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
@@ -1104,6 +1399,7 @@ fn load_pack(
         (&manifest.files.states, &states_text),
         (&manifest.files.sensitivity, &sensitivity_text),
         (&manifest.files.connections, &connections_text),
+        (&manifest.files.paintings, &paintings_text),
     ] {
         if let (Some(file), Some(text)) = (file, text) {
             components.push((file.as_str(), text.as_bytes()));
@@ -1119,6 +1415,7 @@ fn load_pack(
         absent,
         states,
         connections,
+        paintings,
         bytes_hash,
         source: source.provenance(),
     })
