@@ -4,20 +4,20 @@ Language Server Protocol implementation for Cairn editors. It puts the parser an
 
 ## Status
 
-The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — what a `cairn check` with no `--edition` reports: the same `parse → lower → check` passes and the lowering-stage findings every target that reads their line raises, without the `@intended_targets` findings the CLI merges in — on every `didOpen`/`didChange`, clearing them on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Diagnostics are computed on a second thread that skips a revision a newer one has replaced, so a completion request is not kept waiting behind them. Hover and code actions are not yet wired.
+The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, reports diagnostics — what a `cairn check` with no `--edition` reports: the same `parse → lower → check` passes and the lowering-stage findings every target that reads their line raises, without the `@intended_targets` findings the CLI merges in — and answers `textDocument/completion` from the closed vocabularies. A client whose `initialize` declares `textDocument.diagnostic` pulls them with `textDocument/diagnostic` and is never published to; any other client is pushed `textDocument/publishDiagnostics` on every `didOpen`/`didChange`, cleared on `didClose`. Diagnostics are computed on a second thread, which answers a pull before it publishes and skips a revision a newer one has replaced, so a completion request is not kept waiting behind them. Hover and code actions are not yet wired.
 
 ## Shipped capabilities
 
 | Capability | Notes |
 |---|---|
 | `textDocument/publishDiagnostics` (push) | Stable `E_*`/`W_*` strings in `code`, `source: "cairn"`, span notes as `relatedInformation`, spanless notes folded into `message` as `note:` lines, structured payloads in `data`. Positions are 0-based lines with UTF-16 code-unit columns (the protocol default). |
+| `textDocument/diagnostic` (pull) | The same diagnostics, advertised as `diagnosticProvider` with identifier `cairn`, no inter-file dependencies and no workspace diagnostics. A report's `resultId` names the revision of the document's text it was computed on, counted across the session so a reopened document never repeats one; a pull whose `previousResultId` names the stored revision is answered `unchanged` without recomputing. A pull for a document that is not open is refused with `InvalidParams`. |
 | `textDocument/completion` | Three closed-vocabulary contexts, detected line-locally so completion works while the document fails to parse: line-opening keywords (top-level items, member commands, `slot` + selector keywords in theme bodies), `mat_slot=` values (union of slot names declared by the document's themes — edition variants union naturally, matching unpinned `cairn check`), and `@` material tokens from the built-in registry union (java ∪ bedrock): abstract tokens with their resolved canonical id as detail, plus the deduplicated canonical ids from the catalog's value column. The full canonical vocabulary is not offered yet: completion reads the materials catalog, not the blocks table the registry packs also carry and `E_UNKNOWN_ID` answers from. Trigger characters: `@`, `=`, `.`. |
 
 ## Planned capabilities
 
 | Capability | Spec reference |
 |---|---|
-| `textDocument/diagnostic` (pull) — syntax, geometry, attachment, support, fluid, version_caps, edit_stability, redstone | [lint](https://cairn.kage1020.com/spec/lint/) |
 | `textDocument/completion` over the full canonical block vocabulary, by reading the registry packs' blocks table as well as the materials catalog | [materials-themes "Canonical vocabulary"](https://cairn.kage1020.com/spec/materials-themes/) |
 | `textDocument/hover` — block primitive docs, blockstate intent vs resolved view | [blockstate "`intent_state` and `resolved_state`"](https://cairn.kage1020.com/spec/blockstate/) |
 | `textDocument/codeAction` — apply the "Suggested fix:" payloads from lint messages | [lint](https://cairn.kage1020.com/spec/lint/), [versioning-editions "Fail-loud and minimum-version inference"](https://cairn.kage1020.com/spec/versioning-editions/) |

@@ -1,5 +1,5 @@
-//! The latest text of each open document, which a completion request names by URI alone. A
-//! ranged edit is applied as one, though the server advertises full sync.
+//! The latest text of each open document, which a request names by URI alone, and the revision
+//! that text is. A ranged edit is applied as one, though the server advertises full sync.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -106,7 +106,16 @@ pub(crate) fn apply_content_changes(
 /// Latest full text of every open document, keyed by URI.
 #[derive(Debug, Default)]
 pub struct DocumentStore {
-    docs: HashMap<lsp_types::Uri, String>,
+    docs: HashMap<lsp_types::Uri, Document>,
+    /// The revision the last text stored took, so no two texts share one.
+    last_revision: u64,
+}
+
+/// One open document's text and the revision it is.
+#[derive(Debug)]
+struct Document {
+    text: String,
+    revision: u64,
 }
 
 impl DocumentStore {
@@ -118,7 +127,9 @@ impl DocumentStore {
 
     /// Record the full text delivered by `didOpen`.
     pub fn open(&mut self, uri: lsp_types::Uri, text: String) {
-        self.docs.insert(uri, text);
+        self.last_revision += 1;
+        let revision = self.last_revision;
+        self.docs.insert(uri, Document { text, revision });
     }
 
     /// Applies a `didChange`'s `contentChanges` to an open document and returns the new text.
@@ -135,8 +146,10 @@ impl DocumentStore {
             .docs
             .get_mut(uri)
             .ok_or(ChangeRefused::DocumentNotOpen)?;
-        *slot = apply_content_changes(slot, changes)?;
-        Ok(slot)
+        slot.text = apply_content_changes(&slot.text, changes)?;
+        self.last_revision += 1;
+        slot.revision = self.last_revision;
+        Ok(&slot.text)
     }
 
     /// Forgets a document; closing one that is not open does nothing.
@@ -147,7 +160,13 @@ impl DocumentStore {
     /// Latest text of an open document, or `None` when the URI is not open.
     #[must_use]
     pub fn get(&self, uri: &lsp_types::Uri) -> Option<&str> {
-        self.docs.get(uri).map(String::as_str)
+        self.docs.get(uri).map(|document| document.text.as_str())
+    }
+
+    /// The revision of an open document's latest text, or `None` when the URI is not open.
+    #[must_use]
+    pub fn revision(&self, uri: &lsp_types::Uri) -> Option<u64> {
+        self.docs.get(uri).map(|document| document.revision)
     }
 }
 
@@ -378,6 +397,39 @@ mod tests {
             "{refused:?}",
         );
         assert_eq!(store.get(&uri("file:///a.crn")), Some("ab\n"));
+    }
+
+    #[test]
+    fn every_text_stored_takes_a_revision_no_earlier_text_had() {
+        let mut store = DocumentStore::new();
+        let a = uri("file:///a.crn");
+        store.open(a.clone(), "one".to_owned());
+        store.open(uri("file:///b.crn"), "one".to_owned());
+        assert_eq!(store.revision(&a), Some(1));
+        assert_eq!(store.revision(&uri("file:///b.crn")), Some(2));
+        store.apply(&a, [whole("two")]).expect("open");
+        assert_eq!(store.revision(&a), Some(3));
+        store.close(&a);
+        assert_eq!(store.revision(&a), None);
+        store.open(a.clone(), "one".to_owned());
+        assert_eq!(
+            store.revision(&a),
+            Some(4),
+            "a reopened text is a new revision"
+        );
+    }
+
+    #[test]
+    fn a_refused_revision_keeps_the_revision_it_refused_to_replace() {
+        let mut store = DocumentStore::new();
+        let a = uri("file:///a.crn");
+        store.open(a.clone(), "ab\n".to_owned());
+        store
+            .apply(&a, [edit((9, 0), (9, 0), "y")])
+            .expect_err("line 9 is not there");
+        assert_eq!(store.revision(&a), Some(1));
+        store.apply(&a, [whole("cd\n")]).expect("open");
+        assert_eq!(store.revision(&a), Some(2));
     }
 
     #[test]

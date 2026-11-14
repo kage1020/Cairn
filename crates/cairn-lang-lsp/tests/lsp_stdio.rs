@@ -1,5 +1,6 @@
-//! The `cairn-lsp` binary over stdio: how each way a session ends exits and logs, and the line each
-//! dropped notification logs. What the dispatch loop answers is tested beside `server.rs`.
+//! The `cairn-lsp` binary over stdio: how each way a session ends exits and logs, the line each
+//! dropped notification logs, and the diagnostics route `initialize` settles. What the dispatch
+//! loop answers is tested beside `server.rs`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -44,6 +45,15 @@ impl Server {
 
     /// [`Server::start`] with `args` on the command line.
     fn start_with_args(args: &[&str]) -> (Self, serde_json::Value) {
+        Self::start_with(args, &serde_json::json!({}))
+    }
+
+    /// [`Server::start`] for a client that declares `capabilities`.
+    fn start_declaring(capabilities: &serde_json::Value) -> (Self, serde_json::Value) {
+        Self::start_with(&[], capabilities)
+    }
+
+    fn start_with(args: &[&str], capabilities: &serde_json::Value) -> (Self, serde_json::Value) {
         let mut child = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
             .args(args)
             .stdin(Stdio::piped())
@@ -83,7 +93,7 @@ impl Server {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "initialize",
-            "params": { "capabilities": {} },
+            "params": { "capabilities": capabilities },
         }));
         let response = server.read_message();
         server.send(&serde_json::json!({
@@ -266,6 +276,39 @@ fn initialize_advertises_full_sync_and_completion_and_shuts_down_clean() {
     assert_eq!(
         capabilities["completionProvider"]["triggerCharacters"],
         serde_json::json!(["@", "=", "."]),
+    );
+    assert_eq!(
+        capabilities["diagnosticProvider"]["identifier"],
+        serde_json::json!("cairn"),
+    );
+    server.shutdown();
+}
+
+#[test]
+fn a_client_that_declares_pulled_diagnostics_is_answered_and_not_published_to() {
+    let (mut server, _) = Server::start_declaring(&serde_json::json!({
+        "textDocument": { "diagnostic": { "dynamicRegistration": false } },
+    }));
+    server.did_open(DUPLICATE, 1);
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "textDocument/diagnostic",
+        "params": { "textDocument": { "uri": TEST_URI } },
+    }));
+    let next = server.read_message();
+    assert_eq!(
+        next.get("id"),
+        Some(&serde_json::json!(2)),
+        "the pull's answer comes before anything else, got: {next}",
+    );
+    assert_eq!(next["result"]["kind"], "full");
+    assert!(
+        !next["result"]["items"]
+            .as_array()
+            .expect("an item array")
+            .is_empty(),
+        "the fixture has findings, got: {next}",
     );
     server.shutdown();
 }
