@@ -13,8 +13,9 @@ use crate::block_array::material::{
     IdOrigin, MaterialDeferred, TargetRegistry, resolve_block_state, validated_id,
 };
 use crate::block_array::openings::WallSide;
+pub(super) use crate::block_array::openings::side_name;
 use crate::block_array::wall_column::WallColumn;
-use crate::block_array::{BlockState, Dims, PaletteIndex};
+use crate::block_array::{Bbox, BlockState, Dims, PaletteIndex};
 
 use super::canvas::ScopePalette;
 use super::phase::Phase;
@@ -47,6 +48,19 @@ pub(super) struct StructCtx<'a> {
 }
 
 impl StructCtx<'_> {
+    /// The cells over the body's `size=` footprint from row `low` to row `high`.
+    pub(super) fn footprint_box(&self, low: u32, high: u32) -> Bbox {
+        let o = self.overhang;
+        Bbox::spanning(
+            (o, low, o),
+            (
+                o.saturating_add(self.interior_w).saturating_sub(1),
+                high,
+                o.saturating_add(self.interior_h).saturating_sub(1),
+            ),
+        )
+    }
+
     /// The note on a refusal above the struct as written when a roof whose shape does not read
     /// may raise its top row, or `None`.
     pub(super) fn unread_roof_note(&self) -> Option<String> {
@@ -436,13 +450,4 @@ pub(super) fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Opt
         Vec::new(),
     ));
     None
-}
-
-pub(super) fn side_name(side: WallSide) -> &'static str {
-    match side {
-        WallSide::Front => "front",
-        WallSide::Back => "back",
-        WallSide::Left => "left",
-        WallSide::Right => "right",
-    }
 }

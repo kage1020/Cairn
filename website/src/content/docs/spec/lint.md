@@ -352,6 +352,7 @@ author means, so with both in scope the question has not been asked.
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_PLACEMENT_OVERLAP` | Two `place` rows of one site resolve to boxes that share a cell, or a `connect` row's walkway lays a cell inside the box of a placement it does not join ([Entities §8.2](/spec/entities/#82-anchor-conventions)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
 | `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
@@ -393,6 +394,23 @@ row names no prior place, as it would for any other id, and is `E_UNRESOLVED_PLA
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
 
+`E_PLACEMENT_OVERLAP` compares every pair of rows of one site by the boxes the coordinate solver
+gives them, each from its origin to `origin + dims - 1`. `east_of=` and `north_of=` keep a row clear
+of the row it names and of no other: a second `at=origin` lands on the first, and a chain of
+relative rows can come back onto a row placed along another chain. The finding is on the later
+row, with a note at the earlier one, and names both boxes and the box they share. Its fix is the
+`gap=` that moves the later row clear along the axis its selector steps, which moves every row
+placed relative to it too, or for an `at=origin` row, which no `gap=` moves, a relative selector.
+A walkway is compared by the cells it lays rather than by its box, against every placement of its
+site but its two ends, and the finding is on the `connect` row with a note at the placement. The
+router keeps a strip off placement floors only, so a strip routed under the eaves of a third
+placement is one. Rows of two sites are not compared, since each site is laid out from its own
+origin. Inside one body, overlapping members merge by phase; between two structure files there is
+nothing to merge. Each writes air in every cell its body does not fill, so which of two
+overlapping files holds a shared cell depends on the order they are placed in, and the source
+names no order. That is why the overlap is an error. Lowering raises it once every row is placed,
+so `cairn check` reports it without a `--target` too.
+
 `W_UNUSED_DEF` counts every `place` row in a `site` body whose `use=` names the def, including a row
 refused for its id or its origin. That row does reference the def, and the finding with the repair
 is the one on the row: removing the def, as the warning would advise, only brings it back as
@@ -422,7 +440,7 @@ something for the name would build a site the source did not describe.
 
 | Code | Meaning |
 |---|---|
-| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
+| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member of the referenced def's body, or of a `level` directly in it, carries. A member under a `level` inside a `level` builds nothing, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
 | `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, or a `path=` that is not a material token (`path=gravel` for `path=@gravel`), so the walkway has no material to lay. |
 | `W_DUPLICATE_WALKWAY` | A `connect` joins the same two ports, in either order, as an earlier row in the same site that already laid them. |
@@ -639,11 +657,16 @@ Beyond the codes above, lint covers:
 | **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
-| **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
+| **AABB interference** | Members of one body that overlap priority-merge by phase; bodies of two `place` rows that overlap are an error ([Entities §8.2](/spec/entities/#82-anchor-conventions)). Boundary blockstate re-resolution is the IR layer's job. |
 
-Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
-and no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
-holds only in part: a door, window, eave stair, chest, sensor or actuator its own line puts outside
+Of these, attachment, entity_aabb, support, fluid and edit_stability are planned, and no command
+checks them yet. AABB interference holds inside a body, where the phase order merges the members
+and `W_PHASE_CONFLICT` reports two of one phase that take a cell from each other
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and
+between bodies, where two `place` rows of a site whose boxes share a cell, or a walkway laid inside
+a placement it does not join, are `E_PLACEMENT_OVERLAP`
+([Sites and placements](#sites-and-placements)). Geometry holds only in part: a door, window,
+eave stair, chest, sensor or actuator its own line puts outside
 its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
 keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
 `E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
@@ -934,8 +957,8 @@ the key itself decides whether the member is built at all, the member is left ou
 `W_DEFERRED_MEMBER` (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
 [§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
 reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
-*unreached* key is one this specification defines that no pass reads yet. `window shape=` /
-`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today. Every
+*unreached* key is one this specification defines that no pass reads yet. `window shape=` and a
+header's `class=` are those keys today. Every
 `key=value` on the right of a `theme` selector row whose keyword the compiler knows is one too,
 reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
 ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member

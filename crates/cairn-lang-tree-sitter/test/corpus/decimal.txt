@@ -1,0 +1,54 @@
+==================
+Decimals as a key's value, in a list and as a bare value
+==================
+
+struct s size=5x5
+  walls scale=1.5 marks=[0.25, 2] 3.75
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (decimal)))
+          (command_arg
+            (attribute
+              (identifier)
+              (value_list
+                (decimal)
+                (integer))))
+          (command_arg
+            (decimal)))))))
+
+==================
+A decimal with no digit before its dot
+:error
+==================
+
+struct s size=5x5
+  walls scale=.5
+
+---
+
+==================
+A decimal as a stage count
+:error
+==================
+
+struct s size=5x5
+  logic sig.out = delay(sig.in, 1.5)
+
+---

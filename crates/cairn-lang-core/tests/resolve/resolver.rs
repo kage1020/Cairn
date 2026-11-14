@@ -311,7 +311,7 @@ fn unresolved_ports(r: &Resolution) -> Vec<&Diagnostic> {
 }
 
 #[test]
-fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
+fn a_port_under_a_level_resolves() {
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -328,33 +328,14 @@ fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
         "  connect a.entry to b.front path=@gravel\n",
     );
     let r = resolve(&ir(src), None);
-    let [refusal] = unresolved_ports(&r)[..] else {
-        panic!("expected one E_UNRESOLVED_PORT, got {:?}", r.diagnostics);
-    };
     assert_eq!(
-        refusal.primary,
-        "port `entry` of `def cottage` (used by `place a`) is declared under a `level`, \
-             and a member under a `level` cannot be a port yet",
+        r.diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new(),
     );
-    assert_eq!(refusal.span, span_of(src, "a.entry", 0));
-    let notes: Vec<(Option<Span>, &str)> = refusal
-        .notes
-        .iter()
-        .map(|n| (n.span.clone(), n.message.as_str()))
-        .collect();
-    assert_eq!(
-        notes,
-        [(
-            Some(span_of(src, "door id=entry side=back at=center", 0)),
-            "a port has to be a door or window declared directly in the body of \
-                 `def cottage`: use one of those as the endpoint; level-scoped ports are a \
-                 future extension",
-        )],
-    );
-    assert!(
-        r.connects.is_empty(),
-        "the refused connect must not resolve"
-    );
+    assert_eq!(r.connects.len(), 1);
 }
 
 #[test]
@@ -382,16 +363,20 @@ fn a_port_under_a_level_inside_a_level_names_the_inner_level() {
     assert_eq!(
         refusal.primary,
         "port `up_entry` of `def tower` (used by `place a`) is declared under \
-             `level id=inner`, and a member under a `level` cannot be a port yet",
+             `level id=inner`, a `level` inside another, which builds nothing",
     );
-    let note_spans: Vec<Option<Span>> = refusal.notes.iter().map(|n| n.span.clone()).collect();
+    let notes: Vec<(Option<Span>, &str)> = refusal
+        .notes
+        .iter()
+        .map(|n| (n.span.clone(), n.message.as_str()))
+        .collect();
     assert_eq!(
-        note_spans,
-        [Some(span_of(
-            src,
-            "door id=up_entry side=back at=center",
-            0
-        ))],
+        notes,
+        [(
+            Some(span_of(src, "door id=up_entry side=back at=center", 0)),
+            "a port is a door or window in the body of `def tower` or directly under one of \
+             its `level`s: move the member out of the inner `level`",
+        )],
     );
     assert!(
         r.connects.is_empty(),
@@ -400,7 +385,7 @@ fn a_port_under_a_level_inside_a_level_names_the_inner_level() {
 }
 
 #[test]
-fn a_body_port_resolves_when_a_level_carries_the_same_id() {
+fn a_port_id_in_the_body_and_under_a_level_is_ambiguous() {
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -417,13 +402,26 @@ fn a_body_port_resolves_when_a_level_carries_the_same_id() {
         "  connect a.front to b.front path=@gravel\n",
     );
     let r = resolve(&ir(src), None);
+    let ambiguous: Vec<(&str, &str)> = r
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::AmbiguousPort)
+        .map(|d| (&src[d.span.clone()], d.primary.as_str()))
+        .collect();
     assert_eq!(
-        unresolved_ports(&r).len(),
-        0,
-        "a body member carries `front`: {:?}",
-        r.diagnostics,
+        ambiguous,
+        [
+            (
+                "a.front",
+                "port `front` matches 2 members of `def tower`; the reference is ambiguous",
+            ),
+            (
+                "b.front",
+                "port `front` matches 2 members of `def tower`; the reference is ambiguous",
+            ),
+        ],
     );
-    assert_eq!(r.connects.len(), 1, "{:?}", r.diagnostics);
+    assert!(r.connects.is_empty(), "{:?}", r.diagnostics);
 }
 
 #[test]

@@ -67,6 +67,7 @@ fn lower_theme(name: &str, body: &[ThemeRule], span: crate::error::Span) -> Them
                 attrs,
                 bindings,
                 span: rule_span,
+                ..
             } => {
                 selectors.push(SelectorRule {
                     keyword: keyword.clone(),
@@ -189,16 +190,27 @@ fn lower_body(body: &[Statement]) -> MemberBody {
 fn push_statement(stmt: &Statement, out: &mut MemberBody) {
     match stmt {
         Statement::Generic { .. } => out.members.push(lower_member(stmt)),
-        Statement::Logic { lhs, rhs, span } => out.logic.push(LogicBinding {
-            lhs: lhs.clone(),
-            rhs: rhs.clone(),
-            span: span.clone(),
-        }),
+        Statement::Logic {
+            lhs,
+            rhs,
+            binds,
+            span,
+            ..
+        } => {
+            if *binds {
+                out.logic.push(LogicBinding {
+                    lhs: lhs.clone(),
+                    rhs: rhs.clone(),
+                    span: span.clone(),
+                });
+            }
+        }
         Statement::AssertTruth {
             inputs,
             output,
             rows,
             span,
+            ..
         } => out.asserts.push(AssertIr::Truth {
             inputs: inputs.clone(),
             output: output.clone(),
@@ -210,6 +222,7 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             consequent,
             within,
             span,
+            ..
         } => out.asserts.push(AssertIr::Always {
             antecedent: antecedent.clone(),
             consequent: consequent.clone(),
@@ -221,6 +234,7 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             to,
             bound,
             span,
+            ..
         } => out.asserts.push(AssertIr::Latency {
             from: from.clone(),
             to: to.clone(),

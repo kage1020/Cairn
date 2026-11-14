@@ -310,6 +310,11 @@ fn the_record_serializes_under_members_keyed_like_structures() {
                     "state": { "id": "minecraft:cobblestone" },
                     "runs": [{ "from": [0, 1, 0], "len": 1 }],
                 }],
+                "geometry": {
+                    "anchor": [0, 1, 0],
+                    "declared_bbox": { "min": [0, 1, 0], "max": [0, 1, 0] },
+                    "actual_bbox": { "min": [0, 1, 0], "max": [0, 1, 0] },
+                },
             }],
         }),
     );

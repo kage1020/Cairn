@@ -11,11 +11,12 @@ use crate::block_array::args::{
     UnreadArgument, diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member,
     ident_or_ignore, read_or_ignore,
 };
+use crate::block_array::geometry::{Declared, outer_face};
 use crate::block_array::openings::{
-    DOOR_HEIGHT, WallSide, door_anchor_offset, door_at_refusal, wall_length, wall_local_to_grid,
+    DOOR_HEIGHT, WallSide, door_column, wall_length, wall_local_to_grid,
 };
 use crate::block_array::roof::inward_cardinal;
-use crate::block_array::{BlockState, PaletteIndex};
+use crate::block_array::{Bbox, BlockState, PaletteIndex};
 
 use super::canvas::{Canvas, MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
@@ -146,6 +147,12 @@ pub(super) fn fill_door(
         }
         // A derived door stands hinged on the left until `hang_doors` settles it.
         let hinge = door.hinge.unwrap_or(Hinge::Left);
+        let [(_, lower), (_, upper)] = door.cells();
+        canvas.declare(Declared {
+            anchor: lower,
+            bbox: Bbox::spanning(lower, upper),
+            host_face: Some(outer_face(door.side)),
+        });
         let mut painted = [PaletteIndex::AIR; 2];
         for (slot, (half, pos)) in painted.iter_mut().zip(door.cells()) {
             canvas.paint(pos, || {
@@ -187,12 +194,13 @@ fn stand_door(
 ) -> Option<HungDoor> {
     let side = side_of(member, diagnostics);
     let at = side.and_then(|side| {
-        door_anchor_offset(member, wall_length(side, ctx.interior_w, ctx.interior_h))
-            .map_err(|written| {
+        let length = wall_length(side, ctx.interior_w, ctx.interior_h);
+        door_column(member, side, length)
+            .map_err(|fault| {
                 diagnostics.push(diag_invalid_member(
                     member,
-                    door_at_refusal(&written),
-                    Vec::new(),
+                    fault.refusal(),
+                    vec![fault.fix(length)],
                 ));
             })
             .ok()
@@ -233,7 +241,7 @@ fn stand_door(
         ctx.interior_h,
         ctx.dims,
     ) else {
-        // INVARIANT(wall-grid-validated): `at < len`, and both rows sit in a painted course.
+        // INVARIANT(wall-grid-validated): `at < length`, and both rows sit in a painted course.
         debug_assert!(
             false,
             "door row y={base_row} at u={at} on the {} wall is outside the wall grid; `at=` \

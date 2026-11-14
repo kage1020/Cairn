@@ -1,6 +1,6 @@
 //! Lowering the `connect` rows of every `site` to walkway strips.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::hash::BuildHasher;
 
 use indexmap::IndexMap;
@@ -9,7 +9,7 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNo
 use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::DefIr;
 use crate::prose::and_list;
-use crate::resolve::{Resolution, place_scope_key};
+use crate::resolve::{Resolution, ValidatedConnect, place_scope_key};
 
 use crate::block_array::material::{
     MaterialDeferred, TargetRegistry, is_stand_in, resolve_block_state,
@@ -21,7 +21,8 @@ use crate::block_array::walkway::{
 };
 use crate::block_array::{BlockArray, BlockState, Dims, Footprint, Placement, Walkway};
 
-use super::site_floor::{FloorExtent, FloorPlan, PlacedBody};
+use super::overlap::report_strip_overlaps;
+use super::site_floor::{FloorExtent, FloorPlan, PlacedBody, collect_floor_cells};
 use super::token_diag::{
     IdSite, NamedBy, TokenSite, check_state_literal, diag_abstract_token, diag_state_unmapped,
     diag_undeclared_id, diag_unknown_abstract_token,
@@ -37,8 +38,6 @@ pub(super) struct ConnectInputs<'a> {
     pub(super) registry: Option<&'a dyn TargetRegistry>,
     /// Every `place` row that lowered, under its `site::SITE::PLACE_ID` key.
     pub(super) placed: &'a IndexMap<String, PlacedBody>,
-    /// Placement floors on the walk plane, and each placement's floor extent.
-    pub(super) floor: &'a FloorPlan,
 }
 
 /// Lower every resolved `connect` row into a walkway array and its [`Walkway`] record.
@@ -51,25 +50,29 @@ pub(super) fn lower_connects(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let &ConnectInputs {
-        resolution,
-        registry,
-        placed,
-        floor,
-        ..
+        registry, placed, ..
     } = inputs;
-    let blocked = &floor.cells;
+    let ported = place_every_port(inputs, diagnostics);
+    let floors = walk_planes(&ported, structures, placed);
+    // Indexed once for every row on a plane, so many colliding rows cannot multiply a linear scan.
+    let indexes: BTreeMap<i32, BlockedIndex<'_, _>> = floors
+        .iter()
+        .map(|(plane, floor)| (*plane, BlockedIndex::new(&floor.cells)))
+        .collect();
     let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
-    // Indexed once for every row, so many colliding rows cannot multiply a linear scan.
-    let blocked_index = BlockedIndex::new(blocked);
 
-    for connect in &resolution.connects {
-        let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
-        let to_key = place_scope_key(connect.site.as_str(), connect.to.place.as_str());
-        let Some((from_pos, to_pos)) =
-            place_ports(connect, (&from_key, &to_key), inputs, diagnostics)
-        else {
+    for (connect, from_key, to_key, ports) in ported {
+        let Some((from_pos, to_pos)) = ports else {
             continue;
         };
+        let (Some(floor), Some(blocked_index)) =
+            (floors.get(&from_pos.1), indexes.get(&from_pos.1))
+        else {
+            // INVARIANT: `floors` and `indexes` hold the plane of every pair `place_ports` placed.
+            debug_assert!(false, "no floor plan for the plane y={}", from_pos.1);
+            continue;
+        };
+        let blocked = &floor.cells;
 
         // A pair is recorded only once its strip is laid, so a refused earlier row is no duplicate.
         let dedup_key = connect.walkway_pair();
@@ -86,7 +89,7 @@ pub(super) fn lower_connects(
             connect,
             (from_pos, to_pos),
             blocked,
-            &blocked_index,
+            blocked_index,
             diagnostics,
         ) else {
             continue;
@@ -101,6 +104,12 @@ pub(super) fn lower_connects(
             origin,
             blocked_count: skipped,
         } = build_walkway_array(&path, material, blocked, &scope_key);
+        let strip: Vec<Cell> = path
+            .iter()
+            .copied()
+            .filter(|cell| !blocked.contains(cell))
+            .collect();
+        report_strip_overlaps(connect, &strip, (&from_key, &to_key), placed, diagnostics);
         if routed {
             debug_assert_eq!(
                 skipped, 0,
@@ -147,6 +156,43 @@ pub(super) fn lower_connects(
             },
         );
     }
+}
+
+/// A `connect` row, the scope keys of its two placements, and its two ports' world cells, or
+/// `None` after the finding that refused them.
+type Ported<'c> = (&'c ValidatedConnect, String, String, Option<(Cell, Cell)>);
+
+/// Every resolved `connect` row with its ports placed.
+fn place_every_port<'c>(
+    inputs: &ConnectInputs<'c>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<Ported<'c>> {
+    inputs
+        .resolution
+        .connects
+        .iter()
+        .map(|connect| {
+            let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
+            let to_key = place_scope_key(connect.site.as_str(), connect.to.place.as_str());
+            let ports = place_ports(connect, (&from_key, &to_key), inputs, diagnostics);
+            (connect, from_key, to_key, ports)
+        })
+        .collect()
+}
+
+/// The [`FloorPlan`] of each row a pair of `ported` ports shares, collected once for all its rows.
+fn walk_planes(
+    ported: &[Ported<'_>],
+    structures: &IndexMap<String, BlockArray>,
+    placed: &IndexMap<String, PlacedBody>,
+) -> BTreeMap<i32, FloorPlan> {
+    ported
+        .iter()
+        .filter_map(|(.., ports)| ports.map(|(from, _)| from.1))
+        .collect::<BTreeSet<i32>>()
+        .into_iter()
+        .map(|plane| (plane, collect_floor_cells(structures, placed, plane)))
+        .collect()
 }
 
 /// The world cells of a `connect` row's two ports, or `None` after a `W_DEFERRED_MEMBER`.
@@ -200,7 +246,11 @@ fn place_ports(
         &to_body.cut,
     );
     let (notes, noun, (from_refused, to_refused)) = match (from_pos, to_pos) {
-        (Ok(from_pos), Ok(to_pos)) => return Some((from_pos, to_pos)),
+        (Ok(from_pos), Ok(to_pos)) if from_pos.1 == to_pos.1 => return Some((from_pos, to_pos)),
+        (Ok(from_pos), Ok(to_pos)) => {
+            diagnostics.push(diag_ports_on_two_rows(connect, from_pos.1, to_pos.1));
+            return None;
+        }
         (Err(from_err), Err(to_err)) => (
             vec![
                 from_err.note(&connect.from.to_string()),
@@ -233,6 +283,32 @@ fn place_ports(
         data: None,
     });
     None
+}
+
+/// A row whose two ports stand on different rows, which no flat strip joins.
+fn diag_ports_on_two_rows(
+    connect: &crate::resolve::ValidatedConnect,
+    from_y: i32,
+    to_y: i32,
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::DeferredMember,
+        span: connect.span.clone(),
+        primary: format!(
+            "walkway `{from} ↔ {to}` was skipped because its ports stand on two rows, `{from}` at \
+             y={from_y} and `{to}` at y={to_y}",
+            from = connect.from,
+            to = connect.to,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "a walkway is a flat strip on the row its two ports share and does not \
+                      climb; join two openings that open onto one row, both in their `def` body \
+                      or both under a `level` of one `y=`"
+                .to_owned(),
+        }],
+        data: None,
+    }
 }
 
 /// A `connect` row's two ends and scope key, or `None` after a `W_INVALID_WALKWAY_IDENT`.

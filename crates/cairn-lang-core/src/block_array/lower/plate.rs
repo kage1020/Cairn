@@ -5,6 +5,7 @@ use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::diag_deferred_member_reason;
+use crate::block_array::geometry::Declared;
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Fixture, Refusal, fixture_cell, note_unbuilt_binding, outside_the_array};
@@ -53,10 +54,11 @@ fn place_plate(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<bool, Refusal> {
-    let (_, cell) = fixture_cell(PLATE, member, y_offset, ctx)?;
+    let (anchor, cell) = fixture_cell(PLATE, member, y_offset, ctx)?;
     let Some(base_id) = plate_id_for_member(member, ctx, diagnostics)? else {
         return Ok(false);
     };
+    canvas.declare(Declared::cell(cell, Some(anchor.host_face())));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(BlockState::bare(base_id))) {
         Ok(true)

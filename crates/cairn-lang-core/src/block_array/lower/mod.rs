@@ -20,6 +20,7 @@ mod fill;
 mod fixture;
 mod geometry_material;
 mod members;
+mod overlap;
 mod paint;
 mod part;
 mod phase;
@@ -56,7 +57,8 @@ use anchor::{GapOutcome, report_unread_gap, resolve_place_anchor};
 use body::{BodyDescriptor, BodyInputs, LoweredBody, lower_body_to_block_array};
 use connect::{ConnectInputs, lower_connects};
 use diag::{VoxelSource, diag_def_no_size, diag_struct_no_size};
-use site_floor::{PlacedBody, collect_floor_cells};
+use overlap::report_placement_overlaps;
+use site_floor::PlacedBody;
 
 pub use without_target::{findings_under_guards, findings_without_target};
 
@@ -120,15 +122,13 @@ fn lower_to_block_array_within(
         mut structures,
         members,
     } = built;
-    // After every site, so the collision set covers every floor tile a strip might cross.
-    let floor = collect_floor_cells(&structures, &placed);
+    report_placement_overlaps(&placed, &mut diagnostics);
     lower_connects(
         &ConnectInputs {
             resolution,
             defs: &intent.defs,
             registry,
             placed: &placed,
-            floor: &floor,
         },
         &mut structures,
         &mut walkways,
@@ -191,9 +191,6 @@ fn lower_site<'a>(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for member in &site.placements {
-        if matches!(member.role, MemberRole::Connect) {
-            continue;
-        }
         if !matches!(member.role, MemberRole::Place) {
             continue;
         }
@@ -239,7 +236,8 @@ fn lower_site<'a>(
         };
 
         // Resolved before this place is inserted: the anchor looks only at prior places.
-        let (anchor, gap_unread) = resolve_place_anchor(member, placed, &site.name);
+        let prior = |key: &str| placed.get(key).map(|b| &b.placement);
+        let (anchor, gap_unread) = resolve_place_anchor(member, prior, &site.name);
 
         // Lowered even without an anchor: the body's findings stand wherever the row lands.
         let body = lower_body_to_block_array(
@@ -283,6 +281,8 @@ fn lower_site<'a>(
         placed
             .entry(lowered.array.source_scope.clone())
             .or_insert(PlacedBody {
+                row: member.span.clone(),
+                anchor,
                 walls: lowered.walls,
                 cut: lowered.cut,
                 placement: Placement {

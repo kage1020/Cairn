@@ -10,11 +10,12 @@ use crate::error::Span;
 use crate::intent::{Member, MemberRole, Size, role_of};
 use crate::resolve::ScopeResolution;
 
+use crate::block_array::geometry::Declared;
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{
-    BlockArray, Dims, MAX_STRUCTURE_VOLUME, Palette, PaletteFull, PaletteIndex, ResolvedBlock,
-    ResolvedMember,
+    Bbox, BlockArray, Dims, MAX_STRUCTURE_VOLUME, Palette, PaletteFull, PaletteIndex,
+    ResolvedBlock, ResolvedMember,
 };
 
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
@@ -166,7 +167,7 @@ pub(super) fn lower_body_to_block_array<'a>(
     );
 
     let array = finished_array(dims, palette, voxels, body.source_scope, &derived);
-    let members = resolved_members(&flattened, canvas.owners(), &array);
+    let members = resolved_members(&flattened, &canvas, &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));
     }
@@ -261,13 +262,14 @@ fn state_findings<'a>(
     })
 }
 
-/// Each member of `flattened` that owns a cell of `array`, with the states its cells hold, in the
-/// order of the first cell each owns.
+/// Each member of `flattened` that owns a cell of `array`, with the states its cells hold and its
+/// geometry, in the order of the first cell each owns.
 fn resolved_members(
     flattened: &[(u32, &Member)],
-    owners: &[u32],
+    canvas: &Canvas,
     array: &BlockArray,
 ) -> Vec<ResolvedMember> {
+    let owners = canvas.owners();
     debug_assert_eq!(
         owners.len(),
         array.voxels.len(),
@@ -275,7 +277,7 @@ fn resolved_members(
     );
     // Keyed by first cell, not source line: `resolved_ir_hash` reads this order, and
     // `spec/compilation` "Within-phase conflicts and the palette" keeps it free of line order.
-    let mut built: IndexMap<usize, IndexMap<PaletteIndex, ResolvedBlock>> = IndexMap::new();
+    let mut built: IndexMap<u32, (Bbox, IndexMap<PaletteIndex, ResolvedBlock>)> = IndexMap::new();
     for (index, (&owner, &state)) in owners.iter().zip(&array.voxels).enumerate() {
         let Some(member) = owner.checked_sub(1) else {
             continue;
@@ -284,9 +286,11 @@ fn resolved_members(
             .dims
             .position(index)
             .expect("a voxel's index lies in the dims it was laid out by");
-        built
-            .entry(member as usize)
-            .or_default()
+        let (held, blocks) = built
+            .entry(member)
+            .or_insert_with(|| (Bbox::cell(cell), IndexMap::new()));
+        *held = held.including(cell);
+        blocks
             .entry(state)
             .or_insert_with(|| ResolvedBlock {
                 state: array.palette.entries[usize::from(state.0)].clone(),
@@ -296,12 +300,22 @@ fn resolved_members(
     }
     built
         .into_iter()
-        .map(|(member, blocks)| {
-            let (_, member) = flattened[member];
+        .map(|(index, (held, blocks))| {
+            let (_, member) = flattened[index as usize];
+            let declared = canvas.declared(index).unwrap_or_else(|| {
+                debug_assert!(
+                    false,
+                    "`{}` painted cells without declaring its geometry; its painter must call \
+                     `MemberCanvas::declare`",
+                    member.role.keyword(),
+                );
+                Declared::boxed(held, None)
+            });
             ResolvedMember {
                 role: member.role.keyword().to_owned(),
                 id: member.id.clone(),
                 resolved_state: blocks.into_values().collect(),
+                geometry: declared.holding(held),
                 span: member.span.clone(),
             }
         })
