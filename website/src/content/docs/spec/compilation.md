@@ -8,7 +8,7 @@ Write commands flat and in any order. The compiler assigns each one to a phase a
 phases in this fixed order:
 
 ```
-massing     floor / walls / volume / fill
+massing     floor / walls / fill
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / chest / sensors / actuators / Tier 0 parts
@@ -23,8 +23,8 @@ A `fill` is `massing` with a `mat_slot=` and `fluids` with a `fluid=`
 ([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)), so its water is poured once the blocks
 it may hold are placed.
 
-Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `water` are not keywords
-yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
+Not every row runs today. `sign`, `painting`, `frame`, `bed` and `water` are not keywords yet and
+are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
 `envelope`, `openings`, `fixtures` (whose members are `chest`, every sensor and actuator but
 `door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts))), `fluids` and `raw`
 ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)).

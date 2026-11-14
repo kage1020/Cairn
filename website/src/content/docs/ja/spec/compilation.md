@@ -7,7 +7,7 @@ title: "4. コンパイルモデル"
 コマンドは、順番を気にせず並べて書けます。コンパイラが各コマンドをフェーズに振り分け、フェーズを次の決まった順番で評価します。
 
 ```
-massing     floor / walls / volume / fill
+massing     floor / walls / fill
 envelope    roof / stair
 openings    door / window
 fixtures    sign / painting / frame / bed / chest / センサー / アクチュエーター / Tier 0 の部品
@@ -20,7 +20,7 @@ raw         raw_block / raw_fill (エスケープハッチ)
 
 水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
 
-ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
+ただし、今のところすべての行が動くわけではありません。`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
