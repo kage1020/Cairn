@@ -10,6 +10,7 @@ mod canonical_spelling;
 mod connections;
 mod declared_elsewhere;
 mod ids_exist;
+mod respelling;
 mod spelling;
 mod state_domain;
 mod states;

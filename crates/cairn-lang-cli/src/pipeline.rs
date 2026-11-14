@@ -1,29 +1,24 @@
 //! The front half the subcommands share: reading, parsing, checking and lowering a source.
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::ast::Header;
-use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockState, TargetRegistry, findings_without_target,
-    lower_to_block_array,
-};
-use cairn_lang_core::check::{LineStarts, weigh_intended_targets};
+use cairn_lang_core::block_array::{BlockArrayIr, findings_without_target, lower_to_block_array};
+use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{declared_version_floors, resolve};
-use cairn_lang_core::{
-    Diagnostic, DiagnosticCode, Edition, Severity, check, diagnose_parse_failure, lower, parse,
+use cairn_lang_core::{Diagnostic, Edition, diagnose_parse_failure, lower, parse};
+use cairn_lang_formats::info::{Conflict, kept_findings, requires_conflicts, supported_versions};
+pub(crate) use cairn_lang_formats::info::{
+    build_diagnostics, built_scopes, dropped_scopes, lay_circuits,
 };
 use cairn_lang_formats::registry::builtin_pack;
-use cairn_lang_redstone::{Diagnostic as CircuitDiagnostic, build_circuits};
+use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
 use crate::floors::{DeclaredFloors, floor_refusing_target};
 use crate::report::{FailureReport, report_failure_document};
-use crate::target::{ResolvedTarget, resolve_target, supported_versions};
-
-pub(crate) use requested::{RequestedEditions, requested_editions};
+use crate::target::{ResolvedTarget, resolve_target};
 
 /// Read a source, or report why not: exit 2 for a path that names nothing, 1 for anything else.
 pub(crate) fn read_source(file: &Path) -> Result<String, ExitCode> {
@@ -96,60 +91,6 @@ pub(crate) fn check_lowering(
     }
 }
 
-/// Scopes the source asked for that hold no block after lowering, all-air arrays included: the
-/// resolver's scopes, then one `site::SITE::FROM ↔ TO` per `connect` pair that laid none.
-pub(crate) fn dropped_scopes(
-    resolution: &cairn_lang_core::Resolution,
-    block_ir: &BlockArrayIr,
-) -> Vec<String> {
-    let built = |key: &str| block_ir.structures.get(key).is_some_and(holds_a_block);
-    let mut dropped: Vec<String> = resolution
-        .scopes
-        .keys()
-        .filter(|key| !key.starts_with("def::"))
-        .filter(|key| !built(key))
-        .cloned()
-        .collect();
-    let pair = |site: &str, from: String, to: String| {
-        let (a, b) = if from <= to { (from, to) } else { (to, from) };
-        (site.to_owned(), a, b)
-    };
-    let mut accounted: HashSet<(String, String, String)> = block_ir
-        .walkways
-        .iter()
-        .filter(|(key, _)| built(key.as_str()))
-        .map(|(_, w)| pair(w.site.as_str(), w.from.to_string(), w.to.to_string()))
-        .collect();
-    for connect in &resolution.connects {
-        let (from, to) = (connect.from.to_string(), connect.to.to_string());
-        let key = format!("site::{}::{from} ↔ {to}", connect.site);
-        if accounted.insert(pair(connect.site.as_str(), from, to)) {
-            dropped.push(key);
-        }
-    }
-    dropped
-}
-
-/// How many structures hold at least one block.
-pub(crate) fn built_scopes(block_ir: &BlockArrayIr) -> usize {
-    block_ir
-        .structures
-        .values()
-        .filter(|array| holds_a_block(array))
-        .count()
-}
-
-/// Whether any voxel of `array` is something other than air, wherever its palette puts air.
-fn holds_a_block(array: &BlockArray) -> bool {
-    array.voxels.iter().any(|index| {
-        array
-            .palette
-            .entries
-            .get(usize::from(index.0))
-            .is_some_and(|state| state.id != BlockState::AIR_ID)
-    })
-}
-
 /// Report the scopes a lowering lost, as `E_PARTIAL_BUILD`, ending the line with `because`.
 pub(crate) fn report_partial_build(file: &Path, dropped: &[String], built: usize, because: &str) {
     eprintln!(
@@ -163,138 +104,9 @@ pub(crate) fn report_partial_build(file: &Path, dropped: &[String], built: usize
     }
 }
 
-/// Every diagnostic a command must report, in the order the passes ran: [`check()`]'s, which
-/// include the resolver's, then `lowering`'s.
-///
-/// `asked` is the editions `@intended_targets` is weighed in.
-pub(crate) fn build_diagnostics(
-    module: &cairn_lang_core::ast::Module,
-    ir: &cairn_lang_core::intent::IntentModule,
-    edition: Option<Edition>,
-    asked: &[Edition],
-    lowering: Vec<cairn_lang_core::check::Diagnostic>,
-) -> Vec<cairn_lang_core::check::Diagnostic> {
-    let mut combined = check(module, ir, edition);
-    // Merged by span into `check`'s sorted half; the lowering stage's findings follow.
-    for finding in intended_target_findings(module, asked) {
-        let at = combined.partition_point(|kept| {
-            (kept.span.start, kept.span.end) <= (finding.span.start, finding.span.end)
-        });
-        combined.insert(at, finding);
-    }
-    combined.extend(lowering);
-    combined
-}
-
-/// `@intended_targets` weighed in the table of every edition in `asked`, one cap finding a span.
-///
-/// `W_INTENDED_TARGET_UNSUPPORTED` waits for a single edition: a version Java cannot build is
-/// routinely the Bedrock target the author means.
-fn intended_target_findings(
-    module: &cairn_lang_core::ast::Module,
-    asked: &[Edition],
-) -> Vec<cairn_lang_core::check::Diagnostic> {
-    // Packs parse on first use, which a file without the header should not pay for.
-    if !module
-        .headers
-        .iter()
-        .any(|header| matches!(header, Header::IntendedTargets { .. }))
-    {
-        return Vec::new();
-    }
-    let mut findings: Vec<cairn_lang_core::check::Diagnostic> = Vec::new();
-    for edition in asked {
-        let pack = builtin_pack(*edition);
-        let targetable = supported_versions(pack);
-        for finding in weigh_intended_targets(module, *edition, &pack.version_order(), &targetable)
-        {
-            if asked.len() > 1 && finding.code == DiagnosticCode::IntendedTargetUnsupported {
-                continue;
-            }
-            let clash = findings.iter().position(|kept| {
-                kept.span == finding.span
-                    && (kept.code == finding.code
-                        || (is_intended_target_cap(kept.code)
-                            && is_intended_target_cap(finding.code)))
-            });
-            match clash {
-                // The error wins: one edition's partial answer leaves the other's "none" true.
-                Some(at) if findings[at].code == DiagnosticCode::IntendedTargetCapPartial => {
-                    if finding.code == DiagnosticCode::IntendedTargetCap {
-                        findings[at] = finding;
-                    }
-                }
-                Some(_) => {}
-                None => findings.push(finding),
-            }
-        }
-    }
-    findings
-}
-
-/// Its own module, so [`requested_editions`] is the only way to build a [`RequestedEditions`].
-mod requested {
-    use cairn_lang_core::Edition;
-
-    /// The distinct editions an `--editions` list names, in the order it first names them.
-    pub(crate) struct RequestedEditions(Vec<Edition>);
-
-    impl RequestedEditions {
-        pub(crate) fn as_slice(&self) -> &[Edition] {
-            &self.0
-        }
-    }
-
-    /// Read an `--editions` list as the distinct editions it asks about.
-    ///
-    /// # Errors
-    ///
-    /// The message refusing an empty entry or a name that is not an edition.
-    pub(crate) fn requested_editions(editions: &[String]) -> Result<RequestedEditions, String> {
-        // clap's comma delimiter turns `java,,bedrock` into an empty entry.
-        if editions.iter().any(|e| e.trim().is_empty()) {
-            return Err("--editions value must not contain empty entries".to_owned());
-        }
-        let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
-        for name in editions {
-            let edition: Edition = name.parse().map_err(|err| format!("{err}"))?;
-            if !asked.contains(&edition) {
-                asked.push(edition);
-            }
-        }
-        Ok(RequestedEditions(asked))
-    }
-}
-
 /// The editions a command with one optional pin is about: the pin, or both without one.
 pub(crate) fn weighed_editions(pin: Option<Edition>) -> Vec<Edition> {
     pin.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |one| vec![one])
-}
-
-/// Whether `code` is one of the two `@intended_targets` cap findings.
-fn is_intended_target_cap(code: DiagnosticCode) -> bool {
-    matches!(
-        code,
-        DiagnosticCode::IntendedTargetCap | DiagnosticCode::IntendedTargetCapPartial
-    )
-}
-
-/// Lay each struct's circuit under it for `edition`, its ids read from `registry`, unless
-/// `built` already holds an error: a member that failed to lower is not there to wire.
-pub(crate) fn lay_circuits(
-    ir: &IntentModule,
-    built: &mut BlockArrayIr,
-    edition: Edition,
-    registry: &dyn TargetRegistry,
-) -> Vec<CircuitDiagnostic> {
-    if built
-        .diagnostics
-        .iter()
-        .any(|d| d.severity() == Severity::Error)
-    {
-        return Vec::new();
-    }
-    build_circuits(ir, built, edition, Some(registry))
 }
 
 /// The circuit findings `cairn check` reports: the pinned edition's, at the pinned version when
@@ -325,37 +137,6 @@ pub(crate) fn check_circuits(
     kept_findings(&runs, |run, finding| finding.touches(&guarded[run]))
 }
 
-/// Each distinct finding of `runs` that every other run raises with the same code at the same span.
-pub(crate) fn raised_by_each(runs: &[Vec<CircuitDiagnostic>]) -> Vec<CircuitDiagnostic> {
-    kept_findings(runs, |_, _| false)
-}
-
-/// Each distinct finding of `runs` that `own` says is its run's own, or that every other run
-/// raises with the same code at the same span.
-fn kept_findings(
-    runs: &[Vec<CircuitDiagnostic>],
-    own: impl Fn(usize, &CircuitDiagnostic) -> bool,
-) -> Vec<CircuitDiagnostic> {
-    let mut kept: Vec<CircuitDiagnostic> = Vec::new();
-    for (i, found) in runs.iter().enumerate() {
-        for finding in found {
-            let raised_by_each = runs
-                .iter()
-                .enumerate()
-                .all(|(j, other)| j == i || other.iter().any(|o| same_place(o, finding)));
-            if (own(i, finding) || raised_by_each) && !kept.contains(finding) {
-                kept.push(finding.clone());
-            }
-        }
-    }
-    kept
-}
-
-/// Whether `a` and `b` are one finding: the same code at the same span.
-pub(crate) fn same_place(a: &CircuitDiagnostic, b: &CircuitDiagnostic) -> bool {
-    a.code == b.code && a.span == b.span
-}
-
 /// A `.crn` read, parsed, resolved and lowered, plus what the lowering failed to produce.
 pub(crate) struct Lowered {
     pub(crate) source: String,
@@ -365,6 +146,8 @@ pub(crate) struct Lowered {
     pub(crate) dropped_scopes: Vec<String>,
     /// The `@requires` floors this edition's build is held to, if the source declares any.
     pub(crate) version_floors: Option<DeclaredFloors>,
+    /// The floors no version declaring every id the build paints clears, whatever the target.
+    pub(crate) conflicts: Vec<Conflict>,
 }
 
 /// Read, parse, resolve and lower `file` for `edition`'s build.
@@ -414,12 +197,24 @@ pub(crate) fn lower_parsed(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
+    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
+        let pack = builtin_pack(edition);
+        requires_conflicts(
+            &ir,
+            &resolution,
+            pack,
+            &supported_versions(pack),
+            &declared.floors,
+            &declared.order,
+        )
+    });
     let lowered = Lowered {
         source,
         block_ir,
         circuits,
         dropped_scopes,
         version_floors,
+        conflicts,
     };
     (ir, lowered)
 }

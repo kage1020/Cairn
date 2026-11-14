@@ -459,12 +459,13 @@ impl StateMapIndex {
     /// The versions whose map writes `state` as a form of a block it maps, oldest first.
     pub fn versions_writing<'a>(&'a self, state: &'a BlockState) -> impl Iterator<Item = &'a str> {
         self.by_version.iter().filter_map(move |(version, map)| {
-            let names = map.onto.contains_key(&state.id) || map.from.contains_key(&state.id);
             let states = VersionStates {
                 index: self,
                 mc_version: version,
                 map,
             };
+            let names =
+                map.onto.contains_key(&state.id) || states.written_apart(&state.id).is_some();
             (names && states.resolve(state).is_ok()).then_some(version.as_str())
         })
     }
@@ -830,6 +831,33 @@ impl<'a> VersionStates<'a> {
         ids
     }
 
+    /// The Bedrock id this version writes the Java block `java` as, when `java` is no Bedrock
+    /// spelling here and no other Java block mapped onto that id takes any of its forms, so the
+    /// written block still says which one it is (`spec/materials-themes` "Mappings across version
+    /// and edition"); `None` otherwise.
+    #[must_use]
+    pub fn written_apart(&self, java: &str) -> Option<&'a str> {
+        let map: &'a VersionMap = self.map;
+        if map.onto.contains_key(java) || map.refused_from.contains(java) {
+            return None;
+        }
+        let forms = map.from.get(java)?;
+        let mut theirs: HashSet<String> = HashSet::new();
+        for (bedrock, _) in forms {
+            for (other, at) in map.onto.get(bedrock).map_or(&[][..], Vec::as_slice) {
+                if other != java {
+                    theirs.extend(self.form_keys(bedrock, other, *at));
+                }
+            }
+        }
+        let apart = forms.iter().all(|(bedrock, at)| {
+            self.form_keys(bedrock, java, *at)
+                .iter()
+                .all(|key| !theirs.contains(key))
+        });
+        apart.then(|| forms[0].0.as_str())
+    }
+
     /// The Bedrock id that writes `state` here when no family of its own id holds its states but
     /// one of the Java block its properties name does, as `redstone_torch[facing=north,lit=false]`
     /// is the unlit wall torch, `unlit_redstone_torch`; `None` otherwise.
@@ -930,6 +958,32 @@ impl VersionStates<'_> {
                 .onto
                 .get(id)
                 .is_some_and(|forms| forms.iter().any(|(java, _)| java == id))
+            || (!self.map.onto.contains_key(id) && self.map.from.contains_key(id))
+    }
+
+    /// Every form the Java block `java` takes as `bedrock` through family `at`, as comparable keys.
+    fn form_keys(&self, bedrock: &str, java: &str, at: usize) -> Vec<String> {
+        let family = self.family(at);
+        let mut states: Vec<IndexMap<String, String>> = vec![IndexMap::new()];
+        for (key, held) in &family.java {
+            states = states
+                .into_iter()
+                .flat_map(|state| {
+                    held.iter().map(move |value| {
+                        let mut next = state.clone();
+                        next.insert(key.clone(), value.clone());
+                        next
+                    })
+                })
+                .collect();
+        }
+        states
+            .iter()
+            .map(|full| {
+                let form = self.form(bedrock, java, family, full, full);
+                format!("{}|{:?}|{}", form.id, form.states, form.waterlogged)
+            })
+            .collect()
     }
 
     /// Whether an entry of `id` with the states `given` reads as `id`'s own Java block: `id` names

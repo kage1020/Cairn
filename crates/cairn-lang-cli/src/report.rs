@@ -6,6 +6,8 @@ use std::process::ExitCode;
 use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts, RenderedDiagnostic};
 use cairn_lang_core::{Diagnostic, ParseError, Severity, diagnose_parse_failure};
 use cairn_lang_formats::bedrock_structure::ParityNote;
+pub(crate) use cairn_lang_formats::info::Found;
+use cairn_lang_formats::info::{FailureDocument, InfoSink, palette_entry_name};
 
 /// Where a command reports the findings that stopped it: prose on stderr, or the one JSON
 /// document `spec/lint` "Machine-readable payload" promises on stdout.
@@ -13,16 +15,6 @@ use cairn_lang_formats::bedrock_structure::ParityNote;
 pub(crate) enum FailureReport {
     Text,
     Json,
-}
-
-/// What a pass reports findings with; under [`FailureReport::Json`] errors wait for the failure
-/// document, while warnings still print on stderr.
-#[derive(Copy, Clone)]
-pub(crate) struct Reporting<'a> {
-    pub(crate) file: &'a Path,
-    pub(crate) source: &'a str,
-    pub(crate) lines: &'a LineStarts,
-    pub(crate) report: FailureReport,
 }
 
 /// A core or redstone diagnostic, as the reporters read it.
@@ -77,44 +69,49 @@ impl Finding for cairn_lang_redstone::Diagnostic {
     }
 }
 
-/// A finding of the core passes or of the circuit a struct is built with, for a list holding both.
-#[derive(Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "a run reports a handful of findings, most of them core's"
-)]
-pub(crate) enum Found {
-    Core(Diagnostic),
-    Circuit(cairn_lang_redstone::Diagnostic),
-}
-
-impl Found {
-    fn finding(&self) -> &dyn Finding {
-        match self {
-            Self::Core(d) => d,
-            Self::Circuit(d) => d,
-        }
+/// The [`Finding`] inside `found`.
+fn inner(found: &Found) -> &dyn Finding {
+    match found {
+        Found::Core(d) => d,
+        Found::Circuit(d) => d,
     }
 }
 
 impl Finding for Found {
     fn span_start(&self) -> usize {
-        self.finding().span_start()
+        inner(self).span_start()
     }
     fn severity(&self) -> Severity {
-        self.finding().severity()
+        inner(self).severity()
     }
     fn code_str(&self) -> &'static str {
-        self.finding().code_str()
+        inner(self).code_str()
     }
     fn primary(&self) -> &str {
-        self.finding().primary()
+        inner(self).primary()
     }
     fn notes(&self) -> &[Note] {
-        self.finding().notes()
+        inner(self).notes()
     }
     fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
-        self.finding().render(source, lines)
+        inner(self).render(source, lines)
+    }
+}
+
+/// Stderr, as an info run reports to it: each finding gcc-style, each line as written.
+pub(crate) struct Stderr<'a> {
+    pub(crate) file: &'a Path,
+    pub(crate) source: &'a str,
+    pub(crate) lines: &'a LineStarts,
+}
+
+impl InfoSink for Stderr<'_> {
+    fn finding(&mut self, finding: &Found) {
+        report_diagnostic(self.file, self.source, self.lines, finding);
+    }
+
+    fn line(&mut self, line: &str) {
+        eprintln!("{line}");
     }
 }
 
@@ -185,12 +182,6 @@ pub(crate) fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(
     }
 }
 
-/// The document a `--format json` command writes in place of its product.
-#[derive(serde::Serialize)]
-struct DiagnosticsDocument {
-    diagnostics: Vec<RenderedDiagnostic>,
-}
-
 /// Report the findings that stopped a command, and return its exit code.
 pub(crate) fn report_failure_document(
     file: &Path,
@@ -206,7 +197,7 @@ pub(crate) fn report_failure_document(
             }
         }
         FailureReport::Json => {
-            let document = DiagnosticsDocument {
+            let document = FailureDocument {
                 diagnostics: render_diagnostics(source, &lines, diagnostics),
             };
             if let Err(code) = print_json("diagnostics", &document) {
@@ -215,11 +206,6 @@ pub(crate) fn report_failure_document(
         }
     }
     ExitCode::from(1)
-}
-
-/// A palette entry's name, `id[key=value,...]`.
-pub(crate) fn palette_entry_name(id: &str, states: &str) -> String {
-    format!("{id}[{states}]")
 }
 
 /// The `W_INTENT_DEGRADED` line for one intent the structure `scope` dropped.

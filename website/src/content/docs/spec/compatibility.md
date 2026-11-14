@@ -58,8 +58,11 @@ Evolving surfaces:
 
 - Spec chapters or sections explicitly marked as draft (the [Open Issues](/spec/open-issues/)
   list), and the syntax a section flags [subject to change](#subject-to-change).
-- New `cairn` subcommands, and new flags and flag values of `cairn compile`, `cairn check` and
-  `cairn info`, during their first three monthly minors after introduction.
+- New `cairn` subcommands, new flags and flag values of `cairn compile`, `cairn check` and
+  `cairn info`, and new language server commands such as `cairn.info`
+  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)), during their first three monthly
+  minors after introduction. What `cairn.info` returns is `cairn info`'s JSON document, at that
+  document's tier.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.
@@ -171,7 +174,7 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 
 **Reserved codes.** The codes a stable command raises are the ones [Lint
 §11.1](/spec/lint/#111-diagnostic-codes) lists, the redstone pipeline's among them. Any other code
-the spec names, such as `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
+the spec names, such as `E_DECOMPILE_DIFF`, is a reserved code: no command raises it yet. A
 reserved code lands with the meaning the spec states for it, where it states one, and its row
 landing is adding a code.
 

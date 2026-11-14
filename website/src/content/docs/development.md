@@ -50,6 +50,9 @@ pages it embeds are the site's own sources, with no copy to drift.
 - **`cairn-lang-redstone` reads sensors, actuators, and `circuit` reservations from core's Intent
   IR**, then lays its own pads and owns its own IR layers
   ([Redstone §14.8](/spec/redstone#148-connection-to-the-ir-and-phases)).
+- **What both front ends report is built in a library.** The `cairn info` report lives in
+  `cairn-lang-formats`, which depends on `cairn-lang-redstone` to lay each struct's circuit, so
+  `cairn-lang-lsp` returns it without depending on `cairn-lang-cli`.
 
 ## Toolchain
 

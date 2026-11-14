@@ -12,13 +12,14 @@ use cairn_lang_core::voxel_diff::{
 };
 use cairn_lang_core::{Edition, Severity, parse};
 use cairn_lang_formats::import::{DecodedStructure, ImportFormat, decode_structure};
+use cairn_lang_formats::info::{Reporter, report_conflicts};
 use serde::Serialize;
 
 use crate::cli::DiffFormat;
 use crate::commands::import::{file_name, open_structure, refuse_extension};
 use crate::floors::enforce_version_floor;
 use crate::pipeline::{Lowered, built_scopes, load_module, lower_parsed, report_partial_build};
-use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
+use crate::report::{Found, Stderr, print_json, report_diagnostics, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target};
 
 /// How many regions the text report lists before it counts the rest.
@@ -92,7 +93,8 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
 }
 
 /// Report what `lowered` found, and the exit code when it refuses the comparison: an error, a
-/// scope it dropped, or a `@requires` floor the stamped `target` falls short of.
+/// conflict between its floors and its blocks, a scope it dropped, or a `@requires` floor the
+/// stamped `target` falls short of.
 fn refuse_build(
     structure: &Path,
     file: &Path,
@@ -107,6 +109,7 @@ fn refuse_build(
         circuits,
         dropped_scopes,
         version_floors,
+        conflicts,
     } = lowered;
     let findings: Vec<Found> = block_ir
         .diagnostics
@@ -121,7 +124,17 @@ fn refuse_build(
     }
     let lines = LineStarts::new(source);
     report_diagnostics(file, source, &lines, &findings);
-    if !dropped_scopes.is_empty() {
+    let mut stderr = Stderr {
+        file,
+        source,
+        lines: &lines,
+    };
+    if report_conflicts(
+        &mut Reporter::new(file, source, &lines, &mut stderr),
+        edition,
+        conflicts,
+    ) {
+    } else if !dropped_scopes.is_empty() {
         report_partial_build(
             file,
             dropped_scopes,
