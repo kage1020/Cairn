@@ -143,6 +143,16 @@ tree-sitter の文法は、2 つの点で既知の例外です。1 つ目に、�
 
 **`offset` の原点。** `offset=0` は、その壁を外から見たときの左端です。`front` と `back` の壁は `x` の小さい側を基準にします。`front` は +z 側から見た向きで、`back` は x 方向に鏡映するので、`sym=true` の開口は建物のどちら側から見ても対称に見えます。`left` と `right` の壁は `z` の小さい側を基準にし、同じように鏡映します。
 
+**`anchor=` による窓の位置。** `offset=` と `y=` は窓の 1 つのセルを置き、`anchor=` は、壁の外から見てどのセルかを名指しします。
+
+| 位置 | 窓の最初の列からの列 | 最も低い段からの段 |
+|---|---|---|
+| `bottom_left`、`middle_left`、`top_left` | `0` | `0`、`size_h / 2`、`size_h - 1` |
+| `bottom_center`、`center`、`top_center` | `size_w / 2` | `0`、`size_h / 2`、`size_h - 1` |
+| `bottom_right`、`middle_right`、`top_right` | `size_w - 1` | `0`、`size_h / 2`、`size_h - 1` |
+
+3 つの段は、最初の列に挙げた位置の順に対応します。たとえば `top_center` は列 `size_w / 2`、段 `size_h - 1` です。割り算は切り捨てなので、幅が偶数なら中央は真ん中の 2 つのセルのうち後ろの方になります。偶数の長さの壁で `at=center` が選ぶ列と同じです。`anchor=` のない窓は `bottom_left`、つまり最初の列と最も低い段で置きます。`anchor=bottom_center offset=4 size=3x3` は、`anchor=` のない `offset=3` と同じく、列 `3` から `5` を切り抜きます。ほかの値は `E_INVALID_MEMBER` です。窓の最初の列を壁の左端より前に、または最も低い段を struct か `level` の基準の段より下に置くアンカーも、`E_INVALID_MEMBER` です。以下の `offset` は窓の最初の列を指します。`anchor=` がそれより後ろの列を名指ししない限り `offset=` そのもので、`repeat=` の連なりもこの列から進みます ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約))。
+
 `sym=true` は、開口を壁の中点で鏡映します (`mirror_offset = wall_length - offset - size_w`)。鏡映した開口が元の矩形と重なる場合は `W_DEFERRED_MEMBER` で拒否し、元の側だけを描きます。壁の中点に対して対称に置いた窓 (`2 * offset + size_w = wall_length`) の鏡映もこれに当たり、元の矩形とぴったり重なります。一方、鏡映が元の矩形に接するだけの場合、つまり元の最後の列の次の列から始まる場合 (`2 * (offset + size_w) = wall_length`) や、元の最初の列の前の列で終わる場合 (`2 * offset = wall_length`) は、元の矩形とセルを共有しないので、拒否も報告もしません。両方が描かれ、窓の 2 倍の幅の 1 つの開口に見えます。
 
 `sym=` には裸の `true` か `false` を書き、`sym=` のない窓は鏡映しません。それ以外の値 (`sym=yes`、`sym="true"`、`sym=1`) は読み取れない値として扱います。窓は鏡映なしで描き、その値は `W_IGNORED_ARGUMENT` として報告します ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。ただし、`repeat=` が 1 より大きい窓は例外です。連続する窓の鏡映は将来の拡張のために予約しているので、`sym=true` の連続はまだ切り抜かず、`W_DEFERRED_MEMBER` として報告します。読み取れない `sym=` もそこでは `false` とは読まず、その窓も切り抜かずに、`W_IGNORED_ARGUMENT` とあわせて `W_DEFERRED_MEMBER` として報告します。

@@ -21,6 +21,7 @@ use crate::block_array::walkway::{
 };
 use crate::block_array::{BlockArray, BlockState, Dims, Footprint, Placement, Walkway};
 
+use super::overlap::report_strip_overlaps;
 use super::site_floor::{FloorExtent, FloorPlan, PlacedBody};
 use super::token_diag::{
     IdSite, NamedBy, TokenSite, check_state_literal, diag_abstract_token, diag_state_unmapped,
@@ -101,6 +102,12 @@ pub(super) fn lower_connects(
             origin,
             blocked_count: skipped,
         } = build_walkway_array(&path, material, blocked, &scope_key);
+        let strip: Vec<Cell> = path
+            .iter()
+            .copied()
+            .filter(|cell| !blocked.contains(cell))
+            .collect();
+        report_strip_overlaps(connect, &strip, (&from_key, &to_key), placed, diagnostics);
         if routed {
             debug_assert_eq!(
                 skipped, 0,

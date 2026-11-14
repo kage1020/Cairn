@@ -250,6 +250,11 @@ impl Anchor {
             Self::Outside(s) | Self::Inside(s) => s,
         }
     }
+
+    /// The face of its wall it stands against: the outer face from outside, the inner from inside.
+    pub(super) fn host_face(self) -> Face {
+        Toward::away_from_the_wall(self).face(self.side())
+    }
 }
 
 /// Parse a fixture's `at=` value, or the refusal of any other shape.

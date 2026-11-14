@@ -144,6 +144,9 @@ pub enum DiagnosticCode {
     /// A `place` with no origin selector or more than one, an `at=` other than `origin`, or an
     /// `east_of=` / `north_of=` that is not a label.
     InvalidPlaceOrigin,
+    /// Two `place` rows of one site whose boxes share a cell, or a walkway laid inside a
+    /// placement it does not join.
+    PlacementOverlap,
     /// A `def NAME` that no `place use=NAME` references.
     UnusedDef,
     /// A `connect` row names a port no member of the referenced def's own body carries.
@@ -242,6 +245,7 @@ impl DiagnosticCode {
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
+            Self::PlacementOverlap => "E_PLACEMENT_OVERLAP",
             Self::UnusedDef => "W_UNUSED_DEF",
             Self::UnresolvedPort => "E_UNRESOLVED_PORT",
             Self::AmbiguousPort => "E_AMBIGUOUS_PORT",
@@ -303,6 +307,7 @@ impl DiagnosticCode {
             | Self::InvalidPlaceId
             | Self::InvalidStructName
             | Self::InvalidPlaceOrigin
+            | Self::PlacementOverlap
             | Self::UnresolvedPort
             | Self::AmbiguousPort
             | Self::MissingPathMaterial
