@@ -30,8 +30,14 @@ Add these when the change reaches them:
 - `crates/cairn-lang-tree-sitter/grammar.js` or its corpus: `pnpm install`, `pnpm run generate`
   (the generated files must come out unchanged after you commit them) and `pnpm test`, in that
   crate's directory.
-- `website/`: `pnpm install`, `pnpm run check` and `pnpm run build` in `website/`, then
-  `cargo xtask lint --site website/dist site-parity` from the root.
+- `website/`: `pnpm install`, `pnpm run build:wasm`, `pnpm run check` and `pnpm run build` in
+  `website/`, then `cargo xtask lint --site website/dist site-parity` from the root.
+- `cairn-lang-wasm`, or `cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats` or
+  `cairn-lang-redstone`, which it is built from: CI's `WebAssembly` job. With the
+  `wasm32-unknown-unknown` target and `wasm-pack` installed, run
+  `sh website/scripts/build-wasm.sh`, which fails when the module outgrows its size budget,
+  `cargo clippy -p cairn-lang-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings`
+  and `wasm-pack test --node crates/cairn-lang-wasm`.
 - `editors/vscode/`: `pnpm install`, `pnpm run package` and `pnpm test` in `editors/vscode/`.
   `pnpm test` opens VS Code and skips on Windows. CI runs it on Linux only, as
   `xvfb-run -a pnpm test`, which is also how to run it without a display.

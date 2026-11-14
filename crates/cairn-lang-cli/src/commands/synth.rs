@@ -6,6 +6,8 @@ use std::process::ExitCode;
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, IntentModule, lower, resolve};
+use cairn_lang_formats::build::finding::Finding;
+use cairn_lang_formats::build::gate::{build_diagnostics, weighed_editions};
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{
     LayoutStage, compile_delay, compile_edition_netlist, compile_legalize, compile_netlist,
@@ -15,7 +17,7 @@ use cairn_lang_redstone::{
 use clap::ValueEnum;
 
 use crate::cli::SynthStage;
-use crate::pipeline::{build_diagnostics, load_module, weighed_editions};
+use crate::pipeline::load_module;
 use crate::report::{FailureReport, report_diagnostics};
 
 pub(crate) fn run_synth(
@@ -86,7 +88,7 @@ struct Reporting<'a> {
 
 impl Reporting<'_> {
     /// Report `diagnostics`, and refuse the run when one of them is an error.
-    fn gate<D: crate::report::Finding>(self, diagnostics: &[D]) -> Result<(), ExitCode> {
+    fn gate<D: Finding>(self, diagnostics: &[D]) -> Result<(), ExitCode> {
         if report_diagnostics(self.file, self.source, self.lines, diagnostics) {
             return Err(ExitCode::from(1));
         }

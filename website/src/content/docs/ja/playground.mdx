@@ -1,44 +1,16 @@
 ---
 title: プレイグラウンド
-description: cairn-lang-wasm で動く、ブラウザ上の Cairn コンパイラ。近日公開予定です。
+description: ブラウザで Cairn を書くと、その場でコンパイルされます。指摘、各構造物の表示、ダウンロードできる構造物ファイルを確認できます。
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import Playground from '../../../components/Playground.astro';
 
-<Aside type="caution" title="未実装">
-このページは、[`cairn-lang-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-lang-wasm) のバインディングが揃ったときにブラウザ上のプレイグラウンドを置くための場所です。今のところコンパイラは `cairn` CLI でしか動かないので、下のサンプルは読むためのテキストです。
-</Aside>
+下のソースを編集すると、入力に合わせてコンパイルします。使うのは `cairn` CLI と同じコンパイラで、[`cairn-lang-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-lang-wasm) から WebAssembly にビルドしてブラウザ内で動かすため、書いた内容がページの外に出ることはありません。各ビルドは組み込みのレジストリパックを使った `cairn compile --edition <edition> --target <target>` です。
 
-## このページで最終的にできること
+<Playground lang="ja" />
 
-すべてブラウザ内で完結する、2 ペイン構成の Cairn の作業台になる予定です。
+## ページに表示されるもの
 
-- 左側に `.crn` エディタ。シンタックスハイライトと、Cairn LSP による診断をその場で表示します。
-- ターゲットの選択 (`--edition java|bedrock`、`--target <version>`) とコンパイルボタン。
-- 右側のペインは、次の表示を切り替えられます。
-  - **Resolved IR**: フェーズ評価を終えた block-array IR。
-  - **Diagnostics**: `cairn` や LSP と同じ「何が誤りか / 有効な候補 / 推奨する修正」の形の lint 出力 ([Lint](/ja/spec/lint/))。
-  - **Bytes**: コンパイラがエディションごとに出力する NBT / schematic のバイト列。
-
-[エコシステム連携](/ja/spec/ecosystem-interop/)で説明する引き上げのループも、ここで使えるようにします。`.litematic` や `.mcstructure` のファイルをドロップすると、コンパイラが raw 主体の `.crn` と、元データとのボクセル差分を表示します。
-
-## それまでの間に読めるサンプル
-
-```text
-@cairn 2026.06
-@requires version>=1.20
-
-theme medieval:
-  slot floor -> @oak_planks
-  slot wall  -> @cobblestone
-  slot roof  -> @spruce_stairs
-
-struct cottage size=9x7
-  floor  mat_slot=floor
-  walls  class=outer mat_slot=wall height=4
-  door   side=front at=center
-  window class=small side=front offset=2 y=2 size=2x2 sym=true
-  roof   kind=gable mat_slot=roof overhang=1
-```
-
-進捗は [Cairn の GitHub リポジトリ](https://github.com/kage1020/Cairn)で確認できます。`cairn-lang-wasm` が `compile()` のバインディングを公開したら、すぐにプレイグラウンドを使えるようにします。
+- **指摘**は `cairn check` と `cairn compile` が報告するもので、[Lint](/ja/spec/lint/) の形 (何が誤りか、何なら有効か、どう直すか) で表示します。指摘を選ぶと、その位置にカーソルを移します。エディションが提供していない `--target` や、`@requires` の下限が除外する `--target` のように、実行全体を拒否するものも一緒に並べます。
+- **結果**は、構造物ファイルの元になる [block-array IR](/ja/spec/architecture/) を層ごとに描き、セルが指すパレットを添えます。エラーの指摘がなければ、実行自体が拒否された場合でも表示します。
+- **構造物ファイル**は `cairn compile` が書き出す `.nbt` (Java) または `.mcstructure` (Bedrock) のファイルで、構造物ごとに 1 つです。ロックファイルはここでは書き出しません。ロックファイルはディスク上のビルドを記録するもので、このビルドは保存されないためです。

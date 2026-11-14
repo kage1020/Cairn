@@ -63,14 +63,14 @@ cargo xtask lint --site website/dist site-parity   # website/ で `pnpm run buil
 |---|---|
 | `crates/cairn-lang-core` | 字句解析、構文解析、Intent IR、check パス、解決、block-array lowering |
 | `crates/cairn-lang-nbt` | NBT のエンコードとデコード。Java はビッグエンディアン、Bedrock はリトルエンディアン |
-| `crates/cairn-lang-formats` | 構造ファイルの書き出し (`.nbt` / `.mcstructure`)、レジストリパック、エディション間の可搬性 |
+| `crates/cairn-lang-formats` | 構造ファイルの書き出し (`.nbt` / `.mcstructure`)、レジストリパック、エディション間の可搬性、フロントエンドが共有するビルドと `cairn info` のレポート |
 | `crates/cairn-lang-redstone` | Logic IR、ネットリスト、配置、配線、遅延、交差の合法化 |
 | `crates/cairn-lang-cli` | `cairn` バイナリ |
 | `crates/cairn-lang-lsp` | 言語サーバー `cairn-lsp` |
 | `crates/cairn-lang-tree-sitter` | tree-sitter 文法。npm には `tree-sitter-cairn` として公開 |
-| `crates/cairn-lang-wasm` | 将来のプレイグラウンド向けのブラウザバインディング。現在はプレースホルダ |
+| `crates/cairn-lang-wasm` | ブラウザ向けのバインディング。ドキュメントサイトのプレイグラウンドを動かします |
 | `editors/vscode` | VS Code 拡張。`cairn-lsp` の薄いクライアント |
-| `website` | Astro + Starlight のドキュメントサイト。仕様・チュートリアル・ガイドを英語と日本語で、開発者ガイドを英語で公開。サイトの Markdown ページを `cairn docs` 用に埋め込む `cairn-lang-docs` クレートもここにあります |
+| `website` | Astro + Starlight のドキュメントサイト。仕様・チュートリアル・ガイドを英語と日本語で、開発者ガイドを英語で公開し、プレイグラウンドも置いています。サイトの Markdown ページを `cairn docs` 用に埋め込む `cairn-lang-docs` クレートもここにあります |
 | `examples` | `.crn` ソース (ロックファイルは生成物なので追跡しません) |
 
 クレート間の依存関係のルールは[開発者ガイド](https://cairn.kage1020.com/development/) (英語のみ) で詳しく説明しています。

@@ -13,13 +13,11 @@ macro_rules! outln {
 mod artifacts;
 mod cli;
 mod commands;
-mod floors;
 mod lockfile;
 mod name_case;
 mod pipeline;
 mod report;
 mod staging;
-mod target;
 
 use std::process::ExitCode;
 
@@ -61,8 +59,9 @@ fn main() -> ExitCode {
         Some(Command::Info {
             file,
             editions,
+            lock,
             format,
-        }) => run_info(&file, &editions, format),
+        }) => run_info(&file, &editions, lock.as_deref(), format),
         Some(Command::Lower {
             file,
             edition,

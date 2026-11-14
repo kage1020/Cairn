@@ -6,17 +6,17 @@ use std::process::ExitCode;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::info::default_lock_path;
+use cairn_lang_formats::target::{ResolvedTarget, resolve_target};
 
 use crate::artifacts::{
     PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
     write_artifacts_and_lock,
 };
-use crate::floors::enforce_version_floor;
-use crate::lockfile::{default_lock_path, report_previous_target};
+use crate::lockfile::report_previous_target;
 use crate::name_case::NameCase;
-use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
-use crate::report::report_diagnostics;
-use crate::target::{ResolvedTarget, resolve_target};
+use crate::pipeline::load_and_lower;
+use crate::report::{report_diagnostics, report_run_level};
 
 pub(crate) fn run_compile(
     file: &Path,
@@ -28,45 +28,27 @@ pub(crate) fn run_compile(
     // Resolved before lowering, which checks ids against it, but reported after the source's
     // own findings.
     let resolved_target = resolve_target(edition, target);
-    let Lowered {
-        source,
-        block_ir,
-        circuits,
-        dropped_scopes,
-        version_floors,
-    } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
+    let (source, lowered) = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
     let lines = LineStarts::new(&source);
-    if report_diagnostics(file, &source, &lines, &block_ir.diagnostics)
-        | report_diagnostics(file, &source, &lines, &circuits)
-    {
+    let refused = report_diagnostics(file, &source, &lines, &lowered.block_ir.diagnostics)
+        | report_diagnostics(file, &source, &lines, &lowered.circuits);
+    for conflict in &lowered.conflicts {
+        report_run_level(file, &source, &lines, conflict);
+    }
+    // A conflict holds at every target, so it stops the build ahead of the target's floor check.
+    if refused || !lowered.conflicts.is_empty() {
         return ExitCode::from(1);
     }
-    // Every code that drops a scope is a warning, so this is what refuses a partial build.
-    if !dropped_scopes.is_empty() {
-        report_partial_build(
-            file,
-            &dropped_scopes,
-            built_scopes(&block_ir),
-            "refusing to certify a partial build",
-        );
-        return ExitCode::from(1);
-    }
-
-    let target = match resolved_target {
-        Ok(t) => t,
-        Err(err) => {
-            eprintln!("error: {err}");
+    let target = match lowered.writable_target(edition, resolved_target) {
+        Ok(target) => target,
+        Err(refusal) => {
+            report_run_level(file, &source, &lines, &refusal);
             return ExitCode::from(1);
         }
     };
-    if let Some(floors) = &version_floors
-        && let Err(code) = enforce_version_floor(file, &source, floors, edition, &target)
-    {
-        return code;
-    }
 
     let out_dir = match prepare_out_dir(file, out) {
         Ok(d) => d,
@@ -74,7 +56,14 @@ pub(crate) fn run_compile(
     };
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
-    check_and_write(&block_ir, &source, edition, &target, &out_dir, &lock_path)
+    check_and_write(
+        &lowered.block_ir,
+        &source,
+        edition,
+        &target,
+        &out_dir,
+        &lock_path,
+    )
 }
 
 /// Check every structure, then write them all and the lockfile.

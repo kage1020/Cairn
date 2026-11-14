@@ -10,11 +10,14 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::intent::{IntentModule, circuit_lines};
 use cairn_lang_core::resolve::resolve;
 use cairn_lang_core::{Edition, Severity, lower};
+use cairn_lang_formats::build::circuits::lay_circuits;
+use cairn_lang_formats::build::finding::{Finding, Found};
+use cairn_lang_formats::build::gate::{build_diagnostics, weighed_editions};
 use cairn_lang_formats::registry::builtin_pack;
 
 use crate::cli::LowerFormat;
-use crate::pipeline::{build_diagnostics, lay_circuits, load_module, weighed_editions};
-use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
+use crate::pipeline::load_module;
+use crate::report::{print_json, report_diagnostics, report_failure_document};
 
 pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerFormat) -> ExitCode {
     let (source, module) = match load_module(file, format.failure_report()) {

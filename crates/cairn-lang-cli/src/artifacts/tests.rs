@@ -1,8 +1,8 @@
 use cairn_lang_core::Edition;
+use cairn_lang_formats::target::resolve_target;
 
 use crate::name_case::NameCase;
 use crate::pipeline::lowered_probe;
-use crate::target::resolve_target;
 
 use super::*;
 

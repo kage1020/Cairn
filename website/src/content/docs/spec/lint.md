@@ -10,7 +10,7 @@ shape is what feeds the loop in [Evaluation Framework](/spec/evaluation/).
 
 This section is the catalog: every code a stable command can raise has a row here, and a code a
 stable command raises with no row is a bug in this section rather than a code outside it. A code
-another chapter names that no command raises yet, such as `E_REQUIRES_CONFLICT`, is a reserved code
+another chapter names that no command raises yet, such as `E_DECOMPILE_DIFF`, is a reserved code
 ([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Where a code's
 rule belongs to another chapter, the row states what the code means and links there for the rule.
 The row is what a reader with a code in hand needs to find, and the chapter is where the behaviour
@@ -149,12 +149,13 @@ to compare.
 
 | Code | Meaning |
 |---|---|
-| `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
+| `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare: a canonical token none of the target's meaning, alias and state-map tables answers ([Materials and Themes §7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)), a raw block's ID, or the ID a catalog entry maps. |
 | `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
 | `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
+| `E_REQUIRES_CONFLICT` | An `@requires` floor lies above the edition's inferred range: every version it admits lacks a block the build paints ([Versioning and Editions](/spec/versioning-editions/#a-floor-is-weighed-against-the-registry)). |
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
 | `W_INTENDED_TARGET_CAP` | Some, not all, of them are. |
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
@@ -646,14 +647,15 @@ and no command checks them yet: two `place` rows whose bodies overlap are not re
 holds only in part: a door, window, eave stair, chest, sensor or actuator its own line puts outside
 its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
 keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
-`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
-pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other
-edition has, `E_STATE_DOMAIN` a state its block does not take there,
-`E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
-version cannot carry, while no entity schema is checked. The redstone row runs through codes of its
-own: the truth-table codes check a table against itself, and the codes of [Redstone](#redstone)
-check a truth table, a temporal assertion and a latency bound against the circuit, and check its
-routing and its dependence on update order.
+`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_REQUIRES_CONFLICT` holds the floors
+to the blocks the build paints, `E_UNKNOWN_ID` refuses a block id the pinned target does not
+declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other edition has,
+`E_STATE_DOMAIN` a state its block does not take there, `E_STATE_UNMAPPED` a block state its state
+map has no form for, and `W_INTENT_DEGRADED` names what a version cannot carry, while no entity
+schema is checked. The redstone row runs through codes of its own: the truth-table codes check a
+table against itself, and the codes of [Redstone](#redstone) check a truth table, a temporal
+assertion and a latency bound against the circuit, and check its routing and its dependence on
+update order.
 
 ### "did you mean"
 

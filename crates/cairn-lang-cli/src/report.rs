@@ -3,9 +3,11 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts, RenderedDiagnostic};
-use cairn_lang_core::{Diagnostic, ParseError, Severity, diagnose_parse_failure};
-use cairn_lang_formats::bedrock_structure::ParityNote;
+use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts};
+use cairn_lang_core::{ParseError, Severity, diagnose_parse_failure};
+use cairn_lang_formats::build::finding::{Finding, Found, render_findings};
+use cairn_lang_formats::build::run_level::{RunLevelAt, RunLevelMessage};
+use cairn_lang_formats::info::{FailureDocument, InfoSink};
 
 /// Where a command reports the findings that stopped it: prose on stderr, or the one JSON
 /// document `spec/lint` "Machine-readable payload" promises on stdout.
@@ -15,106 +17,20 @@ pub(crate) enum FailureReport {
     Json,
 }
 
-/// What a pass reports findings with; under [`FailureReport::Json`] errors wait for the failure
-/// document, while warnings still print on stderr.
-#[derive(Copy, Clone)]
-pub(crate) struct Reporting<'a> {
+/// Stderr, as an info run reports to it: each finding gcc-style, each line as written.
+pub(crate) struct Stderr<'a> {
     pub(crate) file: &'a Path,
     pub(crate) source: &'a str,
     pub(crate) lines: &'a LineStarts,
-    pub(crate) report: FailureReport,
 }
 
-/// A core or redstone diagnostic, as the reporters read it.
-pub(crate) trait Finding {
-    fn span_start(&self) -> usize;
-    fn severity(&self) -> Severity;
-    fn code_str(&self) -> &'static str;
-    fn primary(&self) -> &str;
-    fn notes(&self) -> &[Note];
-    fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic;
-}
+impl InfoSink for Stderr<'_> {
+    fn finding(&mut self, finding: &Found) {
+        report_diagnostic(self.file, self.source, self.lines, finding);
+    }
 
-impl Finding for Diagnostic {
-    fn span_start(&self) -> usize {
-        self.span.start
-    }
-    fn severity(&self) -> Severity {
-        Diagnostic::severity(self)
-    }
-    fn code_str(&self) -> &'static str {
-        self.code.as_str()
-    }
-    fn primary(&self) -> &str {
-        &self.primary
-    }
-    fn notes(&self) -> &[Note] {
-        &self.notes
-    }
-    fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
-        Diagnostic::render(self, source, lines)
-    }
-}
-
-impl Finding for cairn_lang_redstone::Diagnostic {
-    fn span_start(&self) -> usize {
-        self.span.start
-    }
-    fn severity(&self) -> Severity {
-        cairn_lang_redstone::Diagnostic::severity(self)
-    }
-    fn code_str(&self) -> &'static str {
-        self.code.as_str()
-    }
-    fn primary(&self) -> &str {
-        &self.primary
-    }
-    fn notes(&self) -> &[Note] {
-        &self.notes
-    }
-    fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
-        cairn_lang_redstone::Diagnostic::render(self, source, lines)
-    }
-}
-
-/// A finding of the core passes or of the circuit a struct is built with, for a list holding both.
-#[derive(Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "a run reports a handful of findings, most of them core's"
-)]
-pub(crate) enum Found {
-    Core(Diagnostic),
-    Circuit(cairn_lang_redstone::Diagnostic),
-}
-
-impl Found {
-    fn finding(&self) -> &dyn Finding {
-        match self {
-            Self::Core(d) => d,
-            Self::Circuit(d) => d,
-        }
-    }
-}
-
-impl Finding for Found {
-    fn span_start(&self) -> usize {
-        self.finding().span_start()
-    }
-    fn severity(&self) -> Severity {
-        self.finding().severity()
-    }
-    fn code_str(&self) -> &'static str {
-        self.finding().code_str()
-    }
-    fn primary(&self) -> &str {
-        self.finding().primary()
-    }
-    fn notes(&self) -> &[Note] {
-        self.finding().notes()
-    }
-    fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
-        self.finding().render(source, lines)
+    fn line(&mut self, line: &str) {
+        eprintln!("{line}");
     }
 }
 
@@ -159,18 +75,6 @@ pub(crate) fn report_parse_failure(file: &Path, source: &str, err: &ParseError) 
     report_diagnostic(file, source, &lines, &diagnostic);
 }
 
-/// The `--format json` wire form, with the line and column a serialised [`Diagnostic`] lacks.
-pub(crate) fn render_diagnostics(
-    source: &str,
-    lines: &LineStarts,
-    diagnostics: &[impl Finding],
-) -> Vec<RenderedDiagnostic> {
-    diagnostics
-        .iter()
-        .map(|d| d.render(source, lines))
-        .collect()
-}
-
 /// Write one pretty-printed JSON document to stdout, or report why it could not be serialised.
 pub(crate) fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(), ExitCode> {
     match serde_json::to_string_pretty(value) {
@@ -183,12 +87,6 @@ pub(crate) fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(
             Err(ExitCode::from(1))
         }
     }
-}
-
-/// The document a `--format json` command writes in place of its product.
-#[derive(serde::Serialize)]
-struct DiagnosticsDocument {
-    diagnostics: Vec<RenderedDiagnostic>,
 }
 
 /// Report the findings that stopped a command, and return its exit code.
@@ -206,8 +104,8 @@ pub(crate) fn report_failure_document(
             }
         }
         FailureReport::Json => {
-            let document = DiagnosticsDocument {
-                diagnostics: render_diagnostics(source, &lines, diagnostics),
+            let document = FailureDocument {
+                diagnostics: render_findings(source, &lines, diagnostics),
             };
             if let Err(code) = print_json("diagnostics", &document) {
                 return code;
@@ -217,18 +115,22 @@ pub(crate) fn report_failure_document(
     ExitCode::from(1)
 }
 
-/// A palette entry's name, `id[key=value,...]`.
-pub(crate) fn palette_entry_name(id: &str, states: &str) -> String {
-    format!("{id}[{states}]")
+/// Report a run-level refusal or warning on stderr, gcc-style.
+pub(crate) fn report_run_level(
+    file: &Path,
+    source: &str,
+    lines: &LineStarts,
+    message: &RunLevelMessage,
+) {
+    for line in message.lines(&file.display().to_string(), source, lines) {
+        eprintln!("{line}");
+    }
 }
 
-/// The `W_INTENT_DEGRADED` line for one intent the structure `scope` dropped.
-pub(crate) fn degraded_warning(scope: &str, note: &ParityNote) -> String {
-    format!(
-        "warning[W_INTENT_DEGRADED]: {scope}: {}: {}",
-        palette_entry_name(&note.id, &note.states),
-        note.dropped.reason,
-    )
+/// Report a run-level message about a structure, which names no place in the source.
+pub(crate) fn report_structure_message(message: &RunLevelMessage) {
+    debug_assert_eq!(message.at, RunLevelAt::Nothing, "{message:?} names a place");
+    report_run_level(Path::new(""), "", &LineStarts::new(""), message);
 }
 
 /// A note without a span prints indented and unprefixed, so it does not read as a second pointer.

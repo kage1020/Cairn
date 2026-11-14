@@ -63,14 +63,14 @@ cargo xtask lint --site website/dist site-parity   # after `pnpm run build` in w
 |---|---|
 | `crates/cairn-lang-core` | Lexer, parser, Intent IR, check passes, resolution, block-array lowering |
 | `crates/cairn-lang-nbt` | NBT codec — Java big-endian, Bedrock little-endian |
-| `crates/cairn-lang-formats` | Structure writers (`.nbt`, `.mcstructure`), registry packs, portability |
+| `crates/cairn-lang-formats` | Structure writers (`.nbt`, `.mcstructure`), registry packs, portability, and the build and `cairn info` report the front ends share |
 | `crates/cairn-lang-redstone` | Logic IR, netlist, placement, routing, delay, legalization under the struct, simulated assertions |
 | `crates/cairn-lang-cli` | The `cairn` binary |
 | `crates/cairn-lang-lsp` | The `cairn-lsp` language server |
 | `crates/cairn-lang-tree-sitter` | tree-sitter grammar, packaged for npm as `tree-sitter-cairn` |
-| `crates/cairn-lang-wasm` | Browser bindings for the future playground — a placeholder so far |
+| `crates/cairn-lang-wasm` | Browser bindings, which run the docs site's playground |
 | `editors/vscode` | VS Code extension — a thin client over `cairn-lsp` |
-| `website` | Astro + Starlight docs site: spec, tutorial and guides in English and 日本語, and the developer guide in English. Also the `cairn-lang-docs` crate, which embeds the site's Markdown pages for `cairn docs` |
+| `website` | Astro + Starlight docs site: spec, tutorial and guides in English and 日本語, the developer guide in English, and the playground. Also the `cairn-lang-docs` crate, which embeds the site's Markdown pages for `cairn docs` |
 | `examples` | `.crn` sources (lockfiles are generated output and stay untracked) |
 
 The [Developer Guide](https://cairn.kage1020.com/development/) covers the dependency rules between crates in more detail.

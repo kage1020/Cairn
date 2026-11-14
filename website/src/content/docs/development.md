@@ -7,7 +7,7 @@ language spec rather than the compiler, start at the [Specification](/spec/) and
 [CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md).
 
 > The spec is the source of truth, and the Rust workspace implements it chapter by chapter: what it
-> does not cover yet, the spec marks as not implemented. `cairn-lang-wasm` is still a placeholder.
+> does not cover yet, the spec marks as not implemented.
 
 ## Workspace layout
 
@@ -28,10 +28,10 @@ Each crate maps back to the spec chapter it implements:
 | [`cairn-lang-core`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-core/README.md) | Parser, IR, resolver, lint | lib |
 | [`cairn-lang-cli`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-cli/README.md) | The `cairn` binary | bin |
 | [`cairn-lang-nbt`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-nbt/README.md) | Java / Bedrock NBT codec | lib |
-| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.mcstructure` writers, registry packs, portability | lib |
+| [`cairn-lang-formats`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-formats/README.md) | `.nbt` / `.mcstructure` writers, registry packs, portability, the build every front end runs, and the `cairn info` report | lib |
 | [`cairn-lang-redstone`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-redstone/README.md) | Logic synthesis, place-and-route, and the tick simulator that checks a circuit against its assertions | lib |
 | [`cairn-lang-lsp`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-lsp/README.md) | Language Server Protocol | lib + bin |
-| [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) | WebAssembly bindings | cdylib + rlib |
+| [`cairn-lang-wasm`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) | WebAssembly bindings, which run the [playground](/playground/) | cdylib + rlib |
 | [`cairn-lang-tree-sitter`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-tree-sitter/README.md) | Grammar for editor highlighting, also published to npm | lib |
 | [`cairn-lang-docs`](https://github.com/kage1020/Cairn/blob/main/website/rust/README.md) | This site's Markdown pages, embedded for `cairn docs` | lib |
 
@@ -39,7 +39,8 @@ Each crate maps back to the spec chapter it implements:
 
 `cairn-lang-core` sits at the root. `cairn-lang-cli`, `cairn-lang-lsp`, and `cairn-lang-wasm` are
 leaf integrations that nothing depends on. `cairn-lang-formats` is the only crate that pulls in
-`cairn-lang-nbt`. `cairn-lang-docs` depends on nothing. Its manifest is `website/Cargo.toml`, so the
+`cairn-lang-nbt`, and it depends on `cairn-lang-redstone` too, since the build it runs lays each
+struct's circuit. `cairn-lang-docs` depends on nothing. Its manifest is `website/Cargo.toml`, so the
 pages it embeds are the site's own sources, with no copy to drift.
 
 - **`cairn-lang-core` knows nothing about NBT, file formats, redstone simulation, or editor
@@ -50,6 +51,12 @@ pages it embeds are the site's own sources, with no copy to drift.
 - **`cairn-lang-redstone` reads sensors, actuators, and `circuit` reservations from core's Intent
   IR**, then lays its own pads and owns its own IR layers
   ([Redstone §14.8](/spec/redstone#148-connection-to-the-ir-and-phases)).
+- **What the front ends report is built in a library.** `cairn-lang-formats`' `build` module
+  holds what a front end runs over a source for a build: the gate `cairn check` applies, the
+  lowering at a target, and the run-level refusals. Its `info` module builds the `cairn info`
+  report on those passes. `cairn`, the language server and the playground all call them, so they
+  report the same findings in the same words, and neither `cairn-lang-lsp` nor `cairn-lang-wasm`
+  depends on `cairn-lang-cli`.
 
 ## Toolchain
 
@@ -143,10 +150,28 @@ comparing two profiles with them. To run both:
 cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route
 ```
 
-`cairn-lang-wasm` has nothing to build for the browser yet: it has no `wasm-bindgen` binding layer,
-so `wasm-pack` refuses it. Its
-[README](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-wasm/README.md) says what is
-missing and gives the command for when the binding layer lands.
+### The playground's module
+
+The [playground](/playground/) runs `cairn-lang-wasm` built for the browser by `wasm-pack`. With
+the `wasm32-unknown-unknown` target and `wasm-pack` installed
+(`cargo install --locked wasm-pack@0.15.0`), build it into the site from `website/`:
+
+```sh
+pnpm run build:wasm
+```
+
+The script, `website/scripts/build-wasm.sh`, writes the module to `src/playground/pkg/`, which git
+ignores, and fails when the module outgrows the size budget it sets. `--install` installs rustup,
+the target and `wasm-pack` first where they are missing, as the deploy does. `pnpm build` bundles
+the module when it is there; without it the site still builds, and the playground says it was
+built without one.
+
+CI's `WebAssembly` job builds the module, holds it to the budget, and runs the tests that only a
+wasm32 build compiles, in Node:
+
+```sh
+wasm-pack test --node crates/cairn-lang-wasm
+```
 
 ### The examples in Minecraft
 

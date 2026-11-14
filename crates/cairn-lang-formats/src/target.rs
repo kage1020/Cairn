@@ -2,21 +2,27 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArray;
-use cairn_lang_formats::bedrock_structure::{McStructure, ParityNote, prepare_mcstructure};
-use cairn_lang_formats::data_version::{
-    BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
+
+use crate::bedrock_structure::{McStructure, ParityNote, prepare_mcstructure};
+use crate::data_version::{
+    BedrockTarget, JavaTarget, UnsupportedTarget, resolve_bedrock_target, resolve_java_target,
 };
-use cairn_lang_formats::java_structure::{JavaStructure, OutputExt, prepare_structure};
-use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+use crate::java_structure::{JavaStructure, OutputExt, prepare_structure};
+use crate::registry::{RegistryPack, builtin_pack};
 
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
-pub(crate) enum ResolvedTarget {
+#[derive(Debug, Clone)]
+pub enum ResolvedTarget {
+    /// A row of Java's version table.
     Java(JavaTarget),
+    /// A row of Bedrock's version table.
     Bedrock(BedrockTarget),
 }
 
 impl ResolvedTarget {
-    pub(crate) fn output_ext(&self) -> OutputExt {
+    /// The extension of the structure files this target's backend writes.
+    #[must_use]
+    pub fn output_ext(&self) -> OutputExt {
         match self {
             ResolvedTarget::Java(_) => OutputExt::Nbt,
             ResolvedTarget::Bedrock(_) => OutputExt::Mcstructure,
@@ -24,7 +30,15 @@ impl ResolvedTarget {
     }
 
     /// Check `array` against this edition's backend, with the parity notes it raises.
-    pub(crate) fn prepare<'a>(
+    ///
+    /// # Errors
+    ///
+    /// The backend's refusal, as the message a front end prints after the scope.
+    ///
+    /// # Panics
+    ///
+    /// If the built-in Bedrock pack has no state map for a version it can build for.
+    pub fn prepare<'a>(
         &self,
         array: &'a BlockArray,
     ) -> Result<(PreparedStructure<'a>, Vec<ParityNote>), String> {
@@ -43,7 +57,9 @@ impl ResolvedTarget {
         }
     }
 
-    pub(crate) fn mc_version(&self) -> &str {
+    /// The version's label in its edition's table.
+    #[must_use]
+    pub fn mc_version(&self) -> &str {
         match self {
             ResolvedTarget::Java(t) => &t.mc_version,
             ResolvedTarget::Bedrock(t) => &t.mc_version,
@@ -52,7 +68,8 @@ impl ResolvedTarget {
 
     /// `DataVersion` on Java, the block-palette `version` on Bedrock: the integer the artifact
     /// and its lockfile carry.
-    pub(crate) fn version_int(&self) -> i32 {
+    #[must_use]
+    pub fn version_int(&self) -> i32 {
         match self {
             ResolvedTarget::Java(t) => t.data_version,
             ResolvedTarget::Bedrock(t) => t.block_version,
@@ -61,14 +78,17 @@ impl ResolvedTarget {
 
     /// The row's key in its edition's version order, which a floor is weighed against; two
     /// Bedrock releases can share a block-palette `version` and never a key.
-    pub(crate) fn order_key(&self) -> i64 {
+    #[must_use]
+    pub fn order_key(&self) -> i64 {
         i64::from(match self {
             ResolvedTarget::Java(t) => t.data_version,
             ResolvedTarget::Bedrock(t) => t.order_key,
         })
     }
 
-    pub(crate) fn registry_pack(&self) -> &'static RegistryPack {
+    /// The built-in pack of this target's edition.
+    #[must_use]
+    pub fn registry_pack(&self) -> &'static RegistryPack {
         match self {
             ResolvedTarget::Java(_) => builtin_pack(Edition::Java),
             ResolvedTarget::Bedrock(_) => builtin_pack(Edition::Bedrock),
@@ -76,10 +96,12 @@ impl ResolvedTarget {
     }
 }
 
-pub(crate) fn resolve_target(
-    edition: Edition,
-    target: &str,
-) -> Result<ResolvedTarget, cairn_lang_formats::data_version::UnsupportedTarget> {
+/// Resolve `target` against `edition`'s version table.
+///
+/// # Errors
+///
+/// [`UnsupportedTarget`] when the table has no such version.
+pub fn resolve_target(edition: Edition, target: &str) -> Result<ResolvedTarget, UnsupportedTarget> {
     match edition {
         Edition::Java => resolve_java_target(target).map(ResolvedTarget::Java),
         Edition::Bedrock => resolve_bedrock_target(target).map(ResolvedTarget::Bedrock),
@@ -87,7 +109,8 @@ pub(crate) fn resolve_target(
 }
 
 /// Every version a pack can build for, in ascending release order.
-pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
+#[must_use]
+pub fn supported_versions(pack: &RegistryPack) -> Vec<String> {
     pack.targetable()
         .into_iter()
         .map(|entry| entry.mc_version.clone())
@@ -95,13 +118,20 @@ pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
 }
 
 /// A structure its edition's backend has checked, waiting to be written.
-pub(crate) enum PreparedStructure<'a> {
+pub enum PreparedStructure<'a> {
+    /// A gzip `.nbt` structure.
     Java(JavaStructure<'a>),
+    /// An uncompressed `.mcstructure`.
     Bedrock(McStructure<'a>),
 }
 
 impl PreparedStructure<'_> {
-    pub(crate) fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+    /// Write the structure file's bytes to `writer`.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `writer` refuses, or an NBT encoding failure.
+    pub fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         let encoded = match self {
             PreparedStructure::Java(structure) => structure.write_gzip(writer),
             PreparedStructure::Bedrock(structure) => structure.write(writer),
