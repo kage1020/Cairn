@@ -517,3 +517,56 @@ fn one_id_under_two_guards_is_one_port_to_each_edition() {
         assert_eq!(noted, [("W_DEFERRED_MEMBER", vec![line])], "{edition:?}");
     }
 }
+
+#[test]
+fn an_nbt_compound_outside_a_guard_is_refused_at_its_value() {
+    let source = struct_with(
+        "  painting at=1,1,1 facing=north variant=kebab nbt={Invisible:1b}\n  \
+         raw_block mat=minecraft:chest at=2,1,2 nbt={Lock:\"key\"}\n",
+    );
+    let found = diagnose(&source);
+    let fix = "indent the line under `@edition java` or `@edition bedrock`, the edition whose \
+               field names the compound spells, or drop `nbt=`";
+    assert_eq!(
+        found
+            .iter()
+            .map(|d| (
+                d.code.as_str(),
+                slice(&source, d),
+                d.primary.as_str(),
+                notes(d)
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "E_NBT_OUTSIDE_EDITION_GUARD",
+                "{Invisible:1b}",
+                "`painting` writes an `nbt={...}` compound outside an `@edition` guard: the \
+                 compound spells one edition's field names, and the semantic layer is \
+                 edition-neutral",
+                vec![fix],
+            ),
+            (
+                "E_NBT_OUTSIDE_EDITION_GUARD",
+                "{Lock:\"key\"}",
+                "`raw_block` writes an `nbt={...}` compound outside an `@edition` guard: the \
+                 compound spells one edition's field names, and the semantic layer is \
+                 edition-neutral",
+                vec![fix],
+            ),
+        ],
+    );
+}
+
+#[test]
+fn an_entity_line_stands_under_a_guard_only_when_it_writes_nbt() {
+    let source = struct_with(
+        "  @edition java\n    painting at=1,1,1 facing=north variant=kebab nbt={Invisible:1b}\n    \
+         raw_block mat=minecraft:chest at=2,1,2 nbt={Lock:\"key\"}\n    \
+         spawn type=cat at=3,1,3\n    armor_stand at=2,1,3\n",
+    );
+    assert_eq!(
+        located(&source),
+        [("E_SEMANTIC_IN_EDITION_GUARD", "armor_stand at=2,1,3")],
+    );
+}

@@ -415,6 +415,32 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Accept,
     ),
     ("slot_row_args", "theme t:\n  slot a -> @b c=1\n", Reject),
+    // A bare word may name a member form, which takes its keys after it.
+    (
+        "slot_row_member_form_args",
+        "theme t:\n  slot a -> text_display billboard=center scale=2.0\n",
+        Accept,
+    ),
+    (
+        "slot_row_member_form_bare_value",
+        "theme t:\n  slot a -> sign 2 glowing=true\n",
+        Accept,
+    ),
+    (
+        "slot_row_member_form_nbt",
+        "theme t:\n  slot a -> sign nbt={a:1}\n",
+        Accept,
+    ),
+    (
+        "slot_row_string_args",
+        "theme t:\n  slot a -> \"b\" c=1\n",
+        Reject,
+    ),
+    (
+        "slot_row_dotted_args",
+        "theme t:\n  slot a -> b.c d=1\n",
+        Reject,
+    ),
     (
         "selector_rule_dropped_equals",
         "theme t:\n  window[side=front] -> mat_slot glass\n",

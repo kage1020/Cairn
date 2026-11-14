@@ -12,6 +12,7 @@ pub mod hash;
 pub mod load;
 pub mod manifest;
 pub mod materials;
+pub mod paintings;
 pub mod states;
 
 pub use absent::{AbsentCatalog, AbsentEntry, AbsentError, AbsentIndex, SUPPORTED_ABSENT_SCHEMA};
@@ -37,6 +38,10 @@ pub use load::{
     load_builtin_pack, load_from_dir, parse_constraints,
 };
 pub use manifest::{PackFiles, PackManifest};
+pub use paintings::{
+    MAX_PAINTING_SIDE, Painting, PaintingIndex, PaintingRow, PaintingTable, PaintingsCatalog,
+    PaintingsError, SUPPORTED_PAINTINGS_SCHEMA,
+};
 pub use states::{
     BedrockForm, DroppedState, EntityStates, SUPPORTED_SENSITIVITY_SCHEMA, SUPPORTED_STATES_SCHEMA,
     SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal, StatesCatalog, StatesError,

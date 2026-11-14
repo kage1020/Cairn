@@ -52,7 +52,7 @@
       }
     },
     "member-keyword": {
-      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|beam|level|pressure_plate|lever|button|daylight|observer|lamp|piston|dispenser|chest|trapdoor|note_block|sign|bed|repeater|comparator|redstone_torch|redstone_dust|circuit|raw_block|raw_fill|place|connect)\\b",
+      "match": "^\\s*(floor|walls|fill|door|window|roof|stair|beam|level|pressure_plate|lever|button|daylight|observer|lamp|piston|dispenser|chest|trapdoor|note_block|sign|bed|painting|item_frame|armor_stand|villager|trade|text_display|block_display|item_display|hologram|spawn|repeater|comparator|redstone_torch|redstone_dust|circuit|raw_block|raw_fill|place|connect)\\b",
       "captures": {
         "1": { "name": "keyword.other.member.cairn" }
       }

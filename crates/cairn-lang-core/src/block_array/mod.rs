@@ -22,7 +22,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
-pub use constraint::{Constraint, Support};
+pub use constraint::{Constraint, EntityBox, Support};
 pub use entity::{Enchantment, Entity, EntityData, Item, Trade};
 pub use geometry::{Bbox, MemberGeometry};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};

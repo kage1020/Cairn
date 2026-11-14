@@ -1,8 +1,11 @@
 //! A [`BlockArray`] as a Bedrock `.mcstructure`. Each `block_indices` layer runs z fastest,
 //! `(x * size_y + y) * size_z + z`, unlike Java's `blocks`; the second layer holds water where a
 //! waterlogged entry stands and `-1` everywhere else. A block entity is written under
-//! `block_position_data`, keyed by its voxel's place in that order: each of the IR's, and one for
-//! each block whose Java states Bedrock keeps in its block entity, as a chest's pairing.
+//! `block_position_data`, keyed by its voxel's place in that order: each of the IR's, one for
+//! each block whose Java states Bedrock keeps in its block entity, as a chest's pairing, and one
+//! for each item frame, which Bedrock builds as a block. Every other entity is in `entities`.
+
+mod entities;
 
 use std::collections::HashMap;
 
@@ -21,7 +24,8 @@ use thiserror::Error;
 use crate::bedrock_state::{BedrockStateError, StateEntity, translate_states};
 use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
-use crate::dims::{VolumeError, dims_to_i32, list_volume};
+use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
+use crate::nbt_text::{compound_of, first_unencodable};
 use crate::registry::VersionStates;
 
 /// One intent a palette entry dropped to fit Bedrock, reported as `W_INTENT_DEGRADED`.
@@ -82,7 +86,7 @@ pub enum BedrockStructureError {
     /// A list longer than an NBT list's `i32` length prefix allows.
     #[error("the `{list}` list would hold {len} entries, past the NBT list limit of 2147483647")]
     ListTooLong {
-        /// `"block_indices"` or `"block_palette"`.
+        /// `"block_indices"`, `"block_palette"` or `"entities"`.
         list: &'static str,
         /// Its length.
         len: usize,
@@ -139,6 +143,73 @@ pub enum BedrockStructureError {
         /// The encoder's refusal.
         source: NbtIoError,
     },
+    /// An entity Bedrock has no counterpart for, as a display, reachable only through the public
+    /// fields, since lowering refuses one for a Bedrock target.
+    #[error(
+        "the `{id}` at {pos:?} is an entity Bedrock does not have. Fix: compile with \
+         `--edition java`, or build it of what Bedrock has"
+    )]
+    UnmappedEntity {
+        /// The entity's id.
+        id: String,
+        /// Its cell.
+        pos: (u32, u32, u32),
+    },
+    /// An item frame whose cell holds a block, where Bedrock builds the frame as one.
+    #[error(
+        "the `{id}` at {pos:?} hangs in a cell that holds `{block}`, and Bedrock builds an item \
+         frame as a block of its cell. Fix: move the frame, or the block, to a cell of its own"
+    )]
+    FrameCellTaken {
+        /// The frame's id.
+        id: String,
+        /// Its cell.
+        pos: (u32, u32, u32),
+        /// The block the cell holds.
+        block: String,
+    },
+    /// An item frame whose cell is outside the grid, reachable only through the public fields.
+    #[error("the `{id}` at {pos:?} hangs outside the structure's grid")]
+    FrameOutsideGrid {
+        /// The frame's id.
+        id: String,
+        /// Its cell.
+        pos: (u32, u32, u32),
+    },
+    /// An enchantment Bedrock saves by a number this writer does not know.
+    #[error(
+        "enchantment `{id}` has no Bedrock number this writer knows; it writes {known}. Fix: \
+         compile with `--edition java`, or write another enchantment"
+    )]
+    UnmappedEnchantment {
+        /// The enchantment's id.
+        id: String,
+        /// The enchantments it maps, comma-joined.
+        known: String,
+    },
+    /// A string of an entity, or one its `nbt=` writes, the NBT encoder cannot write.
+    #[error(
+        "the `{id}` at {pos:?} holds the text `{text}`, which cannot be written as NBT: {source}. \
+         Fix: write its text in printable ASCII"
+    )]
+    UnencodableEntity {
+        /// The entity's id.
+        id: String,
+        /// The entity's cell.
+        pos: (u32, u32, u32),
+        /// The string.
+        text: String,
+        /// The encoder's refusal.
+        source: NbtIoError,
+    },
+    /// An `nbt={...}` compound the lexer would refuse, reachable only through the public fields.
+    #[error("the `nbt=` compound at {pos:?}, `{text}`, is not one an `nbt=` value holds")]
+    MalformedNbt {
+        /// The cell of the entity or block entity it fills.
+        pos: (u32, u32, u32),
+        /// The compound's text.
+        text: String,
+    },
 }
 
 impl From<crate::dims::DimensionOverflow> for BedrockStructureError {
@@ -177,6 +248,10 @@ pub struct McStructure<'a> {
     slots: Vec<i32>,
     /// Each palette entry's water layer slot, `-1` for one that is not waterlogged.
     water: Vec<i32>,
+    /// The `block_palette` slot of each voxel an item frame takes, by its index in the grid.
+    frames: HashMap<usize, i32>,
+    /// The `entities` list's entries.
+    entities: Vec<Compound>,
 }
 
 /// Leaves out the grid, which can hold millions of voxels.
@@ -188,6 +263,7 @@ impl std::fmt::Debug for McStructure<'_> {
             .field("volume", &self.volume)
             .field("palette_len", &self.block_array.palette.entries.len())
             .field("block_palette_len", &self.block_palette_len)
+            .field("entities", &self.entities.len())
             .finish_non_exhaustive()
     }
 }
@@ -245,6 +321,14 @@ pub fn prepare_mcstructure<'a>(
         slots.push(palette.slot(compound)?);
         waterlogged.push(translated.waterlogged);
     }
+    let (hung, entities) = entities::bedrock_entities(&block_array.entities)?;
+    if !fits_list_limit(entities.len()) {
+        return Err(BedrockStructureError::ListTooLong {
+            list: "entities",
+            len: entities.len(),
+        });
+    }
+    let (framed, frame_entities) = hang_frames(block_array, hung, &mut palette, target)?;
     let water = if waterlogged.contains(&true) {
         let water = translate_states(states, &BlockState::bare(WATER_ID), &[])?;
         let slot = palette.slot(palette_entry(&water.id, water.states, target.block_version))?;
@@ -265,7 +349,7 @@ pub fn prepare_mcstructure<'a>(
     if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
     }
-    let position_data = position_data(block_array, &held)?;
+    let position_data = position_data(block_array, &held, frame_entities)?;
 
     let prepared = McStructure {
         block_array,
@@ -275,9 +359,60 @@ pub fn prepare_mcstructure<'a>(
         block_palette_len,
         slots,
         water,
+        frames: framed,
+        entities,
     };
     Ok((prepared, notes))
 }
+
+/// Each of `frames` as a block of `palette` in its cell, by the cell's index in the grid, with its
+/// block entity; a frame whose cell holds a block or another frame is refused.
+fn hang_frames(
+    block_array: &BlockArray,
+    frames: Vec<entities::Frame>,
+    palette: &mut BlockPalette,
+    target: &BedrockTarget,
+) -> Result<FramedCells, BedrockStructureError> {
+    let entries = &block_array.palette.entries;
+    let mut taken: HashMap<usize, i32> = HashMap::new();
+    let mut frame_entities = Vec::with_capacity(frames.len());
+    for frame in frames {
+        let (x, y, z) = frame.pos;
+        let index = block_array.dims.index(x, y, z).ok_or_else(|| {
+            BedrockStructureError::FrameOutsideGrid {
+                id: frame.id.to_owned(),
+                pos: frame.pos,
+            }
+        })?;
+        let voxel = block_array
+            .voxels
+            .get(index)
+            .copied()
+            .unwrap_or(PaletteIndex::AIR);
+        if voxel != PaletteIndex::AIR || taken.contains_key(&index) {
+            let block = if voxel == PaletteIndex::AIR {
+                frame.id.to_owned()
+            } else {
+                entries
+                    .get(usize::from(voxel.0))
+                    .map_or_else(String::new, |entry| entry.id.clone())
+            };
+            return Err(BedrockStructureError::FrameCellTaken {
+                id: frame.id.to_owned(),
+                pos: frame.pos,
+                block,
+            });
+        }
+        let slot = palette.slot(palette_entry(frame.id, frame.states, target.block_version))?;
+        taken.insert(index, slot);
+        frame_entities.push((frame.pos, frame.block_entity));
+    }
+    Ok((taken, frame_entities))
+}
+
+/// The slot of each cell an item frame takes, by its index in the grid, and each frame's cell with
+/// its block entity.
+type FramedCells = (HashMap<usize, i32>, Vec<((u32, u32, u32), Compound)>);
 
 /// The block a waterlogged cell's second layer holds.
 const WATER_ID: &str = "minecraft:water";
@@ -290,10 +425,11 @@ const SIGN_TEXT_BLACK: i32 = 0xFF00_0000_u32.cast_signed();
 
 /// `block_position_data`: each block entity's `block_entity_data`, keyed by its voxel's index in
 /// `block_indices`, its position the voxel's own; `held` is what each palette entry's block entity
-/// holds of its states, with its Bedrock id.
+/// holds of its states, with its Bedrock id, and `frames` each item frame's.
 fn position_data(
     block_array: &BlockArray,
     held: &[Option<(String, StateEntity)>],
+    frames: Vec<((u32, u32, u32), Compound)>,
 ) -> Result<Compound, BedrockStructureError> {
     let dims = block_array.dims;
     let index = |(x, y, z): (u32, u32, u32)| {
@@ -303,6 +439,9 @@ fn position_data(
     for entity in &block_array.block_entities {
         let nbt = member_entity(&entity.data, entity.pos)?;
         data.insert(index(entity.pos).to_string(), placed(nbt, entity.pos)?);
+    }
+    for (pos, nbt) in frames {
+        data.insert(index(pos).to_string(), placed(nbt, pos)?);
     }
     if held.iter().all(Option::is_none) {
         return Ok(data);
@@ -401,6 +540,20 @@ fn member_entity(
                 Tag::Byte(i8::try_from(number).expect("sixteen dyes fit a byte")),
             );
         }
+        BlockEntityData::Nbt { compound } => {
+            nbt = compound_of(compound).ok_or_else(|| BedrockStructureError::MalformedNbt {
+                pos,
+                text: compound.clone(),
+            })?;
+            if let Some((text, source)) = first_unencodable(&nbt) {
+                return Err(BedrockStructureError::UnencodableEntity {
+                    id: "raw_block".to_owned(),
+                    pos,
+                    text,
+                    source,
+                });
+            }
+        }
     }
     Ok(nbt)
 }
@@ -498,18 +651,22 @@ fn check_palette_strings(id: &str, states: &Compound) -> Result<(), BedrockStruc
 }
 
 impl McStructure<'_> {
-    /// The `block_palette` slot a voxel is written as.
-    fn slot(&self, voxel: PaletteIndex) -> i32 {
-        self.slots[usize::from(voxel.0)]
+    /// The `block_palette` slot the voxel at grid index `i` is written as, an item frame's where
+    /// one hangs.
+    fn slot(&self, (i, voxel): (usize, PaletteIndex)) -> i32 {
+        self.frames
+            .get(&i)
+            .copied()
+            .unwrap_or_else(|| self.slots[usize::from(voxel.0)])
     }
 
     /// The water layer's slot for a voxel, `-1` for a dry one.
-    fn water_slot(&self, voxel: PaletteIndex) -> i32 {
+    fn water_slot(&self, (_, voxel): (usize, PaletteIndex)) -> i32 {
         self.water[usize::from(voxel.0)]
     }
 
-    /// Each voxel's index, in the `block_indices` order: z fastest, then y, then x.
-    fn voxel_order(&self) -> impl Iterator<Item = PaletteIndex> + '_ {
+    /// Each voxel with its grid index, in the `block_indices` order: z fastest, then y, then x.
+    fn voxel_order(&self) -> impl Iterator<Item = (usize, PaletteIndex)> + '_ {
         let dims = self.block_array.dims;
         (0..dims.x).flat_map(move |x| {
             (0..dims.y).flat_map(move |y| {
@@ -517,7 +674,7 @@ impl McStructure<'_> {
                     let i = dims
                         .index(x, y, z)
                         .expect("voxel coordinate in dims by construction");
-                    self.block_array.voxels[i]
+                    (i, self.block_array.voxels[i])
                 })
             })
         })
@@ -534,7 +691,12 @@ impl McStructure<'_> {
             root.tag("size", &Tag::List(List::of_ints(self.size)))?;
             root.compound("structure", |structure| {
                 self.write_block_indices(structure)?;
-                structure.tag("entities", &Tag::List(List::empty()))?;
+                structure.list("entities", 10, self.entities.len(), |list| {
+                    for entity in &self.entities {
+                        list.item(&Tag::Compound(entity.clone()))?;
+                    }
+                    Ok(())
+                })?;
                 structure.compound_tag("palette", &self.palette)
             })?;
             root.tag(
@@ -603,7 +765,7 @@ pub fn build_mcstructure_tag(
 
     let mut structure = Compound::new();
     structure.insert("block_indices", Tag::List(prepared.block_indices()));
-    structure.insert("entities", Tag::List(List::empty()));
+    structure.insert("entities", Tag::List(List::of_compounds(prepared.entities)));
     structure.insert("palette", Tag::Compound(prepared.palette));
 
     let mut root = Compound::new();

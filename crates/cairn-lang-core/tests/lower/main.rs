@@ -15,6 +15,8 @@ mod cottage;
 mod door_block;
 mod door_wall_fit;
 mod edition_guard;
+mod entities;
+mod entity_constraints;
 mod fill;
 mod intent;
 mod l_walkway;

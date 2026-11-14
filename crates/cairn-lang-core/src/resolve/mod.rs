@@ -21,7 +21,7 @@ pub use crate::version::{
     parse_min_version, parse_requirement,
 };
 pub use binding::{
-    MEMBER_FORMS, SelectorMatch, ThemeBinding, TokenKind, classify_token, member_form,
+    MEMBER_FORMS, SelectorMatch, ThemeBinding, TokenKind, classify_token, form_word, member_form,
 };
 pub use resolution::{
     PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,

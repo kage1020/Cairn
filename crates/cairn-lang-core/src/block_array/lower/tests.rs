@@ -1430,7 +1430,10 @@ const SLOT_IGNORERS: &[(&str, &str)] = &[
         "item_display",
         "struct s size=3x3\n  item_display at=1,0,1 item=diamond mat_slot=d\n",
     ),
-    ("spawn", "struct s size=3x3\n  spawn type=cat at=1,0,1 mat_slot=d\n"),
+    (
+        "spawn",
+        "struct s size=3x3\n  spawn type=cat at=1,0,1 mat_slot=d\n",
+    ),
     (
         "raw_block",
         "struct s size=3x3\n  raw_block mat=minecraft:stone at=1,0,1 mat_slot=d\n",

@@ -220,6 +220,24 @@ no sideways face or whose `open` is no boolean, a chest whose default `facing` i
 and a `dust` face that is no sideways face, since dust lies on the block under it. On Java it also
 refuses a row naming a block, or a value of a state, that the version's block table does not give.
 
+Both packs carry a `paintings` component too: the paintings each targetable version has, each with
+its `width` and `height` in blocks, which a `painting`'s `variant=` names and hangs by ([Entities
+§8.1](/spec/entities/#hanging-entities)). It is written by hand from the game: Java's from each
+version's server jar, whose data files give each painting's size from 1.21, and Bedrock's from the
+painting table GeyserMC ships with the block palette each version's `blocks` came from, which also
+gives the `spelling` Bedrock saves a painting's `Motive` as. Rows group the versions that share
+their paintings:
+
+```json
+{ "versions": ["1.21", "1.21.4", "26.3"],
+  "paintings": [{"variant": "orb", "width": 4, "height": 4}] }
+```
+
+The loader refuses a table that names no version or no painting, a version no targetable row of
+the version table names, a targetable version given no painting, a painting given twice at one
+version, a `variant` that is no bare name, a side outside 1 to 16 blocks, and a `spelling` that is
+empty.
+
 ## 10.4 Fail-loud and minimum-version inference
 
 Unknown IDs, out-of-domain states, and parity gaps are hard errors. Silent substitution and implicit
@@ -984,7 +1002,7 @@ The canonical vocabulary absorbs only ID, state, and serialization differences. 
 and game-behaviour differences are not absorbed.** The cases that cannot be:
 
 - blocks only one edition has ([below](#a-block-only-the-other-edition-has))
-- display entities (absent on Bedrock)
+- display entities (absent on Bedrock; [below](#a-block-only-the-other-edition-has))
 - stairs `shape` on Bedrock before 1.26.60 (no such state there)
 - armor_stand pose
 - redstone propagation
@@ -1011,6 +1029,13 @@ component, each row with the sentence a diagnostic prints for it:
 The loader refuses an `absent` ID that the pack's own `blocks` declare at some version, under that
 spelling or another of its `aliases` group, since the edition then has the block.
 
+The component's `entities` lists the other edition's entities a member places that the edition has
+no counterpart for, in the same rows: Bedrock's lists the display entities. A member that places
+one is `E_PARITY_UNSUPPORTED` at its line in a build of that edition, pinned or not, with the
+pack's reason, and the notes ask for the next step down the hierarchy below: a `hologram` for
+floating text, or a block or an `item_frame`, which both editions have ([Entities
+§8.1](/spec/entities/#displays)).
+
 A semantic member whose `mat_slot=` resolves to such a block, and a `connect … path=` that does, is
 `E_PARITY_UNSUPPORTED` ([Lint](/spec/lint/)) at the token, at a pinned target of the edition that
 lacks it. The block is no typo, so no nearest ID is offered. The notes give the pack's reason and
@@ -1033,9 +1058,6 @@ answers an entry the edition's `absent` lists with the same reason
 
 ### Writing an alternative
 
-**Subject to change.** `hologram` and `slot` rules that take arguments are not built yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
 `@edition` conditionals in the semantic layer are forbidden. When an alternative is needed, work
 down this hierarchy:
 
@@ -1049,56 +1071,78 @@ down this hierarchy:
 ```
 @requires bedrock version>=1.21.40   # the Bedrock branch below is spelled for the flattened ids
 
-theme shop_java:    slot floating_text -> text_display scale=2.0
-theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
+theme shop_java:
+  slot stone         -> @cobblestone
+  slot floating_text -> text_display scale=2.0
+
+theme shop_bedrock:
+  slot stone         -> @cobblestone
+  slot floating_text -> sign glowing=true   # Bedrock fallback
 
 struct shop size=9x7
-  hologram id=shop_sign text="Weapon" mat_slot=floating_text   # the semantic layer is always neutral
+  floor    mat_slot=stone
+  walls    mat_slot=stone height=4
+  hologram id=shop_sign at=4,1,2 text="Weapon" mat_slot=floating_text   # a neutral semantic line
   @edition java
-    raw_block mat=minecraft:light[level=15] at=4,3,2
+    raw_block mat=minecraft:light[level=15] at=4,3,4
   @edition bedrock
-    raw_block mat=minecraft:light_block_15 at=4,3,2
+    raw_block mat=minecraft:light_block_15 at=4,3,4
 ```
 
-Of the snippet, the `@requires` line parses today, and so would all of the `struct`: its header, the
-`hologram` line and the two guards with what they hold. The parse never reaches the `struct`,
-though. A `theme` takes its rules on indented lines under its header, so the one-line form is
-`E_PARSE` at the first `slot`, and the parse ends there. Even indented, a `slot` rule binds one
-token and takes nothing after it, so `scale=2.0` and `glowing=true` are `E_PARSE`. Inside a body
-`hologram` is `E_UNKNOWN_KEYWORD`. `E_PARITY_UNSUPPORTED` is raised where a member is bound to a
-block only the other edition has ([above](#a-block-only-the-other-edition-has)). The `edition-fallback`
-example builds the steps that do exist: a per-edition theme, and the light block under its guards.
+A `hologram` is floating text that each edition builds its own way: it is built as the member
+form its `mat_slot=` binds. A `slot` row binds a member form by its bare word, `text_display` or
+`sign`, with the keys the form takes after it, `billboard=` and `scale=` for a text display and
+`glowing=` for a sign ([Materials and Themes
+§7.1](/spec/materials-themes/#71-slots-as-dependency-injection)). The hologram's line writes its
+`text=` and places it, and its `at=`, `offset=`, `y=` and `facing=` place it as they place the
+member it is built as: a text display stands where its line says ([Entities
+§8.1](/spec/entities/#displays)), and a sign stands on the block under it or hangs on a wall as a
+`sign` line's does ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)). A key the form does not take
+is `E_UNKNOWN_ARGUMENT` at the slot row. A hologram whose slot binds a block is `E_INVALID_MEMBER`,
+and so is a member of another keyword whose slot binds a member form, since only a hologram is
+built as one. A hologram built as a text display in a Bedrock build is `E_PARITY_UNSUPPORTED`,
+and its note asks the Bedrock theme to bind the slot to `sign`.
+
+The snippet builds on both editions. Java's build stands a text display at 2 scale on the floor and
+lays the light block its guard holds; Bedrock's stands a glowing sign there, the text on its front,
+and lays Bedrock's light block. `E_PARITY_UNSUPPORTED` is raised where a member is bound to a block
+only the other edition has, or places an entity only the other edition has
+([above](#a-block-only-the-other-edition-has)). The `edition-fallback` example takes the second step
+for a block, a per-edition theme binding a sign each edition has, and `trading-post` takes it for a
+hologram.
 
 ### An `@edition` guard holds the escape hatch
 
 A guard is a line of its own: `@edition`, then `java` or `bedrock`, and nothing after it. The lines
 it guards are indented one level under it, and it stands in a `struct`, `def` or `site` body, or in
 the body of a member there. It shares the sigil with the file directives but is not one. The items
-of a file are edition-neutral, so a guard at top level is `E_PARSE`, and so is one in a `theme` body,
-where the `NAME_java` and `NAME_bedrock` variants say what differs
+of a file are edition-neutral, so a guard at top level is `E_PARSE`, and so is one in a `theme`
+body, where the `NAME_java` and `NAME_bedrock` variants say what differs
 ([below](#the-build-picks-the-variant-not-the-source)). A guard that names no edition or another
 word, takes anything after its edition, holds its lines in braces or has nothing indented under it
 is `E_PARSE` too. A guard does not nest: the one around it already picks the edition, so a guard
 directly under a guard is `E_PARSE`. Deeper down, a line is judged by the line it stands under, as
-it would be outside the guard: a member under a raw member or a Tier 0 part, guarded again or not,
-is `E_UNSUPPORTED_NESTING`, and anything under a refused line goes with that line.
+it would be outside the guard: a member under a line of the escape-hatch layer, guarded again or
+not, is `E_UNSUPPORTED_NESTING`, and anything under a refused line goes with that line.
 
 A guard opens no scope. Its lines are read as if written where the guard stands, so one under a
-`level` takes the level's `y=`, and a raw member or a Tier 0 part gets every check under a guard
+`level` takes the level's `y=`, and a line of the escape-hatch layer gets every check under a guard
 that it would get outside one. What the guard adds is the edition whose build keeps the line.
 
 What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
-§7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
+§7.4](/spec/materials-themes/#74-raw-blocks)), `spawn`, which places any entity by its id ([Entities
+§8.1](/spec/entities/#standing-entities)), and the Tier 0 parts of [Redstone
 §14.1](/spec/redstone/#tier-0-parts): `repeater`, `comparator`, `redstone_torch` and
-`redstone_dust`. A line that writes an `nbt={...}` compound belongs to that layer too, and stands
-under a guard ([Entities §8.1](/spec/entities/#81-two-tiers)), though no keyword reads `nbt=` yet.
-Any other member, and a `logic` or `assert` line, is `E_SEMANTIC_IN_EDITION_GUARD`
-([Lint](/spec/lint/)), once at the outermost such line, taking
-anything indented under it along. So is a `logic` or `assert` line under a guarded raw member or
-Tier 0 part, which outside a guard would still reach redstone synthesis. No build and no other
-check reads a refused line or what goes with it, so it draws that finding alone. A raw member or a
-Tier 0 part in a `site` body is `E_MISPLACED_MEMBER`, with a guard around it or not, so a guard
-there holds nothing that builds.
+`redstone_dust`. An entity's line that writes an `nbt={...}` compound belongs to that layer too, and
+stands under the guard of the edition whose fields the compound spells ([Entities
+§8.1](/spec/entities/#81-two-tiers)); the same line without one is a semantic member. Any other
+member, and a `logic` or `assert` line, is `E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once
+at the outermost such line, taking anything indented under it along. So is a `logic` or `assert`
+line under a guarded line of that layer, which outside a guard would still reach redstone synthesis.
+No build and no other check reads a refused line or what goes with it, so it draws that finding
+alone. A line of that layer in a `site` body is `E_MISPLACED_MEMBER`, with a guard around it or not,
+so a guard there holds nothing that builds.
 
 A pinned build keeps the lines under its own edition's guards and drops the other edition's.
 `cairn compile --edition java` builds the snippet's `minecraft:light` and never builds

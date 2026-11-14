@@ -1,6 +1,7 @@
 //! A [`BlockArray`] as a Java structure file: `size`, `palette`, `blocks`, each with its block
-//! entity's `nbt`, an empty `entities` and `DataVersion`. Lowering never fills the IR's entities,
-//! so none is written.
+//! entity's `nbt`, `entities`, each with its point, its cell and its `nbt`, and `DataVersion`.
+
+mod entities;
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -16,6 +17,7 @@ use thiserror::Error;
 use crate::block_id::is_concrete_id;
 use crate::data_version::JavaTarget;
 use crate::dims::{VolumeError, dim_to_i32, dims_to_i32, fits_list_limit, list_volume};
+use crate::nbt_text::{compound_of, first_unencodable};
 
 /// Why a [`BlockArray`] cannot be written as a Java structure.
 #[derive(Debug, Error)]
@@ -59,7 +61,7 @@ pub enum JavaStructureError {
     /// A list longer than an NBT list's `i32` length prefix allows.
     #[error("the `{list}` list would hold {len} entries, past the NBT list limit of 2147483647")]
     ListTooLong {
-        /// `"blocks"` or `"palette"`.
+        /// `"blocks"`, `"palette"` or `"entities"`.
         list: &'static str,
         /// Its length.
         len: usize,
@@ -95,6 +97,29 @@ pub enum JavaStructureError {
         /// The encoder's refusal.
         source: NbtIoError,
     },
+    /// A string of an entity, its text or one its `nbt=` writes, the NBT encoder cannot write.
+    #[error(
+        "the `{id}` at {pos:?} holds the text `{text}`, which cannot be written as NBT: {source}. \
+         Fix: write its text in printable ASCII"
+    )]
+    UnencodableEntity {
+        /// The entity's id.
+        id: String,
+        /// The entity's cell.
+        pos: (u32, u32, u32),
+        /// The string.
+        text: String,
+        /// The encoder's refusal.
+        source: NbtIoError,
+    },
+    /// An `nbt={...}` compound the lexer would refuse, reachable only through the public fields.
+    #[error("the `nbt=` compound at {pos:?}, `{text}`, is not one an `nbt=` value holds")]
+    MalformedNbt {
+        /// The cell of the entity or block entity it fills.
+        pos: (u32, u32, u32),
+        /// The compound's text.
+        text: String,
+    },
 }
 
 impl From<crate::dims::DimensionOverflow> for JavaStructureError {
@@ -120,13 +145,17 @@ impl From<VolumeError> for JavaStructureError {
 
 /// A [`BlockArray`] checked to write as a Java structure for its target, so writing it can fail
 /// only on I/O.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct JavaStructure<'a> {
     block_array: &'a BlockArray,
     size: [i32; 3],
     /// The `blocks` list's length, checked to fit `i32` and to equal `voxels.len()`.
     volume: usize,
     data_version: i32,
+    /// Each block entity's `nbt`, by its voxel.
+    block_entities: HashMap<(u32, u32, u32), Compound>,
+    /// The `entities` list's entries.
+    entities: Vec<Compound>,
 }
 
 /// Leaves out the grid, which can hold millions of voxels.
@@ -138,7 +167,8 @@ impl std::fmt::Debug for JavaStructure<'_> {
             .field("volume", &self.volume)
             .field("palette_len", &self.block_array.palette.entries.len())
             .field("data_version", &self.data_version)
-            .finish()
+            .field("entities", &self.entities.len())
+            .finish_non_exhaustive()
     }
 }
 
@@ -176,7 +206,7 @@ pub fn prepare_structure<'a>(
             continue;
         };
         for line in front.lines.iter().chain(&back.lines) {
-            check_string(&sign_message(line, target.data_version)).map_err(|source| {
+            check_string(&text_component(line, target.data_version)).map_err(|source| {
                 JavaStructureError::UnencodableSignText {
                     pos: entity.pos,
                     text: line.clone(),
@@ -185,11 +215,21 @@ pub fn prepare_structure<'a>(
             })?;
         }
     }
+    let block_entities = block_entities_at(block_array, target.data_version)?;
+    let entities = entities::entities_list(&block_array.entities, target.data_version)?;
+    if !fits_list_limit(entities.len()) {
+        return Err(JavaStructureError::ListTooLong {
+            list: "entities",
+            len: entities.len(),
+        });
+    }
     Ok(JavaStructure {
         block_array,
         size,
         volume,
         data_version: target.data_version,
+        block_entities,
+        entities,
     })
 }
 
@@ -237,7 +277,7 @@ impl JavaStructure<'_> {
                 self.data_version,
             )),
         )?;
-        let entities = block_entities_at(block_array, self.data_version);
+        let entities = &self.block_entities;
         root.list("blocks", 10, self.volume, |blocks| {
             // `blocks_list`'s (y, z, x) order.
             for y in 0..block_array.dims.y {
@@ -268,7 +308,12 @@ impl JavaStructure<'_> {
             }
             Ok(())
         })?;
-        root.tag("entities", &Tag::List(List::empty()))?;
+        root.list("entities", 10, self.entities.len(), |list| {
+            for entity in &self.entities {
+                list.item(&Tag::Compound(entity.clone()))?;
+            }
+            Ok(())
+        })?;
         root.tag("DataVersion", &Tag::Int(self.data_version))
     }
 }
@@ -296,9 +341,9 @@ pub fn build_structure_tag(
     );
     root.insert(
         "blocks",
-        Tag::List(blocks_list(block_array, prepared.data_version)?),
+        Tag::List(blocks_list(block_array, &prepared.block_entities)?),
     );
-    root.insert("entities", Tag::List(List::empty()));
+    root.insert("entities", Tag::List(List::of_compounds(prepared.entities)));
     root.insert("DataVersion", Tag::Int(prepared.data_version));
     Ok(root)
 }
@@ -395,20 +440,27 @@ fn palette_entry(state: &BlockState, (id_key, properties_key): (&str, &str)) -> 
 fn block_entities_at(
     block_array: &BlockArray,
     data_version: i32,
-) -> HashMap<(u32, u32, u32), Compound> {
-    block_array
-        .block_entities
-        .iter()
-        .filter_map(|entity| Some((entity.pos, entity_nbt(&entity.data, data_version)?)))
-        .collect()
+) -> Result<HashMap<(u32, u32, u32), Compound>, JavaStructureError> {
+    let mut found = HashMap::new();
+    for entity in &block_array.block_entities {
+        if let Some(nbt) = entity_nbt(&entity.data, entity.pos, data_version)? {
+            found.insert(entity.pos, nbt);
+        }
+    }
+    Ok(found)
 }
 
-/// The first `DataVersion` that saves a sign's messages as text components, 1.21.5's.
-const SIGN_TEXT_COMPONENTS_FROM: i32 = 4325;
+/// The first `DataVersion` that saves text, a sign's messages among it, as text components,
+/// 1.21.5's.
+const TEXT_COMPONENTS_FROM: i32 = 4325;
 
 /// A block entity as the game saves one in a structure's `blocks`, without the position its block
 /// entry already gives; `None` for one whose block holds all of it, as a bed's id names its colour.
-fn entity_nbt(data: &BlockEntityData, data_version: i32) -> Option<Compound> {
+fn entity_nbt(
+    data: &BlockEntityData,
+    pos: (u32, u32, u32),
+    data_version: i32,
+) -> Result<Option<Compound>, JavaStructureError> {
     let mut nbt = Compound::new();
     match data {
         BlockEntityData::Fields { id, fields } => {
@@ -423,9 +475,23 @@ fn entity_nbt(data: &BlockEntityData, data_version: i32) -> Option<Compound> {
             nbt.insert("back_text", Tag::Compound(sign_text(back, data_version)));
             nbt.insert("is_waxed", Tag::Byte(0));
         }
-        BlockEntityData::Bed { .. } => return None,
+        BlockEntityData::Bed { .. } => return Ok(None),
+        BlockEntityData::Nbt { compound } => {
+            nbt = compound_of(compound).ok_or_else(|| JavaStructureError::MalformedNbt {
+                pos,
+                text: compound.clone(),
+            })?;
+            if let Some((text, source)) = first_unencodable(&nbt) {
+                return Err(JavaStructureError::UnencodableEntity {
+                    id: "raw_block".to_owned(),
+                    pos,
+                    text,
+                    source,
+                });
+            }
+        }
     }
-    Some(nbt)
+    Ok(Some(nbt))
 }
 
 /// One face of a sign: its four messages, black and glowing or not.
@@ -433,7 +499,7 @@ fn sign_text(text: &SignText, data_version: i32) -> Compound {
     let messages: Vec<Tag> = (0..4)
         .map(|line| {
             let line = text.lines.get(line).map_or("", String::as_str);
-            Tag::String(sign_message(line, data_version))
+            Tag::String(text_component(line, data_version))
         })
         .collect();
     let mut face = Compound::new();
@@ -443,12 +509,12 @@ fn sign_text(text: &SignText, data_version: i32) -> Compound {
     face
 }
 
-/// One line of a sign as `data_version` saves it: a text component, a JSON string before 1.21.5.
-fn sign_message(line: &str, data_version: i32) -> String {
-    if data_version >= SIGN_TEXT_COMPONENTS_FROM {
-        line.to_owned()
+/// `text` as `data_version` saves a text component: a plain string, a JSON one before 1.21.5.
+fn text_component(text: &str, data_version: i32) -> String {
+    if data_version >= TEXT_COMPONENTS_FROM {
+        text.to_owned()
     } else {
-        json_string(line)
+        json_string(text)
     }
 }
 
@@ -470,9 +536,11 @@ fn json_string(text: &str) -> String {
     json
 }
 
-fn blocks_list(block_array: &BlockArray, data_version: i32) -> Result<List, JavaStructureError> {
+fn blocks_list(
+    block_array: &BlockArray,
+    entities: &HashMap<(u32, u32, u32), Compound>,
+) -> Result<List, JavaStructureError> {
     // Air is written too, as the game's structure blocks do, so placement can tell it from void.
-    let entities = block_entities_at(block_array, data_version);
     let mut entries: Vec<Compound> = Vec::with_capacity(block_array.dims.volume());
     for y in 0..block_array.dims.y {
         let yi = dim_to_i32(y, "y")?;

@@ -10,8 +10,8 @@ title: "4. コンパイルモデル"
 massing     floor / walls / volume / fill
 envelope    roof / stair / beam
 openings    door / window
-fixtures    sign / painting / frame / bed / chest / trapdoor / note_block / センサー / アクチュエーター /
-            Tier 0 の部品
+fixtures    sign / bed / chest / trapdoor / note_block / センサー / アクチュエーター / Tier 0 の部品 /
+            painting / item_frame / armor_stand / villager / trade / display / hologram / spawn
 fluids      fill fluid= / water
 logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
 logic_place 床下へのパッド、ライザー、セルの配置 → Placement IR
@@ -21,7 +21,7 @@ raw         raw_block / raw_fill (エスケープハッチ)
 
 水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
 
-ただし、今のところすべての行が動くわけではありません。`volume`、`painting`、`frame`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `sign`、`bed`、`chest`、`trapdoor`、`note_block`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
+ただし、今のところすべての行が動くわけではありません。`volume` と `water` はまだキーワードではなく、どちらも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `sign`、`bed`、`chest`、`trapdoor`、`note_block`、`door` 以外のすべてのセンサーとアクチュエーター、Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品))、そしてエンティティ ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
@@ -144,7 +144,7 @@ Dims.y = void + 1 + wall_top + roof_extra
 
 `level` の中のメンバーも、この 3 つの項すべてに、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 
-**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `beam` / `chest` / `trapdoor` / `note_block` / `sign` / `bed` / すべてのセンサーとアクチュエーター / Tier 0 の部品 / `fill` / `raw_block` / `raw_fill` は、`N` を自分の形状を測る基準として読みます。ただし開口の上に渡す `beam` は、その開口の `level` が決める位置に置きます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
+**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `beam` / `chest` / `trapdoor` / `note_block` / `sign` / `bed` / すべてのセンサーとアクチュエーター / Tier 0 の部品 / すべてのエンティティ / `hologram` / `fill` / `raw_block` / `raw_fill` は、`N` を自分の形状を測る基準として読みます。ただし開口の上に渡す `beam` は、その開口の `level` が決める位置に置きます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
 
 **ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof`、`slope_to=` のない `shed`、`footprint=` か `bounds=` が取る 1 つの値以外を書いた `roof` ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約)) は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
 

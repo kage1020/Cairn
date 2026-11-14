@@ -6,9 +6,9 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::args::diag_invalid_member;
-use crate::block_array::{BlockEntityData, BlockState};
 use crate::block_array::geometry::Declared;
 use crate::block_array::material::{IdOrigin, block_id_state, validated_id};
+use crate::block_array::{BlockEntityData, BlockState};
 use crate::resolve::{TokenKind, classify_token};
 
 use super::canvas::{MemberCanvas, ScopePalette};

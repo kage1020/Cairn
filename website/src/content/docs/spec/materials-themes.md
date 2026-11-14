@@ -64,6 +64,16 @@ text whatever a binding comes to mean. Within one row that is `E_DUPLICATE_ARG`;
 that select the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is still checked:
 `E_THEME_SELECTOR_UNMATCHED` applies to it exactly as its own entry says.
 
+**A slot binds a material or a member form.** A `slot` row binds a canonical or abstract material
+token, which a member builds as its block, and takes nothing after it: a `key=value` there is
+`E_PARSE`. It may instead bind a member form, a bare word naming what a `hologram` is built as,
+`text_display` or `sign`, followed by the keys that form takes: `billboard=` and `scale=` for a
+text display and `glowing=` for a sign, as `slot floating_text -> text_display scale=2.0`
+([Versioning and Editions §10.7](/spec/versioning-editions/#writing-an-alternative)). Only a
+`hologram` is built as a member form, so a member of another keyword whose slot binds one is
+`E_INVALID_MEMBER`, and so is a hologram whose slot binds a token. A key the form does not take is
+`E_UNKNOWN_ARGUMENT`, and any other word is `E_UNKNOWN_SLOT_TARGET`.
+
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
 ([Components, Editing, and Multi-building](/spec/components-editing-sites/)).
 

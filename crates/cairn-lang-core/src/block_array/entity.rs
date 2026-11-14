@@ -34,6 +34,10 @@ pub enum EntityData {
     Painting {
         /// The variant, as the target spells it.
         variant: String,
+        /// Its width in blocks, along the wall to the right of the way it faces.
+        width: u32,
+        /// Its height in blocks.
+        height: u32,
     },
     /// An item frame, or a glow item frame by its id.
     ItemFrame {
@@ -41,7 +45,7 @@ pub enum EntityData {
         #[serde(skip_serializing_if = "Option::is_none")]
         item: Option<Item>,
     },
-    /// An armor stand, arms shown.
+    /// An armor stand, without arms.
     ArmorStand,
     /// A villager and the trades it offers, in the order written.
     Villager {
@@ -92,7 +96,7 @@ pub struct Item {
     pub enchantment: Option<Enchantment>,
 }
 
-/// An enchantment on an item, which an enchanted book stores rather than carries.
+/// An enchantment on an item; an enchanted book keeps it as a stored enchantment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Enchantment {
     /// Enchantment id, as `minecraft:mending`.

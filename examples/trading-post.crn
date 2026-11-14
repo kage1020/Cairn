@@ -1,0 +1,38 @@
+@cairn 2026.06
+@requires version>=1.20
+
+# A village trading post, furnished with the structured entities
+# (spec/entities "Two tiers").
+# Demonstrates: a villager and the trades it offers, a painting and an item
+# frame hung on the walls, an armor stand at a coordinate triple, and a
+# hologram that each edition builds its own way: a text display on Java and
+# a glowing wall sign on Bedrock, which has no display entity
+# (spec/versioning-editions "Writing an alternative").
+
+theme post_java:
+  slot floor     -> @spruce_planks
+  slot wall      -> @cobblestone
+  slot roof      -> @spruce_stairs
+  slot shop_sign -> text_display billboard=center scale=1.5
+
+theme post_bedrock:
+  slot floor     -> @spruce_planks
+  slot wall      -> @cobblestone
+  slot roof      -> @spruce_stairs
+  slot shop_sign -> sign glowing=true
+
+struct trading_post size=9x7
+  floor mat_slot=floor
+  walls mat_slot=wall height=4
+  door  side=front at=center
+  roof  kind=gable mat_slot=roof overhang=1
+  # The librarian stands against the back wall and sells in the order its
+  # trades are written.
+  villager id=librarian at=inside.back offset=4 y=1 profession=librarian level=journeyman
+  trade villager=librarian buy=emerald count=9 sell=bookshelf
+  trade villager=librarian buy=emerald count=20 sell=enchanted_book enchant=mending
+  # A 2x1 painting runs right from its bottom-left cell, seen from the room.
+  painting   id=sunset at=inside.left offset=2 y=2 variant=sunset
+  item_frame id=relic  at=inside.right offset=3 y=2 item=compass
+  armor_stand id=mannequin at=6,1,4 facing=west
+  hologram id=shop_sign at=front.outside offset=4 y=3 text="Trading Post" mat_slot=shop_sign

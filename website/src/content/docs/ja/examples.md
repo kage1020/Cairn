@@ -41,6 +41,12 @@ description: 実際の .crn ファイル集。言語の書き方だけに集中�
 | [`control-room.crn`](https://github.com/kage1020/Cairn/blob/main/examples/control-room.crn) | 壁のそばに置いたすべてのセンサーとアクチュエーター。壁から離れる向きに掛けたレバーとボタン、日照センサー、上を向けたオブザーバーと粘着ピストン、ランプ、外を向いたディスペンサー、パッチで結び付けたピストン。 |
 | [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`。マテリアルで砂の床を塗り、水槽に置いたものの周りに水を注ぐ。仕切りの板ガラスと 1 つのチェストは水を含み、`waterlogged=false` のもう 1 つは乾いたまま残る。 |
 
+## エンティティ
+
+| ファイル | 内容 |
+|---|---|
+| [`trading-post.crn`](https://github.com/kage1020/Cairn/blob/main/examples/trading-post.crn) | 奥の壁のそばに立ち、2 つの取引を持つ司書の村人、左右の壁に掛けた絵画と額縁、座標の 3 つ組の位置に立てた防具立て、ドアの上の `hologram`。hologram は、エディションごとのテーマがそれぞれのやり方で組み上げ、Java ではテキストの display、Bedrock では光る看板になる。 |
+
 ## 境界のケース
 
 | ファイル | 内容 |

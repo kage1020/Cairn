@@ -186,6 +186,51 @@ fn an_entity_box_is_read_in_blocks() {
     assert_eq!(index.entity_box("minecraft:armor_stand"), None);
 }
 
+#[test]
+fn the_builtin_catalog_boxes_every_entity_a_structured_member_places() {
+    let builtin = load_builtin_constraints().expect("the built-in catalog loads");
+    let boxes: Vec<(&str, Option<EntityBox>)> = [
+        "armor_stand",
+        "block_display",
+        "glow_item_frame",
+        "item_display",
+        "item_frame",
+        "painting",
+        "text_display",
+        "villager",
+    ]
+    .into_iter()
+    .map(|id| (id, builtin.entity_box(&format!("minecraft:{id}"))))
+    .collect();
+    let stands = |width, height| {
+        Some(EntityBox {
+            width,
+            height,
+            depth: None,
+        })
+    };
+    let hangs = |width, height| {
+        Some(EntityBox {
+            width,
+            height,
+            depth: Some(0.0625),
+        })
+    };
+    assert_eq!(
+        boxes,
+        [
+            ("armor_stand", stands(0.5, 1.975)),
+            ("block_display", stands(0.0, 0.0)),
+            ("glow_item_frame", hangs(0.75, 0.75)),
+            ("item_display", stands(0.0, 0.0)),
+            ("item_frame", hangs(0.75, 0.75)),
+            ("painting", hangs(1.0, 1.0)),
+            ("text_display", stands(0.0, 0.0)),
+            ("villager", stands(0.6, 1.95)),
+        ]
+    );
+}
+
 fn malformed(table: &'static str, id: &str, problem: &str) -> ConstraintsError {
     ConstraintsError::MalformedRow {
         table,
@@ -302,7 +347,15 @@ fn a_boundary_or_box_that_is_wrong_is_refused() {
             malformed(
                 "entity_aabb",
                 "villager",
-                "`height` is not a positive number of blocks",
+                "`height` is not a number of blocks, 0 or more",
+            ),
+        ),
+        (
+            r#""entity_aabb": [{"entities": ["painting"], "width": 1, "height": 1, "depth": 0}]"#,
+            malformed(
+                "entity_aabb",
+                "painting",
+                "`depth` is not a positive number of blocks",
             ),
         ),
         (

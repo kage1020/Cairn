@@ -2,8 +2,7 @@ use indexmap::IndexMap;
 
 use super::*;
 use crate::block_array::{
-    BlockArray, BlockEntityData, CellRun, Dims, Entity, EntityData, Face, PALETTE_CAPACITY,
-    Palette,
+    BlockArray, BlockEntityData, CellRun, Dims, Entity, EntityData, Face, PALETTE_CAPACITY, Palette,
 };
 
 const KEY: &str = "struct::hut";

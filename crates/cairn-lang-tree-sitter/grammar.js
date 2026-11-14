@@ -303,12 +303,21 @@ module.exports = grammar({
 
     theme_body: $ => body($, choice($.requires_stmt, $.slot_binding, $.selector_rule)),
 
+    // Only a bare word, which may name a member form, takes `key=value` arguments after it.
     slot_binding: $ => seq(
       'slot',
       field('name', $.identifier),
       '->',
-      field('target', $._value),
-      optional(field('positional', $.positional_list)),
+      choice(
+        prec(1, seq(
+          field('target', $.identifier),
+          optional(field('arguments', $.attribute_list)),
+        )),
+        seq(
+          field('target', $._value),
+          optional(field('positional', $.positional_list)),
+        ),
+      ),
     ),
 
     selector_rule: $ => seq(

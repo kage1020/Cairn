@@ -1,0 +1,226 @@
+---
+source: crates/cairn-lang-core/tests/lower/intent.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: post_java
+    slots:
+      floor:
+        kind: Token
+        value: spruce_planks
+      wall:
+        kind: Token
+        value: cobblestone
+      roof:
+        kind: Token
+        value: spruce_stairs
+      shop_sign:
+        kind: Ident
+        value: text_display
+    slot_arguments:
+      shop_sign:
+        billboard:
+          kind: Ident
+          value: center
+        scale:
+          kind: Decimal
+          value: "1.5"
+    selectors: []
+  - name: post_bedrock
+    slots:
+      floor:
+        kind: Token
+        value: spruce_planks
+      wall:
+        kind: Token
+        value: cobblestone
+      roof:
+        kind: Token
+        value: spruce_stairs
+      shop_sign:
+        kind: Ident
+        value: sign
+    slot_arguments:
+      shop_sign:
+        glowing:
+          kind: Bool
+          value: true
+    selectors: []
+defs: []
+sites: []
+structs:
+  - name: trading_post
+    size:
+      w: 9
+      h: 7
+    args: {}
+    members:
+      - role:
+          kind: Floor
+        mat_slot: floor
+        arguments: {}
+        intent_state: {}
+      - role:
+          kind: Walls
+        mat_slot: wall
+        arguments:
+          height:
+            kind: Int
+            value: 4
+        intent_state: {}
+      - role:
+          kind: Door
+        arguments:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+        intent_state: {}
+      - role:
+          kind: Roof
+        mat_slot: roof
+        arguments:
+          kind:
+            kind: Ident
+            value: gable
+          overhang:
+            kind: Int
+            value: 1
+        intent_state: {}
+      - id: librarian
+        role:
+          kind: Villager
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - back
+          offset:
+            kind: Int
+            value: 4
+          y:
+            kind: Int
+            value: 1
+          profession:
+            kind: Ident
+            value: librarian
+          level:
+            kind: Ident
+            value: journeyman
+        intent_state: {}
+      - role:
+          kind: Trade
+        arguments:
+          villager:
+            kind: Ident
+            value: librarian
+          buy:
+            kind: Ident
+            value: emerald
+          count:
+            kind: Int
+            value: 9
+          sell:
+            kind: Ident
+            value: bookshelf
+        intent_state: {}
+      - role:
+          kind: Trade
+        arguments:
+          villager:
+            kind: Ident
+            value: librarian
+          buy:
+            kind: Ident
+            value: emerald
+          count:
+            kind: Int
+            value: 20
+          sell:
+            kind: Ident
+            value: enchanted_book
+          enchant:
+            kind: Ident
+            value: mending
+        intent_state: {}
+      - id: sunset
+        role:
+          kind: Painting
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - left
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 2
+          variant:
+            kind: Ident
+            value: sunset
+        intent_state: {}
+      - id: relic
+        role:
+          kind: ItemFrame
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - right
+          offset:
+            kind: Int
+            value: 3
+          y:
+            kind: Int
+            value: 2
+          item:
+            kind: Ident
+            value: compass
+        intent_state: {}
+      - id: mannequin
+        role:
+          kind: ArmorStand
+        arguments:
+          at:
+            kind: Coord
+            value:
+              x: 6
+              y: 1
+              z: 4
+          facing:
+            kind: Ident
+            value: west
+        intent_state: {}
+      - id: shop_sign
+        role:
+          kind: Hologram
+        mat_slot: shop_sign
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - front
+              - outside
+          offset:
+            kind: Int
+            value: 4
+          y:
+            kind: Int
+            value: 3
+          text:
+            kind: Str
+            value: Trading Post
+        intent_state: {}

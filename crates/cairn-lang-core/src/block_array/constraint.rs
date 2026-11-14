@@ -24,6 +24,17 @@ pub enum Constraint {
     Falls,
 }
 
+/// The space an entity takes in the world, in blocks (`spec/lint` "Entity AABB").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EntityBox {
+    /// Across the entity, or along the face it hangs on; per block of a painting's variant.
+    pub width: f64,
+    /// Up the entity, or up the face it hangs on; per block of a painting's variant.
+    pub height: f64,
+    /// Out of the face, for an entity that hangs on one; `None` for one that stands.
+    pub depth: Option<f64>,
+}
+
 /// What a face gives a block set against it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Support {

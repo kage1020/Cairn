@@ -372,7 +372,7 @@ impl MemberRole {
         )
     }
 
-    /// Whether this role places an entity rather than a block (`spec/entities` "Two tiers").
+    /// Whether this role places an entity, not a block (`spec/entities` "Two tiers").
     #[must_use]
     pub fn places_an_entity(&self) -> bool {
         matches!(

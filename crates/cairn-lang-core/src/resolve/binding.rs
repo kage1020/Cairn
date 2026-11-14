@@ -37,6 +37,15 @@ pub fn member_form(value: &Value) -> Option<&'static [&'static str]> {
         .map(|(_, keys)| *keys)
 }
 
+/// The word a member form value names, as `text_display`, or how a value of another kind reads.
+#[must_use]
+pub fn form_word(value: &Value) -> String {
+    match &value.kind {
+        ValueKind::Ident(word) => word.clone(),
+        _ => value.describe(),
+    }
+}
+
 /// Classifies a token value: a `.` before any `[` makes it abstract, anything else canonical.
 #[must_use]
 pub fn classify_token(value: &Value) -> TokenKind {

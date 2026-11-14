@@ -285,7 +285,11 @@ const PAINTERS: &[(&str, &str, &str)] = &[
     ("note_block", "note_block at=1,1,1 note=12", ""),
     ("sign", "sign at=1,1,1 text=\"Inn\"", ""),
     ("bed", "bed at=inside.front offset=1 y=1", ""),
-    ("painting", "painting at=inside.front offset=1 y=1 variant=kebab", ""),
+    (
+        "painting",
+        "painting at=inside.front offset=1 y=1 variant=kebab",
+        "",
+    ),
     ("item_frame", "item_frame at=inside.front offset=1 y=1", ""),
     ("armor_stand", "armor_stand at=1,1,1", ""),
     ("villager", "villager id=v at=1,1,1", ""),

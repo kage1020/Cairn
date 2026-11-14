@@ -177,6 +177,8 @@ pub enum DiagnosticCode {
     UnsupportedBlock,
     /// A member holds water that flows into air the build leaves beside it.
     WaterSpill,
+    /// An entity's box overlaps a full block, a door's cell or another entity's box.
+    EntityClipping,
     /// An `assert truth(...)` with no rows, or none whose output is `0` or `1`.
     TruthTableEmpty,
     /// An `assert truth(...)` lists one signal as two or more of its inputs.
@@ -266,6 +268,7 @@ impl DiagnosticCode {
             Self::NoAttachmentFace => "W_NO_ATTACHMENT_FACE",
             Self::UnsupportedBlock => "W_UNSUPPORTED_BLOCK",
             Self::WaterSpill => "W_WATER_SPILL",
+            Self::EntityClipping => "W_ENTITY_CLIPPING",
             Self::TruthTableEmpty => "E_TRUTH_TABLE_EMPTY",
             Self::TruthTableDuplicateInput => "E_TRUTH_TABLE_DUPLICATE_INPUT",
             Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
@@ -351,6 +354,7 @@ impl DiagnosticCode {
             | Self::NoAttachmentFace
             | Self::UnsupportedBlock
             | Self::WaterSpill
+            | Self::EntityClipping
             | Self::TruthTableDuplicateRow
             | Self::IntendedTargetCapPartial
             | Self::IntendedTargetUnsupported

@@ -2,6 +2,7 @@
 //! separators" reads, kept as written; only the lexer refuses a malformed one.
 
 use cairn_lang_core::ast::{Item, Statement, ValueKind};
+use cairn_lang_core::lex::{NbtCompound, NbtValue, parse_compound};
 use cairn_lang_core::parse;
 
 use crate::{member_args, member_refusal};
@@ -297,4 +298,46 @@ fn a_compound_nests_sixty_four_levels_deep() {
             13 + 3 * 64,
         ),
     );
+}
+
+#[test]
+fn a_compound_reads_as_the_typed_values_snbt_gives_it_in_the_order_written() {
+    use NbtValue::{
+        Byte, ByteArray, Compound, Double, Float, Int, IntArray, List, Long, LongArray, Short,
+    };
+    let entry = |key: &str, value| (key.to_owned(), value);
+    assert_eq!(
+        parse_compound(
+            "{z:1b, \"a b\":'it\\'s', s:-2s, i:+3, l:4L, f:0.5f, d:1.5, e:2d, t:true, u:false, \
+             n:[1, 2], c:{x:[]}, w:[B; 1b], v:[I;], q:[L; -9223372036854775808l], o:007.5}"
+        ),
+        Some(NbtCompound {
+            entries: vec![
+                entry("z", Byte(1)),
+                entry("a b", NbtValue::String("it's".to_owned())),
+                entry("s", Short(-2)),
+                entry("i", Int(3)),
+                entry("l", Long(4)),
+                entry("f", Float(0.5)),
+                entry("d", Double(1.5)),
+                entry("e", Double(2.0)),
+                entry("t", Byte(1)),
+                entry("u", Byte(0)),
+                entry("n", List(vec![Int(1), Int(2)])),
+                entry(
+                    "c",
+                    Compound(NbtCompound {
+                        entries: vec![entry("x", List(Vec::new()))],
+                    }),
+                ),
+                entry("w", ByteArray(vec![1])),
+                entry("v", IntArray(Vec::new())),
+                entry("q", LongArray(vec![i64::MIN])),
+                entry("o", Double(7.5)),
+            ],
+        }),
+    );
+    for refused in ["", "{a:1", "{a:1} ", "[1]", "{a:b}", "{a:1, a:2}"] {
+        assert_eq!(parse_compound(refused), None, "{refused:?}");
+    }
 }

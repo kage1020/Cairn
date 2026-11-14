@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole, ValueWithSpan};
-use crate::resolve::{ScopeResolution, member_form};
+use crate::resolve::{ScopeResolution, form_word, member_form};
 
 use crate::block_array::args::{
     diag_deferred_member_reason, diag_invalid_member, member_or_slot_span,
@@ -409,9 +409,9 @@ fn diag_member_form_bound(member: &Member, slot_value: &ValueWithSpan) -> Diagno
     let mut diagnostic = diag_invalid_member(
         member,
         format!(
-            "{keyword} `mat_slot={slot}` binds the member form {}, which only a `hologram` is \
+            "{keyword} `mat_slot={slot}` binds the member form `{}`, which only a `hologram` is \
              built as",
-            slot_value.value.describe(),
+            form_word(&slot_value.value),
         ),
         vec![format!(
             "bind `{slot}` to a block, as `slot {slot} -> @oak_planks`, or give the {keyword} a \

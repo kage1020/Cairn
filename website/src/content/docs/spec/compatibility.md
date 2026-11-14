@@ -190,7 +190,7 @@ code. The placeholders today include:
 
 - `E_PARSE`, on syntax the spec specifies that does not parse yet, such as `edit`;
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
-  `spawn`, `painting` and `raw_repeat`;
+  `volume` and `raw_repeat`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists, a theme selector's bindings among them;
 - `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which

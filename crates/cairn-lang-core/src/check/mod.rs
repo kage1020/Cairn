@@ -170,7 +170,8 @@ mod tests {
             | C::PhaseConflict
             | C::NoAttachmentFace
             | C::UnsupportedBlock
-            | C::WaterSpill => RaisedBy::LoweringOnly,
+            | C::WaterSpill
+            | C::EntityClipping => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
             }

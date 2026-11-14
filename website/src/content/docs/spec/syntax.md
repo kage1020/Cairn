@@ -30,9 +30,11 @@ A `struct` or `def` header and a `theme` selector rule keep their bare values be
 `key=value` arguments, so `struct s size 3x3` is `E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as
 `size=3x3`. A `site` or `theme` header reads nothing after its name, a `slot` row nothing after the
 value it binds, and an `assert` line nothing after the end of its form: a bare value there is the
-same finding, and a `key=value` there is `E_PARSE`. A `logic` line whose `=` is dropped,
-`logic sig.a sig.b or sig.c`, still reads the expression after its name, binds nothing, and is
-`E_UNEXPECTED_POSITIONAL` on the whole line.
+same finding, and a `key=value` there is `E_PARSE`. A `slot` row that binds a bare word reads the
+`key=value` arguments of a member form after it, as `slot floating_text -> text_display scale=2.0`
+([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)). A `logic`
+line whose `=` is dropped, `logic sig.a sig.b or sig.c`, still reads the expression after its name,
+binds nothing, and is `E_UNEXPECTED_POSITIONAL` on the whole line.
 
 ### 5.1.1 Literals and separators
 
@@ -53,12 +55,11 @@ digit. The key that reads one says whether the writer stores it as a float or a 
 writer rounds the written value to the nearest one of that type. Such a key reads an integer as the
 same number, so `scale=2` and `scale=2.0` are one value.
 
-No key reads a decimal yet: the keys that will, such as the `scale=` of a display entity
-([Entities §8.1](/spec/entities/#81-two-tiers)), belong to keywords the compiler does not know. A
-key that reads another kind of value treats a decimal as it treats a coordinate triple (below): a
-label or size key refuses it as a type mismatch, a member key such as `height=` or `offset=` refuses
-its member as `E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or
-`overhang=`, says so with `W_IGNORED_ARGUMENT`.
+The key that reads one is a display's `scale=`, which the writer stores as a float ([Entities
+§8.1](/spec/entities/#displays)). A key that reads another kind of value treats a decimal as it
+treats a coordinate triple (below): a label or size key refuses it as a type mismatch, a member key
+such as `height=` or `offset=` refuses its member as `E_INVALID_MEMBER`, and a key that falls back
+to its default, such as `sym=` or `overhang=`, says so with `W_IGNORED_ARGUMENT`.
 
 An **NBT compound** is raw NBT written as SNBT in braces, as in `nbt={variant:"black"}`. It is what
 a key reads when a `{` follows its `=`, with a space between them or none. Anywhere else a `{` keeps
@@ -85,10 +86,10 @@ Anything else is `E_PARSE` where it starts, an exponent, a hexadecimal or binary
 between digits, an escape such as `\n`, a function such as `bool(...)` and a comment among them. The
 parser keeps the compound as written, braces included, and checks no field in it against the
 target: what its fields mean, and the `@edition` guard a line that writes one stands under, are
-[Entities §8.1](/spec/entities/#81-two-tiers)'s. No keyword reads `nbt=` yet, so it is a key like
-any other that its line does not read: `E_UNKNOWN_ARGUMENT` on a header or a member, and
-`W_IGNORED_ARGUMENT` as a theme selector's binding. A key that reads another kind of value treats a
-compound as it treats a decimal.
+[Entities §8.1](/spec/entities/#81-two-tiers)'s. The keywords that read `nbt=` are the entities'
+and `raw_block`. On any other line it is a key like any other that its line does not read:
+`E_UNKNOWN_ARGUMENT` on a header or a member, and `W_IGNORED_ARGUMENT` as a theme selector's
+binding. A key that reads another kind of value treats a compound as it treats a decimal.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
@@ -122,12 +123,12 @@ wall's length. The `from=` and `to=` of a `fill` ([Blockstate Model
 §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and the `at=` of a `raw_block`
 ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), a Tier 0 part ([Redstone
 §14.1](/spec/redstone/#tier-0-parts)), a `trapdoor`, a `note_block`, a `sign` and a `bed`
-([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), read a
-triple, and no other key does yet: the entities that take one are not keywords. A key that reads
-another kind of value treats a triple as any value of the wrong kind. A label or size key refuses it
-as a type mismatch, a member key such as `side=` or `height=` refuses its member as
-`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says
-so with `W_IGNORED_ARGUMENT`.
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), and an entity
+([Entities §8.1](/spec/entities/#81-two-tiers)) read a triple, and no other key does. A key that
+reads another kind of value treats a triple as any value of the wrong kind. A label or size key
+refuses it as a type mismatch, a member key such as `side=` or `height=` refuses its member as
+`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says so
+with `W_IGNORED_ARGUMENT`.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
@@ -269,8 +270,9 @@ nesting diagnostic. So is a line indented after a directive: a directive is one 
 under it belongs to no construct.
 
 An `@edition` guard indents the lines under it too, but it is not a member and groups nothing. Its
-lines stand in the body around it, and it holds only raw members and Tier 0 parts ([Versioning and
-Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
+lines stand in the body around it, and it holds only the escape-hatch layer: raw members, `spawn`,
+Tier 0 parts, and an entity's line that writes `nbt=` ([Versioning and Editions
+§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
 
 [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what
 `y=N` means to each grouped member.
@@ -278,8 +280,10 @@ Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-ha
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `beam`, `level`,
 `pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
-`trapdoor`, `note_block`, `sign`, `bed`, `repeater`, `comparator`, `redstone_torch`,
-`redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`,
+`trapdoor`, `note_block`, `sign`, `bed`, `painting`, `item_frame`, `armor_stand`, `villager`,
+`trade`, `text_display`, `block_display`, `item_display`, `hologram`, `spawn`, `repeater`,
+`comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A `site` body
+describes a layout: `place`,
 `connect`. The keyword table is global, so writing one in the other body parses and classifies and
 then reaches nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking
 anything indented under it along. A `level` groups the other members of a `struct` / `def` body,

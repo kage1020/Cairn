@@ -18,7 +18,7 @@ fn examples_dir() -> PathBuf {
 }
 
 /// How many `.crn` files `examples/` ships, so a sweep that finds fewer fails.
-const SHIPPED_EXAMPLES: usize = 16;
+const SHIPPED_EXAMPLES: usize = 17;
 
 /// Every `.crn` under `examples/`, sorted.
 fn crn_files() -> Vec<PathBuf> {

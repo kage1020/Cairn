@@ -5,8 +5,10 @@ Each `examples/*.crn` is compiled for every targetable row of the built-in Java 
 version's server jar reads each `.nbt` back through its data generator: `--dev` writes SNBT, and
 `--server` runs the DataFixer from the file's `DataVersion` and loads the template against the
 block registry. An unknown block loads as air, an unknown property is dropped and a value outside
-its domain reverts to the default. Unlike a running world, the loader does not filter blocks by
-enabled features, so a block behind an experiment loads here and not in the game.
+its domain reverts to the default. An entity's point and cell read back only typed as the game
+reads them, and its `nbt` is kept as written, so this checks where an entity lands, not that the
+game spawns it. Unlike a running world, the loader does not filter blocks by enabled features, so a
+block behind an experiment loads here and not in the game.
 
 Standard library only: it runs on a bare `ubuntu-latest` runner.
 """
@@ -264,6 +266,26 @@ def block_states(structure: dict) -> dict[tuple[int, int, int], tuple[str, dict]
     return states
 
 
+def entity_differences(index: int, ours: dict, theirs: dict) -> list[str]:
+    """What the game read differently of the `index`th entity: its point, its cell, its `nbt` keys.
+
+    The game keeps an entity's `nbt` as the file gives it, so every key written comes back.
+    """
+    nbt, read = ours.get("nbt", {}), theirs.get("nbt", {})
+    name = f"entity {index} ({nbt.get('id', 'no id')})"
+    found = [
+        f"{name}: `{key}` {ours.get(key)} was read as {theirs.get(key)}"
+        for key in ("pos", "blockPos")
+        if ours.get(key) != theirs.get(key)
+    ]
+    for key, value in nbt.items():
+        if key not in read:
+            found.append(f"{name}: `{key}` was dropped")
+        elif read[key] != value:
+            found.append(f"{name}: `{key}` {value} was read as {read[key]}")
+    return found
+
+
 def differences(written: dict, loaded: dict) -> list[str]:
     """What the game read differently from what was written, one line per difference.
 
@@ -278,6 +300,9 @@ def differences(written: dict, loaded: dict) -> list[str]:
         ours, theirs = len(written.get(key, [])), len(loaded.get(key, []))
         if ours != theirs:
             found.append(f"{ours} {key} were read as {theirs}")
+    pairs = zip(written.get("entities", []), loaded.get("entities", []))
+    for index, (ours, theirs) in enumerate(pairs):
+        found.extend(entity_differences(index, ours, theirs))
     ours, theirs = block_states(written), block_states(loaded)
     for pos in sorted(ours.keys() | theirs.keys()):
         if pos not in theirs:

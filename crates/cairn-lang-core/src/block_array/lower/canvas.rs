@@ -199,13 +199,14 @@ impl Canvas {
         }
     }
 
-    /// Each entity the members placed, a villager holding the trades that name it, in the order of
-    /// their cells and in line order within one cell (`spec/entities` "Two tiers").
-    pub(super) fn entities(&self) -> Vec<Entity> {
-        let mut placed: Vec<(usize, Entity)> = self
+    /// Each entity placed, with the index of its member in the flattened paint list and a
+    /// villager's trades attached, in the order of their cells as [`Dims::index`] lays them out
+    /// and in line order within one cell.
+    pub(super) fn entities(&self) -> Vec<(u32, Entity)> {
+        let mut placed: Vec<(usize, u32, Entity)> = self
             .entities
             .iter()
-            .map(|(_, line, entity)| {
+            .map(|(member, line, entity)| {
                 let mut entity = entity.clone();
                 if let EntityData::Villager { trades, .. } = &mut entity.data {
                     trades.extend(
@@ -216,26 +217,18 @@ impl Canvas {
                     );
                 }
                 let (x, y, z) = entity.block_pos;
-                (self.dims.index(x, y, z).unwrap_or(usize::MAX), entity)
+                (
+                    self.dims.index(x, y, z).unwrap_or(usize::MAX),
+                    *member,
+                    entity,
+                )
             })
             .collect();
-        placed.sort_by_key(|(cell, _)| *cell);
-        placed.into_iter().map(|(_, entity)| entity).collect()
-    }
-
-    /// The members of the flattened paint list that placed an entity, in the order of
-    /// [`Self::entities`].
-    pub(super) fn entity_members(&self) -> Vec<u32> {
-        let mut placed: Vec<(usize, u32)> = self
-            .entities
-            .iter()
-            .map(|(member, _, entity)| {
-                let (x, y, z) = entity.block_pos;
-                (self.dims.index(x, y, z).unwrap_or(usize::MAX), *member)
-            })
-            .collect();
-        placed.sort_by_key(|(cell, _)| *cell);
-        placed.into_iter().map(|(_, member)| member).collect()
+        placed.sort_by_key(|(cell, _, _)| *cell);
+        placed
+            .into_iter()
+            .map(|(_, member, entity)| (member, entity))
+            .collect()
     }
 
     /// Each block entity whose member still holds its cell, in the order they were set.

@@ -86,7 +86,11 @@ fn hang_painting(
                 registry,
                 known,
                 elsewhere,
-            } => return Err(Box::new(unknown_variant(member, name, &registry, &known, &elsewhere))),
+            } => {
+                return Err(Box::new(unknown_variant(
+                    member, name, &registry, &known, &elsewhere,
+                )));
+            }
             PaintingLookup::Unrecorded => (format!("minecraft:{name}"), 1, 1),
         };
     let right = placed
@@ -106,7 +110,15 @@ fn hang_painting(
     };
     let outside = || Box::new(super::fixture::outside_the_array(PAINTING, member));
     let far = at(width - 1, height - 1).ok_or_else(outside)?;
-    declare_box(PAINTING, member, ctx, canvas, placed.cell, far, placed.host_face)?;
+    declare_box(
+        PAINTING,
+        member,
+        ctx,
+        canvas,
+        placed.cell,
+        far,
+        placed.host_face,
+    )?;
     let hung = at((width - 1) / 2, (height - 1) / 2).ok_or_else(outside)?;
     canvas.place_entity(
         member.span.start,
@@ -115,7 +127,11 @@ fn hang_painting(
             pos: hanging_point(hung, placed.facing),
             block_pos: hung,
             facing: placed.facing,
-            data: EntityData::Painting { variant: spelling },
+            data: EntityData::Painting {
+                variant: spelling,
+                width,
+                height,
+            },
             nbt: nbt_of(member, unread),
         },
     );
@@ -157,7 +173,10 @@ fn unknown_variant(
             nearest_match(name, known.iter().map(String::as_str))
                 .map(|near| did_you_mean(&format!("variant={near}"))),
         );
-        notes.push(format!("`{registry}` has the paintings {}", known.join(", ")));
+        notes.push(format!(
+            "`{registry}` has the paintings {}",
+            known.join(", ")
+        ));
     } else {
         notes.push(format!(
             "`{name}` is a painting of {}: pass a `--target` that has it, or pick another",
@@ -226,4 +245,3 @@ pub(super) fn fill_item_frame(
         (true, _) => "the frame is hung without it",
     });
 }
-

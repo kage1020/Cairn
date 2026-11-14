@@ -307,7 +307,10 @@ fn traded(member: &Member, key: &'static str) -> Result<String, Refusal> {
         Some(raw) => id_value(&raw.value.kind).ok_or_else(|| {
             Box::new(diag_invalid_member(
                 member,
-                format!("trade `{key}=` must be {AN_ID}, not {}", raw.value.describe()),
+                format!(
+                    "trade `{key}=` must be {AN_ID}, not {}",
+                    raw.value.describe()
+                ),
                 vec![format!("write `{key}=` with the item's id")],
             ))
         }),

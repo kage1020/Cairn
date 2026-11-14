@@ -38,9 +38,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Member.** A named element of the Intent IR. Types: `block`, `block_entity`, `entity`. The
   IR carries the type, but the author writes one selector grammar across all of them
   ([principles P4](/spec/principles/)). Today a member carries the `role` its keyword classifies to
-  and no type. A `sign` and a `bed` are block members whose blocks keep block entities
-  ([entities §8.1](/spec/entities/#81-two-tiers)), no keyword places an entity yet, and `type` will
-  sit beside `role`.
+  and no type. A `sign` and a `bed` are block members whose blocks keep block entities, a
+  `painting`, an `item_frame`, an `armor_stand`, a `villager`, a display and a `spawn` place
+  entities ([entities §8.1](/spec/entities/#81-two-tiers)), and `type` will sit beside `role`.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
@@ -183,8 +183,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 
 - **Edition.** `java` or `bedrock`. Compile-time only; never present in the DSL semantic layer.
   See [versioning-editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability).
-- **`@edition` guard.** A line in a body that keeps the raw members and Tier 0 parts indented
-  under it to one edition's build. It is the one line inside a body that keeps lines to one
+- **`@edition` guard.** A line in a body that keeps the escape-hatch layer indented under it, the
+  raw members, `spawn`, the Tier 0 parts and an entity's line that writes `nbt=`, to one edition's
+  build. It is the one line inside a body that keeps lines to one
   edition's build, and it never holds the semantic layer. See
   [versioning-editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch).
 - **Cairn version vs MC target.** Two **separate axes** distinguished by field/flag/keyword, never

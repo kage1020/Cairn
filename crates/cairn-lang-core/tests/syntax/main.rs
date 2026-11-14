@@ -16,6 +16,7 @@ mod decimal_literals;
 mod edition_guards;
 mod lex;
 mod line_positions;
+mod member_forms;
 mod nbt_literals;
 mod nesting_depth;
 mod parse_commands;

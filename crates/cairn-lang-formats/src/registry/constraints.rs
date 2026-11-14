@@ -159,9 +159,9 @@ pub struct CenterRow {
 pub struct EntityAabbRow {
     /// The entities it describes.
     pub entities: Vec<String>,
-    /// Across the entity, or along the face it hangs on.
+    /// Across the entity, or along the face it hangs on; 0 for a box that holds no space.
     pub width: f64,
-    /// Up the entity, or up the face it hangs on.
+    /// Up the entity, or up the face it hangs on; 0 for a box that holds no space.
     pub height: f64,
     /// Out of the face, for an entity that hangs on one; absent for one that stands.
     #[serde(default)]
@@ -557,17 +557,21 @@ impl ConstraintIndex {
                     missing: "entity",
                 });
             }
+            // A display's box is empty, so `width` and `height` may be 0; a face has depth.
             let sizes = [
-                ("width", Some(row.width)),
-                ("height", Some(row.height)),
-                ("depth", row.depth),
+                ("width", Some(row.width), "a number of blocks, 0 or more"),
+                ("height", Some(row.height), "a number of blocks, 0 or more"),
+                ("depth", row.depth, "a positive number of blocks"),
             ];
-            for (name, size) in sizes {
-                if size.is_some_and(|size| !size.is_finite() || size <= 0.0) {
+            for (name, size, valid) in sizes {
+                let valid_size = |size: f64| {
+                    size.is_finite() && (size > 0.0 || (size == 0.0 && name != "depth"))
+                };
+                if size.is_some_and(|size| !valid_size(size)) {
                     return Err(malformed(
                         table,
                         &entities,
-                        &format!("`{name}` is not a positive number of blocks"),
+                        &format!("`{name}` is not {valid}"),
                     ));
                 }
             }

@@ -7,9 +7,9 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    AbsentConcept, BlockArrayIr, BlockIdSet, BlockState, Constraint, DeclaredElsewhere,
-    DomainFault, Face, Faces, JoinKind, Joins, OutOfDomain, StateDomain, Support, TargetRegistry,
-    UnmappedState,
+    AbsentConcept, AbsentEntity, BlockArrayIr, BlockIdSet, BlockState, Constraint,
+    DeclaredElsewhere, DomainFault, EntityBox, Face, Faces, JoinKind, Joins, OutOfDomain,
+    PaintingLookup, PaintingVariant, StateDomain, Support, TargetRegistry, UnmappedState,
 };
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{SemanticSensitiveFinding, VersionOrder, compare_versions};
@@ -29,6 +29,7 @@ use super::data_versions::{
 use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
+use super::paintings::{PaintingIndex, PaintingsError};
 use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates, WATER_LAYER_STATE};
 
 /// The state of a slab that fills its cell, which the game never lets hold water although its
@@ -44,6 +45,7 @@ struct BuiltinFiles {
     aliases: &'static str,
     absent: &'static str,
     connections: &'static str,
+    paintings: &'static str,
     states: Option<&'static str>,
     sensitivity: Option<&'static str>,
 }
@@ -80,6 +82,7 @@ macro_rules! builtin_files {
             aliases: include_str!(concat!("../../registry-data/", $dir, "/aliases.json")),
             absent: include_str!(concat!("../../registry-data/", $dir, "/absent.json")),
             connections: include_str!(concat!("../../registry-data/", $dir, "/connections.json")),
+            paintings: include_str!(concat!("../../registry-data/", $dir, "/paintings.json")),
             states: $states,
             sensitivity: $sensitivity,
         }
@@ -117,6 +120,7 @@ pub struct RegistryPack {
     absent: AbsentIndex,
     states: Option<StateMapIndex>,
     connections: ConnectionIndex,
+    paintings: PaintingIndex,
     bytes_hash: HashHex,
     source: PackSource,
 }
@@ -140,6 +144,7 @@ pub struct PackView<'a> {
     /// The targetable versions, which alone a note may offer as a `--target`.
     targetable: Vec<&'a str>,
     connections: &'a ConnectionIndex,
+    paintings: &'a PaintingIndex,
     /// The constraint catalog the view's checks read; `None` runs none.
     constraints: Option<&'a ConstraintIndex>,
     /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
@@ -373,6 +378,83 @@ impl TargetRegistry for PackView<'_> {
     fn keeps_water(&self, state: &BlockState, face: Face) -> Option<bool> {
         self.constraints?;
         Some(self.sturdy(state)?.contains(face))
+    }
+
+    fn solid(&self, state: &BlockState) -> Option<bool> {
+        self.constraints?;
+        Some(self.sturdy(state)? == Faces::ALL)
+    }
+
+    fn entity_box(&self, id: &str) -> Option<EntityBox> {
+        let shape = self.constraints?.entity_box(id)?;
+        Some(EntityBox {
+            width: shape.width,
+            height: shape.height,
+            depth: shape.depth,
+        })
+    }
+
+    fn painting(&self, variant: &str) -> PaintingLookup {
+        if self.paintings.is_empty() {
+            return PaintingLookup::Unrecorded;
+        }
+        let known = |painting: &super::paintings::Painting| {
+            PaintingLookup::Known(PaintingVariant {
+                spelling: painting.spelling.clone(),
+                width: painting.width,
+                height: painting.height,
+            })
+        };
+        if let Some(version) = self.mc_version {
+            if let Some(painting) = self.paintings.at(version, variant) {
+                return known(painting);
+            }
+            return PaintingLookup::Unknown {
+                registry: self.label.clone(),
+                known: self
+                    .paintings
+                    .variants_at(version)
+                    .map(str::to_owned)
+                    .collect(),
+                elsewhere: self
+                    .paintings
+                    .everywhere(variant)
+                    .map(|(version, _)| version.to_owned())
+                    .collect(),
+            };
+        }
+        // Unpinned, a variant some version has hangs as every version that has it agrees.
+        let mut found = self
+            .paintings
+            .everywhere(variant)
+            .map(|(_, painting)| painting);
+        let Some(first) = found.next() else {
+            return PaintingLookup::Unknown {
+                registry: self.label.clone(),
+                known: self
+                    .paintings
+                    .every_variant()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+                elsewhere: Vec::new(),
+            };
+        };
+        if found.all(|other| other == first) {
+            known(first)
+        } else {
+            PaintingLookup::Unrecorded
+        }
+    }
+
+    fn absent_entity(&self, id: &str) -> Option<AbsentEntity> {
+        self.absent
+            .entity_reason_for(id)
+            .map(|reason| AbsentEntity {
+                registry: self.label.clone(),
+                declared_by: self.edition.other(),
+                reason: reason.to_owned(),
+            })
     }
 }
 
@@ -651,6 +733,13 @@ pub enum RegistryError {
         #[from]
         source: ConnectionsError,
     },
+    /// The pack's `paintings` component failed to validate.
+    #[error(transparent)]
+    Paintings {
+        /// The validation error.
+        #[from]
+        source: PaintingsError,
+    },
     /// `connections` lacks a table for a targetable version, or has one for a version not in the
     /// table.
     #[error(
@@ -856,6 +945,12 @@ impl RegistryPack {
         &self.connections
     }
 
+    /// The painting tables, empty without the component.
+    #[must_use]
+    pub fn paintings(&self) -> &PaintingIndex {
+        &self.paintings
+    }
+
     /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
     #[must_use]
     pub fn bytes_hash(&self) -> &HashHex {
@@ -1016,6 +1111,7 @@ impl RegistryPack {
                 .map(|e| e.mc_version.as_str())
                 .collect(),
             connections: &self.connections,
+            paintings: &self.paintings,
             constraints: None,
             label: match mc_version {
                 Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
@@ -1140,6 +1236,7 @@ enum Component {
     States,
     Sensitivity,
     Connections,
+    Paintings,
 }
 
 impl Component {
@@ -1154,6 +1251,7 @@ impl Component {
             Component::States => "states",
             Component::Sensitivity => "sensitivity",
             Component::Connections => "connections",
+            Component::Paintings => "paintings",
         };
         RegistryError::File {
             file: file.to_owned(),
@@ -1185,6 +1283,7 @@ impl ComponentSource for BuiltinFiles {
             Component::States => embedded(self.states, "states")?,
             Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
             Component::Connections => self.connections,
+            Component::Paintings => self.paintings,
         }))
     }
 
@@ -1280,6 +1379,13 @@ fn load_pack(
         ConnectionIndex::empty,
     )?;
     validate_connections(&connections, &data_versions, &blocks, expected_edition)?;
+    let (paintings, paintings_text) = optional_component(
+        source,
+        Component::Paintings,
+        manifest.files.paintings.as_deref(),
+        |catalog| PaintingIndex::from_catalog(catalog, &data_versions),
+        PaintingIndex::empty,
+    )?;
 
     let mut components: Vec<(&str, &[u8])> = vec![(
         manifest.files.data_versions.as_str(),
@@ -1293,6 +1399,7 @@ fn load_pack(
         (&manifest.files.states, &states_text),
         (&manifest.files.sensitivity, &sensitivity_text),
         (&manifest.files.connections, &connections_text),
+        (&manifest.files.paintings, &paintings_text),
     ] {
         if let (Some(file), Some(text)) = (file, text) {
             components.push((file.as_str(), text.as_bytes()));
@@ -1308,6 +1415,7 @@ fn load_pack(
         absent,
         states,
         connections,
+        paintings,
         bytes_hash,
         source: source.provenance(),
     })

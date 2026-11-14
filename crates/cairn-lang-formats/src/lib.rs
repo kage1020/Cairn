@@ -7,6 +7,7 @@ mod block_id;
 pub mod data_version;
 mod dims;
 pub mod java_structure;
+mod nbt_text;
 pub mod portability;
 pub mod registry;
 

@@ -10,7 +10,7 @@ use crate::resolve::{TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
-use super::constraint::Constraint;
+use super::constraint::{Constraint, EntityBox};
 use super::joins::{Face, Joins};
 
 /// A block state the pinned target's state map has no form for, as
@@ -116,6 +116,20 @@ pub trait TargetRegistry {
     /// cannot say.
     fn keeps_water(&self, state: &BlockState, face: Face) -> Option<bool> {
         let _ = (state, face);
+        None
+    }
+
+    /// Whether every face of `state` is whole, so an entity in its cell stands inside it, or
+    /// `None` when the registry cannot say.
+    fn solid(&self, state: &BlockState) -> Option<bool> {
+        let _ = state;
+        None
+    }
+
+    /// The box of the entity `id` at the pinned target (`spec/lint` "Entity AABB"), or `None`
+    /// when the registry gives it none.
+    fn entity_box(&self, id: &str) -> Option<EntityBox> {
+        let _ = id;
         None
     }
 

@@ -5,14 +5,15 @@ use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 
-use crate::block_array::EntityData;
 use crate::block_array::args::{diag_invalid_member, read_or_ignore, strings_or_ignore};
+use crate::block_array::{EntityData, Item};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::entity::{
-    Hold, diag_absent_entity, item_of, place, place_one, report_unread, scale_of, standing_point,
+    AN_ID, Hold, diag_absent_entity, id_value, place, place_one, report_unread, scale_of,
+    standing_point,
 };
-use super::fixture::Fixture;
+use super::fixture::{Fixture, Refusal};
 use super::members::{MemberState, StructCtx, resolve_member_state};
 use super::sign::fill_sign;
 
@@ -99,7 +100,14 @@ fn show_text(
     .copied()
     .unwrap_or(BILLBOARDS[0]);
     let scale = scale_of(member, &mut unread);
-    let built = match place(TEXT_DISPLAY, Hold::Stands, member, y_offset, ctx, &mut unread) {
+    let built = match place(
+        TEXT_DISPLAY,
+        Hold::Stands,
+        member,
+        y_offset,
+        ctx,
+        &mut unread,
+    ) {
         Ok(placed) => {
             place_one(
                 member,
@@ -161,7 +169,14 @@ pub(super) fn fill_block_display(
         MemberState::Unbound | MemberState::Refused => None,
     };
     let scale = scale_of(member, &mut unread);
-    let placed = place(BLOCK_DISPLAY, Hold::Stands, member, y_offset, ctx, &mut unread);
+    let placed = place(
+        BLOCK_DISPLAY,
+        Hold::Stands,
+        member,
+        y_offset,
+        ctx,
+        &mut unread,
+    );
     let built = match (placed, block) {
         (Ok(placed), Some(block)) => {
             place_one(
@@ -208,13 +223,19 @@ pub(super) fn fill_item_display(
         return;
     }
     let mut unread = Vec::new();
-    let item = item_of(member, "item", &mut unread);
     let scale = scale_of(member, &mut unread);
-    let built = match (
-        place(ITEM_DISPLAY, Hold::Stands, member, y_offset, ctx, &mut unread),
-        item,
-    ) {
-        (Ok(placed), Some(item)) => {
+    let built = match shown_item(member).and_then(|item| {
+        let placed = place(
+            ITEM_DISPLAY,
+            Hold::Stands,
+            member,
+            y_offset,
+            ctx,
+            &mut unread,
+        )?;
+        Ok((item, placed))
+    }) {
+        Ok((item, placed)) => {
             place_one(
                 member,
                 canvas,
@@ -226,17 +247,7 @@ pub(super) fn fill_item_display(
             );
             true
         }
-        (Ok(_), None) => {
-            if member.written("item").is_none() {
-                diagnostics.push(diag_invalid_member(
-                    member,
-                    "item_display has no `item=`, so nothing says what it shows".into(),
-                    vec!["write `item=` with the item's id, such as `item=diamond_sword`".into()],
-                ));
-            }
-            false
-        }
-        (Err(refusal), _) => {
+        Err(refusal) => {
             diagnostics.push(*refusal);
             false
         }
@@ -247,6 +258,29 @@ pub(super) fn fill_item_display(
         (true, "facing") => "it faces south",
         (true, _) => "it is placed without it",
     });
+}
+
+/// The item an item display's `item=` names, one of it, or the refusal of a line that names none.
+fn shown_item(member: &Member) -> Result<Item, Refusal> {
+    let written = member.written("item");
+    match written.and_then(|raw| id_value(&raw.value.kind)) {
+        Some(id) => Ok(Item {
+            id,
+            count: 1,
+            enchantment: None,
+        }),
+        None => Err(Box::new(diag_invalid_member(
+            member,
+            match written {
+                None => "item_display has no `item=`, so nothing says what it shows".into(),
+                Some(raw) => format!(
+                    "item_display `item=` must be {AN_ID}, not {}",
+                    raw.value.describe()
+                ),
+            },
+            vec!["write `item=` with the item's id, such as `item=diamond_sword`".into()],
+        ))),
+    }
 }
 
 /// Build a `hologram` as the member form its `mat_slot=` binds, its line's keys beside the

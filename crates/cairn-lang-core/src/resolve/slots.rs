@@ -11,7 +11,9 @@ use crate::intent::{Member, MemberRole, ValueWithSpan, role_of};
 use crate::prose::selector_text;
 use crate::suggest::{did_you_mean_note, nearest_match};
 
-use super::binding::{MEMBER_FORMS, ThemeBinding, TokenKind, classify_token, member_form};
+use super::binding::{
+    MEMBER_FORMS, ThemeBinding, TokenKind, classify_token, form_word, member_form,
+};
 
 /// The `E_UNRESOLVED_SLOT` for `slot`, listing every slot resolution accepts: the bound variant's,
 /// then the sibling variants' that an unpinned build also takes.
@@ -109,7 +111,7 @@ fn unknown_form_argument(
     form: &crate::ast::Value,
     keys: &[&str],
 ) -> Diagnostic {
-    let form = form.describe();
+    let form = form_word(form);
     let mut notes: Vec<DiagnosticNote> = nearest_match(key, keys.iter().copied())
         .map(did_you_mean_note)
         .into_iter()

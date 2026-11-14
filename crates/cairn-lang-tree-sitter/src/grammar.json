@@ -2126,26 +2126,69 @@
           "value": "->"
         },
         {
-          "type": "FIELD",
-          "name": "target",
-          "content": {
-            "type": "SYMBOL",
-            "name": "_value"
-          }
-        },
-        {
           "type": "CHOICE",
           "members": [
             {
-              "type": "FIELD",
-              "name": "positional",
+              "type": "PREC",
+              "value": 1,
               "content": {
-                "type": "SYMBOL",
-                "name": "positional_list"
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "FIELD",
+                    "name": "target",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "identifier"
+                    }
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "FIELD",
+                        "name": "arguments",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "attribute_list"
+                        }
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  }
+                ]
               }
             },
             {
-              "type": "BLANK"
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "target",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_value"
+                  }
+                },
+                {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "FIELD",
+                      "name": "positional",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "positional_list"
+                      }
+                    },
+                    {
+                      "type": "BLANK"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }

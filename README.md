@@ -88,9 +88,10 @@ semantic-sensitive:      Java: (none)   Bedrock: (none)
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, signs with their text, beds, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
+- Entities: paintings, item frames, armor stands, villagers with the trades they sell, the displays (`text_display`, `block_display`, `item_display`), any other entity by its id (`spawn`), and a `hologram` a theme builds per edition, a text display on Java and a glowing sign on Bedrock.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
-- A constraint catalog beside the packs: a build pinned to a target warns on a lever or torch with nothing to hold it, sand over air, and water that runs out of the structure, and `cairn info` and the lockfile name the members whose meaning changes at a Java version.
+- A constraint catalog beside the packs: a build pinned to a target warns on a lever or torch with nothing to hold it, sand over air, water that runs out of the structure, and an entity a block, a door or another entity clips, and `cairn info` and the lockfile name the members whose meaning changes at a Java version.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
