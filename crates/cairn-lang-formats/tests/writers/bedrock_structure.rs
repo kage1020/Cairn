@@ -2,7 +2,7 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
+    BlockArray, BlockArrayIr, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
 };
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_state::BedrockStateError;
@@ -430,6 +430,54 @@ fn non_straight_stair_shape_degrades() {
     let states = last_palette_states(&root);
     assert_eq!(states.entries.get("weirdo_direction"), Some(&Tag::Int(0)));
     assert_eq!(states.entries.get("upside_down_bit"), Some(&Tag::Byte(0)));
+}
+
+#[test]
+fn an_eave_at_an_inner_shape_degrades_where_bedrock_has_no_corner_state() {
+    let latest = resolve_bedrock_target("1.26.60").expect("known target");
+    for shape in ["inner_left", "inner_right"] {
+        let source = eave_source(shape);
+        let old = crate::common::lower_source(&source, Edition::Bedrock, Some("1.21.60"));
+        assert_eq!(old.diagnostics, [], "shape={shape}");
+        let (_, notes) = build(only_array(&old)).expect("build");
+        assert_eq!(
+            note_fields(&notes),
+            [(
+                "minecraft:oak_stairs",
+                format!("facing=south,half=top,shape={shape}").as_str(),
+                &dropped_shape(shape, &["1.21.60"]),
+            )],
+            "shape={shape}",
+        );
+
+        let new = crate::common::lower_source(&source, Edition::Bedrock, Some("1.26.60"));
+        let (root, notes) = build_at(only_array(&new), &latest).expect("build");
+        assert_eq!(note_fields(&notes), [], "shape={shape}");
+        let corners: Vec<&Tag> = block_palette(&root)
+            .iter()
+            .filter(|entry| name_of(entry) == "minecraft:oak_stairs")
+            .filter_map(|entry| states_of(entry).entries.get("minecraft:corner"))
+            .collect();
+        assert_eq!(corners, [&Tag::String(shape.to_owned())], "shape={shape}");
+    }
+}
+
+/// A 3x1 struct whose front eave is a band of oak stairs at `shape`.
+fn eave_source(shape: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @cobblestone\n  slot eave -> @oak_stairs\n\n\
+         struct s size=3x1\n  walls mat_slot=wall height=1\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  \
+         stair kind=stairs mat_slot=eave side=front half=top facing=out shape={shape}\n"
+    )
+}
+
+/// The one structure `ir` built.
+fn only_array(ir: &BlockArrayIr) -> &BlockArray {
+    let mut arrays = ir.structures.values();
+    let array = arrays.next().expect("one structure");
+    assert!(arrays.next().is_none(), "one structure");
+    array
 }
 
 #[test]

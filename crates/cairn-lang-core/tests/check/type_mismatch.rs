@@ -79,6 +79,46 @@ fn a_coordinate_on_a_label_or_size_key_is_a_type_mismatch() {
 }
 
 #[test]
+fn a_decimal_or_a_compound_on_a_label_or_size_key_is_a_type_mismatch() {
+    let label = "`mat_slot=` expects a label (identifier or string), got";
+    let size = "`size=` expects a `WxH` literal, got";
+    for (src, code, written, primary) in [
+        (
+            "struct s size=1x1\n  walls mat_slot=1.5\n",
+            DiagnosticCode::TypeMismatchLabel,
+            "1.5",
+            format!("{label} decimal"),
+        ),
+        (
+            "struct s size=1x1\n  walls mat_slot={a:1}\n",
+            DiagnosticCode::TypeMismatchLabel,
+            "{a:1}",
+            format!("{label} NBT compound"),
+        ),
+        (
+            "struct s size=1.5\n  floor mat_slot=m\n",
+            DiagnosticCode::TypeMismatchSize,
+            "1.5",
+            format!("{size} decimal"),
+        ),
+        (
+            "struct s size={a:1}\n  floor mat_slot=m\n",
+            DiagnosticCode::TypeMismatchSize,
+            "{a:1}",
+            format!("{size} NBT compound"),
+        ),
+    ] {
+        let found = of_code(src, code);
+        assert_eq!(found.len(), 1, "for {src:?}, got {found:#?}");
+        assert_eq!(
+            (slice(src, &found[0]), found[0].primary.as_str()),
+            (written, primary.as_str()),
+            "for {src:?}",
+        );
+    }
+}
+
+#[test]
 fn a_block_id_on_a_size_key_is_a_type_mismatch() {
     let src = "struct s size=minecraft:stone\n  floor mat_slot=m\n";
     let found = of_code(src, DiagnosticCode::TypeMismatchSize);

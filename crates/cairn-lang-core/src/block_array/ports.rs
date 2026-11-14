@@ -13,7 +13,7 @@ use crate::intent::{DefIr, Member, MemberRole};
 
 use super::Dims;
 use super::openings::{
-    DOOR_HEIGHT, WallSide, WindowArgFault, WindowArgs, Written, door_anchor_offset, door_at_clause,
+    DOOR_HEIGHT, DoorColumnFault, WallSide, WindowArgFault, WindowArgs, Written, door_column,
     read_window_args, wall_length, wall_local_to_grid,
 };
 use super::wall_column::WallColumn;
@@ -38,8 +38,11 @@ pub(super) enum PortRejection {
     Side { written: Written, member: Span },
     /// The `def` has no `size=`, so its walls have no length.
     Sizeless,
-    /// A door's `at=` is missing or is not `center | left | right`.
-    DoorAt { written: Written, member: Span },
+    /// A door's `at=` or `offset=` names no column it can stand in.
+    DoorColumn {
+        fault: DoorColumnFault,
+        member: Span,
+    },
     /// No `walls` member of the body paints.
     DoorNoWalls { member: Span },
     /// The walls paint, but not the row a door opens at.
@@ -89,7 +92,7 @@ impl PortRejection {
     fn anchor(&self) -> (Option<&Span>, bool) {
         match self {
             Self::Side { member, .. }
-            | Self::DoorAt { member, .. }
+            | Self::DoorColumn { member, .. }
             | Self::DoorNoWalls { member }
             | Self::DoorOutsideCourse { member, .. }
             | Self::DoorShortCourse { member, .. }
@@ -140,7 +143,7 @@ impl PortRejection {
             Self::Sizeless => {
                 "belongs to a `def` with no `size=`, so its walls have no length".to_owned()
             }
-            Self::DoorAt { written, .. } => format!("is a door that {}", door_at_clause(written)),
+            Self::DoorColumn { fault, .. } => format!("is a door that {}", fault.clause()),
             Self::DoorNoWalls { .. } => format!("is a door with no wall to open: {NO_WALLS}"),
             Self::DoorOutsideCourse { walls, .. } => format!(
                 "is a door that opens at y={DOOR_PORT_BASE_V}, the row above the floor slab, which \
@@ -227,8 +230,8 @@ pub(super) fn port_world_position<S: BuildHasher>(
     let overhang = overhang_x.max(overhang_z);
     let len = wall_length(side, interior_w, interior_h);
     let (wall_x, wall_z) = if matches!(member.role, MemberRole::Door) {
-        let u = door_anchor_offset(member, len).map_err(|written| PortRejection::DoorAt {
-            written,
+        let u = door_column(member, side, len).map_err(|fault| PortRejection::DoorColumn {
+            fault,
             member: member.span.clone(),
         })?;
         if walls.is_empty() {

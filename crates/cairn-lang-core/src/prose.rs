@@ -62,7 +62,7 @@ fn value_text(value: &Value) -> String {
         ValueKind::Size { w, h } => format!("{w}x{h}"),
         ValueKind::Coord { x, y, z } => format!("{x},{y},{z}"),
         ValueKind::Token(token) => format!("@{token}"),
-        ValueKind::BlockId(id) => id.clone(),
+        ValueKind::Decimal(text) | ValueKind::BlockId(text) | ValueKind::Nbt(text) => text.clone(),
         ValueKind::DotRef(reference) => reference.to_string(),
         ValueKind::Str(text) => format!("\"{text}\""),
         ValueKind::List(items) => {
