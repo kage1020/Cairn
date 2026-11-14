@@ -100,7 +100,7 @@ semantic-sensitive:      (none)
 
 - Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
-- `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
+- `edit` patches.
 - `.litematic` and `.schem` writers, and importing existing schematics.
 - The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
