@@ -50,7 +50,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
     nesting::run(ir, &mut sink);
-    positional::run(ir, &mut sink);
+    positional::run(module, ir, &mut sink);
     requires::run(module, &mut sink);
     struct_name::run(module, &mut sink);
     truth::run(ir, &mut sink);
