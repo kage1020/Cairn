@@ -68,8 +68,8 @@ fn cut_window(
     }
 }
 
-/// What a window's line declares: the rectangles `cut` names, anchored at the cell its `offset=`
-/// and `y=` place.
+/// What a window's line declares: the rectangles `cut` cuts and its mirror's, anchored at the cell
+/// its `offset=` and `y=` place.
 fn window_declared(ctx: &StructCtx<'_>, cut: &WindowCut) -> Option<Declared> {
     let grid = |u: u32, y: u32| {
         wall_local_to_grid(
@@ -86,6 +86,7 @@ fn window_declared(ctx: &StructCtx<'_>, cut: &WindowCut) -> Option<Declared> {
     let corners = cut
         .stamps
         .iter()
+        .chain(&cut.mirror)
         .flat_map(|&(offset, width)| {
             let far = offset.saturating_add(width.saturating_sub(1));
             [grid(offset, cut.row), grid(far, top)]

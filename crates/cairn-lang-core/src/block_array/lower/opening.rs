@@ -316,6 +316,8 @@ pub(super) struct WindowCut {
     pub(super) height: u32,
     /// The `(offset, width)` of each rectangle: its `repeat=` series, then its `sym=true` mirror.
     pub(super) stamps: Vec<(u32, u32)>,
+    /// The `(offset, width)` its `sym=true` mirror takes, declared even when the mirror is skipped.
+    pub(super) mirror: Option<(u32, u32)>,
     /// The wall-local `(u, y)` of the cell its `offset=` and `y=` place.
     pub(super) anchor: (u32, u32),
     /// The block its `mat_slot=` binds, or `None` for an opening carved to air.
@@ -385,7 +387,8 @@ pub(super) fn plan_window(
     let mut stamps: Vec<(u32, u32)> = (0..repeat)
         .map(|i| (offset.saturating_add(step.saturating_mul(i)), sw))
         .collect();
-    if sym == Some(true) {
+    let mirror = (sym == Some(true)).then(|| (mirror_column(args, len), sw));
+    if mirror.is_some() {
         stamps
             .extend(window_mirror(member, side, args, len, diagnostics).map(|mirror| (mirror, sw)));
     }
@@ -394,6 +397,7 @@ pub(super) fn plan_window(
         row: y_start,
         height: sh,
         stamps,
+        mirror,
         anchor: (args.offset, args.y.saturating_add(y_offset)),
         fill,
     })
@@ -597,7 +601,7 @@ fn window_mirror(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
     let (offset, sw, sh) = (args.column(), args.width, args.height);
-    let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
+    let mirror_offset = mirror_column(args, len);
     let primary_end = offset.saturating_add(sw);
     let mirror_end = mirror_offset.saturating_add(sw);
     // Strict: a mirror that only touches the primary shares no cell with it, so it is still a
@@ -637,6 +641,11 @@ fn window_mirror(
         return None;
     }
     Some(mirror_offset)
+}
+
+/// The column a `sym=true` window's mirror starts at on a wall `len` long.
+fn mirror_column(args: WindowArgs, len: u32) -> u32 {
+    len.saturating_sub(args.column()).saturating_sub(args.width)
 }
 
 /// The part of its wall an opening cuts, as a `beam` laid over it reads it.
