@@ -1,5 +1,6 @@
 //! Where a one-cell member set against a wall, a `pressure_plate`, another sensor or actuator, or
-//! a `chest`, stands and which way it looks (`spec/redstone` "Signal binding").
+//! a `chest` or `trapdoor`, stands and which way it looks (`spec/redstone` "Signal binding",
+//! `spec/blockstate` "Derive by default, promote on override").
 
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticNote};

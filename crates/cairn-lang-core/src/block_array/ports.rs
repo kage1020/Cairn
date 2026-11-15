@@ -288,6 +288,7 @@ fn is_opening(role: &MemberRole) -> bool {
         | MemberRole::Fill
         | MemberRole::Roof
         | MemberRole::Stair
+        | MemberRole::Beam
         | MemberRole::Level
         | MemberRole::PressurePlate
         | MemberRole::Lever
@@ -298,6 +299,8 @@ fn is_opening(role: &MemberRole) -> bool {
         | MemberRole::Piston
         | MemberRole::Dispenser
         | MemberRole::Chest
+        | MemberRole::Trapdoor
+        | MemberRole::NoteBlock
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch

@@ -42,6 +42,8 @@ fn under_level<'a>(
 pub(super) struct Written {
     /// Every row the placed `walls` members are written to.
     pub(super) walls: WallColumn,
+    /// The `(level y, height)` of each placed `walls` member written with a positive `height=`.
+    pub(super) placed_walls: Vec<(u32, u32)>,
     /// The highest of those rows, `0` with none.
     pub(super) wall_top: u32,
     /// The tallest rise of a roof whose line says its shape.
@@ -99,7 +101,8 @@ impl Written {
         };
         let height_with = |rise: u32| 1u32.saturating_add(wall_top).saturating_add(rise);
         Self {
-            walls: WallColumn::from_walls(placed),
+            walls: WallColumn::from_walls(placed.iter().copied()),
+            placed_walls: placed,
             wall_top,
             rise,
             height: height_with(rise),
