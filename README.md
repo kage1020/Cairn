@@ -94,7 +94,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs, rename aliases and meaning tokens, so a canonical token is written the way each target spells it.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
-- `cairn-lsp` with diagnostics, completion and the `cairn info` report, plus a [VS Code extension](editors/vscode/).
+- `cairn-lsp` with diagnostics, completion, hover and the `cairn info` report, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
 - A [playground](https://cairn.kage1020.com/playground/) on the documentation site, where `cairn-lang-wasm` compiles a source in the browser as it is typed and offers its structure files to download.
 
