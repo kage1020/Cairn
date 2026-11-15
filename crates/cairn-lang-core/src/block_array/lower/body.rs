@@ -150,22 +150,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         Err(Overflow::StandIn) => return None,
     };
 
-    // A stand-in differs from air at every target, but from another block only as the pack says.
-    let pack_decides = |&(before, after): &(PaletteIndex, PaletteIndex)| {
-        (Some(before) == stand_in && after != PaletteIndex::AIR)
-            || (Some(after) == stand_in && before != PaletteIndex::AIR)
-    };
-    for ((overridden, overriding), contested) in &canvas.conflicts {
-        if contested.keys().any(pack_decides) {
-            continue;
-        }
-        diagnostics.push(diag_phase_conflict(
-            flattened[*overridden as usize].1,
-            flattened[*overriding as usize].1,
-            contested.values().sum(),
-            split_doors.contains(overridden),
-        ));
-    }
+    report_phase_conflicts(&canvas, stand_in, &flattened, &split_doors, diagnostics);
     let cut = cut_openings(&flattened, &canvas.wrote);
     let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
     debug_assert!(
@@ -187,6 +172,33 @@ pub(super) fn lower_body_to_block_array<'a>(
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// Report each pair of members of one phase that wrote a cell to different blocks, but not a pair
+/// the registry pack decides between.
+fn report_phase_conflicts(
+    canvas: &Canvas,
+    stand_in: Option<PaletteIndex>,
+    flattened: &[(u32, &Member)],
+    split_doors: &[u32],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // A stand-in differs from air at every target, but from another block only as the pack says.
+    let pack_decides = |&(before, after): &(PaletteIndex, PaletteIndex)| {
+        (Some(before) == stand_in && after != PaletteIndex::AIR)
+            || (Some(after) == stand_in && before != PaletteIndex::AIR)
+    };
+    for ((overridden, overriding), contested) in &canvas.conflicts {
+        if contested.keys().any(pack_decides) {
+            continue;
+        }
+        diagnostics.push(diag_phase_conflict(
+            flattened[*overridden as usize].1,
+            flattened[*overriding as usize].1,
+            contested.values().sum(),
+            split_doors.contains(overridden),
+        ));
+    }
 }
 
 /// The body's array over the pruned `voxels`, its palette put in canonical order, with the keys
