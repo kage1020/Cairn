@@ -4,7 +4,7 @@
 use cairn_lang_core::BlockArrayIr;
 use cairn_lang_core::intent::{Unread, known_keywords, role_of};
 
-use crate::common::{lowered, solid_cells};
+use crate::common::{lowered, same_build, solid_cells};
 
 /// Where a fixture's argument goes.
 const MARKER: &str = "%ARGUMENT%";
@@ -47,13 +47,6 @@ fn build(fixture: &Fixture, argument: &str) -> BlockArrayIr {
     let painted: usize = ir.structures.values().map(solid_cells).sum();
     assert!(painted > 0, "the fixture paints nothing:\n{source}");
     ir
-}
-
-/// Whether two builds match in blocks, placements and walkways; diagnostics carry spans.
-fn same_build(left: &BlockArrayIr, right: &BlockArrayIr) -> bool {
-    left.structures == right.structures
-        && left.placements == right.placements
-        && left.walkways == right.walkways
 }
 
 #[test]
