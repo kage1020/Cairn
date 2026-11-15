@@ -4,10 +4,11 @@ use std::io::Write as _;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockEntityData, BlockState, Dims, MAX_STRUCTURE_VOLUME,
-    PALETTE_CAPACITY, PaletteIndex,
+    BlockArray, BlockArrayIr, BlockState, Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY,
+    PaletteIndex,
 };
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
+use cairn_lang_formats::java_structure::build_structure_tag;
 use cairn_lang_formats::litematic::{
     LitematicMetadata, LitematicReadError, LitematicReadRegion, LitematicSchematic,
     litematic_files, prepare_litematic, read_litematic,
@@ -37,24 +38,42 @@ fn round_trip(ir: &BlockArrayIr, target: &JavaTarget) -> Vec<LitematicSchematic>
         .collect()
 }
 
-/// `array` as the reader returns it: its palette, its grid and its block entities' fields.
-fn volume_of(array: &BlockArray) -> BlockVolume {
-    let block_entities = array
-        .block_entities
+/// `array` as the reader returns it at `target`: its palette, its grid, and the block entities its
+/// `.nbt` keeps, which a `.litematic` keeps as well.
+fn volume_of(array: &BlockArray, target: &JavaTarget) -> BlockVolume {
+    let root = build_structure_tag(array, target).expect("a lowered array builds");
+    let Some(Tag::List(blocks)) = root.entries.get("blocks") else {
+        panic!("blocks is a list");
+    };
+    let block_entities = blocks
+        .items
         .iter()
-        .map(|entity| {
-            let BlockEntityData::Fields { id, fields } = &entity.data else {
-                unreachable!("the arrays read back here hold a comparator's fields");
+        .filter_map(|block| {
+            let Tag::Compound(block) = block else {
+                panic!("a block entry is a compound");
             };
-            let mut data = Compound::new();
-            for (field, value) in fields {
-                data.insert(field.clone(), Tag::Int(*value));
-            }
-            StoredBlockEntity {
-                pos: entity.pos,
-                id: id.clone(),
+            let Some(Tag::Compound(nbt)) = block.entries.get("nbt") else {
+                return None;
+            };
+            let Some(Tag::List(pos)) = block.entries.get("pos") else {
+                panic!("a block entry has a pos");
+            };
+            let [x, y, z] = &pos.items[..] else {
+                panic!("a pos has three axes");
+            };
+            let axis = |tag: &Tag| match tag {
+                Tag::Int(value) => u32::try_from(*value).expect("a voxel of the grid"),
+                other => panic!("an axis is an int: {other:?}"),
+            };
+            let mut data = nbt.clone();
+            let Some(Tag::String(id)) = data.entries.shift_remove("id") else {
+                panic!("a block entity has an id");
+            };
+            Some(StoredBlockEntity {
+                pos: (axis(x), axis(y), axis(z)),
+                id,
                 data,
-            }
+            })
         })
         .collect();
     BlockVolume::new(
@@ -86,7 +105,7 @@ fn a_struct_reads_back_as_its_block_array_with_its_block_entity() {
         regions: vec![LitematicReadRegion {
             name: "comparator".to_owned(),
             min_corner: (0, 0, 0),
-            volume: volume_of(&array),
+            volume: volume_of(&array, &target("1.20.4")),
             entities: vec![],
         }],
     };
@@ -96,7 +115,8 @@ fn a_struct_reads_back_as_its_block_array_with_its_block_entity() {
 #[test]
 fn a_site_reads_back_region_by_region_at_each_origin() {
     let ir = lower_example("village.crn", Edition::Java, None);
-    let read = round_trip(&ir, &target(latest(Edition::Java)));
+    let at = target(latest(Edition::Java));
+    let read = round_trip(&ir, &at);
     let regions: Vec<(String, (i32, i32, i32), BlockVolume)> = read
         .into_iter()
         .flat_map(|schematic| schematic.regions)
@@ -112,7 +132,7 @@ fn a_site_reads_back_region_by_region_at_each_origin() {
                 .map(|p| p.origin)
                 .or_else(|| ir.walkways.get(scope.as_str()).map(|w| w.origin))
                 .expect("every village structure is placed");
-            (ir.artifact_stem(scope), origin, volume_of(array))
+            (ir.artifact_stem(scope), origin, volume_of(array, &at))
         })
         .collect();
     assert_eq!(regions, expected);
@@ -128,7 +148,11 @@ fn every_shipped_example_reads_back_as_its_block_arrays() {
             .flat_map(|schematic| schematic.regions)
             .map(|region| region.volume)
             .collect();
-        let expected: Vec<BlockVolume> = ir.structures.values().map(volume_of).collect();
+        let expected: Vec<BlockVolume> = ir
+            .structures
+            .values()
+            .map(|array| volume_of(array, &target))
+            .collect();
         assert_eq!(read, expected, "{name}");
     }
 }
@@ -139,8 +163,9 @@ fn a_palette_past_sixteen_entries_reads_back() {
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let slots: Vec<u16> = (0..=40).rev().cycle().take(5 * 7 * 3).collect();
     let array = array_of("wide", Dims { x: 5, y: 7, z: 3 }, &ids, &slots);
-    let read = round_trip(&ir_of(array.clone()), &target("1.21.4"));
-    assert_eq!(read[0].regions[0].volume, volume_of(&array));
+    let at = target("1.21.4");
+    let read = round_trip(&ir_of(array.clone()), &at);
+    assert_eq!(read[0].regions[0].volume, volume_of(&array, &at));
 }
 
 /// The uncompressed bytes of an unnamed root holding `entries` in order.
