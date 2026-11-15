@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use cairn_lang_core::ast::ValueKind;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, lower_to_block_array,
+    BlockArray, BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, Walkway, lower_to_block_array,
 };
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
@@ -265,6 +265,26 @@ pub fn walkway_was_laid(source: &str) -> bool {
         "a walkway that was not skipped has to have been laid",
     );
     !skipped
+}
+
+/// Whether two builds match in blocks, placements and walkways, leaving out the source spans the
+/// walkways and the diagnostics carry.
+pub fn same_build(left: &BlockArrayIr, right: &BlockArrayIr) -> bool {
+    let laid = |ir: &BlockArrayIr| -> Vec<(String, Walkway)> {
+        ir.walkways
+            .iter()
+            .map(|(key, walkway)| {
+                let walkway = Walkway {
+                    span: 0..0,
+                    ..walkway.clone()
+                };
+                (key.to_string(), walkway)
+            })
+            .collect()
+    };
+    left.structures == right.structures
+        && left.placements == right.placements
+        && laid(left) == laid(right)
 }
 
 /// The cells of `array` that are not air.

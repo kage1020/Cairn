@@ -94,7 +94,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - A constraint catalog beside the packs: a build pinned to a target warns on a lever or torch with nothing to hold it, sand over air, water that runs out of the structure, and an entity a block, a door or another entity clips, and `cairn info` and the lockfile name the members whose meaning changes at a Java version.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
-- `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
+- `cairn-lsp` with diagnostics, completion and hover, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
 
 **Experimental.** `cairn synth --experimental-logic-synth` prints each stage of the redstone pipeline as JSON: synthesis, netlist construction, edition selection, placement, routing, delay insertion, and legalization. The output shape is free to change.
