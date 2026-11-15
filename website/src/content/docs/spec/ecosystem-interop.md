@@ -18,9 +18,10 @@ format `--structure-format` names:
 | `litematic` | a Litematica schematic per struct and per site ([§12.1.1](#1211-litematica)) | one file, with a region per placement and per walkway |
 
 The format changes the files and nothing else. The block array is the same, an artifact is named by
-the same rule and refused on the same collisions, and the lockfile is the one the other format
-writes, byte for byte. Bedrock has one structure format, so `--structure-format` with
-`--edition bedrock` is a usage error, exit 2, refused before the source is read.
+the same rule and refused by the same guards, which also catch a struct and a site of one name, and
+the lockfile is the one the other format writes, byte for byte. Bedrock has one structure format, so
+`--structure-format` with `--edition bedrock` is a usage error, exit 2, refused before the source is
+read.
 
 ### 12.1.1 Litematica
 

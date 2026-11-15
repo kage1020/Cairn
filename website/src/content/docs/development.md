@@ -254,9 +254,10 @@ Format support lives in `cairn-lang-formats`. A new file type needs a writer fro
 to bytes, streamed so its peak memory does not grow with the volume (`tests/writer_memory.rs`).
 Importing it, the reverse direction, needs two more things:
 
-1. A reader from bytes to voxels, built on `cairn-lang-nbt`'s pull reader so one region or one
-   list item is in memory at a time. `.litematic` has one, returning each region as a
-   `BlockVolume`.
+1. A reader from bytes to voxels, built on `cairn-lang-nbt`'s pull reader so one region's NBT is
+   in memory at a time and a list or array longer than the format can need is refused before it is
+   read. `.litematic` has one, returning each region as a `BlockVolume`, which holds its voxels to
+   its palette and its block entities to its box.
 2. An `(edition, version)` provenance stamp on import
    ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)), which no
    format has yet.
