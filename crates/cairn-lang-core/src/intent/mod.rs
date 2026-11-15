@@ -1,6 +1,8 @@
 //! Intent IR, the first semantic layer above the surface AST: each body sorted into typed
 //! [`Member`]s with roles, and `logic` and `assert` lines split out.
 
+mod address;
+mod addressing;
 mod branch;
 mod guard;
 mod keyword_table;
@@ -18,6 +20,7 @@ use serde::Serialize;
 use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
+pub use self::address::{AddressSegment, MemberAddress};
 pub(crate) use self::guard::{guarded_lines, is_escape_hatch_line, refused_under_guard};
 pub use self::keyword_table::{
     Actuator, MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue,
@@ -28,6 +31,7 @@ pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
     Arguments, BodyKind, IntentState, Label, Member, MemberBody, ValueWithSpan,
 };
+pub(crate) use self::patch::patched_actuator;
 pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;
 
@@ -49,6 +53,38 @@ pub struct IntentModule {
 }
 
 impl IntentModule {
+    /// Every member with an address, at any depth of a `struct` or `def` body: the structs' first,
+    /// each body in source order, a member before those nested under it.
+    #[must_use]
+    pub fn addressed_members(&self) -> Vec<AddressedMember<'_>> {
+        fn walk<'a>(
+            scope_kind: ScopeKind,
+            scope_name: &'a str,
+            members: &'a [Member],
+            out: &mut Vec<AddressedMember<'a>>,
+        ) {
+            for member in members {
+                if let Some(address) = &member.address {
+                    out.push(AddressedMember {
+                        scope_kind,
+                        scope_name,
+                        address,
+                        member,
+                    });
+                }
+                walk(scope_kind, scope_name, &member.children.members, out);
+            }
+        }
+        let mut out = Vec::new();
+        for s in &self.structs {
+            walk(ScopeKind::Struct, &s.name, &s.members, &mut out);
+        }
+        for d in &self.defs {
+            walk(ScopeKind::Def, &d.name, &d.members, &mut out);
+        }
+        out
+    }
+
     /// Every `struct`, `def` and `site` body, in that order, each in source order.
     pub(crate) fn bodies(&self) -> impl Iterator<Item = ItemBody<'_>> {
         let structs = self.structs.iter().map(|s| ItemBody {
@@ -271,6 +307,20 @@ impl AssertIr {
     }
 }
 
+/// One member [`IntentModule::addressed_members`] lists, with the item it stands in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct AddressedMember<'a> {
+    /// Which scope family the member stands in.
+    pub scope_kind: ScopeKind,
+    /// Source-level name of that scope.
+    pub scope_name: &'a str,
+    /// The member's address.
+    pub address: &'a MemberAddress,
+    /// The member.
+    pub member: &'a Member,
+}
+
 /// Which family of Intent IR scope a downstream pass is describing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -302,6 +352,9 @@ pub struct CircuitRegion {
     /// Byte range of the originating `circuit region=...` line.
     #[serde(skip)]
     pub span: Span,
+    /// The address of the originating `circuit region=...` line.
+    #[serde(skip)]
+    pub address: Option<MemberAddress>,
 }
 
 /// The usable reservations among [`circuit_lines`], in the same order.
@@ -458,6 +511,7 @@ fn collect_circuit_lines(
                         width: size.w.get(),
                         depth: size.h.get(),
                         span: m.span.clone(),
+                        address: m.address.clone(),
                     }),
                     Err(defect) => Err(RejectedCircuitRegion {
                         scope_kind,

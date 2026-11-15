@@ -22,7 +22,8 @@ cairn-lang-redstone.workspace = true
 # nearest valid one, which `tests/cli/contract/usage.rs` pins.
 clap = { version = "4.6.1", features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
+# `cairn parse` reads its AST's JSON back in, as deep as the parser's nesting bounds let it go.
+serde_json = { workspace = true, features = ["unbounded_depth"] }
 
 [lints]
 workspace = true
