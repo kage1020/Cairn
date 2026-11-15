@@ -35,6 +35,7 @@ use crate::error::Span;
 use crate::ids::{
     PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem, walkway_artifact_stem,
 };
+use crate::intent::MemberAddress;
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -141,6 +142,9 @@ pub struct ResolvedMember {
     /// The member's `id=`, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The member's address in the body it was written in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<MemberAddress>,
     /// Each block state the member resolved to, in the order its first cell is laid out.
     pub resolved_state: Vec<ResolvedBlock>,
     /// Byte range of the member's own line.
