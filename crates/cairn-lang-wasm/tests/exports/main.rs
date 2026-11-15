@@ -106,6 +106,17 @@ fn info_answers_the_report_and_throws_on_an_empty_editions_list() {
 }
 
 #[wasm_bindgen_test]
+fn info_where_there_is_no_file_system_reports_no_lock() {
+    let exported = info(BUILD, vec!["java".to_owned()]).expect("editions");
+    let verified = get(&exported, "verified_target");
+    assert_eq!(
+        get(&verified, "status").as_string().as_deref(),
+        Some("missing")
+    );
+    assert_eq!(get(&verified, "path").as_string().as_deref(), Some(""));
+}
+
+#[wasm_bindgen_test]
 fn targets_answers_the_report() {
     let exported = targets("bedrock").expect("an edition");
     assert_eq!(
