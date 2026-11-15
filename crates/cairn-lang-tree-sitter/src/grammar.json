@@ -737,6 +737,22 @@
               "name": "latency_form"
             }
           ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "positional",
+              "content": {
+                "type": "SYMBOL",
+                "name": "positional_list"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         }
       ]
     },
@@ -1024,8 +1040,16 @@
           }
         },
         {
-          "type": "STRING",
-          "value": "="
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "="
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         },
         {
           "type": "FIELD",
@@ -2262,6 +2286,22 @@
             "type": "SYMBOL",
             "name": "_value"
           }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "positional",
+              "content": {
+                "type": "SYMBOL",
+                "name": "positional_list"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         }
       ]
     },
@@ -2366,8 +2406,24 @@
     "attribute_list": {
       "type": "REPEAT1",
       "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "attribute"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_value"
+          }
+        ]
+      }
+    },
+    "positional_list": {
+      "type": "REPEAT1",
+      "content": {
         "type": "SYMBOL",
-        "name": "attribute"
+        "name": "_value"
       }
     },
     "attribute": {
