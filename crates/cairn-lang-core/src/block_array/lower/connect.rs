@@ -144,6 +144,7 @@ pub(super) fn lower_connects(
                 origin,
                 footprint,
                 path_material: material_id,
+                span: connect.span.clone(),
             },
         );
     }
