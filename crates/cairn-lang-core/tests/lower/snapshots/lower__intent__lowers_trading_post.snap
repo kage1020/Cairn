@@ -61,12 +61,14 @@ structs:
       h: 7
     args: {}
     members:
-      - role:
+      - address: "floor[0]"
+        role:
           kind: Floor
         mat_slot: floor
         arguments: {}
         intent_state: {}
-      - role:
+      - address: "walls[0]"
+        role:
           kind: Walls
         mat_slot: wall
         arguments:
@@ -74,7 +76,8 @@ structs:
             kind: Int
             value: 4
         intent_state: {}
-      - role:
+      - address: "door@front[0]"
+        role:
           kind: Door
         arguments:
           side:
@@ -84,7 +87,8 @@ structs:
             kind: Ident
             value: center
         intent_state: {}
-      - role:
+      - address: "roof[0]"
+        role:
           kind: Roof
         mat_slot: roof
         arguments:
@@ -96,6 +100,7 @@ structs:
             value: 1
         intent_state: {}
       - id: librarian
+        address: "villager@inside.back[0]"
         role:
           kind: Villager
         arguments:
@@ -117,7 +122,8 @@ structs:
             kind: Ident
             value: journeyman
         intent_state: {}
-      - role:
+      - address: "trade[1]"
+        role:
           kind: Trade
         arguments:
           villager:
@@ -133,7 +139,8 @@ structs:
             kind: Ident
             value: bookshelf
         intent_state: {}
-      - role:
+      - address: "trade[0]"
+        role:
           kind: Trade
         arguments:
           villager:
@@ -153,6 +160,7 @@ structs:
             value: mending
         intent_state: {}
       - id: sunset
+        address: "painting@inside.left[0]"
         role:
           kind: Painting
         arguments:
@@ -172,6 +180,7 @@ structs:
             value: sunset
         intent_state: {}
       - id: relic
+        address: "item_frame@inside.right[0]"
         role:
           kind: ItemFrame
         arguments:
@@ -191,6 +200,7 @@ structs:
             value: compass
         intent_state: {}
       - id: mannequin
+        address: "armor_stand[0]"
         role:
           kind: ArmorStand
         arguments:
@@ -205,6 +215,7 @@ structs:
             value: west
         intent_state: {}
       - id: shop_sign
+        address: "hologram@front.outside[0]"
         role:
           kind: Hologram
         mat_slot: shop_sign

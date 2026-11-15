@@ -380,6 +380,7 @@ fn resolved_members(
         Some(ResolvedMember {
             role: member.role.keyword().to_owned(),
             id: member.id.clone(),
+            address: member.address.clone(),
             resolved_state: Vec::new(),
             geometry: declared.holding(declared.bbox),
             span: member.span.clone(),
