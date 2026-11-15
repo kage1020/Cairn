@@ -373,19 +373,33 @@ fn a_key_on_a_line_that_takes_none_is_refused_at_the_key() {
     for (source, expected) in [
         (
             "site s size=3x3\n",
-            "1:8: a `site` header takes no `key=value` argument, got `size=`",
+            "1:8: a `site` header takes no `key=value` argument, got `size=`; delete it: a `site` \
+             header is its name, with an optional `:` after it",
         ),
         (
             "theme t dark=1:\n",
-            "1:9: a `theme` header takes no `key=value` argument, got `dark=`",
+            "1:9: a `theme` header takes no `key=value` argument, got `dark=`; delete it: a \
+             `theme` header is its name, with an optional `:` after it",
         ),
         (
             "theme t:\n  slot a -> @b c=1\n",
-            "2:16: a `slot` row takes no `key=value` argument, got `c=`",
+            "2:16: a `slot` row takes no `key=value` argument, got `c=`; delete it: a `slot` row \
+             binds one value",
+        ),
+        (
+            "struct s size=3x3\n  assert truth(a -> b) { 0 -> 1 } strict=1\n",
+            "2:35: an `assert truth` line takes no `key=value` argument, got `strict=`; delete it: \
+             an `assert truth` line ends at the `}` of its table",
+        ),
+        (
+            "struct s size=3x3\n  assert always(a -> eventually b within 4) twice=1\n",
+            "2:45: an `assert always` line takes no `key=value` argument, got `twice=`; delete \
+             it: an `assert always` line ends at its `)`",
         ),
         (
             "struct s size=3x3\n  assert latency(a -> b) <= 4 ticks=2\n",
-            "2:31: an `assert` line takes no `key=value` argument, got `ticks=`",
+            "2:31: an `assert latency` line takes no `key=value` argument, got `ticks=`; delete \
+             it: an `assert latency` line ends at its bound",
         ),
     ] {
         assert_eq!(refusal(source), expected, "{source:?}");

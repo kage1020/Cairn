@@ -34,6 +34,9 @@ const GUARD_IN_A_THEME: &str = "an `@edition` guard stands inside a `struct`, `d
      body, never in a `theme`: a theme is picked per edition by its name, so write this edition's \
      slots in a `theme NAME_java` or a `theme NAME_bedrock`";
 
+/// What a `site` or `theme` header holds, as its refusal of a `key=value` words it.
+const HEADER_WITHOUT_ARGUMENTS: &str = "is its name, with an optional `:` after it";
+
 /// The words a refusal inside a call names it by.
 struct CallWording {
     /// The primitive's name.
@@ -409,7 +412,8 @@ impl<'a> Parser<'a> {
 
     fn parse_theme_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
-        let (_, positional) = self.parse_line_tail(Some("a `theme` header"))?;
+        let (_, positional) =
+            self.parse_line_tail(Some(("a `theme` header", HEADER_WITHOUT_ARGUMENTS)))?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let mut requires = Vec::new();
@@ -465,7 +469,8 @@ impl<'a> Parser<'a> {
                 return Err(self.block_id_in_a_slot_row());
             }
             let value = self.parse_value()?;
-            let (_, positional) = self.parse_line_tail(Some("a `slot` row"))?;
+            let (_, positional) =
+                self.parse_line_tail(Some(("a `slot` row", "binds one value")))?;
             let span = start_byte..self.last_byte();
             self.expect_newline()?;
             return Ok(ThemeRule::Slot {
@@ -520,7 +525,8 @@ impl<'a> Parser<'a> {
 
     fn parse_site_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
-        let (_, positional) = self.parse_line_tail(Some("a `site` header"))?;
+        let (_, positional) =
+            self.parse_line_tail(Some(("a `site` header", HEADER_WITHOUT_ARGUMENTS)))?;
         self.consume_optional_colon();
         self.expect_newline()?;
         let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
@@ -924,7 +930,10 @@ impl<'a> Parser<'a> {
         }
         self.expect(&TokenKind::RBrace)?;
         let span = start_byte..self.last_byte();
-        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
+        let (_, positional) = self.parse_line_tail(Some((
+            "an `assert truth` line",
+            "ends at the `}` of its table",
+        )))?;
         self.expect_newline()?;
         Ok(Statement::AssertTruth {
             inputs,
@@ -967,7 +976,8 @@ impl<'a> Parser<'a> {
                 })?;
         self.expect(&TokenKind::RParen)?;
         let span = start_byte..self.last_byte();
-        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
+        let (_, positional) =
+            self.parse_line_tail(Some(("an `assert always` line", "ends at its `)`")))?;
         self.expect_newline()?;
         Ok(Statement::AssertAlways {
             antecedent,
@@ -1004,7 +1014,8 @@ impl<'a> Parser<'a> {
                     kind: *err.kind(),
                 })?;
         let span = start_byte..self.last_byte();
-        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
+        let (_, positional) =
+            self.parse_line_tail(Some(("an `assert latency` line", "ends at its bound")))?;
         self.expect_newline()?;
         Ok(Statement::AssertLatency {
             from,
@@ -1510,23 +1521,26 @@ impl<'a> Parser<'a> {
     }
 
     /// Read a line's `key=value` arguments and its bare values up to the first token no value
-    /// starts with, such as a header's `:`. A line that takes no argument names itself in
-    /// `no_arguments`.
+    /// starts with, such as a header's `:`; `no_arguments` names a line that takes no
+    /// `key=value`, which refuses one, and says what that line holds.
     fn parse_line_tail(
         &mut self,
-        no_arguments: Option<&str>,
+        no_arguments: Option<(&str, &str)>,
     ) -> Result<(Vec<Arg>, Vec<Value>), ParseError> {
         let mut args = Vec::new();
         let mut positional = Vec::new();
         while self.at_value_start() {
             if !self.is_at_key_eq() {
                 positional.push(self.parse_value()?);
-            } else if let Some(line) = no_arguments {
+            } else if let Some((line, holds)) = no_arguments {
                 let position = self.position();
                 let key = self.expect_ident()?;
                 return Err(ParseError::Syntax {
                     position,
-                    message: format!("{line} takes no `key=value` argument, got `{key}=`"),
+                    message: format!(
+                        "{line} takes no `key=value` argument, got `{key}=`; delete it: {line} \
+                         {holds}"
+                    ),
                 });
             } else {
                 args.push(self.parse_arg()?);
