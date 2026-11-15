@@ -72,7 +72,7 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 
 Diagnostics name what is wrong and what a valid value looks like, so a failed build tells you what to type next. `--format json` emits the same findings in machine-readable form, so the write-check-fix loop works as well for tools as it does by hand.
 
-`cairn info` tells you which versions a file builds for before you pick a target:
+`cairn info` tells you which versions a file builds for before you pick a target, and which one its lockfile says the last compile verified:
 
 ```
 $ cairn info cottage.crn
@@ -81,6 +81,7 @@ edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedroc
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      (none)
+verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
 ## What works today
