@@ -153,8 +153,9 @@ const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls
      (from=x,y,z to=x,y,z with mat_slot= or fluid=water), door, window, \
      roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate, lever, button, \
      daylight, observer, lamp, piston, dispenser and chest (at=<side>.outside|inside.<side>), \
-     repeater, comparator, redstone_torch and redstone_dust (at=x,y,z or at=<side>.outside|\
-     inside.<side>), raw_block (mat=<namespace:path> at=x,y,z) and raw_fill (mat=<namespace:path> from=x,y,z \
+     trapdoor, repeater, comparator, redstone_torch and redstone_dust (at=x,y,z or \
+     at=<side>.outside|inside.<side>), note_block (at=x,y,z), beam (kind=pillar \
+     at=<side>.top|<id>.top), raw_block (mat=<namespace:path> at=x,y,z) and raw_fill (mat=<namespace:path> from=x,y,z \
      to=x,y,z), and level y=N grouping, and recognises circuit region=<label> void=<N> (u32, \
      N>=1) plus actuator patches such as door[id=<name>] opened_by=sig.<name>; other roles will \
      be added as their lowering rules are spec'd";
