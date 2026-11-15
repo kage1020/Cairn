@@ -93,8 +93,11 @@ module.exports = grammar({
       'edit',
       field('target', choice($.selector, $.member_address)),
       'set',
-      field('set', $.attribute_list),
+      field('set', alias($.edit_set, $.attribute_list)),
     ),
+
+    // Core refuses a bare value among an edit's keys, so unlike a header's list this holds none.
+    edit_set: $ => repeat1($.attribute),
 
     member_address: $ => seq($.address_step, repeat(seq('.', $.address_step))),
 

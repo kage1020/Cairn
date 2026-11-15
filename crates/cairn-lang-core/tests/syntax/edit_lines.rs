@@ -126,6 +126,10 @@ fn a_malformed_edit_is_refused_where_it_goes_wrong() {
             "1:19: an edit sets at least one `key=value` after `set`",
         ),
         (
+            "edit window[0] set shape arch\n",
+            "1:26: expected `=`, got identifier `arch`",
+        ),
+        (
             "edit window set shape=arch\n",
             "1:13: expected `[` or `@` after `window`: an edit selects by a selector, \
              `window[class=NAME]`, or by an address, `window@front[0]`",

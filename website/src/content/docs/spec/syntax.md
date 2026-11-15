@@ -37,7 +37,8 @@ after the end of its form: a bare value there is the same finding, and a `key=va
 `E_PARSE`. A `logic` line whose `=` is dropped, `logic sig.a sig.b or sig.c`, still reads the
 expression after its name, binds nothing, and is `E_UNEXPECTED_POSITIONAL` on the whole line. No
 expression starts with an infix primitive, so `logic sig.a or sig.b` is `E_PARSE` at the `or`, for
-its missing `=`.
+its missing `=`. An `edit` line keeps no positional list yet, so a bare value after its `set` is
+`E_PARSE`, which ends the parse: `edit window[0] set shape arch` is refused with "expected `=`".
 
 ### 5.1.1 Literals and separators
 
