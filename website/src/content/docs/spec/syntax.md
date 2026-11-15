@@ -465,8 +465,9 @@ first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `le
 
 - `ROLE` is the member's keyword.
 - `@SIDE` is the wall the line names, as written: its `side=` (`door@front[0]`), or else a dotted
-  `at=` (`chest@inside.back[0]`, `button@front.outside[0]`). A line that names no wall writes no
-  `@SIDE`: `walls[0]`, `level[1]`.
+  `at=` (`chest@inside.back[0]`, `button@front.outside[0]`). A `beam` over an opening writes its
+  `at=` too, the opening's `id=` in place of a wall (`beam@entry.top[0]`). A line that names no wall
+  writes no `@SIDE`: `walls[0]`, `level[1]`.
 - `N` counts from 0 among the members of the same parent with the same `ROLE` and `@SIDE`, in the
   order of where they stand:
   1. along the wall: `offset=`, or else the column a door anchor in `at=` names
