@@ -72,6 +72,9 @@ pub struct Walkway {
     pub footprint: Footprint,
     /// Canonical id of the path material, e.g. `minecraft:gravel`.
     pub path_material: String,
+    /// Byte range of the `connect` row that laid it.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 impl BlockArrayIr {
