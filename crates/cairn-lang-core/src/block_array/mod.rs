@@ -331,6 +331,16 @@ impl BlockArray {
             .find(|index| usize::from(*index) >= len)
             .map(|index| (index, len))
     }
+
+    /// The first block entity on no voxel of [`Self::dims`].
+    #[must_use]
+    pub fn first_block_entity_outside(&self) -> Option<&BlockEntity> {
+        self.block_entities.iter().find(|entity| {
+            self.dims
+                .index(entity.pos.0, entity.pos.1, entity.pos.2)
+                .is_none()
+        })
+    }
 }
 
 /// The most entries one [`Palette`] holds, air included.

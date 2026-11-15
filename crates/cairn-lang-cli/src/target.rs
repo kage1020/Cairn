@@ -7,7 +7,10 @@ use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
 use cairn_lang_formats::java_structure::{JavaStructure, OutputExt, prepare_structure};
+use cairn_lang_formats::litematic::Litematic;
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+
+use crate::cli::StructureFormat;
 
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
 pub(crate) enum ResolvedTarget {
@@ -16,6 +19,7 @@ pub(crate) enum ResolvedTarget {
 }
 
 impl ResolvedTarget {
+    /// The extension of one array's structure file in this edition's own format.
     pub(crate) fn output_ext(&self) -> OutputExt {
         match self {
             ResolvedTarget::Java(_) => OutputExt::Nbt,
@@ -86,10 +90,34 @@ pub(crate) fn resolve_target(
     }
 }
 
-/// A structure its edition's backend has checked, waiting to be written.
+/// What a build's artifacts are checked against and written by: its target with, on Java, the
+/// file format.
+#[derive(Clone, Copy)]
+pub(crate) enum Backend<'t> {
+    /// A structure file per array, in the target's edition's own format.
+    PerArray(&'t ResolvedTarget),
+    /// A `.litematic` per struct and per site.
+    Litematic(&'t JavaTarget),
+}
+
+impl<'t> Backend<'t> {
+    /// The backend `target` writes through, `format` picking Java's; Bedrock has one format, and
+    /// `cairn compile` refuses `--structure-format` beside it.
+    pub(crate) fn new(target: &'t ResolvedTarget, format: StructureFormat) -> Self {
+        match (target, format) {
+            (ResolvedTarget::Java(java), StructureFormat::Litematic) => Self::Litematic(java),
+            (ResolvedTarget::Java(_), StructureFormat::Nbt) | (ResolvedTarget::Bedrock(_), _) => {
+                Self::PerArray(target)
+            }
+        }
+    }
+}
+
+/// A structure file its backend has checked, waiting to be written.
 pub(crate) enum PreparedStructure<'a> {
     Java(JavaStructure<'a>),
     Bedrock(McStructure<'a>),
+    Litematic(Litematic<'a>),
 }
 
 impl PreparedStructure<'_> {
@@ -97,6 +125,7 @@ impl PreparedStructure<'_> {
         let encoded = match self {
             PreparedStructure::Java(structure) => structure.write_gzip(writer),
             PreparedStructure::Bedrock(structure) => structure.write(writer),
+            PreparedStructure::Litematic(schematic) => schematic.write_gzip(writer),
         };
         encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }
