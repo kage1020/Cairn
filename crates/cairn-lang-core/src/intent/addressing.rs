@@ -1,15 +1,12 @@
 //! Giving each member of a `struct` or `def` body its address, from where its line puts it
 //! (`spec/syntax` "IDs, classes, addresses").
 
-use std::collections::{BTreeMap, HashMap};
+use crate::ast::{Value, ValueKind};
+use crate::edition::Edition;
 
-use serde::Serialize;
+use super::{AddressSegment, Member, MemberAddress, Size, ValueWithSpan, patched_actuator};
 
-use crate::ast::ValueKind;
-
-use super::{AddressSegment, Member, MemberAddress, Size, ValueWithSpan};
-
-/// One coordinate of a [`Position`]; a value the line writes in a shape no pass reads sorts last.
+/// One coordinate of a [`Position`]; a value the line writes in a shape no step reads sorts last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Coordinate {
     Read(u64),
@@ -19,61 +16,101 @@ enum Coordinate {
 /// Where a member stands among its siblings of one role and side, compared field by field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Position {
-    /// Along its wall: `offset=`, or the column a door's `at=` names.
+    /// Along its wall: `offset=`, or the column an `at=` door anchor names.
     column: Coordinate,
     /// `y=`.
     row: Coordinate,
-    /// The low corner of the cell or box its `at=`, `from=` and `to=` name, `(y, z, x)`.
+    /// The low corner of the cell a coordinate `at=` names, or of the box `from=` and `to=` span,
+    /// `(y, z, x)`.
     low: [Coordinate; 3],
     /// The high corner of the same.
     high: [Coordinate; 3],
 }
 
-/// Everything a line writes, key by key, as text, which orders two members at one position.
-type Written = BTreeMap<String, String>;
+/// What a line writes other than its `id=`, `class=` and `[selector]`, each value spelled by
+/// [`Value::spelling`], compared field by field.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Written {
+    /// Each `key=value`, sorted.
+    pairs: Vec<(String, String)>,
+    /// The bare values, in the order written.
+    bare: Vec<String>,
+    /// The value after `->`.
+    binding: Option<String>,
+    /// The edition of the `@edition` guard the line stands under.
+    guard: Option<&'static str>,
+}
 
-/// Give each of `members`, and each member nested under one, its address under `parent`, in a
-/// body of `footprint`.
+/// The order a body's members are counted in, compared field by field.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Key {
+    role: String,
+    side: Option<String>,
+    position: Position,
+    written: Written,
+    /// The keys of the members nested under it that take an address, sorted.
+    nested: Vec<Key>,
+}
+
+/// Give each of `members`, and each member nested under one, its address under `parent`, or at
+/// the top of the body when there is none, in a body of `footprint`.
 pub(super) fn assign_addresses(
     members: &mut [Member],
     footprint: Option<&Size>,
-    parent: &MemberAddress,
+    parent: Option<&MemberAddress>,
 ) {
-    let keys: Vec<(String, Option<String>, Position, Written)> = members
+    let mut keyed: Vec<(usize, Key)> = members
         .iter()
-        .map(|member| {
-            let side = side(member);
-            let position = position(member, side.as_deref(), footprint);
-            (
-                member.role.keyword().to_owned(),
-                side,
-                position,
-                written(member),
-            )
-        })
+        .enumerate()
+        .filter_map(|(i, member)| Some((i, key(member, footprint)?)))
         .collect();
-    // An actuator patch stands nowhere: it acts on the member its `[selector]` picks.
-    let mut order: Vec<usize> = (0..members.len())
-        .filter(|&i| members[i].selector.is_none())
-        .collect();
-    // Stable, so only lines that write the same thing keep the order they are written in.
-    order.sort_by(|&a, &b| keys[a].cmp(&keys[b]));
-    let mut taken: HashMap<(&str, Option<&str>), u32> = HashMap::new();
-    for i in order {
-        let (role, side, _, _) = &keys[i];
-        let index = taken.entry((role.as_str(), side.as_deref())).or_default();
-        members[i].address = Some(parent.child(AddressSegment {
-            role: role.clone(),
-            side: side.clone(),
-            index: *index,
-        }));
-        *index += 1;
+    // Stable, so only members that tie at every step keep the order their lines are written in.
+    keyed.sort_by(|(_, a), (_, b)| a.cmp(b));
+    let mut previous: Option<(String, Option<String>)> = None;
+    let mut index = 0;
+    for (i, key) in keyed {
+        let group = (key.role, key.side);
+        if previous.as_ref() == Some(&group) {
+            index += 1;
+        } else {
+            index = 0;
+        }
+        let segment = AddressSegment::new(group.0.clone(), group.1.clone(), index);
+        members[i].address = Some(match parent {
+            Some(parent) => parent.child(segment),
+            None => MemberAddress::new(segment),
+        });
+        previous = Some(group);
     }
     for member in members.iter_mut() {
         if let Some(address) = member.address.clone() {
-            assign_addresses(&mut member.children.members, footprint, &address);
+            assign_addresses(&mut member.children.members, footprint, Some(&address));
         }
     }
+}
+
+/// Where `member` comes in the count, or `None` for an actuator patch, which stands nowhere: it
+/// acts on the member its `[selector]` picks.
+fn key(member: &Member, footprint: Option<&Size>) -> Option<Key> {
+    if patched_actuator(member).is_some() {
+        return None;
+    }
+    let side = side(member);
+    let position = position(member, side.as_deref(), footprint);
+    let mut nested: Vec<Key> = member
+        .children
+        .members
+        .iter()
+        .filter_map(|child| key(child, footprint))
+        .collect();
+    nested.sort();
+    Some(Key {
+        role: member.role.keyword().to_owned(),
+        side,
+        position,
+        written: written(member),
+        nested,
+    })
 }
 
 /// The wall a member's line puts it on (`side=front`) or against (`at=inside.front`).
@@ -115,12 +152,13 @@ fn column(member: &Member, side: Option<&str>, footprint: Option<&Size>) -> Coor
     };
     match &at.value.kind {
         ValueKind::Ident(anchor) => anchor_column(anchor, side, footprint),
-        ValueKind::Int(_) => whole_number(at),
-        _ => Coordinate::Read(0),
+        // A wall or a cell, which name no column.
+        ValueKind::DotRef(_) | ValueKind::Coord { .. } => Coordinate::Read(0),
+        _ => Coordinate::Unread,
     }
 }
 
-/// The column a door's named anchor stands in on `side`, as `spec/syntax` "Selectors" places it.
+/// The column a door anchor stands in on `side`, as `spec/syntax` "Selectors" places it.
 fn anchor_column(anchor: &str, side: Option<&str>, footprint: Option<&Size>) -> Coordinate {
     let length = match (side, footprint) {
         (Some("front" | "back"), Some(footprint)) => Some(u64::from(footprint.w.get())),
@@ -135,9 +173,10 @@ fn anchor_column(anchor: &str, side: Option<&str>, footprint: Option<&Size>) -> 
     }
 }
 
-/// The corners of the cell `at=` names, or of the box `from=` and `to=` name, as `(y, z, x)`.
+/// The corners of the cell a coordinate `at=` names, or else of the box `from=` and `to=` span,
+/// as `(y, z, x)`.
 fn corners(member: &Member) -> ([Coordinate; 3], [Coordinate; 3]) {
-    let cell = |key: &str| match member.written(key).map(|value| &value.value.kind) {
+    let cell = |value: Option<&ValueWithSpan>| match value.map(|value| &value.value.kind) {
         None => [Coordinate::Read(0); 3],
         Some(ValueKind::Coord { x, y, z }) => [
             Coordinate::Read(*y),
@@ -146,46 +185,33 @@ fn corners(member: &Member) -> ([Coordinate; 3], [Coordinate; 3]) {
         ],
         Some(_) => [Coordinate::Unread; 3],
     };
-    if member.written("at").is_some() {
-        let at = cell("at");
+    if let Some(at) = member
+        .written("at")
+        .filter(|at| matches!(at.value.kind, ValueKind::Coord { .. }))
+    {
+        let at = cell(Some(at));
         return (at, at);
     }
-    let (from, to) = (cell("from"), cell("to"));
+    let (from, to) = (cell(member.written("from")), cell(member.written("to")));
     let low = std::array::from_fn(|i| from[i].min(to[i]));
     let high = std::array::from_fn(|i| from[i].max(to[i]));
     (low, high)
 }
 
 fn written(member: &Member) -> Written {
-    let mut written: Written = member
+    let mut pairs: Vec<(String, String)> = member
         .written_fields()
-        .map(|(key, value)| (key.to_owned(), text(&value.value)))
+        .filter(|(key, _)| !matches!(*key, "id" | "class"))
+        .map(|(key, value)| (key.to_owned(), value.value.spelling()))
         .collect();
-    let labels = [
-        ("id", member.id.as_deref()),
-        ("class", member.class.as_deref()),
-        (
-            "mat_slot",
-            member.mat_slot.as_ref().map(|slot| slot.name.as_str()),
-        ),
-    ];
-    for (key, label) in labels {
-        if let Some(label) = label {
-            written.insert(key.to_owned(), label.to_owned());
-        }
+    if let Some(slot) = &member.mat_slot {
+        pairs.push(("mat_slot".to_owned(), slot.name.clone()));
     }
-    if !member.positional.is_empty() {
-        written.insert(" ".to_owned(), text(&member.positional));
+    pairs.sort();
+    Written {
+        pairs,
+        bare: member.positional.iter().map(Value::spelling).collect(),
+        binding: member.binding.as_ref().map(Value::spelling),
+        guard: member.edition_guard.map(Edition::as_str),
     }
-    if let Some(binding) = &member.binding {
-        written.insert("->".to_owned(), text(binding));
-    }
-    if let Some(edition) = member.edition_guard {
-        written.insert("@edition".to_owned(), edition.as_str().to_owned());
-    }
-    written
-}
-
-fn text(value: &impl Serialize) -> String {
-    serde_json::to_string(value).expect("a value the parser read serializes")
 }

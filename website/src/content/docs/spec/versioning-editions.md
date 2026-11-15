@@ -940,10 +940,12 @@ row](#the-verified-target-row). No constraint catalog ships yet
 `member_version_sensitivity` is `[]`.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
-filling, and address assignment. Each member's `resolved_state` record carries the address the
-compiler gave it ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), so a change that moves an
-address, such as a member added ahead of others of its role on its wall, moves the hash as a change
-to what is built does.
+filling, and address assignment. The `members` record of each member that built a cell, a struct's
+`circuit` included, carries the address the compiler gave its line
+([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)). A change that moves one of those
+addresses, such as a member added ahead of others of its role on its wall, moves the hash as a
+change to what is built does. The address of a member that builds no cell, such as a `level`, is
+not recorded, and reaches the hash only as a step of the addresses of the members under it.
 
 `lock_schema_version` leads the document so a reader can decide whether it understands the rest
 before parsing it. Version `1` is the shape above plus two keys written only when they are

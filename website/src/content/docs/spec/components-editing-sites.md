@@ -32,12 +32,13 @@ def cottage class=house size=9x7:
 
 Important members carry `id=`. Every member of a `struct` or `def` body also gets a **meaning-based
 stable address** derived from parent / role / side / level / offset rather than from generation
-order, so addresses stay stable when you append to a struct. `window@front[0]` is the window
-nearest the left end of the front wall, and `level[1].window@front[0]` the one nearest it under the
-second `level` from the bottom. [Syntax §5.5](/spec/syntax/#55-ids-classes-addresses) gives the
-form and how members of one role on one wall are counted. Reordering lines, or adding a member of
-another role, on another wall or further along the wall, moves no address. A member added ahead of
-others of its role on its wall renumbers those after it, which is what `id=` is for.
+order. `window@front[0]` is the window nearest the left end of the front wall, and
+`level[1].window@front[0]` the one nearest it under the second `level` from the bottom. [Syntax
+§5.5](/spec/syntax/#55-ids-classes-addresses) gives the form and how members of one role on one wall
+are counted. Reordering lines moves no address, except between members that tie at every step of
+that count, which trade theirs. Adding a member of another role, on another wall or further along
+the wall moves none either. A member added ahead of others of its role on its wall renumbers those
+after it, which is what `id=` is for.
 
 Edits are a patch DSL against a selector or address:
 
