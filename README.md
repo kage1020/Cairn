@@ -89,7 +89,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt`, Litematica `.litematic` or Sponge Schematic `.schem`, and Bedrock `.mcstructure`, output from one source.
 - `cairn import`, which reads any of those four files back as a `.crn` of raw members that compiles back to the same blocks. It recovers blocks and their regularity, not intent, and says so with `W_SEMANTIC_LOSS`.
-- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`, `raw_repeat`), and `level` grouping.
+- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`, `raw_repeat`), and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
