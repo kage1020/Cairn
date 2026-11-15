@@ -102,7 +102,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 **Not yet.**
 
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
-- `edit` patches, and the stable addresses the compiler is to give members written without an `id=`.
+- `edit` patches.
 - `.litematic` and `.schem` writers, and importing existing schematics.
 - The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 

@@ -102,7 +102,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 **未実装の機能。**
 
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
-- `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
+- `edit` による部分的な変更
 - `.litematic` と `.schem` の書き出し、既存の schematic の読み込み
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
