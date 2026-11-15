@@ -280,7 +280,9 @@ fn a_written_edit_target_offers_set_and_nothing_after_it() {
         ("edit window[0] set ", vec![]),
         ("edit window[0] set shape=arch ", vec![]),
     ] {
-        let items = completions(source, at_end_of(source, source)).expect("in the document");
+        let items = completions(source, at_end_of(source, source))
+            .expect("in the document")
+            .items;
         assert_eq!(labels(&items), expected, "{source:?}");
     }
     let source = "edit window@front[0] se";
@@ -302,7 +304,9 @@ fn mat_slot_on_an_edit_line_follows_the_edited_keyword() {
         ("edit level[0].circuit[0] set mat_slot=", vec![]),
     ] {
         let source = format!("{theme}{rest}");
-        let items = completions(&source, at_end_of(&source, rest)).expect("in the document");
+        let items = completions(&source, at_end_of(&source, rest))
+            .expect("in the document")
+            .items;
         assert_eq!(labels(&items), expected, "{rest:?}");
     }
 }
@@ -766,7 +770,10 @@ fn a_vocabulary_one_past_the_limit_drops_the_candidate_ranked_last() {
 fn a_keyword_answer_is_never_cut() {
     let list = completions("st", at_end_of("st", "st")).expect("in the document");
     assert!(!list.is_incomplete);
-    assert_eq!(labels(&list.items), ["theme", "def", "site", "struct"]);
+    assert_eq!(
+        labels(&list.items),
+        ["theme", "def", "site", "struct", "edit"]
+    );
 }
 
 #[test]
