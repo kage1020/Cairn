@@ -214,6 +214,9 @@ pub enum Item {
         /// Byte range of the name token alone.
         #[serde(skip)]
         name_span: Span,
+        /// Bare values after the name, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// `requires version>=X` lines the body declares, in source order.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         requires: Vec<MemberRequires>,
@@ -233,6 +236,9 @@ pub enum Item {
         name_span: Span,
         /// Inline `key=value` arguments on the definition header.
         args: Vec<Arg>,
+        /// Bare values on the definition header, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// `requires version>=X` lines the body declares, in source order.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         requires: Vec<MemberRequires>,
@@ -243,12 +249,16 @@ pub enum Item {
         span: Span,
     },
     /// `site NAME[:]` block — multi-building placement.
+    #[non_exhaustive]
     Site {
         /// Site name following the `site` keyword.
         name: String,
         /// Byte range of the name token alone.
         #[serde(skip)]
         name_span: Span,
+        /// Bare values after the name, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range of the whole block, indented body included.
@@ -256,6 +266,7 @@ pub enum Item {
         span: Span,
     },
     /// `struct NAME[ ARGS]` block — single building / structural composition.
+    #[non_exhaustive]
     Struct {
         /// Struct name following the `struct` keyword.
         name: String,
@@ -264,6 +275,9 @@ pub enum Item {
         name_span: Span,
         /// Inline `key=value` arguments on the struct header.
         args: Vec<Arg>,
+        /// Bare values on the struct header, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range of the whole block, indented body included.
@@ -362,16 +376,21 @@ impl Item {
 #[non_exhaustive]
 pub enum ThemeRule {
     /// `slot NAME -> VALUE` mapping.
+    #[non_exhaustive]
     Slot {
         /// Slot name on the LHS.
         slot: String,
         /// Token or value bound to the slot.
         value: Value,
+        /// Bare values after the bound one, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the entire `slot NAME -> VALUE` line.
         #[serde(skip)]
         span: Span,
     },
     /// `KEYWORD[ATTRS] -> KEY=VALUE [KEY=VALUE...]` selector binding.
+    #[non_exhaustive]
     Selector {
         /// Member keyword on the LHS (`window`, `door`, ...).
         keyword: String,
@@ -379,6 +398,9 @@ pub enum ThemeRule {
         attrs: Vec<Arg>,
         /// `key=value` bindings on the RHS of the arrow.
         bindings: Vec<Arg>,
+        /// Bare values among the bindings, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the entire selector rule line.
         #[serde(skip)]
         span: Span,
@@ -433,7 +455,18 @@ pub enum Statement {
         #[serde(skip)]
         span: Span,
     },
+    /// `logic LHS EXPR` line, its `=` dropped — binds nothing (`spec/syntax` "Lexical").
+    UnboundLogic {
+        /// LHS reference, which the line leaves unbound.
+        lhs: DottedRef,
+        /// Boolean expression read after the name.
+        rhs: Expr,
+        /// Byte range of the whole `logic ...` line.
+        #[serde(skip)]
+        span: Span,
+    },
     /// `assert truth(INPUTS -> OUTPUT) { ROWS }` — a truth table over input signals.
+    #[non_exhaustive]
     AssertTruth {
         /// Input signal references inside `truth(...)`.
         inputs: Vec<DottedRef>,
@@ -441,11 +474,15 @@ pub enum Statement {
         output: DottedRef,
         /// One `bits -> result` per row.
         rows: Vec<TruthRow>,
+        /// Bare values after the closing `}`, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert truth(...) { ... }` form.
         #[serde(skip)]
         span: Span,
     },
     /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` — bounded liveness.
+    #[non_exhaustive]
     AssertAlways {
         /// Antecedent reference on the LHS of `->`.
         antecedent: DottedRef,
@@ -453,11 +490,15 @@ pub enum Statement {
         consequent: DottedRef,
         /// `within N` bound in ticks.
         within: u32,
+        /// Bare values after the closing `)`, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert always(...)` form.
         #[serde(skip)]
         span: Span,
     },
     /// `assert latency(FROM -> TO) <= N` — an upper bound on the ticks from one signal to another.
+    #[non_exhaustive]
     AssertLatency {
         /// Signal reference the path starts at, before `->`.
         from: DottedRef,
@@ -465,6 +506,9 @@ pub enum Statement {
         to: DottedRef,
         /// `<= N` bound in ticks.
         bound: u32,
+        /// Bare values after the bound, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert latency(...) <= N` form.
         #[serde(skip)]
         span: Span,
@@ -489,6 +533,7 @@ impl Statement {
         match self {
             Self::Generic { span, .. }
             | Self::Logic { span, .. }
+            | Self::UnboundLogic { span, .. }
             | Self::AssertTruth { span, .. }
             | Self::AssertAlways { span, .. }
             | Self::AssertLatency { span, .. }
