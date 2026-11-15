@@ -162,11 +162,8 @@ fn a_logic_line_without_its_equals_sign_still_reads_its_expression() {
     let Item::Struct { body, .. } = &module.items[0] else {
         panic!("not a struct");
     };
-    let Statement::Logic {
-        lhs, rhs, binds, ..
-    } = &body[0]
-    else {
-        panic!("expected Logic, got {:?}", body[0]);
+    let Statement::UnboundLogic { lhs, rhs, .. } = &body[0] else {
+        panic!("expected UnboundLogic, got {:?}", body[0]);
     };
     assert_eq!(lhs, &dr(&["sig", "open"]));
     assert_eq!(
@@ -177,7 +174,18 @@ fn a_logic_line_without_its_equals_sign_still_reads_its_expression() {
             name(&["sig", "exit"])
         ),
     );
-    assert!(!binds);
+}
+
+#[test]
+fn bare_values_and_an_unbound_logic_line_serialise() {
+    let module = parse(
+        "struct s size 3x3\n  logic sig.a sig.b\n  assert latency(sig.a -> sig.b) <= 4 ticks\n",
+    )
+    .expect("parse");
+    assert_eq!(
+        serde_json::to_string(&module.items).expect("serialise"),
+        r#"[{"kind":"Struct","name":"s","args":[],"positional":[{"kind":"Ident","value":"size"},{"kind":"Size","value":{"w":3,"h":3}}],"body":[{"kind":"UnboundLogic","lhs":["sig","a"],"rhs":{"kind":"Ref","value":["sig","b"]}},{"kind":"AssertLatency","from":["sig","a"],"to":["sig","b"],"bound":4,"positional":[{"kind":"Ident","value":"ticks"}]}]}]"#,
+    );
 }
 
 #[test]
@@ -798,12 +806,6 @@ fn assert_always_overflowing_within_reports_out_of_range() {
         .expect_err("overflow");
     let msg = err.user_message();
     assert!(msg.contains("out of range"), "got: {msg}");
-}
-
-#[test]
-fn rejects_logic_with_neither_eq_nor_expression() {
-    let err = parse("struct s\n  logic sig.a\n").expect_err("missing =");
-    assert_eq!(err.user_message(), "expected `=`, got end of line");
 }
 
 #[test]

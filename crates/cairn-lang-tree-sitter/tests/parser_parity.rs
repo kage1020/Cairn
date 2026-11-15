@@ -414,6 +414,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  slot a -> @b @c\n",
         Accept,
     ),
+    (
+        "slot_row_bare_string_boolean_and_integer",
+        "theme t:\n  slot a -> @b \"s\" true 3\n",
+        Accept,
+    ),
     ("slot_row_args", "theme t:\n  slot a -> @b c=1\n", Reject),
     // A bare word may name a member form, which takes its keys after it.
     (
@@ -489,6 +494,16 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "logic_name_alone",
         "struct s size=3x3\n  logic s.out\n",
+        Reject,
+    ),
+    (
+        "logic_dropped_equals_before_an_infix_primitive",
+        "struct s size=3x3\n  logic s.out or a.b\n",
+        Reject,
+    ),
+    (
+        "logic_dropped_equals_before_an_integer",
+        "struct s size=3x3\n  logic s.out 3\n",
         Reject,
     ),
     (
@@ -1431,6 +1446,31 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "nbt_comment_inside",
         "struct s size=3x3\n  floor nbt={a:1 # note}\n",
+        Reject,
+    ),
+    (
+        "block_id_on_a_struct_header",
+        "struct s size=3x3 minecraft:stone\n  floor a=1\n",
+        Reject,
+    ),
+    (
+        "block_id_on_a_def_header",
+        "def d size=3x3 minecraft:stone:\n  floor a=1\n",
+        Reject,
+    ),
+    (
+        "block_id_on_a_site_header",
+        "site s minecraft:stone\n  place id=a\n",
+        Reject,
+    ),
+    (
+        "block_id_on_a_theme_header",
+        "theme t minecraft:stone:\n  slot a -> @b\n",
+        Reject,
+    ),
+    (
+        "header_bare_value_after_the_colon",
+        "struct s size=3x3: tall\n  floor a=1\n",
         Reject,
     ),
     // -- edition guards ---------------------------------------------------

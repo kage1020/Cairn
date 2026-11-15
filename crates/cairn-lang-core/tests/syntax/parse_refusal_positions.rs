@@ -373,20 +373,33 @@ fn a_key_on_a_line_that_takes_none_is_refused_at_the_key() {
     for (source, expected) in [
         (
             "site s size=3x3\n",
-            "1:8: a `site` header takes no `key=value` argument, got `size=`",
+            "1:8: a `site` header takes no `key=value` argument, got `size=`; delete it: a `site` \
+             header is its name, with an optional `:` after it",
         ),
         (
             "theme t dark=1:\n",
-            "1:9: a `theme` header takes no `key=value` argument, got `dark=`",
+            "1:9: a `theme` header takes no `key=value` argument, got `dark=`; delete it: a \
+             `theme` header is its name, with an optional `:` after it",
         ),
         (
             "theme t:\n  slot a -> @b c=1\n",
             "2:16: a `slot` row binding a material token takes no `key=value` argument, got \
-             `c=`",
+             `c=`; delete it: a `slot` row binding a material token binds that token alone",
+        ),
+        (
+            "struct s size=3x3\n  assert truth(a -> b) { 0 -> 1 } strict=1\n",
+            "2:35: an `assert truth` line takes no `key=value` argument, got `strict=`; delete it: \
+             an `assert truth` line ends at the `}` of its table",
+        ),
+        (
+            "struct s size=3x3\n  assert always(a -> eventually b within 4) twice=1\n",
+            "2:45: an `assert always` line takes no `key=value` argument, got `twice=`; delete \
+             it: an `assert always` line ends at its `)`",
         ),
         (
             "struct s size=3x3\n  assert latency(a -> b) <= 4 ticks=2\n",
-            "2:31: an `assert` line takes no `key=value` argument, got `ticks=`",
+            "2:31: an `assert latency` line takes no `key=value` argument, got `ticks=`; delete \
+             it: an `assert latency` line ends at its bound",
         ),
     ] {
         assert_eq!(refusal(source), expected, "{source:?}");
@@ -412,7 +425,75 @@ fn an_x_key_apart_from_a_size_is_an_ordinary_key() {
     );
 }
 
+#[test]
+fn a_block_id_on_a_header_is_refused_at_its_colon() {
+    for (source, expected) in [
+        (
+            "struct s size=3x3 minecraft:stone\n",
+            "1:28: this `:` makes `minecraft:stone` a block id, which a `struct` header never \
+             reads: delete the block id",
+        ),
+        (
+            "def d size=3x3 minecraft:oak_log[axis=x]:\n",
+            "1:25: this `:` makes `minecraft:oak_log` a block id, which a `def` header never \
+             reads: delete the block id",
+        ),
+        (
+            "site s minecraft:stone\n",
+            "1:17: this `:` makes `minecraft:stone` a block id, which a `site` header never reads: \
+             delete the block id",
+        ),
+        (
+            "theme t minecraft:stone:\n",
+            "1:18: this `:` makes `minecraft:stone` a block id, which a `theme` header never \
+             reads: delete the block id",
+        ),
+    ] {
+        assert_eq!(refusal(source), expected, "{source:?}");
+    }
+}
+
+/// A header's bare values stand before its `:`, so a word after the `:` is refused where it stands.
+#[test]
+fn a_word_after_a_headers_colon_is_refused_at_the_word() {
+    for (source, expected) in [
+        (
+            "struct s:stone\n",
+            "1:10: expected end of line, got identifier `stone`",
+        ),
+        (
+            "struct s size=3x3:stone\n",
+            "1:19: expected end of line, got identifier `stone`",
+        ),
+        (
+            "struct s size=3x3: tall\n",
+            "1:20: expected end of line, got identifier `tall`",
+        ),
+    ] {
+        assert_eq!(refusal(source), expected, "{source:?}");
+    }
+}
+
 // -- logic expressions ------------------------------------------------------
+
+/// An infix primitive starts no expression, so after the name it is the `=` that is missing.
+#[test]
+fn a_logic_line_with_no_expression_after_its_name_needs_its_equals_sign() {
+    for (line, expected) in [
+        ("logic sig.a", "2:14: expected `=`, got end of line"),
+        (
+            "logic sig.a or sig.b",
+            "2:15: expected `=`, got identifier `or`",
+        ),
+        ("logic sig.a 3", "2:15: expected `=`, got integer `3`"),
+    ] {
+        assert_eq!(
+            refusal(&format!("struct s\n  {line}\n")),
+            expected,
+            "{line:?}"
+        );
+    }
+}
 
 #[test]
 fn an_infix_primitive_is_not_read_as_a_signal() {

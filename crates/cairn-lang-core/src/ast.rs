@@ -368,16 +368,21 @@ pub enum Statement {
         span: Span,
     },
     /// `logic LHS = EXPR` line — binds a boolean signal.
-    #[non_exhaustive]
     Logic {
         /// LHS reference being defined.
         lhs: DottedRef,
         /// RHS boolean expression.
         rhs: Expr,
-        /// Whether an `=` stands between the name and the expression: a line without one binds
-        /// nothing (`spec/syntax` "Lexical").
-        #[serde(skip_serializing_if = "is_true")]
-        binds: bool,
+        /// Byte range of the whole `logic ...` line.
+        #[serde(skip)]
+        span: Span,
+    },
+    /// `logic LHS EXPR` line, its `=` dropped — binds nothing (`spec/syntax` "Lexical").
+    UnboundLogic {
+        /// LHS reference, which the line leaves unbound.
+        lhs: DottedRef,
+        /// Boolean expression read after the name.
+        rhs: Expr,
         /// Byte range of the whole `logic ...` line.
         #[serde(skip)]
         span: Span,
@@ -443,15 +448,6 @@ pub enum Statement {
     },
 }
 
-/// Whether `value` is `true`, the default a serialized `binds` leaves out.
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "`skip_serializing_if` passes the field by reference"
-)]
-fn is_true(value: &bool) -> bool {
-    *value
-}
-
 impl Statement {
     /// Byte range of this statement; for `Generic` and `EditionGuard`, the first line alone.
     #[must_use]
@@ -459,6 +455,7 @@ impl Statement {
         match self {
             Self::Generic { span, .. }
             | Self::Logic { span, .. }
+            | Self::UnboundLogic { span, .. }
             | Self::AssertTruth { span, .. }
             | Self::AssertAlways { span, .. }
             | Self::AssertLatency { span, .. }

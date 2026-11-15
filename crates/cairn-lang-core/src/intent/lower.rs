@@ -202,21 +202,12 @@ fn lower_body(body: &[Statement]) -> MemberBody {
 fn push_statement(stmt: &Statement, out: &mut MemberBody) {
     match stmt {
         Statement::Generic { .. } => out.members.push(lower_member(stmt)),
-        Statement::Logic {
-            lhs,
-            rhs,
-            binds,
-            span,
-            ..
-        } => {
-            if *binds {
-                out.logic.push(LogicBinding {
-                    lhs: lhs.clone(),
-                    rhs: rhs.clone(),
-                    span: span.clone(),
-                });
-            }
-        }
+        Statement::Logic { lhs, rhs, span } => out.logic.push(LogicBinding {
+            lhs: lhs.clone(),
+            rhs: rhs.clone(),
+            span: span.clone(),
+        }),
+        Statement::UnboundLogic { .. } => {}
         Statement::AssertTruth {
             inputs,
             output,
