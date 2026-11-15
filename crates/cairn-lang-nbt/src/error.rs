@@ -46,8 +46,8 @@ pub enum NbtIoError {
     Io(#[from] std::io::Error),
 }
 
-/// Why bytes could not be read as NBT, with the offset into the uncompressed stream where the
-/// fault starts.
+/// Why bytes could not be read as NBT. A fault in the NBT says where in the uncompressed stream it
+/// starts, but for [`Self::RootNotCompound`], which is always the first byte.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum NbtReadError {
@@ -57,7 +57,7 @@ pub enum NbtReadError {
         /// The root's type id.
         id: u8,
     },
-    /// A type id past `TAG_Long_Array` (12), or `TAG_End` where a value belongs.
+    /// A type id past `TAG_Long_Array` (12).
     #[error("nbt: tag type {id} at byte {offset} is not a value type (1 to 12)")]
     UnknownTagType {
         /// The type id.
@@ -114,7 +114,26 @@ pub enum NbtReadError {
         /// Where the string's length prefix starts.
         offset: u64,
     },
-    /// An I/O failure, or input that ends inside a tag.
+    /// Input that ends before the root closes.
+    #[error("nbt: the input ends at byte {offset}, before the root closes")]
+    Truncated {
+        /// How many bytes there were.
+        offset: u64,
+    },
+    /// Input past the root, which [`NbtReader::finish`](crate::NbtReader::finish) refuses.
+    #[error("nbt: the root closes at byte {offset}, and input follows it")]
+    TrailingBytes {
+        /// Where the first byte past the root sits.
+        offset: u64,
+    },
+    /// A call on a reader that an earlier call failed on, whose bytes no longer line up with tags.
+    #[error("nbt: the reader failed at byte {offset} and reads no further")]
+    AfterFailure {
+        /// Where the reader stood when it failed.
+        offset: u64,
+    },
+    /// A failure of the stream the NBT is read from, such as gzip that does not decode or whose
+    /// trailer does not match it.
     #[error("nbt I/O: {0}")]
     Io(#[from] std::io::Error),
 }
