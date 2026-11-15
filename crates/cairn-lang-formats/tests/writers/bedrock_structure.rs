@@ -560,6 +560,24 @@ fn write_mcstructure_is_uncompressed_little_endian() {
 }
 
 #[test]
+fn a_block_entity_on_no_voxel_of_the_grid_is_refused() {
+    let mut ba = comparator_array("minecraft:powered_comparator");
+    ba.block_entities[0].pos = (1, 2, 1);
+    let err = build(&ba).expect_err("off the grid");
+    assert!(
+        matches!(
+            &err,
+            BedrockStructureError::BlockEntityOutsideGrid {
+                id,
+                pos: (1, 2, 1),
+                dims: (2, 2, 3),
+            } if id == "minecraft:comparator"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
     let (mut ba, _) = asymmetric_array();
     assert_eq!(ba.palette.entries.len(), 2, "fixture palette");

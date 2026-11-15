@@ -58,6 +58,16 @@ pub enum BedrockStructureError {
         /// The palette's length.
         len: usize,
     },
+    /// A block entity on no voxel of the grid, reachable only through the public fields.
+    #[error("block entity `{id}` at {pos:?} lies outside the {dims:?} grid, so no block holds it")]
+    BlockEntityOutsideGrid {
+        /// Its id.
+        id: String,
+        /// Where it sits.
+        pos: (u32, u32, u32),
+        /// The grid's extents.
+        dims: (u32, u32, u32),
+    },
     /// A dimension past the `i32` wire width.
     #[error("dimension {axis} = {value} exceeds NBT i32 wire limit")]
     DimensionOverflow {
@@ -232,6 +242,14 @@ pub fn prepare_mcstructure<'a>(
     let volume = list_volume(block_array)?;
     if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(BedrockStructureError::PaletteIndexOutOfRange { index, len });
+    }
+    if let Some(entity) = block_array.first_block_entity_outside() {
+        let dims = block_array.dims;
+        return Err(BedrockStructureError::BlockEntityOutsideGrid {
+            id: entity.id.clone(),
+            pos: entity.pos,
+            dims: (dims.x, dims.y, dims.z),
+        });
     }
     let position_data = position_data(block_array)?;
 
