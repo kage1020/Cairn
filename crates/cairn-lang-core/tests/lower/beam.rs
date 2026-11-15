@@ -380,9 +380,12 @@ fn a_beam_over_a_door_its_own_line_does_not_place_defers_and_lays_nothing() {
             (
                 "door id=d side=front at=middle",
                 DiagnosticCode::InvalidMember,
-                "door has `at=middle`, which is not one of center, left, right — use \
-                 `at=center | left | right`",
-                &[],
+                "door has `at=middle`, which is not one of center, left, right",
+                &[
+                    "name the door's column once: `at=center`, `at=left` or `at=right` for an \
+                     anchor, or `offset=N` for a column between the wall's corners, counted from 0 \
+                     at its left end seen from outside",
+                ],
             ),
             (
                 "door id=d side=front at=center hinge=sideways",

@@ -11,8 +11,7 @@ use crate::block_array::args::{
     diag_invalid_member, ident_or_ignore, nonneg_int_or_refuse, read_or_ignore,
 };
 use crate::block_array::openings::{
-    DOOR_HEIGHT, WallSide, WindowArgs, door_anchor_offset, door_at_refusal, read_window_args,
-    wall_length,
+    DOOR_HEIGHT, WallSide, WindowArgs, door_column, read_window_args, wall_length,
 };
 
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
@@ -123,12 +122,13 @@ pub(super) fn plan_door(
 ) -> Option<DoorPlan> {
     let side = side_of(member, diagnostics);
     let at = side.and_then(|side| {
-        door_anchor_offset(member, wall_length(side, ctx.interior_w, ctx.interior_h))
-            .map_err(|written| {
+        let length = wall_length(side, ctx.interior_w, ctx.interior_h);
+        door_column(member, side, length)
+            .map_err(|fault| {
                 diagnostics.push(diag_invalid_member(
                     member,
-                    door_at_refusal(&written),
-                    Vec::new(),
+                    fault.refusal(),
+                    vec![fault.fix(length)],
                 ));
             })
             .ok()
