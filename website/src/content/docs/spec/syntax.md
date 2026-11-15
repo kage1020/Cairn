@@ -637,11 +637,17 @@ language server shows the entry's own line on hover.
   §7.4](/spec/materials-themes/#74-raw-blocks).
   - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
   - **`at=`.** The cell, a coordinate triple.
+  - **`origin=`.** `imported`, which marks a line `cairn import` wrote.
 - **`raw_fill`.** One block named by its id, in every cell of a box. See [Materials and Themes
   §7.4](/spec/materials-themes/#74-raw-blocks).
   - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
   - **`from=`.** One corner of the box, a coordinate triple.
   - **`to=`.** The opposite corner of the box, a coordinate triple.
+  - **`origin=`.** `imported`, which marks a line `cairn import` wrote.
+- **`raw_repeat`.** Writes the `raw_block` and `raw_fill` lines under it again at a fixed step. See
+  [Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks).
+  - **`count=`.** How many copies are written, a positive integer.
+  - **`step=`.** How far each copy lies from the one before, a coordinate triple.
 - **`place`.** Places a `def` in a `site`. See [Components, Editing, and Multi-building
   §9.3.2](/spec/components-editing-sites/#932-origin-selectors).
   - **`use=`.** The `def` it places.
