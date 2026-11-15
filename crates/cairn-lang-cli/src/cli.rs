@@ -139,8 +139,8 @@ pub(crate) enum Command {
             `Error`-severity diagnostic (the check passes run here, as does each requested \
             edition's lowering with its circuits laid, and a range derived from a file `cairn \
             check` rejects is a confident wrong answer), or on any other I/O error reading the \
-            source (permission denied, non-UTF-8 contents); 2 when the file cannot be located, \
-            and rejects an empty `--editions` value with exit 2"
+            source (permission denied, non-UTF-8 contents); 2 when the source file cannot be \
+            located, and rejects an empty `--editions` value with exit 2"
     )]
     Info {
         /// Path to the .crn file to inspect.

@@ -992,16 +992,21 @@ and its `cairn_version`:
 verified target:         java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
 ```
 
-The target is spelled the way `W_PREVIOUSLY_VERIFIED_TARGET` spells it, edition first, with `block
-version` in place of `DataVersion` on Bedrock. `source changed` in place of `source unchanged` means
-the target was verified for another revision of the file, so the build it certifies is not this
-one's. A note on stderr says so, and the next `cairn compile` rewrites the lock. A lock whose
-`verified` is `false` names a target nothing verified, and the row adds `(not verified)` after the
-target. The compiler never writes one.
+The target is spelled as `W_PREVIOUSLY_VERIFIED_TARGET` spells its verified side, always led by the
+edition, with `block version` in place of `DataVersion` on Bedrock. `source changed` in place of
+`source unchanged` means the target was verified for another revision of the file, so the build it
+certifies is not this one's. A note on stderr says so, and the next compile that writes this path
+rewrites the lock. A lock whose `verified` is `false` names a target nothing verified, and the row
+adds `(not verified)` after the target. The compiler never writes one.
 
 A lock valid but for an identifier the current rule refuses, as one an earlier Cairn wrote can be,
 is reported all the same: the release that wrote it verified its target. A note names the
-identifier, and the next compile replaces the lock, as `cairn compile` says when it reads one.
+identifier, and the next compile that writes this path replaces the lock, as `cairn compile` says
+when it reads one.
+
+The compile a note names is `cairn compile` for `<source>.lock`, and `cairn compile --lock <path>`
+for a lock `--lock` names: a compile without the flag writes `<source>.lock` and leaves any other
+path alone.
 
 A lock the row cannot read prints a placeholder in place of the target, with a `note:` on stderr
 naming the path and the cause:
@@ -1010,12 +1015,19 @@ naming the path and the cause:
 |---|---|---|
 | No file at the path | `(no lock)` | `missing` |
 | A `lock_schema_version` above the one this release reads | `(lock schema N, newer than this Cairn reads)` | `newer_schema` |
-| A file that cannot be read, or a document the schema refuses for any other reason | `(unreadable lock)` | `unreadable` |
+| A file that cannot be read as UTF-8 text, or a document the schema refuses for any other reason ([§10.6](#106-provenance-and-lock)) | `(unreadable lock)` | `unreadable` |
+
+A note promises only what a compile does. A compile writes a missing lock, so that note names the
+compile, unless the path's directory does not exist, which the note then says instead. A compile
+replaces a document the schema refuses, so that note names the compile too. A file that cannot be
+read, such as a directory at the path, can stop the compile from writing there as well, so that
+note names the cause alone.
 
 None of them refuses the command. A lock is the record of an earlier build rather than an input to
 this report, so `cairn info` exits 0 with the placeholder in the row, as it does for an edition with
 no buildable target. A `--lock` naming a file that does not exist is `(no lock)`, like the default
-path. A newer schema is read no further than its version, because its field names need not mean
+path, and so is a path through a directory that does not exist or through a file, on every
+platform. A newer schema is read no further than its version, because its field names need not mean
 what this release's do ([§10.6](#106-provenance-and-lock)).
 
 `--format json` carries the row as `verified_target`, an object that always has `status` and
@@ -1025,7 +1037,7 @@ what this release's do ([§10.6](#106-provenance-and-lock)).
 |---|---|
 | `read` | `target` (`edition`, `mc_version`, `data_version`), `verified`, `source_unchanged`, `cairn_version`, and `refused_identifier`, the refusal as the note words it, when the lock records one |
 | `newer_schema` | `lock_schema_version`, the version the document declares, and `supported`, the one this release reads |
-| `unreadable` | `error`, the cause as the note words it |
+| `unreadable` | `kind`, `io` for a file that cannot be read as UTF-8 text and `invalid` for a document the schema refuses, and `error`, the cause as the note words it |
 | `missing` | nothing more |
 
 ## 10.6 Provenance and lock
@@ -1038,12 +1050,14 @@ lock, written by the compiler on a successful build. They are never hand-written
 # build.crn.lock (compiler-generated)
 lock_schema_version: 1        # revision of this document's own schema
 source_hash: sha256:...
-cairn_version: 2026.10.0      # the Cairn release that wrote it, as `cairn --version` prints it
-target: { edition: java, mc_version: 1.20.4, data_version: 3700 }
+cairn_version: 2026.11.0      # the Cairn release that wrote it, as `cairn --version` prints it
+target: { edition: bedrock, mc_version: 1.21.60, data_version: 18168865 }
 inputs: { registry_pack_hash: sha256:..., constraint_catalog_hash: sha256:... }
 resolved_ir_hash: sha256:...
 verified: true
-member_version_sensitivity: [ { id: yard_water, reason: "cauldron split at 1.17" } ]
+member_version_sensitivity:
+  - { id: yard_water, reason: "cauldron split at 1.17" }
+  - { id: fence, reason: "wall conn at 1.16" }
 ```
 
 A compile writes the lock next to its source as `<source>.lock` unless `--lock` names another
@@ -1064,11 +1078,17 @@ version `1`. A document declaring a higher version is refused rather than read a
 names still meant the same thing. Keys the schema does not declare are refused wherever they
 appear.
 
+Versions count from `1`, so a document declaring `0` is refused. So is a value no compile writes:
+a `cairn_version` that is not a release (`YYYY.M` or `YYYY.M.PATCH`), or an `mc_version` carrying
+a control character or a line or paragraph separator. A lock is often received rather than written
+locally, and `cairn info` prints both values inside one row of its report, where a line break would
+let the lock add a row of its own.
+
 Recompiling for a different target shows the difference from the verified one loudly:
 
 ```text
-$ cairn compile build.crn --edition java --target 1.21.4 --lock build.crn.lock
-W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
+$ cairn compile build.crn --edition bedrock --target 1.21.40 --lock build.crn.lock
+W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.21.60/block version 18168865, now 1.21.40/18163713.
 W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 ```
 
