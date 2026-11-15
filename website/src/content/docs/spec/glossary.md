@@ -41,6 +41,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   and no type, and no keyword places a block entity or an entity yet; `type` will sit beside `role`.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
+- **Address.** The name the compiler gives every member of a `struct` or `def` body from where it
+  stands, `ROLE@SIDE[N]` per step, such as `level[1].window@front[0]`. Line order decides one only
+  between members that tie at every step of the count, so otherwise reordering lines or appending a
+  member elsewhere moves none. See [syntax §5.5](/spec/syntax/#55-ids-classes-addresses).
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
@@ -120,7 +124,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   `lock_schema_version`, `source_hash`, `cairn_version`, `target` (`edition`, `mc_version`,
   `data_version`), `inputs` (`registry_pack_hash`, `constraint_catalog_hash`), `resolved_ir_hash`,
   `verified: true` and `member_version_sensitivity`, plus `placements` and `walkways` for a source
-  with a `site`. See
+  with a `site`. `cairn info` reports the target a lock records as its `verified target` row. See
   [versioning-editions §10.6](/spec/versioning-editions/#106-provenance-and-lock).
 - **Provenance stamp.** `(edition, version)` recorded onto the block-array IR on import, mapped from
   the format itself (`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java). See

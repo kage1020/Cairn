@@ -132,6 +132,63 @@ fn parses_struct_with_size_and_one_child() {
 }
 
 #[test]
+fn a_header_keeps_its_bare_values_beside_its_arguments() {
+    let module = parse("struct s 9x7 size=3x3 tall:\n  floor mat_slot=floor\n").expect("parse");
+    let Item::Struct {
+        args, positional, ..
+    } = &module.items[0]
+    else {
+        panic!("not a struct");
+    };
+    assert_eq!(
+        args.iter().map(|a| a.key.as_str()).collect::<Vec<_>>(),
+        ["size"]
+    );
+    assert_eq!(
+        positional
+            .iter()
+            .map(|v| v.kind.clone())
+            .collect::<Vec<_>>(),
+        [
+            ValueKind::Size { w: nz(9), h: nz(7) },
+            ValueKind::Ident("tall".to_owned())
+        ],
+    );
+}
+
+#[test]
+fn a_logic_line_without_its_equals_sign_still_reads_its_expression() {
+    let module = parse("struct s\n  logic sig.open sig.step or sig.exit\n").expect("parse");
+    let Item::Struct { body, .. } = &module.items[0] else {
+        panic!("not a struct");
+    };
+    let Statement::UnboundLogic { lhs, rhs, .. } = &body[0] else {
+        panic!("expected UnboundLogic, got {:?}", body[0]);
+    };
+    assert_eq!(lhs, &dr(&["sig", "open"]));
+    assert_eq!(
+        rhs,
+        &infix(
+            LogicPrimitive::Or,
+            name(&["sig", "step"]),
+            name(&["sig", "exit"])
+        ),
+    );
+}
+
+#[test]
+fn bare_values_and_an_unbound_logic_line_serialise() {
+    let module = parse(
+        "struct s size 3x3\n  logic sig.a sig.b\n  assert latency(sig.a -> sig.b) <= 4 ticks\n",
+    )
+    .expect("parse");
+    assert_eq!(
+        serde_json::to_string(&module.items).expect("serialise"),
+        r#"[{"kind":"Struct","name":"s","args":[],"positional":[{"kind":"Ident","value":"size"},{"kind":"Size","value":{"w":3,"h":3}}],"body":[{"kind":"UnboundLogic","lhs":["sig","a"],"rhs":{"kind":"Ref","value":["sig","b"]}},{"kind":"AssertLatency","from":["sig","a"],"to":["sig","b"],"bound":4,"positional":[{"kind":"Ident","value":"ticks"}]}]}]"#,
+    );
+}
+
+#[test]
 fn parses_command_with_selector_head() {
     let module = parse("struct s\n  door[id=front] opened_by=sig.open\n").expect("parse");
     let Item::Struct { body, .. } = &module.items[0] else {
@@ -297,6 +354,7 @@ fn parses_assert_latency() {
         to,
         bound,
         span,
+        ..
     } = &body[0]
     else {
         panic!("expected AssertLatency, got {:?}", body[0]);
@@ -748,13 +806,6 @@ fn assert_always_overflowing_within_reports_out_of_range() {
         .expect_err("overflow");
     let msg = err.user_message();
     assert!(msg.contains("out of range"), "got: {msg}");
-}
-
-#[test]
-fn rejects_logic_without_eq() {
-    let err = parse("struct s\n  logic sig.a sig.b\n").expect_err("missing =");
-    let msg = err.user_message();
-    assert!(msg.contains('='), "got: {msg}");
 }
 
 #[test]
