@@ -622,6 +622,24 @@ language server shows the entry's own line on hover.
   - **`at=`.** Its cell, a coordinate triple.
   - **`note=`.** Its note, a whole number from 0 to 24.
   - **`instrument=`.** The name of the instrument it plays.
+- **`sign`.** A sign by a wall or at a coordinate triple, holding the text its line writes. See
+  [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the compass word it looks toward, hung on the block behind it, in
+    place of standing on the block under it.
+  - **`text=`.** Its front's text, a string or a list of up to four lines. See [Entities
+    §8.1](/spec/entities/#81-two-tiers).
+  - **`back=`.** Its back's text, a string or a list of up to four lines.
+  - **`glowing=`.** With `true`, the text on both faces is lit.
+- **`bed`.** A bed's head and foot, by a wall or at a coordinate triple. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its head's cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column its head is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way its head points: by a wall `left` or `right`, in place of toward the
+    wall, and at a triple a compass word, which a bed there must write.
 - **`repeater`.** A redstone repeater placed by hand, a Tier 0 part. See
   [Redstone §14.1](/spec/redstone/#tier-0-parts).
   - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
