@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{LineStarts, RenderedDiagnostic};
-use cairn_lang_core::lock::LockReading;
+use cairn_lang_core::lock::{LockReading, UnreadableKind};
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
 use cairn_lang_core::{Diagnostic, Edition, Severity, diagnose_parse_failure, lower, parse};
 use serde::Serialize;
@@ -122,7 +122,8 @@ pub struct InfoRequest<'a> {
     pub source: &'a str,
     /// The editions to report on.
     pub editions: &'a RequestedEditions,
-    /// The lockfile the `verified target` row reads.
+    /// The lockfile the `verified target` row reads, which its notes have `cairn compile --lock`
+    /// write unless it is [`default_lock_path`] of `file`.
     pub lock: &'a Path,
     /// Hold each error for the failure document, leaving the sink the warnings and notes.
     pub errors_in_document: bool,
@@ -228,27 +229,48 @@ pub fn info(
     )?;
 
     let axes = compute_axes(&module, rows);
-    let verified_target = VerifiedTarget {
-        path: request.lock.display().to_string(),
-        reading: LockReading::of(request.lock, source),
-    };
-    for note in verified_target_notes(request.file, &verified_target) {
+    let reading = LockReading::of(request.lock, source);
+    for note in verified_target_notes(request.file, request.lock, &reading) {
         out.line(&note);
     }
     Ok(InfoDocument {
         axes,
-        verified_target,
+        verified_target: VerifiedTarget {
+            path: request.lock.display().to_string(),
+            reading,
+        },
     })
 }
 
-/// The `note:` lines saying what the row alone does not: why there is no target, or why the one
-/// it names does not certify this source.
-fn verified_target_notes(file: &Path, verified: &VerifiedTarget) -> Vec<String> {
-    let path = &verified.path;
-    match &verified.reading {
-        LockReading::Missing => vec![format!(
-            "note: no lockfile at {path}, so no target is verified; `cairn compile` writes one"
-        )],
+/// The `note:` lines saying what the row alone does not: why there is no target, why the one it
+/// names does not certify this source, and which identifier the lock records that this Cairn
+/// refuses.
+fn verified_target_notes(file: &Path, lock: &Path, reading: &LockReading) -> Vec<String> {
+    let path = lock.display();
+    // A plain compile writes `<source>.lock` and leaves any other path alone.
+    let compile = if lock == default_lock_path(file) {
+        "`cairn compile`".to_owned()
+    } else {
+        format!("`cairn compile --lock {path}`")
+    };
+    match reading {
+        LockReading::Missing => {
+            let dir = lock
+                .parent()
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            let remedy = if dir.is_dir() {
+                format!("{compile} writes one")
+            } else {
+                format!(
+                    "{} is not a directory, so {compile} cannot write one there",
+                    dir.display()
+                )
+            };
+            vec![format!(
+                "note: no lockfile at {path}, so no target is verified; {remedy}"
+            )]
+        }
         LockReading::Read {
             source_unchanged,
             refused_identifier,
@@ -257,13 +279,13 @@ fn verified_target_notes(file: &Path, verified: &VerifiedTarget) -> Vec<String> 
             let refused = refused_identifier.iter().map(|refused| {
                 format!(
                     "note: {path} records an identifier this Cairn refuses ({refused}); the next \
-                     `cairn compile` replaces it"
+                     {compile} replaces it"
                 )
             });
             let changed = (!source_unchanged).then(|| {
                 format!(
                     "note: {} has changed since {path} was written, so its target was verified \
-                     for another revision of the file; the next `cairn compile` rewrites the lock",
+                     for another revision of the file; the next {compile} rewrites the lock",
                     file.display(),
                 )
             });
@@ -276,9 +298,18 @@ fn verified_target_notes(file: &Path, verified: &VerifiedTarget) -> Vec<String> 
             "note: {path} declares lock schema version {lock_schema_version}, and this Cairn \
              reads {supported}; the newer Cairn that wrote it can report it"
         )],
-        LockReading::Unreadable { error } => vec![format!(
-            "note: {path}: the lockfile could not be read ({error}); the next `cairn compile` \
-             replaces it"
+        LockReading::Unreadable {
+            kind: UnreadableKind::Invalid,
+            error,
+        } => vec![format!(
+            "note: {path}: the lockfile could not be read ({error}); the next {compile} replaces \
+             it"
+        )],
+        LockReading::Unreadable {
+            kind: UnreadableKind::Io,
+            error,
+        } => vec![format!(
+            "note: {path}: the lockfile could not be read ({error})"
         )],
     }
 }
