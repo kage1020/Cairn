@@ -48,6 +48,10 @@ const PINNED: Table = &[
     ),
     ("minecraft:oak_log", &[("axis", &["x", "y", "z"])]),
     (
+        "minecraft:note_block",
+        &[("instrument", &["harp", "bit"]), ("note", &["0", "12"])],
+    ),
+    (
         "minecraft:oak_button",
         &[
             ("face", &["floor", "wall", "ceiling"]),
@@ -56,6 +60,16 @@ const PINNED: Table = &[
         ],
     ),
     ("minecraft:oak_planks", &[]),
+    (
+        "minecraft:oak_trapdoor",
+        &[
+            ("facing", &["north", "south", "west", "east"]),
+            ("half", &["top", "bottom"]),
+            ("open", &["true", "false"]),
+            ("powered", &["true", "false"]),
+            ("waterlogged", &["true", "false"]),
+        ],
+    ),
     (
         "minecraft:oak_stairs",
         &[
@@ -73,8 +87,13 @@ const PINNED: Table = &[
     ),
 ];
 
-/// The edition's other version, which the pinned one dropped `active` and a stair's `shape` from.
+/// The edition's other version, which the pinned one dropped `active`, a stair's `shape` and the
+/// `trumpet` instrument from.
 const OLDER: Table = &[
+    (
+        "minecraft:note_block",
+        &[("instrument", &["harp", "bit", "trumpet"])],
+    ),
     (
         "minecraft:creaking_heart",
         &[
@@ -565,6 +584,202 @@ fn a_state_lowering_derives_outside_its_block_is_refused_at_the_member() {
             "origin": "derived",
         }),
     );
+}
+
+#[test]
+fn an_instrument_the_target_lacks_is_refused_on_its_value_and_builds_no_note_block() {
+    let source = "struct s size=3x3\n  note_block at=1,0,1 instrument=trumpet\n  \
+                  note_block at=0,0,0 instrument=bitt\n";
+    let out = lowered_at(source, &Tables::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [
+            (
+                DiagnosticCode::StateDomain,
+                "trumpet",
+                "`minecraft:note_block` takes no `instrument=trumpet` at test 2.0; `instrument` \
+                 takes harp, bit",
+                vec![
+                    "`instrument=trumpet` is valid at 1.0: pass that version as `--target`, or \
+                     give `instrument=` a value test 2.0 takes",
+                ],
+            ),
+            (
+                DiagnosticCode::StateDomain,
+                "bitt",
+                "`minecraft:note_block` takes no `instrument=bitt` at test 2.0; `instrument` takes \
+                 harp, bit",
+                vec![
+                    "did you mean `instrument=bit`?",
+                    "give `instrument=` a value test 2.0 takes, or leave `instrument=` out",
+                ],
+            ),
+        ],
+    );
+    assert_eq!(
+        serde_json::to_value(&out.diagnostics[1].data).expect("the payload serialises"),
+        json!({
+            "kind": "state_domain",
+            "id": "minecraft:note_block",
+            "key": "instrument",
+            "value": "bitt",
+            "registry": "test 2.0",
+            "reason": "value_outside",
+            "valid": ["harp", "bit"],
+            "origin": "argument",
+            "suggestion": "bit",
+        }),
+    );
+    assert_eq!(solid_cells(only_structure(&out)), 0);
+}
+
+#[test]
+fn a_beam_bound_to_a_block_whose_axis_is_not_xyz_is_built_from_the_default_beam() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=3x3\n  walls mat_slot=wall height=1\n  \
+                  beam kind=pillar mat_slot=wall at=front.top\n";
+    let out = lowered_at(source, &Tables::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [(
+            DiagnosticCode::IncompatibleMaterial,
+            "@cobblestone",
+            "beam derives `axis` from the wall it lies along and `minecraft:cobblestone` is not a \
+             pillar, so those states have nowhere to go",
+            vec![
+                "bind the slot to a block whose `axis` takes `x`, `y` and `z`, such as a log — the \
+                 registry pack's `beam.default` resolves to one",
+                "reached through `mat_slot=wall`, so every member reading that slot has it too",
+            ],
+        )],
+    );
+    assert!(painted(&out, "minecraft:oak_log[axis=x]"));
+}
+
+#[test]
+fn a_beam_whose_line_writes_axis_says_its_axis_comes_from_that_line() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=3x3\n  walls mat_slot=wall height=1\n  \
+                  beam kind=pillar mat_slot=wall at=front.top axis=y\n";
+    let out = lowered_at(source, &Tables::pinned());
+    assert_eq!(
+        findings(source, &out),
+        [(
+            DiagnosticCode::IncompatibleMaterial,
+            "@cobblestone",
+            "beam derives `axis` from its line's `axis=` and `minecraft:cobblestone` is not a \
+             pillar, so those states have nowhere to go",
+            vec![
+                "bind the slot to a block whose `axis` takes `x`, `y` and `z`, such as a log — the \
+                 registry pack's `beam.default` resolves to one",
+                "reached through `mat_slot=wall`, so every member reading that slot has it too",
+            ],
+        )],
+    );
+    assert!(painted(&out, "minecraft:oak_log[axis=y]"));
+}
+
+#[test]
+fn a_beam_is_laid_from_any_block_where_the_target_cannot_say_whether_it_is_a_pillar() {
+    let unpinned = Tables {
+        ids: Vec::new(),
+        pinned: false,
+    };
+    for (registry, slot) in [(unpinned, "cobblestone"), (Tables::pinned(), "gravel")] {
+        let source = format!(
+            "theme t:\n  slot wall -> @cobblestone\n  slot b -> @{slot}\n\n\
+             struct s size=3x3\n  walls mat_slot=wall height=1\n  \
+             beam kind=pillar mat_slot=b at=front.top\n"
+        );
+        let out = lowered_at(&source, &registry);
+        assert_eq!(findings(&source, &out), [], "{slot}");
+        assert!(
+            painted(&out, &format!("minecraft:{slot}[axis=x]")),
+            "{slot}"
+        );
+    }
+}
+
+#[test]
+fn a_material_its_target_refuses_builds_no_beam_trapdoor_or_chest_and_their_unread_states_say_so() {
+    for (slot, line, refused, unread) in [
+        (
+            "@oak_log[axis=w]",
+            "beam kind=pillar mat_slot=m at=front.top axis=3",
+            (
+                "`minecraft:oak_log` takes no `axis=w` at test 2.0; `axis` takes x, y, z",
+                vec![
+                    "did you mean `axis=x`?",
+                    "correct the state literal to a value test 2.0 takes, or leave `axis` out for \
+                     the block's default",
+                ],
+            ),
+            (
+                "`axis=` must be `x`, `y` or `z`, not integer `3`; the value was ignored",
+                "this beam is not laid either way — see the finding on the material its \
+                 `mat_slot=` names",
+            ),
+        ),
+        (
+            "@oak_trapdoor[half=middle]",
+            "trapdoor mat_slot=m at=1,1,1 open=3",
+            (
+                "`minecraft:oak_trapdoor` takes no `half=middle` at test 2.0; `half` takes top, \
+                 bottom",
+                vec![
+                    "correct the state literal to a value test 2.0 takes, or leave `half` out for \
+                     the block's default",
+                ],
+            ),
+            (
+                "`open=` must be `true` or `false`, not integer `3`; the value was ignored",
+                "this trapdoor is not built either way — see the finding on the material its \
+                 `mat_slot=` names",
+            ),
+        ),
+        (
+            "@chest[type=double]",
+            "chest mat_slot=m at=inside.back offset=2 y=1 size=3",
+            (
+                "`minecraft:chest` takes no `type=double` at test 2.0; `type` takes single, left, \
+                 right",
+                vec![
+                    "correct the state literal to a value test 2.0 takes, or leave `type` out for \
+                     the block's default",
+                ],
+            ),
+            (
+                "`size=` must be `single`, not integer `3`; the value was ignored",
+                "this chest is not built either way — see the finding on the material its \
+                 `mat_slot=` names",
+            ),
+        ),
+    ] {
+        let walled = format!(
+            "theme t:\n  slot wall -> @cobblestone\n  slot m -> {slot}\n\n\
+             struct s size=5x5\n  walls mat_slot=wall height=3\n"
+        );
+        let source = format!("{walled}  {line}\n");
+        let out = lowered_at(&source, &Tables::pinned());
+        assert_eq!(
+            findings(&source, &out),
+            [
+                (DiagnosticCode::StateDomain, slot, refused.0, refused.1),
+                (
+                    DiagnosticCode::IgnoredArgument,
+                    "3",
+                    unread.0,
+                    vec![unread.1]
+                ),
+            ],
+            "{line}",
+        );
+        assert_eq!(
+            only_structure(&out),
+            only_structure(&lowered_at(&walled, &Tables::pinned())),
+            "{line}",
+        );
+    }
 }
 
 #[test]

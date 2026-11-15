@@ -23,7 +23,7 @@ pub fn examples_dir() -> PathBuf {
 }
 
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
-pub const SHIPPED_EXAMPLES: usize = 15;
+pub const SHIPPED_EXAMPLES: usize = 16;
 
 /// Every `.crn` under `examples/`, as `(file name, source)` sorted by name, refusing any set but
 /// the shipped one, since a sweep over nothing passes.
@@ -171,6 +171,43 @@ pub fn block_palette(root: &Compound) -> &[Tag] {
         Some(Tag::List(l)) => &l.items,
         other => panic!("block_palette is not a List: {other:?}"),
     }
+}
+
+/// Each `block_palette` entry of a `.mcstructure` root as `name[key=value,…]`, its states sorted
+/// by key and the entries sorted.
+///
+/// # Panics
+///
+/// When an entry is not a compound with a `name` and `states`, or a state is not a byte, an int or
+/// a string.
+pub fn written_palette(root: &Compound) -> Vec<String> {
+    let mut written: Vec<String> = block_palette(root)
+        .iter()
+        .map(|entry| {
+            let Tag::Compound(entry) = entry else {
+                panic!("palette entry: {entry:?}");
+            };
+            let (Some(Tag::String(name)), Some(Tag::Compound(states))) =
+                (entry.entries.get("name"), entry.entries.get("states"))
+            else {
+                panic!("palette entry: {entry:?}");
+            };
+            let mut states: Vec<String> = states
+                .entries
+                .iter()
+                .map(|(key, value)| match value {
+                    Tag::Byte(v) => format!("{key}={v}"),
+                    Tag::Int(v) => format!("{key}={v}"),
+                    Tag::String(v) => format!("{key}={v}"),
+                    other => panic!("{key}: {other:?}"),
+                })
+                .collect();
+            states.sort();
+            format!("{name}[{}]", states.join(","))
+        })
+        .collect();
+    written.sort();
+    written
 }
 
 /// A blockstate property map from `(key, value)` pairs, in the order given.
