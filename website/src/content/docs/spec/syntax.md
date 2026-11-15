@@ -549,6 +549,8 @@ language server shows the entry's own line on hover.
 - **`door`.** A door cut into a wall, two rows tall. See [§5.4](#54-selectors).
   - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
   - **`at=`.** Where along the wall it is cut: `center`, `left` or `right`.
+  - **`offset=`.** In place of `at=`, the column it is cut in, between the wall's corners, counted
+    from the wall's left end as seen from outside.
   - **`opened_by=`.** The signal that opens it. See
     [Redstone §14.2](/spec/redstone/#142-signal-binding).
   - **`hinge=`.** The side its hinge is on, `left` or `right`, in place of the derived side.
