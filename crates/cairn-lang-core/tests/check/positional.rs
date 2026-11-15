@@ -202,8 +202,8 @@ fn finding<'a>(text: &'a str, primary: &str, note: &str) -> (&'a str, String, Ve
     (text, primary.to_owned(), vec![note.to_owned()])
 }
 
-const KEYED_HEADER_NOTE: &str =
-    "give each value the key it belongs to (`size=3x3`); a missing `=` lands here too";
+const KEYED_HEADER_NOTE: &str = "give each value the key it belongs to (`class=house`, \
+                                 `size=3x3`); a missing `=` lands here too";
 
 #[test]
 fn a_dropped_equals_sign_on_a_struct_or_def_header_is_reported() {
