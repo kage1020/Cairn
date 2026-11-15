@@ -88,7 +88,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - `cairn parse` / `check` / `info` / `lower` / `compile`
 - 1 つのソースから Java の `.nbt` または Litematica の `.litematic` と、Bedrock の `.mcstructure` を出力
-- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
+- メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、梁、チェスト、トラップドア、音符ブロック、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - パックの隣に置く制約カタログ。ターゲットを固定したビルドは、支えるもののないレバーや松明、空気の上の砂、構造物から流れ出す水を警告し、`cairn info` とロックファイルは、Java のあるバージョンで意味が変わるメンバーを示します

@@ -4,7 +4,7 @@
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 use cairn_lang_core::check::DiagnosticCode;
 
-use crate::common::{lowered, notes, only_structure, slice, state_at};
+use crate::common::{DRAWN_ROLES, lowered, notes, only_structure, slice, state_at};
 
 /// A struct `width`x`depth` with one course of cobblestone walls and `window` in it.
 fn struct_with_window(width: u32, depth: u32, window: &str) -> String {
@@ -143,19 +143,5 @@ fn a_window_deferred_outright_carries_the_generic_deferral_note() {
     let src = struct_with_window(6, 5, window);
     let out = lowered(&src);
     let all: Vec<_> = out.diagnostics.iter().flat_map(notes).collect();
-    assert_eq!(
-        all,
-        [
-            "block-array lowering currently voxelises floor, walls, fill (from=x,y,z to=x,y,z \
-             with mat_slot= or fluid=water), door, window, roof \
-             (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate, lever, button, \
-             daylight, observer, lamp, piston, dispenser and chest \
-             (at=<side>.outside|inside.<side>), repeater, comparator, redstone_torch and \
-             redstone_dust (at=x,y,z or at=<side>.outside|inside.<side>), raw_block \
-             (mat=<namespace:path> at=x,y,z) and raw_fill (mat=<namespace:path> from=x,y,z to=x,y,z), and level y=N grouping, and \
-             recognises circuit region=<label> void=<N> (u32, N>=1) plus actuator patches such \
-             as door[id=<name>] opened_by=sig.<name>; other roles will be added as their \
-             lowering rules are spec'd"
-        ],
-    );
+    assert_eq!(all, [DRAWN_ROLES],);
 }
