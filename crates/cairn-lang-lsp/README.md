@@ -1,5 +1,7 @@
 # cairn-lang-lsp
 
+This crate's Rust API is in the [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no promise: any release may change it.
+
 Language Server Protocol implementation for Cairn editors. It puts the parser and lint diagnostics from [`cairn-lang-core`](../cairn-lang-core/README.md) in the margin as you type and completes canonical material tokens, so the write-check-fix loop described in [lint](https://cairn.kage1020.com/spec/lint/) happens in the editor rather than in a terminal. The [VS Code extension](../../editors/vscode/README.md) is a thin client over this binary.
 
 ## Status
