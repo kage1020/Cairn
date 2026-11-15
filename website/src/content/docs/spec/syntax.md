@@ -534,6 +534,12 @@ language server shows the entry's own line on hover.
   - **`y=`.** The row the band is on.
   - **`waterlogged=`.** `true` or `false` written into the stairs' state, or `auto` to let a water
     `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`beam`.** A run of pillar blocks laid along a wall's top row or over an opening. See
+  [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`kind=`.** The kind of beam: `pillar`.
+  - **`at=`.** Where it is laid: `<side>.top` along that wall's top row, or `<id>.top` over the
+    `door` or `window` with that `id=`.
+  - **`axis=`.** The axis its blocks lie along, `x`, `y` or `z`, in place of along its wall.
 - **`level`.** Groups the members under it, lifting each of them `y=` rows above the base plane.
   See [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
   - **`y=`.** How many rows above the base plane its members stand.
@@ -598,6 +604,22 @@ language server shows the entry's own line on hover.
   - **`size=`.** With `single`, the chest is not paired.
   - **`waterlogged=`.** `true` or `false` written into the chest's state, or `auto` to let a water
     `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`trapdoor`.** A trapdoor by a wall or at a coordinate triple. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it faces: by a wall `in`, `out`, `left` or `right`, in place of away
+    from the wall, and at a triple a compass word.
+  - **`half=`.** The half of the cell it sits in: `top` or `bottom`.
+  - **`open=`.** Whether it is built open, `true`, or closed, `false`.
+  - **`waterlogged=`.** `true` or `false` written into the trapdoor's state, or `auto` to let a
+    water `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`note_block`.** A note block at a coordinate triple. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its cell, a coordinate triple.
+  - **`note=`.** Its note, a whole number from 0 to 24.
+  - **`instrument=`.** The name of the instrument it plays.
 - **`repeater`.** A redstone repeater placed by hand, a Tier 0 part. See
   [Redstone §14.1](/spec/redstone/#tier-0-parts).
   - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
