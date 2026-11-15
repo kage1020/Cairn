@@ -385,12 +385,13 @@ author never wrote and cannot point at.
 
 Each item and member keyword, and each `key=` a member's line accepts, in one line with the
 section that specifies it. That section is normative, and this list is its index:
-``cairn docs spec/syntax "`door`"`` prints one entry, and the language server shows it on hover.
+``cairn docs spec/syntax "`door`"`` prints one entry with the keys nested under it, and the
+language server shows the entry's own line on hover.
 
 **Items.**
 
 - **`struct`.** One building, built from its body over the `size=WxH` footprint its line declares.
-  See [§5.2](#52-nesting).
+  See [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
 - **`def`.** A reusable building with slots, which the `place` rows of a `site` put down. See
   [Components, Editing, and Multi-building
   §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
@@ -429,16 +430,16 @@ section that specifies it. That section is normative, and this list is its index
     [Redstone §14.2](/spec/redstone/#142-signal-binding).
   - **`hinge=`.** The side its hinge is on, `left` or `right`, in place of the derived side.
   - **`open=`.** Whether it is built open, `true`, or closed, `false`.
-- **`window`.** An opening cut into a wall and filled with its material. See
-  [§5.4](#54-selectors).
+- **`window`.** An opening cut into a wall and filled with its `mat_slot=` material, or left open
+  without one. See [§5.4](#54-selectors).
   - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
   - **`y=`.** The row its lowest cells are on, counted from the floor.
   - **`offset=`.** Its first column along the wall, counted from the wall's left end as seen
     from outside.
   - **`size=`.** Its width and height, `WxH`.
   - **`sym=`.** With `true`, a mirrored copy across the wall's midpoint is cut too.
-  - **`repeat=`.** How many copies are cut along the wall.
-  - **`step=`.** How many columns each copy starts after the one before it.
+  - **`repeat=`.** How many windows the series cuts along the wall, the first included.
+  - **`step=`.** How many columns each window starts after the one before it.
   - **`shape=`.** The opening's outline, read by nothing yet. See
     [Entities §8.2](/spec/entities/#82-anchor-conventions).
   - **`anchor=`.** The opening's reference point, read by nothing yet. See
@@ -462,8 +463,8 @@ section that specifies it. That section is normative, and this list is its index
   - **`y=`.** The row the band is on.
   - **`waterlogged=`.** `true` or `false` written into the stairs' state, or `auto` to let a water
     `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
-- **`level`.** Groups the members under it, each standing its `y=` rows above the base plane. See
-  [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
+- **`level`.** Groups the members under it, lifting each of them `y=` rows above the base plane.
+  See [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
   - **`y=`.** How many rows above the base plane its members stand.
 - **`pressure_plate`.** A pressure plate by a wall, a sensor. See
   [Redstone §14.2](/spec/redstone/#142-signal-binding).
@@ -516,7 +517,7 @@ section that specifies it. That section is normative, and this list is its index
   - **`fired_by=`.** The signal that fires it.
   - **`facing=`.** The way it fires, in place of away from the wall: `in`, `out`, `left`,
     `right`, `up` or `down`.
-- **`chest`.** A chest by a wall, paired with a chest beside it. See [Blockstate Model
+- **`chest`.** A chest by a wall, which pairs with a chest beside it. See [Blockstate Model
   §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
   - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
   - **`offset=`.** The wall column it is beside.
