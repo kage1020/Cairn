@@ -8,6 +8,8 @@ use cairn_lang_core::intent::{Member, known_keywords, role_of};
 use cairn_lang_core::resolve::Resolution;
 use cairn_lang_core::{BlockArrayIr, IntentModule, lower, parse, resolve};
 
+use crate::common::same_build;
+
 /// Where a fixture's slot name goes.
 const SLOT: &str = "%SLOT%";
 
@@ -160,13 +162,6 @@ fn builds(source: &str) -> (BlockArrayIr, BlockArrayIr) {
     look_up_every_slot(&ir, &mut looked_up);
     let with_every_slot = lower_to_block_array(&ir, &looked_up, None);
     (as_run, with_every_slot)
-}
-
-/// Whether two builds match in blocks, placements and walkways; diagnostics carry spans.
-fn same_build(left: &BlockArrayIr, right: &BlockArrayIr) -> bool {
-    left.structures == right.structures
-        && left.placements == right.placements
-        && left.walkways == right.walkways
 }
 
 /// Voxels the build paints, across every structure and walkway.
