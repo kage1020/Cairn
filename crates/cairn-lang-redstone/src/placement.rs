@@ -113,13 +113,7 @@ pub fn compile_placement(
                 extend_unique(&mut out.diagnostics, vec![too_large(&scope, region)]);
                 continue;
             }
-            let region = Reservation::new(
-                region.label.clone(),
-                region.void,
-                array.dims.x,
-                array.dims.z,
-                region.span.clone(),
-            );
+            let region = Reservation::new(region, array.dims.x, array.dims.z);
             let (coupled, findings) =
                 coupling::couple(ir, members, array, resolved, region.layers, &scope);
             if !findings.is_empty() {
