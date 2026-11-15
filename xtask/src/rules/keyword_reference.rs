@@ -1,8 +1,8 @@
 //! The Japanese keyword reference holds the entries the English one does, each nested under the
-//! same keyword. The language server quotes the English page and a test holds that one to core's
-//! keyword table, so nothing else notices a Japanese entry missing, extra or misplaced.
+//! same keyword, and each page holds an entry once. Nothing but this rule compares the Japanese
+//! entries to the English ones.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use cairn_lang_docs::{Page, Part};
 
@@ -11,8 +11,8 @@ use crate::repo::Repo;
 
 pub const RULE: Rule = Rule {
     name: "keyword-reference",
-    summary: "spec/syntax's keyword reference lists the same entries, nested alike, in each \
-              language",
+    summary: "spec/syntax's keyword reference lists the same entries, nested alike, once each, in \
+              each language",
     check,
 };
 
@@ -25,7 +25,7 @@ const PAGES: [(&str, &str); 2] = [
     ),
 ];
 
-/// An entry: the code term it nests in, `None` at the top level, and its own name.
+/// An entry: the term it nests in, `None` at the top level, and its own name.
 type Entry = (Option<&'static str>, &'static str);
 
 fn check(_repo: &Repo) -> Vec<Finding> {
@@ -33,7 +33,11 @@ fn check(_repo: &Repo) -> Vec<Finding> {
     let mut read = Vec::new();
     for (path, file) in PAGES {
         match cairn_lang_docs::page(path) {
-            Some(page) => read.push(entries(page)),
+            Some(page) => {
+                let counted = entries(page);
+                findings.extend(repeated(file, &counted));
+                read.push(counted);
+            }
             None => findings.push(Finding::new(file, None, format!("embeds no page `{path}`"))),
         }
     }
@@ -43,61 +47,72 @@ fn check(_repo: &Repo) -> Vec<Finding> {
     findings
 }
 
-/// Every term of `page` whose name is code, each with the code term it nests in.
-fn entries(page: &Page) -> BTreeSet<Entry> {
-    let terms: Vec<(&'static str, &'static str)> = page
+/// Every term of `page` whose name is code, with the term it nests in, and how many times the
+/// page defines it there.
+fn entries(page: &Page) -> BTreeMap<Entry, usize> {
+    let mut counted = BTreeMap::new();
+    for title in page
         .titles()
         .into_iter()
         .filter(|title| title.len() > 1 && title.starts_with('`') && title.ends_with('`'))
-        .flat_map(|title| {
-            page.cited(title)
-                .into_iter()
-                .filter_map(move |part| match part {
-                    Part::Term { markdown, .. } => Some((title, markdown)),
-                    Part::Page | Part::Section(_) => None,
-                })
-        })
-        .collect();
-    terms
+    {
+        for part in page.cited(title) {
+            if let Part::Term { within, .. } = part {
+                *counted.entry((within, title)).or_default() += 1;
+            }
+        }
+    }
+    counted
+}
+
+fn place(owner: Option<&str>) -> String {
+    match owner {
+        Some(owner) => format!("under {owner}"),
+        None => "at the top level".to_owned(),
+    }
+}
+
+/// A finding at `file` for each entry its page defines more than once in the same place.
+fn repeated(file: &str, entries: &BTreeMap<Entry, usize>) -> Vec<Finding> {
+    entries
         .iter()
-        .map(|&(name, markdown)| {
-            let owner = terms
-                .iter()
-                .filter(|(_, outer)| outer.len() > markdown.len() && nests_in(markdown, outer))
-                .min_by_key(|(_, outer)| outer.len())
-                .map(|&(owner, _)| owner);
-            (owner, name)
+        .filter(|(_, count)| **count > 1)
+        .map(|(&(owner, name), count)| {
+            Finding::new(
+                file,
+                None,
+                format!("has {count} entries {name} {}; keep one", place(owner)),
+            )
         })
         .collect()
 }
 
-/// Whether `inner` lies inside `outer`; both slice one page's Markdown, so that is nesting.
-fn nests_in(inner: &str, outer: &str) -> bool {
-    let inner = inner.as_bytes().as_ptr_range();
-    let outer = outer.as_bytes().as_ptr_range();
-    outer.start <= inner.start && inner.end <= outer.end
-}
-
 /// A finding at `file`, the Japanese page, for each entry one language has and the other lacks.
-fn compare(file: &str, english: &BTreeSet<Entry>, japanese: &BTreeSet<Entry>) -> Vec<Finding> {
-    let place = |owner: Option<&str>| match owner {
-        Some(owner) => format!("under {owner}"),
-        None => "at the top level".to_owned(),
-    };
-    let missing = english.difference(japanese).map(|&(owner, name)| {
-        format!(
-            "has no entry {name} {}, which the English keyword reference has; translate it \
-             there",
-            place(owner)
-        )
-    });
-    let extra = japanese.difference(english).map(|&(owner, name)| {
-        format!(
-            "has an entry {name} {} the English keyword reference does not; add it there or \
-             drop it here",
-            place(owner)
-        )
-    });
+fn compare(
+    file: &str,
+    english: &BTreeMap<Entry, usize>,
+    japanese: &BTreeMap<Entry, usize>,
+) -> Vec<Finding> {
+    let missing = english
+        .keys()
+        .filter(|entry| !japanese.contains_key(*entry))
+        .map(|&(owner, name)| {
+            format!(
+                "has no entry {name} {}, which the English keyword reference has; translate it \
+                 there",
+                place(owner)
+            )
+        });
+    let extra = japanese
+        .keys()
+        .filter(|entry| !english.contains_key(*entry))
+        .map(|&(owner, name)| {
+            format!(
+                "has an entry {name} {} the English keyword reference does not; add it there or \
+                 drop it here",
+                place(owner)
+            )
+        });
     missing
         .chain(extra)
         .map(|message| Finding::new(file, None, message))

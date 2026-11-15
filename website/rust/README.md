@@ -10,7 +10,7 @@ The crate's manifest lives in the site's own directory, `website/`, so its packa
 
 `pages()` lists every page, English before Japanese, each directory's index first and its chapters by number, and `page("spec/syntax")` finds one by the path the site serves it at, or by its file (`spec/index`, `spec/lint.md`). A `Page` gives its title and Markdown, the Markdown the site serves at its `index.md`, and its headings with the anchor the site gives each.
 
-`Page::cited` takes the title a citation quotes, in the form `spec/lint "Error vs warning"` takes in the compiler's `--help` and comments, and returns each part of the page with that title: the section of a heading whose title without its number matches, a term a `- **Term.**` list item defines, or the page itself. More than one part makes the citation ambiguous. `Page::anchored` returns the section a link's `#fragment` opens.
+`Page::cited` takes the title a citation quotes, in the form `spec/lint "Error vs warning"` takes in the compiler's `--help` and comments, and returns each part of the page with that title: the section of a heading whose title without its number matches, a term a `- **Term.**` list item defines, with the term of the item it is nested under, or the page itself. More than one part makes the citation ambiguous. `Page::anchored` returns the section a link's `#fragment` opens.
 
 `lines` and `heading` read any Markdown the way the pages are read: which lines fenced code holds, and which line is an ATX heading and at what level.
 
