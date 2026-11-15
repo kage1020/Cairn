@@ -8,6 +8,7 @@ use crate::data_version::{
     BedrockTarget, JavaTarget, UnsupportedTarget, resolve_bedrock_target, resolve_java_target,
 };
 use crate::java_structure::{JavaStructure, OutputExt, prepare_structure};
+use crate::litematic::Litematic;
 use crate::registry::{RegistryPack, builtin_pack};
 
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
@@ -20,7 +21,7 @@ pub enum ResolvedTarget {
 }
 
 impl ResolvedTarget {
-    /// The extension of the structure files this target's backend writes.
+    /// The extension of one array's structure file in this edition's own format.
     #[must_use]
     pub fn output_ext(&self) -> OutputExt {
         match self {
@@ -117,12 +118,14 @@ pub fn supported_versions(pack: &RegistryPack) -> Vec<String> {
         .collect()
 }
 
-/// A structure its edition's backend has checked, waiting to be written.
+/// A structure file its backend has checked, waiting to be written.
 pub enum PreparedStructure<'a> {
     /// A gzip `.nbt` structure.
     Java(JavaStructure<'a>),
     /// An uncompressed `.mcstructure`.
     Bedrock(McStructure<'a>),
+    /// A gzip `.litematic` schematic of a struct or a site.
+    Litematic(Litematic<'a>),
 }
 
 impl PreparedStructure<'_> {
@@ -135,6 +138,7 @@ impl PreparedStructure<'_> {
         let encoded = match self {
             PreparedStructure::Java(structure) => structure.write_gzip(writer),
             PreparedStructure::Bedrock(structure) => structure.write(writer),
+            PreparedStructure::Litematic(schematic) => schematic.write_gzip(writer),
         };
         encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }

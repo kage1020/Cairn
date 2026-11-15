@@ -6,9 +6,13 @@ use std::process::ExitCode;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::build::artifact::{PreparedArtifact, prepare_artifact};
-use cairn_lang_formats::build::run_level::{RunLevelNote, artifact_collision};
+use cairn_lang_formats::build::run_level::{RunLevelNote, artifact_collision, backend_refusal};
+use cairn_lang_formats::data_version::JavaTarget;
+use cairn_lang_formats::java_structure::{OutputExt, output_filename};
+use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
 use cairn_lang_formats::target::{PreparedStructure, ResolvedTarget};
 
+use crate::cli::StructureFormat;
 use crate::lockfile::build_lockfile;
 use crate::name_case::NameCase;
 use crate::report::report_structure_message;
@@ -45,16 +49,64 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
-/// Check every structure against the backend before any I/O, so only I/O can fail a write.
+/// What a build's artifacts are checked against and written by: its target with, on Java, the
+/// file format.
+#[derive(Clone, Copy)]
+pub(crate) enum Backend<'t> {
+    /// A structure file per array, in the target's edition's own format.
+    PerArray(&'t ResolvedTarget),
+    /// A `.litematic` per struct and per site.
+    Litematic(&'t JavaTarget),
+}
+
+impl<'t> Backend<'t> {
+    /// The backend `target` writes through, `format` picking Java's; Bedrock has one format, and
+    /// `cairn compile` refuses `--structure-format` beside it.
+    pub(crate) fn new(target: &'t ResolvedTarget, format: StructureFormat) -> Self {
+        match (target, format) {
+            (ResolvedTarget::Java(java), StructureFormat::Litematic) => Self::Litematic(java),
+            (ResolvedTarget::Java(_), StructureFormat::Nbt) | (ResolvedTarget::Bedrock(_), _) => {
+                Self::PerArray(target)
+            }
+        }
+    }
+}
+
+/// Check every artifact against its backend before any I/O, so only I/O can fail a write.
 pub(crate) fn prepare_artifacts<'a>(
     block_ir: &'a BlockArrayIr,
-    target: &ResolvedTarget,
+    backend: Backend<'_>,
     out_dir: &Path,
     case: NameCase,
 ) -> Result<Vec<(PathBuf, PreparedStructure<'a>)>, PrepareRefusal> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
-    let mut seen_paths: std::collections::HashMap<EntryLocation, (PathBuf, String)> =
-        std::collections::HashMap::with_capacity(block_ir.structures.len());
+    let mut claims = Claims {
+        out_dir,
+        case,
+        litematic: matches!(backend, Backend::Litematic(_)),
+        seen: std::collections::HashMap::with_capacity(block_ir.structures.len()),
+    };
+    let target = match backend {
+        Backend::PerArray(target) => target,
+        Backend::Litematic(java) => {
+            for file in litematic_files(block_ir) {
+                let (scope, stem) = (file.scope.clone(), file.stem.clone());
+                let schematic = prepare_litematic(file, java).map_err(|err| {
+                    let mut refusal = backend_refusal(&scope, &err.to_string());
+                    if let Some(fix) = litematic_fix(&err) {
+                        refusal
+                            .notes
+                            .push(RunLevelNote::Line(format!("note: {fix}")));
+                    }
+                    report_structure_message(&refusal);
+                    ExitCode::from(1)
+                })?;
+                let path = claims.claim(&scope, &output_filename(&stem, OutputExt::Litematic))?;
+                prepared.push((path, PreparedStructure::Litematic(schematic)));
+            }
+            return Ok(prepared);
+        }
+    };
     for (scope, array) in &block_ir.structures {
         let PreparedArtifact {
             file_name,
@@ -67,10 +119,41 @@ pub(crate) fn prepare_artifacts<'a>(
         for warning in &degraded {
             report_structure_message(warning);
         }
-        let path = artifact_path(out_dir, scope, &file_name)?;
+        prepared.push((claims.claim(scope, &file_name)?, structure));
+    }
+    Ok(prepared)
+}
+
+/// How to build a site `refusal` keeps from being one `.litematic`, when another format can.
+fn litematic_fix(refusal: &LitematicError) -> Option<&'static str> {
+    match refusal {
+        LitematicError::CornerOverflow { .. } => Some(
+            "move the placement nearer the site's origin, or compile with `--structure-format \
+             nbt`, which records only where each file's minimum corner sits",
+        ),
+        LitematicError::MetadataOverflow { .. } => Some(
+            "split the site into smaller ones, or compile with `--structure-format nbt`, which \
+             writes a file per placement and walkway",
+        ),
+        _ => None,
+    }
+}
+
+/// The directory entries the artifacts prepared so far write, each with the scope that claimed it.
+struct Claims<'o> {
+    out_dir: &'o Path,
+    case: NameCase,
+    litematic: bool,
+    seen: std::collections::HashMap<EntryLocation, (PathBuf, String)>,
+}
+
+impl Claims<'_> {
+    /// Where `scope`'s artifact `file_name` goes, refused when an earlier scope's goes there too.
+    fn claim(&mut self, scope: &str, file_name: &str) -> Result<PathBuf, PrepareRefusal> {
+        let path = artifact_path(self.out_dir, scope, file_name)?;
         // Distinct scope keys can name one file, and the resolver's `E_OUTPUT_NAME_COLLISION`
         // sees only resolved scopes.
-        let location = entry_location(&path, case).map_err(|err| {
+        let location = entry_location(&path, self.case).map_err(|err| {
             eprintln!(
                 "error: cannot resolve where artifact `{}` would be written: {err}",
                 path.display(),
@@ -79,19 +162,19 @@ pub(crate) fn prepare_artifacts<'a>(
             ExitCode::from(1)
         })?;
         if let Some((first_path, first)) =
-            seen_paths.insert(location, (path.clone(), scope.clone()))
+            self.seen.insert(location, (path.clone(), scope.to_owned()))
         {
             let collision = ArtifactCollision {
                 first,
                 first_path,
-                scope: scope.clone(),
+                scope: scope.to_owned(),
                 path,
+                litematic: self.litematic,
             };
             return Err(PrepareRefusal::Collision(collision));
         }
-        prepared.push((path, structure));
+        Ok(path)
     }
-    Ok(prepared)
 }
 
 /// Why [`prepare_artifacts`] refused.
@@ -110,18 +193,30 @@ pub(crate) struct ArtifactCollision {
     first_path: PathBuf,
     scope: String,
     path: PathBuf,
+    litematic: bool,
 }
 
 impl ArtifactCollision {
-    /// Print the refusal; the note covers spellings only a case-folding file system makes one.
+    /// Print the refusal, with a note on the fix when the collision is one of a format or of a
+    /// case-folding file system.
     pub(crate) fn report(&self) {
         let Self {
             first,
             first_path,
             scope,
             path,
+            litematic,
         } = self;
         let mut refusal = artifact_collision(&path.display().to_string(), first, scope);
+        // Only a site written as one `.litematic` takes a name a struct can also have.
+        let site = first.starts_with("site::") || scope.starts_with("site::");
+        if *litematic && site && first_path == path {
+            refusal.notes.push(RunLevelNote::Line(
+                "note: rename the site or the struct, or compile with `--structure-format nbt`, \
+                 which writes the site as a file per placement"
+                    .to_owned(),
+            ));
+        }
         if first_path != path {
             refusal.notes.push(RunLevelNote::Line(format!(
                 "note: `{}` and `{}` name one file on this file system; rename one of the scopes \
