@@ -160,7 +160,8 @@ sites, is refused rather than written over the other.
 `cairn compile --structure-format litematic` writes a site as one `.litematic` named after the site
 instead, each placement and walkway a region in it named as its `.nbt` file would be. A `struct`
 named after a site would write the same file, and the compile refuses it
-([§12.1.1](/spec/ecosystem-interop/#1211-litematica)).
+([§12.1.1](/spec/ecosystem-interop/#1211-litematica)). A site named after such a device is
+`E_INVALID_SITE_NAME`, whichever format the build writes.
 
 The world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
 the lockfile, by default `<source>.lock` beside the source (`village.crn.lock` for `village.crn`),
