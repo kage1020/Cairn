@@ -80,14 +80,15 @@ space on either side of a `,` inside the triple, two components alone, a fourth 
 A cell outside the footprint, or above the top row the scope as written reaches ([Compilation Model
 §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), is outside the scope. The member
 that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offset=` at or past its
-wall's length. The `from=` and `to=` of a `fill`
-([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and a `raw_block`'s
-`at=` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), read a triple, and no
-other key does yet: `note_block` and the entities that take one are not keywords. A key that reads
-another kind of value treats a triple as any value of the wrong kind. A label or size key refuses
-it as a type mismatch, a member key such as `side=` or `height=` refuses its member as
-`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says
-so with `W_IGNORED_ARGUMENT`.
+wall's length. The `from=` and `to=` of a `fill` ([Blockstate Model
+§6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and the `at=` of a `raw_block`
+([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), a Tier 0 part ([Redstone
+§14.1](/spec/redstone/#tier-0-parts)), a `trapdoor` and a `note_block` ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), read a triple, and no other key
+does yet: the entities that take one are not keywords. A key that reads another kind of value treats
+a triple as any value of the wrong kind. A label or size key refuses it as a type mismatch, a member
+key such as `side=` or `height=` refuses its member as `E_INVALID_MEMBER`, and a key that falls back
+to its default, such as `sym=` or `overhang=`, says so with `W_IGNORED_ARGUMENT`.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
@@ -234,15 +235,15 @@ Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-ha
 `y=N` means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
-building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
+building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `beam`, `level`,
 `pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
-`repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A
-`site` body describes a layout: `place`, `connect`. The keyword table is global, so writing one in
-the other body parses and classifies and then reaches nothing. That is `E_MISPLACED_MEMBER`,
-reported once at the offending row, taking anything indented under it along. A `level` groups the
-other members of a `struct` / `def` body, but not a `circuit` line, whose reservation spans the
-whole scope: a `circuit` line under a `level` reaches nothing either, and is `E_MISPLACED_MEMBER` on
-that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+`trapdoor`, `note_block`, `repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`,
+`raw_block`, `raw_fill`. A `site` body describes a layout: `place`, `connect`. The keyword table is
+global, so writing one in the other body parses and classifies and then reaches nothing. That is
+`E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along. A
+`level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
+reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
+`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
@@ -390,8 +391,9 @@ first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `le
 
 - `ROLE` is the member's keyword.
 - `@SIDE` is the wall the line names, as written: its `side=` (`door@front[0]`), or else a dotted
-  `at=` (`chest@inside.back[0]`, `button@front.outside[0]`). A line that names no wall writes no
-  `@SIDE`: `walls[0]`, `level[1]`.
+  `at=` (`chest@inside.back[0]`, `button@front.outside[0]`). A `beam` over an opening writes its
+  `at=` too, the opening's `id=` in place of a wall (`beam@entry.top[0]`). A line that names no wall
+  writes no `@SIDE`: `walls[0]`, `level[1]`.
 - `N` counts from 0 among the members of the same parent with the same `ROLE` and `@SIDE`, in the
   order of where they stand:
   1. along the wall: `offset=`, or else the column a door anchor in `at=` names
@@ -534,6 +536,12 @@ language server shows the entry's own line on hover.
   - **`y=`.** The row the band is on.
   - **`waterlogged=`.** `true` or `false` written into the stairs' state, or `auto` to let a water
     `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`beam`.** A run of pillar blocks laid along a wall's top row or over an opening. See
+  [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`kind=`.** The kind of beam: `pillar`.
+  - **`at=`.** Where it is laid: `<side>.top` along that wall's top row, or `<id>.top` over the
+    `door` or `window` with that `id=`.
+  - **`axis=`.** The axis its blocks lie along, `x`, `y` or `z`, in place of along its wall.
 - **`level`.** Groups the members under it, lifting each of them `y=` rows above the base plane.
   See [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
   - **`y=`.** How many rows above the base plane its members stand.
@@ -598,6 +606,22 @@ language server shows the entry's own line on hover.
   - **`size=`.** With `single`, the chest is not paired.
   - **`waterlogged=`.** `true` or `false` written into the chest's state, or `auto` to let a water
     `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`trapdoor`.** A trapdoor by a wall or at a coordinate triple. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it faces: by a wall `in`, `out`, `left` or `right`, in place of away
+    from the wall, and at a triple a compass word.
+  - **`half=`.** The half of the cell it sits in: `top` or `bottom`.
+  - **`open=`.** Whether it is built open, `true`, or closed, `false`.
+  - **`waterlogged=`.** `true` or `false` written into the trapdoor's state, or `auto` to let a
+    water `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`note_block`.** A note block at a coordinate triple. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its cell, a coordinate triple.
+  - **`note=`.** Its note, a whole number from 0 to 24.
+  - **`instrument=`.** The name of the instrument it plays.
 - **`repeater`.** A redstone repeater placed by hand, a Tier 0 part. See
   [Redstone §14.1](/spec/redstone/#tier-0-parts).
   - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
