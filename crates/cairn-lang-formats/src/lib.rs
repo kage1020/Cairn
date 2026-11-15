@@ -1,3 +1,7 @@
+//! This crate's Rust API is in the
+//! [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no
+//! promise: any release may change it.
+//!
 //! Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers for the block-array
 //! IR, a reader of each, the import that writes what a reader read as raw members, and the
 //! registry packs and portability reports they rely on, with the lowering a build shares and the

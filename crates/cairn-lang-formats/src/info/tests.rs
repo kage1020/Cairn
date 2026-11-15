@@ -94,7 +94,8 @@ fn a_report_carries_the_lock_it_read_and_sends_the_note_explaining_it() {
     assert_eq!(
         sent,
         [format!(
-            "note: no lockfile at {LOCK}, so no target is verified; `cairn compile` writes one"
+            "note: no lockfile at {LOCK}, so no target is verified; no/such/dir is not a \
+             directory, so `cairn compile --lock {LOCK}` cannot write one there"
         )],
     );
 }
