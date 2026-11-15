@@ -68,6 +68,7 @@ fn lower_theme(name: &str, body: &[ThemeRule], span: crate::error::Span) -> Them
                 attrs,
                 bindings,
                 span: rule_span,
+                ..
             } => {
                 selectors.push(SelectorRule {
                     keyword: keyword.clone(),
@@ -197,11 +198,13 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             rhs: rhs.clone(),
             span: span.clone(),
         }),
+        Statement::UnboundLogic { .. } => {}
         Statement::AssertTruth {
             inputs,
             output,
             rows,
             span,
+            ..
         } => out.asserts.push(AssertIr::Truth {
             inputs: inputs.clone(),
             output: output.clone(),
@@ -213,6 +216,7 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             consequent,
             within,
             span,
+            ..
         } => out.asserts.push(AssertIr::Always {
             antecedent: antecedent.clone(),
             consequent: consequent.clone(),
@@ -224,6 +228,7 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             to,
             bound,
             span,
+            ..
         } => out.asserts.push(AssertIr::Latency {
             from: from.clone(),
             to: to.clone(),

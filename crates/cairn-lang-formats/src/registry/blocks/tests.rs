@@ -60,6 +60,18 @@ fn versions_are_listed_in_resolution_order() {
 }
 
 #[test]
+fn each_version_comes_with_its_own_ids_in_resolution_order() {
+    let index = parse(TWO_VERSIONS).expect("catalog");
+    let owned = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+    let base = owned(&["minecraft:cobblestone", "minecraft:stonebrick"]);
+    let diffed = owned(&["minecraft:cobblestone", "minecraft:stone_bricks"]);
+    assert_eq!(
+        index.ids_by_version().collect::<Vec<_>>(),
+        [("1.0", base.as_slice()), ("1.1", diffed.as_slice())],
+    );
+}
+
+#[test]
 fn a_version_the_catalog_never_names_has_no_table() {
     let index = parse(TWO_VERSIONS).expect("catalog");
     assert!(index.ids_for("1.2").is_none());
