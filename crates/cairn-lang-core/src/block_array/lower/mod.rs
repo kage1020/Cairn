@@ -6,6 +6,7 @@
 //! [`flatten_members`]: members::flatten_members
 
 mod anchor;
+mod beam;
 mod body;
 mod canvas;
 mod cell_box;
@@ -20,6 +21,8 @@ mod fill;
 mod fixture;
 mod geometry_material;
 mod members;
+mod note_block;
+mod opening;
 mod paint;
 mod part;
 mod phase;
@@ -30,7 +33,9 @@ mod roof_kind;
 mod site_floor;
 mod sizing;
 mod stair;
+mod stand;
 mod token_diag;
+mod trapdoor;
 mod waterlogged;
 mod window;
 mod without_target;

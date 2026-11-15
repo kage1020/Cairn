@@ -284,7 +284,7 @@ fn label(message: &serde_json::Value) -> String {
 }
 
 #[test]
-fn initialize_advertises_sync_completion_and_pulled_diagnostics_and_shuts_down_clean() {
+fn initialize_advertises_sync_completion_hover_and_pulled_diagnostics_and_shuts_down_clean() {
     let (server, response) = Server::start();
     assert_eq!(response.get("id"), Some(&serde_json::json!(1)));
     let capabilities = &response["result"]["capabilities"];
@@ -299,6 +299,7 @@ fn initialize_advertises_sync_completion_and_pulled_diagnostics_and_shuts_down_c
         capabilities["diagnosticProvider"]["identifier"],
         serde_json::json!("cairn"),
     );
+    assert_eq!(capabilities["hoverProvider"], serde_json::json!(true));
     server.shutdown();
 }
 
