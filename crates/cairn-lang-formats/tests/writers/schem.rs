@@ -243,7 +243,7 @@ fn a_states_properties_are_spelled_sorted_by_name() {
 }
 
 #[test]
-fn only_the_last_block_entity_at_each_voxel_of_the_grid_is_written() {
+fn only_the_last_block_entity_at_each_voxel_is_written() {
     let mut array = comparator_array("minecraft:comparator");
     let base = array.block_entities[0].clone();
     let at = |pos, id: &str| BlockEntity {
@@ -253,8 +253,6 @@ fn only_the_last_block_entity_at_each_voxel_of_the_grid_is_written() {
     };
     array.block_entities = vec![
         at((1, 1, 1), "minecraft:first"),
-        at((0, 0, 3), "minecraft:off_the_grid"),
-        at((u32::MAX, 0, 0), "minecraft:far_off_the_grid"),
         at((1, 1, 1), "minecraft:last"),
         at((0, 0, 0), "minecraft:origin"),
     ];
@@ -276,6 +274,24 @@ fn only_the_last_block_entity_at_each_voxel_of_the_grid_is_written() {
     let (origin, last) = (string("minecraft:origin"), string("minecraft:last"));
     let (at_origin, at_one) = (Tag::IntArray(vec![0, 0, 0]), Tag::IntArray(vec![1, 1, 1]));
     assert_eq!(written, [(&origin, &at_origin), (&last, &at_one)]);
+}
+
+#[test]
+fn a_block_entity_off_the_grid_is_refused() {
+    let mut array = comparator_array("minecraft:comparator");
+    array.block_entities[0].pos = (0, 0, 3);
+    let err = prepare_schem(struct_file(&array), &target("1.21.4")).expect_err("off the grid");
+    assert!(
+        matches!(
+            &err,
+            SchemError::Structure(JavaStructureError::BlockEntityOutsideGrid {
+                id,
+                pos: (0, 0, 3),
+                dims: (2, 2, 3),
+            }) if id == "minecraft:comparator"
+        ),
+        "got {err:?}"
+    );
 }
 
 #[test]

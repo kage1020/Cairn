@@ -14,7 +14,7 @@ block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem`
 | `litematic` | struct ごと、site ごとに 1 つの Litematica schematic ([§12.1.1](#1211-litematica)) | 1 ファイルにまとめ、配置ごと、通路ごとに 1 つのリージョン |
 | `schem` | struct、配置、通路ごとに 1 つの Sponge Schematic ([§12.1.2](#1212-sponge-schematic)) | 配置ごと、通路ごとに 1 ファイル。それぞれ site の中の原点だけずらす |
 
-形式で変わるのはファイルだけです。block array は同じで、成果物は同じ規則で名付け、同じ衝突で拒否し、ロックファイルはどの形式で書き出してもバイト単位で同じです。Bedrock の構造形式は 1 つだけなので、`--edition bedrock` と一緒に `--structure-format` を指定すると使い方の誤り (終了コード 2) になり、ソースを読む前に拒否します。
+形式で変わるのはファイルだけです。block array は同じで、ロックファイルはどの形式で書き出してもバイト単位で同じです。成果物は同じ規則で名付けて同じ検査で拒否し、`litematic` ではこの検査が同じ名前の struct と site も捕らえます。Bedrock の構造形式は 1 つだけなので、`--edition bedrock` と一緒に `--structure-format` を指定すると使い方の誤り (終了コード 2) になり、ソースを読む前に拒否します。
 
 ### 12.1.1 Litematica
 
@@ -23,7 +23,7 @@ block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem`
 ルートには次のものを入れます。
 
 - `MinecraftDataVersion` はターゲットの DataVersion、`Version` はそのリリース向けの Litematica が読める schematic のバージョンで、1.20.5 の DataVersion (3837) より前なら 6、それ以降なら 7 です。`SubVersion` は 1 です。
-- `Metadata`: ファイルの名前にあたる `Name`、ソースには作者を書かないので `Cairn` とする `Author`、空の `Description`、`RegionCount`、リージョンのボクセル数を合計した `TotalVolume`、そのうち air、cave air、void air 以外の数を数えた `TotalBlocks`、すべてのリージョンを囲む箱の大きさの `EnclosingSize` です。作成時刻、更新時刻、プレビュー画像は入れません。そのため、同じソースからは常に同じバイト列が書き出されます。
+- `Metadata`: ファイルの名前にあたる `Name`、ソースには作者を書かないので `Cairn` とする `Author`、空の `Description`、`RegionCount`、リージョンのボクセル数を合計した `TotalVolume`、そのうち air、cave air、void air 以外の数を数えた `TotalBlocks`、すべてのリージョンを囲む箱の大きさの `EnclosingSize` です。作成時刻、更新時刻、プレビュー画像は入れないので、同じソースからは常に同じバイト列が書き出されます。
 - `Regions`: 各リージョンには、最小の角にあたる `Position` と、どの軸も正の `Size` を入れます。`BlockStatePalette` には、リージョンのブロック状態を air を先頭にして並べ、どの DataVersion でも `Name` と `Properties` のキーで書きます。構造ファイルが `id` と `properties` に切り替わる版でも、Litematica はこのキーのままだからです。`BlockStates` には、各ボクセルのパレット番号を `(y, z, x)` の順に、最大の番号に必要なビット数 (2 ビット以上) で、各 long の下位から詰めます。1 つの long の残りに収まらない番号は、次の long にまたがります。`TileEntities` には、各ブロックエンティティを `.nbt` の書き出しが `nbt` に書くのと同じ形で入れ、リージョンの角からの `x`、`y`、`z` を加えます。`Entities`、`PendingBlockTicks`、`PendingFluidTicks` は空です。
 
 ### 12.1.2 Sponge Schematic

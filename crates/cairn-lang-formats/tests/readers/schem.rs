@@ -1,16 +1,18 @@
 //! `read_schem` over what the writer wrote, and over files only another tool would write.
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArrayIr, BlockState, Dims, PaletteIndex};
+use cairn_lang_core::block_array::{
+    BlockArrayIr, BlockState, Dims, MAX_STRUCTURE_VOLUME, PaletteIndex,
+};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::schem::{
     SchemReadError, SpongeSchematic, prepare_schem, read_schem, schem_files,
 };
 use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
-use cairn_lang_nbt::{NbtReadError, write_java_gzip};
+use cairn_lang_nbt::{NbtReadError, write_java_gzip, write_java_uncompressed};
 
-use crate::common::{comparator_array, ir_of, latest, lower_example, volume_of, wide_array};
+use crate::common::{comparator_array, gzip, ir_of, latest, lower_example, volume_of, wide_array};
 
 fn target(version: &str) -> JavaTarget {
     resolve_java_target(version).expect("a targetable version")
@@ -144,6 +146,22 @@ fn blocks_mut(schematic: &mut Compound) -> &mut Compound {
     }
 }
 
+/// The path and expectation each schematic is refused with.
+fn malformed(schematics: impl IntoIterator<Item = Compound>) -> Vec<(String, &'static str)> {
+    schematics
+        .into_iter()
+        .map(|schematic| match read_error(&v3_bytes(schematic)) {
+            SchemReadError::Malformed { path, expected } => (path, expected),
+            other => panic!("not malformed: {other:?}"),
+        })
+        .collect()
+}
+
+/// A one-voxel schematic of air, in version 3.
+fn air_v3() -> Compound {
+    schematic_v3([1, 1, 1], &[("minecraft:air", 0)], &[0])
+}
+
 #[test]
 fn a_version_2_file_reads_with_its_fields_beside_each_block_entitys_id() {
     let mut palette = Compound::new();
@@ -201,20 +219,21 @@ fn a_version_2_file_reads_with_its_fields_beside_each_block_entitys_id() {
         data_version: 3700,
         metadata: compound([("Name", string("v2"))]),
         offset: (-1, 64, 2),
-        volume: BlockVolume {
-            dims: Dims { x: 3, y: 1, z: 1 },
-            palette: vec![
+        volume: BlockVolume::new(
+            Dims { x: 3, y: 1, z: 1 },
+            vec![
                 BlockState::air(),
                 BlockState::bare("minecraft:stone"),
                 lever,
             ],
-            voxels: vec![PaletteIndex(1), PaletteIndex(0), PaletteIndex(2)],
-            block_entities: vec![StoredBlockEntity {
+            vec![PaletteIndex(1), PaletteIndex(0), PaletteIndex(2)],
+            vec![StoredBlockEntity {
                 pos: (2, 0, 0),
                 id: "minecraft:sign".to_owned(),
                 data: compound([("Text1", string("hi"))]),
             }],
-        },
+        )
+        .expect("a volume"),
         entities: vec![creeper],
     };
     assert_eq!(
@@ -233,19 +252,20 @@ fn a_sparse_palette_reads_back_in_index_order() {
     let read = read_schem(v3_bytes(schematic).as_slice()).expect("the file reads");
     assert_eq!(
         read.volume,
-        BlockVolume {
-            dims: Dims { x: 3, y: 1, z: 1 },
-            palette: vec![BlockState::air(), BlockState::bare("minecraft:stone")],
-            voxels: vec![PaletteIndex(1), PaletteIndex(0), PaletteIndex(1)],
-            block_entities: vec![],
-        }
+        BlockVolume::new(
+            Dims { x: 3, y: 1, z: 1 },
+            vec![BlockState::air(), BlockState::bare("minecraft:stone")],
+            vec![PaletteIndex(1), PaletteIndex(0), PaletteIndex(1)],
+            vec![],
+        )
+        .expect("a volume")
     );
     assert_eq!((read.metadata, read.offset), (Compound::new(), (0, 0, 0)));
 }
 
 #[test]
 fn a_version_without_a_data_version_is_refused() {
-    let mut schematic = schematic_v3([1, 1, 1], &[("minecraft:air", 0)], &[0]);
+    let mut schematic = air_v3();
     schematic.insert("Version", Tag::Int(1));
     let err = read_error(&v3_bytes(schematic));
     assert!(
@@ -324,12 +344,11 @@ fn a_palette_past_a_block_arrays_is_refused() {
 
 #[test]
 fn a_field_of_the_wrong_shape_is_refused_by_its_path() {
-    let base = || schematic_v3([1, 1, 1], &[("minecraft:air", 0)], &[0]);
-    let mut no_width = base();
+    let mut no_width = air_v3();
     no_width.entries.shift_remove("Width");
-    let mut short_offset = base();
+    let mut short_offset = air_v3();
     short_offset.insert("Offset", Tag::IntArray(vec![0, 0]));
-    let mut no_palette = base();
+    let mut no_palette = air_v3();
     blocks_mut(&mut no_palette).entries.shift_remove("Palette");
     let unparsed = schematic_v3([1, 1, 1], &[("minecraft:lever[face]", 0)], &[0]);
     let twice = schematic_v3(
@@ -337,39 +356,25 @@ fn a_field_of_the_wrong_shape_is_refused_by_its_path() {
         &[("minecraft:air", 0), ("minecraft:stone", 0)],
         &[0],
     );
-    let mut not_int = base();
+    let mut not_int = air_v3();
     blocks_mut(&mut not_int).insert(
         "Palette",
         Tag::Compound(compound([("minecraft:air", string("0"))])),
     );
-    let mut no_data = base();
+    let mut no_data = air_v3();
     blocks_mut(&mut no_data).entries.shift_remove("Data");
     let cut_short = schematic_v3([1, 1, 1], &[("minecraft:air", 0)], &[0x80]);
-    let mut outside = base();
-    let chest = compound([
-        ("Pos", Tag::IntArray(vec![1, 0, 0])),
-        ("Id", string("minecraft:chest")),
-    ]);
-    blocks_mut(&mut outside).insert("BlockEntities", Tag::List(List::of_compounds(vec![chest])));
-    let refused: Vec<(String, &str)> = [
-        no_width,
-        short_offset,
-        no_palette,
-        unparsed,
-        twice,
-        not_int,
-        no_data,
-        cut_short,
-        outside,
-    ]
-    .into_iter()
-    .map(|schematic| match read_error(&v3_bytes(schematic)) {
-        SchemReadError::Malformed { path, expected } => (path, expected),
-        other => panic!("not malformed: {other:?}"),
-    })
-    .collect();
     assert_eq!(
-        refused,
+        malformed([
+            no_width,
+            short_offset,
+            no_palette,
+            unparsed,
+            twice,
+            not_int,
+            no_data,
+            cut_short,
+        ]),
         [
             ("Schematic.Width".to_owned(), "a short"),
             ("Schematic.Offset".to_owned(), "an int array of three"),
@@ -394,10 +399,73 @@ fn a_field_of_the_wrong_shape_is_refused_by_its_path() {
                 "Schematic.Blocks.Data".to_owned(),
                 "an array of whole varints"
             ),
+        ]
+    );
+}
+
+#[test]
+fn a_block_entity_or_entity_of_the_wrong_shape_is_refused_by_its_index_and_field() {
+    let with_entities = |entities: Vec<Compound>| {
+        let mut schematic = air_v3();
+        blocks_mut(&mut schematic).insert("BlockEntities", Tag::List(List::of_compounds(entities)));
+        schematic
+    };
+    let chest = |pos: Vec<i32>| {
+        compound([
+            ("Pos", Tag::IntArray(pos)),
+            ("Id", string("minecraft:chest")),
+        ])
+    };
+    let no_id = with_entities(vec![compound([("Pos", Tag::IntArray(vec![0, 0, 0]))])]);
+    let two_ints = with_entities(vec![chest(vec![0, 0])]);
+    let negative = with_entities(vec![chest(vec![0, -1, 0])]);
+    let outside = with_entities(vec![chest(vec![0, 0, 0]), chest(vec![1, 0, 0])]);
+    let mut data_not_compound = chest(vec![0, 0, 0]);
+    data_not_compound.insert("Data", Tag::Int(0));
+    let data_not_compound = with_entities(vec![data_not_compound]);
+    let mut ints = air_v3();
+    blocks_mut(&mut ints).insert(
+        "BlockEntities",
+        Tag::List(List::of_tags(3, vec![Tag::Int(0)])),
+    );
+    let mut entities_of_ints = air_v3();
+    entities_of_ints.insert("Entities", Tag::List(List::of_tags(3, vec![Tag::Int(0)])));
+    assert_eq!(
+        malformed([
+            no_id,
+            two_ints,
+            negative,
+            outside,
+            data_not_compound,
+            ints,
+            entities_of_ints,
+        ]),
+        [
+            (
+                "Schematic.Blocks.BlockEntities[0].Id".to_owned(),
+                "a block entity id string"
+            ),
+            (
+                "Schematic.Blocks.BlockEntities[0].Pos".to_owned(),
+                "an int array of three"
+            ),
+            (
+                "Schematic.Blocks.BlockEntities[0].Pos".to_owned(),
+                "three ints, each 0 or more"
+            ),
+            (
+                "Schematic.Blocks.BlockEntities[1].Pos".to_owned(),
+                "a voxel inside the schematic's `Width`, `Height` and `Length`"
+            ),
+            (
+                "Schematic.Blocks.BlockEntities[0].Data".to_owned(),
+                "a compound"
+            ),
             (
                 "Schematic.Blocks.BlockEntities".to_owned(),
-                "a list of block entities, each an `Id` and a `Pos` inside the schematic"
+                "a list of compounds"
             ),
+            ("Schematic.Entities".to_owned(), "a list of compounds"),
         ]
     );
 }
@@ -409,4 +477,135 @@ fn bytes_that_are_not_gzip_are_an_nbt_error() {
         matches!(err, SchemReadError::Nbt(NbtReadError::Io(_))),
         "got {err:?}"
     );
+}
+
+#[test]
+fn a_version_it_does_not_read_is_reported_over_a_part_it_would_explain() {
+    let mut schematic = air_v3();
+    blocks_mut(&mut schematic).insert(
+        "BlockEntities",
+        Tag::List(List::of_compounds(vec![Compound::new()])),
+    );
+    schematic.insert("Version", Tag::Int(4));
+    let err = read_error(&v3_bytes(schematic.clone()));
+    assert!(
+        matches!(err, SchemReadError::UnsupportedVersion { version: 4 }),
+        "got {err:?}"
+    );
+    schematic.insert("Version", Tag::Int(3));
+    let err = read_error(&v3_bytes(schematic));
+    assert!(
+        matches!(
+            &err,
+            SchemReadError::Malformed { path, expected: "a block entity id string" }
+                if path == "Schematic.Blocks.BlockEntities[0].Id"
+        ),
+        "got {err:?}"
+    );
+}
+
+/// A gzip-wrapped version 2 root that opens and then holds `header`, which cuts it short.
+fn root_opening_with(header: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![10, 0, 0];
+    bytes.extend(header);
+    gzip(&bytes)
+}
+
+#[test]
+fn a_list_or_array_longer_than_a_schematic_can_need_is_refused_before_it_is_read() {
+    // A voxel's varint takes at most three bytes.
+    let limit = MAX_STRUCTURE_VOLUME * 3;
+    let mut header = vec![7, 0, 9];
+    header.extend(b"BlockData");
+    header.extend(i32::try_from(limit + 1).expect("an i32").to_be_bytes());
+    let err = read_error(&root_opening_with(&header));
+    assert!(
+        matches!(
+            err,
+            SchemReadError::Nbt(NbtReadError::TooLong {
+                context: "byte_array",
+                len,
+                limit: l,
+                offset: 15,
+            }) if len == limit + 1 && l == limit
+        ),
+        "got {err:?}"
+    );
+
+    let mut header = vec![9, 0, 13];
+    header.extend(b"BlockEntities");
+    header.push(10);
+    header.extend(
+        i32::try_from(MAX_STRUCTURE_VOLUME + 1)
+            .expect("an i32")
+            .to_be_bytes(),
+    );
+    let err = read_error(&root_opening_with(&header));
+    assert!(
+        matches!(
+            err,
+            SchemReadError::Nbt(NbtReadError::TooLong {
+                context: "list",
+                len,
+                limit,
+                offset: 20,
+            }) if len == MAX_STRUCTURE_VOLUME + 1 && limit == MAX_STRUCTURE_VOLUME
+        ),
+        "got {err:?}"
+    );
+}
+
+/// The kind of the gzip failure `bytes` are refused with.
+fn gzip_error(bytes: &[u8]) -> std::io::ErrorKind {
+    match read_error(bytes) {
+        SchemReadError::Nbt(NbtReadError::Io(io)) => io.kind(),
+        other => panic!("not a gzip failure: {other:?}"),
+    }
+}
+
+#[test]
+fn a_gzip_trailer_that_does_not_match_is_refused() {
+    let bytes = v3_bytes(air_v3());
+    let mut crc = bytes.clone();
+    let at = crc.len() - 8;
+    crc[at] ^= 1;
+    let mut size = bytes.clone();
+    let at = size.len() - 1;
+    size[at] ^= 1;
+    let kinds = [crc.as_slice(), size.as_slice(), &bytes[..bytes.len() - 8]].map(gzip_error);
+    assert_eq!(
+        kinds,
+        [
+            std::io::ErrorKind::InvalidInput,
+            std::io::ErrorKind::InvalidInput,
+            std::io::ErrorKind::UnexpectedEof,
+        ]
+    );
+}
+
+#[test]
+fn input_past_the_root_is_refused_in_the_stream_and_after_the_gzip_member() {
+    let root = compound([("Schematic", Tag::Compound(air_v3()))]);
+    let mut uncompressed = Vec::new();
+    write_java_uncompressed(&mut uncompressed, "", &root).expect("the root writes");
+    let end = uncompressed.len() as u64;
+    let mut in_stream = uncompressed.clone();
+    in_stream.push(0);
+    let err = read_error(&gzip(&in_stream));
+    assert!(
+        matches!(err, SchemReadError::Nbt(NbtReadError::TrailingBytes { offset }) if offset == end),
+        "got {err:?}"
+    );
+
+    let mut second_member = gzip(&uncompressed);
+    second_member.extend(gzip(&uncompressed));
+    let err = read_error(&second_member);
+    assert!(
+        matches!(err, SchemReadError::Nbt(NbtReadError::TrailingBytes { offset }) if offset == end),
+        "got {err:?}"
+    );
+
+    let mut garbage = gzip(&uncompressed);
+    garbage.extend(b"not a gzip member");
+    assert_eq!(gzip_error(&garbage), std::io::ErrorKind::InvalidInput);
 }

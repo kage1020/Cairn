@@ -18,9 +18,10 @@ format `--structure-format` names:
 | `schem` | a Sponge Schematic per struct, placement and walkway ([§12.1.2](#1212-sponge-schematic)) | a file per placement and per walkway, each offset by its origin in the site |
 
 The format changes the files and nothing else. The block array is the same, an artifact is named by
-the same rule and refused on the same collisions, and the lockfile is the same, byte for byte,
-whichever format is written. Bedrock has one structure format, so `--structure-format` with
-`--edition bedrock` is a usage error, exit 2, refused before the source is read.
+the same rule and refused by the same guards, which under `litematic` also catch a struct and a
+site of one name, and the lockfile is the same, byte for byte, whichever format is written.
+Bedrock has one structure format, so `--structure-format` with `--edition bedrock` is a usage
+error, exit 2, refused before the source is read.
 
 ### 12.1.1 Litematica
 
