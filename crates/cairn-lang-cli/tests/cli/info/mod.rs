@@ -4,3 +4,4 @@ mod circuit;
 mod intended_targets;
 mod parity;
 mod report;
+mod verified_target;
