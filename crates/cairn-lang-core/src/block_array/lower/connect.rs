@@ -110,12 +110,10 @@ pub(super) fn lower_connects(
             .filter(|cell| !blocked.contains(cell))
             .collect();
         report_strip_overlaps(connect, &strip, (&from_key, &to_key), placed, diagnostics);
-        if routed {
-            debug_assert_eq!(
-                skipped, 0,
-                "walkway `{scope_key}` laid a routed path with {skipped} collisions",
-            );
-        }
+        debug_assert!(
+            !routed || skipped == 0,
+            "walkway `{scope_key}` laid a routed path with {skipped} collisions",
+        );
         if skipped > 0 {
             let note = walkway_blocked_note(
                 connect,
