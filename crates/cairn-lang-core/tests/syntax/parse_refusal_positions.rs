@@ -425,6 +425,55 @@ fn an_x_key_apart_from_a_size_is_an_ordinary_key() {
     );
 }
 
+#[test]
+fn a_block_id_on_a_header_is_refused_at_its_colon() {
+    for (source, expected) in [
+        (
+            "struct s size=3x3 minecraft:stone\n",
+            "1:28: this `:` makes `minecraft:stone` a block id, which a `struct` header never \
+             reads: delete the block id",
+        ),
+        (
+            "def d size=3x3 minecraft:oak_log[axis=x]:\n",
+            "1:25: this `:` makes `minecraft:oak_log` a block id, which a `def` header never \
+             reads: delete the block id",
+        ),
+        (
+            "site s minecraft:stone\n",
+            "1:17: this `:` makes `minecraft:stone` a block id, which a `site` header never reads: \
+             delete the block id",
+        ),
+        (
+            "theme t minecraft:stone:\n",
+            "1:18: this `:` makes `minecraft:stone` a block id, which a `theme` header never \
+             reads: delete the block id",
+        ),
+    ] {
+        assert_eq!(refusal(source), expected, "{source:?}");
+    }
+}
+
+/// A header's bare values stand before its `:`, so a word after the `:` is refused where it stands.
+#[test]
+fn a_word_after_a_headers_colon_is_refused_at_the_word() {
+    for (source, expected) in [
+        (
+            "struct s:stone\n",
+            "1:10: expected end of line, got identifier `stone`",
+        ),
+        (
+            "struct s size=3x3:stone\n",
+            "1:19: expected end of line, got identifier `stone`",
+        ),
+        (
+            "struct s size=3x3: tall\n",
+            "1:20: expected end of line, got identifier `tall`",
+        ),
+    ] {
+        assert_eq!(refusal(source), expected, "{source:?}");
+    }
+}
+
 // -- logic expressions ------------------------------------------------------
 
 /// An infix primitive starts no expression, so after the name it is the `=` that is missing.

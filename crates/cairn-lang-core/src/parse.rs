@@ -414,7 +414,7 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident_spanned()?;
         let (_, positional) =
             self.parse_line_tail(Some(("a `theme` header", HEADER_WITHOUT_ARGUMENTS)))?;
-        self.consume_optional_colon();
+        self.consume_header_colon("theme", &positional)?;
         self.expect_newline()?;
         let mut requires = Vec::new();
         let body = if self.peek_is(&TokenKind::Indent) {
@@ -508,7 +508,7 @@ impl<'a> Parser<'a> {
     fn parse_def_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
         let (args, positional) = self.parse_line_tail(None)?;
-        self.consume_optional_colon();
+        self.consume_header_colon("def", &positional)?;
         self.expect_newline()?;
         let (requires, body) = self.parse_optional_command_body(RequiresPolicy::Accepted)?;
         let span = start_byte..self.last_content_byte();
@@ -527,7 +527,7 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident_spanned()?;
         let (_, positional) =
             self.parse_line_tail(Some(("a `site` header", HEADER_WITHOUT_ARGUMENTS)))?;
-        self.consume_optional_colon();
+        self.consume_header_colon("site", &positional)?;
         self.expect_newline()?;
         let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
         let span = start_byte..self.last_content_byte();
@@ -543,7 +543,7 @@ impl<'a> Parser<'a> {
     fn parse_struct_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
         let (args, positional) = self.parse_line_tail(None)?;
-        self.consume_optional_colon();
+        self.consume_header_colon("struct", &positional)?;
         self.expect_newline()?;
         let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
         let span = start_byte..self.last_content_byte();
@@ -2015,10 +2015,34 @@ impl<'a> Parser<'a> {
             )
     }
 
-    fn consume_optional_colon(&mut self) {
-        if self.peek_is(&TokenKind::Colon) {
-            self.advance();
+    /// Take a header's optional `:`, refusing one that joins the bare value before it to a name
+    /// after it, since that makes a block id and no header reads one.
+    fn consume_header_colon(
+        &mut self,
+        keyword: &str,
+        positional: &[Value],
+    ) -> Result<(), ParseError> {
+        let Some(colon) = self.peek().filter(|t| t.kind == TokenKind::Colon) else {
+            return Ok(());
+        };
+        let namespace = positional.last().filter(|value| {
+            matches!(value.kind, ValueKind::Ident(_)) && value.span.end == colon.span.start
+        });
+        let path = self.tokens.get(self.pos + 1).filter(|path| {
+            matches!(path.kind, TokenKind::Ident(_)) && path.span.start == colon.span.end
+        });
+        if let (Some(namespace), Some(path)) = (namespace, path) {
+            let id = &self.source[namespace.span.start..path.span.end];
+            return Err(ParseError::Syntax {
+                position: colon.position,
+                message: format!(
+                    "this `:` makes `{id}` a block id, which a `{keyword}` header never reads: \
+                     delete the block id"
+                ),
+            });
         }
+        self.advance();
+        Ok(())
     }
 
     fn skip_newlines(&mut self) {
