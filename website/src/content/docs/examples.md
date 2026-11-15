@@ -40,6 +40,7 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 | File | Shows |
 |---|---|
 | [`storeroom.crn`](https://github.com/kage1020/Cairn/blob/main/examples/storeroom.crn) | `chest` against the walls: each faces away from its wall, two side by side pair, and `size=single` keeps two apart. |
+| [`workshop.crn`](https://github.com/kage1020/Cairn/blob/main/examples/workshop.crn) | `beam`, `trapdoor` and `note_block`: logs laid over a door and a window and along the side walls' tops, a trapdoor hung open against a wall and one laid high at a coordinate triple, and a note block with the note and instrument its line writes. |
 | [`control-room.crn`](https://github.com/kage1020/Cairn/blob/main/examples/control-room.crn) | Every sensor and actuator against the walls: a lever and a button hung facing away from theirs, a daylight detector, an observer and a sticky piston turned upward, a lamp, a dispenser facing out, and the piston bound through a patch. |
 | [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`: a sand bed painted with a material, then water poured around what stands in the tank, waterlogging a pane divider and a chest while `waterlogged=false` keeps another dry. |
 
