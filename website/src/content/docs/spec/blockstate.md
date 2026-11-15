@@ -218,12 +218,12 @@ door's block is recorded on the door and not on the wall it was set into, and a 
 cells survive records nothing. `cairn lower --format json` prints the record under `members`, keyed
 like `structures`. Each record names its member by keyword, by `id=` where the line writes one, and
 by its address ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)), which is what lets two
-builds be compared member by member. A body lists its
-members in the order of the first cell each owns, so reordering lines that share no cell leaves the
-record as it was, as it leaves the grid ([Compilation Model
-§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The record is made each time a
-body is lowered: its block ids are those the lowering's target resolved, a theme's edition variant
-and a pinned version's override included, and its property names are the canonical vocabulary's.
+builds be compared member by member. A body lists its members in the order of the first cell each
+owns, so reordering lines that share no cell leaves the record as it was, as it leaves the grid
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The record
+is made each time a body is lowered: its block ids are those the lowering's target resolved, a
+theme's edition variant and a pinned version's override included, and its property names are the
+canonical vocabulary's.
 
 In place of `type`, a member carries the `role` its keyword classifies to.
 
