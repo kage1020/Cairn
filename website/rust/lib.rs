@@ -146,7 +146,7 @@ impl Page {
     fn terms(&self, headings: &[(usize, Heading)]) -> Vec<(&'static str, Part)> {
         let markdown = self.markdown;
         let all: Vec<Line<'static>> = lines(markdown).collect();
-        let mut terms = Vec::new();
+        let mut terms: Vec<(&'static str, Part)> = Vec::new();
         for (index, line) in all.iter().enumerate() {
             if line.fenced {
                 continue;
@@ -182,11 +182,19 @@ impl Page {
                 .iter()
                 .rfind(|(start, _)| *start < line.start)
                 .map(|(_, heading)| heading.slug.clone());
+            let item = &markdown[line.start..end];
+            // An earlier item either ends before this one or holds it, so the last holder is the
+            // innermost.
+            let within = terms.iter().rev().find_map(|(outer, part)| match part {
+                Part::Term { markdown, .. } if holds(markdown, item) => Some(*outer),
+                _ => None,
+            });
             terms.push((
                 name,
                 Part::Term {
-                    markdown: &markdown[line.start..end],
+                    markdown: item,
                     section,
+                    within,
                 },
             ));
         }
@@ -226,10 +234,12 @@ pub enum Part {
     Section(Heading),
     /// The list item defining a term.
     Term {
-        /// The item, its continuation lines included.
+        /// The item, its continuation lines and the items nested under it included.
         markdown: &'static str,
         /// The `#fragment` of the innermost section holding it, absent above the first heading.
         section: Option<String>,
+        /// The term of the innermost item it is nested under, absent when no term's item holds it.
+        within: Option<&'static str>,
     },
 }
 
@@ -301,6 +311,13 @@ pub fn heading(line: &str) -> Option<(usize, &str)> {
         return Some((level, unclosed.trim_end()));
     }
     Some((level, text))
+}
+
+/// Whether `inner` lies inside `outer`, two slices of one page's Markdown.
+fn holds(outer: &str, inner: &str) -> bool {
+    let outer = outer.as_bytes().as_ptr_range();
+    let inner = inner.as_bytes().as_ptr_range();
+    outer.start <= inner.start && inner.end <= outer.end
 }
 
 fn indent_of(line: &str) -> usize {
