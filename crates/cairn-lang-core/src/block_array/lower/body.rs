@@ -127,9 +127,15 @@ pub(super) fn lower_body_to_block_array<'a>(
         wall_top: max_wall_top,
         rise: roof_extra,
         wall_column,
+        painting_walls,
         written: Written::of(&written_members, interior_w, interior_h).raised_to(imported),
         patched,
         repeats,
+        openings: flattened
+            .iter()
+            .copied()
+            .filter(|(_, member)| matches!(member.role, MemberRole::Door | MemberRole::Window))
+            .collect(),
     };
     let (canvas, split_doors, derived) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();

@@ -41,12 +41,17 @@ pub(super) struct StructCtx<'a> {
     pub(super) rise: u32,
     /// Every row the walls members paint, gaps and all; ports read this same column.
     pub(super) wall_column: WallColumn,
+    /// The `(level y, height)` of each `walls` member that paints.
+    pub(super) painting_walls: Vec<(u32, u32)>,
     /// The struct as written, which a member's own line is judged against.
     pub(super) written: Written,
     /// The span start of each member a well-formed actuator patch binds a signal to.
     pub(super) patched: HashSet<usize>,
     /// The copies of each raw member a `raw_repeat` holds.
     pub(super) repeats: Repeats,
+    /// Every `door` and `window` of the paint set, with its level's `y` offset, for a `beam` to
+    /// rest on.
+    pub(super) openings: Vec<(u32, &'a Member)>,
 }
 
 impl StructCtx<'_> {
@@ -142,7 +147,9 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         MemberRole::Floor | MemberRole::Walls | MemberRole::Fill => {
             MemberDisposition::Paints(Phase::Massing)
         }
-        MemberRole::Roof | MemberRole::Stair => MemberDisposition::Paints(Phase::Envelope),
+        MemberRole::Roof | MemberRole::Stair | MemberRole::Beam => {
+            MemberDisposition::Paints(Phase::Envelope)
+        }
         MemberRole::Door | MemberRole::Window => MemberDisposition::Paints(Phase::Openings),
         MemberRole::PressurePlate
         | MemberRole::Lever
@@ -153,6 +160,8 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         | MemberRole::Piston
         | MemberRole::Dispenser
         | MemberRole::Chest
+        | MemberRole::Trapdoor
+        | MemberRole::NoteBlock
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
@@ -295,6 +304,7 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::Door
         | MemberRole::Window
         | MemberRole::Stair
+        | MemberRole::Beam
         | MemberRole::PressurePlate
         | MemberRole::Lever
         | MemberRole::Button
@@ -304,6 +314,8 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::Piston
         | MemberRole::Dispenser
         | MemberRole::Chest
+        | MemberRole::Trapdoor
+        | MemberRole::NoteBlock
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
