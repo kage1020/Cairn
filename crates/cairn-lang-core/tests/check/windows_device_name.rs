@@ -1,5 +1,5 @@
-//! A `place id=` or `struct` name is an artifact's file stem, so `check` refuses one that spells a
-//! device name Windows reserves, on every host; a site name or port id is only ever one part of a
+//! A `place id=`, `struct` or `site` name is an artifact's file stem, so `check` refuses one that
+//! spells a device name Windows reserves, on every host; a port id is only ever one part of a
 //! walkway's file name, so it may spell one.
 
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
@@ -292,13 +292,59 @@ fn a_struct_whose_name_only_resembles_a_device_is_not_refused() {
     }
 }
 
-/// Each is one part of a walkway's name, which a device name never is.
+/// A site of one placement alone.
+fn site_named(name: &str) -> String {
+    format!("{PRELUDE}site {name}:\n  place id=a use=hut theme=plain at=origin\n")
+}
+
+/// Under `--structure-format litematic` a site is written under its own name, and a source is
+/// refused for it whichever format the build writes.
 #[test]
-fn a_site_and_a_port_may_spell_a_device() {
+fn a_site_named_after_a_device_is_refused_in_any_case() {
+    for name in ["CON", "prn", "Aux", "nUL", "com0", "LPT9"] {
+        let source = site_named(name);
+        assert_eq!(codes(&source), ["E_INVALID_SITE_NAME"], "{name}");
+        let found = one_of_code(&source, DiagnosticCode::InvalidSiteName);
+        assert_eq!(slice(&source, &found), name);
+        assert_eq!(
+            found.primary,
+            format!("`site {name}` is not a usable name: it is a device name Windows reserves"),
+        );
+    }
+}
+
+#[test]
+fn the_site_name_refusal_says_why_and_how_to_fix_it() {
+    let found = one_of_code(&site_named("nul"), DiagnosticCode::InvalidSiteName);
+    assert_eq!(found.severity(), Severity::Error);
+    assert_eq!(
+        notes(&found),
+        [
+            "a site's name, under `--structure-format litematic`, is the stem of the artifact \
+             file written into `--out`, and Windows reserves `CON`, `PRN`, `AUX`, `NUL`, and \
+             `COM` or `LPT` followed by one of `0` to `9`, `¹`, `²` or `³`, in any letter case, \
+             as device names, so the name is refused on every host, not only on Windows; rename \
+             it, for example to `nul_1`"
+        ],
+    );
+    assert_eq!(found.notes[0].span, None);
+    assert_eq!(codes(&site_named("nul_1")), Vec::<&str>::new());
+}
+
+#[test]
+fn a_site_whose_name_only_resembles_a_device_is_not_refused() {
+    for name in ["console", "CON1", "NULL", "COM", "COM10", "lpt_1"] {
+        assert_eq!(codes(&site_named(name)), Vec::<&str>::new(), "{name}");
+    }
+}
+
+/// It is one part of a walkway's name, which a device name never is.
+#[test]
+fn a_port_may_spell_a_device() {
     let source = "theme plain:\n  slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n\n\
          def hut size=3x3:\n  floor id=floor mat_slot=floor\n  \
          walls id=walls class=outer mat_slot=wall height=3\n  door id=nul side=front at=center\n\n\
-         site con:\n  place id=a use=hut theme=plain at=origin\n  \
+         site hamlet:\n  place id=a use=hut theme=plain at=origin\n  \
          place id=b use=hut theme=plain east_of=a gap=4\n  connect a.nul to b.nul path=@oak_planks\n";
     assert_eq!(codes(source), Vec::<&str>::new());
     let out = lowered(source);
@@ -308,5 +354,5 @@ fn a_site_and_a_port_may_spell_a_device() {
         .keys()
         .map(|k| out.artifact_stem(k))
         .collect();
-    assert_eq!(stems, ["a", "b", "con_walkway_a_nul__b_nul"]);
+    assert_eq!(stems, ["a", "b", "hamlet_walkway_a_nul__b_nul"]);
 }
