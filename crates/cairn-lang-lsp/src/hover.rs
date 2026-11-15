@@ -507,13 +507,6 @@ fn describe_token(value: &Value, binder: &Binder<'_>) -> String {
         }
         Binder::Path => "the `path=` of this `connect` row".to_owned(),
     };
-    if matches!(binder, Binder::Selector { .. }) {
-        let link = section_link("spec/materials-themes", "Slots as dependency injection");
-        return format!(
-            "`@{inner}`, {bound}\n\nSelector bindings are reserved, so no block is resolved for \
-             this value. See [`spec/materials-themes` \"Slots as dependency injection\"]({link})."
-        );
-    }
     let editions: Vec<String> = EDITIONS
         .into_iter()
         .map(|edition| {
@@ -522,21 +515,6 @@ fn describe_token(value: &Value, binder: &Binder<'_>) -> String {
         })
         .collect();
     format!("`@{inner}`, {bound}\n\n{}", editions.join("\n"))
-}
-
-/// The site's link to the section titled `title` of the page at `path`, or to the page when no
-/// section has that title.
-fn section_link(path: &str, title: &str) -> String {
-    let slug = cairn_lang_docs::page(path).and_then(|page| {
-        page.cited(title).into_iter().find_map(|part| match part {
-            Part::Section(heading) => Some(heading.slug),
-            Part::Page | Part::Term { .. } => None,
-        })
-    });
-    match slug {
-        Some(slug) => format!("{SITE}/{path}/#{slug}"),
-        None => format!("{SITE}/{path}/"),
-    }
 }
 
 /// The block `@inner` names on `edition` with no version pinned, with an abstract token's

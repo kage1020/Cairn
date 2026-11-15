@@ -14,3 +14,5 @@
   and `BindingKey` name the keys each keyword binds.
 - *(lsp)* Completion right of a theme selector row's arrow offers the keys its keyword binds, less
   any the row binds already.
+- *(lsp)* Hover on a `@` token a selector row binds shows the block it names on Java and on
+  Bedrock, as a `slot` row's does.

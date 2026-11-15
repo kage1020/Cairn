@@ -147,9 +147,11 @@ fn a_member_that_writes_no_blockstate_says_so() {
                 "{}\n\n---\n\n`id=shell`\n\n\
                  **`intent_state`**: nothing written\n\n\
                  **`resolved_state`** on java, with no version pinned:\n\
-                 - `struct::keep`: `minecraft:cherry_planks` in 45 cells\n\n\
+                 - `struct::keep`: `minecraft:spruce_log` in 12 cells, \
+                 `minecraft:cherry_planks` in 33 cells\n\n\
                  **`resolved_state`** on bedrock, with no version pinned:\n\
-                 - `struct::keep`: `minecraft:cherry_planks` in 45 cells",
+                 - `struct::keep`: `minecraft:spruce_log` in 12 cells, \
+                 `minecraft:cherry_planks` in 33 cells",
                 quoted("walls"),
             ),
             range(8, 2, 7),
@@ -264,7 +266,7 @@ const TOKENS: &str = "\
 theme t:
   slot stairs -> @oak_stairs[facing=east]
   slot floor -> @floor.nonexistent.thing
-  window[class=\"a->b\"] -> trim=@spruce_log
+  window[class=\"a->b\"] -> frame=@spruce_wood
 ";
 
 #[test]
@@ -291,45 +293,27 @@ fn a_canonical_token_keeps_its_state_literal_and_an_unknown_abstract_token_says_
     );
 }
 
-/// The selector bindings' note, linking the section the site gives `spec/materials-themes` "Slots
-/// as dependency injection".
-fn reserved() -> String {
-    let page = cairn_lang_docs::page("spec/materials-themes").expect("the chapter's page");
-    let heading = page
-        .headings()
-        .into_iter()
-        .find(|heading| heading.text.ends_with(" Slots as dependency injection"))
-        .expect("a section on slots");
-    format!(
-        "Selector bindings are reserved, so no block is resolved for this value. See \
-         [`spec/materials-themes` \"Slots as dependency injection\"]\
-         (https://cairn.kage1020.com/spec/materials-themes/#{}).",
-        heading.slug,
-    )
-}
-
 #[test]
-fn a_selector_binding_resolves_no_block_and_its_row_keyword_shows_its_entry() {
+fn a_selector_binding_names_its_block_on_each_edition_and_its_row_keyword_shows_its_entry() {
     assert_eq!(
         shown(KEEP, "@spruce_log"),
         Some((
-            format!(
-                "`@spruce_log`, bound to `trim=` by the `walls[class=outer]` row of theme \
-                 `stone`\n\n{}",
-                reserved(),
-            ),
+            "`@spruce_log`, bound to `trim=` by the `walls[class=outer]` row of theme `stone`\n\n\
+             - java: `minecraft:spruce_log`\n\
+             - bedrock: `minecraft:spruce_log`"
+                .to_owned(),
             range(4, 29, 40),
         )),
     );
     assert_eq!(
-        shown(TOKENS, "@spruce_log"),
+        shown(TOKENS, "@spruce_wood"),
         Some((
-            format!(
-                "`@spruce_log`, bound to `trim=` by the `window[class=\"a->b\"]` row of theme \
-                 `t`\n\n{}",
-                reserved(),
-            ),
-            range(3, 31, 42),
+            "`@spruce_wood`, bound to `frame=` by the `window[class=\"a->b\"]` row of theme \
+             `t`\n\n\
+             - java: `minecraft:spruce_wood`\n\
+             - bedrock: `minecraft:spruce_wood`"
+                .to_owned(),
+            range(3, 32, 44),
         )),
         "a `->` quoted in the selector",
     );
