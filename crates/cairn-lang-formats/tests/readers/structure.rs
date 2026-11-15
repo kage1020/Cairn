@@ -9,9 +9,9 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
-use cairn_lang_nbt::{NbtReadError, write_java_gzip};
+use cairn_lang_nbt::{NbtReadError, write_java_gzip, write_java_uncompressed};
 
-use crate::common::{comparator_array, examples, latest, lower_example, volume_of};
+use crate::common::{comparator_array, examples, gzip, latest, lower_example, volume_of};
 
 fn target(version: &str) -> JavaTarget {
     resolve_java_target(version).expect("a targetable version")
@@ -116,16 +116,17 @@ fn a_cell_blocks_lists_nothing_at_reads_as_air_added_to_a_palette_without_it() {
         read(&root),
         StoredStructure {
             data_version: 4189,
-            volume: BlockVolume {
-                dims: Dims { x: 3, y: 1, z: 1 },
-                palette: vec![BlockState::bare("minecraft:stone"), BlockState::air()],
-                voxels: vec![PaletteIndex(0), PaletteIndex(1), PaletteIndex(0)],
-                block_entities: vec![StoredBlockEntity {
+            volume: BlockVolume::new(
+                Dims { x: 3, y: 1, z: 1 },
+                vec![BlockState::bare("minecraft:stone"), BlockState::air()],
+                vec![PaletteIndex(0), PaletteIndex(1), PaletteIndex(0)],
+                vec![StoredBlockEntity {
                     pos: (2, 0, 0),
                     id: "minecraft:chest".to_owned(),
                     data: compound([("Lock", Tag::String(String::new()))]),
                 }],
-            },
+            )
+            .expect("a volume"),
             void_cells: 1,
             palettes: 1,
             entities: vec![],
@@ -151,8 +152,8 @@ fn of_several_palettes_the_first_is_read_and_the_rest_counted() {
     );
     let read = read(&root);
     assert_eq!(
-        (read.volume.palette, read.palettes),
-        (vec![BlockState::bare("minecraft:white_wool")], 3)
+        (read.volume.palette(), read.palettes),
+        ([BlockState::bare("minecraft:white_wool")].as_slice(), 3)
     );
 }
 
@@ -234,10 +235,7 @@ fn a_field_of_the_wrong_shape_is_refused_by_its_path() {
             ("DataVersion".to_owned(), "an int"),
             ("size".to_owned(), "a list of three ints, none negative"),
             ("palette".to_owned(), "a list of block states"),
-            (
-                "palette".to_owned(),
-                "a list of block states, each a `Name` and its `Properties`"
-            ),
+            ("palette[0].Name".to_owned(), "a block id string"),
             ("blocks".to_owned(), "a list of compounds"),
             ("blocks[0].state".to_owned(), "an int"),
             ("blocks[0].pos".to_owned(), "a list of three ints"),
@@ -253,4 +251,55 @@ fn bytes_that_are_not_gzip_are_an_nbt_error() {
         matches!(err, StructureReadError::Nbt(NbtReadError::Io(_))),
         "got {err:?}"
     );
+}
+
+/// The kind of I/O failure the gzip decoder refuses `bytes` with.
+fn gzip_error(bytes: &[u8]) -> std::io::ErrorKind {
+    match read_structure(bytes).expect_err("the file is refused") {
+        StructureReadError::Nbt(NbtReadError::Io(io)) => io.kind(),
+        other => panic!("not a gzip failure: {other:?}"),
+    }
+}
+
+#[test]
+fn a_gzip_trailer_that_does_not_match_is_refused() {
+    let bytes = bytes(&structure([1, 1, 1], vec![], vec![block(0, [0, 0, 0])]));
+    let mut crc = bytes.clone();
+    let at = crc.len() - 8;
+    crc[at] ^= 1;
+    let mut size = bytes.clone();
+    let at = size.len() - 1;
+    size[at] ^= 1;
+    let kinds = [crc.as_slice(), size.as_slice(), &bytes[..bytes.len() - 8]].map(gzip_error);
+    assert_eq!(
+        kinds,
+        [
+            std::io::ErrorKind::InvalidInput,
+            std::io::ErrorKind::InvalidInput,
+            std::io::ErrorKind::UnexpectedEof,
+        ]
+    );
+}
+
+#[test]
+fn input_past_the_root_is_refused_in_the_stream_and_after_the_gzip_member() {
+    let root = structure([1, 1, 1], vec![], vec![block(0, [0, 0, 0])]);
+    let mut uncompressed = Vec::new();
+    write_java_uncompressed(&mut uncompressed, "", &root).expect("the root writes");
+    let end = uncompressed.len() as u64;
+    let mut in_stream = uncompressed.clone();
+    in_stream.push(0);
+    let mut second_member = gzip(&uncompressed);
+    second_member.extend(gzip(&uncompressed));
+    for bytes in [gzip(&in_stream), second_member] {
+        let err = read_structure(bytes.as_slice()).expect_err("the file is refused");
+        assert!(
+            matches!(err, StructureReadError::Nbt(NbtReadError::TrailingBytes { offset }) if offset == end),
+            "got {err:?}"
+        );
+    }
+
+    let mut garbage = gzip(&uncompressed);
+    garbage.extend(b"not a gzip member");
+    assert_eq!(gzip_error(&garbage), std::io::ErrorKind::InvalidInput);
 }

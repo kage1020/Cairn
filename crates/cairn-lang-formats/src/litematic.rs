@@ -8,7 +8,7 @@ mod read;
 mod write;
 
 pub use read::{
-    LitematicMetadata, LitematicReadError, LitematicSchematic, ReadRegion, read_litematic,
+    LitematicMetadata, LitematicReadError, LitematicReadRegion, LitematicSchematic, read_litematic,
 };
 pub use write::{
     Litematic, LitematicError, LitematicFile, LitematicRegion, litematic_files, prepare_litematic,
@@ -18,7 +18,7 @@ pub use write::{
 /// for 1.20.4 reads only up to 6.
 const VERSION_7_FROM: i32 = 3837;
 
-/// Litematica's `SubVersion`, which every `Version` it writes carries.
+/// The `SubVersion` Litematica writes beside `Version` 6 and 7.
 const SUB_VERSION: i32 = 1;
 
 /// The `Version` a Litematica for `data_version` writes and reads.
@@ -26,7 +26,8 @@ fn schematic_version(data_version: i32) -> i32 {
     if data_version >= VERSION_7_FROM { 7 } else { 6 }
 }
 
-/// The bits a palette index takes in `BlockStates` for a palette of `len` entries.
+/// The bits a palette index takes in `BlockStates` for a palette of `len` entries, never fewer
+/// than the 2 Litematica packs even a one-entry palette at.
 fn bits_per_entry(len: usize) -> u32 {
     let largest = len.saturating_sub(1);
     (usize::BITS - largest.leading_zeros()).max(2)

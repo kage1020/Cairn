@@ -19,6 +19,7 @@ pub mod info;
 pub mod java_structure;
 pub mod litematic;
 pub mod portability;
+mod read_stream;
 pub mod registry;
 pub mod schem;
 mod site_frame;
@@ -44,7 +45,7 @@ pub use java_structure::{
 };
 pub use litematic::{
     Litematic, LitematicError, LitematicFile, LitematicMetadata, LitematicReadError,
-    LitematicRegion, LitematicSchematic, ReadRegion, litematic_files, prepare_litematic,
+    LitematicReadRegion, LitematicRegion, LitematicSchematic, litematic_files, prepare_litematic,
     read_litematic,
 };
 pub use portability::{
@@ -59,4 +60,4 @@ pub use schem::{
     Schem, SchemError, SchemFile, SchemReadError, SpongeSchematic, prepare_schem, read_schem,
     schem_files,
 };
-pub use volume::{BlockVolume, StoredBlockEntity};
+pub use volume::{BlockVolume, StoredBlockEntity, VolumeError};

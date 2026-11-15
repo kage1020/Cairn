@@ -22,7 +22,10 @@
   rules, and a body wider or deeper than 48 blocks split into a `site` of 48 by 48 chunks. It checks
   what it writes by lowering it back and comparing every cell.
 - *(formats)* `read_structure` reads a Java `.nbt` and `read_mcstructure` a Bedrock `.mcstructure`,
-  streaming as the `.litematic` and `.schem` readers do. `import::decode_structure` turns any of
+  streaming as the `.litematic` and `.schem` readers do and refusing what they refuse: a list or
+  array longer than the file could need before it is read, input past the root, and on a `.nbt` a
+  gzip trailer that does not match. A `BedrockVolume`, like a `BlockVolume`, is built only through
+  `new`, which holds each voxel to its palette and each block entity to its box. `import::decode_structure` turns any of
   the four into block grids stamped with a target, and `import::import_raw` writes them as the
   source `cairn import` writes.
 - *(lsp)* Completion on a line under a `raw_repeat` offers only `raw_block` and `raw_fill`.

@@ -130,7 +130,8 @@ struct Fields {
 ///
 /// A [`StructureReadError`] for bytes that are not a structure file this reader reads.
 pub fn read_structure<R: Read>(reader: R) -> Result<StoredStructure, StructureReadError> {
-    let gz = flate2::read::GzDecoder::new(reader);
+    // As Java's `GZIPInputStream` reads them, members after the first continue the stream.
+    let gz = flate2::read::MultiGzDecoder::new(reader);
     let mut nbt = NbtReader::java(gz).with_max_len(MAX_STRUCTURE_VOLUME);
     nbt.next_event()?;
     let mut fields = Fields::default();
@@ -166,6 +167,7 @@ pub fn read_structure<R: Read>(reader: R) -> Result<StoredStructure, StructureRe
             Event::Value { .. } | Event::End => {}
         }
     }
+    nbt.finish()?;
     decode(fields)
 }
 
@@ -200,14 +202,13 @@ fn read_palette<R: Read>(
     }
     entries
         .iter()
-        .map(block_state_from_nbt)
-        .collect::<Option<_>>()
-        .ok_or_else(|| {
-            malformed(
-                path,
-                "a list of block states, each a `Name` and its `Properties`",
-            )
+        .enumerate()
+        .map(|(index, entry)| {
+            block_state_from_nbt(entry).map_err(|fault| {
+                malformed(format!("{path}[{index}].{}", fault.field), fault.expected)
+            })
         })
+        .collect()
 }
 
 /// The open `palettes` list: the first palette read, the others counted and skipped.
@@ -317,12 +318,8 @@ fn decode(fields: Fields) -> Result<StoredStructure, StructureReadError> {
         .collect::<Result<_, _>>()?;
     Ok(StoredStructure {
         data_version,
-        volume: BlockVolume {
-            dims: size,
-            palette,
-            voxels,
-            block_entities,
-        },
+        volume: BlockVolume::new(size, palette, voxels, block_entities)
+            .expect("each part of the structure is checked as it is decoded"),
         void_cells,
         palettes: fields.palettes,
         entities: fields.entities,

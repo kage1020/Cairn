@@ -258,8 +258,10 @@ to bytes, streamed so its peak memory does not grow with the volume (`tests/writ
 Importing it, the reverse direction, needs two more things:
 
 1. A reader from bytes to voxels, built on `cairn-lang-nbt`'s pull reader so one region or one
-   list item is in memory at a time. Each of the four formats has one, returning each region or
-   structure as a `BlockVolume`, or a `.mcstructure` as a `BedrockVolume`.
+   list item is in memory at a time and a list or array longer than the format can need is refused
+   before it is read. Each of the four formats has one, returning each region or structure as a
+   `BlockVolume`, which holds its voxels to its palette and its block entities to its box, or a
+   `.mcstructure` as a `BedrockVolume`.
 2. An arm in `import::decode_structure`, which turns what the reader returns into block grids and
    reads the version the file was saved at, the `(edition, version)` provenance stamp is chosen
    from ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)).

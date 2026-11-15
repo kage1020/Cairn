@@ -246,7 +246,7 @@ fn decode_nbt<R: Read>(
     let read = read_structure(reader)?;
     let stamp = java_stamp(read.data_version)?;
     let name = unit_names([stem]).remove(0);
-    lose_block_entities(losses, &name, &read.volume.block_entities);
+    lose_block_entities(losses, &name, read.volume.block_entities());
     lose_entities(losses, &name, &read.entities);
     if read.void_cells > 0 {
         losses.push(void_loss(&name, read.void_cells));
@@ -285,7 +285,7 @@ fn decode_litematic<R: Read>(
         .iter()
         .zip(names)
         .map(|(region, name)| {
-            lose_block_entities(losses, &name, &region.volume.block_entities);
+            lose_block_entities(losses, &name, region.volume.block_entities());
             lose_entities(losses, &name, &region.entities);
             let (x, y, z) = region.min_corner;
             GridUnit {
@@ -310,7 +310,7 @@ fn decode_schem<R: Read>(
     let read = read_schem(reader)?;
     let stamp = java_stamp(read.data_version)?;
     let name = unit_names([stem]).remove(0);
-    lose_block_entities(losses, &name, &read.volume.block_entities);
+    lose_block_entities(losses, &name, read.volume.block_entities());
     lose_entities(losses, &name, &read.entities);
     let (x, y, z) = read.offset;
     let comment = if read.offset == (0, 0, 0) {
@@ -334,7 +334,7 @@ fn decode_mcstructure<R: Read>(
 ) -> Result<(ImportStamp, Vec<GridUnit>), ImportError> {
     let read = read_mcstructure(reader)?;
     let name = unit_names([stem]).remove(0);
-    lose_block_entities(losses, &name, &read.volume.block_entities);
+    lose_block_entities(losses, &name, read.volume.block_entities());
     lose_entities(losses, &name, &read.entities);
     let (stamp, grid) = bedrock_stamp(&read.volume)?;
     bedrock_losses(losses, &name, &stamp, &grid);
@@ -401,7 +401,7 @@ fn java_stamp(data_version: i32) -> Result<ImportStamp, ImportError> {
 fn bedrock_stamp(volume: &BedrockVolume) -> Result<(ImportStamp, grid::BedrockGrid), ImportError> {
     let pack = builtin_pack(Edition::Bedrock);
     let saved = volume
-        .palette
+        .palette()
         .iter()
         .filter_map(|entry| entry.version)
         .max();

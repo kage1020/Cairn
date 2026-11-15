@@ -176,14 +176,14 @@ pub type BedrockCell = (Option<(String, Compound)>, Option<(String, Compound)>);
 pub fn bedrock_cells(volume: &BedrockVolume) -> Vec<BedrockCell> {
     let named = |slot: &Option<PaletteIndex>| {
         slot.map(|slot| {
-            let block = &volume.palette[usize::from(slot.0)];
+            let block = &volume.palette()[usize::from(slot.0)];
             (block.name.clone(), block.states.clone())
         })
     };
     volume
-        .blocks
+        .blocks()
         .iter()
-        .zip(&volume.liquids)
+        .zip(volume.liquids())
         .map(|(block, liquid)| (named(block), named(liquid)))
         .collect()
 }
@@ -371,35 +371,54 @@ pub fn wide_array(len: usize, slots: &[u16]) -> BlockArray {
 }
 
 /// `array` as a reader returns it: its palette, its grid, and the block entities a structure
-/// holds, the last at each voxel of the grid in `(y, z, x)` order, with their fields.
+/// holds, the last at each voxel in `(y, z, x)` order, with their fields.
+///
+/// # Panics
+///
+/// When a block entity of `array` lies off its grid, which no written array holds.
 pub fn volume_of(array: &BlockArray) -> BlockVolume {
     let mut placed: Vec<(usize, &BlockEntity)> = Vec::new();
     for entity in &array.block_entities {
         let (x, y, z) = entity.pos;
-        let Some(index) = array.dims.index(x, y, z) else {
-            continue;
-        };
+        let index = array
+            .dims
+            .index(x, y, z)
+            .expect("a written array holds no block entity off its grid");
         placed.retain(|&(at, _)| at != index);
         placed.push((index, entity));
     }
     placed.sort_by_key(|&(index, _)| index);
-    BlockVolume {
-        dims: array.dims,
-        palette: array.palette.entries.clone(),
-        voxels: array.voxels.clone(),
-        block_entities: placed
-            .into_iter()
-            .map(|(_, entity)| {
-                let mut data = Compound::new();
-                for (field, value) in &entity.fields {
-                    data.insert(field.clone(), Tag::Int(*value));
-                }
-                StoredBlockEntity {
-                    pos: entity.pos,
-                    id: entity.id.clone(),
-                    data,
-                }
-            })
-            .collect(),
-    }
+    let block_entities = placed
+        .into_iter()
+        .map(|(_, entity)| {
+            let mut data = Compound::new();
+            for (field, value) in &entity.fields {
+                data.insert(field.clone(), Tag::Int(*value));
+            }
+            StoredBlockEntity {
+                pos: entity.pos,
+                id: entity.id.clone(),
+                data,
+            }
+        })
+        .collect();
+    BlockVolume::new(
+        array.dims,
+        array.palette.entries.clone(),
+        array.voxels.clone(),
+        block_entities,
+    )
+    .expect("a written array is a volume")
+}
+
+/// `bytes` as one gzip member.
+///
+/// # Panics
+///
+/// When compressing into memory fails, which it does not.
+pub fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(bytes).expect("the bytes compress");
+    gz.finish().expect("the member closes")
 }

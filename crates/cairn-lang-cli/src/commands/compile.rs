@@ -19,7 +19,7 @@ use crate::lockfile::report_previous_target;
 use crate::name_case::NameCase;
 use crate::pipeline::{built_scopes, load_and_lower, report_partial_build};
 use crate::report::{Stderr, report_diagnostics};
-use crate::target::{ResolvedTarget, resolve_target};
+use crate::target::{Backend, ResolvedTarget, resolve_target};
 
 pub(crate) fn run_compile(
     file: &Path,
@@ -125,7 +125,8 @@ fn check_and_write(
 ) -> ExitCode {
     // A lock can share an entry with an artifact only inside `--out`, so `--out` alone is probed.
     let case = NameCase::of_dir(out_dir);
-    let prepared = match prepare_artifacts(block_ir, target, structure_format, out_dir, case) {
+    let backend = Backend::new(target, structure_format);
+    let prepared = match prepare_artifacts(block_ir, backend, out_dir, case) {
         Ok(p) => p,
         Err(PrepareRefusal::Collision(collision)) => {
             collision.report();

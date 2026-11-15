@@ -57,14 +57,14 @@ fn a_struct_reads_back_in_the_grids_order_with_its_water_and_block_entity() {
     assert_eq!(read.world_origin, (0, 0, 0));
     assert_eq!(read.entities, []);
     let volume = &read.volume;
-    assert_eq!(volume.dims, Dims { x: 2, y: 2, z: 3 });
+    assert_eq!(volume.dims(), Dims { x: 2, y: 2, z: 3 });
     let names: Vec<(&str, Option<&str>)> = volume
-        .blocks
+        .blocks()
         .iter()
-        .zip(&volume.liquids)
+        .zip(volume.liquids())
         .map(|(block, liquid)| {
             let name = |slot: &Option<PaletteIndex>| {
-                slot.map(|slot| volume.palette[usize::from(slot.0)].name.as_str())
+                slot.map(|slot| volume.palette()[usize::from(slot.0)].name.as_str())
             };
             (name(block).expect("no structure void"), name(liquid))
         })
@@ -90,14 +90,14 @@ fn a_struct_reads_back_in_the_grids_order_with_its_water_and_block_entity() {
     );
     assert!(
         volume
-            .palette
+            .palette()
             .iter()
             .all(|block| block.version == Some(target.block_version))
     );
     let mut fields = Compound::new();
     fields.insert("OutputSignal", Tag::Int(3));
     assert_eq!(
-        volume.block_entities,
+        volume.block_entities(),
         [StoredBlockEntity {
             pos: (1, 1, 1),
             id: "Comparator".to_owned(),
@@ -118,10 +118,10 @@ fn every_shipped_example_reads_back_as_the_bedrock_blocks_its_arrays_translate_t
             let read = read_mcstructure(bytes(&root).as_slice()).expect("the file reads back");
             let read_blocks: Vec<(String, Compound)> = read
                 .volume
-                .blocks
+                .blocks()
                 .iter()
                 .map(|slot| {
-                    let block = &read.volume.palette[usize::from(slot.expect("no void").0)];
+                    let block = &read.volume.palette()[usize::from(slot.expect("no void").0)];
                     (block.name.clone(), block.states.clone())
                 })
                 .collect();
@@ -155,8 +155,8 @@ fn a_structure_void_reads_as_no_block() {
     layer_mut(&mut root, 0)[0] = Tag::Int(-1);
     let read = read_mcstructure(bytes(&root).as_slice()).expect("the file reads");
     assert_eq!(
-        (read.volume.blocks, read.volume.liquids),
-        (vec![None], vec![None])
+        (read.volume.blocks(), read.volume.liquids()),
+        ([None].as_slice(), [None].as_slice())
     );
 }
 
@@ -257,7 +257,7 @@ fn a_field_of_the_wrong_shape_is_refused_by_its_path() {
 fn a_palette_entry_keeps_its_typed_states_and_version() {
     let read = read_mcstructure(bytes(&one_stone()).as_slice()).expect("the file reads");
     assert_eq!(
-        read.volume.palette,
+        read.volume.palette(),
         ["minecraft:air", "minecraft:stone"].map(|name| BedrockBlock {
             name: name.to_owned(),
             states: Compound::new(),
@@ -267,10 +267,25 @@ fn a_palette_entry_keeps_its_typed_states_and_version() {
 }
 
 #[test]
-fn bytes_that_are_not_nbt_are_an_nbt_error() {
+fn bytes_that_end_inside_the_root_are_an_nbt_error() {
     let err = read_mcstructure(&b"\x0a"[..]).expect_err("refused");
     assert!(
-        matches!(err, McStructureReadError::Nbt(NbtReadError::Io(_))),
+        matches!(
+            err,
+            McStructureReadError::Nbt(NbtReadError::Truncated { offset: 1 })
+        ),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn input_past_the_root_is_refused() {
+    let mut bytes = bytes(&one_stone());
+    let end = bytes.len() as u64;
+    bytes.push(0);
+    let err = read_mcstructure(bytes.as_slice()).expect_err("refused");
+    assert!(
+        matches!(err, McStructureReadError::Nbt(NbtReadError::TrailingBytes { offset }) if offset == end),
         "got {err:?}"
     );
 }
