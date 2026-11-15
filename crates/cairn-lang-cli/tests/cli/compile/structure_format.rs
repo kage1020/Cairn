@@ -10,8 +10,8 @@ use crate::common::{Fixture, cairn};
 
 /// A struct, and a site of two placements joined by a walkway.
 const YARD: &str = "theme t:\n  slot wall -> @cobblestone\n\n\
-                    def hut size=5x5:\n  walls id=w mat_slot=wall height=3\n  \
-                    door  id=p side=front at=center\n\n\
+                    def hut size=5x5:\n  floor mat_slot=wall\n  \
+                    walls id=w mat_slot=wall height=3\n  door  id=p side=front at=center\n\n\
                     struct shed size=3x3\n  walls mat_slot=wall height=2\n\n\
                     site yard:\n  place id=a use=hut theme=t at=origin\n  \
                     place id=b use=hut theme=t east_of=a gap=4\n  \
