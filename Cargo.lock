@@ -215,6 +215,7 @@ version = "2026.11.0"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-formats",
+ "crossbeam-channel",
  "lsp-server",
  "lsp-types",
  "serde",
