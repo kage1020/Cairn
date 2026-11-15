@@ -88,11 +88,13 @@ surfaces are responsible for their own pinning.**
 
 Internal surfaces:
 
-- The Rust API of every workspace crate (`cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats`,
-  `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`, `cairn-lang-tree-sitter`,
-  `cairn-lang-docs`). These crates are published to crates.io from the first monthly minor that
-  contains them, but every item that is not the CLI's transitive public dependency is marked
-  `#[doc(hidden)]`. No item is marked yet.
+- The Rust API of every workspace crate with a library: `cairn-lang-core`, `cairn-lang-nbt`,
+  `cairn-lang-formats`, `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`,
+  `cairn-lang-tree-sitter` and `cairn-lang-docs`. `cairn-lang-cli` has none, only the `cairn`
+  binary. These crates are published to crates.io from the first monthly minor that contains them.
+  Each published one opens its crate-level `//!` doc, which docs.rs shows first, and its README,
+  which crates.io shows, with the same sentence: that its Rust API is in the Internal tier and
+  carries no promise, linked to this definition.
 - `cairn synth`, which runs only behind `--experimental-logic-synth`, and the JSON it prints.
 - The compiler's intermediate representation (Intent IR, Semantic IR, block-array pivot
   layouts).
