@@ -709,6 +709,107 @@ language server shows the entry's own line on hover.
   - **`y=`.** By a wall, the row it is on.
   - **`facing=`.** The way its head points: by a wall `left` or `right`, in place of toward the
     wall, and at a triple a compass word, which a bed there must write.
+- **`painting`.** A painting hung on the face of the block behind it. See [Entities
+  §8.1](/spec/entities/#hanging-entities).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks, which it must write there: `north`, `south`,
+    `east` or `west`.
+  - **`variant=`.** The painting it shows, by the name the target's `paintings` table gives it.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`item_frame`.** An item frame hung on a face, holding one item or none. See [Entities
+  §8.1](/spec/entities/#hanging-entities).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks, which it must write there: a compass word, `up`
+    or `down`.
+  - **`item=`.** The item it holds.
+  - **`glowing=`.** With `true`, a glow item frame.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`armor_stand`.** An armor stand on its cell's floor. See [Entities
+  §8.1](/spec/entities/#standing-entities).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`villager`.** A villager on its cell's floor, offering the trades its `trade` lines name. See
+  [Entities §8.1](/spec/entities/#standing-entities).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`profession=`.** Its profession, such as `librarian`, or `none` without one.
+  - **`level=`.** Its level, from `novice` to `master`, or `novice` without one.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`trade`.** One offer of a `villager` of the same body. See [Entities
+  §8.1](/spec/entities/#standing-entities).
+  - **`villager=`.** The `id=` of the villager that offers it.
+  - **`buy=`.** The item it buys.
+  - **`count=`.** How many of that item it buys, from 1 to 64.
+  - **`sell=`.** The item it sells.
+  - **`sell_count=`.** How many of that item it sells, from 1 to 64.
+  - **`enchant=`.** An enchantment on the item it sells.
+  - **`enchant_level=`.** That enchantment's level, from 1 to 255.
+- **`text_display`.** Java's text display, drawing its text where it stands. See [Entities
+  §8.1](/spec/entities/#displays).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`text=`.** Its text, a string or a list of lines.
+  - **`billboard=`.** How it turns to the viewer: `fixed`, `vertical`, `horizontal` or `center`.
+  - **`scale=`.** How much it scales what it draws along each axis, a number above 0.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`block_display`.** Java's block display, drawing the block its `mat_slot=` binds. See
+  [Entities §8.1](/spec/entities/#displays).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`scale=`.** How much it scales what it draws along each axis, a number above 0.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`item_display`.** Java's item display, drawing the item its `item=` names. See [Entities
+  §8.1](/spec/entities/#displays).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`item=`.** The item it draws, which it must write.
+  - **`scale=`.** How much it scales what it draws along each axis, a number above 0.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`hologram`.** Floating text built as the member form its `mat_slot=` binds, a `text_display`
+  or a `sign`. See [Versioning and Editions
+  §10.7](/spec/versioning-editions/#writing-an-alternative).
+  - **`at=`.** Its cell, read as the member it is built as reads its own.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it looks, read as the member it is built as reads its own.
+  - **`text=`.** Its text.
+- **`spawn`.** Any other entity, by its id: the escape hatch for entities. See [Entities
+  §8.1](/spec/entities/#standing-entities).
+  - **`type=`.** The entity's id, which it must write.
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
 - **`repeater`.** A redstone repeater placed by hand, a Tier 0 part. See
   [Redstone §14.1](/spec/redstone/#tier-0-parts).
   - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
@@ -746,6 +847,8 @@ language server shows the entry's own line on hover.
   §7.4](/spec/materials-themes/#74-raw-blocks).
   - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
   - **`at=`.** The cell, a coordinate triple.
+  - **`nbt=`.** Its block's block entity, a compound written as given, under an `@edition` guard.
+    See [Entities §8.1](/spec/entities/#81-two-tiers).
 - **`raw_fill`.** One block named by its id, in every cell of a box. See [Materials and Themes
   §7.4](/spec/materials-themes/#74-raw-blocks).
   - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
