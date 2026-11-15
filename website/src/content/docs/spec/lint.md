@@ -528,8 +528,8 @@ puts in its place. A `roof` whose `kind=` or `slope_to=` does not read may rise 
 on its footprint, and `walls` under a `level` that is not placed may hold any row, so a member only
 they could hold is deferred to them. A `circuit` line that reserves no region and an actuator patch
 that binds no component are refused the same way. [Redstone §14.2](/spec/redstone/#142-signal-binding)
-lists the lines that put a `pressure_plate` nowhere, which put a `chest` and every other sensor or
-actuator but `door` nowhere too, and for a sensor or actuator the drop reaches past the block array
+lists the lines that put a `pressure_plate` nowhere, which put a `chest`, a `trapdoor` set by a wall
+and every other sensor or actuator but `door` nowhere too, and for a sensor or actuator the drop reaches past the block array
 as well: its binding is still read, so its signal stays in the netlist with no component behind it,
 and the finding says so in a note.
 

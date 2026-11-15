@@ -20,7 +20,8 @@ pub(super) enum MemberFallback {
     Air,
     /// A `fill`: it paints none of its box, which keeps what the other members paint there.
     Unpainted,
-    /// A `walls`: it paints no row and claims none in the volume, so a cut into it is refused.
+    /// A `walls`: it paints no row and claims none in the volume, so a door or window cut into it,
+    /// or a beam laid on it, is deferred.
     Absent,
     /// A `window`: [`fill_window`] refuses it, so the wall stays and a port on it is refused.
     ///
