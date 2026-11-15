@@ -240,13 +240,15 @@ check runs where the ID check runs and nowhere else
 both to a build that pins one.
 
 A state literal ([Syntax](/spec/syntax/)) is checked at its token, and the member or walkway that
-binds it is not built. The finding names the pair, the values the property takes, or the properties
-the block has when it has no such property, and the other versions whose tables take the pair: a
-domain that changed between releases is the likeliest cause of a literal that is valid somewhere,
-and the repair is then a target rather than an edit. Lowering checks the states it derives as well
-(a stair's `facing`, `half` and `shape`), at the member, so a derivation the target's block cannot
-hold is refused rather than written; that is a defect in Cairn or the pack's table, and the finding
-says so.
+binds it is not built. A state a member's own line writes, such as a `note_block`'s `instrument=`
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), is checked
+the same way at its value. The finding names the pair, the values the property takes, or the
+properties the block has when it has no such property, and the other versions whose tables take the
+pair: a domain that changed between releases is the likeliest cause of a literal that is valid
+somewhere, and the repair is then a target rather than an edit. Lowering checks the states it
+derives as well (a stair's `facing`, `half` and `shape`), at the member, so a derivation the
+target's block cannot hold is refused rather than written; that is a defect in Cairn or the pack's
+table, and the finding says so.
 
 A literal on a block the pinned target's pack records no states for is written as given, with
 `W_STATE_LITERAL_UNCHECKED` ([Lint](/spec/lint/)) so that it is said rather than silent. Both
