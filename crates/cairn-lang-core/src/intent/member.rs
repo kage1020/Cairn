@@ -22,7 +22,8 @@ pub struct Member {
     /// Explicit `class=` grouping, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
-    /// Where it stands in its `struct` or `def` body; `None` on a `site` row or an actuator patch.
+    /// Where it stands in its `struct` or `def` body; `None` on a `site` row, on an actuator patch
+    /// and on a member nested under one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<MemberAddress>,
     /// What kind of member this is; unknown keywords are [`MemberRole::Other`].

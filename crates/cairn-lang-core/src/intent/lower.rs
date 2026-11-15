@@ -8,9 +8,9 @@ use super::addressing::assign_addresses;
 use super::edit::apply_edits;
 use super::member::args_to_map;
 use super::{
-    Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member,
-    MemberAddress, MemberBody, SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr,
-    ValueWithSpan, refused_under_guard, role_of,
+    Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
+    SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan,
+    refused_under_guard, role_of,
 };
 
 /// Lower a parsed [`Module`] into its [`IntentModule`] form, at [`SemanticLevel::Grouped`], with
@@ -107,7 +107,7 @@ fn lower_struct(
         logic,
         asserts,
     } = lower_body(body);
-    assign_addresses(&mut members, size.as_ref(), &MemberAddress::default());
+    assign_addresses(&mut members, size.as_ref(), None);
     StructIr {
         name: name.to_owned(),
         size,
@@ -131,7 +131,7 @@ fn lower_def(
         logic,
         asserts,
     } = lower_body(body);
-    assign_addresses(&mut members, size.as_ref(), &MemberAddress::default());
+    assign_addresses(&mut members, size.as_ref(), None);
     DefIr {
         name: name.to_owned(),
         size,

@@ -49,7 +49,7 @@ pub fn suggest_patch(
         .module
         .addressed_members()
         .into_iter()
-        .map(|(_, _, member)| (member.span.start, member))
+        .map(|found| (found.member.span.start, found.member))
         .collect();
     let mut kept: Vec<String> = Vec::new();
     let mut reached = comparison.counts;

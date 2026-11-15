@@ -2,7 +2,18 @@
 
 use std::fmt;
 
-use super::{Member, MemberRole};
+use indexmap::IndexMap;
+
+use super::{Actuator, Member, MemberRole, ValueWithSpan};
+
+/// The actuator a line patches, with the selector that picks the member it acts on: the selector
+/// form of an actuator, such as `door[id=front] opened_by=sig.x`, which binds a signal to an
+/// actuator declared elsewhere (`spec/redstone` "Signal binding"); `None` for any other line.
+pub(crate) fn patched_actuator(
+    member: &Member,
+) -> Option<(Actuator, &IndexMap<String, ValueWithSpan>)> {
+    Some((member.role.actuator()?, member.selector.as_ref()?))
+}
 
 /// Why an actuator patch's `[selector]` picks no physical member; `Display` gives the reason alone.
 #[derive(Debug, Clone, PartialEq, Eq)]

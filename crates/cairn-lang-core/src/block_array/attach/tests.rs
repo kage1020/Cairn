@@ -193,11 +193,7 @@ fn a_circuit_lays_under_the_structure_which_rises_over_it() {
 #[test]
 fn the_circuit_is_recorded_under_the_address_of_its_line() {
     let mut ir = hut();
-    let line = MemberAddress::default().child(AddressSegment {
-        role: "circuit".to_owned(),
-        side: None,
-        index: 0,
-    });
+    let line = MemberAddress::new(AddressSegment::new("circuit".to_owned(), None, 0));
     assert_eq!(
         ir.attach_circuit(KEY, 2, &circuit(), 10..20, Some(line.clone())),
         Ok(())

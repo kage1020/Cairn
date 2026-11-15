@@ -68,7 +68,7 @@ fn an_address_edit_reads_each_step_and_a_dotted_side() {
     let steps: Vec<(&str, Option<&str>, u32)> = address
         .segments()
         .iter()
-        .map(|step| (step.role.as_str(), step.side.as_deref(), step.index))
+        .map(|step| (step.role(), step.side(), step.index()))
         .collect();
     assert_eq!(
         steps,

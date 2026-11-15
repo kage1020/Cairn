@@ -136,10 +136,10 @@ fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
             outln!("  members:");
         }
         for member in members {
-            let address = member
-                .address
-                .as_ref()
-                .map_or_else(|| member.role.clone(), ToString::to_string);
+            let address = member.address.as_ref().map_or_else(
+                || format!("{} (no address)", member.role),
+                ToString::to_string,
+            );
             match &member.id {
                 Some(id) => outln!("    {address}  id={id}"),
                 None => outln!("    {address}"),
