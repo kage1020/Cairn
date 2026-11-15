@@ -468,18 +468,17 @@ fn a_logic_line_without_its_equals_sign_binds_nothing() {
     }
 }
 
-/// The one finding is the warning every selector binding earns, since no pass reads one.
 #[test]
 fn a_well_formed_header_rule_or_assertion_is_not_reported() {
     let src = format!(
-        "{PRELUDE}theme t:\n  slot wall -> @stone\n  window[side=front] -> mat_slot=glass\n\n\
+        "{PRELUDE}theme t:\n  slot wall -> @stone\n  window[side=front] -> frame=@spruce_wood\n\n\
          site duo:\n  place id=anchor use=hut theme=plain at=origin\n\n\
          struct s size=5x5:\n  floor mat_slot=floor\n  logic sig.lamps = sig.power and sig.day\n  \
          assert truth(sig.a -> sig.b) {{ 0 -> 1; 1 -> 0 }}\n  \
          assert always(sig.a -> eventually sig.b within 4)\n  \
          assert latency(sig.a -> sig.b) <= 4\n"
     );
-    assert_eq!(found(&src), [("W_IGNORED_ARGUMENT", "glass")]);
+    assert_eq!(found(&src), []);
 }
 
 /// A line under a guard or a member is checked where it stands, whatever else it earns there.
