@@ -6,7 +6,7 @@
 # them; on a developer's machine the script names what is missing instead.
 set -eu
 
-# The largest the module may be, in bytes: its size, 2,689,460, with a sixth on top for growth.
+# The largest the module may be, in bytes: 3 MiB, kept above its size so that it can grow.
 WASM_SIZE_BUDGET=3145728
 WASM_PACK_VERSION=0.15.0
 
