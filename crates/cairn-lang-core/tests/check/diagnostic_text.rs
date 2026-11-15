@@ -172,6 +172,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_INCOMPLETE_PLACE",
         "E_INVALID_MEMBER",
         "E_INVALID_PLACE_ID",
+        "E_INVALID_SITE_NAME",
         "E_INVALID_STRUCT_NAME",
         "E_MISPLACED_MEMBER",
         "E_THEME_SELECTOR_UNMATCHED",
@@ -447,13 +448,16 @@ fn unreadable_value_sources() -> Vec<String> {
     ]
 }
 
-/// The source for names Windows reserves for a device, and rows naming a place refused for one.
+/// The sources for names Windows reserves for a device, and rows naming a place refused for one.
 fn device_name_sources() -> Vec<String> {
-    vec![format!(
-        "{THEME}{HUT}struct con size=3x3\n  floor mat_slot=floor\n\nsite s:\n  \
-         place id=a use=hut theme=t at=origin\n  place id=nul use=hut theme=t east_of=a gap=4\n  \
-         place id=b use=hut theme=t north_of=nul gap=4\n  connect a.entry to nul.entry path=@path\n"
-    )]
+    vec![
+        format!(
+            "{THEME}{HUT}struct con size=3x3\n  floor mat_slot=floor\n\nsite s:\n  \
+             place id=a use=hut theme=t at=origin\n  place id=nul use=hut theme=t east_of=a gap=4\n  \
+             place id=b use=hut theme=t north_of=nul gap=4\n  connect a.entry to nul.entry path=@path\n"
+        ),
+        format!("{THEME}{HUT}site prn:\n  place id=a use=hut theme=t at=origin\n"),
+    ]
 }
 
 /// Every finding `check` and the block-array pass raise over `source`.
