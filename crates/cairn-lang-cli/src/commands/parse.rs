@@ -50,9 +50,7 @@ fn document(module: &Module) -> serde_json::Result<Json> {
     let addresses: HashMap<usize, String> = ir
         .addressed_members()
         .into_iter()
-        .filter_map(|(_, _, member)| {
-            Some((member.span.start, member.address.as_ref()?.to_string()))
-        })
+        .map(|found| (found.member.span.start, found.address.to_string()))
         .collect();
     let Some(items) = document.get_mut("items").and_then(Json::as_array_mut) else {
         return Ok(document);
