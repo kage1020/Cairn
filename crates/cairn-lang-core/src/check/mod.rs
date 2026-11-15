@@ -6,6 +6,7 @@ mod arguments;
 mod binding;
 mod cairn_version;
 mod connect_arity;
+mod device_name;
 mod duplicate;
 mod edit;
 mod edition_guard;
@@ -17,7 +18,6 @@ mod nesting;
 mod positional;
 mod requires;
 mod sink;
-mod struct_name;
 mod truth;
 mod type_mismatch;
 
@@ -54,7 +54,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     nesting::run(ir, &mut sink);
     positional::run(module, ir, &mut sink);
     requires::run(module, &mut sink);
-    struct_name::run(module, &mut sink);
+    device_name::run(module, &mut sink);
     truth::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
     for d in resolver_findings(ir, edition) {
@@ -127,6 +127,7 @@ mod tests {
             | C::TypeMismatchSize
             | C::ConnectArity
             | C::InvalidStructName
+            | C::InvalidSiteName
             | C::TruthTableEmpty
             | C::TruthTableDuplicateInput
             | C::TruthTableConflict
@@ -219,6 +220,7 @@ mod tests {
                 "E_EDIT_UNKNOWN_KEY",
                 "E_EDIT_UNMATCHED",
                 "E_INVALID_REQUIRES",
+                "E_INVALID_SITE_NAME",
                 "E_INVALID_STRUCT_NAME",
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",

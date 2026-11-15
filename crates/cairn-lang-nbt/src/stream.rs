@@ -7,12 +7,13 @@ use std::io::Write;
 use crate::error::NbtIoError;
 use crate::tag::{Compound, Tag};
 use crate::writer::{
-    Endian, check_item_type, write_compound_body, write_list_header, write_payload, write_string,
-    write_tag_id,
+    Endian, check_item_type, write_compound_body, write_list_header, write_long_array_payload,
+    write_payload, write_string, write_tag_id,
 };
 
 const LIST_ID: u8 = 9;
 const COMPOUND_ID: u8 = 10;
+const LONG_ARRAY_ID: u8 = 12;
 
 /// A compound being written, terminated when the closure that received it returns `Ok`.
 pub struct CompoundStream<'w, W: Write> {
@@ -123,6 +124,26 @@ impl<W: Write> CompoundStream<'_, W> {
         write_tag_id(self.writer, COMPOUND_ID)?;
         write_string(self.writer, self.endian, name)?;
         stream_compound_body(self.writer, self.endian, body)
+    }
+
+    /// Appends a named `TAG_Long_Array` of the `len` values `values` yields, never collecting them.
+    ///
+    /// # Errors
+    ///
+    /// An invalid `name`, a `len` past `i32::MAX`, or an I/O failure.
+    ///
+    /// # Panics
+    ///
+    /// When `values` yields a number of values other than `len`.
+    pub fn long_array(
+        &mut self,
+        name: &str,
+        len: usize,
+        values: impl IntoIterator<Item = i64>,
+    ) -> Result<(), NbtIoError> {
+        write_tag_id(self.writer, LONG_ARRAY_ID)?;
+        write_string(self.writer, self.endian, name)?;
+        write_long_array_payload(self.writer, self.endian, len, values)
     }
 
     /// Appends a named list of `len` items that `body` streams; an empty one declares `TAG_End`.

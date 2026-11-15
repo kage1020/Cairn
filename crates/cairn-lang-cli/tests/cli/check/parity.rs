@@ -120,6 +120,13 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct nul size=3x3\n  floor mat_slot=floor\n"),
     ),
     (
+        "E_INVALID_SITE_NAME",
+        Source::WithPrologue(
+            "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\n\
+             site aux:\n  place id=a use=hut theme=t at=origin\n",
+        ),
+    ),
+    (
         "E_MISSING_MATERIAL",
         Source::WithPrologue("struct s size=5x5\n  walls class=outer height=3\n"),
     ),
