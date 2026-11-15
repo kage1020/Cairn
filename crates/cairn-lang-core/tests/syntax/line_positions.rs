@@ -99,18 +99,18 @@ fn a_lone_carriage_return_starts_a_line_in_both_layers() {
 
 #[test]
 fn a_trailing_newline_does_not_move_an_end_of_line_error() {
-    let terminated = parse("def foo bar\n").expect_err("`bar` needs a value");
-    let bare = parse("def foo bar").expect_err("`bar` needs a value");
+    let terminated = parse("def foo bar=\n").expect_err("`bar=` needs a value");
+    let bare = parse("def foo bar=").expect_err("`bar=` needs a value");
     assert_eq!(terminated.position(), bare.position());
     let position = terminated.position();
-    assert_eq!((position.line.get(), position.col.get()), (1, 12));
+    assert_eq!((position.line.get(), position.col.get()), (1, 13));
 }
 
 /// `lines::starts` counts the empty line after a final terminator; `lines::split` drops it.
 #[test]
 fn an_end_of_line_error_names_a_line_with_text_on_it() {
     for source in [
-        "def foo bar\n",
+        "def foo bar=\n",
         "site s:\n  walls height=\n",
         "site s:\n  walls mat=[a, b\n",
     ] {
