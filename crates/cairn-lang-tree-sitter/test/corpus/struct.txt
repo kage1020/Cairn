@@ -415,3 +415,34 @@ struct s size=1x1
   requires version>=1.21
 
 ---
+
+==================
+A header keeps its bare values beside its arguments
+==================
+
+struct s 9x7 size=3x3 tall:
+  floor mat_slot=floor
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (size_literal
+        (integer)
+        (integer))
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer)))
+      (identifier))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
