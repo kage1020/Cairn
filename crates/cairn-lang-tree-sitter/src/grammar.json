@@ -139,11 +139,23 @@
           "type": "FIELD",
           "name": "set",
           "content": {
-            "type": "SYMBOL",
-            "name": "attribute_list"
+            "type": "ALIAS",
+            "content": {
+              "type": "SYMBOL",
+              "name": "edit_set"
+            },
+            "named": true,
+            "value": "attribute_list"
           }
         }
       ]
+    },
+    "edit_set": {
+      "type": "REPEAT1",
+      "content": {
+        "type": "SYMBOL",
+        "name": "attribute"
+      }
     },
     "member_address": {
       "type": "SEQ",
