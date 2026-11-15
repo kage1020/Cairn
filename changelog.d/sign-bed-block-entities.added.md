@@ -14,8 +14,8 @@
 - *(core)* A sign's text and a bed's colour ride in the block array as block entities beside their
   cells, and a member that builds over one later takes it away. `TargetRegistry::canonical_block`
   tells the lowering which Java bed a Bedrock `bed` token stands for.
-- *(formats)* The `.nbt` writer saves a sign's faces as `front_text` and `back_text`, its messages
-  JSON strings before 1.21.5 and plain strings from it. The `.mcstructure` writer saves a sign's
+- *(formats)* The `.nbt` and `.litematic` writers save a sign's faces as `front_text` and
+  `back_text`, its messages JSON strings before 1.21.5 and plain strings from it. The `.mcstructure` writer saves a sign's
   faces as `FrontText` and `BackText`, a bed's colour as the dye's number, each half of a chest pair
   with the cell of its other half, which keeps the pair joined, and a note block's `note`. Either
   writer refuses sign text outside ASCII, naming the sign's cell.

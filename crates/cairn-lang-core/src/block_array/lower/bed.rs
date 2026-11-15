@@ -19,7 +19,7 @@ use super::fixture::{
 };
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id, path_of};
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
-use super::part::{COMPASS_FACES, Stand, stand_of, triple_cell};
+use super::stand::{COMPASS_FACES, Stand, stand_of, triple_cell};
 
 /// Catalog token of the bed a `bed` is built from when no `mat_slot=` binds one.
 const BED_TOKEN: &str = "bed.default";

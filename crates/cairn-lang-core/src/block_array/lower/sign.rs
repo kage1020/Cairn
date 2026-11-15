@@ -21,7 +21,7 @@ use super::geometry_material::{
     Family, GeometryMemberDescription, geometry_material_id, wall_sign_of,
 };
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
-use super::part::{COMPASS, COMPASS_FACES, Stand, stand_of, triple_cell};
+use super::stand::{COMPASS, COMPASS_FACES, Stand, stand_of, triple_cell};
 
 /// Catalog token of the standing sign a `sign` is built from when no `mat_slot=` binds one.
 const STANDING_TOKEN: &str = "sign.oak";

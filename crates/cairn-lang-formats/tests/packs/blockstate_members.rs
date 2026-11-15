@@ -17,12 +17,19 @@ fn room(members: &str) -> String {
     )
 }
 
-/// Each finding's code and primary text.
-fn findings(source: &str, edition: Edition, version: &str) -> Vec<(DiagnosticCode, String)> {
+/// Each finding's code, the source text it points at, its primary message and its notes.
+fn findings<'s>(
+    source: &'s str,
+    edition: Edition,
+    version: &str,
+) -> Vec<(DiagnosticCode, &'s str, String, Vec<String>)> {
     lower_source(source, edition, Some(version))
         .diagnostics
         .into_iter()
-        .map(|diagnostic| (diagnostic.code, diagnostic.primary))
+        .map(|d| {
+            let notes = d.notes.into_iter().map(|note| note.message).collect();
+            (d.code, &source[d.span], d.primary, notes)
+        })
         .collect()
 }
 
@@ -90,11 +97,17 @@ fn an_instrument_is_checked_against_the_pinned_versions_note_block() {
         findings(&source, Edition::Java, "1.21.4"),
         [(
             DiagnosticCode::StateDomain,
+            "trumpet",
             "`minecraft:note_block` takes no `instrument=trumpet` at java 1.21.4; `instrument` \
              takes harp, basedrum, snare, hat, bass, flute, bell, guitar, chime, xylophone, \
              iron_xylophone, cow_bell, didgeridoo, bit, banjo, pling, zombie, skeleton, creeper, \
              dragon, wither_skeleton, piglin, custom_head"
                 .to_owned(),
+            vec![
+                "`instrument=trumpet` is valid at 26.3: pass that version as `--target`, or give \
+                 `instrument=` a value java 1.21.4 takes"
+                    .to_owned(),
+            ],
         )],
     );
 }
@@ -109,9 +122,18 @@ fn a_beam_takes_a_block_whose_axis_lies_each_way_at_either_edition() {
             findings(&stone, edition, version),
             [(
                 DiagnosticCode::IncompatibleMaterial,
+                "@cobblestone",
                 "beam derives `axis` from the wall it lies along and `minecraft:cobblestone` is \
                  not a pillar, so those states have nowhere to go"
                     .to_owned(),
+                vec![
+                    "bind the slot to a block whose `axis` takes `x`, `y` and `z`, such as a log \
+                     — the registry pack's `beam.default` resolves to one"
+                        .to_owned(),
+                    "reached through `mat_slot=stone`, so every member reading that slot has it \
+                     too"
+                    .to_owned(),
+                ],
             )],
             "{version}",
         );

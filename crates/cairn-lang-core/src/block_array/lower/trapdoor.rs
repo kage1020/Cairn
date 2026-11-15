@@ -18,7 +18,7 @@ use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Fixture, Refusal, Toward, fixture_cell, outside_the_array, written_facing};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
-use super::part::{COMPASS, COMPASS_FACES, Stand, stand_of, triple_cell, word};
+use super::stand::{COMPASS, COMPASS_FACES, Stand, stand_of, triple_cell, word};
 use super::waterlogged::{
     WrittenWaterlogged, keep_waterlogged, read_waterlogged, waterlogged_state,
 };
@@ -93,20 +93,26 @@ pub(super) fn fill_trapdoor(
         open,
         waterlogged,
     };
-    let stand = match place_trapdoor(member, written, y_offset, ctx, palette, canvas, diagnostics) {
-        Ok(stand) => Some(stand),
-        Err(refusal) => {
-            diagnostics.push(*refusal);
-            None
-        }
-    };
+    // The cell's form when the trapdoor is built, else what its unread states report.
+    let built: Result<Stand, &str> =
+        match place_trapdoor(member, written, y_offset, ctx, palette, canvas, diagnostics) {
+            Ok(Some(stand)) => Ok(stand),
+            Ok(None) => Err(
+                "this trapdoor is not built either way — see the finding on the material its \
+                 `mat_slot=` names",
+            ),
+            Err(refusal) => {
+                diagnostics.push(*refusal);
+                Err("this trapdoor is not built either way — see the finding on the same line")
+            }
+        };
     for argument in unread {
-        let consequence = match (stand, argument.key) {
-            (None, _) => "this trapdoor is not built either way — see the finding on the same line",
-            (Some(Stand::ByWall), "facing") => {
+        let consequence = match (built, argument.key) {
+            (Err(not_built), _) => not_built,
+            (Ok(Stand::ByWall), "facing") => {
                 "the trapdoor faces away from the wall it hangs by, hinged on that wall"
             }
-            (Some(Stand::Triple), "facing") => "the trapdoor takes the block's own `facing`",
+            (Ok(Stand::Triple), "facing") => "the trapdoor takes the block's own `facing`",
             (_, "half") => "the trapdoor is built in the bottom half of its cell, as `half=bottom`",
             (_, "open") => "the trapdoor is built closed, as `open=false`",
             _ => {
@@ -118,7 +124,8 @@ pub(super) fn fill_trapdoor(
     }
 }
 
-/// [`fill_trapdoor`], answering how its `at=` named its cell, or the finding that refuses it.
+/// [`fill_trapdoor`], answering how its `at=` named the cell it was built in, `None` when a state
+/// literal the target refuses builds nothing, or the finding that refuses it.
 fn place_trapdoor(
     member: &Member,
     written: WrittenStates<'_>,
@@ -127,7 +134,7 @@ fn place_trapdoor(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<Stand, Refusal> {
+) -> Result<Option<Stand>, Refusal> {
     let stand = stand_of(TRAPDOOR, TRAPDOOR.noun, member)?;
     let toward = match stand {
         Stand::ByWall => {
@@ -147,7 +154,7 @@ fn place_trapdoor(
             // The caller reports the one returned, after these.
             let last = refusals.pop();
             diagnostics.extend(refusals.into_iter().map(|refusal| *refusal));
-            return last.map_or(Ok(stand), Err);
+            return last.map_or(Ok(Some(stand)), Err);
         }
     };
     let (cell, facing) = match toward {
@@ -161,8 +168,8 @@ fn place_trapdoor(
             facing,
         ),
     };
-    let Some(id) = trapdoor_block_id(member, ctx, diagnostics)? else {
-        return Ok(stand);
+    let Some(id) = trapdoor_block_id(member, stand, ctx, diagnostics)? else {
+        return Ok(None);
     };
     let mut properties = IndexMap::new();
     if let Some(facing) = facing {
@@ -174,7 +181,7 @@ fn place_trapdoor(
     let state = BlockState { id, properties };
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
-        Ok(stand)
+        Ok(Some(stand))
     } else {
         Err(Box::new(outside_the_array(TRAPDOOR, member)))
     }
@@ -224,6 +231,7 @@ fn compass_facing(member: &Member, written: Option<&str>) -> Result<Option<Face>
 /// for a binding whose state literal the target refused, which builds no trapdoor.
 fn trapdoor_block_id(
     member: &Member,
+    stand: Stand,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Option<String>, Refusal> {
@@ -246,7 +254,10 @@ fn trapdoor_block_id(
         || default_block_id(member, ctx.registry, TRAPDOOR_TOKEN, TRAPDOOR_BASE_ID),
         &GeometryMemberDescription {
             subject: "trapdoor".to_owned(),
-            states_from: "the wall it hangs by and its own line",
+            states_from: match stand {
+                Stand::ByWall => "the wall it hangs by and its own line",
+                Stand::Triple => "its own line",
+            },
             requires: Some(Family::Trapdoor),
         },
         diagnostics,

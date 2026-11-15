@@ -40,6 +40,8 @@ pub(super) struct StructCtx<'a> {
     pub(super) rise: u32,
     /// Every row the walls members paint, gaps and all; ports read this same column.
     pub(super) wall_column: WallColumn,
+    /// The `(level y, height)` of each `walls` member that paints.
+    pub(super) painting_walls: Vec<(u32, u32)>,
     /// The struct as written, which a member's own line is judged against.
     pub(super) written: Written,
     /// The span start of each member a well-formed actuator patch binds a signal to.
