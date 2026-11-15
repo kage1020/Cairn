@@ -34,6 +34,9 @@ const GUARD_IN_A_THEME: &str = "an `@edition` guard stands inside a `struct`, `d
      body, never in a `theme`: a theme is picked per edition by its name, so write this edition's \
      slots in a `theme NAME_java` or a `theme NAME_bedrock`";
 
+/// What a `site` or `theme` header holds, as its refusal of a `key=value` words it.
+const HEADER_WITHOUT_ARGUMENTS: &str = "is its name, with an optional `:` after it";
+
 /// The words a refusal inside a call names it by.
 struct CallWording {
     /// The primitive's name.
@@ -409,8 +412,9 @@ impl<'a> Parser<'a> {
 
     fn parse_theme_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
-        let (_, positional) = self.parse_line_tail(Some("a `theme` header"))?;
-        self.consume_optional_colon();
+        let (_, positional) =
+            self.parse_line_tail(Some(("a `theme` header", HEADER_WITHOUT_ARGUMENTS)))?;
+        self.consume_header_colon("theme", &positional)?;
         self.expect_newline()?;
         let mut requires = Vec::new();
         let body = if self.peek_is(&TokenKind::Indent) {
@@ -465,7 +469,8 @@ impl<'a> Parser<'a> {
                 return Err(self.block_id_in_a_slot_row());
             }
             let value = self.parse_value()?;
-            let (_, positional) = self.parse_line_tail(Some("a `slot` row"))?;
+            let (_, positional) =
+                self.parse_line_tail(Some(("a `slot` row", "binds one value")))?;
             let span = start_byte..self.last_byte();
             self.expect_newline()?;
             return Ok(ThemeRule::Slot {
@@ -503,7 +508,7 @@ impl<'a> Parser<'a> {
     fn parse_def_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
         let (args, positional) = self.parse_line_tail(None)?;
-        self.consume_optional_colon();
+        self.consume_header_colon("def", &positional)?;
         self.expect_newline()?;
         let (requires, body) = self.parse_optional_command_body(RequiresPolicy::Accepted)?;
         let span = start_byte..self.last_content_byte();
@@ -520,8 +525,9 @@ impl<'a> Parser<'a> {
 
     fn parse_site_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
-        let (_, positional) = self.parse_line_tail(Some("a `site` header"))?;
-        self.consume_optional_colon();
+        let (_, positional) =
+            self.parse_line_tail(Some(("a `site` header", HEADER_WITHOUT_ARGUMENTS)))?;
+        self.consume_header_colon("site", &positional)?;
         self.expect_newline()?;
         let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
         let span = start_byte..self.last_content_byte();
@@ -537,7 +543,7 @@ impl<'a> Parser<'a> {
     fn parse_struct_item(&mut self, start_byte: usize) -> Result<Item, ParseError> {
         let (name, name_span) = self.expect_ident_spanned()?;
         let (args, positional) = self.parse_line_tail(None)?;
-        self.consume_optional_colon();
+        self.consume_header_colon("struct", &positional)?;
         self.expect_newline()?;
         let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
         let span = start_byte..self.last_content_byte();
@@ -798,22 +804,25 @@ impl<'a> Parser<'a> {
 
     fn parse_logic_command(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
         let lhs = self.parse_dotted_ref()?;
-        // With its `=` dropped, the line still reads the expression it would have bound.
-        let binds = !matches!(
-            self.peek().map(|t| &t.kind),
-            Some(TokenKind::Ident(_) | TokenKind::LParen)
-        );
+        // With its `=` dropped, the line still reads the expression it would have bound. No
+        // expression starts with an infix primitive, so one there is refused as the missing `=`.
+        let binds = match self.peek().map(|t| &t.kind) {
+            Some(TokenKind::LParen) => false,
+            Some(TokenKind::Ident(_)) => self
+                .peek_primitive()
+                .is_some_and(|primitive| primitive.infix_rank().is_some()),
+            _ => true,
+        };
         if binds {
             self.expect(&TokenKind::Eq)?;
         }
         let rhs = self.parse_expr()?;
         let span = start_byte..self.last_byte();
         self.expect_operand_end(&[TokenKind::Newline])?;
-        Ok(Statement::Logic {
-            lhs,
-            rhs,
-            binds,
-            span,
+        Ok(if binds {
+            Statement::Logic { lhs, rhs, span }
+        } else {
+            Statement::UnboundLogic { lhs, rhs, span }
         })
     }
 
@@ -921,7 +930,10 @@ impl<'a> Parser<'a> {
         }
         self.expect(&TokenKind::RBrace)?;
         let span = start_byte..self.last_byte();
-        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
+        let (_, positional) = self.parse_line_tail(Some((
+            "an `assert truth` line",
+            "ends at the `}` of its table",
+        )))?;
         self.expect_newline()?;
         Ok(Statement::AssertTruth {
             inputs,
@@ -964,7 +976,8 @@ impl<'a> Parser<'a> {
                 })?;
         self.expect(&TokenKind::RParen)?;
         let span = start_byte..self.last_byte();
-        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
+        let (_, positional) =
+            self.parse_line_tail(Some(("an `assert always` line", "ends at its `)`")))?;
         self.expect_newline()?;
         Ok(Statement::AssertAlways {
             antecedent,
@@ -1001,7 +1014,8 @@ impl<'a> Parser<'a> {
                     kind: *err.kind(),
                 })?;
         let span = start_byte..self.last_byte();
-        let (_, positional) = self.parse_line_tail(Some("an `assert` line"))?;
+        let (_, positional) =
+            self.parse_line_tail(Some(("an `assert latency` line", "ends at its bound")))?;
         self.expect_newline()?;
         Ok(Statement::AssertLatency {
             from,
@@ -1507,23 +1521,26 @@ impl<'a> Parser<'a> {
     }
 
     /// Read a line's `key=value` arguments and its bare values up to the first token no value
-    /// starts with, such as a header's `:`. A line that takes no argument names itself in
-    /// `no_arguments`.
+    /// starts with, such as a header's `:`; `no_arguments` names a line that takes no
+    /// `key=value`, which refuses one, and says what that line holds.
     fn parse_line_tail(
         &mut self,
-        no_arguments: Option<&str>,
+        no_arguments: Option<(&str, &str)>,
     ) -> Result<(Vec<Arg>, Vec<Value>), ParseError> {
         let mut args = Vec::new();
         let mut positional = Vec::new();
         while self.at_value_start() {
             if !self.is_at_key_eq() {
                 positional.push(self.parse_value()?);
-            } else if let Some(line) = no_arguments {
+            } else if let Some((line, holds)) = no_arguments {
                 let position = self.position();
                 let key = self.expect_ident()?;
                 return Err(ParseError::Syntax {
                     position,
-                    message: format!("{line} takes no `key=value` argument, got `{key}=`"),
+                    message: format!(
+                        "{line} takes no `key=value` argument, got `{key}=`; delete it: {line} \
+                         {holds}"
+                    ),
                 });
             } else {
                 args.push(self.parse_arg()?);
@@ -2037,10 +2054,34 @@ impl<'a> Parser<'a> {
             )
     }
 
-    fn consume_optional_colon(&mut self) {
-        if self.peek_is(&TokenKind::Colon) {
-            self.advance();
+    /// Take a header's optional `:`, refusing one that joins the bare value before it to a name
+    /// after it, since that makes a block id and no header reads one.
+    fn consume_header_colon(
+        &mut self,
+        keyword: &str,
+        positional: &[Value],
+    ) -> Result<(), ParseError> {
+        let Some(colon) = self.peek().filter(|t| t.kind == TokenKind::Colon) else {
+            return Ok(());
+        };
+        let namespace = positional.last().filter(|value| {
+            matches!(value.kind, ValueKind::Ident(_)) && value.span.end == colon.span.start
+        });
+        let path = self.tokens.get(self.pos + 1).filter(|path| {
+            matches!(path.kind, TokenKind::Ident(_)) && path.span.start == colon.span.end
+        });
+        if let (Some(namespace), Some(path)) = (namespace, path) {
+            let id = &self.source[namespace.span.start..path.span.end];
+            return Err(ParseError::Syntax {
+                position: colon.position,
+                message: format!(
+                    "this `:` makes `{id}` a block id, which a `{keyword}` header never reads: \
+                     delete the block id"
+                ),
+            });
         }
+        self.advance();
+        Ok(())
     }
 
     fn skip_newlines(&mut self) {
