@@ -143,7 +143,8 @@ fn a_site_named_after_a_struct_collides_only_as_one_litematic() {
         String::from_utf8_lossy(&result.stderr),
         format!(
             "error: output filename `{}` collides between scopes `struct::yard` and \
-             `site::yard`\n",
+             `site::yard`\n  note: rename the site or the struct, or compile with \
+             `--structure-format nbt`, which writes the site as a file per placement\n",
             out.join("yard.litematic").display(),
         ),
     );
