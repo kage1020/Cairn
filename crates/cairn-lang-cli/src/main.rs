@@ -63,8 +63,9 @@ fn main() -> ExitCode {
         Some(Command::Info {
             file,
             editions,
+            lock,
             format,
-        }) => run_info(&file, &editions, format),
+        }) => run_info(&file, &editions, lock.as_deref(), format),
         Some(Command::Lower {
             file,
             edition,
