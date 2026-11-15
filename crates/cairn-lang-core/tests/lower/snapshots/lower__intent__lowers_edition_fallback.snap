@@ -92,7 +92,7 @@ structs:
               w: 1
               h: 1
         intent_state: {}
-      - address: "raw_block[1]"
+      - address: "raw_block[0]"
         role:
           kind: RawBlock
         arguments:
@@ -107,7 +107,7 @@ structs:
               z: 2
         intent_state: {}
         edition_guard: java
-      - address: "raw_block[0]"
+      - address: "raw_block[1]"
         role:
           kind: RawBlock
         arguments:

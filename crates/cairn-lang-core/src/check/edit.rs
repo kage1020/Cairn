@@ -80,15 +80,13 @@ fn unmatched(ir: &IntentModule, edit: &EditIr, role: &MemberRole) -> Diagnostic 
 /// Where the members of `keyword` stand, for an address that names none of them.
 fn standing_addresses(ir: &IntentModule, keyword: &str) -> String {
     let mut addresses: Vec<String> = Vec::new();
-    for (_, _, member) in ir.addressed_members() {
-        if member.role.keyword() != keyword {
+    for found in ir.addressed_members() {
+        if found.member.role.keyword() != keyword {
             continue;
         }
-        if let Some(address) = &member.address {
-            let address = format!("`{address}`");
-            if !addresses.contains(&address) {
-                addresses.push(address);
-            }
+        let address = format!("`{}`", found.address);
+        if !addresses.contains(&address) {
+            addresses.push(address);
         }
     }
     let more = addresses.len().saturating_sub(LISTED_ADDRESSES);

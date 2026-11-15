@@ -75,28 +75,31 @@ impl Parser<'_> {
                 ),
             });
         }
-        let mut address = MemberAddress::default();
-        let (mut role, mut role_span) = (keyword, keyword_span);
-        loop {
-            let side = if self.peek_is(&TokenKind::At) {
-                self.advance();
-                Some(self.parse_address_side()?)
-            } else {
-                None
-            };
-            let index = self.parse_address_index(&role)?;
-            address = address.child(AddressSegment { role, side, index });
-            if !self.peek_is(&TokenKind::Dot) {
-                break;
-            }
+        let mut address = MemberAddress::new(self.parse_address_step(keyword)?);
+        let mut role_span = keyword_span;
+        while self.peek_is(&TokenKind::Dot) {
             self.advance();
-            (role, role_span) = self.expect_ident_spanned()?;
+            let (role, span) = self.expect_ident_spanned()?;
+            role_span = span;
+            address = address.child(self.parse_address_step(role)?);
         }
         Ok(EditTarget::Address {
             address,
             keyword_span: role_span,
             span: start..self.last_byte(),
         })
+    }
+
+    /// One address step of `role`, after its keyword: `@front[0]`, or `[1]` on no wall.
+    fn parse_address_step(&mut self, role: String) -> Result<AddressSegment, ParseError> {
+        let side = if self.peek_is(&TokenKind::At) {
+            self.advance();
+            Some(self.parse_address_side()?)
+        } else {
+            None
+        };
+        let index = self.parse_address_index(&role)?;
+        Ok(AddressSegment::new(role, side, index))
     }
 
     /// The wall after an address step's `@`: `front`, or a dotted one such as `inside.back`.

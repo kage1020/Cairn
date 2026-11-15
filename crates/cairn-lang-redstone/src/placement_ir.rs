@@ -82,7 +82,7 @@ impl Reservation {
     ///
     /// # Panics
     ///
-    /// On a `void` of 0, which lowering refuses.
+    /// On a `line` whose `void` is 0, which lowering refuses.
     pub(crate) fn new(line: &CircuitRegion, width: u32, depth: u32) -> Self {
         assert!(
             line.void > 0,

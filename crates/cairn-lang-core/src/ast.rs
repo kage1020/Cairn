@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 
 use serde::Serialize;
 
-use crate::address::MemberAddress;
+use crate::address::{AddressSegment, MemberAddress};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::logic_library::{LogicPrimitive, StageCount};
@@ -132,10 +132,9 @@ impl EditTarget {
     pub fn keyword(&self) -> &str {
         match self {
             Self::Selector { keyword, .. } => keyword,
-            Self::Address { address, .. } => address
-                .segments()
-                .last()
-                .map_or("", |segment| segment.role.as_str()),
+            Self::Address { address, .. } => {
+                address.segments().last().map_or("", AddressSegment::role)
+            }
         }
     }
 
@@ -635,17 +634,25 @@ impl Value {
 
     /// Source text that parses back to this value (strings have no escapes), or `None` for a list.
     fn surface_form(&self) -> Option<String> {
+        (!matches!(self.kind, ValueKind::List(_))).then(|| self.spelling())
+    }
+
+    /// The one spelling of this value that `spec/syntax` "IDs, classes, addresses" compares by:
+    /// source text that parses back to it, a list's items joined by `, ` between `[` and `]`.
+    pub(crate) fn spelling(&self) -> String {
         match &self.kind {
-            ValueKind::Ident(s) => Some(s.clone()),
-            ValueKind::Str(s) => Some(format!("\"{s}\"")),
-            ValueKind::Bool(b) => Some(b.to_string()),
-            ValueKind::Int(i) => Some(i.to_string()),
-            ValueKind::Size { w, h } => Some(format!("{w}x{h}")),
-            ValueKind::Coord { x, y, z } => Some(format!("{x},{y},{z}")),
-            ValueKind::Token(t) => Some(format!("@{t}")),
-            ValueKind::BlockId(id) => Some(id.clone()),
-            ValueKind::DotRef(d) => Some(d.to_string()),
-            ValueKind::List(_) => None,
+            ValueKind::Ident(s) | ValueKind::BlockId(s) => s.clone(),
+            ValueKind::Str(s) => format!("\"{s}\""),
+            ValueKind::Bool(b) => b.to_string(),
+            ValueKind::Int(i) => i.to_string(),
+            ValueKind::Size { w, h } => format!("{w}x{h}"),
+            ValueKind::Coord { x, y, z } => format!("{x},{y},{z}"),
+            ValueKind::Token(t) => format!("@{t}"),
+            ValueKind::DotRef(d) => d.to_string(),
+            ValueKind::List(items) => {
+                let items: Vec<String> = items.iter().map(Self::spelling).collect();
+                format!("[{}]", items.join(", "))
+            }
         }
     }
 

@@ -383,8 +383,9 @@ error.
 ## 5.5 IDs, classes, addresses
 
 Important members MAY declare `id=`, and `class=` groups members. Every member of a `struct` or
-`def` body also gets an **address**, which the compiler derives from where the member stands:
-parent, role, side, level and offset, never the order its lines are written in. See
+`def` body also gets an **address**, which the compiler derives from where the member stands
+(parent, role, side, level and offset) and from what its line writes, not from the order lines are
+written in. See
 [Components, Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model).
 
 An address is one segment for each step from the body down to the member, joined by `.`, outermost
@@ -397,26 +398,46 @@ first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `le
   `@SIDE`: `walls[0]`, `level[1]`.
 - `N` counts from 0 among the members of the same parent with the same `ROLE` and `@SIDE`, in the
   order of where they stand:
-  1. along the wall: `offset=`, or the column `at=` names, a door anchor's
-     ([§5.4](#54-selectors)) or a number. A line that writes neither stands at 0;
+  1. along the wall: `offset=`, or else the column a door anchor in `at=` names
+     ([§5.4](#54-selectors)) on the wall the line names, which runs the `W` of `size=` for `front`
+     and `back` and its `H` for `left` and `right`. A line that writes neither, or whose `at=`
+     names a wall or a cell, stands at 0;
   2. then up: `y=`, 0 when absent, so `level`s count from the lowest;
-  3. then the cell `at=X,Y,Z` names, or the box `from=` and `to=` span: its low corner, then its
-     high corner, each compared by `y`, then `z`, then `x`.
+  3. then the cell a coordinate `at=X,Y,Z` names, or else the box `from=` and `to=` span, whichever
+     end is written first: its low corner, then its high corner, each compared by `y`, then `z`,
+     then `x`. A line that writes none of them stands at `0,0,0`.
 
-  A value no pass reads in that place, such as `at=center` in a `def` with no `size=`, sorts after
-  every number. Members that stand in the same place are ordered by the text of what their lines
-  write, key by key. Two lines keep the order they are written in only when they write the same
-  thing, and those build the same.
+  A value these steps cannot read as a whole number sorts after every number: an `offset=`, `y=`,
+  `from=` or `to=` of another kind, an `at=` that is no door anchor, wall or cell, such as the
+  number [§5.4](#54-selectors) reserves, and `center` or `right` where the wall has no length to
+  measure, on a line that names no `front`, `back`, `left` or `right` or in a `def` with no
+  `size=`.
 
-A member carries its address whether or not it has an `id=`, so adding an `id=` renumbers nothing.
-A member under an `@edition` guard counts among the members the guard stands in. An actuator patch
-(`door[id=front] opened_by=sig.x`) has no address and takes no place in the count: it stands
-nowhere, and acts on the member its selector picks.
+  Members that stand in the same place are ordered by what their lines write other than `id=`,
+  `class=` and a `[selector]`. Their `key=value` pairs come first, sorted by key and compared pair
+  by pair, key then value. Then come their bare values in the order written, the value after `->`,
+  the edition of the `@edition` guard they stand under, and last the members nested under them
+  that take an address: each body sorted by keyword, then by `@SIDE` with a line that names no wall
+  first, then as this list orders members, and compared member by member. At each of these, the
+  line that runs out first, or has no `->` or no guard, sorts first. Keys, values and editions
+  compare as text, by Unicode code point, each value spelled one way: a number in decimal digits, a
+  string between its double quotes, a token with its `@` and any state literal without spaces, a
+  list as its items joined by `, ` between `[` and `]`, a `mat_slot=` as the name of its slot, and
+  anything else as written. So `height=10` sorts before `height=9`, and `frame="oak"` before
+  `frame=oak`. Members that tie at every step keep the order their lines are written in.
 
-Reordering lines moves no address, and neither does adding a member of another role, on another
-wall, under another parent, or further along the wall. A member added ahead of others of its role
-on its wall renumbers those after it, so a member an edit must keep naming across such a change
-carries an `id=`.
+A member carries its address whether or not it has an `id=`, so adding an `id=`, a `class=` or a
+`[selector]` to a line renumbers nothing. A member under an `@edition` guard counts among the
+members the guard stands in. An actuator patch (`door[id=front] opened_by=sig.x`) has no address
+and takes no place in the count, and neither does a line nested under one: a patch stands nowhere,
+and acts on the member its selector picks. A `[selector]` on a line of any other keyword makes no
+patch, and the line is counted as any other is.
+
+Reordering lines moves no address, except between members that tie at every step, which trade
+theirs when their lines trade places. Adding a member of another role, on another wall, under
+another parent, or further along the wall moves none either. A member added ahead of others of its
+role on its wall renumbers those after it, so a member an edit must keep naming across such a
+change carries an `id=`.
 
 An `edit` line names a member by its address, `edit window@front[0] set y=2`, and selects the
 member whose line gives it that address as written. An edit that moves a member, by setting its
@@ -424,8 +445,9 @@ member whose line gives it that address as written. An edit that moves a member,
 Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
 
 `cairn parse --format json` prints each member line's address, and the ASCII dump of `cairn lower`
-lists those of the members that built a cell. Each member's `resolved_state` record carries its
-address ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), so the
+lists those of the members that built a cell. The `resolved_state` record of each member that
+built a cell, a struct's `circuit` included, carries its address
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), so those
 addresses feed `resolved_ir_hash`
 ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 

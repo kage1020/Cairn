@@ -34,6 +34,7 @@ pub(crate) use self::member::args_to_map;
 pub use self::member::{
     Arguments, BodyKind, IntentState, Label, Member, MemberBody, ValueWithSpan,
 };
+pub(crate) use self::patch::patched_actuator;
 pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub(crate) use self::select::{
     SelectorKeys, compares_as_label, levels_under, selector_keys, selects,
@@ -66,22 +67,26 @@ pub struct IntentModule {
 }
 
 impl IntentModule {
-    /// Every member with an address, at any depth of a `struct` or `def` body, with the kind and
-    /// name of the item it stands in: the structs' first, each body in source order, a member
-    /// before those nested under it.
+    /// Every member with an address, at any depth of a `struct` or `def` body: the structs' first,
+    /// each body in source order, a member before those nested under it.
     #[must_use]
-    pub fn addressed_members(&self) -> Vec<(ScopeKind, &str, &Member)> {
+    pub fn addressed_members(&self) -> Vec<AddressedMember<'_>> {
         fn walk<'a>(
-            kind: ScopeKind,
-            name: &'a str,
+            scope_kind: ScopeKind,
+            scope_name: &'a str,
             members: &'a [Member],
-            out: &mut Vec<(ScopeKind, &'a str, &'a Member)>,
+            out: &mut Vec<AddressedMember<'a>>,
         ) {
             for member in members {
-                if member.address.is_some() {
-                    out.push((kind, name, member));
+                if let Some(address) = &member.address {
+                    out.push(AddressedMember {
+                        scope_kind,
+                        scope_name,
+                        address,
+                        member,
+                    });
                 }
-                walk(kind, name, &member.children.members, out);
+                walk(scope_kind, scope_name, &member.children.members, out);
             }
         }
         let mut out = Vec::new();
@@ -328,6 +333,20 @@ impl AssertIr {
             Self::Latency { from, to, .. } => vec![from, to],
         }
     }
+}
+
+/// One member [`IntentModule::addressed_members`] lists, with the item it stands in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct AddressedMember<'a> {
+    /// Which scope family the member stands in.
+    pub scope_kind: ScopeKind,
+    /// Source-level name of that scope.
+    pub scope_name: &'a str,
+    /// The member's address.
+    pub address: &'a MemberAddress,
+    /// The member.
+    pub member: &'a Member,
 }
 
 /// Which family of Intent IR scope a downstream pass is describing.

@@ -42,9 +42,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
 - **Address.** The name the compiler gives every member of a `struct` or `def` body from where it
-  stands, `ROLE@SIDE[N]` per step, such as `level[1].window@front[0]`: never from line order, so
-  reordering lines or appending a member elsewhere moves none. See
-  [syntax §5.5](/spec/syntax/#55-ids-classes-addresses).
+  stands, `ROLE@SIDE[N]` per step, such as `level[1].window@front[0]`. Line order decides one only
+  between members that tie at every step of the count, so otherwise reordering lines or appending a
+  member elsewhere moves none. See [syntax §5.5](/spec/syntax/#55-ids-classes-addresses).
 - **`edit`.** A top-level line, `edit TARGET set key=value …`, that changes the members a selector
   (`window[class=vent]`) or an address (`window@front[0]`) selects, as their lines write them,
   without rewriting those lines. A member it does not select whose `resolved_state` it changes is
