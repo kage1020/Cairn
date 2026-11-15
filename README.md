@@ -88,13 +88,13 @@ verified target:           bedrock 1.21.60/block version 18168865, source unchan
 ## What works today
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
-- Java `.nbt` and Bedrock `.mcstructure` output from one source.
+- Java `.nbt` or Litematica `.litematic`, and Bedrock `.mcstructure`, output from one source.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, chests, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - A constraint catalog beside the packs: a build pinned to a target warns on a lever or torch with nothing to hold it, sand over air, and water that runs out of the structure, and `cairn info` and the lockfile name the members whose meaning changes at a Java version.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
-- `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
+- `cairn-lsp` with diagnostics, completion and hover, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
 
 **Experimental.** `cairn synth --experimental-logic-synth` prints each stage of the redstone pipeline as JSON: synthesis, netlist construction, edition selection, placement, routing, delay insertion, and legalization. The output shape is free to change.
@@ -104,7 +104,7 @@ verified target:           bedrock 1.21.60/block version 18168865, source unchan
 - Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
 - `edit` patches.
-- `.litematic` and `.schem` writers, and importing existing schematics.
+- The `.schem` writer, and importing existing schematics.
 - The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas

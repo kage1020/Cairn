@@ -88,6 +88,7 @@ fn a_term_ends_with_a_full_stop_and_runs_through_its_continuation_lines() {
         vec![Part::Term {
             markdown,
             section: section.map(str::to_owned),
+            within: None,
         }]
     };
     assert_eq!(
@@ -118,6 +119,53 @@ fn a_term_ends_with_a_full_stop_and_runs_through_its_continuation_lines() {
     );
     assert_eq!(page.cited("Other"), []);
     assert_eq!(page.cited("Fenced"), []);
+}
+
+#[test]
+fn a_nested_term_is_within_the_term_of_the_innermost_item_holding_it() {
+    let page = synthetic(
+        "## 3.1 Nested\n\n\
+         - **Outer.** One.\n  \
+         - **Middle.** Two.\n    \
+         - **Inner.** Three.\n\n      \
+         Its second paragraph.\n  \
+         - **Beside.** Four.\n\
+         - plain item\n  \
+         - **Loose.** Five.\n\
+         - **Next.** Six.\n",
+    );
+    let within: Vec<_> = page
+        .titles()
+        .into_iter()
+        .flat_map(|title| page.cited(title))
+        .filter_map(|part| match part {
+            Part::Term {
+                markdown, within, ..
+            } => Some((markdown, within)),
+            Part::Page | Part::Section(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        within,
+        [
+            (
+                "- **Outer.** One.\n  - **Middle.** Two.\n    - **Inner.** Three.\n\n      \
+                 Its second paragraph.\n  - **Beside.** Four.\n",
+                None
+            ),
+            (
+                "  - **Middle.** Two.\n    - **Inner.** Three.\n\n      Its second paragraph.\n",
+                Some("Outer")
+            ),
+            (
+                "    - **Inner.** Three.\n\n      Its second paragraph.\n",
+                Some("Middle")
+            ),
+            ("  - **Beside.** Four.\n", Some("Outer")),
+            ("  - **Loose.** Five.\n", None),
+            ("- **Next.** Six.\n", None),
+        ]
+    );
 }
 
 #[test]
@@ -165,6 +213,7 @@ fn a_title_more_than_one_part_has_names_each_of_them() {
             Part::Term {
                 markdown: "- **Same.** A term.\n",
                 section: Some("11-same".to_owned()),
+                within: None,
             },
         ]
     );
