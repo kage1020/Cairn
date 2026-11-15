@@ -413,6 +413,25 @@ fn an_x_key_apart_from_a_size_is_an_ordinary_key() {
 
 // -- logic expressions ------------------------------------------------------
 
+/// An infix primitive starts no expression, so after the name it is the `=` that is missing.
+#[test]
+fn a_logic_line_with_no_expression_after_its_name_needs_its_equals_sign() {
+    for (line, expected) in [
+        ("logic sig.a", "2:14: expected `=`, got end of line"),
+        (
+            "logic sig.a or sig.b",
+            "2:15: expected `=`, got identifier `or`",
+        ),
+        ("logic sig.a 3", "2:15: expected `=`, got integer `3`"),
+    ] {
+        assert_eq!(
+            refusal(&format!("struct s\n  {line}\n")),
+            expected,
+            "{line:?}"
+        );
+    }
+}
+
 #[test]
 fn an_infix_primitive_is_not_read_as_a_signal() {
     for (expression, expected) in [

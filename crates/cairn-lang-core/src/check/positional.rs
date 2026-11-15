@@ -102,12 +102,7 @@ fn check_statements(body: &[Statement], sink: &mut DiagnosticSink) {
             Statement::Generic { children, .. } | Statement::EditionGuard { children, .. } => {
                 check_statements(children, sink);
             }
-            Statement::Logic {
-                lhs,
-                binds: false,
-                span,
-                ..
-            } => sink.push(unbound_logic(lhs, span)),
+            Statement::UnboundLogic { lhs, span, .. } => sink.push(unbound_logic(lhs, span)),
             Statement::Logic { .. } => {}
             Statement::AssertTruth { positional, .. } => {
                 push_run(

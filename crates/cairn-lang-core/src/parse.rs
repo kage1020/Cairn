@@ -798,22 +798,25 @@ impl<'a> Parser<'a> {
 
     fn parse_logic_command(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
         let lhs = self.parse_dotted_ref()?;
-        // With its `=` dropped, the line still reads the expression it would have bound.
-        let binds = !matches!(
-            self.peek().map(|t| &t.kind),
-            Some(TokenKind::Ident(_) | TokenKind::LParen)
-        );
+        // With its `=` dropped, the line still reads the expression it would have bound. No
+        // expression starts with an infix primitive, so one there is refused as the missing `=`.
+        let binds = match self.peek().map(|t| &t.kind) {
+            Some(TokenKind::LParen) => false,
+            Some(TokenKind::Ident(_)) => self
+                .peek_primitive()
+                .is_some_and(|primitive| primitive.infix_rank().is_some()),
+            _ => true,
+        };
         if binds {
             self.expect(&TokenKind::Eq)?;
         }
         let rhs = self.parse_expr()?;
         let span = start_byte..self.last_byte();
         self.expect_operand_end(&[TokenKind::Newline])?;
-        Ok(Statement::Logic {
-            lhs,
-            rhs,
-            binds,
-            span,
+        Ok(if binds {
+            Statement::Logic { lhs, rhs, span }
+        } else {
+            Statement::UnboundLogic { lhs, rhs, span }
         })
     }
 

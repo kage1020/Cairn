@@ -449,6 +449,16 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     (
+        "logic_dropped_equals_before_an_infix_primitive",
+        "struct s size=3x3\n  logic s.out or a.b\n",
+        Reject,
+    ),
+    (
+        "logic_dropped_equals_before_an_integer",
+        "struct s size=3x3\n  logic s.out 3\n",
+        Reject,
+    ),
+    (
         "top_level_unknown",
         "widget w\n  floor mat_slot=f\n",
         Reject,
