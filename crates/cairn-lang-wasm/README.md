@@ -1,5 +1,7 @@
 # cairn-lang-wasm
 
+This crate's Rust API is in the [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no promise: any release may change it.
+
 WebAssembly bindings for the Cairn compiler. The documentation site's [playground](https://cairn.kage1020.com/playground/) runs them: a source compiles in the browser, with no server, through the same [`cairn-lang-core`](../cairn-lang-core/README.md) and [`cairn-lang-formats`](../cairn-lang-formats/README.md) code the `cairn` CLI runs, and the built-in registry packs are embedded in the module.
 
 ## Status

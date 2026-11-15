@@ -1,3 +1,7 @@
+//! This crate's Rust API is in the
+//! [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no
+//! promise: any release may change it.
+//!
 //! WebAssembly bindings that run the Cairn compiler in a browser, with the built-in registry packs
 //! embedded: `cairn compile` and `cairn info` over a source held in memory.
 //!
