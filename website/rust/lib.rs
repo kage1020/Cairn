@@ -1,3 +1,7 @@
+//! This crate's Rust API is in the
+//! [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no
+//! promise: any release may change it.
+//!
 //! Every Markdown page of the Cairn documentation site, the specification among them, embedded at
 //! build time, so a tool can show the pages of the release it was built from without a network.
 //!

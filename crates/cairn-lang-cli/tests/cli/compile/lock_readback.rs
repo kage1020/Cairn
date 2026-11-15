@@ -21,7 +21,13 @@ fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    let first = Run::from(compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock)));
+    let first = Run::from(compile(
+        &src,
+        "bedrock",
+        "1.21.60",
+        out_dir.path(),
+        Some(&lock),
+    ));
     assert_eq!(first.code, Some(0), "stderr={}", first.stderr);
     assert!(
         warning_lines(&first.stderr).is_empty(),
@@ -29,11 +35,20 @@ fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
         warning_lines(&first.stderr),
     );
 
-    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
+    let second = Run::from(compile(
+        &src,
+        "bedrock",
+        "1.21.40",
+        out_dir.path(),
+        Some(&lock),
+    ));
     assert_eq!(second.code, Some(0), "stderr={}", second.stderr);
     assert_eq!(
         warning_lines(&second.stderr),
-        ["W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189."],
+        [
+            "W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.21.60/block version 18168865, now \
+             1.21.40/18163713."
+        ],
         "stderr does not carry the spec's line: {}",
         second.stderr,
     );
@@ -244,6 +259,36 @@ fn a_lockfile_that_does_not_parse_is_reported_rather_than_discarded() {
     assert!(
         replaced.starts_with("lock_schema_version:"),
         "the lockfile should still have been replaced: {replaced}",
+    );
+}
+
+#[test]
+fn a_lock_path_that_cannot_be_read_is_reported_without_a_promise_to_replace_it() {
+    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
+    let out_dir = TempDir::new().expect("out");
+    let lock = out_dir.path().join("cottage.lock");
+    fs::create_dir(&lock).expect("a directory at the lock path");
+
+    let run = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
+    assert_eq!(run.code, Some(1), "stderr={}", run.stderr);
+    let lines: Vec<&str> = run.stderr.lines().collect();
+    let [warning, error] = lines.as_slice() else {
+        panic!(
+            "a warning and the write's error expected, got: {}",
+            run.stderr
+        );
+    };
+    assert_eq!(
+        *warning,
+        format!(
+            "warning: {}: the existing lockfile could not be read (lockfile I/O: a directory, not \
+             a file), so its target is not compared with this build's",
+            lock.display(),
+        ),
+    );
+    assert!(
+        error.starts_with(&format!("error: writing lockfile `{}`: ", lock.display())),
+        "the write fails with the platform's own words: {error}",
     );
 }
 

@@ -638,7 +638,9 @@ fn the_recommended_row_names_the_buildable_ends_and_the_pair_across_each_boundar
         ));
         let stdout = info_rows(&fixture.source(), "java,bedrock");
         assert_eq!(
-            stdout.lines().last(),
+            stdout
+                .lines()
+                .find(|row| row.starts_with("recommended test targets:")),
             Some(format!("recommended test targets:  {expected}").as_str()),
             "{head}{members}",
         );

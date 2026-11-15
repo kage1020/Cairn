@@ -1204,6 +1204,7 @@ fn naming_the_entry_does_not_move_the_rows() {
             "intended targets",
             "semantic-sensitive",
             "recommended test targets",
+            "verified target",
         ],
         "premise: these are the rows, got: {clean_out}",
     );

@@ -127,18 +127,19 @@ pub(crate) enum Command {
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
-    /// Report a .crn source file's version range, edition portability, semantic-sensitive members
-    /// and the versions worth testing it in.
+    /// Report a .crn source file's version range, edition portability, semantic-sensitive
+    /// members, the versions worth testing it in and its verified lock target.
     #[command(
-        long_about = "Report the three version axes (declared registry range, edition portability, \
-            semantic-sensitive members) for a .crn source file, with the versions each edition \
-            builds it for and the `recommended test targets` among them: the oldest and the \
-            newest, and the pair either side of each semantic-sensitivity boundary that falls \
-            between them. Exits 0 on success; 1 on a parse \
-            failure, on any `Error`-severity diagnostic (the check passes run here, as does each \
-            requested edition's lowering with its circuits laid, and a range derived from a file \
-            `cairn check` rejects is a confident wrong answer), or on any \
-            other I/O error (permission denied, non-UTF-8 contents); 2 when the file cannot be \
+        long_about = "Report the three version axes (declared registry range, semantic-sensitive \
+            members, verified lock target) for a .crn source file, with each requested edition's \
+            portability and buildable targets beside them and the `recommended test targets` \
+            among those: the oldest and the newest, and the pair either side of each \
+            semantic-sensitivity boundary that falls between them. Exits 0 on success, including \
+            when the lockfile is missing or cannot be read; 1 on a parse failure, on any \
+            `Error`-severity diagnostic (the check passes run here, as does each requested \
+            edition's lowering with its circuits laid, and a range derived from a file `cairn \
+            check` rejects is a confident wrong answer), or on any other I/O error reading the \
+            source (permission denied, non-UTF-8 contents); 2 when the source file cannot be \
             located, and rejects an empty `--editions` value with exit 2"
     )]
     Info {
@@ -155,6 +156,15 @@ pub(crate) enum Command {
                 repeated name is reported once",
         )]
         editions: Vec<String>,
+        /// Lockfile to report the verified target of; defaults to `<source>.lock` next to the
+        /// source.
+        #[arg(
+            long,
+            long_help = "Lockfile whose target the `verified target` row reports. Defaults to \
+                `<source>.lock` next to the source, the path `cairn compile` writes. A path with \
+                no file reports `(no lock)` rather than refusing the command"
+        )]
+        lock: Option<PathBuf>,
         /// Output format for the report.
         #[arg(long, value_enum, default_value_t = InfoFormat::Text)]
         format: InfoFormat,
@@ -440,7 +450,7 @@ pub(crate) enum CheckFormat {
 pub(crate) enum InfoFormat {
     /// Multi-line human report mirroring the three-answers section of `spec/versioning-editions`.
     Text,
-    /// Pretty JSON serialisation of `VersionAxes`, for tools.
+    /// Pretty JSON serialisation of `VersionAxes` and the verified lock target, for tools.
     Json,
 }
 
