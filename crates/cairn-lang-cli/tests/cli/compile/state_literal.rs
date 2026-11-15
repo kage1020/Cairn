@@ -61,7 +61,9 @@ fn bedrock_builds_a_state_only_at_the_versions_whose_map_carries_it() {
              `minecraft:cherry_wood` to, so the pack carries no form for them\n  \
              note: pass `--target` 1.21.0, 1.21.60 or 1.26.60, whose state maps carry these \
              states, bind the material to a block bedrock 1.21.40 has a form for, or build for \
-             the other edition\n"
+             the other edition\n\
+             note: no lockfile at {path}.lock, so no target is verified; `cairn compile` writes \
+             one\n"
         )),
     );
     let json = cairn("info", &[path, "--editions", "bedrock", "--format", "json"]);

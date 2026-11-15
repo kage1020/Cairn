@@ -24,12 +24,14 @@ structs:
       h: 10
     args: {}
     members:
-      - role:
+      - address: "floor[0]"
+        role:
           kind: Floor
         mat_slot: wall
         arguments: {}
         intent_state: {}
       - class: outer
+        address: "walls[0]"
         role:
           kind: Walls
         mat_slot: wall
@@ -38,7 +40,8 @@ structs:
             kind: Int
             value: 3
         intent_state: {}
-      - role:
+      - address: "roof[0]"
+        role:
           kind: Roof
         mat_slot: wall
         arguments:
@@ -50,6 +53,7 @@ structs:
             value: 1
         intent_state: {}
       - id: front
+        address: "door@front[0]"
         role:
           kind: Door
         arguments:
@@ -61,6 +65,7 @@ structs:
             value: center
         intent_state: {}
       - id: back
+        address: "door@back[0]"
         role:
           kind: Door
         arguments:
@@ -72,6 +77,7 @@ structs:
             value: center
         intent_state: {}
       - id: plate1
+        address: "pressure_plate@front.outside[0]"
         role:
           kind: PressurePlate
         binding:
@@ -93,6 +99,7 @@ structs:
             value: 0
         intent_state: {}
       - id: plate2
+        address: "pressure_plate@inside.front[0]"
         role:
           kind: PressurePlate
         binding:
@@ -139,7 +146,8 @@ structs:
               - sig
               - f2
         intent_state: {}
-      - role:
+      - address: "circuit[0]"
+        role:
           kind: Circuit
         arguments:
           region:
