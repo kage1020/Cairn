@@ -7,12 +7,13 @@ use std::io::Read;
 use cairn_lang_core::block_array::{
     BlockState, Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY, PaletteIndex,
 };
-use cairn_lang_nbt::tag::{Compound, List, Tag};
+use cairn_lang_nbt::tag::{Compound, Tag};
 use cairn_lang_nbt::{Event, NbtReadError, NbtReader};
 use indexmap::IndexMap;
 use thiserror::Error;
 
 use super::STATE_SEPARATORS;
+use crate::read_stream::{lists_compounds, next_inside, rest_of_compound};
 use crate::volume::{BlockVolume, StoredBlockEntity};
 
 /// The versions read: 2, the first to carry `DataVersion`, and 3.
@@ -116,10 +117,41 @@ struct Fields {
     metadata: Option<Compound>,
     extents: [Option<i16>; 3],
     offset: Option<Vec<i32>>,
-    palette: Option<Compound>,
+    palette: Option<StoredPalette>,
     data: Option<Vec<i8>>,
-    block_entities: Option<List>,
-    entities: Option<List>,
+    block_entities: Option<Result<Vec<ReadBlockEntity>, ListFault>>,
+    entities: Option<Result<Vec<Compound>, ListFault>>,
+}
+
+/// A `Palette` as it streamed: each spelling with its index, `None` for a value that is no int,
+/// held up to [`PALETTE_CAPACITY`] entries and counted past them.
+struct StoredPalette {
+    entries: IndexMap<String, Option<i32>>,
+    len: usize,
+}
+
+/// A `BlockEntities` item whose `Id` and `Pos` read, with its other fields as stored.
+struct ReadBlockEntity {
+    pos: (u32, u32, u32),
+    id: String,
+    rest: Compound,
+}
+
+/// The first part of a list that is not the shape the specification gives it.
+struct ListFault {
+    /// The item and its field, or `None` for the list itself.
+    item: Option<(usize, &'static str)>,
+    expected: &'static str,
+}
+
+impl ListFault {
+    /// The refusal of the list at `path`.
+    fn at(&self, path: &str) -> SchemReadError {
+        match self.item {
+            None => malformed(path, self.expected),
+            Some((index, field)) => malformed(format!("{path}[{index}].{field}"), self.expected),
+        }
+    }
 }
 
 /// Reads a gzip-wrapped `.schem`.
@@ -128,13 +160,16 @@ struct Fields {
 ///
 /// A [`SchemReadError`] for bytes that are not a `.schem` this reader reads.
 pub fn read_schem<R: Read>(reader: R) -> Result<SpongeSchematic, SchemReadError> {
-    let gz = flate2::read::GzDecoder::new(reader);
-    let max_len = MAX_STRUCTURE_VOLUME.saturating_mul(MAX_VARINT_LEN);
-    let mut nbt = NbtReader::java(gz).with_max_len(max_len);
+    // As Java's `GZIPInputStream` reads them, members after the first continue the stream.
+    let gz = flate2::read::MultiGzDecoder::new(reader);
+    let mut nbt = NbtReader::java(gz)
+        .with_max_len(MAX_STRUCTURE_VOLUME)
+        .with_max_array_len(MAX_STRUCTURE_VOLUME.saturating_mul(MAX_VARINT_LEN));
     nbt.next_event()?;
     let mut fields = Fields::default();
     // Version 3 nests its fields in a `Schematic` compound; version 2 keeps them in the root.
     read_entries(&mut nbt, &mut fields, Container::Root)?;
+    nbt.finish()?;
     decode(fields)
 }
 
@@ -150,9 +185,9 @@ fn read_entries<R: Read>(
     nbt: &mut NbtReader<R>,
     fields: &mut Fields,
     container: Container,
-) -> Result<(), SchemReadError> {
-    while let Some(event) = nbt.next_event()? {
-        match event {
+) -> Result<(), NbtReadError> {
+    loop {
+        match next_inside(nbt)? {
             Event::Value {
                 name: Some(name),
                 tag,
@@ -179,17 +214,22 @@ fn read_entries<R: Read>(
                     read_entries(nbt, fields, Container::Blocks)?;
                 }
                 "Metadata" if container != Container::Blocks => {
-                    fields.metadata = Some(rest_compound(nbt)?);
+                    fields.metadata = Some(rest_of_compound(nbt)?);
                 }
-                "Palette" => fields.palette = Some(rest_compound(nbt)?),
+                "Palette" => fields.palette = Some(read_palette_entries(nbt)?),
                 _ => nbt.skip_rest()?,
             },
             Event::List {
-                name: Some(name), ..
+                name: Some(name),
+                element_type_id,
+                ..
             } => match name.as_str() {
-                "BlockEntities" => fields.block_entities = Some(rest_list(nbt)?),
+                "BlockEntities" => {
+                    fields.block_entities =
+                        Some(each_compound(nbt, element_type_id, read_block_entity)?);
+                }
                 "Entities" if container != Container::Blocks => {
-                    fields.entities = Some(rest_list(nbt)?);
+                    fields.entities = Some(each_compound(nbt, element_type_id, Ok)?);
                 }
                 _ => nbt.skip_rest()?,
             },
@@ -198,21 +238,98 @@ fn read_entries<R: Read>(
             Event::End => return Ok(()),
         }
     }
-    Ok(())
 }
 
-fn rest_compound<R: Read>(nbt: &mut NbtReader<R>) -> Result<Compound, SchemReadError> {
-    let Tag::Compound(compound) = nbt.read_rest()? else {
-        unreachable!("the rest of a compound reads as a compound");
+/// The entries of the open `Palette` compound, none held past [`PALETTE_CAPACITY`].
+fn read_palette_entries<R: Read>(nbt: &mut NbtReader<R>) -> Result<StoredPalette, NbtReadError> {
+    let mut palette = StoredPalette {
+        entries: IndexMap::new(),
+        len: 0,
     };
-    Ok(compound)
+    loop {
+        let (name, index) = match next_inside(nbt)? {
+            Event::Value {
+                name: Some(name),
+                tag,
+            } => {
+                let index = match tag {
+                    Tag::Int(index) => Some(index),
+                    _ => None,
+                };
+                (name, index)
+            }
+            Event::Compound { name: Some(name) }
+            | Event::List {
+                name: Some(name), ..
+            } => {
+                nbt.skip_rest()?;
+                (name, None)
+            }
+            Event::End => return Ok(palette),
+            event => unreachable!("a compound's entries are named, got {event:?}"),
+        };
+        palette.len += 1;
+        if palette.len <= PALETTE_CAPACITY {
+            palette.entries.insert(name, index);
+        }
+    }
 }
 
-fn rest_list<R: Read>(nbt: &mut NbtReader<R>) -> Result<List, SchemReadError> {
-    let Tag::List(list) = nbt.read_rest()? else {
-        unreachable!("the rest of a list reads as a list");
+/// The items of the open list, each a compound `item` reads, or the first one it refuses, with
+/// the rest of the list skipped.
+fn each_compound<R: Read, T>(
+    nbt: &mut NbtReader<R>,
+    element_type_id: u8,
+    item: impl Fn(Compound) -> Result<T, (&'static str, &'static str)>,
+) -> Result<Result<Vec<T>, ListFault>, NbtReadError> {
+    if !lists_compounds(element_type_id) {
+        nbt.skip_rest()?;
+        return Ok(Err(ListFault {
+            item: None,
+            expected: "a list of compounds",
+        }));
+    }
+    let mut items = Vec::new();
+    loop {
+        match next_inside(nbt)? {
+            Event::Compound { name: None } => match item(rest_of_compound(nbt)?) {
+                Ok(read) => items.push(read),
+                Err((field, expected)) => {
+                    let fault = ListFault {
+                        item: Some((items.len(), field)),
+                        expected,
+                    };
+                    nbt.skip_rest()?;
+                    return Ok(Err(fault));
+                }
+            },
+            Event::End => return Ok(Ok(items)),
+            event => unreachable!("a list of compounds holds only compounds, got {event:?}"),
+        }
+    }
+}
+
+/// A `BlockEntities` item's `Id` and `Pos`, or the field of it that is not the shape it must be.
+fn read_block_entity(
+    mut stored: Compound,
+) -> Result<ReadBlockEntity, (&'static str, &'static str)> {
+    let Some(Tag::String(id)) = stored.entries.shift_remove("Id") else {
+        return Err(("Id", "a block entity id string"));
     };
-    Ok(list)
+    let Some(Tag::IntArray(pos)) = stored.entries.shift_remove("Pos") else {
+        return Err(("Pos", "an int array of three"));
+    };
+    let &[x, y, z] = pos.as_slice() else {
+        return Err(("Pos", "an int array of three"));
+    };
+    let [Ok(x), Ok(y), Ok(z)] = [x, y, z].map(u32::try_from) else {
+        return Err(("Pos", "three ints, each 0 or more"));
+    };
+    Ok(ReadBlockEntity {
+        pos: (x, y, z),
+        id,
+        rest: stored,
+    })
 }
 
 /// The field paths of one version's layout.
@@ -221,6 +338,7 @@ struct Paths {
     palette: &'static str,
     data: &'static str,
     block_entities: &'static str,
+    entities: &'static str,
 }
 
 impl Paths {
@@ -231,6 +349,7 @@ impl Paths {
                 palette: "Schematic.Blocks.Palette",
                 data: "Schematic.Blocks.Data",
                 block_entities: "Schematic.Blocks.BlockEntities",
+                entities: "Schematic.Entities",
             }
         } else {
             Self {
@@ -238,6 +357,7 @@ impl Paths {
                 palette: "Palette",
                 data: "BlockData",
                 block_entities: "BlockEntities",
+                entities: "Entities",
             }
         }
     }
@@ -295,60 +415,45 @@ fn decode(fields: Fields) -> Result<SpongeSchematic, SchemReadError> {
 
     let block_entities = match fields.block_entities {
         None => Vec::new(),
-        Some(list) => list
-            .items
-            .iter()
+        Some(read) => read
+            .map_err(|fault| fault.at(paths.block_entities))?
+            .into_iter()
+            .enumerate()
             .map(|item| stored_block_entity(item, version, dims))
-            .collect::<Option<_>>()
-            .ok_or_else(|| {
-                malformed(
-                    paths.block_entities,
-                    "a list of block entities, each an `Id` and a `Pos` inside the schematic",
-                )
-            })?,
+            .collect::<Result<_, _>>()
+            .map_err(|fault| fault.at(paths.block_entities))?,
     };
     let entities = match fields.entities {
         None => Vec::new(),
-        Some(list) => list
-            .items
-            .into_iter()
-            .map(|item| match item {
-                Tag::Compound(compound) => Some(compound),
-                _ => None,
-            })
-            .collect::<Option<_>>()
-            .ok_or_else(|| malformed(format!("{}Entities", paths.prefix), "a list of compounds"))?,
+        Some(read) => read.map_err(|fault| fault.at(paths.entities))?,
     };
+    let volume = BlockVolume::new(dims, palette, voxels, block_entities)
+        .expect("each part of the schematic is checked as it is decoded");
     Ok(SpongeSchematic {
         version,
         data_version,
         metadata: fields.metadata.unwrap_or_default(),
         offset,
-        volume: BlockVolume {
-            dims,
-            palette,
-            voxels,
-            block_entities,
-        },
+        volume,
         entities,
     })
 }
 
 /// The palette in index order, and each stored index's slot in it.
 fn read_palette(
-    stored: &Compound,
+    stored: &StoredPalette,
     path: &str,
 ) -> Result<(Vec<BlockState>, HashMap<i32, PaletteIndex>), SchemReadError> {
-    if stored.entries.len() > PALETTE_CAPACITY {
+    if stored.len > PALETTE_CAPACITY {
         return Err(SchemReadError::PaletteTooLarge {
-            len: stored.entries.len(),
+            len: stored.len,
             limit: PALETTE_CAPACITY,
         });
     }
     let mut indexed = Vec::with_capacity(stored.entries.len());
     for (spelled, index) in &stored.entries {
         let entry_path = || format!("{path}.{spelled}");
-        let Tag::Int(index) = index else {
+        let Some(index) = index else {
             return Err(malformed(entry_path(), "an int index"));
         };
         let state = parse_state(spelled).ok_or_else(|| {
@@ -451,42 +556,37 @@ fn decode_data(
     Ok(voxels)
 }
 
-/// A `BlockEntities` item: an `Id` and `Pos`, its fields in `Data` from version 3 and beside
-/// them before it.
-fn stored_block_entity(item: &Tag, version: i32, dims: Dims) -> Option<StoredBlockEntity> {
-    let Tag::Compound(stored) = item else {
-        return None;
+/// A `BlockEntities` item as the volume holds it: its fields in `Data` from version 3 and beside
+/// its `Id` and `Pos` before it, its position checked to be a voxel of `dims`.
+fn stored_block_entity(
+    (index, read): (usize, ReadBlockEntity),
+    version: i32,
+    dims: Dims,
+) -> Result<StoredBlockEntity, ListFault> {
+    let fault = |field, expected| ListFault {
+        item: Some((index, field)),
+        expected,
     };
-    let Some(Tag::String(id)) = stored.entries.get("Id") else {
-        return None;
-    };
-    let Some(Tag::IntArray(pos)) = stored.entries.get("Pos") else {
-        return None;
-    };
-    let [x, y, z] = pos.as_slice() else {
-        return None;
-    };
-    let pos = (
-        u32::try_from(*x).ok()?,
-        u32::try_from(*y).ok()?,
-        u32::try_from(*z).ok()?,
-    );
-    dims.index(pos.0, pos.1, pos.2)?;
+    let (x, y, z) = read.pos;
+    if dims.index(x, y, z).is_none() {
+        return Err(fault(
+            "Pos",
+            "a voxel inside the schematic's `Width`, `Height` and `Length`",
+        ));
+    }
+    let mut rest = read.rest;
     let data = if version >= 3 {
-        match stored.entries.get("Data") {
+        match rest.entries.shift_remove("Data") {
             None => Compound::new(),
-            Some(Tag::Compound(data)) => data.clone(),
-            Some(_) => return None,
+            Some(Tag::Compound(data)) => data,
+            Some(_) => return Err(fault("Data", "a compound")),
         }
     } else {
-        let mut data = stored.clone();
-        data.entries.shift_remove("Id");
-        data.entries.shift_remove("Pos");
-        data
+        rest
     };
-    Some(StoredBlockEntity {
-        pos,
-        id: id.clone(),
+    Ok(StoredBlockEntity {
+        pos: read.pos,
+        id: read.id,
         data,
     })
 }

@@ -1,12 +1,10 @@
 //! Bytes the reader refuses, each with the offset where the fault starts.
 
-use std::io::ErrorKind;
-
 use cairn_lang_nbt::{
     MAX_DEPTH, NbtReadError, NbtReader, read_bedrock_uncompressed, read_java_uncompressed,
 };
 
-use crate::{every_tag, java_bytes};
+use crate::{bedrock_bytes, every_tag, java_bytes};
 
 fn java_error(bytes: &[u8]) -> NbtReadError {
     read_java_uncompressed(bytes).expect_err("the bytes are refused")
@@ -77,6 +75,54 @@ fn a_non_empty_list_of_tag_end_is_refused() {
     let err = java_error(&root_with_entry(9, &[0, 0, 0, 0, 2]));
     assert!(
         matches!(err, NbtReadError::ListOfEnd { len: 2, offset: 7 }),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn a_length_at_the_readers_limit_is_read() {
+    let bytes = root_with_entry(12, &[0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 7, 0]);
+    let mut reader = NbtReader::java(bytes.as_slice()).with_max_len(1);
+    reader.next_event().expect("the root opens");
+    let event = reader.next_event().expect("one long is within the limit");
+    assert_eq!(
+        event,
+        Some(cairn_lang_nbt::Event::Value {
+            name: Some("l".to_owned()),
+            tag: cairn_lang_nbt::Tag::LongArray(vec![7]),
+        })
+    );
+}
+
+#[test]
+fn an_array_limit_leaves_lists_their_own() {
+    let list = root_with_entry(9, &[1, 0, 0, 0, 3, 1, 2, 3, 0]);
+    let mut reader = NbtReader::java(list.as_slice())
+        .with_max_len(3)
+        .with_max_array_len(2);
+    reader.next_event().expect("the root opens");
+    reader
+        .skip_rest()
+        .expect("a list of three is within the list limit");
+
+    let array = root_with_entry(7, &[0, 0, 0, 3, 1, 2, 3, 0]);
+    let mut reader = NbtReader::java(array.as_slice())
+        .with_max_len(3)
+        .with_max_array_len(2);
+    reader.next_event().expect("the root opens");
+    let err = reader
+        .next_event()
+        .expect_err("an array of three is past the array limit");
+    assert!(
+        matches!(
+            err,
+            NbtReadError::TooLong {
+                context: "byte_array",
+                len: 3,
+                limit: 2,
+                offset: 7,
+            }
+        ),
         "got {err:?}"
     );
 }
@@ -155,25 +201,94 @@ fn a_string_that_is_not_its_dialects_encoding_is_refused() {
 }
 
 #[test]
-fn input_ending_inside_the_root_is_an_unexpected_eof() {
+fn input_ending_inside_the_root_is_refused_where_it_ends() {
     let bytes = java_bytes("", &every_tag());
-    for cut in [1, 2, 9, bytes.len() / 2, bytes.len() - 1] {
+    for cut in [0, 1, 2, 9, bytes.len() / 2, bytes.len() - 1] {
         let err = java_error(&bytes[..cut]);
         assert!(
-            matches!(&err, NbtReadError::Io(io) if io.kind() == ErrorKind::UnexpectedEof),
+            matches!(err, NbtReadError::Truncated { offset } if offset == cut as u64),
             "cut at {cut}: got {err:?}"
         );
     }
 }
 
 #[test]
-fn input_ending_inside_a_skipped_array_is_an_unexpected_eof() {
+fn input_ending_inside_a_skipped_array_is_refused_where_it_ends() {
     let bytes = root_with_entry(12, &[0, 0, 0, 2, 0, 0, 0, 0]);
     let mut reader = NbtReader::java(bytes.as_slice());
     reader.next_event().expect("the root opens");
     let err = reader.skip_rest().expect_err("the array is cut");
     assert!(
-        matches!(&err, NbtReadError::Io(io) if io.kind() == ErrorKind::UnexpectedEof),
+        matches!(err, NbtReadError::Truncated { offset: 15 }),
         "got {err:?}"
     );
+}
+
+#[test]
+fn input_past_the_root_is_refused_where_it_starts() {
+    let mut java = java_bytes("", &every_tag());
+    let end = java.len() as u64;
+    java.push(0);
+    let err = java_error(&java);
+    assert!(
+        matches!(err, NbtReadError::TrailingBytes { offset } if offset == end),
+        "got {err:?}"
+    );
+
+    let mut bedrock = bedrock_bytes("", &every_tag());
+    let end = bedrock.len() as u64;
+    bedrock.extend(bedrock_bytes("", &every_tag()));
+    let err = read_bedrock_uncompressed(bedrock.as_slice()).expect_err("a second root follows");
+    assert!(
+        matches!(err, NbtReadError::TrailingBytes { offset } if offset == end),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn a_reader_refuses_every_call_after_one_that_failed() {
+    let mut reader = NbtReader::java(&[8, 0, 0, 0, 0][..]);
+    let first = reader.next_event().expect_err("the root is a string");
+    assert!(
+        matches!(first, NbtReadError::RootNotCompound { id: 8 }),
+        "got {first:?}"
+    );
+    for _ in 0..2 {
+        let again = reader.next_event().expect_err("the reader failed");
+        assert!(
+            matches!(again, NbtReadError::AfterFailure { offset: 1 }),
+            "got {again:?}"
+        );
+    }
+    let finished = reader.finish().expect_err("the reader failed");
+    assert!(
+        matches!(finished, NbtReadError::AfterFailure { offset: 1 }),
+        "got {finished:?}"
+    );
+
+    // The list's type and length were consumed, so a retry would read its payload as a tag.
+    let bytes = root_with_entry(9, &[3, 0xFF, 0xFF, 0xFF, 0xFF, 0]);
+    let mut reader = NbtReader::java(bytes.as_slice());
+    reader.next_event().expect("the root opens");
+    let first = reader
+        .next_event()
+        .expect_err("the list's length is negative");
+    assert!(
+        matches!(first, NbtReadError::NegativeLength { offset: 8, .. }),
+        "got {first:?}"
+    );
+    let again = reader.next_event().expect_err("the reader failed");
+    assert!(
+        matches!(again, NbtReadError::AfterFailure { offset: 12 }),
+        "got {again:?}"
+    );
+}
+
+#[test]
+#[should_panic(expected = "`finish` is called once the root has closed")]
+fn finishing_a_reader_whose_root_is_open_panics() {
+    let bytes = java_bytes("", &every_tag());
+    let mut reader = NbtReader::java(bytes.as_slice());
+    reader.next_event().expect("the root opens");
+    let _ = reader.finish();
 }

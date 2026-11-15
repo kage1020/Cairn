@@ -8,8 +8,9 @@
 - *(formats)* The `.litematic` writer stamps `Version` 6 for 1.20.4 and 7 from 1.20.5, the version
   a Litematica for each release reads, writes block entities as the `.nbt` writer does, and leaves
   out the save times and preview image, so a source always compiles to the same bytes. A
-  `.litematic` reader returns each region's voxels, palette and block entities, holding one region
-  in memory at a time.
-- *(nbt)* `NbtReader`, a pull reader for both dialects, yields a root one tag at a time and refuses
-  malformed input with the byte offset where the fault starts, and `CompoundStream::long_array`
-  writes a long array from an iterator without collecting it.
+  `.litematic` reader returns each region's voxels, palette and block entities, holding one
+  region's NBT in memory at a time.
+- *(nbt)* `NbtReader`, a pull reader for both dialects, yields a root one tag at a time, refuses
+  malformed NBT with the byte offset where the fault starts, input that ends early with where it
+  ends, and, through `finish`, input past the root, and fails every call after one that failed.
+  `CompoundStream::long_array` writes a long array from an iterator without collecting it.

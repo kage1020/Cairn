@@ -9,7 +9,7 @@ use cairn_lang_nbt::{Event, NbtReadError, NbtReader};
 use thiserror::Error;
 
 use crate::dims::{read_extents, saturating_volume};
-use crate::volume::StoredBlockEntity;
+use crate::volume::{StoredBlockEntity, VolumeError};
 
 /// The `format_version` read, the only one the game saves.
 const FORMAT_VERSION: i32 = 1;
@@ -25,20 +25,100 @@ pub struct StoredMcStructure {
     pub entities: Vec<Compound>,
 }
 
-/// The voxels of a `.mcstructure`, in the `(y, z, x)` order [`Dims::index`] lays out.
+/// The voxels of a `.mcstructure`, in the `(y, z, x)` order [`Dims::index`] lays out, each a slot
+/// of the palette or a structure void, with each block entity on a voxel of the box.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BedrockVolume {
-    /// Voxel extents.
-    pub dims: Dims,
+    dims: Dims,
+    palette: Vec<BedrockBlock>,
+    blocks: Vec<Option<PaletteIndex>>,
+    liquids: Vec<Option<PaletteIndex>>,
+    block_entities: Vec<StoredBlockEntity>,
+}
+
+impl BedrockVolume {
+    /// The volume of these parts.
+    ///
+    /// # Errors
+    ///
+    /// A [`VolumeError`] for a layer that does not fill the box, a voxel of either layer past the
+    /// palette, or a block entity outside the box.
+    pub fn new(
+        dims: Dims,
+        palette: Vec<BedrockBlock>,
+        blocks: Vec<Option<PaletteIndex>>,
+        liquids: Vec<Option<PaletteIndex>>,
+        block_entities: Vec<StoredBlockEntity>,
+    ) -> Result<Self, VolumeError> {
+        let volume = dims.volume();
+        for layer in [&blocks, &liquids] {
+            if layer.len() != volume {
+                return Err(VolumeError::VoxelCount {
+                    volume,
+                    voxels: layer.len(),
+                });
+            }
+            let outside = layer.iter().enumerate().find_map(|(voxel, slot)| {
+                slot.filter(|index| usize::from(index.0) >= palette.len())
+                    .map(|index| (voxel, index))
+            });
+            if let Some((voxel, index)) = outside {
+                return Err(VolumeError::IndexOutsidePalette {
+                    voxel,
+                    index: index.0,
+                    len: palette.len(),
+                });
+            }
+        }
+        if let Some((index, entity)) = block_entities.iter().enumerate().find(|(_, entity)| {
+            dims.index(entity.pos.0, entity.pos.1, entity.pos.2)
+                .is_none()
+        }) {
+            return Err(VolumeError::BlockEntityOutside {
+                index,
+                pos: entity.pos,
+                dims,
+            });
+        }
+        Ok(Self {
+            dims,
+            palette,
+            blocks,
+            liquids,
+            block_entities,
+        })
+    }
+
+    /// The box's extents.
+    #[must_use]
+    pub fn dims(&self) -> Dims {
+        self.dims
+    }
+
     /// `palette.default.block_palette`, in the file's order.
-    pub palette: Vec<BedrockBlock>,
+    #[must_use]
+    pub fn palette(&self) -> &[BedrockBlock] {
+        &self.palette
+    }
+
     /// The first `block_indices` layer, `None` where it holds `-1`: a structure void, which a
     /// placement leaves as the world has it.
-    pub blocks: Vec<Option<PaletteIndex>>,
+    #[must_use]
+    pub fn blocks(&self) -> &[Option<PaletteIndex>] {
+        &self.blocks
+    }
+
     /// The second layer, the water a waterlogged block stands in, `None` where it holds `-1`.
-    pub liquids: Vec<Option<PaletteIndex>>,
+    #[must_use]
+    pub fn liquids(&self) -> &[Option<PaletteIndex>] {
+        &self.liquids
+    }
+
     /// The block entities, each at the voxel its `block_position_data` key names.
-    pub block_entities: Vec<StoredBlockEntity>,
+    #[must_use]
+    pub fn block_entities(&self) -> &[StoredBlockEntity] {
+        &self.block_entities
+    }
 }
 
 /// One `block_palette` entry.
@@ -166,6 +246,7 @@ pub fn read_mcstructure<R: Read>(reader: R) -> Result<StoredMcStructure, McStruc
             Event::Value { .. } | Event::End => {}
         }
     }
+    nbt.finish()?;
     decode(fields)
 }
 
@@ -301,13 +382,8 @@ fn decode(fields: Fields) -> Result<StoredMcStructure, McStructureReadError> {
     };
     Ok(StoredMcStructure {
         world_origin,
-        volume: BedrockVolume {
-            dims,
-            palette,
-            blocks,
-            liquids,
-            block_entities,
-        },
+        volume: BedrockVolume::new(dims, palette, blocks, liquids, block_entities)
+            .expect("each part of the structure is checked as it is decoded"),
         entities: fields.entities,
     })
 }
