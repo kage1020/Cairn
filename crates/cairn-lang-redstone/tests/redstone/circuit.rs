@@ -93,6 +93,11 @@ fn each_example_lays_its_circuit_under_its_struct_which_rises_whole() {
                 &source[members[0].span.clone()],
                 format!("circuit region=floor void={void}"),
             );
+            assert_eq!(
+                members[0].address.as_ref().map(ToString::to_string),
+                Some("circuit[0]".to_owned()),
+                "{name}"
+            );
             let cells: usize = members[0]
                 .resolved_state
                 .iter()
