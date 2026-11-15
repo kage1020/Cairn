@@ -11,7 +11,8 @@ fn long_help_states_each_subcommands_exit_codes() {
         ),
         (
             "info",
-            "2 when the file cannot be located, and rejects an empty `--editions` value with exit 2",
+            "2 when the source file cannot be located, and rejects an empty `--editions` value \
+             with exit 2",
         ),
         ("lower", "and 2 when the file cannot be located"),
         ("compile", "and 2 when the source file cannot be located"),
