@@ -1,5 +1,7 @@
 # cairn-lang-tree-sitter
 
+This crate's Rust API is in the [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no promise: any release may change it.
+
 tree-sitter grammar for the Cairn build description language. It gives editors syntax highlighting and structural selection without running the language server; diagnostics and completion come from [`cairn-lang-lsp`](../cairn-lang-lsp/README.md) instead.
 
 - Rust: `use cairn_lang_tree_sitter::LANGUAGE;` — also exports `HIGHLIGHTS_QUERY`, `LOCALS_QUERY`, `INJECTIONS_QUERY`.
