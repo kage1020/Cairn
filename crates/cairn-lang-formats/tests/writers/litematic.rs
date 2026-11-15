@@ -1,7 +1,7 @@
 //! The `.litematic` writer: the files an IR splits into and the tag tree each holds.
 
-use cairn_lang_core::block_array::{BlockArrayIr, BlockEntity, Dims};
-use cairn_lang_core::{Edition, WalkwayScopeKey};
+use cairn_lang_core::block_array::{BlockArrayIr, BlockEntity, Dims, Placement};
+use cairn_lang_core::{Edition, PlaceId, SiteName, WalkwayScopeKey};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::java_structure::JavaStructureError;
 use cairn_lang_formats::litematic::{
@@ -12,7 +12,7 @@ use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use crate::common::{array_of, comparator_array, ir_of, latest, lower_example};
 
-/// A file's scope and stem, with each region's scope, name and position.
+/// A file's scope and stem, with each region's scope, name and minimum corner.
 type FileShape<'a> = (&'a str, &'a str, Vec<(&'a str, &'a str, (i32, i32, i32))>);
 
 fn target(version: &str) -> JavaTarget {
@@ -239,7 +239,7 @@ fn a_site_is_one_file_with_a_region_per_placement_and_walkway_at_its_origin() {
             let regions = file
                 .regions
                 .iter()
-                .map(|region| (region.scope, region.name.as_str(), region.position))
+                .map(|region| (region.scope, region.name.as_str(), region.min_corner))
                 .collect();
             (file.scope.as_str(), file.stem.as_str(), regions)
         })
@@ -291,7 +291,11 @@ fn a_sites_metadata_counts_every_region_and_encloses_them_all() {
     let (mut volume, mut regions) = (0, 0);
     for region in &file.regions {
         let dims = region.block_array.dims;
-        let start = [region.position.0, region.position.1, region.position.2];
+        let start = [
+            region.min_corner.0,
+            region.min_corner.1,
+            region.min_corner.2,
+        ];
         for (axis, len) in [dims.x, dims.y, dims.z].into_iter().enumerate() {
             let len = i32::try_from(len).expect("small");
             min[axis] = min[axis].min(start[axis]);
@@ -344,7 +348,7 @@ fn one_region(array: &cairn_lang_core::block_array::BlockArray) -> LitematicFile
         regions: vec![LitematicRegion {
             scope: "struct::probe",
             name: "probe".to_owned(),
-            position: (0, 0, 0),
+            min_corner: (0, 0, 0),
             block_array: array,
         }],
     }
@@ -361,8 +365,6 @@ fn only_the_last_block_entity_at_each_voxel_of_the_grid_is_written() {
     };
     array.block_entities = vec![
         at((1, 1, 1), "minecraft:first"),
-        at((0, 0, 3), "minecraft:off_the_grid"),
-        at((u32::MAX, 0, 0), "minecraft:far_off_the_grid"),
         at((1, 1, 1), "minecraft:last"),
         at((0, 0, 0), "minecraft:origin"),
     ];
@@ -391,6 +393,120 @@ fn only_the_last_block_entity_at_each_voxel_of_the_grid_is_written() {
             (&last, &Tag::Int(1), &Tag::Int(1), &Tag::Int(1)),
         ]
     );
+}
+
+#[test]
+fn a_block_entity_off_the_grid_is_refused_with_its_region() {
+    let mut array = comparator_array("minecraft:comparator");
+    array.block_entities[0].pos = (0, 0, 3);
+    let err = prepare_litematic(one_region(&array), &target("1.21.4")).expect_err("off the grid");
+    assert!(
+        matches!(
+            &err,
+            LitematicError::Region {
+                region,
+                source: JavaStructureError::BlockEntityOutsideGrid {
+                    id,
+                    pos: (0, 0, 3),
+                    dims: (2, 2, 3),
+                },
+            } if region == "probe" && id == "minecraft:comparator"
+        ),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn a_block_entity_sits_at_its_voxel_from_its_regions_corner_wherever_the_region_is() {
+    let array = comparator_array("minecraft:comparator");
+    let dims = array.dims;
+    let mut ir = ir_of(array);
+    let (_, array) = ir.structures.pop().expect("one structure");
+    ir.structures.insert("site::s::far".to_owned(), array);
+    ir.placements.insert(
+        "site::s::far".to_owned(),
+        Placement {
+            site: SiteName::new("s").expect("a site name"),
+            place_id: PlaceId::new("far").expect("a place id"),
+            source_def: "d".to_owned(),
+            theme: "t".to_owned(),
+            origin: (5, -2, 7),
+            dims,
+        },
+    );
+    let root = written_root(only_file(&ir), &target("1.21.4"));
+    let region = entry(entry(&root, "Regions"), "far");
+    let Some(Tag::List(tile_entities)) = region.entries.get("TileEntities") else {
+        panic!("TileEntities is a list");
+    };
+    let Some(Tag::Compound(comparator)) = tile_entities.items.first() else {
+        panic!("one tile entity");
+    };
+    let at = ["x", "y", "z"].map(|axis| comparator.entries[axis].clone());
+    assert_eq!(
+        (&region.entries["Position"], at),
+        (&xyz(5, -2, 7), [Tag::Int(1), Tag::Int(1), Tag::Int(1)]),
+    );
+}
+
+#[test]
+fn version_7_starts_at_data_version_3837() {
+    let ir = ir_of(comparator_array("minecraft:comparator"));
+    let versions: Vec<(i32, Tag)> = [3836, 3837]
+        .into_iter()
+        .map(|data_version| {
+            let target = JavaTarget {
+                mc_version: format!("data version {data_version}"),
+                data_version,
+            };
+            let root = written_root(only_file(&ir), &target);
+            (data_version, root.entries["Version"].clone())
+        })
+        .collect();
+    assert_eq!(versions, [(3836, Tag::Int(6)), (3837, Tag::Int(7))]);
+}
+
+#[test]
+fn total_blocks_counts_neither_cave_air_nor_void_air() {
+    let ids = [
+        "minecraft:cave_air",
+        "minecraft:void_air",
+        "minecraft:stone",
+    ];
+    let array = array_of("airs", Dims { x: 4, y: 1, z: 1 }, &ids, &[0, 1, 2, 3]);
+    let ir = ir_of(array);
+    let root = written_root(only_file(&ir), &target("1.21.4"));
+    let metadata = entry(&root, "Metadata");
+    assert_eq!(
+        (
+            &metadata.entries["TotalVolume"],
+            &metadata.entries["TotalBlocks"]
+        ),
+        (&Tag::Int(4), &Tag::Int(1)),
+    );
+}
+
+#[test]
+fn an_index_takes_the_bits_its_palettes_largest_slot_needs_and_at_least_two() {
+    let widths: Vec<(usize, usize)> = [1, 2, 4, 5, 16, 17]
+        .into_iter()
+        .map(|len| {
+            let ids: Vec<String> = (1..len).map(|i| format!("cairn:block_{i}")).collect();
+            let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let top = u16::try_from(len - 1).expect("a small palette");
+            let slots: Vec<u16> = (0..=top).cycle().take(64).collect();
+            let array = array_of("wide", Dims { x: 64, y: 1, z: 1 }, &ids, &slots);
+            let ir = ir_of(array);
+            let root = written_root(only_file(&ir), &target("1.21.4"));
+            let region = entry(entry(&root, "Regions"), "wide");
+            let Tag::LongArray(longs) = &region.entries["BlockStates"] else {
+                panic!("BlockStates is a long array");
+            };
+            // 64 voxels of `bits` bits fill `bits` longs.
+            (len, longs.len())
+        })
+        .collect();
+    assert_eq!(widths, [(1, 2), (2, 2), (4, 2), (5, 3), (16, 4), (17, 5)]);
 }
 
 #[test]
@@ -425,7 +541,7 @@ fn a_name_the_nbt_encoder_cannot_write_is_refused() {
 fn a_region_reaching_past_i32_is_refused() {
     let array = array_of("probe", Dims { x: 2, y: 1, z: 1 }, &[], &[0, 0]);
     let mut file = one_region(&array);
-    file.regions[0].position = (i32::MAX, 0, 0);
+    file.regions[0].min_corner = (i32::MAX, 0, 0);
     let err = prepare_litematic(file, &target("1.21.4")).expect_err("past i32");
     assert!(
         matches!(
@@ -443,8 +559,8 @@ fn an_enclosing_size_past_i32_is_refused() {
     let mut file = one_region(&array);
     let mut far = file.regions[0].clone();
     far.name = "far".to_owned();
-    far.position = (0, 0, i32::MAX);
-    file.regions[0].position = (0, 0, i32::MIN);
+    far.min_corner = (0, 0, i32::MAX);
+    file.regions[0].min_corner = (0, 0, i32::MIN);
     file.regions.push(far);
     let err = prepare_litematic(file, &target("1.21.4")).expect_err("past i32");
     assert!(

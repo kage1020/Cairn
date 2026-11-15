@@ -89,7 +89,7 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
                 regions: vec![LitematicRegion {
                     scope: "struct::cube",
                     name: "cube".to_owned(),
-                    position: (0, 0, 0),
+                    min_corner: (0, 0, 0),
                     block_array: array,
                 }],
             };

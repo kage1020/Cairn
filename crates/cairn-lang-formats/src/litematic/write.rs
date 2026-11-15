@@ -37,8 +37,8 @@ pub struct LitematicRegion<'a> {
     pub scope: &'a str,
     /// The region's name, the stem the structure's `.nbt` file would have.
     pub name: String,
-    /// Where the region's minimum corner sits in the file's frame.
-    pub position: (i32, i32, i32),
+    /// Where the region's minimum corner sits in the file's frame, which `Position` stores.
+    pub min_corner: (i32, i32, i32),
     /// The region's voxels.
     pub block_array: &'a BlockArray,
 }
@@ -49,7 +49,7 @@ impl std::fmt::Debug for LitematicRegion<'_> {
         f.debug_struct("LitematicRegion")
             .field("scope", &self.scope)
             .field("name", &self.name)
-            .field("position", &self.position)
+            .field("min_corner", &self.min_corner)
             .field("dims", &self.block_array.dims)
             .finish_non_exhaustive()
     }
@@ -61,7 +61,7 @@ pub fn litematic_files(ir: &BlockArrayIr) -> Vec<LitematicFile<'_>> {
     let mut files: IndexMap<String, LitematicFile<'_>> = IndexMap::new();
     for (scope, block_array) in &ir.structures {
         let name = ir.artifact_stem(scope);
-        let (file_scope, stem, position) = match site_origin(ir, scope) {
+        let (file_scope, stem, min_corner) = match site_origin(ir, scope) {
             Some((site, origin)) => (format!("site::{site}"), site.to_string(), origin),
             None => (scope.clone(), name.clone(), (0, 0, 0)),
         };
@@ -76,7 +76,7 @@ pub fn litematic_files(ir: &BlockArrayIr) -> Vec<LitematicFile<'_>> {
             .push(LitematicRegion {
                 scope,
                 name,
-                position,
+                min_corner,
                 block_array,
             });
     }
@@ -158,7 +158,11 @@ pub fn prepare_litematic<'a>(
             source,
         })?;
         let dims = region.block_array.dims;
-        let corner = [region.position.0, region.position.1, region.position.2];
+        let corner = [
+            region.min_corner.0,
+            region.min_corner.1,
+            region.min_corner.2,
+        ];
         for (axis, ((&start, len), name)) in corner
             .iter()
             .zip([dims.x, dims.y, dims.z])
@@ -240,7 +244,7 @@ impl Litematic<'_> {
         Ok(())
     }
 
-    /// The root's entries, in the order Litematica writes them.
+    /// The root's entries.
     fn write_root<W: Write>(&self, root: &mut CompoundStream<'_, W>) -> Result<(), NbtIoError> {
         root.tag("MinecraftDataVersion", &Tag::Int(self.data_version))?;
         root.tag("Version", &Tag::Int(schematic_version(self.data_version)))?;
@@ -268,7 +272,7 @@ impl Litematic<'_> {
     }
 }
 
-/// One region's entries, in the order Litematica writes them.
+/// One region's entries.
 fn write_region<W: Write>(
     body: &mut CompoundStream<'_, W>,
     region: &LitematicRegion<'_>,
@@ -306,7 +310,7 @@ fn write_region<W: Write>(
     for empty in ["PendingBlockTicks", "PendingFluidTicks", "Entities"] {
         body.tag(empty, &Tag::List(List::empty()))?;
     }
-    let (x, y, z) = region.position;
+    let (x, y, z) = region.min_corner;
     body.compound_tag("Position", &vec3([x, y, z]))?;
     let dims = block_array.dims;
     let size = [dims.x, dims.y, dims.z].map(|d| i32::try_from(d).expect("dims checked to fit i32"));

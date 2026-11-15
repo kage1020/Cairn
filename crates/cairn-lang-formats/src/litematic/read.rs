@@ -1,9 +1,11 @@
-//! Reads a `.litematic` one region at a time, so only one region's `BlockStates` is in memory
-//! as NBT at once.
+//! Reads a `.litematic` one field at a time, so only the fields it returns are held, and only one
+//! region's `BlockStates` is in memory as NBT at once.
 
 use std::io::Read;
 
-use cairn_lang_core::block_array::{Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY, PaletteIndex};
+use cairn_lang_core::block_array::{
+    BlockState, Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY, PaletteIndex,
+};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use cairn_lang_nbt::{Event, NbtReadError, NbtReader};
 use thiserror::Error;
@@ -13,6 +15,12 @@ use crate::volume::{BlockVolume, StoredBlockEntity, block_state_from_nbt};
 
 /// The `Version`s read: 5, the first whose palette is post-flattening, to 7.
 const VERSIONS: std::ops::RangeInclusive<i32> = 5..=7;
+
+/// The type id of `TAG_Compound`, which every list a region holds carries.
+const COMPOUND_ID: u8 = 10;
+
+/// The type id an empty list reads with.
+const END_ID: u8 = 0;
 
 /// A `.litematic` as read.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,7 +34,7 @@ pub struct LitematicSchematic {
     /// `Metadata`.
     pub metadata: LitematicMetadata,
     /// `Regions`, in the file's order.
-    pub regions: Vec<ReadRegion>,
+    pub regions: Vec<LitematicReadRegion>,
 }
 
 /// The `Metadata` fields a reader can use, each as stored.
@@ -50,7 +58,7 @@ pub struct LitematicMetadata {
 
 /// One region of a [`LitematicSchematic`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct ReadRegion {
+pub struct LitematicReadRegion {
     /// The region's name.
     pub name: String,
     /// Where the region's minimum corner sits in the schematic's frame, whichever corner its
@@ -66,13 +74,13 @@ pub struct ReadRegion {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum LitematicReadError {
-    /// The bytes are not gzip-wrapped NBT.
+    /// The bytes are not one gzip-wrapped NBT root.
     #[error("{0}")]
     Nbt(#[from] NbtReadError),
     /// A field is absent, or not the shape Litematica writes.
     #[error("`{path}` is missing or is not {expected}")]
     Malformed {
-        /// The field, as `Regions.<name>.Size`.
+        /// The field, as `Regions.<name>.Size` or `Regions.<name>.TileEntities[2].x`.
         path: String,
         /// What Litematica writes there.
         expected: &'static str,
@@ -106,15 +114,33 @@ pub enum LitematicReadError {
         /// The most a block array holds.
         limit: usize,
     },
-    /// `BlockStates` holds fewer longs than its region's voxels need.
-    #[error("region `{region}`'s BlockStates has {len} longs; its voxels need {needed}")]
-    BlockStatesTooShort {
+    /// `BlockStates` holds other than the longs its region's voxels fill.
+    #[error(
+        "region `{region}`'s BlockStates has {len} longs, where its voxels at the {bits} bits \
+         its palette takes fill {needed}"
+    )]
+    BlockStatesLength {
         /// The region's name.
         region: String,
         /// The longs stored.
         len: usize,
-        /// The longs needed.
+        /// The longs the voxels fill.
         needed: usize,
+        /// The bits each voxel's index takes.
+        bits: u32,
+    },
+    /// `BlockStates` sets bits past its last voxel's index, which Litematica leaves clear.
+    #[error(
+        "region `{region}`'s BlockStates sets bits past its last voxel, so it was not packed at \
+         the {bits} bits its {len}-entry palette takes"
+    )]
+    BlockStatesPadding {
+        /// The region's name.
+        region: String,
+        /// The bits each voxel's index takes.
+        bits: u32,
+        /// The palette's length.
+        len: usize,
     },
     /// A packed index past the end of its region's palette.
     #[error("region `{region}` has palette index {index} at voxel {voxel}, past its {len} entries")]
@@ -136,12 +162,18 @@ pub enum LitematicReadError {
 ///
 /// A [`LitematicReadError`] for bytes that are not a `.litematic` this reader reads.
 pub fn read_litematic<R: Read>(reader: R) -> Result<LitematicSchematic, LitematicReadError> {
-    let gz = flate2::read::GzDecoder::new(reader);
-    let mut nbt = NbtReader::java(gz).with_max_len(MAX_STRUCTURE_VOLUME);
+    // As Java's `GZIPInputStream` reads them, members after the first continue the stream.
+    let gz = flate2::read::MultiGzDecoder::new(reader);
+    let mut nbt = NbtReader::java(gz)
+        .with_max_len(MAX_STRUCTURE_VOLUME)
+        .with_max_array_len(long_count(
+            MAX_STRUCTURE_VOLUME,
+            bits_per_entry(PALETTE_CAPACITY),
+        ));
     nbt.next_event()?;
     let (mut data_version, mut version, mut sub_version) = (None, None, None);
     let mut metadata = None;
-    let mut regions = Vec::new();
+    let mut regions = None;
     while let Some(event) = nbt.next_event()? {
         match event {
             Event::Value {
@@ -154,27 +186,28 @@ pub fn read_litematic<R: Read>(reader: R) -> Result<LitematicSchematic, Litemati
                 _ => {}
             },
             Event::Compound { name: Some(name) } if name == "Metadata" => {
-                let Tag::Compound(compound) = nbt.read_rest()? else {
-                    unreachable!("the rest of a compound reads as a compound");
-                };
-                metadata = Some(read_metadata(&compound));
+                metadata = Some(read_metadata(&mut nbt)?);
             }
             Event::Compound { name: Some(name) } if name == "Regions" => {
-                read_regions(&mut nbt, &mut regions)?;
+                regions = Some(read_regions(&mut nbt)?);
             }
             Event::Compound { .. } | Event::List { .. } => nbt.skip_rest()?,
             Event::Value { .. } | Event::End => {}
         }
     }
+    nbt.finish()?;
     let version = version.ok_or_else(|| malformed("Version", "an int"))?;
     if !VERSIONS.contains(&version) {
         return Err(LitematicReadError::UnsupportedVersion { version });
     }
+    let data_version = data_version.ok_or_else(|| malformed("MinecraftDataVersion", "an int"))?;
+    let metadata = metadata.ok_or_else(|| malformed("Metadata", "a compound"))?;
+    let regions = regions.ok_or_else(|| malformed("Regions", "a compound"))??;
     Ok(LitematicSchematic {
-        data_version: data_version.ok_or_else(|| malformed("MinecraftDataVersion", "an int"))?,
+        data_version,
         version,
         sub_version,
-        metadata: metadata.ok_or_else(|| malformed("Metadata", "a compound"))?,
+        metadata,
         regions,
     })
 }
@@ -186,23 +219,72 @@ fn malformed(path: impl Into<String>, expected: &'static str) -> LitematicReadEr
     }
 }
 
-/// Each region of the open `Regions` compound, read and decoded one at a time.
+/// The next event inside a compound or list that is open.
+fn next_inside<R: Read>(nbt: &mut NbtReader<R>) -> Result<Event, NbtReadError> {
+    Ok(nbt
+        .next_event()?
+        .expect("an open compound or list closes before the root does"))
+}
+
+/// What is left of the open compound, read whole.
+fn rest_of_compound<R: Read>(nbt: &mut NbtReader<R>) -> Result<Compound, NbtReadError> {
+    let Tag::Compound(compound) = nbt.read_rest()? else {
+        unreachable!("the rest of a compound reads as a compound");
+    };
+    Ok(compound)
+}
+
+/// The fields of the open `Metadata` compound that [`LitematicMetadata`] keeps.
+fn read_metadata<R: Read>(nbt: &mut NbtReader<R>) -> Result<LitematicMetadata, NbtReadError> {
+    let mut metadata = LitematicMetadata::default();
+    loop {
+        match next_inside(nbt)? {
+            Event::End => return Ok(metadata),
+            Event::Value {
+                name: Some(name),
+                tag,
+            } => match (name.as_str(), tag) {
+                ("Name", Tag::String(value)) => metadata.name = Some(value),
+                ("Author", Tag::String(value)) => metadata.author = Some(value),
+                ("Description", Tag::String(value)) => metadata.description = Some(value),
+                ("RegionCount", Tag::Int(value)) => metadata.region_count = Some(value),
+                ("TotalVolume", Tag::Int(value)) => metadata.total_volume = Some(value),
+                ("TotalBlocks", Tag::Int(value)) => metadata.total_blocks = Some(value),
+                _ => {}
+            },
+            Event::Compound { name: Some(name) } if name == "EnclosingSize" => {
+                metadata.enclosing_size = vec3(&rest_of_compound(nbt)?);
+            }
+            Event::Compound { .. } | Event::List { .. } => nbt.skip_rest()?,
+            Event::Value { name: None, .. } => {}
+        }
+    }
+}
+
+/// The regions of the open `Regions` compound, each read and decoded in turn. A region that does
+/// not decode stands in for them all, the rest of `Regions` skipped, so a `Version` after it is
+/// still weighed first.
 fn read_regions<R: Read>(
     nbt: &mut NbtReader<R>,
-    regions: &mut Vec<ReadRegion>,
-) -> Result<(), LitematicReadError> {
+) -> Result<Result<Vec<LitematicReadRegion>, LitematicReadError>, NbtReadError> {
+    let depth = nbt.depth();
+    let mut regions = Vec::new();
     loop {
-        match nbt.next_event()? {
-            Some(Event::Compound { name: Some(name) }) => {
-                let Tag::Compound(region) = nbt.read_rest()? else {
-                    unreachable!("the rest of a compound reads as a compound");
-                };
-                regions.push(read_region(name, &region)?);
-            }
+        match next_inside(nbt)? {
+            Event::Compound { name: Some(name) } => match read_region(nbt, name) {
+                Ok(region) => regions.push(region),
+                Err(LitematicReadError::Nbt(err)) => return Err(err),
+                Err(fault) => {
+                    while nbt.depth() >= depth {
+                        nbt.skip_rest()?;
+                    }
+                    return Ok(Err(fault));
+                }
+            },
             // Litematica passes over an entry of `Regions` that is not a compound.
-            Some(Event::List { .. }) => nbt.skip_rest()?,
-            Some(Event::Value { .. } | Event::Compound { name: None }) => {}
-            Some(Event::End) | None => return Ok(()),
+            Event::List { .. } => nbt.skip_rest()?,
+            Event::Value { .. } | Event::Compound { name: None } => {}
+            Event::End => return Ok(Ok(regions)),
         }
     }
 }
@@ -214,57 +296,151 @@ fn int(compound: &Compound, key: &str) -> Option<i32> {
     }
 }
 
-fn string(compound: &Compound, key: &str) -> Option<String> {
-    match compound.entries.get(key) {
-        Some(Tag::String(value)) => Some(value.clone()),
-        _ => None,
-    }
-}
-
-fn vec3(compound: &Compound, key: &str) -> Option<[i32; 3]> {
-    let Some(Tag::Compound(xyz)) = compound.entries.get(key) else {
-        return None;
-    };
+fn vec3(xyz: &Compound) -> Option<[i32; 3]> {
     Some([int(xyz, "x")?, int(xyz, "y")?, int(xyz, "z")?])
 }
 
-fn read_metadata(metadata: &Compound) -> LitematicMetadata {
-    LitematicMetadata {
-        name: string(metadata, "Name"),
-        author: string(metadata, "Author"),
-        description: string(metadata, "Description"),
-        region_count: int(metadata, "RegionCount"),
-        total_volume: int(metadata, "TotalVolume"),
-        total_blocks: int(metadata, "TotalBlocks"),
-        enclosing_size: vec3(metadata, "EnclosingSize"),
-    }
+/// The fields of one region, in whatever order the file holds them.
+#[derive(Default)]
+struct RegionFields {
+    position: Option<[i32; 3]>,
+    size: Option<[i32; 3]>,
+    palette: Option<Vec<BlockState>>,
+    block_states: Option<Vec<i64>>,
+    block_entities: Vec<StoredBlockEntity>,
+    entities: Vec<Compound>,
 }
 
-fn compounds<'c>(
-    region: &'c Compound,
-    path: &str,
-    key: &str,
-) -> Result<Vec<&'c Compound>, LitematicReadError> {
-    match region.entries.get(key) {
-        None => Ok(Vec::new()),
-        Some(Tag::List(list)) => list
-            .items
-            .iter()
-            .map(|item| match item {
-                Tag::Compound(compound) => Ok(compound),
-                _ => Err(malformed(format!("{path}.{key}"), "a list of compounds")),
-            })
-            .collect(),
-        Some(_) => Err(malformed(format!("{path}.{key}"), "a list of compounds")),
-    }
-}
-
-fn read_region(name: String, region: &Compound) -> Result<ReadRegion, LitematicReadError> {
+/// The open region `name`, its fields read one at a time and every other entry skipped.
+fn read_region<R: Read>(
+    nbt: &mut NbtReader<R>,
+    name: String,
+) -> Result<LitematicReadRegion, LitematicReadError> {
     let path = format!("Regions.{name}");
-    let xyz = "a compound of x, y and z ints";
-    let position =
-        vec3(region, "Position").ok_or_else(|| malformed(format!("{path}.Position"), xyz))?;
-    let size = vec3(region, "Size")
+    let mut fields = RegionFields::default();
+    loop {
+        match next_inside(nbt)? {
+            Event::End => break,
+            Event::Compound { name: Some(key) } if key == "Position" => {
+                fields.position = vec3(&rest_of_compound(nbt)?);
+            }
+            Event::Compound { name: Some(key) } if key == "Size" => {
+                fields.size = vec3(&rest_of_compound(nbt)?);
+            }
+            Event::List {
+                name: Some(key),
+                element_type_id,
+                len,
+            } => match key.as_str() {
+                "BlockStatePalette" => {
+                    if len > PALETTE_CAPACITY {
+                        return Err(LitematicReadError::PaletteTooLarge {
+                            region: name,
+                            len,
+                            limit: PALETTE_CAPACITY,
+                        });
+                    }
+                    let mut palette = Vec::with_capacity(len);
+                    let list = format!("{path}.BlockStatePalette");
+                    each_compound(nbt, &list, element_type_id, |index, entry| {
+                        let state = block_state_from_nbt(&entry).map_err(|fault| {
+                            malformed(format!("{list}[{index}].{}", fault.field), fault.expected)
+                        })?;
+                        palette.push(state);
+                        Ok(())
+                    })?;
+                    fields.palette = Some(palette);
+                }
+                "TileEntities" => {
+                    let list = format!("{path}.TileEntities");
+                    let mut block_entities = Vec::new();
+                    each_compound(nbt, &list, element_type_id, |index, nbt| {
+                        block_entities.push(stored_block_entity(nbt, &format!("{list}[{index}]"))?);
+                        Ok(())
+                    })?;
+                    fields.block_entities = block_entities;
+                }
+                "Entities" => {
+                    let mut entities = Vec::new();
+                    each_compound(
+                        nbt,
+                        &format!("{path}.Entities"),
+                        element_type_id,
+                        |_, nbt| {
+                            entities.push(nbt);
+                            Ok(())
+                        },
+                    )?;
+                    fields.entities = entities;
+                }
+                _ => nbt.skip_rest()?,
+            },
+            Event::Value {
+                name: Some(key),
+                tag: Tag::LongArray(longs),
+            } if key == "BlockStates" => fields.block_states = Some(longs),
+            Event::Compound { .. } | Event::List { .. } => nbt.skip_rest()?,
+            Event::Value { .. } => {}
+        }
+    }
+    decode_region(name, &path, fields)
+}
+
+/// Each compound of the open list `path`, read whole one at a time and handed to `item` with its
+/// index.
+fn each_compound<R: Read>(
+    nbt: &mut NbtReader<R>,
+    path: &str,
+    element_type_id: u8,
+    mut item: impl FnMut(usize, Compound) -> Result<(), LitematicReadError>,
+) -> Result<(), LitematicReadError> {
+    if element_type_id != COMPOUND_ID && element_type_id != END_ID {
+        return Err(malformed(path, "a list of compounds"));
+    }
+    for index in 0.. {
+        match next_inside(nbt)? {
+            Event::Compound { name: None } => item(index, rest_of_compound(nbt)?)?,
+            Event::End => break,
+            event => unreachable!("a list of compounds holds only compounds, got {event:?}"),
+        }
+    }
+    Ok(())
+}
+
+/// A `TileEntities` entry at `path`, its position checked to be a voxel coordinate.
+fn stored_block_entity(
+    mut nbt: Compound,
+    path: &str,
+) -> Result<StoredBlockEntity, LitematicReadError> {
+    let Some(Tag::String(id)) = nbt.entries.shift_remove("id") else {
+        return Err(malformed(format!("{path}.id"), "a block entity id string"));
+    };
+    let mut pos = [0; 3];
+    for (axis, key) in pos.iter_mut().zip(["x", "y", "z"]) {
+        let Some(Tag::Int(value)) = nbt.entries.shift_remove(key) else {
+            return Err(malformed(format!("{path}.{key}"), "an int"));
+        };
+        *axis = u32::try_from(value)
+            .map_err(|_| malformed(format!("{path}.{key}"), "an int, 0 or more"))?;
+    }
+    Ok(StoredBlockEntity {
+        pos: (pos[0], pos[1], pos[2]),
+        id,
+        data: nbt,
+    })
+}
+
+/// The region `fields` hold, checked to be one Litematica writes.
+fn decode_region(
+    name: String,
+    path: &str,
+    fields: RegionFields,
+) -> Result<LitematicReadRegion, LitematicReadError> {
+    let position = fields
+        .position
+        .ok_or_else(|| malformed(format!("{path}.Position"), "a compound of x, y and z ints"))?;
+    let size = fields
+        .size
         .filter(|size| size.iter().all(|&axis| axis != 0))
         .ok_or_else(|| {
             malformed(
@@ -292,33 +468,30 @@ fn read_region(name: String, region: &Compound) -> Result<ReadRegion, LitematicR
                 .saturating_mul(u64::from(z)),
             limit: MAX_STRUCTURE_VOLUME,
         })?;
-
-    let palette = compounds(region, &path, "BlockStatePalette")?
-        .into_iter()
-        .map(block_state_from_nbt)
-        .collect::<Option<Vec<_>>>()
+    let palette = fields
+        .palette
         .filter(|palette| !palette.is_empty())
         .ok_or_else(|| {
             malformed(
                 format!("{path}.BlockStatePalette"),
-                "a non-empty list of block states, each a `Name` and its `Properties`",
+                "a non-empty list of block states",
             )
         })?;
-    if palette.len() > PALETTE_CAPACITY {
-        return Err(LitematicReadError::PaletteTooLarge {
-            region: name,
-            len: palette.len(),
-            limit: PALETTE_CAPACITY,
-        });
-    }
-    let Some(Tag::LongArray(longs)) = region.entries.get("BlockStates") else {
-        return Err(malformed(format!("{path}.BlockStates"), "a long array"));
-    };
-    let voxels = unpack(longs, volume, palette.len()).map_err(|fault| match fault {
-        Unpacked::TooShort { needed } => LitematicReadError::BlockStatesTooShort {
+    let longs = fields
+        .block_states
+        .ok_or_else(|| malformed(format!("{path}.BlockStates"), "a long array"))?;
+    let bits = bits_per_entry(palette.len());
+    let voxels = unpack(&longs, volume, palette.len()).map_err(|fault| match fault {
+        Unpacked::Length { needed } => LitematicReadError::BlockStatesLength {
             region: name.clone(),
             len: longs.len(),
             needed,
+            bits,
+        },
+        Unpacked::Padding => LitematicReadError::BlockStatesPadding {
+            region: name.clone(),
+            bits,
+            len: palette.len(),
         },
         Unpacked::OutOfRange { voxel, index } => LitematicReadError::PaletteIndexOutOfRange {
             region: name.clone(),
@@ -327,63 +500,46 @@ fn read_region(name: String, region: &Compound) -> Result<ReadRegion, LitematicR
             len: palette.len(),
         },
     })?;
-
-    let block_entities = compounds(region, &path, "TileEntities")?
-        .into_iter()
-        .map(|nbt| {
-            stored_block_entity(nbt, dims).ok_or_else(|| {
-                malformed(
-                    format!("{path}.TileEntities"),
-                    "a list of block entities, each an `id` and `x`, `y`, `z` inside the region",
-                )
-            })
-        })
-        .collect::<Result<_, _>>()?;
-    let entities = compounds(region, &path, "Entities")?
-        .into_iter()
-        .cloned()
-        .collect();
-    Ok(ReadRegion {
+    for (index, entity) in fields.block_entities.iter().enumerate() {
+        let (pos, extents) = ([entity.pos.0, entity.pos.1, entity.pos.2], [x, y, z]);
+        if let Some(axis) = (0..3).find(|&axis| pos[axis] >= extents[axis]) {
+            return Err(malformed(
+                format!("{path}.TileEntities[{index}].{}", ["x", "y", "z"][axis]),
+                "an int below the region's `Size` on that axis",
+            ));
+        }
+    }
+    let volume = BlockVolume::new(dims, palette, voxels, fields.block_entities)
+        .expect("each part of a region is checked as it is decoded");
+    Ok(LitematicReadRegion {
         name,
         min_corner: (min_corner[0], min_corner[1], min_corner[2]),
-        volume: BlockVolume {
-            dims,
-            palette,
-            voxels,
-            block_entities,
-        },
-        entities,
+        volume,
+        entities: fields.entities,
     })
-}
-
-/// A `TileEntities` entry, its position checked to lie inside `dims`.
-fn stored_block_entity(nbt: &Compound, dims: Dims) -> Option<StoredBlockEntity> {
-    let id = string(nbt, "id")?;
-    let [x, y, z] = ["x", "y", "z"].map(|axis| int(nbt, axis).and_then(|v| u32::try_from(v).ok()));
-    let pos = (x?, y?, z?);
-    dims.index(pos.0, pos.1, pos.2)?;
-    let mut data = nbt.clone();
-    for key in ["id", "x", "y", "z"] {
-        data.entries.shift_remove(key);
-    }
-    Some(StoredBlockEntity { pos, id, data })
 }
 
 /// Why packed `BlockStates` do not decode.
 enum Unpacked {
-    TooShort { needed: usize },
+    Length { needed: usize },
+    Padding,
     OutOfRange { voxel: usize, index: u64 },
 }
 
-/// The `volume` palette indices `longs` packs for a palette of `palette_len` entries.
+/// The `volume` palette indices `longs` packs for a palette of `palette_len` entries, which
+/// Litematica writes in exactly the longs they fill, with the bits past the last index clear.
 fn unpack(longs: &[i64], volume: usize, palette_len: usize) -> Result<Vec<PaletteIndex>, Unpacked> {
     let bits = bits_per_entry(palette_len);
     let needed = long_count(volume, bits);
-    if longs.len() < needed {
-        return Err(Unpacked::TooShort { needed });
+    if longs.len() != needed {
+        return Err(Unpacked::Length { needed });
+    }
+    let width = usize::try_from(bits).expect("at most 32 bits");
+    let used = (volume * width) % 64;
+    if used != 0 && longs[needed - 1].cast_unsigned() >> used != 0 {
+        return Err(Unpacked::Padding);
     }
     let mask = (1_u64 << bits) - 1;
-    let width = usize::try_from(bits).expect("at most 32 bits");
     let mut voxels = Vec::with_capacity(volume);
     for voxel in 0..volume {
         let offset = voxel * width;

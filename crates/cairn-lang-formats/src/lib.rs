@@ -31,7 +31,7 @@ pub use java_structure::{
 };
 pub use litematic::{
     Litematic, LitematicError, LitematicFile, LitematicMetadata, LitematicReadError,
-    LitematicRegion, LitematicSchematic, ReadRegion, litematic_files, prepare_litematic,
+    LitematicReadRegion, LitematicRegion, LitematicSchematic, litematic_files, prepare_litematic,
     read_litematic,
 };
 pub use portability::{
@@ -42,4 +42,4 @@ pub use registry::{
     PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
     load_builtin_pack, load_from_dir,
 };
-pub use volume::{BlockVolume, StoredBlockEntity};
+pub use volume::{BlockVolume, StoredBlockEntity, VolumeError};

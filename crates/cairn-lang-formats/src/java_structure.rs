@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockState};
+use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockState, Dims};
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
@@ -36,6 +36,16 @@ pub enum JavaStructureError {
         index: u16,
         /// The palette's length.
         len: usize,
+    },
+    /// A block entity on no voxel of the grid, reachable only through the public fields.
+    #[error("block entity `{id}` at {pos:?} lies outside the {dims:?} grid, so no block holds it")]
+    BlockEntityOutsideGrid {
+        /// Its id.
+        id: String,
+        /// Where it sits.
+        pos: (u32, u32, u32),
+        /// The grid's extents.
+        dims: (u32, u32, u32),
     },
     /// A dimension past the `i32` wire width.
     #[error("dimension {axis} = {value} exceeds Java NBT i32 wire limit")]
@@ -156,6 +166,14 @@ pub fn prepare_structure<'a>(
     let volume = list_volume(block_array)?;
     if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(JavaStructureError::PaletteIndexOutOfRange { index, len });
+    }
+    if let Some(entity) = block_array.first_block_entity_outside() {
+        let Dims { x, y, z } = block_array.dims;
+        return Err(JavaStructureError::BlockEntityOutsideGrid {
+            id: entity.id.clone(),
+            pos: entity.pos,
+            dims: (x, y, z),
+        });
     }
     Ok(JavaStructure {
         block_array,
@@ -374,13 +392,18 @@ fn block_entities_at(block_array: &BlockArray) -> HashMap<(u32, u32, u32), &Bloc
         .collect()
 }
 
-/// The block entities a structure's `blocks` holds: the last at each voxel of the grid, in the
-/// grid's `(y, z, x)` order.
+/// The block entities a structure file holds, its `blocks` or a `.litematic` region's
+/// `TileEntities`: the last at each voxel, in the grid's `(y, z, x)` order.
 pub(crate) fn placed_block_entities(block_array: &BlockArray) -> Vec<&BlockEntity> {
     let dims = block_array.dims;
     let mut placed: Vec<(usize, &BlockEntity)> = block_entities_at(block_array)
         .into_iter()
-        .filter_map(|((x, y, z), entity)| Some((dims.index(x, y, z)?, entity)))
+        .map(|((x, y, z), entity)| {
+            let index = dims
+                .index(x, y, z)
+                .expect("prepare_structure refuses one off the grid");
+            (index, entity)
+        })
         .collect();
     placed.sort_unstable_by_key(|&(index, _)| index);
     placed.into_iter().map(|(_, entity)| entity).collect()
