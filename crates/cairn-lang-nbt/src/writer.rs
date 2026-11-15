@@ -91,12 +91,35 @@ pub(crate) fn write_payload<W: Write>(
             }
         }
         Tag::LongArray(values) => {
-            write_array_len(w, endian, "long_array", values.len())?;
-            for v in values {
-                endian.write_i64(w, *v)?;
-            }
+            write_long_array_payload(w, endian, values.len(), values.iter().copied())?;
         }
     }
+    Ok(())
+}
+
+/// A `TAG_Long_Array` payload of the `len` values `values` yields.
+///
+/// # Panics
+///
+/// When `values` yields a number of values other than `len`.
+pub(crate) fn write_long_array_payload<W: Write>(
+    w: &mut W,
+    endian: Endian,
+    len: usize,
+    values: impl IntoIterator<Item = i64>,
+) -> Result<(), NbtIoError> {
+    write_array_len(w, endian, "long_array", len)?;
+    let mut values = values.into_iter();
+    for written in 0..len {
+        let value = values.next().unwrap_or_else(|| {
+            panic!("a streamed long array declared {len} values and was given {written}")
+        });
+        endian.write_i64(w, value)?;
+    }
+    assert!(
+        values.next().is_none(),
+        "a streamed long array declared {len} values and was given more",
+    );
     Ok(())
 }
 

@@ -349,6 +349,7 @@ author means, so with both in scope the question has not been asked.
 |---|---|
 | `E_INVALID_PLACE_ID` | A `place id=` is empty, carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character, or is a device name Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_INVALID_STRUCT_NAME` | A `struct` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
+| `E_INVALID_SITE_NAME` | A `site` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
@@ -375,11 +376,14 @@ ground: they print as nothing or move the terminal cursor, so a finding that quo
 not show it. `id=` accepts a string literal, which is what let the value through.
 
 A `struct` is written under its own name ([§9.3.4](/spec/components-editing-sites/#934-output-naming)),
-so one named after a device is `E_INVALID_STRUCT_NAME`, for the same reason and in any letter
-case. A struct name is a bare identifier, so none of the characters above can reach it. Neither a
-site name nor a port id is refused for spelling a device name: each is only ever one part of a
-walkway's file name, such as `hamlet_walkway_home1_entry__home2_entry`, and Windows reads a file as
-a device only when the part of its name before the extension is the device's whole name.
+so one named after a device is `E_INVALID_STRUCT_NAME`, for the same reason and in any letter case.
+`cairn compile --structure-format litematic` writes a site under its own name too, so one named
+after a device is `E_INVALID_SITE_NAME`. `check` refuses it whatever format a build would write, as
+it refuses a place id on every host: whether a name is accepted depends on the name alone. A struct
+or site name is a bare identifier, so none of the characters above can reach it. A port id is not
+refused for spelling a device name: it is only ever one part of a walkway's file name, such as
+`hamlet_walkway_home1_entry__home2_entry`, and Windows reads a file as a device only when the part
+of its name before the extension is the device's whole name.
 
 A later `east_of=` / `north_of=` naming the id of a row refused with `E_INVALID_PLACE_ID` still
 means that row, so it is not `E_UNRESOLVED_PLACE_REF`, which would send the author looking for a
