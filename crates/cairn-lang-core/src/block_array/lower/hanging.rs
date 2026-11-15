@@ -16,7 +16,7 @@ use super::entity::{
 };
 use super::fixture::{Fixture, Refusal};
 use super::members::StructCtx;
-use super::part::COMPASS_FACES;
+use super::stand::COMPASS_FACES;
 
 /// How a painting's findings name it.
 const PAINTING: Fixture = Fixture {

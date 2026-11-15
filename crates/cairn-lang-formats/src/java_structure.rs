@@ -6,7 +6,7 @@ mod entities;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use cairn_lang_core::block_array::{BlockArray, BlockEntityData, BlockState, SignText};
+use cairn_lang_core::block_array::{BlockArray, BlockEntityData, BlockState, Dims, SignText};
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
@@ -39,6 +39,16 @@ pub enum JavaStructureError {
         index: u16,
         /// The palette's length.
         len: usize,
+    },
+    /// A block entity on no voxel of the grid, reachable only through the public fields.
+    #[error("block entity `{id}` at {pos:?} lies outside the {dims:?} grid, so no block holds it")]
+    BlockEntityOutsideGrid {
+        /// Its id.
+        id: String,
+        /// Where it sits.
+        pos: (u32, u32, u32),
+        /// The grid's extents.
+        dims: (u32, u32, u32),
     },
     /// A dimension past the `i32` wire width.
     #[error("dimension {axis} = {value} exceeds Java NBT i32 wire limit")]
@@ -200,6 +210,14 @@ pub fn prepare_structure<'a>(
     let volume = list_volume(block_array)?;
     if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(JavaStructureError::PaletteIndexOutOfRange { index, len });
+    }
+    if let Some(entity) = block_array.first_block_entity_outside() {
+        let Dims { x, y, z } = block_array.dims;
+        return Err(JavaStructureError::BlockEntityOutsideGrid {
+            id: java_entity_id(&entity.data).to_owned(),
+            pos: entity.pos,
+            dims: (x, y, z),
+        });
     }
     for entity in &block_array.block_entities {
         let BlockEntityData::Sign { front, back } = &entity.data else {
@@ -381,6 +399,8 @@ pub enum OutputExt {
     Nbt,
     /// Bedrock structure (`.mcstructure`).
     Mcstructure,
+    /// Litematica schematic (`.litematic`).
+    Litematic,
 }
 
 impl OutputExt {
@@ -390,6 +410,7 @@ impl OutputExt {
         match self {
             OutputExt::Nbt => "nbt",
             OutputExt::Mcstructure => "mcstructure",
+            OutputExt::Litematic => "litematic",
         }
     }
 }
@@ -422,7 +443,10 @@ fn palette_list(entries: &[BlockState], data_version: i32) -> List {
     List::of_compounds(compounds)
 }
 
-fn palette_entry(state: &BlockState, (id_key, properties_key): (&str, &str)) -> Compound {
+pub(crate) fn palette_entry(
+    state: &BlockState,
+    (id_key, properties_key): (&str, &str),
+) -> Compound {
     let mut compound = Compound::new();
     compound.insert(id_key, Tag::String(state.id.clone()));
     if !state.properties.is_empty() {
@@ -435,19 +459,63 @@ fn palette_entry(state: &BlockState, (id_key, properties_key): (&str, &str)) -> 
     compound
 }
 
-/// The `nbt` of each block entity of `block_array` that Java keeps beside its block, by the voxel
-/// it sits at, as `data_version` saves it.
+/// The `nbt` of the last block entity at each voxel of `block_array`, by that voxel, as
+/// `data_version` saves it, for each one Java keeps beside its block.
 fn block_entities_at(
     block_array: &BlockArray,
     data_version: i32,
 ) -> Result<HashMap<(u32, u32, u32), Compound>, JavaStructureError> {
+    // Java keeps the last block entity at a voxel.
+    let last: HashMap<(u32, u32, u32), usize> = block_array
+        .block_entities
+        .iter()
+        .enumerate()
+        .map(|(at, entity)| (entity.pos, at))
+        .collect();
     let mut found = HashMap::new();
-    for entity in &block_array.block_entities {
+    for (at, entity) in block_array.block_entities.iter().enumerate() {
+        if last[&entity.pos] != at {
+            continue;
+        }
         if let Some(nbt) = entity_nbt(&entity.data, entity.pos, data_version)? {
             found.insert(entity.pos, nbt);
         }
     }
     Ok(found)
+}
+
+/// The block entities a structure file holds, its `blocks` or a `.litematic` region's
+/// `TileEntities`, with the `nbt` `data_version` saves: the last at each voxel that Java keeps
+/// beside its block, in the grid's `(y, z, x)` order.
+pub(crate) fn placed_block_entities(
+    block_array: &BlockArray,
+    data_version: i32,
+) -> Vec<((u32, u32, u32), Compound)> {
+    let dims = block_array.dims;
+    let at = block_entities_at(block_array, data_version)
+        .expect("prepare_structure refuses a block entity that does not encode");
+    let mut placed: Vec<(usize, (u32, u32, u32), Compound)> = at
+        .into_iter()
+        .map(|((x, y, z), nbt)| {
+            let index = dims
+                .index(x, y, z)
+                .expect("prepare_structure refuses one off the grid");
+            (index, (x, y, z), nbt)
+        })
+        .collect();
+    placed.sort_unstable_by_key(|&(index, ..)| index);
+    placed.into_iter().map(|(_, pos, nbt)| (pos, nbt)).collect()
+}
+
+/// The id Java saves a block entity holding `data` under, `raw_block` for an `nbt=` compound,
+/// which is saved as written.
+pub(crate) fn java_entity_id(data: &BlockEntityData) -> &str {
+    match data {
+        BlockEntityData::Fields { id, .. } => id,
+        BlockEntityData::Sign { .. } => "minecraft:sign",
+        BlockEntityData::Bed { .. } => "minecraft:bed",
+        BlockEntityData::Nbt { .. } => "raw_block",
+    }
 }
 
 /// The first `DataVersion` that saves text, a sign's messages among it, as text components,
@@ -470,7 +538,7 @@ fn entity_nbt(
             }
         }
         BlockEntityData::Sign { front, back } => {
-            nbt.insert("id", Tag::String("minecraft:sign".to_owned()));
+            nbt.insert("id", Tag::String(java_entity_id(data).to_owned()));
             nbt.insert("front_text", Tag::Compound(sign_text(front, data_version)));
             nbt.insert("back_text", Tag::Compound(sign_text(back, data_version)));
             nbt.insert("is_waxed", Tag::Byte(0));

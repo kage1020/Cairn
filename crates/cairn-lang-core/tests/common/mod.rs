@@ -400,7 +400,7 @@ pub fn def_with(row: &str) -> String {
     format!("{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  {row}\n")
 }
 
-/// A target on which panes, chests and stairs hold water and no other block does.
+/// A target on which panes, chests, stairs and trapdoors hold water and no other block does.
 pub struct Wet;
 
 impl TargetRegistry for Wet {
@@ -418,7 +418,10 @@ impl TargetRegistry for Wet {
 
     fn holds_water(&self, state: &BlockState) -> Option<bool> {
         let id = state.id.strip_prefix("minecraft:")?;
-        Some(matches!(id, "glass_pane" | "chest" | "oak_stairs"))
+        Some(matches!(
+            id,
+            "glass_pane" | "chest" | "oak_stairs" | "oak_trapdoor"
+        ))
     }
 }
 
@@ -473,3 +476,18 @@ pub fn layer(array: &BlockArray, y: u32) -> Vec<String> {
         })
         .collect()
 }
+
+/// The note a `W_DEFERRED_MEMBER` carries for a member lowering does not draw yet, listing the
+/// roles it does.
+pub const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, walls, fill \
+    (from=x,y,z to=x,y,z with mat_slot= or fluid=water), door, window, roof \
+    (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate, lever, button, daylight, \
+    observer, lamp, piston, dispenser and chest (at=<side>.outside|inside.<side>), trapdoor, sign, \
+    bed, repeater, comparator, redstone_torch and redstone_dust (at=x,y,z or \
+    at=<side>.outside|inside.<side>), note_block (at=x,y,z), painting, item_frame, armor_stand, \
+    villager, text_display, block_display, item_display, hologram and spawn (at=x,y,z or \
+    at=<side>.outside|inside.<side>), trade (villager=<id>), beam (kind=pillar \
+    at=<side>.top|<id>.top), raw_block (mat=<namespace:path> at=x,y,z) and raw_fill \
+    (mat=<namespace:path> from=x,y,z to=x,y,z), and level y=N grouping, and recognises circuit \
+    region=<label> void=<N> (u32, N>=1) plus actuator patches such as door[id=<name>] \
+    opened_by=sig.<name>; other roles will be added as their lowering rules are spec'd";

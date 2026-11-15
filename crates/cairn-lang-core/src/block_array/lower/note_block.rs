@@ -61,7 +61,10 @@ pub(super) fn fill_note_block(
         "a whole number from 0 to 24",
     )
     .unwrap_or_else(|argument| {
-        unread.push((argument, "the note block is built with `note=0`"));
+        unread.push((
+            argument,
+            "the note block is built with no `note`, which plays the block's lowest",
+        ));
         None
     });
     let instrument = ident_or_ignore(

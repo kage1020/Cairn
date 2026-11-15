@@ -139,6 +139,8 @@ pub enum DiagnosticCode {
     InvalidPlaceId,
     /// A `struct` named after a device Windows reserves.
     InvalidStructName,
+    /// A `site` named after a device Windows reserves.
+    InvalidSiteName,
     /// Two `place` rows in the same site share an `id=`; the first wins.
     DuplicatePlaceId,
     /// Two scopes a build writes share a file name, ignoring case.
@@ -251,6 +253,7 @@ impl DiagnosticCode {
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::InvalidStructName => "E_INVALID_STRUCT_NAME",
+            Self::InvalidSiteName => "E_INVALID_SITE_NAME",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
@@ -319,6 +322,7 @@ impl DiagnosticCode {
             | Self::IncompletePlace
             | Self::InvalidPlaceId
             | Self::InvalidStructName
+            | Self::InvalidSiteName
             | Self::InvalidPlaceOrigin
             | Self::UnresolvedPort
             | Self::AmbiguousPort
@@ -488,7 +492,8 @@ pub enum DiagnosticData {
     IncompatibleMaterial {
         /// The fully namespaced id the member was bound to.
         id: String,
-        /// Family the member's geometry needs, as a bare noun (`stair` or `door`).
+        /// Family the member's geometry needs, as a bare noun: `stair`, `door`, `chest`, `button`,
+        /// `trapdoor` or `pillar`.
         required: String,
         /// `mat_slot=` name the member read, when it has one.
         #[serde(skip_serializing_if = "Option::is_none")]

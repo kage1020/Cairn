@@ -125,6 +125,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         wall_top: max_wall_top,
         rise: roof_extra,
         wall_column,
+        painting_walls,
         written: Written::of(&written_members, interior_w, interior_h),
         patched,
         openings: flattened

@@ -36,6 +36,20 @@ fn a_note_block_writes_the_note_and_instrument_its_line_does_and_no_other_state(
 }
 
 #[test]
+fn a_note_block_plays_every_note_from_0_to_24() {
+    let src = room("note_block at=1,1,1 note=0\n  note_block at=2,1,2 note=24");
+    let out = lowered(&src);
+    assert_eq!(findings(&src, &out), Vec::<Finding<'_>>::new());
+    assert_eq!(
+        note_blocks(&out),
+        [
+            ((1, 1, 1), "minecraft:note_block[note=0]".to_owned()),
+            ((2, 1, 2), "minecraft:note_block[note=24]".to_owned()),
+        ],
+    );
+}
+
+#[test]
 fn a_note_outside_two_octaves_or_an_at_that_is_no_triple_is_refused() {
     const CELL: &str = "write `at=` as the coordinate triple `x,y,z` of the cell the block goes in, as in `at=1,1,1`";
     for (line, primary, notes) in [
@@ -81,7 +95,7 @@ fn a_value_of_the_wrong_kind_is_ignored_and_the_note_block_built_without_it() {
                 "x",
                 "`note=` must be a whole number from 0 to 24, not identifier `x`; the value was \
                  ignored",
-                vec!["the note block is built with `note=0`"],
+                vec!["the note block is built with no `note`, which plays the block's lowest"],
             ),
             (
                 DiagnosticCode::IgnoredArgument,
@@ -99,4 +113,30 @@ fn a_value_of_the_wrong_kind_is_ignored_and_the_note_block_built_without_it() {
         note_blocks(&out),
         [((2, 1, 2), "minecraft:note_block".to_owned())]
     );
+}
+
+#[test]
+fn a_note_block_outside_the_struct_is_refused_and_its_unread_states_say_so() {
+    let line = "note_block at=9,1,2 note=x";
+    let src = room(line);
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [
+            (
+                DiagnosticCode::InvalidMember,
+                line,
+                "note_block `at=9,1,2` lies outside the struct's `size=7x5` footprint",
+                vec!["the cell's `x` runs from 0 to 6 and its `z` from 0 to 4"],
+            ),
+            (
+                DiagnosticCode::IgnoredArgument,
+                "x",
+                "`note=` must be a whole number from 0 to 24, not identifier `x`; the value was \
+                 ignored",
+                vec!["this note block is not built either way — see the finding on the same line"],
+            ),
+        ],
+    );
+    assert_eq!(note_blocks(&out), []);
 }

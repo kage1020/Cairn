@@ -1,5 +1,5 @@
-//! The cells a line names with coordinate triples: a `fill`'s or `raw_fill`'s box between `from=`
-//! and `to=`, or a `raw_block`'s one cell at `at=` (`spec/syntax` "Literals and separators").
+//! The cells a line names with coordinate triples: a box between `from=` and `to=`, or one cell
+//! at `at=` (`spec/syntax` "Literals and separators").
 
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;

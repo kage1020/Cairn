@@ -3,7 +3,7 @@
 
 use cairn_lang_core::DiagnosticCode;
 
-use crate::common::{Finding, blocks_where, findings, lowered, only_structure};
+use crate::common::{Finding, Wet, blocks_where, findings, lowered, lowered_with, only_structure};
 
 const THEME: &str = "theme t:\n  slot wall -> @cobblestone\n  slot hatch -> @spruce_trapdoor\n\n";
 
@@ -31,6 +31,13 @@ fn hung(members: &str) -> Vec<Placed> {
     assert_eq!(findings(&src, &out), Vec::<Finding<'_>>::new(), "{members}");
     trapdoors(&out)
 }
+
+/// What a trapdoor's `facing=` takes, as the finding on a value of the wrong kind words it.
+const FACING: &str = "a way from the wall, `in`, `out`, `left` or `right`, by a wall and `north`, \
+                      `south`, `east` or `west` at a triple";
+
+/// The note on a `waterlogged=` the trapdoor does not take.
+const WATERLOGGED: &str = "`waterlogged=` takes `auto`, which lets a water `fill` set it, or `true` or `false`, which keep it";
 
 #[test]
 fn a_trapdoor_by_a_wall_faces_away_from_it_closed_and_low() {
@@ -149,27 +156,30 @@ fn every_word_a_trapdoor_line_gets_wrong_is_its_own_finding() {
     let line = "trapdoor at=inside.front offset=2 y=1 half=middle waterlogged=maybe facing=up";
     let src = room(line);
     let out = lowered(&src);
-    let found: Vec<_> = findings(&src, &out)
-        .into_iter()
-        .map(|(code, _, primary, _)| (code, primary))
-        .collect();
     assert_eq!(
-        found,
+        findings(&src, &out),
         [
             (
                 DiagnosticCode::InvalidMember,
-                "unknown trapdoor `facing=up`"
+                line,
+                "unknown trapdoor `facing=up`",
+                vec!["`facing=` takes one of in, out, left, right"],
             ),
             (
                 DiagnosticCode::InvalidMember,
-                "unknown trapdoor `half=middle`"
+                line,
+                "unknown trapdoor `half=middle`",
+                vec!["`half=` takes top or bottom"],
             ),
             (
                 DiagnosticCode::InvalidMember,
-                "unknown trapdoor `waterlogged=maybe`"
+                line,
+                "unknown trapdoor `waterlogged=maybe`",
+                vec![WATERLOGGED],
             ),
         ],
     );
+    assert_eq!(trapdoors(&out), []);
 }
 
 #[test]
@@ -199,6 +209,119 @@ fn a_value_of_the_wrong_kind_is_ignored_and_the_trapdoor_built_without_it() {
         [(
             (2, 1, 3),
             "minecraft:oak_trapdoor[facing=north,half=bottom,open=false]".to_owned()
+        )],
+    );
+}
+
+#[test]
+fn each_state_a_trapdoor_cannot_read_says_what_it_is_built_as() {
+    let ignored = |written: &'static str, key: &str, expected: &str, consequence: &'static str| {
+        (
+            DiagnosticCode::IgnoredArgument,
+            written,
+            format!("`{key}=` must be {expected}, not integer `{written}`; the value was ignored"),
+            consequence,
+        )
+    };
+    let by_wall = "the trapdoor faces away from the wall it hangs by, hinged on that wall";
+    let water = "the trapdoor holds water where a water `fill` overlaps it, as with \
+                 `waterlogged=auto`";
+    for (line, found, built) in [
+        (
+            "trapdoor at=inside.front offset=2 y=1 facing=3 waterlogged=4",
+            vec![
+                ignored("3", "facing", FACING, by_wall),
+                ignored("4", "waterlogged", "`auto`, `true` or `false`", water),
+            ],
+            vec![(
+                (2, 1, 3),
+                "minecraft:oak_trapdoor[facing=north,half=bottom,open=false]".to_owned(),
+            )],
+        ),
+        (
+            "trapdoor at=3,1,2 facing=3",
+            vec![ignored(
+                "3",
+                "facing",
+                FACING,
+                "the trapdoor takes the block's own `facing`",
+            )],
+            vec![(
+                (3, 1, 2),
+                "minecraft:oak_trapdoor[half=bottom,open=false]".to_owned(),
+            )],
+        ),
+        (
+            "trapdoor at=3,1,2 offset=1 half=3",
+            vec![ignored(
+                "3",
+                "half",
+                "`top` or `bottom`",
+                "this trapdoor is not built either way — see the finding on the same line",
+            )],
+            Vec::new(),
+        ),
+    ] {
+        let src = room(line);
+        let out = lowered(&src);
+        let ignored: Vec<_> = findings(&src, &out)
+            .into_iter()
+            .filter(|(code, ..)| *code == DiagnosticCode::IgnoredArgument)
+            .map(|(code, at, primary, notes)| (code, at, primary.to_owned(), notes))
+            .collect();
+        assert_eq!(
+            ignored,
+            found
+                .into_iter()
+                .map(|(code, at, primary, note)| (code, at, primary, vec![note]))
+                .collect::<Vec<_>>(),
+            "{line}",
+        );
+        assert_eq!(trapdoors(&out), built, "{line}");
+    }
+}
+
+#[test]
+fn water_overlapping_a_trapdoor_waterlogs_it_unless_its_line_says_false() {
+    let src = room(
+        "trapdoor at=inside.back offset=1 y=1\n  \
+         trapdoor at=inside.back offset=3 y=1 waterlogged=false\n  \
+         trapdoor at=inside.back offset=5 y=1 waterlogged=auto\n  \
+         fill fluid=water from=1,1,1 to=5,1,1",
+    );
+    let out = lowered_with(&src, &Wet);
+    assert_eq!(out.diagnostics, []);
+    let hung = |x: u32, waterlogged: bool| {
+        (
+            (x, 1, 1),
+            format!(
+                "minecraft:oak_trapdoor[facing=south,half=bottom,open=false,\
+                 waterlogged={waterlogged}]"
+            ),
+        )
+    };
+    assert_eq!(
+        trapdoors(&out),
+        [hung(1, true), hung(3, false), hung(5, true)]
+    );
+}
+
+#[test]
+fn a_trapdoor_at_a_triple_bound_to_no_trapdoor_names_its_line_as_where_its_states_come_from() {
+    let src = room("trapdoor at=3,1,2 mat_slot=wall");
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::IncompatibleMaterial,
+            "@cobblestone",
+            "trapdoor derives `facing` / `half` / `open` from its own line and \
+             `minecraft:cobblestone` is not a trapdoor, so those states have nowhere to go",
+            vec![
+                "bind the slot to a `*_trapdoor` material — the registry pack's \
+                 `trapdoor.default` resolves to one",
+                "reached through `mat_slot=wall`, so every member reading that slot has it too",
+            ],
         )],
     );
 }

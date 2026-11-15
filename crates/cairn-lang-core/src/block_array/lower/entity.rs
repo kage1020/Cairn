@@ -15,7 +15,7 @@ use crate::block_array::{Bbox, Entity, EntityData, Item};
 use super::canvas::MemberCanvas;
 use super::fixture::{Fixture, Refusal, fixture_cell, outside_the_array};
 use super::members::StructCtx;
-use super::part::{COMPASS_FACES, Stand, stand_of, triple_cell};
+use super::stand::{COMPASS_FACES, Stand, stand_of, triple_cell};
 
 /// How far a hanging entity's point sits from its cell's middle toward the face it hangs on, in
 /// blocks: the game's own inset, 15/32.

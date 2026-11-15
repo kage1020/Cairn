@@ -7,17 +7,14 @@ use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberRole};
+use crate::intent::Member;
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{
     diag_deferred_member_noted, diag_deferred_member_reason, diag_invalid_member, ident_or_ignore,
 };
 use crate::block_array::geometry::{Declared, outer_face};
-use crate::block_array::openings::{
-    DOOR_HEIGHT, WallSide, WindowArgs, door_anchor_offset, read_window_args, wall_length,
-    wall_local_to_grid,
-};
+use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 use crate::block_array::{Bbox, BlockState};
 
 use super::canvas::{MemberCanvas, ScopePalette};
@@ -26,7 +23,8 @@ use super::geometry_material::{Family, GeometryMemberDescription, geometry_mater
 use super::members::{
     MemberState, StructCtx, default_block_id, resolve_member_state, side_name, unplaced_walls_note,
 };
-use super::part::word;
+use super::opening::placed_opening;
+use super::stand::word;
 
 /// Catalog token a `beam`'s default material comes from; the pack spells it per edition.
 const BEAM_TOKEN: &str = "beam.default";
@@ -59,23 +57,24 @@ pub(super) fn fill_beam(
         Ok(axis) => (axis, None),
         Err(argument) => (None, Some(argument)),
     };
-    let laid = match lay_beam(member, axis, y_offset, ctx, palette, canvas, diagnostics) {
-        Ok(()) => true,
+    let not_laid = match lay_beam(member, axis, y_offset, ctx, palette, canvas, diagnostics) {
+        Ok(true) => None,
+        Ok(false) => Some(
+            "this beam is not laid either way — see the finding on the material its `mat_slot=` \
+             names",
+        ),
         Err(refusal) => {
             diagnostics.push(*refusal);
-            false
+            Some("this beam is not laid either way — see the finding on the same line")
         }
     };
     diagnostics.extend(unread.map(|argument| {
-        argument.report(if laid {
-            "the beam lies along its wall, as with no `axis=`"
-        } else {
-            "this beam is not laid either way — see the finding on the same line"
-        })
+        argument.report(not_laid.unwrap_or("the beam lies along its wall, as with no `axis=`"))
     }));
 }
 
-/// [`fill_beam`], answering the finding that refuses the beam.
+/// [`fill_beam`], answering whether the beam was laid, or the finding that refuses it; a state
+/// literal the target refuses is reported where it is written and lays nothing.
 fn lay_beam(
     member: &Member,
     axis: Option<&str>,
@@ -84,15 +83,15 @@ fn lay_beam(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), Refusal> {
+) -> Result<bool, Refusal> {
     beam_kind(member)?;
     let axis = word(member, "axis", axis, &["x", "y", "z"])?;
     let run = match rest_of(member, ctx)? {
         Rest::WallTop(side) => wall_top_run(member, side, y_offset, ctx)?,
         Rest::Opening { opening, level } => opening_run(member, opening, level, ctx)?,
     };
-    let Some(id) = beam_block_id(member, ctx, diagnostics)? else {
-        return Ok(());
+    let Some(id) = beam_block_id(member, axis.is_some(), ctx, diagnostics)? else {
+        return Ok(false);
     };
     let cells: Vec<_> = run
         .columns
@@ -129,7 +128,7 @@ fn lay_beam(
     for cell in cells {
         canvas.paint(cell, || index);
     }
-    Ok(())
+    Ok(true)
 }
 
 /// The refusal of a beam whose `kind=` is missing or names no beam.
@@ -199,27 +198,33 @@ fn rest_of<'a>(member: &Member, ctx: &StructCtx<'a>) -> Result<Rest<'a>, Refusal
             None,
         ));
     };
+    let ids = || {
+        ctx.openings
+            .iter()
+            .filter_map(|(_, opening)| opening.id.as_deref())
+    };
+    let side = WallSide::from_ident(head);
+    let opening = ctx
+        .openings
+        .iter()
+        .find(|(_, opening)| opening.id.as_deref() == Some(head.as_str()));
+    let near = || nearest_match(head, SIDES.into_iter().chain(ids()));
     if tail != "top" {
+        let known = (side.is_some() || opening.is_some()).then_some(head.as_str());
         return Err(refuse(
             format!("beam `at={dotref}` does not end in `.top`, the top a beam rests on"),
-            Some(did_you_mean(&format!("at={head}.top"))),
+            known
+                .or_else(near)
+                .map(|head| did_you_mean(&format!("at={head}.top"))),
         ));
     }
-    if let Some(side) = WallSide::from_ident(head) {
+    if let Some(side) = side {
         return Ok(Rest::WallTop(side));
     }
-    if let Some(&(level, opening)) = ctx
-        .openings
-        .iter()
-        .find(|(_, opening)| opening.id.as_deref() == Some(head.as_str()))
-    {
+    if let Some(&(level, opening)) = opening {
         return Ok(Rest::Opening { opening, level });
     }
-    let ids = ctx
-        .openings
-        .iter()
-        .filter_map(|(_, opening)| opening.id.as_deref());
-    let near = nearest_match(head, SIDES.into_iter().chain(ids));
+    let near = near();
     Err(refuse(
         format!(
             "beam `at={dotref}`: `{head}` is no wall side, and no `door` or `window` in this body \
@@ -236,8 +241,35 @@ struct Run {
     columns: BTreeSet<u32>,
 }
 
-/// The top row of the course of walls holding the first row under the beam's level, between the
-/// wall's corners.
+/// The length of the `side` wall a beam at `anchor` lies on, or the refusal of a wall with no cell
+/// between its corners.
+fn between_corners(
+    member: &Member,
+    anchor: &str,
+    side: WallSide,
+    ctx: &StructCtx<'_>,
+) -> Result<u32, Refusal> {
+    let length = wall_length(side, ctx.interior_w, ctx.interior_h);
+    if length >= 3 {
+        return Ok(length);
+    }
+    let name = side_name(side);
+    Err(Box::new(diag_invalid_member(
+        member,
+        format!(
+            "beam `{anchor}`: the {name} wall is {length} long, so it has no cell between its \
+             corners"
+        ),
+        vec![
+            "a beam runs between the corners of the wall it lies on, so that wall needs a length \
+             of at least 3"
+                .to_owned(),
+        ],
+    )))
+}
+
+/// The top row of the walls of the beam's own level, those written under the same `level` or,
+/// outside one, outside any, between the wall's corners.
 fn wall_top_run(
     member: &Member,
     side: WallSide,
@@ -245,40 +277,47 @@ fn wall_top_run(
     ctx: &StructCtx<'_>,
 ) -> Result<Run, Refusal> {
     let name = side_name(side);
-    let length = wall_length(side, ctx.interior_w, ctx.interior_h);
-    if length < 3 {
+    let anchor = format!("at={name}.top");
+    let length = between_corners(member, &anchor, side, ctx)?;
+    let top = |walls: &[(u32, u32)]| {
+        walls
+            .iter()
+            .filter(|(level, _)| *level == y_offset)
+            .map(|(level, height)| level.saturating_add(*height))
+            .max()
+    };
+    let Some(written) = top(&ctx.written.placed_walls) else {
+        let base = if y_offset == 0 {
+            "the struct's base".to_owned()
+        } else {
+            format!("`level y={y_offset}`")
+        };
         return Err(Box::new(diag_invalid_member(
             member,
             format!(
-                "beam `at={name}.top`: the {name} wall is {length} long, so it has no cell between \
-                 its corners"
+                "beam `{anchor}` has no wall to rest on: no `walls` member with a positive \
+                 `height=` rises from {base}"
             ),
             vec![
-                "a beam along a wall's top runs between the wall's corners, so the wall needs a \
-                 length of at least 3"
+                "a beam along a wall's top rests on the walls of its own level; add a `walls` \
+                 member with a positive `height=` beside the beam, or move the beam beside the \
+                 walls it rests on"
                     .to_owned(),
             ],
         )));
-    }
-    let base = y_offset.saturating_add(1);
-    let Some(row) = ctx.wall_column.course_top_at(base) else {
-        let at = if y_offset == 0 {
-            format!("row {base}")
-        } else {
-            format!("row {base}, the first under `level y={y_offset}`")
-        };
-        return Err(no_wall(
-            member,
-            &format!("at={name}.top"),
-            base,
-            ctx,
-            format!("beam `at={name}.top` has no wall to rest on: no `walls` member reaches {at}"),
-            "add a `walls` member that reaches this row to the struct's body".to_owned(),
-        ));
     };
+    if top(&ctx.painting_walls) != Some(written) {
+        return Err(Box::new(diag_deferred_member_noted(
+            member,
+            &format!(
+                "beam `{anchor}` rests on row {written} of a `walls` member that paints nothing"
+            ),
+            "the beam is laid once that member's material resolves to a block",
+        )));
+    }
     Ok(Run {
         side,
-        row,
+        row: written,
         columns: (1..length - 1).collect(),
     })
 }
@@ -293,50 +332,26 @@ fn opening_run(
 ) -> Result<Run, Refusal> {
     let keyword = opening.role.keyword();
     let anchor = format!("at={}.top", opening.id.as_deref().unwrap_or_default());
-    let unread = || {
-        Box::new(diag_deferred_member_noted(
+    let Some(cut) = placed_opening(opening, level, ctx) else {
+        return Err(Box::new(diag_deferred_member_noted(
             member,
             &format!(
-                "beam `{anchor}` rests on a {keyword} whose line does not place it, so nothing \
-                 says where its top is"
+                "beam `{anchor}` rests on a {keyword} that is not placed, so nothing says where its \
+                 top is"
             ),
-            &format!("the beam is laid once the {keyword}'s line reads; see the finding on it"),
-        ))
+            &format!(
+                "the beam is laid once the {keyword} is; see the finding on the {keyword}'s line"
+            ),
+        )));
     };
-    let side = opening
-        .ident_value("side")
-        .and_then(WallSide::from_ident)
-        .ok_or_else(unread)?;
-    let length = wall_length(side, ctx.interior_w, ctx.interior_h);
-    let (row, stamps) = if matches!(opening.role, MemberRole::Door) {
-        let u = door_anchor_offset(opening, length).map_err(|_| unread())?;
-        (level.saturating_add(1 + DOOR_HEIGHT), vec![(u, 1)])
-    } else {
-        let args = read_window_args(opening).map_err(|_| unread())?;
-        let stamps = window_stamps(opening, args, length).ok_or_else(unread)?;
-        let top = level.saturating_add(args.y).saturating_add(args.height);
-        (top, stamps)
-    };
-    let columns: BTreeSet<u32> = stamps
+    let length = between_corners(member, &anchor, cut.side, ctx)?;
+    let columns: BTreeSet<u32> = cut
+        .stamps
         .into_iter()
         .flat_map(|(offset, width)| offset.saturating_sub(1)..=offset.saturating_add(width))
         .filter(|&u| u >= 1 && u + 1 < length)
         .collect();
-    if columns.is_empty() {
-        return Err(Box::new(diag_invalid_member(
-            member,
-            format!(
-                "beam `{anchor}`: the {keyword} leaves no cell between the corners of the {} \
-                 wall above it",
-                side_name(side),
-            ),
-            vec![format!(
-                "a beam over an opening runs between its wall's corners; move the {keyword} away \
-                 from the corner, or lay the beam along the wall's top with `at={}.top`",
-                side_name(side),
-            )],
-        )));
-    }
+    let row = cut.top.saturating_add(1);
     if ctx.wall_column.course_top_at(row).is_none() {
         return Err(no_wall(
             member,
@@ -350,55 +365,15 @@ fn opening_run(
             format!("raise the `walls` to reach row {row}, or lower the {keyword}"),
         ));
     }
-    Ok(Run { side, row, columns })
+    Ok(Run {
+        side: cut.side,
+        row,
+        columns,
+    })
 }
 
-/// The `(offset, width)` of each opening a window's line cuts, its `repeat=` series or the window
-/// and its mirror under `sym=true`; `None` when the window is not cut.
-fn window_stamps(window: &Member, args: WindowArgs, length: u32) -> Option<Vec<(u32, u32)>> {
-    let repeat = match window.written("repeat") {
-        None => 1,
-        Some(_) => window.nonneg_u32("repeat").filter(|&repeat| repeat > 0)?,
-    };
-    let step = match window.written("step") {
-        None => 0,
-        Some(_) => window.nonneg_u32("step")?,
-    };
-    if repeat > 1 && step == 0 {
-        return None;
-    }
-    let sym = match window.written("sym").map(|raw| &raw.value.kind) {
-        None => false,
-        Some(ValueKind::Bool(sym)) => *sym,
-        // An unreadable `sym=` draws the window without its mirror, and leaves a series uncut.
-        Some(_) if repeat == 1 => false,
-        Some(_) => return None,
-    };
-    if sym && repeat > 1 {
-        return None;
-    }
-    let last = args.offset.checked_add(step.checked_mul(repeat - 1)?)?;
-    if last.checked_add(args.width)? > length {
-        return None;
-    }
-    let mut stamps: Vec<(u32, u32)> = (0..repeat)
-        .map(|i| (args.offset + step * i, args.width))
-        .collect();
-    if sym {
-        let mirror = length
-            .saturating_sub(args.offset)
-            .saturating_sub(args.width);
-        // Strict, as `sym=true` pairs a window with a mirror that only touches it.
-        let overlap = args.offset < mirror + args.width && mirror < args.offset + args.width;
-        if !overlap {
-            stamps.push((mirror, args.width));
-        }
-    }
-    Some(stamps)
-}
-
-/// The finding on a beam whose `row` no painting `walls` member holds: a deferral when a written
-/// one would, else the refusal `primary` with `fix`.
+/// The finding on a beam over an opening whose `row` no painting `walls` member holds: a deferral
+/// when a written one would, else the refusal `primary` with `fix`.
 fn no_wall(
     member: &Member,
     anchor: &str,
@@ -437,6 +412,7 @@ fn along(side: WallSide) -> &'static str {
 /// binding whose state literal the target refused, which lays no beam.
 fn beam_block_id(
     member: &Member,
+    axis_written: bool,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Option<String>, Refusal> {
@@ -459,7 +435,11 @@ fn beam_block_id(
         || default_block_id(member, ctx.registry, BEAM_TOKEN, BEAM_BASE_ID),
         &GeometryMemberDescription {
             subject: "beam".to_owned(),
-            states_from: "the wall it lies along",
+            states_from: if axis_written {
+                "its line's `axis=`"
+            } else {
+                "the wall it lies along"
+            },
             requires: Some(Family::Pillar),
         },
         diagnostics,

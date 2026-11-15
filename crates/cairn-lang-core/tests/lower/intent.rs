@@ -137,6 +137,38 @@ fn a_chests_blockstate_is_its_intent_state_and_the_rest_its_arguments() {
 }
 
 #[test]
+fn a_beams_trapdoors_and_note_blocks_blockstate_is_its_intent_state_and_the_rest_its_arguments() {
+    let ir = lower_source(
+        "struct s size=5x5
+  beam kind=pillar at=front.top axis=y
+  trapdoor at=inside.back offset=1 y=1 facing=left half=top open=true waterlogged=true
+  note_block at=1,1,1 note=3 instrument=bit
+",
+    );
+    let split: Vec<(Vec<&str>, Vec<&str>)> = ir.structs[0]
+        .members
+        .iter()
+        .map(|member| {
+            (
+                member.intent_state.keys().map(String::as_str).collect(),
+                member.arguments.keys().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        split,
+        [
+            (vec!["axis"], vec!["kind", "at"]),
+            (
+                vec!["facing", "half", "open", "waterlogged"],
+                vec!["at", "offset", "y"]
+            ),
+            (vec!["note", "instrument"], vec!["at"]),
+        ],
+    );
+}
+
+#[test]
 fn a_key_that_is_blockstate_on_one_role_is_an_argument_on_another() {
     let ir = lower_source(
         "struct s size=5x5

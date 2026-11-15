@@ -79,23 +79,25 @@ pub(super) fn fill_chest(
         size,
         waterlogged,
     };
-    let built = match place_chest(member, written, y_offset, ctx, palette, canvas, diagnostics) {
-        Ok(()) => true,
+    let not_built = match place_chest(member, written, y_offset, ctx, palette, canvas, diagnostics)
+    {
+        Ok(true) => None,
+        Ok(false) => Some(
+            "this chest is not built either way — see the finding on the material its \
+             `mat_slot=` names",
+        ),
         Err(refusal) => {
             diagnostics.push(*refusal);
-            false
+            Some("this chest is not built either way — see the finding on the same line")
         }
     };
     for (argument, consequence) in unread {
-        diagnostics.push(argument.report(if built {
-            consequence
-        } else {
-            "this chest is not built either way — see the finding on the same line"
-        }));
+        diagnostics.push(argument.report(not_built.unwrap_or(consequence)));
     }
 }
 
-/// [`fill_chest`], answering the finding that refuses the chest.
+/// [`fill_chest`], answering whether the chest was built, or the finding that refuses it; a state
+/// literal the target refuses is reported where it is written and builds nothing.
 fn place_chest(
     member: &Member,
     written: WrittenStates<'_>,
@@ -104,7 +106,7 @@ fn place_chest(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), Refusal> {
+) -> Result<bool, Refusal> {
     let toward = written_facing(CHEST, member, written.facing, &Toward::HORIZONTAL);
     let single = match written.size {
         None => Ok(false),
@@ -130,12 +132,12 @@ fn place_chest(
             // The caller reports the one returned, after these.
             let last = refusals.pop();
             diagnostics.extend(refusals.into_iter().map(|refusal| *refusal));
-            return last.map_or(Ok(()), Err);
+            return last.map_or(Ok(true), Err);
         }
     };
     let (anchor, cell) = fixture_cell(CHEST, member, y_offset, ctx)?;
     let Some(id) = chest_block_id(member, ctx, diagnostics)? else {
-        return Ok(());
+        return Ok(false);
     };
     let side = anchor.side();
     let facing = toward
@@ -152,7 +154,7 @@ fn place_chest(
     canvas.declare(Declared::cell(cell, Some(anchor.host_face())));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
-        Ok(())
+        Ok(true)
     } else {
         Err(Box::new(outside_the_array(CHEST, member)))
     }

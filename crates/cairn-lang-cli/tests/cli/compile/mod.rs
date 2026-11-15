@@ -9,5 +9,6 @@ mod edition_theme;
 mod lock_readback;
 mod roof_material;
 mod state_literal;
+mod structure_format;
 mod unknown_argument;
 mod version_cap;

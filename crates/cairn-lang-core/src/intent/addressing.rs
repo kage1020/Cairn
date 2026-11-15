@@ -113,7 +113,8 @@ fn key(member: &Member, footprint: Option<&Size>) -> Option<Key> {
     })
 }
 
-/// The wall a member's line puts it on (`side=front`) or against (`at=inside.front`).
+/// The wall a member's line puts it on (`side=front`) or against (`at=inside.front`), or the
+/// opening a beam rests on (`at=entry.top`).
 fn side(member: &Member) -> Option<String> {
     let wall = |key| match &member.written(key)?.value.kind {
         ValueKind::Ident(side) if key == "side" => Some(side.clone()),
@@ -152,7 +153,7 @@ fn column(member: &Member, side: Option<&str>, footprint: Option<&Size>) -> Coor
     };
     match &at.value.kind {
         ValueKind::Ident(anchor) => anchor_column(anchor, side, footprint),
-        // A wall or a cell, which name no column.
+        // A wall, an opening or a cell, which name no column.
         ValueKind::DotRef(_) | ValueKind::Coord { .. } => Coordinate::Read(0),
         _ => Coordinate::Unread,
     }

@@ -6,6 +6,8 @@ use cairn_lang_core::block_array::{BlockArray, BlockEntityData};
 use cairn_lang_formats::bedrock_structure::{BedrockStructureError, build_mcstructure_tag};
 use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_target};
 use cairn_lang_formats::java_structure::{JavaStructureError, build_structure_tag};
+use cairn_lang_formats::litematic::{litematic_files, prepare_litematic};
+use cairn_lang_nbt::read_java_gzip;
 use cairn_lang_nbt::tag::Tag;
 
 use crate::common::{lower_source, position_data, snbt, states_for};
@@ -43,6 +45,32 @@ fn java_nbt(array: &BlockArray, mc_version: &str) -> Vec<(String, String)> {
             other => panic!("block entry: {other:?}"),
         })
         .collect()
+}
+
+/// Each `TileEntities` entry of the one region of `source`'s `.litematic` at Java `mc_version`, in
+/// SNBT.
+fn litematic_tile_entities(source: &str, mc_version: &str) -> Vec<String> {
+    let ir = lower_source(source, Edition::Java, Some(mc_version));
+    assert_eq!(ir.diagnostics, []);
+    let target = resolve_java_target(mc_version).expect("a shipped target");
+    let mut files = litematic_files(&ir);
+    assert_eq!(files.len(), 1, "one file");
+    let mut bytes = Vec::new();
+    prepare_litematic(files.remove(0), &target)
+        .expect("the file prepares")
+        .write_gzip(&mut bytes)
+        .expect("the file writes");
+    let (_, root) = read_java_gzip(bytes.as_slice()).expect("the bytes read back");
+    let Some(Tag::Compound(regions)) = root.entries.get("Regions") else {
+        panic!("Regions is not a Compound");
+    };
+    let [Tag::Compound(region)] = regions.entries.values().collect::<Vec<_>>()[..] else {
+        panic!("not one region");
+    };
+    let Some(Tag::List(tile_entities)) = region.entries.get("TileEntities") else {
+        panic!("TileEntities is not a List");
+    };
+    tile_entities.items.iter().map(snbt).collect()
 }
 
 /// `array`'s `block_position_data` at Bedrock `mc_version`, each entry's key and its SNBT.
@@ -90,6 +118,13 @@ fn a_java_sign_writes_its_text_as_json_before_1_21_5_and_as_text_from_it() {
             java_sign(["The", "Inn", "", ""], ["Closed", "", "", ""]),
         )],
     );
+}
+
+#[test]
+fn a_litematic_region_keeps_the_sign_a_java_structure_does_and_no_bed() {
+    let sign = java_sign(["The", "Inn", "", ""], ["Closed", "", "", ""]);
+    let at_its_voxel = format!("{},x:2,y:1,z:3}}", &sign[..sign.len() - 1]);
+    assert_eq!(litematic_tile_entities(ROOM, "26.3"), [at_its_voxel]);
 }
 
 #[test]
