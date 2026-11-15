@@ -74,6 +74,9 @@ pub struct Walkway {
     pub footprint: Footprint,
     /// Canonical id of the path material, e.g. `minecraft:gravel`.
     pub path_material: String,
+    /// Byte range of the `connect` row that laid it.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 impl BlockArrayIr {
@@ -328,6 +331,16 @@ impl BlockArray {
             .map(|index| index.0)
             .find(|index| usize::from(*index) >= len)
             .map(|index| (index, len))
+    }
+
+    /// The first block entity on no voxel of [`Self::dims`].
+    #[must_use]
+    pub fn first_block_entity_outside(&self) -> Option<&BlockEntity> {
+        self.block_entities.iter().find(|entity| {
+            self.dims
+                .index(entity.pos.0, entity.pos.1, entity.pos.2)
+                .is_none()
+        })
     }
 }
 
