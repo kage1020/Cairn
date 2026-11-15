@@ -25,14 +25,19 @@ The parser puts anything that is not `key=`, `-> binding`, or `[selector]` into 
 so a dropped `=` lands there too. `walls mat_slot=wall height 3` is not a `walls` with a shortened
 height. It is not built at all.
 
-A header, a `theme` rule and a `logic` or `assert` line keep one too, and the parse goes on past it.
-A `struct` or `def` header and a `theme` selector rule keep their bare values beside their
-`key=value` arguments, so `struct s size 3x3` is `E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as
-`size=3x3`. A `site` or `theme` header reads nothing after its name, a `slot` row nothing after the
-value it binds, and an `assert` line nothing after the end of its form: a bare value there is the
-same finding, and a `key=value` there is `E_PARSE`. A `logic` line whose `=` is dropped,
-`logic sig.a sig.b or sig.c`, still reads the expression after its name, binds nothing, and is
-`E_UNEXPECTED_POSITIONAL` on the whole line.
+A header, a `theme` rule and an `assert` line keep a positional list too, so a bare value there
+does not end the parse. A header's list holds the bare values after its name and before its `:`. A
+bare value after the `:`, as in `struct s size=3x3: tall`, is `E_PARSE`. So is a block id among the
+values before it, refused at the block id's own `:`, since a block id is a `key=` value ([Literals
+and separators](#511-literals-and-separators)). A `struct` or `def` header and a `theme` selector
+rule keep their bare values beside their `key=value` arguments, so `struct s size 3x3` is
+`E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as `size=3x3`. A `site` or `theme` header reads
+nothing after its name, a `slot` row nothing after the value it binds, and an `assert` line nothing
+after the end of its form: a bare value there is the same finding, and a `key=value` there is
+`E_PARSE`. A `logic` line whose `=` is dropped, `logic sig.a sig.b or sig.c`, still reads the
+expression after its name, binds nothing, and is `E_UNEXPECTED_POSITIONAL` on the whole line. No
+expression starts with an infix primitive, so `logic sig.a or sig.b` is `E_PARSE` at the `or`, for
+its missing `=`.
 
 ### 5.1.1 Literals and separators
 
