@@ -1203,6 +1203,7 @@ fn naming_the_entry_does_not_move_the_rows() {
             "buildable targets",
             "intended targets",
             "semantic-sensitive",
+            "verified target",
         ],
         "premise: these are the rows, got: {clean_out}",
     );
