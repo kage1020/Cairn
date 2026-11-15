@@ -10,7 +10,7 @@ mod structure_file;
 mod structure_id;
 
 use cairn_lang_nbt::tag::{Compound, List, Tag};
-use cairn_lang_nbt::{write_bedrock_uncompressed, write_java_gzip};
+use cairn_lang_nbt::{stream_java_uncompressed, write_bedrock_uncompressed, write_java_gzip};
 
 /// A Java `level.dat`'s bytes, its root holding `data` as `Data`.
 fn java_level_dat(data: Compound) -> Vec<u8> {
@@ -50,4 +50,16 @@ fn bedrock_root(release: [i32; 5]) -> Compound {
     root.insert("LevelName", Tag::String("Bedrock level".to_owned()))
         .insert("lastOpenedWithVersion", Tag::List(List::of_ints(release)));
     root
+}
+
+/// Gzip-wrapped Java NBT whose root holds `entries` in order, a key named twice written twice.
+fn java_gzip_entries(entries: &[(&str, Tag)]) -> Vec<u8> {
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    stream_java_uncompressed(&mut gz, "", |root| {
+        entries
+            .iter()
+            .try_for_each(|(name, tag)| root.tag(name, tag))
+    })
+    .expect("write");
+    gz.finish().expect("finish")
 }

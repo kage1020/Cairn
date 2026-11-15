@@ -18,7 +18,3 @@
   the stamp of a structure file without building its blocks, `StructureId` checks an id against
   the game's path rules and names the file it loads from, and `CrossVersion` and
   `recompile_target` say how a structure stands to a world and which target to rebuild it at.
-- *(nbt)* NBT readers: `read_java_uncompressed`, `read_java_gzip` and `read_bedrock_uncompressed`
-  build the root entries a `ReadOptions` keeps and skip the rest, within a byte budget, refusing
-  nesting past the game's 512 levels, negative lengths, untyped lists and strings that are not the
-  dialect's encoding with an `NbtReadError`.

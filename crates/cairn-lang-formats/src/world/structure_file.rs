@@ -1,18 +1,13 @@
 //! The `DataVersion` a Java structure file is stamped with, read without building its blocks.
 
+use std::io::Read;
+
 use cairn_lang_nbt::tag::Tag;
-use cairn_lang_nbt::{
-    NbtReadError, NbtRoot, ReadOptions, read_bedrock_uncompressed, read_java_gzip,
-};
+use cairn_lang_nbt::{NbtReadError, NbtReader};
 use thiserror::Error;
 
+use super::entries::{self, Body, for_each_entry, open_root};
 use super::level_dat::GZIP_MAGIC;
-
-/// The most the kept `DataVersion` and the skipped entries' names may build.
-const STAMP_TREE_BYTES: usize = 1 << 16;
-
-/// The tag id of a list.
-const LIST: u8 = 9;
 
 /// Why bytes give no Java structure's `DataVersion`.
 #[derive(Debug, Error)]
@@ -52,43 +47,62 @@ pub fn read_structure_data_version(bytes: &[u8]) -> Result<i32, StructureFileErr
             StructureFileError::NotGzip
         });
     }
-    let options = ReadOptions {
-        keep: Some(&["DataVersion"]),
-        max_tree_bytes: STAMP_TREE_BYTES,
-    };
-    let root = read_java_gzip(bytes, &options).map_err(StructureFileError::Nbt)?;
-    let has_list = |name: &str| {
-        root.skipped
-            .iter()
-            .any(|(key, id)| key == name && *id == LIST)
-    };
+    let stamp = read_stamp(&mut entries::java_gzip(bytes)).map_err(StructureFileError::Nbt)?;
+    let [size, blocks, palette, palettes] = stamp.lists;
     let mut missing = Vec::new();
-    if !has_list("size") {
+    if !size {
         missing.push("`size`");
     }
-    if !has_list("blocks") {
+    if !blocks {
         missing.push("`blocks`");
     }
-    if !has_list("palette") && !has_list("palettes") {
+    if !palette && !palettes {
         missing.push("`palette`");
     }
     if !missing.is_empty() {
         return Err(StructureFileError::NotAStructure { missing });
     }
-    match root.compound.entries.get("DataVersion") {
-        Some(&Tag::Int(data_version)) => Ok(data_version),
-        _ => Err(StructureFileError::NoDataVersion),
-    }
+    stamp.data_version.ok_or(StructureFileError::NoDataVersion)
+}
+
+/// The keys of the root lists a structure has: `size`, `blocks`, and `palette` or `palettes`.
+const LIST_KEYS: [&str; 4] = ["size", "blocks", "palette", "palettes"];
+
+/// What a structure file's root says of it, each entry the last under its key as the game keeps.
+#[derive(Debug, Default)]
+struct Stamp {
+    /// An integer `DataVersion`.
+    data_version: Option<i32>,
+    /// Whether the entry under each of [`LIST_KEYS`] is a list.
+    lists: [bool; 4],
+}
+
+fn read_stamp<R: Read>(nbt: &mut NbtReader<R>) -> Result<Stamp, NbtReadError> {
+    open_root(nbt)?;
+    let mut stamp = Stamp::default();
+    for_each_entry(nbt, |_, entry| {
+        if entry.name == "DataVersion" {
+            stamp.data_version = match entry.body {
+                Body::Value(Tag::Int(version)) => Some(version),
+                _ => None,
+            };
+        } else if let Some(at) = LIST_KEYS.iter().position(|key| *key == entry.name) {
+            stamp.lists[at] = matches!(entry.body, Body::List);
+        }
+        Ok(())
+    })?;
+    Ok(stamp)
 }
 
 fn is_mcstructure(bytes: &[u8]) -> bool {
-    let options = ReadOptions {
-        keep: Some(&[]),
-        max_tree_bytes: STAMP_TREE_BYTES,
-    };
-    read_bedrock_uncompressed(bytes, &options).is_ok_and(|root: NbtRoot| {
-        ["format_version", "structure"]
-            .iter()
-            .all(|name| root.skipped.iter().any(|(key, _)| key == name))
-    })
+    let mut nbt = entries::bedrock(bytes);
+    let (mut format_version, mut structure) = (false, false);
+    let read = open_root(&mut nbt).and_then(|()| {
+        for_each_entry(&mut nbt, |_, entry| {
+            format_version |= entry.name == "format_version";
+            structure |= entry.name == "structure";
+            Ok(())
+        })
+    });
+    read.is_ok() && format_version && structure
 }

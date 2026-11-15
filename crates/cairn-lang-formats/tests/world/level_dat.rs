@@ -7,7 +7,7 @@ use cairn_lang_formats::world::{
 use cairn_lang_nbt::tag::{Compound, Tag};
 use tempfile::TempDir;
 
-use crate::{bedrock_level_dat, bedrock_root, java_level_dat, saved_data};
+use crate::{bedrock_level_dat, bedrock_root, java_gzip_entries, java_level_dat, saved_data};
 
 /// A world folder whose `level.dat` holds `bytes`.
 fn world_with(bytes: &[u8]) -> TempDir {
@@ -58,6 +58,27 @@ fn a_data_compound_without_an_integer_data_version() {
     let mut bytes = Vec::new();
     cairn_lang_nbt::write_java_gzip(&mut bytes, "", &root).expect("write");
     let err = read(&bytes).expect_err("refused");
+    assert!(matches!(err, LevelDatError::NoDataVersion), "{err:?}");
+}
+
+#[test]
+fn a_data_compound_written_twice_is_read_as_its_last() {
+    let entries = [
+        ("Data", Tag::Compound(saved_data(3953, "1.21"))),
+        ("Data", Tag::Compound(saved_data(4189, "1.21.4"))),
+    ];
+    assert_eq!(
+        read(&java_gzip_entries(&entries)).expect("read"),
+        WorldVersion {
+            data_version: 4189,
+            name: Some("1.21.4".to_owned()),
+        }
+    );
+    let entries = [
+        ("Data", Tag::Compound(saved_data(3953, "1.21"))),
+        ("Data", Tag::Int(4189)),
+    ];
+    let err = read(&java_gzip_entries(&entries)).expect_err("refused");
     assert!(matches!(err, LevelDatError::NoDataVersion), "{err:?}");
 }
 

@@ -1,14 +1,17 @@
 //! The `DataVersion` a structure file is stamped with, and the files that carry none.
 
+use std::io::Write;
+
 use cairn_lang_core::Edition;
 use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_target};
 use cairn_lang_formats::java_structure::{build_structure_tag, write_compound_gzip};
 use cairn_lang_formats::world::{StructureFileError, read_structure_data_version};
+use cairn_lang_nbt::NbtReadError;
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use crate::common::{lower_example, states_for};
-use crate::{java_level_dat, saved_data};
+use crate::{java_gzip_entries, java_level_dat, saved_data};
 
 /// The cottage example's structure at the Java `mc_version`.
 fn cottage(mc_version: &str) -> Compound {
@@ -107,4 +110,48 @@ fn gzip_that_does_not_decode() {
     cut.truncate(cut.len() / 2);
     let err = read_structure_data_version(&cut).expect_err("refused");
     assert!(matches!(err, StructureFileError::Nbt(_)), "{err:?}");
+}
+
+#[test]
+fn a_key_written_twice_is_read_as_its_last_entry() {
+    let root = cottage("1.21.4");
+    let mut entries: Vec<(&str, Tag)> = root
+        .entries
+        .iter()
+        .map(|(name, tag)| (name.as_str(), tag.clone()))
+        .collect();
+    entries.push(("DataVersion", Tag::Int(3700)));
+    assert_eq!(
+        read_structure_data_version(&java_gzip_entries(&entries)).expect("read"),
+        3700
+    );
+    entries.push(("blocks", Tag::Int(0)));
+    let err = read_structure_data_version(&java_gzip_entries(&entries)).expect_err("refused");
+    assert!(
+        matches!(&err, StructureFileError::NotAStructure { missing } if *missing == ["`blocks`"]),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn an_array_longer_than_any_structure_holds_is_refused_before_its_elements_are_read() {
+    // A root holding one long array, `junk`, that declares 2^24 + 1 elements and carries none.
+    let mut nbt = vec![10, 0, 0, 12, 0, 4];
+    nbt.extend_from_slice(b"junk");
+    nbt.extend_from_slice(&((1_i32 << 24) + 1).to_be_bytes());
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(&nbt).expect("write");
+    let err = read_structure_data_version(&gz.finish().expect("finish")).expect_err("refused");
+    assert!(
+        matches!(
+            err,
+            StructureFileError::Nbt(NbtReadError::TooLong {
+                context: "long_array",
+                len: 16_777_217,
+                limit: 16_777_216,
+                offset: 10,
+            })
+        ),
+        "{err:?}"
+    );
 }

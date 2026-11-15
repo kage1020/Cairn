@@ -3,6 +3,7 @@
 //! the `DataVersion` a structure file is stamped with, the structure id a file is installed under
 //! and the file in the world that id names, and how the two versions stand.
 
+mod entries;
 mod level_dat;
 mod structure_file;
 mod structure_id;

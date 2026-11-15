@@ -95,13 +95,13 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 ## いま使える機能
 
 - `cairn parse` / `check` / `info` / `lower` / `compile` / `install` / `docs`
-- 1 つのソースから Java の `.nbt` と Bedrock の `.mcstructure` を出力
+- 1 つのソースから Java の `.nbt` または Litematica の `.litematic` と、Bedrock の `.mcstructure` を出力
 - `/place template` が読み込めるように Java の構造ファイルをワールドに入れる `cairn install`。ワールドより新しいバージョン向けの構造は拒否し、古いバージョン向けの構造は `--allow-cross-version` がなければ拒否します。
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、チェスト、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
-- 診断と補完を提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
+- 診断・補完・ホバーを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)
 
 **実験的な機能。** `cairn synth --experimental-logic-synth` は、レッドストーンのパイプラインの各ステージ (合成、ネットリスト構築、エディション選択、配置、配線、遅延挿入、合法化) を JSON で出力します。出力の形式は今後変わる可能性があります。
@@ -111,7 +111,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
 - `edit` による部分的な変更
-- `.litematic` と `.schem` の書き出し、既存の schematic の読み込み
+- `.schem` の書き出し、既存の schematic の読み込み
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
 ## 基本の考え方

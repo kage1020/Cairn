@@ -5,14 +5,13 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use cairn_lang_nbt::tag::Tag;
-use cairn_lang_nbt::{NbtReadError, ReadOptions, read_bedrock_uncompressed, read_java_gzip};
+use cairn_lang_nbt::{Event, NbtReadError, NbtReader};
 use thiserror::Error;
+
+use super::entries::{self, Body, for_each_entry, open_root};
 
 /// The file in a world's folder that records the world, on either edition.
 pub const LEVEL_DAT: &str = "level.dat";
-
-/// The most a `level.dat`'s `Data` compound may build, the quota the game reads one under.
-const LEVEL_DAT_TREE_BYTES: usize = 100 * 1024 * 1024;
 
 /// The two bytes every gzip stream opens with.
 pub(super) const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
@@ -76,25 +75,53 @@ pub fn read_level_dat(world: &Path) -> Result<WorldVersion, LevelDatError> {
 }
 
 fn read_java(gzip: impl Read) -> Result<WorldVersion, LevelDatError> {
-    let options = ReadOptions {
-        keep: Some(&["Data"]),
-        max_tree_bytes: LEVEL_DAT_TREE_BYTES,
-    };
-    let root = read_java_gzip(gzip, &options).map_err(LevelDatError::Nbt)?;
-    let Some(Tag::Compound(data)) = root.compound.entries.get("Data") else {
-        return Err(LevelDatError::NoDataVersion);
-    };
-    let Some(&Tag::Int(data_version)) = data.entries.get("DataVersion") else {
-        return Err(LevelDatError::NoDataVersion);
-    };
-    let name = match data.entries.get("Version") {
-        Some(Tag::Compound(version)) => match version.entries.get("Name") {
-            Some(Tag::String(name)) => Some(name.clone()),
-            _ => None,
-        },
-        _ => None,
-    };
-    Ok(WorldVersion { data_version, name })
+    let mut nbt = entries::java_gzip(gzip);
+    open_root(&mut nbt).map_err(LevelDatError::Nbt)?;
+    let mut saved = None;
+    for_each_entry(&mut nbt, |nbt, entry| {
+        // The game keeps the last of two entries under one key.
+        if entry.name == "Data" {
+            saved = match entry.body {
+                Body::Compound => saved_version(nbt)?,
+                Body::List | Body::Value(_) => None,
+            };
+        }
+        Ok(())
+    })
+    .map_err(LevelDatError::Nbt)?;
+    saved.ok_or(LevelDatError::NoDataVersion)
+}
+
+/// The version the `Data` compound `nbt` is in records, `None` without an integer `DataVersion`.
+fn saved_version<R: Read>(nbt: &mut NbtReader<R>) -> Result<Option<WorldVersion>, NbtReadError> {
+    let mut data_version = None;
+    let mut name = None;
+    for_each_entry(nbt, |nbt, entry| {
+        match (entry.name.as_str(), entry.body) {
+            ("DataVersion", Body::Value(Tag::Int(version))) => data_version = Some(version),
+            ("DataVersion", _) => data_version = None,
+            ("Version", Body::Compound) => name = release_name(nbt)?,
+            ("Version", _) => name = None,
+            _ => {}
+        }
+        Ok(())
+    })?;
+    Ok(data_version.map(|data_version| WorldVersion { data_version, name }))
+}
+
+/// The string `Name` of the `Version` compound `nbt` is in.
+fn release_name<R: Read>(nbt: &mut NbtReader<R>) -> Result<Option<String>, NbtReadError> {
+    let mut name = None;
+    for_each_entry(nbt, |_, entry| {
+        if entry.name == "Name" {
+            name = match entry.body {
+                Body::Value(Tag::String(release)) => Some(release),
+                _ => None,
+            };
+        }
+        Ok(())
+    })?;
+    Ok(name)
 }
 
 /// [`LevelDatError::Bedrock`] for a `level.dat` whose first bytes are `head`, `None` when the
@@ -105,29 +132,43 @@ fn bedrock(head: &[u8], file_len: u64, payload: impl Read) -> Option<LevelDatErr
     if u64::from(declared) != file_len.checked_sub(8)? {
         return None;
     }
-    let options = ReadOptions {
-        keep: Some(&["lastOpenedWithVersion"]),
-        max_tree_bytes: LEVEL_DAT_TREE_BYTES,
-    };
-    let root = read_bedrock_uncompressed(payload, &options).ok()?;
-    let last_opened_with = match root.compound.entries.get("lastOpenedWithVersion") {
-        Some(Tag::List(list)) => {
-            let parts: Option<Vec<String>> = list
-                .items
-                .iter()
-                .take(3)
-                .map(|part| match part {
-                    Tag::Int(part) => Some(part.to_string()),
-                    _ => None,
-                })
-                .collect();
-            parts
-                .filter(|parts| !parts.is_empty())
-                .map(|parts| parts.join("."))
-        }
-        _ => None,
-    };
+    let mut nbt = entries::bedrock(payload);
+    let last_opened_with = last_opened_with(&mut nbt).ok()?;
     Some(LevelDatError::Bedrock { last_opened_with })
+}
+
+/// The release a Bedrock `level.dat`'s `lastOpenedWithVersion` names, as `1.21.60`, from the
+/// first three of its integers.
+fn last_opened_with<R: Read>(nbt: &mut NbtReader<R>) -> Result<Option<String>, NbtReadError> {
+    open_root(nbt)?;
+    let mut release = None;
+    for_each_entry(nbt, |nbt, entry| {
+        if entry.name == "lastOpenedWithVersion" {
+            release = match entry.body {
+                Body::List => release_parts(nbt)?,
+                Body::Compound | Body::Value(_) => None,
+            };
+        }
+        Ok(())
+    })?;
+    Ok(release)
+}
+
+/// The first three items of the list `nbt` is in, joined with `.`, `None` when one of them is
+/// not an integer or the list is empty.
+fn release_parts<R: Read>(nbt: &mut NbtReader<R>) -> Result<Option<String>, NbtReadError> {
+    let mut parts = Vec::new();
+    while parts.len() < 3 {
+        match nbt.next_event()? {
+            Some(Event::Value {
+                tag: Tag::Int(part),
+                ..
+            }) => parts.push(part.to_string()),
+            Some(Event::End) | None => break,
+            Some(_) => return Ok(None),
+        }
+    }
+    Ok((!parts.is_empty()).then(|| parts.join(".")))
 }
 
 /// The names of the folders in `dir` that hold a `level.dat`, sorted; none when `dir` cannot be
