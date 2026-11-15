@@ -1,5 +1,7 @@
 # cairn-lang-core
 
+This crate's Rust API is in the [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no promise: any release may change it.
+
 Core of the Cairn language: the lexer, the parser, the IR layers above the surface syntax, and the passes that resolve *intent* into a block-array IR.
 
 This crate is the dependency root of every crate above the byte layer; [`cairn-lang-nbt`](../cairn-lang-nbt/README.md), the tree-sitter grammar and [`cairn-lang-docs`](../../website/rust/README.md) stand on their own. It is intentionally backend-free — it knows nothing about NBT byte layout, edition file formats, redstone simulation, the LSP, or WASM bindings. Those live in sibling crates so the compile pipeline stays small and testable.
@@ -14,7 +16,7 @@ This crate is the dependency root of every crate above the byte layer; [`cairn-l
 | `check` | The diagnostic-collecting pipeline: arguments, arity, duplicates, nesting, positional form, `@requires`, `@cairn`, `@intended_targets`, materials, member scope, type mismatches | [lint](https://cairn.kage1020.com/spec/lint/) |
 | `resolve` | Theme binding, per-edition theme variants, `@requires` parsing, and the three version axes | [materials-themes](https://cairn.kage1020.com/spec/materials-themes/), [versioning-editions "The `edition portability` row" and "The `buildable targets` row"](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `block_array` | The universal pivot: walls, openings, roofs, walkways, and material lowering into a palette + index array | [architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/) |
-| `lock` | Lockfile schema and the hashes that make a build reproducible | [versioning-editions "Provenance and lock"](https://cairn.kage1020.com/spec/versioning-editions/) |
+| `lock` | Lockfile schema, the hashes that make a build reproducible, and the reading `cairn info` reports of a lock | [versioning-editions "Provenance and lock"](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `calver`, `edition`, `ids` | The `@cairn` version value, the edition axis, and the identifier newtypes shared across passes | [versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `suggest`, `error`, `lines` | "Did you mean …?" lookup over closed vocabularies, spans and positions, line boundaries | [lint](https://cairn.kage1020.com/spec/lint/) |
 

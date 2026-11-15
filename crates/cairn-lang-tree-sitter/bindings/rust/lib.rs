@@ -1,3 +1,7 @@
+//! This crate's Rust API is in the
+//! [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no
+//! promise: any release may change it.
+//!
 //! The tree-sitter Cairn grammar, as a [`LANGUAGE`] that converts into a `tree_sitter::Language`.
 
 pub use ffi::LANGUAGE;

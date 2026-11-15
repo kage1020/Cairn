@@ -1,8 +1,8 @@
 //! The dispatch loop driven in-process over an in-memory connection.
 
 use std::str::FromStr;
-use std::sync::mpsc;
-use std::thread::{self, JoinHandle};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
 use std::time::Duration;
 
 use super::*;
@@ -13,17 +13,40 @@ const TEST_URI: &str = "file:///test.crn";
 /// How long a test waits for a message, so one that never arrives fails rather than hangs.
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// What [`main_loop`] ended with, its error as text.
+type Ended = Result<Teardown, String>;
+
 /// [`main_loop`] running on its own thread, with the client end of its connection.
 struct Session {
     client: Connection,
-    server: JoinHandle<Result<Teardown, DynError>>,
+    ended: mpsc::Receiver<Ended>,
 }
 
 impl Session {
+    /// A session with a client that takes pushed diagnostics.
     fn start() -> Self {
+        Self::start_in(DiagnosticsMode::Push)
+    }
+
+    /// A session with a client that pulls diagnostics.
+    fn start_pulling() -> Self {
+        Self::start_in(DiagnosticsMode::Pull)
+    }
+
+    fn start_in(mode: DiagnosticsMode) -> Self {
+        Self::start_with(mode, compute_diagnostics)
+    }
+
+    /// A session whose findings `diagnose` computes.
+    fn start_with(mode: DiagnosticsMode, diagnose: Diagnose) -> Self {
         let (server, client) = Connection::memory();
-        let server = thread::spawn(move || main_loop(&server));
-        Self { client, server }
+        let (report_end, ended) = mpsc::channel();
+        thread::spawn(move || {
+            let teardown = main_loop(&server, mode, diagnose).map_err(|err| err.to_string());
+            // A test no longer waiting for the end has failed already.
+            let _ = report_end.send(teardown);
+        });
+        Self { client, ended }
     }
 
     /// Send one message, written as the JSON a client puts on the wire.
@@ -126,6 +149,25 @@ impl Session {
         self.read_response(id)
     }
 
+    /// Send a `textDocument/diagnostic` request for a test that reads the next message itself.
+    fn send_pull(&self, id: i64, uri: &str, previous_result_id: Option<&str>) {
+        self.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/diagnostic",
+            "params": {
+                "textDocument": { "uri": uri },
+                "previousResultId": previous_result_id,
+            },
+        }));
+    }
+
+    /// Send a `textDocument/diagnostic` request and return its response.
+    fn pull(&self, id: i64, uri: &str, previous_result_id: Option<&str>) -> serde_json::Value {
+        self.send_pull(id, uri, previous_result_id);
+        self.read_response(id)
+    }
+
     /// Send `shutdown` and assert its `null` result, leaving the loop running until `exit`.
     fn request_shutdown(&self) {
         self.send(&serde_json::json!({
@@ -142,27 +184,31 @@ impl Session {
     }
 
     /// Send `exit` and return what the loop ended with.
-    fn exit(self) -> Result<Teardown, String> {
+    fn exit(self) -> Ended {
         self.send(&serde_json::json!({ "jsonrpc": "2.0", "method": "exit" }));
         self.join()
     }
 
     /// Close the client's end without a word, and return what the loop ended with.
-    fn hang_up(self) -> Result<Teardown, String> {
-        let Self { client, server } = self;
+    fn hang_up(self) -> Ended {
+        let Self { client, ended } = self;
         drop(client);
-        Self::join_handle(server)
+        Self::wait(&ended)
     }
 
-    fn join(self) -> Result<Teardown, String> {
-        Self::join_handle(self.server)
+    /// What the loop ended with, once it ends by itself.
+    fn join(self) -> Ended {
+        Self::wait(&self.ended)
     }
 
-    fn join_handle(server: JoinHandle<Result<Teardown, DynError>>) -> Result<Teardown, String> {
-        server
-            .join()
-            .expect("the loop thread panicked")
-            .map_err(|err| err.to_string())
+    fn wait(ended: &mpsc::Receiver<Ended>) -> Ended {
+        match ended.recv_timeout(READ_TIMEOUT) {
+            Ok(teardown) => teardown,
+            Err(RecvTimeoutError::Timeout) => {
+                panic!("the loop did not end within {READ_TIMEOUT:?}")
+            }
+            Err(RecvTimeoutError::Disconnected) => panic!("the loop thread panicked"),
+        }
     }
 
     /// Run the `shutdown`/`exit` handshake and assert it ends the loop cleanly.
@@ -170,6 +216,25 @@ impl Session {
         self.request_shutdown();
         assert_eq!(self.exit(), Ok(Teardown::AfterShutdown));
     }
+
+    /// Send `shutdown` and `exit` without reading, assert they end the loop cleanly, and return
+    /// every message the loop sent that the test had not read, `shutdown`'s answer among them.
+    fn end(self) -> Vec<serde_json::Value> {
+        self.send(&serde_json::json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }));
+        self.send(&serde_json::json!({ "jsonrpc": "2.0", "method": "exit" }));
+        let Self { client, ended } = self;
+        assert_eq!(Self::wait(&ended), Ok(Teardown::AfterShutdown));
+        sent(&client)
+    }
+}
+
+/// Every message `client` has been sent and not read, as JSON.
+fn sent(client: &Connection) -> Vec<serde_json::Value> {
+    client
+        .receiver
+        .try_iter()
+        .map(|message| serde_json::to_value(message).expect("serialise message"))
+        .collect()
 }
 
 /// The diagnostics of a `publishDiagnostics` notification, asserting it targets `uri`.
@@ -188,11 +253,11 @@ fn diagnostics_of(message: &serde_json::Value) -> &Vec<serde_json::Value> {
     diagnostics_for(message, TEST_URI)
 }
 
-/// Labels of a completion response's item array.
+/// Labels of a completion response's item list.
 fn completion_labels(response: &serde_json::Value) -> Vec<&str> {
-    response["result"]
+    response["result"]["items"]
         .as_array()
-        .expect("completion result should be an item array")
+        .expect("completion result should be a list of items")
         .iter()
         .map(|item| item["label"].as_str().expect("string label"))
         .collect()
@@ -208,6 +273,46 @@ fn capabilities_advertise_full_sync_and_the_completion_triggers() {
         capabilities["completionProvider"]["triggerCharacters"],
         serde_json::json!(["@", "=", "."]),
     );
+}
+
+#[test]
+fn capabilities_advertise_pulled_diagnostics_for_one_document_at_a_time() {
+    let capabilities = serde_json::to_value(server_capabilities()).expect("serialise");
+    assert_eq!(
+        capabilities["diagnosticProvider"],
+        serde_json::json!({
+            "identifier": "cairn",
+            "interFileDependencies": false,
+            "workspaceDiagnostics": false,
+        }),
+    );
+}
+
+#[test]
+fn pull_is_negotiated_only_for_a_diagnostic_capability_object() {
+    let declaring = |diagnostic| serde_json::json!({ "capabilities": { "textDocument": { "diagnostic": diagnostic } } });
+    for (params, mode) in [
+        (declaring(serde_json::json!({})), DiagnosticsMode::Pull),
+        (
+            declaring(serde_json::json!({ "relatedDocumentSupport": false })),
+            DiagnosticsMode::Pull,
+        ),
+        (declaring(serde_json::Value::Null), DiagnosticsMode::Push),
+        (declaring(serde_json::json!(false)), DiagnosticsMode::Push),
+        (declaring(serde_json::json!(0)), DiagnosticsMode::Push),
+        (declaring(serde_json::json!("")), DiagnosticsMode::Push),
+        (declaring(serde_json::json!([])), DiagnosticsMode::Push),
+        (
+            serde_json::json!({ "capabilities": { "textDocument": { "publishDiagnostics": {} } } }),
+            DiagnosticsMode::Push,
+        ),
+        (
+            serde_json::json!({ "capabilities": {} }),
+            DiagnosticsMode::Push,
+        ),
+    ] {
+        assert_eq!(DiagnosticsMode::negotiate(&params), mode, "{params}");
+    }
 }
 
 // ---------------------------------------------------------- notifications
@@ -304,8 +409,8 @@ fn an_unknown_notification_before_shutdown_is_ignored() {
     let session = Session::start();
     session.send(&serde_json::json!({
         "jsonrpc": "2.0",
-        "method": "$/cancelRequest",
-        "params": { "id": 1 },
+        "method": "$/setTrace",
+        "params": { "value": "off" },
     }));
     session.did_open(CLEAN, 1);
     let published = session.read_until_method("textDocument/publishDiagnostics");
@@ -372,37 +477,38 @@ fn a_document_queued_again_publishes_only_what_was_queued_last() {
         (uri("file:///a.crn"), Publication::Cleared),
         (uri("file:///b.crn"), findings(2, DUPLICATE)),
     ] {
-        queue.send(entry).expect("the queue is open");
+        queue.send(Job::Publish(entry)).expect("the queue is open");
     }
     drop(queue);
-    publish_queued(&server, &queued).expect("every publication is sent");
+    serve_queued(&server, &queued, compute_diagnostics).expect("every publication is sent");
 
-    let published: Vec<serde_json::Value> = client
-        .receiver
-        .try_iter()
-        .map(|message| serde_json::to_value(message).expect("serialise message"))
-        .collect();
-    let expected = |path: &str, version, diagnostics| {
-        serde_json::json!({
-            "method": "textDocument/publishDiagnostics",
-            "params": lsp_types::PublishDiagnosticsParams {
-                uri: uri(path),
-                diagnostics,
-                version,
-            },
-        })
-    };
     assert_eq!(
-        published,
+        sent(&client),
         [
-            expected("file:///a.crn", None, Vec::new()),
-            expected(
+            publication("file:///a.crn", None, Vec::new()),
+            publication(
                 "file:///b.crn",
                 Some(2),
                 compute_diagnostics(&uri("file:///b.crn"), DUPLICATE),
             ),
         ],
     );
+}
+
+/// A `publishDiagnostics` notification as the client receives it.
+fn publication(
+    uri: &str,
+    version: Option<i32>,
+    diagnostics: Vec<lsp_types::Diagnostic>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "method": "textDocument/publishDiagnostics",
+        "params": lsp_types::PublishDiagnosticsParams {
+            uri: lsp_types::Uri::from_str(uri).expect("valid uri"),
+            diagnostics,
+            version,
+        },
+    })
 }
 
 #[test]
@@ -430,6 +536,352 @@ fn rapid_changes_publish_in_revision_order_ending_with_the_newest() {
         "no revision may be published after a newer one: {versions:?}",
     );
     session.shutdown();
+}
+
+// --------------------------------------------------------- pulled diagnostics
+
+/// The full report answering pull `id`, on `revision` of a text whose findings are `items`.
+fn full_report(id: i64, revision: &str, items: &impl serde::Serialize) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "result": { "kind": "full", "resultId": revision, "items": items },
+    })
+}
+
+/// The `unchanged` answer to pull `id`, naming `revision`.
+fn unchanged_report(id: i64, revision: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "result": { "kind": "unchanged", "resultId": revision },
+    })
+}
+
+/// [`DUPLICATE`]'s findings, as [`TEST_URI`].
+fn duplicate_findings() -> Vec<lsp_types::Diagnostic> {
+    let uri = lsp_types::Uri::from_str(TEST_URI).expect("valid uri");
+    compute_diagnostics(&uri, DUPLICATE)
+}
+
+#[test]
+fn a_pull_answers_the_stored_text_with_its_findings_and_a_result_id() {
+    let session = Session::start_pulling();
+    session.did_open(DUPLICATE, 1);
+    assert_eq!(
+        session.pull(50, TEST_URI, None),
+        full_report(50, "1", &duplicate_findings()),
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_pull_answers_the_text_it_arrived_with() {
+    let session = Session::start_pulling();
+    session.did_open(DUPLICATE, 1);
+    session.send_pull(65, TEST_URI, None);
+    session.did_change(TEST_URI, CLEAN, 2);
+    assert_eq!(
+        session.read_response(65),
+        full_report(65, "1", &duplicate_findings()),
+    );
+    assert_eq!(
+        session.pull(66, TEST_URI, Some("1")),
+        full_report(66, "2", &serde_json::json!([])),
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_pull_naming_the_report_the_client_holds_is_answered_unchanged() {
+    let session = Session::start_pulling();
+    session.did_open(DUPLICATE, 1);
+    assert_eq!(
+        session.pull(51, TEST_URI, None),
+        full_report(51, "1", &duplicate_findings()),
+    );
+    assert_eq!(
+        session.pull(52, TEST_URI, Some("1")),
+        unchanged_report(52, "1")
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_pull_after_a_change_reports_the_new_text_whatever_the_client_holds() {
+    let session = Session::start_pulling();
+    session.did_open(DUPLICATE, 1);
+    assert_eq!(
+        session.pull(53, TEST_URI, None),
+        full_report(53, "1", &duplicate_findings()),
+    );
+    session.did_change(TEST_URI, CLEAN, 2);
+    assert_eq!(
+        session.pull(54, TEST_URI, Some("1")),
+        full_report(54, "2", &serde_json::json!([])),
+    );
+    session.did_close(TEST_URI);
+    session.did_open(CLEAN, 1);
+    assert_eq!(
+        session.pull(55, TEST_URI, Some("2")),
+        full_report(55, "3", &serde_json::json!([])),
+        "a reopened document is a new revision, even with the text it had",
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_refused_change_leaves_the_report_the_client_holds_current() {
+    let session = Session::start_pulling();
+    session.did_open(DUPLICATE, 1);
+    assert_eq!(
+        session.pull(56, TEST_URI, None),
+        full_report(56, "1", &duplicate_findings()),
+    );
+    session.send(&change_events(
+        2,
+        &serde_json::json!([insert_at(9, 0, "bogus!!")]),
+    ));
+    assert_eq!(
+        session.pull(57, TEST_URI, Some("1")),
+        unchanged_report(57, "1")
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_client_that_pulls_is_never_published_to() {
+    let session = Session::start_pulling();
+    session.did_open(DUPLICATE, 1);
+    session.did_change(TEST_URI, DUPLICATE, 2);
+    session.did_close(TEST_URI);
+    session.did_open(DUPLICATE, 3);
+    session.send_pull(58, TEST_URI, None);
+    assert_eq!(
+        session.read_message(),
+        full_report(58, "3", &duplicate_findings()),
+    );
+    assert_eq!(
+        session.end(),
+        [serde_json::json!({ "id": 99, "result": null })]
+    );
+}
+
+#[test]
+fn a_client_diagnostics_are_pushed_to_may_still_pull_them() {
+    let session = Session::start();
+    session.did_open(DUPLICATE, 1);
+    let published = session.read_until_method("textDocument/publishDiagnostics");
+    assert_eq!(
+        published,
+        publication(TEST_URI, Some(1), duplicate_findings())
+    );
+    assert_eq!(
+        session.pull(59, TEST_URI, None),
+        full_report(59, "1", &duplicate_findings()),
+        "both routes answer from the same passes",
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_pull_for_a_document_that_is_not_open_is_cancelled_without_a_retrigger() {
+    let not_open = |id: i64, uri: &str| {
+        serde_json::json!({
+            "id": id,
+            "error": {
+                "code": -32802,
+                "message": format!("document not open: {uri}"),
+                "data": { "retriggerRequest": false },
+            },
+        })
+    };
+    let session = Session::start_pulling();
+    let never_opened = "file:///never-opened.crn";
+    assert_eq!(
+        session.pull(60, never_opened, None),
+        not_open(60, never_opened)
+    );
+    session.did_open(CLEAN, 1);
+    session.did_close(TEST_URI);
+    assert_eq!(
+        session.pull(61, TEST_URI, Some("1")),
+        not_open(61, TEST_URI)
+    );
+    session.shutdown();
+}
+
+#[test]
+fn a_pull_whose_params_do_not_parse_is_invalid_params() {
+    let session = Session::start_pulling();
+    session.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 62,
+        "method": "textDocument/diagnostic",
+        "params": { "textDocument": {} },
+    }));
+    assert_eq!(
+        session.read_response(62),
+        serde_json::json!({
+            "id": 62,
+            "error": {
+                "code": -32602,
+                "message": "malformed `textDocument/diagnostic` params: missing field `uri`",
+            },
+        }),
+    );
+    session.shutdown();
+}
+
+/// A [`Job::Report`] for [`TEST_URI`].
+fn report(id: RequestId, text: &str, revision: u64) -> Job {
+    Job::Report(Report {
+        id,
+        uri: lsp_types::Uri::from_str(TEST_URI).expect("valid uri"),
+        text: text.to_owned(),
+        revision: Revision::numbered(revision),
+    })
+}
+
+#[test]
+fn reports_are_answered_in_order_ahead_of_the_publications_queued_before_them() {
+    let (server, client) = Connection::memory();
+    let (queue, queued) = mpsc::channel();
+    let uri = lsp_types::Uri::from_str(TEST_URI).expect("valid uri");
+    let findings = Publication::Findings {
+        version: 1,
+        text: DUPLICATE.to_owned(),
+    };
+    for job in [
+        Job::Publish((uri.clone(), findings)),
+        report(RequestId::from(5), CLEAN, 3),
+        report(RequestId::from(6), DUPLICATE, 4),
+    ] {
+        queue.send(job).expect("the queue is open");
+    }
+    drop(queue);
+    serve_queued(&server, &queued, compute_diagnostics).expect("every job is done");
+
+    assert_eq!(
+        sent(&client),
+        [
+            serde_json::json!({
+                "id": 5,
+                "result": { "kind": "full", "resultId": "3", "items": [] },
+            }),
+            serde_json::json!({
+                "id": 6,
+                "result": {
+                    "kind": "full",
+                    "resultId": "4",
+                    "items": compute_diagnostics(&uri, DUPLICATE),
+                },
+            }),
+            publication(TEST_URI, Some(1), compute_diagnostics(&uri, DUPLICATE)),
+        ],
+    );
+}
+
+#[test]
+fn a_report_cancelled_while_queued_is_answered_cancelled() {
+    let (server, client) = Connection::memory();
+    let (queue, queued) = mpsc::channel();
+    let named = RequestId::from("pull-7".to_owned());
+    for job in [
+        report(RequestId::from(5), DUPLICATE, 1),
+        report(named.clone(), DUPLICATE, 1),
+        report(RequestId::from(6), CLEAN, 2),
+        Job::Cancel(RequestId::from(5)),
+        Job::Cancel(named),
+        Job::Cancel(RequestId::from(8)),
+    ] {
+        queue.send(job).expect("the queue is open");
+    }
+    drop(queue);
+    serve_queued(&server, &queued, compute_diagnostics).expect("every job is done");
+
+    let cancelled = |id: serde_json::Value| {
+        serde_json::json!({
+            "id": id,
+            "error": {
+                "code": -32800,
+                "message": "`textDocument/diagnostic` cancelled by the client before its report \
+                            was computed",
+            },
+        })
+    };
+    assert_eq!(
+        sent(&client),
+        [
+            cancelled(serde_json::json!(5)),
+            cancelled(serde_json::json!("pull-7")),
+            serde_json::json!({
+                "id": 6,
+                "result": { "kind": "full", "resultId": "2", "items": [] },
+            }),
+        ],
+    );
+}
+
+#[test]
+fn a_cancel_request_is_handed_to_the_diagnostics_thread_in_either_mode() {
+    let (queue, queued) = mpsc::channel();
+    let mut store = DocumentStore::new();
+    for mode in [DiagnosticsMode::Push, DiagnosticsMode::Pull] {
+        for id in [serde_json::json!(5), serde_json::json!("pull-5")] {
+            let cancel = Notification::new(
+                "$/cancelRequest".to_owned(),
+                serde_json::json!({ "id": id }),
+            );
+            handle_notification(&queue, &mut store, cancel, mode).expect("the queue is open");
+        }
+    }
+    let by_number = || Job::Cancel(RequestId::from(5));
+    let by_name = || Job::Cancel(RequestId::from("pull-5".to_owned()));
+    assert_eq!(
+        queued.try_iter().collect::<Vec<_>>(),
+        [by_number(), by_name(), by_number(), by_name()],
+    );
+}
+
+#[test]
+fn a_cancel_for_a_pull_already_answered_sends_nothing() {
+    let session = Session::start_pulling();
+    session.did_open(CLEAN, 1);
+    let answered = session.pull(63, TEST_URI, None);
+    assert_eq!(
+        answered,
+        serde_json::json!({
+            "id": 63,
+            "result": { "kind": "full", "resultId": "1", "items": [] },
+        }),
+    );
+    session.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "$/cancelRequest",
+        "params": { "id": 63 },
+    }));
+    assert_eq!(
+        session.end(),
+        [serde_json::json!({ "id": 99, "result": null })]
+    );
+}
+
+/// Findings that are never computed: the passes panic.
+fn panicking(_: &lsp_types::Uri, _: &str) -> Vec<lsp_types::Diagnostic> {
+    panic!("the passes failed");
+}
+
+#[test]
+fn a_panic_on_the_diagnostics_thread_ends_the_session_in_either_mode() {
+    let panicked = Err("the diagnostics thread panicked: the passes failed".to_owned());
+
+    let session = Session::start_with(DiagnosticsMode::Push, panicking);
+    session.did_open(CLEAN, 1);
+    assert_eq!(session.join(), panicked, "a publication's panic");
+
+    let session = Session::start_with(DiagnosticsMode::Pull, panicking);
+    session.did_open(CLEAN, 1);
+    session.send_pull(64, TEST_URI, None);
+    assert_eq!(session.join(), panicked, "a report's panic");
 }
 
 // ---------------------------------------------------------------- requests
@@ -473,6 +925,24 @@ fn completion_reflects_did_change_revisions() {
 }
 
 #[test]
+fn a_material_token_answer_cut_at_the_limit_says_it_is_incomplete() {
+    let session = Session::start();
+    let source = "theme a:\n  slot floor -> @";
+    session.did_open(source, 1);
+    let cut = session.request_completion(10, TEST_URI, 1, 17);
+    assert_eq!(cut["result"]["isIncomplete"], serde_json::json!(true));
+    assert_eq!(
+        cut["result"]["items"].as_array().map(Vec::len),
+        Some(crate::completion::MATERIAL_ITEM_LIMIT),
+    );
+    session.did_change(TEST_URI, "theme a:\n  slot floor -> @cherry_plan", 2);
+    let whole = session.request_completion(11, TEST_URI, 1, 28);
+    assert_eq!(whole["result"]["isIncomplete"], serde_json::json!(false));
+    assert_eq!(completion_labels(&whole), ["cherry_planks"]);
+    session.shutdown();
+}
+
+#[test]
 fn completion_on_an_unopened_document_is_invalid_params() {
     // -32602 is InvalidParams.
     let session = Session::start();
@@ -497,7 +967,7 @@ fn completion_answers_at_the_end_of_a_newline_terminated_document() {
     session.did_open("struct s size=2x2\n", 1);
     session.read_until_method("textDocument/publishDiagnostics");
     let response = session.request_completion(38, TEST_URI, 1, 0);
-    let items = response["result"]
+    let items = response["result"]["items"]
         .as_array()
         .unwrap_or_else(|| panic!("expected items at the empty final line, got: {response}"));
     assert!(!items.is_empty(), "the line exists, so it has candidates");
@@ -510,7 +980,7 @@ fn completion_answers_in_an_empty_document() {
     session.did_open("", 1);
     session.read_until_method("textDocument/publishDiagnostics");
     let response = session.request_completion(39, TEST_URI, 0, 0);
-    let items = response["result"]
+    let items = response["result"]["items"]
         .as_array()
         .unwrap_or_else(|| panic!("expected items in an empty document, got: {response}"));
     assert!(!items.is_empty(), "an empty document still has candidates");
@@ -652,7 +1122,7 @@ fn a_ranged_change_outside_the_document_is_dropped() {
         "a refused revision publishes nothing, got: {response}"
     );
     assert!(
-        response["result"]
+        response["result"]["items"]
             .as_array()
             .is_some_and(|items| !items.is_empty()),
         "the refusal leaves the URI open, with a line 1 to complete on, got: {response}",
