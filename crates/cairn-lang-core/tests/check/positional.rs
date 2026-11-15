@@ -4,7 +4,7 @@
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
 
-use crate::common::{PRELUDE, def_with, diagnose, of_code, one_of_code, struct_with};
+use crate::common::{PRELUDE, def_with, diagnose, lowered, of_code, one_of_code, struct_with};
 
 fn duo_with(row: &str) -> String {
     format!(
@@ -185,6 +185,34 @@ fn a_dropped_equals_costs_the_whole_member() {
     );
 }
 
+/// Each finding `source` raises, as its code and the text it points at, in report order.
+fn found(source: &str) -> Vec<(&'static str, &str)> {
+    diagnose(source)
+        .iter()
+        .map(|d| (d.code.as_str(), &source[d.span.clone()]))
+        .collect()
+}
+
+/// The `W_UNUSED_DEF` findings of a `source` that places none of its `def`s, as [`found`] lists
+/// them: one per `def`, whose block runs to the next blank line.
+fn unused_defs(source: &str) -> Vec<(&'static str, &str)> {
+    source
+        .split("\n\n")
+        .filter(|block| block.starts_with("def "))
+        .map(|block| ("W_UNUSED_DEF", block.trim_end()))
+        .collect()
+}
+
+/// [`unused_defs`] followed by `rest`.
+fn after_unused_defs<'a>(
+    source: &'a str,
+    rest: &[(&'static str, &'a str)],
+) -> Vec<(&'static str, &'a str)> {
+    let mut all = unused_defs(source);
+    all.extend_from_slice(rest);
+    all
+}
+
 /// Each `E_UNEXPECTED_POSITIONAL` `source` raises, as the text it points at, its primary and its
 /// notes.
 fn positionals(source: &str) -> Vec<(&str, String, Vec<String>)> {
@@ -202,13 +230,24 @@ fn finding<'a>(text: &'a str, primary: &str, note: &str) -> (&'a str, String, Ve
     (text, primary.to_owned(), vec![note.to_owned()])
 }
 
-const KEYED_HEADER_NOTE: &str =
-    "give each value the key it belongs to (`size=3x3`); a missing `=` lands here too";
+/// A source built around one body line, as [`struct_with`] and [`def_with`] build theirs.
+type Body = fn(&str) -> String;
+
+/// The bodies a `logic` or `assert` line stands in, by the keyword that opens each.
+const BODIES: [(&str, Body); 2] = [("struct", struct_with), ("def", def_with)];
+
+const KEYED_HEADER_NOTE: &str = "a header takes only `size=`: write the size as `size=3x3` and \
+                                 delete any other value; a missing `=` lands here too";
 
 #[test]
 fn a_dropped_equals_sign_on_a_struct_or_def_header_is_reported() {
     for keyword in ["struct", "def"] {
         let src = format!("{PRELUDE}{keyword} s size 5x5\n  floor mat_slot=floor\n");
+        assert_eq!(
+            found(&src),
+            after_unused_defs(&src, &[("E_UNEXPECTED_POSITIONAL", "size 5x5")]),
+            "{keyword}",
+        );
         assert_eq!(
             positionals(&src),
             [finding(
@@ -226,15 +265,53 @@ fn a_dropped_equals_sign_on_a_struct_or_def_header_is_reported() {
 
 #[test]
 fn a_bare_value_beside_a_header_argument_is_reported() {
-    let src = format!("{PRELUDE}struct s size=5x5 tall:\n  floor mat_slot=floor\n");
+    for keyword in ["struct", "def"] {
+        let src = format!("{PRELUDE}{keyword} s size=5x5 tall:\n  floor mat_slot=floor\n");
+        assert_eq!(
+            found(&src),
+            after_unused_defs(&src, &[("E_UNEXPECTED_POSITIONAL", "tall")]),
+            "{keyword}",
+        );
+        assert_eq!(
+            positionals(&src),
+            [finding(
+                "tall",
+                &format!(
+                    "a `{keyword}` header reads only `key=value` arguments: the 1 bare value on \
+                     this line is dropped"
+                ),
+                KEYED_HEADER_NOTE,
+            )],
+            "{keyword}",
+        );
+    }
+}
+
+/// `size=9x` is `size=9` and a bare `x`, as on a member line, so the header has no size either.
+#[test]
+fn a_size_with_no_height_on_a_header_is_an_integer_and_a_bare_value() {
+    for keyword in ["struct", "def"] {
+        let src = format!("{keyword} s size=9x\n  floor mat_slot=floor\n");
+        assert_eq!(
+            found(&src),
+            after_unused_defs(
+                &src,
+                &[
+                    ("E_TYPE_MISMATCH_SIZE", "9"),
+                    ("E_UNEXPECTED_POSITIONAL", "x")
+                ],
+            ),
+            "{keyword}",
+        );
+    }
+    let src = "struct s size=9x\n  floor mat_slot=floor\n";
     assert_eq!(
-        positionals(&src),
-        [finding(
-            "tall",
-            "a `struct` header reads only `key=value` arguments: the 1 bare value on this line is \
-             dropped",
-            KEYED_HEADER_NOTE,
-        )],
+        lowered(src)
+            .diagnostics
+            .iter()
+            .map(|d| (d.code.as_str(), &src[d.span.clone()]))
+            .collect::<Vec<_>>(),
+        [("W_STRUCT_NO_SIZE", src.trim_end())],
     );
 }
 
@@ -242,6 +319,7 @@ fn a_bare_value_beside_a_header_argument_is_reported() {
 fn a_site_or_theme_header_reads_nothing_after_its_name() {
     let site =
         format!("{PRELUDE}site duo extra:\n  place id=anchor use=hut theme=plain at=origin\n");
+    assert_eq!(found(&site), [("E_UNEXPECTED_POSITIONAL", "extra")]);
     assert_eq!(
         positionals(&site),
         [finding(
@@ -252,6 +330,7 @@ fn a_site_or_theme_header_reads_nothing_after_its_name() {
         )],
     );
     let theme = "theme dusk dark 2:\n  slot wall -> @stone\n";
+    assert_eq!(found(theme), [("E_UNEXPECTED_POSITIONAL", "dark 2")]);
     assert_eq!(
         positionals(theme),
         [finding(
@@ -266,6 +345,7 @@ fn a_site_or_theme_header_reads_nothing_after_its_name() {
 #[test]
 fn a_dropped_equals_sign_on_a_selector_rule_is_reported() {
     let src = "theme t:\n  window[side=front] -> mat_slot glass\n";
+    assert_eq!(found(src), [("E_UNEXPECTED_POSITIONAL", "mat_slot glass")]);
     assert_eq!(
         positionals(src),
         [finding(
@@ -277,9 +357,17 @@ fn a_dropped_equals_sign_on_a_selector_rule_is_reported() {
     );
 }
 
+/// What trails the value a row binds may be a token, a string, a boolean or an integer.
 #[test]
 fn a_slot_row_binds_its_one_value() {
-    let src = "theme t:\n  slot wall -> @stone @brick\n  slot roof -> @oak @birch @spruce\n";
+    let src = "theme t:\n  slot wall -> @stone @brick\n  slot roof -> @oak \"s\" true 3\n";
+    assert_eq!(
+        found(src),
+        [
+            ("E_UNEXPECTED_POSITIONAL", "@brick"),
+            ("E_UNEXPECTED_POSITIONAL", "\"s\" true 3"),
+        ],
+    );
     assert_eq!(
         positionals(src),
         [
@@ -289,8 +377,8 @@ fn a_slot_row_binds_its_one_value() {
                 "delete it, or bind it to a slot of its own on a `slot` row",
             ),
             finding(
-                "@birch @spruce",
-                "a `slot` row binds one value: the 2 bare values after it on this line are \
+                "\"s\" true 3",
+                "a `slot` row binds one value: the 3 bare values after it on this line are \
                  dropped",
                 "delete them, or bind each to a slot of its own on a `slot` row",
             ),
@@ -320,41 +408,67 @@ fn an_assert_line_ends_at_its_form() {
             "its bound",
         ),
     ] {
-        assert_eq!(
-            positionals(&struct_with(line)),
-            [finding(
-                text,
-                &format!(
-                    "an `assert {form}` line ends at {end}: the 1 bare value after it is dropped"
-                ),
-                "delete it",
-            )],
-            "{line}",
-        );
+        for (body, with) in BODIES {
+            let src = with(line);
+            assert_eq!(
+                found(&src),
+                after_unused_defs(&src, &[("E_UNEXPECTED_POSITIONAL", text)]),
+                "{body}: {line}",
+            );
+            assert_eq!(
+                positionals(&src),
+                [finding(
+                    text,
+                    &format!(
+                        "an `assert {form}` line ends at {end}: the 1 bare value after it is \
+                         dropped"
+                    ),
+                    "delete it",
+                )],
+                "{body}: {line}",
+            );
+        }
     }
 }
 
 #[test]
 fn a_logic_line_without_its_equals_sign_binds_nothing() {
-    let line = "logic sig.lamps sig.power and not sig.day";
-    let src = struct_with(line);
-    assert_eq!(
-        positionals(&src),
-        [finding(
-            line,
-            "a `logic` line binds `NAME = EXPR`, and no `=` follows `sig.lamps`: the name and the \
-             expression after it are bare values, and the line binds nothing",
-            "write `=` between them: `logic sig.lamps = ...`",
-        )],
-    );
-    let bound = |source: &str| lower(&parse(source).expect("parse")).structs[0].logic.len();
-    assert_eq!(bound(&src), 0, "the line binds nothing");
-    assert_eq!(
-        bound(&struct_with("logic sig.lamps = sig.power and not sig.day")),
-        1,
-    );
+    let bound = |source: &str| {
+        let ir = lower(&parse(source).expect("parse"));
+        let structs = ir.structs.iter().map(|s| s.logic.len());
+        structs
+            .chain(ir.defs.iter().map(|d| d.logic.len()))
+            .sum::<usize>()
+    };
+    for line in [
+        "logic sig.lamps sig.power and not sig.day",
+        "logic sig.lamps (sig.power)",
+    ] {
+        for (body, with) in BODIES {
+            let src = with(line);
+            assert_eq!(
+                found(&src),
+                after_unused_defs(&src, &[("E_UNEXPECTED_POSITIONAL", line)]),
+                "{body}: {line}",
+            );
+            assert_eq!(
+                positionals(&src),
+                [finding(
+                    line,
+                    "a `logic` line binds `NAME = EXPR`, and no `=` follows `sig.lamps`: the name \
+                     and the expression after it are bare values, and the line binds nothing",
+                    "write `=` between them: `logic sig.lamps = ...`",
+                )],
+                "{body}: {line}",
+            );
+            assert_eq!(bound(&src), 0, "{body}: {line}");
+            let fixed = line.replacen("sig.lamps ", "sig.lamps = ", 1);
+            assert_eq!(bound(&with(&fixed)), 1, "{body}: {fixed}");
+        }
+    }
 }
 
+/// The one finding is the warning every selector binding earns, since no pass reads one.
 #[test]
 fn a_well_formed_header_rule_or_assertion_is_not_reported() {
     let src = format!(
@@ -365,36 +479,47 @@ fn a_well_formed_header_rule_or_assertion_is_not_reported() {
          assert always(sig.a -> eventually sig.b within 4)\n  \
          assert latency(sig.a -> sig.b) <= 4\n"
     );
-    assert_eq!(positionals(&src), []);
+    assert_eq!(found(&src), [("W_IGNORED_ARGUMENT", "glass")]);
 }
 
 /// A line under a guard or a member is checked where it stands, whatever else it earns there.
 #[test]
 fn a_bare_value_on_a_nested_line_is_still_reported() {
-    let src = struct_with(
-        "@edition java\n    assert latency(sig.a -> sig.b) <= 4 ticks\n  \
-         walls mat_slot=wall height=3\n    logic sig.a sig.b",
-    );
-    assert_eq!(
-        of_code(&src, DiagnosticCode::UnexpectedPositional)
-            .iter()
-            .map(|d| &src[d.span.clone()])
-            .collect::<Vec<_>>(),
-        ["ticks", "logic sig.a sig.b"],
-    );
+    for (body, with) in BODIES {
+        let src = with(
+            "@edition java\n    assert latency(sig.a -> sig.b) <= 4 ticks\n  \
+             walls mat_slot=wall height=3\n    logic sig.a sig.b",
+        );
+        assert_eq!(
+            found(&src),
+            after_unused_defs(
+                &src,
+                &[
+                    (
+                        "E_SEMANTIC_IN_EDITION_GUARD",
+                        "assert latency(sig.a -> sig.b) <= 4",
+                    ),
+                    ("E_UNEXPECTED_POSITIONAL", "ticks"),
+                    ("E_UNEXPECTED_POSITIONAL", "logic sig.a sig.b"),
+                ],
+            ),
+            "{body}",
+        );
+    }
 }
 
-/// The slips are findings rather than parse failures, so every one in the file is reported.
 #[test]
 fn the_parse_goes_on_past_a_bare_value_on_any_line() {
     let src = "theme t dark:\n  slot wall -> @stone\n\n\
                struct s size 5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height 3\n  \
                logic sig.a sig.b\n";
     assert_eq!(
-        of_code(src, DiagnosticCode::UnexpectedPositional)
-            .iter()
-            .map(|d| &src[d.span.clone()])
-            .collect::<Vec<_>>(),
-        ["dark", "size 5x5", "height 3", "logic sig.a sig.b"],
+        found(src),
+        [
+            ("E_UNEXPECTED_POSITIONAL", "dark"),
+            ("E_UNEXPECTED_POSITIONAL", "size 5x5"),
+            ("E_UNEXPECTED_POSITIONAL", "height 3"),
+            ("E_UNEXPECTED_POSITIONAL", "logic sig.a sig.b"),
+        ],
     );
 }
