@@ -417,7 +417,7 @@ fn and_list(items: &[String]) -> String {
 }
 
 /// What `member` holds in each structure `built` lays, a block state and its cell count to a
-/// line, or `None` for a row that owns no cell of its own.
+/// line, or `None` for a `place`, `level` or `circuit` row.
 fn resolved_state(member: &Member, built: &BlockArrayIr) -> Option<String> {
     let scopes: Vec<String> = match &member.role {
         // A `place` and a `level` paint nothing themselves, and hover lays no circuit.
