@@ -49,6 +49,7 @@ fn a_clean_build_answers_its_ir_beside_one_structure_file_per_structure() {
                 "members": {
                     "struct::s": [{
                         "role": "floor",
+                        "address": "floor[0]",
                         "resolved_state": [{
                             "state": { "id": "minecraft:oak_planks" },
                             "runs": [

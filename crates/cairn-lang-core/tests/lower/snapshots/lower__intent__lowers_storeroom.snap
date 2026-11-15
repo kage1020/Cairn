@@ -30,12 +30,14 @@ structs:
       h: 5
     args: {}
     members:
-      - role:
+      - address: "floor[0]"
+        role:
           kind: Floor
         mat_slot: floor
         arguments: {}
         intent_state: {}
-      - role:
+      - address: "walls[0]"
+        role:
           kind: Walls
         mat_slot: wall
         arguments:
@@ -43,7 +45,8 @@ structs:
             kind: Int
             value: 3
         intent_state: {}
-      - role:
+      - address: "door@front[0]"
+        role:
           kind: Door
         arguments:
           side:
@@ -53,7 +56,8 @@ structs:
             kind: Ident
             value: center
         intent_state: {}
-      - role:
+      - address: "roof[0]"
+        role:
           kind: Roof
         mat_slot: roof
         arguments:
@@ -65,6 +69,7 @@ structs:
             value: 1
         intent_state: {}
       - id: grain
+        address: "chest@inside.back[0]"
         role:
           kind: Chest
         arguments:
@@ -81,6 +86,7 @@ structs:
             value: 1
         intent_state: {}
       - id: flour
+        address: "chest@inside.back[1]"
         role:
           kind: Chest
         arguments:
@@ -97,6 +103,7 @@ structs:
             value: 1
         intent_state: {}
       - id: salt
+        address: "chest@inside.back[2]"
         role:
           kind: Chest
         arguments:
@@ -113,6 +120,7 @@ structs:
             value: 1
         intent_state: {}
       - id: tools
+        address: "chest@inside.left[0]"
         role:
           kind: Chest
         arguments:
@@ -132,6 +140,7 @@ structs:
             kind: Ident
             value: single
       - id: seeds
+        address: "chest@inside.left[1]"
         role:
           kind: Chest
         arguments:
