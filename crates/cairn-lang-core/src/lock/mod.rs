@@ -4,7 +4,7 @@ mod hash;
 mod schema;
 
 use std::fs;
-use std::io::Write as _;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 pub use hash::{HashError, HashHex, HashParseError, hash_resolved_ir, hash_source};
@@ -13,7 +13,10 @@ pub use schema::{
     MemberSensitivity, RefusedIdentifierLock,
 };
 
+use serde::{Serialize, Serializer};
 use thiserror::Error;
+
+use crate::ids::IdError;
 
 /// Errors raised while reading or writing a lockfile.
 #[derive(Debug, Error)]
@@ -97,17 +100,188 @@ impl Lockfile {
         gate_schema_version(body)?;
         Ok(serde_norway::from_str(body)?)
     }
+}
 
-    /// The first identifier the current id rule refuses, with the target and members `body`
-    /// records, when that is all that is wrong with it; `Ok(None)` when `body` is valid.
+/// A lockfile's text, classified the way every reader of one treats it.
+#[derive(Debug)]
+pub enum LockfileRead {
+    /// A document the schema accepts.
+    Valid(Lockfile),
+    /// A document the schema accepts but for an identifier the current rule refuses, as one an
+    /// earlier Cairn wrote can be.
+    RefusedIdentifier(RefusedIdentifierLock),
+    /// A document declaring a schema revision newer than this build reads.
+    NewerSchema {
+        /// Version the document declared.
+        found: u32,
+        /// Highest version this build understands.
+        supported: u32,
+    },
+    /// A document the schema refuses for any other reason.
+    Invalid(LockError),
+}
+
+impl LockfileRead {
+    /// The lockfile text `body`, classified.
+    #[must_use]
+    pub fn from_body(body: &str) -> Self {
+        let strict = match Lockfile::from_yaml(body) {
+            Ok(lock) => return Self::Valid(lock),
+            Err(LockError::UnsupportedSchemaVersion { found, supported }) => {
+                return Self::NewerSchema { found, supported };
+            }
+            Err(err) => err,
+        };
+        match schema::refused_identifier(body) {
+            Ok(Some(refused)) => Self::RefusedIdentifier(refused),
+            // The probe's error, not the strict one: the strict read may have stopped at an
+            // identifier before reaching what is really wrong.
+            Err(cause) => Self::Invalid(cause.into()),
+            // Unreachable while the probe mirrors the strict schema.
+            Ok(None) => Self::Invalid(strict),
+        }
+    }
+
+    /// The lockfile at `path`, classified, or `None` when no file is there.
     ///
     /// # Errors
     ///
-    /// [`LockError::UnsupportedSchemaVersion`] for a newer revision, or [`LockError::Yaml`] when
-    /// `body` is invalid even with its identifiers read as plain strings.
-    pub fn refused_identifier(body: &str) -> Result<Option<RefusedIdentifierLock>, LockError> {
-        gate_schema_version(body)?;
-        Ok(schema::refused_identifier(body)?)
+    /// The failure reading `path` as UTF-8 text, a directory at `path` among them.
+    pub fn from_path(path: &Path) -> Result<Option<Self>, io::Error> {
+        // Checked first, since Windows answers a directory with `PermissionDenied`.
+        if path.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::IsADirectory,
+                "a directory, not a file",
+            ));
+        }
+        match fs::read_to_string(path) {
+            Ok(body) => Ok(Some(Self::from_body(&body))),
+            // Unix answers a file in place of a directory with `NotADirectory`, Windows with
+            // `NotFound`; either way no file is at `path`.
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                ) =>
+            {
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+    }
+}
+
+/// What the lockfile at a path holds, as `spec/versioning-editions` "The `verified target` row"
+/// reports it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum LockReading {
+    /// No file at the path.
+    Missing,
+    /// A document the schema accepts, or one it refuses only for an identifier.
+    Read {
+        /// The target the lock records.
+        target: LockTarget,
+        /// The lock's `verified` field.
+        verified: bool,
+        /// Whether the source hashes to the lock's `source_hash`.
+        source_unchanged: bool,
+        /// The release that wrote the lock.
+        cairn_version: String,
+        /// The identifier the current rule refuses, when the lock records one.
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "as_its_message"
+        )]
+        refused_identifier: Option<IdError>,
+    },
+    /// A document declaring a schema revision newer than this build reads.
+    NewerSchema {
+        /// Version the document declared.
+        lock_schema_version: u32,
+        /// Highest version this build understands.
+        supported: u32,
+    },
+    /// A file that cannot be read as text, or a document the schema refuses for another reason.
+    Unreadable {
+        /// Which of the two it is.
+        kind: UnreadableKind,
+        /// The cause, as [`LockError`] words it.
+        error: String,
+    },
+}
+
+/// Why a lockfile is [`LockReading::Unreadable`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnreadableKind {
+    /// The path could not be read as UTF-8 text.
+    Io,
+    /// The text is a document the schema refuses.
+    Invalid,
+}
+
+#[expect(
+    clippy::ref_option,
+    reason = "`serialize_with` hands the field over by reference"
+)]
+fn as_its_message<S: Serializer>(
+    refused: &Option<IdError>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match refused {
+        Some(refused) => serializer.collect_str(refused),
+        None => serializer.serialize_none(),
+    }
+}
+
+impl LockReading {
+    /// The lockfile at `path`, read for the source whose text is `source`.
+    #[must_use]
+    pub fn of(path: &Path, source: &str) -> Self {
+        match LockfileRead::from_path(path) {
+            Ok(Some(read)) => Self::from_read(read, source),
+            Ok(None) => Self::Missing,
+            Err(err) => Self::Unreadable {
+                kind: UnreadableKind::Io,
+                error: LockError::Io(err).to_string(),
+            },
+        }
+    }
+
+    /// The lockfile text `body`, read for the source whose text is `source`.
+    #[must_use]
+    pub fn from_body(body: &str, source: &str) -> Self {
+        Self::from_read(LockfileRead::from_body(body), source)
+    }
+
+    fn from_read(read: LockfileRead, source: &str) -> Self {
+        let source_hash = hash_source(source);
+        match read {
+            LockfileRead::Valid(lock) => Self::Read {
+                source_unchanged: lock.source_hash == source_hash,
+                target: lock.target,
+                verified: lock.verified,
+                cairn_version: lock.cairn_version,
+                refused_identifier: None,
+            },
+            LockfileRead::RefusedIdentifier(refused) => Self::Read {
+                source_unchanged: refused.source_hash == source_hash,
+                target: refused.target,
+                verified: refused.verified,
+                cairn_version: refused.cairn_version,
+                refused_identifier: Some(refused.error),
+            },
+            LockfileRead::NewerSchema { found, supported } => Self::NewerSchema {
+                lock_schema_version: found,
+                supported,
+            },
+            LockfileRead::Invalid(err) => Self::Unreadable {
+                kind: UnreadableKind::Invalid,
+                error: err.to_string(),
+            },
+        }
     }
 }
 

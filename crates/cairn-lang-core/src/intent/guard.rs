@@ -15,6 +15,7 @@ pub(crate) fn refused_under_guard(line: &Statement) -> bool {
             !role.is_escape_hatch() && !matches!(role, MemberRole::Other(_))
         }
         Statement::Logic { .. }
+        | Statement::UnboundLogic { .. }
         | Statement::AssertTruth { .. }
         | Statement::AssertAlways { .. }
         | Statement::AssertLatency { .. } => true,
