@@ -36,12 +36,14 @@ structs:
       h: 5
     args: {}
     members:
-      - role:
+      - address: "floor[0]"
+        role:
           kind: Floor
         mat_slot: floor
         arguments: {}
         intent_state: {}
-      - role:
+      - address: "walls[0]"
+        role:
           kind: Walls
         mat_slot: wall
         arguments:
@@ -50,6 +52,7 @@ structs:
             value: 4
         intent_state: {}
       - id: entry
+        address: "door@front[0]"
         role:
           kind: Door
         arguments:
@@ -61,6 +64,7 @@ structs:
             value: center
         intent_state: {}
       - id: light
+        address: "window@back[0]"
         role:
           kind: Window
         arguments:
@@ -79,7 +83,8 @@ structs:
               w: 3
               h: 1
         intent_state: {}
-      - role:
+      - address: "roof[0]"
+        role:
           kind: Roof
         mat_slot: roof
         arguments:
@@ -91,6 +96,7 @@ structs:
             value: 1
         intent_state: {}
       - id: lintel
+        address: "beam@entry.top[0]"
         role:
           kind: Beam
         mat_slot: frame
@@ -105,6 +111,7 @@ structs:
               - top
         intent_state: {}
       - id: head
+        address: "beam@light.top[0]"
         role:
           kind: Beam
         mat_slot: frame
@@ -119,6 +126,7 @@ structs:
               - top
         intent_state: {}
       - id: west
+        address: "beam@left.top[0]"
         role:
           kind: Beam
         mat_slot: frame
@@ -133,6 +141,7 @@ structs:
               - top
         intent_state: {}
       - id: east
+        address: "beam@right.top[0]"
         role:
           kind: Beam
         mat_slot: frame
@@ -147,6 +156,7 @@ structs:
               - top
         intent_state: {}
       - id: hatch
+        address: "trapdoor@inside.left[0]"
         role:
           kind: Trapdoor
         mat_slot: hatch
@@ -167,6 +177,7 @@ structs:
             kind: Bool
             value: true
       - id: shelf
+        address: "trapdoor[0]"
         role:
           kind: Trapdoor
         mat_slot: hatch
@@ -185,6 +196,7 @@ structs:
             kind: Ident
             value: south
       - id: bell
+        address: "note_block[0]"
         role:
           kind: NoteBlock
         arguments:

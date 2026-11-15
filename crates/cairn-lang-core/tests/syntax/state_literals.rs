@@ -250,12 +250,41 @@ fn a_literal_cut_short_by_the_end_of_the_file_reports_end_of_line() {
     }
 }
 
+/// The value a one-row slot binds and the bare values after it, as `(kind, text)` pairs.
+fn slot_row(target: &str) -> (ValueKind, Vec<(ValueKind, String)>) {
+    let source = format!("theme t:\n  slot s -> {target}\n");
+    let module = parse(&source).unwrap_or_else(|err| panic!("{target:?}: {err}"));
+    let Item::Theme { body: rules, .. } = &module.items[0] else {
+        panic!("expected a theme, got {:?}", module.items[0]);
+    };
+    let ThemeRule::Slot {
+        value, positional, ..
+    } = &rules[0]
+    else {
+        panic!("expected a slot row, got {:?}", rules[0]);
+    };
+    let bare = positional
+        .iter()
+        .map(|v| (v.kind.clone(), source[v.span.clone()].to_owned()))
+        .collect();
+    (value.kind.clone(), bare)
+}
+
+/// The one-integer list a slot row leaves after its value.
+fn list_of_one() -> ValueKind {
+    ValueKind::List(vec![Value::new(ValueKind::Int(1), 0..0)])
+}
+
 /// A dotted token is abstract, so it has no literal.
 #[test]
 fn an_abstract_token_leaves_a_touching_bracket_alone() {
-    let (message, at) = refusal("@floor.wood[axis=x]");
-    assert_eq!(message, "expected end of line, got `[`");
-    assert_eq!(at, 24);
+    assert_eq!(
+        slot_row("@floor.wood[1]"),
+        (
+            ValueKind::Token("floor.wood".to_owned()),
+            vec![(list_of_one(), "[1]".to_owned())],
+        ),
+    );
 }
 
 #[test]
@@ -292,9 +321,13 @@ fn a_bracket_touching_a_dotted_token_opens_what_follows() {
 
 #[test]
 fn a_bracket_after_a_space_is_not_a_state_literal() {
-    let (message, at) = refusal("@oak_log [axis=x]");
-    assert_eq!(message, "expected end of line, got `[`");
-    assert_eq!(at, 22);
+    assert_eq!(
+        slot_row("@oak_log [1]"),
+        (
+            ValueKind::Token("oak_log".to_owned()),
+            vec![(list_of_one(), "[1]".to_owned())],
+        ),
+    );
 }
 
 /// Commas are optional in a value list, so apart, a token and a nested list are two items.
