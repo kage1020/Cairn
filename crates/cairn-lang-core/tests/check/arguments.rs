@@ -363,6 +363,10 @@ const SWEEP: &[(&str, &str)] = &[
         "stair",
         "  stair id=s class=c mat_slot=m kind=stairs side=front half=top facing=out shape=straight y=0 waterlogged=false\n",
     ),
+    (
+        "beam",
+        "  beam id=b class=c mat_slot=m kind=pillar at=front.top axis=x\n",
+    ),
     ("level", "  level id=l class=c y=0\n"),
     (
         "pressure_plate",
@@ -399,6 +403,14 @@ const SWEEP: &[(&str, &str)] = &[
     (
         "chest",
         "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single waterlogged=false\n",
+    ),
+    (
+        "trapdoor",
+        "  trapdoor id=td class=c mat_slot=m at=inside.front offset=2 y=1 facing=in half=top open=true waterlogged=false\n",
+    ),
+    (
+        "note_block",
+        "  note_block id=nb class=c at=1,0,1 note=12 instrument=bit\n",
     ),
     (
         "repeater",
@@ -995,6 +1007,11 @@ impl UnreadSlot {
 }
 
 const UNREAD_SLOTS: &[UnreadSlot] = &[
+    UnreadSlot {
+        keyword: "note_block",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  note_block at=2,1,2 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
     UnreadSlot {
         keyword: "lever",
         body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  lever at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",
