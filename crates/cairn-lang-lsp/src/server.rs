@@ -328,7 +328,7 @@ fn handle_request(
                         format!("document not open: {}", uri.as_str()),
                     ),
                     Some(source) => match completions(source, position) {
-                        Some(items) => Response::new_ok(request.id, items),
+                        Some(list) => Response::new_ok(request.id, list),
                         None => Response::new_err(
                             request.id,
                             ErrorCode::InvalidParams as i32,

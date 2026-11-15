@@ -32,6 +32,7 @@ defs:
     args: {}
     members:
       - id: floor
+        address: "floor[0]"
         role:
           kind: Floor
         mat_slot: floor
@@ -39,6 +40,7 @@ defs:
         intent_state: {}
       - id: walls
         class: outer
+        address: "walls[0]"
         role:
           kind: Walls
         mat_slot: wall
@@ -49,6 +51,7 @@ defs:
         intent_state: {}
       - id: entry
         class: entry
+        address: "door@front[0]"
         role:
           kind: Door
         arguments:
@@ -60,6 +63,7 @@ defs:
             value: center
         intent_state: {}
       - id: front
+        address: "window@front[0]"
         role:
           kind: Window
         mat_slot: glass
@@ -80,6 +84,7 @@ defs:
               h: 2
         intent_state: {}
       - id: roof
+        address: "roof[0]"
         role:
           kind: Roof
         mat_slot: roof
