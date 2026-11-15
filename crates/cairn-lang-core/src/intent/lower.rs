@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
+use super::addressing::assign_addresses;
 use super::{
     Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
     SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan,
@@ -67,6 +68,7 @@ fn lower_theme(name: &str, body: &[ThemeRule], span: crate::error::Span) -> Them
                 attrs,
                 bindings,
                 span: rule_span,
+                ..
             } => {
                 selectors.push(SelectorRule {
                     keyword: keyword.clone(),
@@ -94,10 +96,11 @@ fn lower_struct(
 ) -> StructIr {
     let HeaderBreakdown { size, args } = split_size(header_args);
     let MemberBody {
-        members,
+        mut members,
         logic,
         asserts,
     } = lower_body(body);
+    assign_addresses(&mut members, size.as_ref(), None);
     StructIr {
         name: name.to_owned(),
         size,
@@ -117,10 +120,11 @@ fn lower_def(
 ) -> DefIr {
     let HeaderBreakdown { size, args } = split_size(header_args);
     let MemberBody {
-        members,
+        mut members,
         logic,
         asserts,
     } = lower_body(body);
+    assign_addresses(&mut members, size.as_ref(), None);
     DefIr {
         name: name.to_owned(),
         size,
@@ -194,11 +198,13 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             rhs: rhs.clone(),
             span: span.clone(),
         }),
+        Statement::UnboundLogic { .. } => {}
         Statement::AssertTruth {
             inputs,
             output,
             rows,
             span,
+            ..
         } => out.asserts.push(AssertIr::Truth {
             inputs: inputs.clone(),
             output: output.clone(),
@@ -210,6 +216,7 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             consequent,
             within,
             span,
+            ..
         } => out.asserts.push(AssertIr::Always {
             antecedent: antecedent.clone(),
             consequent: consequent.clone(),
@@ -221,6 +228,7 @@ fn push_statement(stmt: &Statement, out: &mut MemberBody) {
             to,
             bound,
             span,
+            ..
         } => out.asserts.push(AssertIr::Latency {
             from: from.clone(),
             to: to.clone(),
@@ -302,6 +310,7 @@ fn lower_member(stmt: &Statement) -> Member {
     Member {
         id: id.map(|label| label.name),
         class: class.map(|label| label.name),
+        address: None,
         role,
         mat_slot,
         selector: lowered_selector,
@@ -320,6 +329,7 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
     Member {
         id: None,
         class: None,
+        address: None,
         role: super::MemberRole::Other(String::new()),
         mat_slot: None,
         selector: None,
