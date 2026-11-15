@@ -102,7 +102,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
-- `edit` による部分的な変更と、`id=` を書かなかったメンバーにコンパイラが付ける安定したアドレス
+- `edit` による部分的な変更
 - `cairn diff-blocks` と、取り込んだものを壁や窓やテーマへリフトするループ
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 

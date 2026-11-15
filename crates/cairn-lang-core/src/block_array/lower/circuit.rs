@@ -69,15 +69,6 @@ pub(super) fn recognize_circuit_region(member: &Member, diagnostics: &mut Vec<Di
 /// The selector attributes an actuator patch reads.
 const ACTUATOR_PATCH_SELECTOR_KEYS: &[&str] = &["id"];
 
-/// The actuator a line patches: the selector form of an actuator, such as `door[…]`, which binds a
-/// signal to an actuator declared elsewhere (`spec/redstone` "Signal binding"); `None` for any
-/// other line.
-pub(super) fn patched_actuator(
-    member: &Member,
-) -> Option<(Actuator, &IndexMap<String, ValueWithSpan>)> {
-    Some((member.role.actuator()?, member.selector.as_ref()?))
-}
-
 /// The refusal of a sensor's line in the selector form, which places nothing, since only an
 /// actuator takes a patch (`spec/redstone` "Signal binding"); `None` for any other line.
 pub(super) fn refused_sensor_selector(member: &Member) -> Option<Diagnostic> {
