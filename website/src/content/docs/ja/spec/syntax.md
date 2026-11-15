@@ -206,6 +206,6 @@ tree-sitter の文法は、3 つの点で既知の例外です。1 つ目に、�
 
 行を並べ替えてもアドレスは変わりません。ただし、どの段でも差がつかないメンバーどうしは、行を入れ替えるとアドレスも入れ替わります。ロールの違うメンバー、別の壁のメンバー、別の親の下のメンバー、壁のもっと先に立つメンバーを足しても、アドレスは変わりません。壁の上で同じロールのメンバーより手前にメンバーを足すと、その後ろの番号がずれます。そうした変更の後も編集が指し続けなければならないメンバーには、`id=` を付けます。
 
-`cairn parse --format json` はメンバーの行ごとにアドレスを出力し、`cairn lower` の ASCII の出力は、セルを組み上げたメンバーのアドレスを一覧にします。セルを組み上げた各メンバーの `resolved_state` の記録は、struct の `circuit` のものも含め、アドレスを持ちます ([ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。そうしたアドレスが `resolved_ir_hash` に入ります ([バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。
+`cairn parse --format json` はメンバーの行ごとにアドレスを出力し、`cairn lower` の ASCII の出力は、セルを組み上げたメンバーとエンティティを置いたメンバーのアドレスを一覧にします。そうしたメンバーの `resolved_state` の記録は、struct の `circuit` のものも含め、アドレスを持ちます ([ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。そうしたアドレスが `resolved_ir_hash` に入ります ([バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。
 
 `site` の本体の行にはアドレスがありません。代わりに `place` 行は `id=` が必須で、省略すると `E_INCOMPLETE_PLACE` になります。アドレスは、そのメンバーがある本体の外では何も指しません。一方、`place` の `id=` は `east_of=` と `connect` が参照する名前で、その `.nbt` を書き出すときの名前でもあります。コンパイラが勝手に名前を作ると、作者が書いてもおらず、参照もできない名前になってしまいます。

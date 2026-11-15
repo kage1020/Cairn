@@ -512,8 +512,8 @@ role on its wall renumbers those after it, so a member an edit must keep naming 
 change carries an `id=`.
 
 `cairn parse --format json` prints each member line's address, and the ASCII dump of `cairn lower`
-lists those of the members that built a cell. The `resolved_state` record of each member that
-built a cell, a struct's `circuit` included, carries its address
+lists those of the members that built a cell or placed an entity. The `resolved_state` record of
+each of those members, a struct's `circuit` included, carries its address
 ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), so those
 addresses feed `resolved_ir_hash`
 ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
