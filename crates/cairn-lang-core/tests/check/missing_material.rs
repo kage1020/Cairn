@@ -263,6 +263,7 @@ const PAINTERS: &[(&str, &str, &str)] = &[
         // An eave band needs a roof drawing an overhang of at least 1.
         "roof id=r kind=gable overhang=1",
     ),
+    ("beam", "beam id=lintel kind=pillar at=front.top", ""),
     (
         "pressure_plate",
         "pressure_plate id=p at=inside.front offset=1 y=0",
@@ -280,6 +281,8 @@ const PAINTERS: &[(&str, &str, &str)] = &[
         "",
     ),
     ("chest", "chest id=c at=inside.front offset=1 y=0", ""),
+    ("trapdoor", "trapdoor id=t at=inside.front offset=1 y=1", ""),
+    ("note_block", "note_block at=1,1,1 note=12", ""),
     ("repeater", "repeater at=1,1,1 facing=east", ""),
     ("comparator", "comparator at=inside.front offset=1 y=1", ""),
     ("redstone_torch", "redstone_torch at=1,1,1", ""),
@@ -370,6 +373,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Window
             | MemberRole::Roof
             | MemberRole::Stair
+            | MemberRole::Beam
             | MemberRole::PressurePlate
             | MemberRole::Lever
             | MemberRole::Button
@@ -379,6 +383,8 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Piston
             | MemberRole::Dispenser
             | MemberRole::Chest
+            | MemberRole::Trapdoor
+            | MemberRole::NoteBlock
             | MemberRole::Repeater
             | MemberRole::Comparator
             | MemberRole::RedstoneTorch
@@ -402,6 +408,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         MemberRole::Window,
         MemberRole::Roof,
         MemberRole::Stair,
+        MemberRole::Beam,
         MemberRole::Level,
         MemberRole::PressurePlate,
         MemberRole::Lever,
@@ -412,6 +419,8 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         MemberRole::Piston,
         MemberRole::Dispenser,
         MemberRole::Chest,
+        MemberRole::Trapdoor,
+        MemberRole::NoteBlock,
         MemberRole::Repeater,
         MemberRole::Comparator,
         MemberRole::RedstoneTorch,
