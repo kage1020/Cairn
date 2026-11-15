@@ -11,6 +11,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "window",
     "roof",
     "stair",
+    "beam",
     "level",
     "pressure_plate",
     "lever",
@@ -21,6 +22,8 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "piston",
     "dispenser",
     "chest",
+    "trapdoor",
+    "note_block",
     "repeater",
     "comparator",
     "redstone_torch",
@@ -169,6 +172,8 @@ pub enum MemberRole {
     Roof,
     /// `stair` command.
     Stair,
+    /// `beam` command, a run of pillar blocks laid along a wall top or over an opening.
+    Beam,
     /// `level` grouping block.
     Level,
     /// `pressure_plate` sensor.
@@ -189,6 +194,10 @@ pub enum MemberRole {
     Dispenser,
     /// `chest` fixture.
     Chest,
+    /// `trapdoor` fixture.
+    Trapdoor,
+    /// `note_block` fixture, placed at a coordinate triple.
+    NoteBlock,
     /// `repeater` Tier 0 part.
     Repeater,
     /// `comparator` Tier 0 part.
@@ -319,6 +328,7 @@ impl MemberRole {
             | Self::Window
             | Self::Roof
             | Self::Stair
+            | Self::Beam
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -326,6 +336,8 @@ impl MemberRole {
             | Self::Daylight
             | Self::Observer
             | Self::Chest
+            | Self::Trapdoor
+            | Self::NoteBlock
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -378,6 +390,7 @@ impl MemberRole {
                 "y",
                 "waterlogged",
             ],
+            Self::Beam => &["kind", "at", "axis"],
             Self::Level => &["y"],
             Self::PressurePlate | Self::Lever | Self::Button | Self::Daylight => {
                 &["at", "offset", "y"]
@@ -387,6 +400,8 @@ impl MemberRole {
             Self::Piston => &["at", "offset", "y", "powered_by", "facing", "sticky"],
             Self::Dispenser => &["at", "offset", "y", "fired_by", "facing"],
             Self::Chest => &["at", "offset", "y", "facing", "size", "waterlogged"],
+            Self::Trapdoor => &["at", "offset", "y", "facing", "half", "open", "waterlogged"],
+            Self::NoteBlock => &["at", "note", "instrument"],
             Self::Repeater => &["at", "offset", "y", "facing", "delay"],
             Self::Comparator => &["at", "offset", "y", "facing", "mode"],
             Self::RedstoneDust => &["at", "offset", "y", "connect"],
@@ -414,6 +429,7 @@ impl MemberRole {
             | Self::Fill
             | Self::Roof
             | Self::Stair
+            | Self::Beam
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -424,6 +440,8 @@ impl MemberRole {
             | Self::Piston
             | Self::Dispenser
             | Self::Chest
+            | Self::Trapdoor
+            | Self::NoteBlock
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -454,6 +472,9 @@ impl MemberRole {
             Self::Stair => &["half", "facing", "shape", "waterlogged"],
             Self::Door => &["hinge", "open"],
             Self::Chest => &["facing", "size", "waterlogged"],
+            Self::Beam => &["axis"],
+            Self::Trapdoor => &["facing", "half", "open", "waterlogged"],
+            Self::NoteBlock => &["note", "instrument"],
             Self::Observer | Self::Piston | Self::Dispenser | Self::RedstoneTorch => &["facing"],
             Self::Repeater => &["facing", "delay"],
             Self::Comparator => &["facing", "mode"],
@@ -511,6 +532,7 @@ impl MemberRole {
             | Self::Lamp
             | Self::Piston
             | Self::Dispenser
+            | Self::NoteBlock
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -529,9 +551,11 @@ impl MemberRole {
             | Self::Fill
             | Self::Door
             | Self::Stair
+            | Self::Beam
             | Self::PressurePlate
             | Self::Button
             | Self::Chest
+            | Self::Trapdoor
             | Self::Other(_) => &[],
         }
     }
@@ -609,6 +633,7 @@ impl MemberRole {
             | Self::Walls
             | Self::Door
             | Self::Window
+            | Self::Beam
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -619,6 +644,8 @@ impl MemberRole {
             | Self::Piston
             | Self::Dispenser
             | Self::Chest
+            | Self::Trapdoor
+            | Self::NoteBlock
             | Self::Repeater
             | Self::Comparator
             | Self::RedstoneTorch
@@ -658,6 +685,7 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "window" => MemberRole::Window,
         "roof" => MemberRole::Roof,
         "stair" => MemberRole::Stair,
+        "beam" => MemberRole::Beam,
         "level" => MemberRole::Level,
         "pressure_plate" => MemberRole::PressurePlate,
         "lever" => MemberRole::Lever,
@@ -668,6 +696,8 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "piston" => MemberRole::Piston,
         "dispenser" => MemberRole::Dispenser,
         "chest" => MemberRole::Chest,
+        "trapdoor" => MemberRole::Trapdoor,
+        "note_block" => MemberRole::NoteBlock,
         "repeater" => MemberRole::Repeater,
         "comparator" => MemberRole::Comparator,
         "redstone_torch" => MemberRole::RedstoneTorch,

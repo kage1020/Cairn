@@ -3,6 +3,7 @@
 use crate::diagnostic::Diagnostic;
 use crate::intent::{BindingKey, Member, MemberRole};
 
+use super::beam::fill_beam;
 use super::canvas::{LazySlot, MemberCanvas, ScopePalette};
 use super::cell_box::Shape;
 use super::chest::fill_chest;
@@ -13,12 +14,14 @@ use super::door::{HungDoor, fill_door};
 use super::fill::fill_material;
 use super::frame::Frame;
 use super::members::{StructCtx, bound_block, palette_index_for, resolve_member_state};
+use super::note_block::fill_note_block;
 use super::part::{Part, fill_part};
 use super::plate::fill_pressure_plate;
 use super::raw::fill_raw;
 use super::roof_fill::fill_roof;
 use super::sizing::wall_height;
 use super::stair::fill_stair;
+use super::trapdoor::fill_trapdoor;
 use super::window::fill_window;
 
 /// What the openings phase leaves to finish once every opening is cut.
@@ -53,6 +56,7 @@ pub(super) fn paint_member(
         // `flatten_members` drops a `roof` at a non-zero offset, so this is the struct's plane.
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Beam => fill_beam(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Door => {
             let hung = &mut openings.hung;
             let frame = fill_door(member, y_offset, ctx, palette, canvas, hung, diagnostics);
@@ -111,6 +115,12 @@ pub(super) fn paint_member(
             );
         }
         MemberRole::Chest => fill_chest(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Trapdoor => {
+            fill_trapdoor(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
+        MemberRole::NoteBlock => {
+            fill_note_block(member, y_offset, ctx, palette, canvas, diagnostics);
+        }
         MemberRole::Repeater => {
             fill_part(
                 Part::Repeater,
