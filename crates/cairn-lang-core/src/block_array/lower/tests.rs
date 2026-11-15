@@ -1,8 +1,8 @@
 use super::anchor::{PlaceAnchor, PlacementCorner, PlacementOutOfRange};
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::connect::edge_pushers;
-use super::door::{DOOR_BASE_ID, DOOR_TOKEN};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
+use super::opening::{DOOR_BASE_ID, DOOR_TOKEN};
 use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
 use super::site_floor::FloorExtent;

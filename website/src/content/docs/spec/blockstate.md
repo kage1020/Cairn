@@ -87,26 +87,31 @@ id is `trapdoor` or ends in `_trapdoor`; any other is `E_INCOMPATIBLE_MATERIAL`,
 built from `@trapdoor.default` beside the error.
 
 A `beam` lays a run of pillar blocks on their side, and `kind=pillar` is its one kind.
-`at=<side>.top` lays it along the top row of the walls under its `level`: the last row of the course
-of `walls` that holds the level's first row, across the wall's cells between its two corners.
-`at=<id>.top` lays it over the `door` or `window` of the same body that has that `id=`, on the row
-above the opening's top row, across the opening's columns and one more on each side, still between
-the wall's corners. A window's `repeat=` series and its `sym=true` mirror are each covered, as the
-window's line cuts them. A side name is read before an id, and a beam's own `level` does not move a
-beam laid over an opening. The beam's `axis` runs along its wall, `x` along the front and back and
-`z` along the left and right, and an `axis=` of `x`, `y` or `z` on its line replaces it, so `axis=y`
-stands the blocks upright in a band. A beam is laid in `envelope`, over the walls it rests on, and
-an opening cut through it later is cut in `openings` ([Compilation Model
-§4.1](/spec/compilation/#41-phase-evaluation)). A missing or unknown `kind=`, an `at=` of neither
-form, an id no `door` or `window` of the body has, a wall too short to have a cell between its
-corners, a row no `walls` member is written to reach, and any other identifier for `axis=` are
-`E_INVALID_MEMBER`. A row a `walls` member is written to reach and does not paint, and an opening
-whose own line does not place it, are `W_DEFERRED_MEMBER`, and an `axis=` that is no identifier is
+`at=<side>.top` lays it along the top row of the walls of its own `level`, the highest row any
+`walls` member written under that `level` reaches, across the wall's cells between its two corners;
+outside a `level`, its walls are those outside one and under `level y=0`. Walls of another level do
+not raise it, even where their courses touch. `at=<id>.top` lays it over the `door` or `window` of
+the same body that has that `id=`, on the row above the opening's top row, across the opening's
+columns and one more on each side, still between the wall's corners. A window's `repeat=` series and
+its `sym=true` mirror are each covered, as the window's line cuts them. A side name is read before
+an id, and a beam's own `level` does not move a beam laid over an opening. The beam's `axis` runs
+along its wall, `x` along the front and back and `z` along the left and right, and an `axis=` of
+`x`, `y` or `z` on its line replaces it, so `axis=y` stands the blocks upright in a band. A beam is
+laid in `envelope`, over the walls it rests on, and an opening cut through it later is cut in
+`openings` ([Compilation Model §4.1](/spec/compilation/#41-phase-evaluation)). A missing or unknown
+`kind=`, an `at=` of neither form, an id no `door` or `window` of the body has, a wall too short to
+have a cell between its corners, a level with no `walls` member of a positive `height=`, a row above
+an opening no `walls` member is written to reach, and any other identifier for `axis=` are
+`E_INVALID_MEMBER`. A top row a `walls` member is written to reach and does not paint, a row above
+an opening only `walls` under a `level` that is not placed could reach, and an opening its own line
+refuses or defers are `W_DEFERRED_MEMBER`, and an `axis=` that is no identifier is
 `W_IGNORED_ARGUMENT`. The beam's `mat_slot=` names its block, and a beam without one is built from
 the registry pack's `@beam.default`. The block MUST be a pillar, one whose `axis` takes `x`, `y` and
-`z` at the pinned target. A lowering with no version pinned takes any block as one, and at a pinned
-target any other is `E_INCOMPATIBLE_MATERIAL`, and the beam is built from `@beam.default` beside the
-error. A beam does not size the volume.
+`z` at the pinned target. A lowering with no version pinned takes any block as one, as does a pinned
+target whose tables record no states for the block, or whose id or state map another code reports
+(`E_UNKNOWN_ID`, `E_STATE_UNMAPPED`). At a pinned target any other block is
+`E_INCOMPATIBLE_MATERIAL`, and the beam is built from `@beam.default` beside the error. A beam does
+not size the volume.
 
 A `note_block` sets one note block in the cell its coordinate triple names, `at=x,y,z` ([Syntax
 §5.1.1](/spec/syntax/#511-literals-and-separators)); a note block turns no way, so it takes no wall
@@ -121,8 +126,9 @@ or lies outside the struct are `E_INVALID_MEMBER`, and a value of the wrong kind
 `W_IGNORED_ARGUMENT`. A note block is built unpowered, so its `powered` is never written. Its block
 is the registry pack's `@note_block.default`, and a `mat_slot=` on its line is `W_IGNORED_ARGUMENT`.
 Bedrock keeps a note block's note in its block entity, which no writer fills yet, and works its
-instrument out from the block below, so a Bedrock build writes neither and says so, for each its
-line writes, with `W_INTENT_DEGRADED` ([Versioning and Editions
+instrument out from the block below, so a Bedrock build writes neither. It says so with
+`W_INTENT_DEGRADED` for an `instrument=` its line writes and for a `note=` other than 0, which a
+note block with no note already plays ([Versioning and Editions
 §10.7](/spec/versioning-editions/#107-java--bedrock-portability)).
 
 Any blockstate that can be architectural intent is overridable, and **the moment you write it, it is
