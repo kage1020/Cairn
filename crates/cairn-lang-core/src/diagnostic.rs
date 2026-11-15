@@ -137,6 +137,8 @@ pub enum DiagnosticCode {
     InvalidPlaceId,
     /// A `struct` named after a device Windows reserves.
     InvalidStructName,
+    /// A `site` named after a device Windows reserves.
+    InvalidSiteName,
     /// Two `place` rows in the same site share an `id=`; the first wins.
     DuplicatePlaceId,
     /// Two scopes a build writes share a file name, ignoring case.
@@ -239,6 +241,7 @@ impl DiagnosticCode {
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::InvalidStructName => "E_INVALID_STRUCT_NAME",
+            Self::InvalidSiteName => "E_INVALID_SITE_NAME",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
@@ -302,6 +305,7 @@ impl DiagnosticCode {
             | Self::IncompletePlace
             | Self::InvalidPlaceId
             | Self::InvalidStructName
+            | Self::InvalidSiteName
             | Self::InvalidPlaceOrigin
             | Self::UnresolvedPort
             | Self::AmbiguousPort
