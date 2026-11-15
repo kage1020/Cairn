@@ -3,7 +3,8 @@
 //! promise: any release may change it.
 //!
 //! Language Server Protocol implementation for Cairn editors: diagnostics from `cairn-lang-core`,
-//! completion of its closed vocabularies, and hover from the keyword reference and the IR.
+//! completion of its closed vocabularies, and hover from the keyword reference, the IR and the
+//! registry packs.
 
 pub mod completion;
 pub mod diagnostics;

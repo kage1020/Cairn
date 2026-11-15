@@ -7,7 +7,8 @@ use cairn_lang_core::block_array::resolve_block_state;
 use cairn_lang_core::intent::ValueWithSpan;
 use cairn_lang_core::resolve::{TokenKind, classify_token};
 use cairn_lang_core::{
-    BlockState, Edition, IntentModule, Member, Span, lower, lower_to_block_array, parse, resolve,
+    BlockArray, BlockArrayIr, BlockState, Diagnostic, Edition, IntentModule, Member, MemberRole,
+    PaletteIndex, Severity, Span, check, lower, lower_to_block_array, parse, resolve,
 };
 use cairn_lang_docs::Part;
 use cairn_lang_formats::builtin_pack;
@@ -45,7 +46,7 @@ pub fn hover(source: &str, position: lsp_types::Position) -> Option<lsp_types::H
 enum Target<'a> {
     /// The keyword opening a top-level item or a theme's selector row.
     Keyword { keyword: &'a str, span: Span },
-    /// A member's line, anywhere a key or a material token does not cover.
+    /// A member's line, anywhere a key or a `connect`'s `path=` token does not cover.
     Member {
         keyword: &'a str,
         line: Span,
@@ -79,7 +80,8 @@ impl Target<'_> {
 enum Binder<'a> {
     /// A theme's `slot NAME -> @TOKEN` row.
     Slot { theme: &'a str, slot: &'a str },
-    /// A `key=@TOKEN` binding on a theme's selector row, written as `row`.
+    /// A `key=@TOKEN` binding on a theme's selector row, `row` being the selector as written,
+    /// such as `walls[class=outer]`.
     Selector {
         theme: &'a str,
         row: &'a str,
@@ -136,11 +138,13 @@ fn in_theme<'a>(
                 {
                     return Some(Target::Keyword { keyword, span });
                 }
-                let row = source[span.clone()]
-                    .split("->")
-                    .next()
-                    .unwrap_or_default()
-                    .trim();
+                let row = bindings
+                    .first()
+                    .map_or(&source[span.clone()], |binding| {
+                        &source[span.start..binding.span.start]
+                    })
+                    .trim_end();
+                let row = row.strip_suffix("->").unwrap_or(row).trim_end();
                 return bindings
                     .iter()
                     .find(|arg| is_token(&arg.value) && arg.value.span.contains(&offset))
@@ -239,7 +243,7 @@ fn describe(target: &Target<'_>, module: &Module, source: &str) -> Option<String
         Target::Argument { keyword, key, .. } => {
             let name = format!("{key}=");
             if let Some(owner) = entry(keyword, None)
-                && let Some(argument) = entry(&name, Some(owner))
+                && let Some(argument) = entry(&name, Some(keyword))
             {
                 return Some(format!("{}\n\n{}", own_text(argument), own_text(owner)));
             }
@@ -247,46 +251,42 @@ fn describe(target: &Target<'_>, module: &Module, source: &str) -> Option<String
         }
         Target::Member { keyword, line, .. } => {
             let own = own_text(entry(keyword, None)?);
-            let ir = lower(module);
-            let member = member_at(&ir, line.start)?;
-            Some(format!(
-                "{own}\n\n---\n\n{}",
-                member_state(&ir, member, source)
-            ))
+            let state = member_state(module, line, source);
+            Some(if state.is_empty() {
+                own
+            } else {
+                format!("{own}\n\n---\n\n{state}")
+            })
         }
         Target::Token { value, binder } => Some(describe_token(value, binder)),
     }
 }
 
-/// Every entry the keyword reference gives `name`, a keyword or a `key=`, in page order.
-fn entries(name: &str) -> Vec<&'static str> {
+/// Every entry the keyword reference gives `name`, a keyword or a `key=`, with the term it nests
+/// in, in page order.
+fn entries(name: &str) -> Vec<(&'static str, Option<&'static str>)> {
     let Some(page) = cairn_lang_docs::page(REFERENCE) else {
         return Vec::new();
     };
     page.cited(&format!("`{name}`"))
         .into_iter()
         .filter_map(|part| match part {
-            Part::Term { markdown, .. } => Some(markdown),
+            Part::Term {
+                markdown, within, ..
+            } => Some((markdown, within)),
             Part::Page | Part::Section(_) => None,
         })
         .collect()
 }
 
-/// The keyword reference's entry for `name`, the one nested in the entry `within` when given and
-/// one nested in none otherwise.
-fn entry(name: &str, within: Option<&'static str>) -> Option<&'static str> {
-    let mut entries = entries(name).into_iter();
-    match within {
-        Some(outer) => entries.find(|inner| nests_in(inner, outer)),
-        None => entries.find(|entry| !entry.starts_with(char::is_whitespace)),
-    }
-}
-
-/// Whether `inner` lies inside `outer`; both slice the page's one Markdown, so that is nesting.
-fn nests_in(inner: &str, outer: &str) -> bool {
-    let inner = inner.as_bytes().as_ptr_range();
-    let outer = outer.as_bytes().as_ptr_range();
-    outer.start <= inner.start && inner.end <= outer.end
+/// The keyword reference's entry for `name`, the one nested in the entry for the keyword `within`
+/// when given and one nested in none otherwise.
+fn entry(name: &str, within: Option<&str>) -> Option<&'static str> {
+    let within = within.map(|keyword| format!("`{keyword}`"));
+    entries(name)
+        .into_iter()
+        .find(|(_, owner)| *owner == within.as_deref())
+        .map(|(markdown, _)| markdown)
 }
 
 /// An entry's own lines, without the entries nested under it, as one paragraph whose links reach
@@ -321,31 +321,117 @@ fn member_at(ir: &IntentModule, start: usize) -> Option<&Member> {
         .or_else(|| ir.sites.iter().find_map(|s| find(&s.placements, start)))
 }
 
-/// A member's `id=`, its `intent_state`, and its `resolved_state` on each edition.
-fn member_state(ir: &IntentModule, member: &Member, source: &str) -> String {
+/// The `id=` and `intent_state` of the member whose line is `line`, and on each edition its
+/// `resolved_state` or why `cairn lower` refuses the document; empty when there is none of these.
+fn member_state(module: &Module, line: &Span, source: &str) -> String {
+    let ir = lower(module);
+    let member = member_at(&ir, line.start);
     let mut lines = Vec::new();
-    if let Some(id) = &member.id {
-        lines.push(format!("`id={id}`"));
+    if let Some(member) = member {
+        if let Some(id) = &member.id {
+            lines.push(format!("`id={id}`"));
+        }
+        let written: Vec<String> = member
+            .intent_state
+            .iter()
+            .map(|(key, value)| format!("`{key}={}`", &source[value.span.clone()]))
+            .collect();
+        lines.push(if written.is_empty() {
+            "**`intent_state`**: nothing written".to_owned()
+        } else {
+            format!("**`intent_state`**: {}", written.join(", "))
+        });
     }
-    let written: Vec<String> = member
-        .intent_state
-        .iter()
-        .map(|(key, value)| format!("`{key}={}`", &source[value.span.clone()]))
-        .collect();
-    lines.push(if written.is_empty() {
-        "**`intent_state`**: nothing written".to_owned()
-    } else {
-        format!("**`intent_state`**: {}", written.join(", "))
-    });
     for edition in EDITIONS {
-        let resolution = resolve(ir, Some(edition));
+        let resolution = resolve(&ir, Some(edition));
         let registry = builtin_pack(edition).view(None);
-        let built = lower_to_block_array(ir, &resolution, Some(&registry));
-        let mut heading = format!(
-            "**`resolved_state`** on {edition}, as `cairn lower --edition {edition}` resolves it:",
-            edition = edition.as_str(),
-        );
-        let scopes: Vec<String> = built
+        let built = lower_to_block_array(&ir, &resolution, Some(&registry));
+        let errors = errors(module, &ir, edition, &built);
+        let edition = edition.as_str();
+        if let Some(refused) = refusal(&errors, line, source) {
+            lines.push(format!(
+                "**`resolved_state`** on {edition}: `cairn lower --edition {edition}` refuses \
+                 this document {refused}"
+            ));
+        } else if let Some(resolved) = member.and_then(|member| resolved_state(member, &built)) {
+            lines.push(format!(
+                "**`resolved_state`** on {edition}, with no version pinned:{resolved}"
+            ));
+        }
+    }
+    lines.join("\n\n")
+}
+
+/// The errors the checks and `built`'s lowering find on `edition`, in source order.
+fn errors(
+    module: &Module,
+    ir: &IntentModule,
+    edition: Edition,
+    built: &BlockArrayIr,
+) -> Vec<Diagnostic> {
+    let mut errors: Vec<Diagnostic> = check(module, ir, Some(edition))
+        .into_iter()
+        .chain(built.diagnostics.iter().cloned())
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .collect();
+    errors.sort_by_key(|error| (error.span.start, error.span.end));
+    errors
+}
+
+/// What `errors` make `cairn lower` refuse the document for: the codes of those on `line`, else
+/// the first one with its line, and how many more there are; `None` without an error.
+fn refusal(errors: &[Diagnostic], line: &Span, source: &str) -> Option<String> {
+    let first = errors.first()?;
+    let here: Vec<&Diagnostic> = errors
+        .iter()
+        .filter(|error| line.contains(&error.span.start))
+        .collect();
+    let (named, place) = if here.is_empty() {
+        (vec![first], format!("line {}", first.position(source).line))
+    } else {
+        (here, "this line".to_owned())
+    };
+    let mut codes: Vec<String> = Vec::new();
+    for error in &named {
+        let code = format!("`{}`", error.code.as_str());
+        if !codes.contains(&code) {
+            codes.push(code);
+        }
+    }
+    let more = match errors.len() - named.len() {
+        0 => String::new(),
+        1 => ", and 1 more error".to_owned(),
+        more => format!(", and {more} more errors"),
+    };
+    Some(format!("for {} on {place}{more}", and_list(&codes)))
+}
+
+/// `items` as an English list: `a`, `a and b`, `a, b, and c`.
+fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [head @ .., last] => format!("{}, and {last}", head.join(", ")),
+    }
+}
+
+/// What `member` holds in each structure `built` lays, a block state and its cell count to a
+/// line, or `None` for a row that owns no cell of its own.
+fn resolved_state(member: &Member, built: &BlockArrayIr) -> Option<String> {
+    let scopes: Vec<String> = match &member.role {
+        // A `place` and a `level` paint nothing themselves, and hover lays no circuit.
+        MemberRole::Place | MemberRole::Level | MemberRole::Circuit => return None,
+        MemberRole::Connect => built
+            .walkways
+            .iter()
+            .filter(|(_, walkway)| walkway.span.start == member.span.start)
+            .filter_map(|(scope, _)| {
+                let array = built.structures.get(scope.as_str())?;
+                Some(scope_line(scope.as_str(), &held(array)))
+            })
+            .collect(),
+        _ => built
             .members
             .iter()
             .flat_map(|(scope, members)| {
@@ -353,27 +439,52 @@ fn member_state(ir: &IntentModule, member: &Member, source: &str) -> String {
                     .iter()
                     .filter(|resolved| resolved.span.start == member.span.start)
                     .map(move |resolved| {
-                        let blocks: Vec<String> = resolved
+                        let blocks: Vec<(&BlockState, u32)> = resolved
                             .resolved_state
                             .iter()
-                            .map(|block| {
-                                let cells: u32 = block.runs.iter().map(|run| run.len).sum();
-                                let unit = if cells == 1 { "cell" } else { "cells" };
-                                format!("`{}` in {cells} {unit}", spelled(&block.state))
-                            })
+                            .map(|block| (&block.state, block.runs.iter().map(|run| run.len).sum()))
                             .collect();
-                        format!("- `{scope}`: {}", blocks.join(", "))
+                        scope_line(scope, &blocks)
                     })
             })
-            .collect();
-        if scopes.is_empty() {
-            heading.push_str(" no cell");
-            lines.push(heading);
-        } else {
-            lines.push(format!("{heading}\n{}", scopes.join("\n")));
-        }
+            .collect(),
+    };
+    Some(if scopes.is_empty() {
+        " no cell".to_owned()
+    } else {
+        format!("\n{}", scopes.join("\n"))
+    })
+}
+
+/// A list item naming `scope` and each block state with how many cells hold it.
+fn scope_line(scope: &str, blocks: &[(&BlockState, u32)]) -> String {
+    let blocks: Vec<String> = blocks
+        .iter()
+        .map(|(state, cells)| {
+            let unit = if *cells == 1 { "cell" } else { "cells" };
+            format!("`{}` in {cells} {unit}", spelled(state))
+        })
+        .collect();
+    format!("- `{scope}`: {}", blocks.join(", "))
+}
+
+/// Each block state other than air that `array` holds, with how many cells hold it.
+fn held(array: &BlockArray) -> Vec<(&BlockState, u32)> {
+    let mut cells = vec![0_u32; array.palette.entries.len()];
+    for voxel in array
+        .voxels
+        .iter()
+        .filter(|voxel| **voxel != PaletteIndex::AIR)
+    {
+        cells[usize::from(voxel.0)] += 1;
     }
-    lines.join("\n\n")
+    array
+        .palette
+        .entries
+        .iter()
+        .zip(cells)
+        .filter(|(_, cells)| *cells > 0)
+        .collect()
 }
 
 /// `state` as a block id with its state literal.
@@ -397,10 +508,10 @@ fn describe_token(value: &Value, binder: &Binder<'_>) -> String {
         Binder::Path => "the `path=` of this `connect` row".to_owned(),
     };
     if matches!(binder, Binder::Selector { .. }) {
+        let link = section_link("spec/materials-themes", "Slots as dependency injection");
         return format!(
             "`@{inner}`, {bound}\n\nSelector bindings are reserved, so no block is resolved for \
-             this value. See [`spec/materials-themes` \"Slots as dependency injection\"]\
-             ({SITE}/spec/materials-themes/#71-slots-as-dependency-injection)."
+             this value. See [`spec/materials-themes` \"Slots as dependency injection\"]({link})."
         );
     }
     let editions: Vec<String> = EDITIONS
@@ -413,7 +524,23 @@ fn describe_token(value: &Value, binder: &Binder<'_>) -> String {
     format!("`@{inner}`, {bound}\n\n{}", editions.join("\n"))
 }
 
-/// The block `@inner` names on `edition`, with no version pinned, and the versions it differs on.
+/// The site's link to the section titled `title` of the page at `path`, or to the page when no
+/// section has that title.
+fn section_link(path: &str, title: &str) -> String {
+    let slug = cairn_lang_docs::page(path).and_then(|page| {
+        page.cited(title).into_iter().find_map(|part| match part {
+            Part::Section(heading) => Some(heading.slug),
+            Part::Page | Part::Term { .. } => None,
+        })
+    });
+    match slug {
+        Some(slug) => format!("{SITE}/{path}/#{slug}"),
+        None => format!("{SITE}/{path}/"),
+    }
+}
+
+/// The block `@inner` names on `edition` with no version pinned, with an abstract token's
+/// per-version overrides or the versions that declare a canonical id.
 fn resolved_on(value: &Value, inner: &str, edition: Edition) -> String {
     let pack = builtin_pack(edition);
     if classify_token(value) == TokenKind::Abstract {
