@@ -18,6 +18,7 @@ title: "用語集"
 
 - **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。現時点では、メンバーが持つのはキーワードから分類した `role` だけで、型は持ちません。ブロックエンティティやエンティティを置くキーワードも、まだありません。`type` は `role` の隣に並べます。
 - **`id` / `class` / `role`**: メンバーに付ける、同一性、グループ、建築上の役割のタグです。セレクタと安定したアドレスに使います。
+- **アドレス (Address)**: `struct` や `def` の本体のメンバーすべてに、コンパイラが、メンバーの立つ位置から与える名前です。段ごとに `ROLE@SIDE[N]` で、`level[1].window@front[0]` のようになります。行の順番で決まるのは、数え方のどの段でも差がつかないメンバーどうしの間だけです。それ以外では、行を並べ替えても、別の場所にメンバーを足しても動きません。[構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス) を参照してください。
 - **`mat_slot`**: メンバー上のマテリアルの注入ポイントです。`theme` が値を割り当てます。構造はスロットだけを持ち、どのブロックを使うかはテーマが持ちます。[マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット) を参照してください。
 - **`intent_state`**: 書き手が意図したブロックステートです。メンバーのキーワードが名前を挙げるブロックステートのキー (`stair` の `facing` など) が入ります。行のそれ以外のキーは、メンバーの引数です。編集の差分が比べるのは、行に書いたもの、つまりこれと引数 **だけ** で、導出したものは比べません。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
 - **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。lowering が各メンバーの分を、組み上げる block-array の隣に記録します。ブロック ID はターゲットが解決したもので、ステート名は正規の語彙のものです。`cairn lower --format json` はそれを `members` の下に出力します。
@@ -47,7 +48,7 @@ title: "用語集"
 - **`@cairn`**: そのファイルが前提とする **Cairn 言語のバージョン** (CalVer `YYYY.M[.PATCH]`) を宣言するヘッダです。来歴を記録するためだけのもので、省略できます。
 - **`@requires`**: Minecraft のターゲットに求める機能の下限です (例: `version>=1.20`)。推定した値と矛盾すると、ハードエラーになります。このエラー `E_REQUIRES_CONFLICT` は予約済みで、推定範囲はまだ導出していません。`cairn compile --target` に下限より古いバージョンを指定すると、`E_VERSION_CAP` になります。[バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定) を参照してください。
 - **`@intended_targets`**: どの Minecraft バージョン向けに作ったかを示すヒントです。検証の記録ではありません (記録はロックに残ります)。それでもファイル自身の下限とは突き合わせるので、下限が拒否するバージョンを挙げていれば、コンパイルするまで気づかないままにはならず、その場で報告されます。
-- **ロック (`*.crn.lock`)**: コンパイラが生成する、再現性のための記録です。`--lock` で別のパスを指定しなければ、ソースの隣に `<source>.lock` (`cottage.crn.lock` など) として書き出します。`lock_schema_version`、`source_hash`、`cairn_version`、`target` (`edition`、`mc_version`、`data_version`)、`inputs` (`registry_pack_hash`、`constraint_catalog_hash`)、`resolved_ir_hash`、`verified: true`、`member_version_sensitivity` を持ち、`site` を含むソースではさらに `placements` と `walkways` を持ちます。[バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
+- **ロック (`*.crn.lock`)**: コンパイラが生成する、再現性のための記録です。`--lock` で別のパスを指定しなければ、ソースの隣に `<source>.lock` (`cottage.crn.lock` など) として書き出します。`lock_schema_version`、`source_hash`、`cairn_version`、`target` (`edition`、`mc_version`、`data_version`)、`inputs` (`registry_pack_hash`、`constraint_catalog_hash`)、`resolved_ir_hash`、`verified: true`、`member_version_sensitivity` を持ち、`site` を含むソースではさらに `placements` と `walkways` を持ちます。`cairn info` は、ロックが記録しているターゲットを `verified target` の行として報告します。[バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
 - **来歴の記録 (Provenance stamp)**: 取り込むときに block-array IR に記録する `(edition, version)` です。値はファイル形式から決まります (`.litematic` → java、`.mcstructure` → bedrock、`.schem` → java)。[エコシステム連携 §12.4](/ja/spec/ecosystem-interop/#124-取り込み時の記録と落とし穴) を参照してください。
 
 ## レッドストーン

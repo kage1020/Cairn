@@ -25,10 +25,19 @@ The parser puts anything that is not `key=`, `-> binding`, or `[selector]` into 
 so a dropped `=` lands there too. `walls mat_slot=wall height 3` is not a `walls` with a shortened
 height. It is not built at all.
 
-Only a member line (a line of a `struct`, `def` or `site` body) keeps a positional list so far. The
-header line of a `struct`, `def`, `site` or `theme`, a `theme` rule, and a `logic` or `assert` line
-do not yet, so the same slip there is `E_PARSE`, which ends the parse: `struct s size 3x3` is refused
-with "expected `=`".
+A header, a `theme` rule and an `assert` line keep a positional list too, so a bare value there
+does not end the parse. A header's list holds the bare values after its name and before its `:`. A
+bare value after the `:`, as in `struct s size=3x3: tall`, is `E_PARSE`. So is a block id among the
+values before it, refused at the block id's own `:`, since a block id is a `key=` value ([Literals
+and separators](#511-literals-and-separators)). A `struct` or `def` header and a `theme` selector
+rule keep their bare values beside their `key=value` arguments, so `struct s size 3x3` is
+`E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as `size=3x3`. A `site` or `theme` header reads
+nothing after its name, a `slot` row nothing after the value it binds, and an `assert` line nothing
+after the end of its form: a bare value there is the same finding, and a `key=value` there is
+`E_PARSE`. A `logic` line whose `=` is dropped, `logic sig.a sig.b or sig.c`, still reads the
+expression after its name, binds nothing, and is `E_UNEXPECTED_POSITIONAL` on the whole line. No
+expression starts with an infix primitive, so `logic sig.a or sig.b` is `E_PARSE` at the `or`, for
+its missing `=`.
 
 ### 5.1.1 Literals and separators
 
@@ -189,14 +198,16 @@ and Monaco use the same rule, so a diagnostic's line number and the line under t
 same row. A position always points at the text that is wrong, so an error at the end of a line is
 reported there and never at the first column of the next one.
 
-The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
+The tree-sitter grammar is a known exception in three ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
 correctly. It also accepts nine forms the parser refuses, because tree-sitter cannot express their
 rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
 integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within` or `<=` bound
 or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last component runs
 into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
-literal naming one property twice.
+literal naming one property twice. And it refuses a bare value after the name on a `site` or
+`theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because taking one
+there would let error recovery read an over-indented first body line into the header.
 
 ## 5.2 Nesting
 
@@ -385,17 +396,75 @@ error.
 
 ## 5.5 IDs, classes, addresses
 
-**Subject to change.** The address the compiler gives a member without `id=`, and the `edit` patch
-DSL that would use it, are not built yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)). Today such a member has no address,
-and a top-level `edit` is `E_PARSE`.
+**Subject to change.** The `edit` patch DSL that would select a member by its address is not built
+yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)). Today a top-level `edit` is
+`E_PARSE`.
 
-Important members MAY declare `id=`, and `class=` groups members. Members without an `id=` get a
-stable, meaning-based address assigned by the compiler, derived from parent / role / side / level /
-offset. See
+Important members MAY declare `id=`, and `class=` groups members. Every member of a `struct` or
+`def` body also gets an **address**, which the compiler derives from where the member stands
+(parent, role, side, level and offset) and from what its line writes, not from the order lines are
+written in. See
 [Components, Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model).
 
-A `place` row is the exception: its `id=` is required, and omitting it is `E_INCOMPLETE_PLACE`. An
-auto-address names nothing outside the body it sits in. A `place`'s `id=` is what `east_of=` and
-`connect` refer to, and what its `.nbt` is written under, so an invented one would be a name the
-author never wrote and cannot point at.
+An address is one segment for each step from the body down to the member, joined by `.`, outermost
+first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `level`. A segment is
+`ROLE@SIDE[N]`:
+
+- `ROLE` is the member's keyword.
+- `@SIDE` is the wall the line names, as written: its `side=` (`door@front[0]`), or else a dotted
+  `at=` (`chest@inside.back[0]`, `button@front.outside[0]`). A line that names no wall writes no
+  `@SIDE`: `walls[0]`, `level[1]`.
+- `N` counts from 0 among the members of the same parent with the same `ROLE` and `@SIDE`, in the
+  order of where they stand:
+  1. along the wall: `offset=`, or else the column a door anchor in `at=` names
+     ([§5.4](#54-selectors)) on the wall the line names, which runs the `W` of `size=` for `front`
+     and `back` and its `H` for `left` and `right`. A line that writes neither, or whose `at=`
+     names a wall or a cell, stands at 0;
+  2. then up: `y=`, 0 when absent, so `level`s count from the lowest;
+  3. then the cell a coordinate `at=X,Y,Z` names, or else the box `from=` and `to=` span, whichever
+     end is written first: its low corner, then its high corner, each compared by `y`, then `z`,
+     then `x`. A line that writes none of them stands at `0,0,0`.
+
+  A value these steps cannot read as a whole number sorts after every number: an `offset=`, `y=`,
+  `from=` or `to=` of another kind, an `at=` that is no door anchor, wall or cell, such as the
+  number [§5.4](#54-selectors) reserves, and `center` or `right` where the wall has no length to
+  measure, on a line that names no `front`, `back`, `left` or `right` or in a `def` with no
+  `size=`.
+
+  Members that stand in the same place are ordered by what their lines write other than `id=`,
+  `class=` and a `[selector]`. Their `key=value` pairs come first, sorted by key and compared pair
+  by pair, key then value. Then come their bare values in the order written, the value after `->`,
+  the edition of the `@edition` guard they stand under, and last the members nested under them
+  that take an address: each body sorted by keyword, then by `@SIDE` with a line that names no wall
+  first, then as this list orders members, and compared member by member. At each of these, the
+  line that runs out first, or has no `->` or no guard, sorts first. Keys, values and editions
+  compare as text, by Unicode code point, each value spelled one way: a number in decimal digits, a
+  string between its double quotes, a token with its `@` and any state literal without spaces, a
+  list as its items joined by `, ` between `[` and `]`, a `mat_slot=` as the name of its slot, and
+  anything else as written. So `height=10` sorts before `height=9`, and `frame="oak"` before
+  `frame=oak`. Members that tie at every step keep the order their lines are written in.
+
+A member carries its address whether or not it has an `id=`, so adding an `id=`, a `class=` or a
+`[selector]` to a line renumbers nothing. A member under an `@edition` guard counts among the
+members the guard stands in. An actuator patch (`door[id=front] opened_by=sig.x`) has no address
+and takes no place in the count, and neither does a line nested under one: a patch stands nowhere,
+and acts on the member its selector picks. A `[selector]` on a line of any other keyword makes no
+patch, and the line is counted as any other is.
+
+Reordering lines moves no address, except between members that tie at every step, which trade
+theirs when their lines trade places. Adding a member of another role, on another wall, under
+another parent, or further along the wall moves none either. A member added ahead of others of its
+role on its wall renumbers those after it, so a member an edit must keep naming across such a
+change carries an `id=`.
+
+`cairn parse --format json` prints each member line's address, and the ASCII dump of `cairn lower`
+lists those of the members that built a cell. The `resolved_state` record of each member that
+built a cell, a struct's `circuit` included, carries its address
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), so those
+addresses feed `resolved_ir_hash`
+([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
+
+A `site` body's rows take no address. A `place` row's `id=` is required instead, and omitting it is
+`E_INCOMPLETE_PLACE`. An address names nothing outside the body it sits in. A `place`'s `id=` is
+what `east_of=` and `connect` refer to, and what its `.nbt` is written under, so an invented one
+would be a name the author never wrote and cannot point at.

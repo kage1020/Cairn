@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::{Member, MemberRole, Size, role_of};
+use crate::intent::{Member, MemberRole, Size, patched_actuator, role_of};
 use crate::resolve::ScopeResolution;
 
 use crate::block_array::geometry::Declared;
@@ -20,9 +20,7 @@ use crate::block_array::{
 
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::cell_box::Cell;
-use super::circuit::{
-    patched_actuator, recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector,
-};
+use super::circuit::{recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector};
 use super::connections::derive_connections;
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::door::{HungDoor, hang_doors, split_doors};
@@ -314,6 +312,7 @@ fn resolved_members(
             ResolvedMember {
                 role: member.role.keyword().to_owned(),
                 id: member.id.clone(),
+                address: member.address.clone(),
                 resolved_state: blocks.into_values().collect(),
                 geometry: declared.holding(held),
                 span: member.span.clone(),
