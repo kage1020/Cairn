@@ -397,6 +397,18 @@ fn cottage_end_to_end_size_matches_overhang_inflated_dims() {
 }
 
 #[test]
+fn a_block_entity_on_no_voxel_of_the_grid_is_refused() {
+    let mut ba = comparator_array("minecraft:comparator");
+    ba.block_entities[0].pos = (2, 0, 0);
+    let err = build_structure_tag(&ba, &target_1_21_4()).expect_err("off the grid");
+    assert_eq!(
+        err.to_string(),
+        "block entity `minecraft:comparator` at (2, 0, 0) lies outside the (2, 2, 3) grid, so no \
+         block holds it"
+    );
+}
+
+#[test]
 fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
     let mut ba = unit_air();
     ba.voxels[0] = PaletteIndex(7);

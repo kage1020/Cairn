@@ -11,6 +11,8 @@ use cairn_lang_formats::litematic::Litematic;
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 use cairn_lang_formats::schem::Schem;
 
+use crate::cli::StructureFormat;
+
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
 pub(crate) enum ResolvedTarget {
     Java(JavaTarget),
@@ -18,6 +20,7 @@ pub(crate) enum ResolvedTarget {
 }
 
 impl ResolvedTarget {
+    /// The extension of one array's structure file in this edition's own format.
     pub(crate) fn output_ext(&self) -> OutputExt {
         match self {
             ResolvedTarget::Java(_) => OutputExt::Nbt,
@@ -94,6 +97,32 @@ pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
         .into_iter()
         .map(|entry| entry.mc_version.clone())
         .collect()
+}
+
+/// What a build's artifacts are checked against and written by: its target with, on Java, the
+/// file format.
+#[derive(Clone, Copy)]
+pub(crate) enum Backend<'t> {
+    /// A structure file per array, in the target's edition's own format.
+    PerArray(&'t ResolvedTarget),
+    /// A `.litematic` per struct and per site.
+    Litematic(&'t JavaTarget),
+    /// A `.schem` per array.
+    Schem(&'t JavaTarget),
+}
+
+impl<'t> Backend<'t> {
+    /// The backend `target` writes through, `format` picking Java's; Bedrock has one format, and
+    /// `cairn compile` refuses `--structure-format` beside it.
+    pub(crate) fn new(target: &'t ResolvedTarget, format: StructureFormat) -> Self {
+        match (target, format) {
+            (ResolvedTarget::Java(java), StructureFormat::Litematic) => Self::Litematic(java),
+            (ResolvedTarget::Java(java), StructureFormat::Schem) => Self::Schem(java),
+            (ResolvedTarget::Java(_), StructureFormat::Nbt) | (ResolvedTarget::Bedrock(_), _) => {
+                Self::PerArray(target)
+            }
+        }
+    }
 }
 
 /// A structure file its backend has checked, waiting to be written.

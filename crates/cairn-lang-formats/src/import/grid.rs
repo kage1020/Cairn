@@ -17,13 +17,13 @@ const WATER_IDS: [&str; 2] = ["minecraft:water", "minecraft:flowing_water"];
 /// A Java volume as a grid: every state as the file stores it, which Java builds as written.
 pub(super) fn java_grid(volume: &BlockVolume) -> BlockGrid {
     BlockGrid {
-        dims: volume.dims,
+        dims: volume.dims(),
         palette: volume
-            .palette
+            .palette()
             .iter()
             .map(|state| GridEntry::exact(state.clone()))
             .collect(),
-        voxels: volume.voxels.clone(),
+        voxels: volume.voxels().to_vec(),
     }
 }
 
@@ -56,9 +56,9 @@ pub(super) fn bedrock_grid(
     let mut unspelled: IndexMap<String, usize> = IndexMap::new();
     let mut layered: IndexMap<String, usize> = IndexMap::new();
     let (mut dried, mut flooded, mut void_cells) = (0, 0, 0);
-    let mut voxels = Vec::with_capacity(volume.blocks.len());
-    for (block, liquid) in volume.blocks.iter().zip(&volume.liquids) {
-        let liquid = liquid.map(|slot| &volume.palette[usize::from(slot.0)]);
+    let mut voxels = Vec::with_capacity(volume.blocks().len());
+    for (block, liquid) in volume.blocks().iter().zip(volume.liquids()) {
+        let liquid = liquid.map(|slot| &volume.palette()[usize::from(slot.0)]);
         let water = liquid.is_some_and(|liquid| WATER_IDS.contains(&liquid.name.as_str()));
         if let Some(liquid) = liquid.filter(|_| !water) {
             *layered.entry(liquid.name.clone()).or_default() += 1;
@@ -69,7 +69,7 @@ pub(super) fn bedrock_grid(
             continue;
         };
         let at = usize::from(block.0);
-        let entry = &volume.palette[at];
+        let entry = &volume.palette()[at];
         let (slot, wet) = *slots.entry((at, water)).or_insert_with(|| {
             let spelling = typed_states(&entry.states)
                 .and_then(|typed| states.canonical_spelling(&entry.name, &typed, water, declares));
@@ -104,7 +104,7 @@ pub(super) fn bedrock_grid(
     }
     BedrockGrid {
         grid: BlockGrid {
-            dims: volume.dims,
+            dims: volume.dims(),
             palette,
             voxels,
         },

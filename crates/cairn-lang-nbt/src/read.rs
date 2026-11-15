@@ -1,7 +1,7 @@
 //! NBT reader: a pull parser that yields a root's tags one at a time, so a list with an entry per
 //! voxel never has to be in memory, and tree readers built on it.
 
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 
 pub use crate::error::NbtReadError;
 use crate::tag::{Compound, List, Tag};
@@ -79,9 +79,21 @@ enum Frame {
     },
 }
 
-/// A pull parser over one root: [`Self::next_event`] yields its [`Event`]s, and
+/// Where a reader is in its one root.
+#[derive(Debug, Clone, Copy)]
+enum State {
+    Start,
+    Open,
+    Closed,
+    /// A call failed with the reader at `offset`, so the bytes after it are misaligned.
+    Failed {
+        offset: u64,
+    },
+}
+
+/// A pull parser over one root: [`Self::next_event`] yields its [`Event`]s,
 /// [`Self::read_rest`] or [`Self::skip_rest`] take what is left of the innermost open compound or
-/// list at once.
+/// list at once, and [`Self::finish`] checks that nothing follows the root.
 #[derive(Debug)]
 pub struct NbtReader<R: Read> {
     reader: R,
@@ -89,8 +101,9 @@ pub struct NbtReader<R: Read> {
     dialect: Dialect,
     offset: u64,
     stack: Vec<Frame>,
-    started: bool,
-    max_len: usize,
+    state: State,
+    max_list_len: usize,
+    max_array_len: usize,
 }
 
 /// How strings are encoded, which is where the two dialects differ beyond byte order.
@@ -130,15 +143,25 @@ impl<R: Read> NbtReader<R> {
             dialect,
             offset: 0,
             stack: Vec::new(),
-            started: false,
-            max_len: usize::MAX,
+            state: State::Start,
+            max_list_len: usize::MAX,
+            max_array_len: usize::MAX,
         }
     }
 
     /// This reader, refusing any list or array that declares more than `max_len` items.
     #[must_use]
     pub fn with_max_len(mut self, max_len: usize) -> Self {
-        self.max_len = max_len;
+        self.max_list_len = max_len;
+        self.max_array_len = max_len;
+        self
+    }
+
+    /// This reader, refusing any array that declares more than `max_len` elements, while lists
+    /// keep the limit [`Self::with_max_len`] gave them.
+    #[must_use]
+    pub fn with_max_array_len(mut self, max_len: usize) -> Self {
+        self.max_array_len = max_len;
         self
     }
 
@@ -158,7 +181,8 @@ impl<R: Read> NbtReader<R> {
     ///
     /// # Errors
     ///
-    /// An [`NbtReadError`] for bytes that are not NBT, or for input that ends inside the root.
+    /// An [`NbtReadError`] for bytes that are not NBT or end inside the root, and
+    /// [`NbtReadError::AfterFailure`] for every call after one that failed.
     pub fn next_event(&mut self) -> Result<Option<Event>, NbtReadError> {
         self.step(false)
     }
@@ -233,10 +257,58 @@ impl<R: Read> NbtReader<R> {
         Ok(())
     }
 
-    /// One event; `skip` reads a value's bytes without keeping them.
+    /// The input the reader was built over, once its root has closed and no byte follows it.
+    ///
+    /// # Errors
+    ///
+    /// [`NbtReadError::TrailingBytes`] for a byte past the root, the failure of the read that looks
+    /// for one, which is where a gzip decoder checks its trailer, or [`NbtReadError::AfterFailure`].
+    ///
+    /// # Panics
+    ///
+    /// When the root has not closed.
+    pub fn finish(mut self) -> Result<R, NbtReadError> {
+        match self.state {
+            State::Closed => {}
+            State::Failed { offset } => return Err(NbtReadError::AfterFailure { offset }),
+            State::Start | State::Open => panic!("`finish` is called once the root has closed"),
+        }
+        let mut byte = [0];
+        loop {
+            match self.reader.read(&mut byte) {
+                Ok(0) => return Ok(self.reader),
+                Ok(_) => {
+                    return Err(NbtReadError::TrailingBytes {
+                        offset: self.offset,
+                    });
+                }
+                Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    /// One event, the reader refusing every call after one that failed.
     fn step(&mut self, skip: bool) -> Result<Option<Event>, NbtReadError> {
-        if !self.started {
-            self.started = true;
+        match self.state {
+            State::Failed { offset } => return Err(NbtReadError::AfterFailure { offset }),
+            State::Closed => return Ok(None),
+            State::Start | State::Open => {}
+        }
+        let event = self.advance(skip);
+        self.state = match &event {
+            Err(_) => State::Failed {
+                offset: self.offset,
+            },
+            Ok(_) if self.stack.is_empty() => State::Closed,
+            Ok(_) => State::Open,
+        };
+        event
+    }
+
+    /// The event the next bytes hold; `skip` reads a value's bytes without keeping them.
+    fn advance(&mut self, skip: bool) -> Result<Option<Event>, NbtReadError> {
+        if matches!(self.state, State::Start) {
             let id = self.read_u8()?;
             if id != COMPOUND_ID {
                 return Err(NbtReadError::RootNotCompound { id });
@@ -246,9 +318,10 @@ impl<R: Read> NbtReader<R> {
             return Ok(Some(Event::Compound { name: Some(name) }));
         }
         let tag_at = self.offset;
-        let Some(frame) = self.stack.last_mut() else {
-            return Ok(None);
-        };
+        let frame = self
+            .stack
+            .last_mut()
+            .expect("an open root has a frame until it closes");
         let (name, type_id) = match frame {
             Frame::List { remaining: 0, .. } => {
                 self.stack.pop();
@@ -391,8 +464,7 @@ impl<R: Read> NbtReader<R> {
 
     fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N], NbtReadError> {
         let mut bytes = [0; N];
-        self.reader.read_exact(&mut bytes)?;
-        self.offset += N as u64;
+        self.fill(&mut bytes)?;
         Ok(bytes)
     }
 
@@ -400,7 +472,7 @@ impl<R: Read> NbtReader<R> {
         Ok(self.read_bytes::<1>()?[0])
     }
 
-    /// An `i32` length prefix, refused when negative or past [`Self::with_max_len`].
+    /// An `i32` length prefix, refused when negative or past the limit for `context`.
     fn read_len(&mut self, context: &'static str) -> Result<usize, NbtReadError> {
         let offset = self.offset;
         let len = self.endian.i32(self.read_bytes()?);
@@ -409,15 +481,40 @@ impl<R: Read> NbtReader<R> {
             len,
             offset,
         })?;
-        if len > self.max_len {
+        let limit = if context == "list" {
+            self.max_list_len
+        } else {
+            self.max_array_len
+        };
+        if len > limit {
             return Err(NbtReadError::TooLong {
                 context,
                 len,
-                limit: self.max_len,
+                limit,
                 offset,
             });
         }
         Ok(len)
+    }
+
+    /// Fills `buf`, counting what arrives, so input that ends early says where it ends.
+    fn fill(&mut self, buf: &mut [u8]) -> Result<(), NbtReadError> {
+        let mut filled = 0;
+        while filled < buf.len() {
+            match self.reader.read(&mut buf[filled..]) {
+                Ok(0) => break,
+                Ok(read) => filled += read,
+                Err(err) if err.kind() == ErrorKind::Interrupted => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+        self.offset += filled as u64;
+        if filled < buf.len() {
+            return Err(NbtReadError::Truncated {
+                offset: self.offset,
+            });
+        }
+        Ok(())
     }
 
     fn discard(&mut self, len: usize) -> Result<(), NbtReadError> {
@@ -425,7 +522,9 @@ impl<R: Read> NbtReader<R> {
         let copied = std::io::copy(&mut (&mut self.reader).take(len), &mut std::io::sink())?;
         self.offset += copied;
         if copied < len {
-            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+            return Err(NbtReadError::Truncated {
+                offset: self.offset,
+            });
         }
         Ok(())
     }
@@ -437,7 +536,9 @@ impl<R: Read> NbtReader<R> {
         let read = (&mut self.reader).take(len).read_to_end(&mut bytes)?;
         self.offset += read as u64;
         if bytes.len() as u64 != len {
-            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+            return Err(NbtReadError::Truncated {
+                offset: self.offset,
+            });
         }
         Ok(bytes)
     }
@@ -446,8 +547,7 @@ impl<R: Read> NbtReader<R> {
         let offset = self.offset;
         let len = usize::from(self.endian.u16(self.read_bytes()?));
         let mut bytes = vec![0; len];
-        self.reader.read_exact(&mut bytes)?;
-        self.offset += len as u64;
+        self.fill(&mut bytes)?;
         let decoded = match self.dialect {
             Dialect::Java => decode_modified_utf8(&bytes),
             Dialect::Bedrock => String::from_utf8(bytes).ok(),
@@ -522,29 +622,32 @@ fn decode_modified_utf8(bytes: &[u8]) -> Option<String> {
     String::from_utf16(&units).ok()
 }
 
-/// Reads one named root of uncompressed Java NBT as a tree.
+/// Reads one named root of uncompressed Java NBT as a tree, refusing input past it.
 ///
 /// # Errors
 ///
-/// Those of [`NbtReader::next_event`].
+/// Those of [`NbtReader::next_event`] and [`NbtReader::finish`].
 pub fn read_java_uncompressed<R: Read>(reader: R) -> Result<(String, Compound), NbtReadError> {
     read_root(NbtReader::java(reader))
 }
 
-/// Reads one named root of gzip-wrapped Java NBT, the form `.nbt` structure files take, as a tree.
+/// Reads one named root of gzip-wrapped Java NBT, the form `.nbt` structure files take, as a tree,
+/// refusing input past it in the gzip stream or after it.
 ///
 /// # Errors
 ///
-/// Those of [`NbtReader::next_event`], or [`NbtReadError::Io`] for input that is not gzip.
+/// Those of [`NbtReader::next_event`] and [`NbtReader::finish`], or [`NbtReadError::Io`] for
+/// input that is not gzip or whose gzip trailer does not match it.
 pub fn read_java_gzip<R: Read>(reader: R) -> Result<(String, Compound), NbtReadError> {
-    read_java_uncompressed(flate2::read::GzDecoder::new(reader))
+    // As Java's `GZIPInputStream` reads them, members after the first continue the stream.
+    read_java_uncompressed(flate2::read::MultiGzDecoder::new(reader))
 }
 
-/// Reads one named root of Bedrock NBT, the `.mcstructure` form, as a tree.
+/// Reads one named root of Bedrock NBT, the `.mcstructure` form, as a tree, refusing input past it.
 ///
 /// # Errors
 ///
-/// Those of [`NbtReader::next_event`].
+/// Those of [`NbtReader::next_event`] and [`NbtReader::finish`].
 pub fn read_bedrock_uncompressed<R: Read>(reader: R) -> Result<(String, Compound), NbtReadError> {
     read_root(NbtReader::bedrock(reader))
 }
@@ -556,5 +659,6 @@ fn read_root<R: Read>(mut reader: NbtReader<R>) -> Result<(String, Compound), Nb
     let Tag::Compound(root) = reader.read_rest()? else {
         unreachable!("the rest of a compound reads as a compound");
     };
+    reader.finish()?;
     Ok((name, root))
 }
