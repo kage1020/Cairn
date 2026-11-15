@@ -397,6 +397,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  slot a -> @b @c\n",
         Accept,
     ),
+    (
+        "slot_row_bare_string_boolean_and_integer",
+        "theme t:\n  slot a -> @b \"s\" true 3\n",
+        Accept,
+    ),
     ("slot_row_args", "theme t:\n  slot a -> @b c=1\n", Reject),
     (
         "selector_rule_dropped_equals",
