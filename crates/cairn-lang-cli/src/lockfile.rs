@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::lock::{
     HashHex, LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement, LockTarget, LockWalkway,
-    Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
+    Lockfile, LockfileRead, MemberSensitivity, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::{CAIRN_VERSION, Edition};
 
@@ -14,63 +14,48 @@ use crate::target::ResolvedTarget;
 /// Warn where the lockfile at `lock_path` records another target, as `spec/versioning-editions`
 /// "Provenance and lock" does, or cannot be read; an absent one is silent.
 pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target: &ResolvedTarget) {
-    // Read once, so the lenient parse below sees the bytes the strict one did.
-    let body = match std::fs::read_to_string(lock_path) {
-        Ok(body) => body,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+    let path = lock_path.display();
+    let previous = match LockfileRead::from_path(lock_path) {
+        Ok(Some(previous)) => previous,
+        Ok(None) => return,
         Err(err) => {
-            warn_unreadable_lock(lock_path, &LockError::from(err));
-            return;
-        }
-    };
-    let previous = match Lockfile::from_yaml(&body) {
-        Ok(previous) => previous,
-        Err(LockError::UnsupportedSchemaVersion { found, supported }) => {
             eprintln!(
-                "warning: {}: the existing lockfile is schema version {found} and this build \
-                 reads {supported}; it was written by a newer Cairn and is being replaced",
-                lock_path.display(),
+                "warning: {path}: the existing lockfile could not be read ({}), so its target is \
+                 not compared with this build's",
+                LockError::from(err),
             );
             return;
         }
-        Err(err) => {
-            match Lockfile::refused_identifier(&body) {
-                Ok(Some(refused)) => {
-                    eprintln!(
-                        "warning: {}: the existing lockfile records an identifier this build \
-                         refuses ({}) but is otherwise valid, as one an earlier Cairn wrote \
-                         would be; it is being replaced",
-                        lock_path.display(),
-                        refused.error,
-                    );
-                    report_target_change(
-                        &refused.target,
-                        &refused.member_version_sensitivity,
-                        edition,
-                        target,
-                    );
-                }
-                // `cause`, not `err`: the strict read may have stopped at an identifier first.
-                Err(cause) => warn_unreadable_lock(lock_path, &cause),
-                // Unreachable while the probe mirrors the strict schema.
-                Ok(None) => warn_unreadable_lock(lock_path, &err),
-            }
-            return;
-        }
     };
-    report_target_change(
-        &previous.target,
-        &previous.member_version_sensitivity,
-        edition,
-        target,
-    );
-}
-
-fn warn_unreadable_lock(lock_path: &Path, err: &LockError) {
-    eprintln!(
-        "warning: {}: the existing lockfile could not be read ({err}); replacing it",
-        lock_path.display(),
-    );
+    match previous {
+        LockfileRead::Valid(previous) => report_target_change(
+            &previous.target,
+            &previous.member_version_sensitivity,
+            edition,
+            target,
+        ),
+        LockfileRead::RefusedIdentifier(refused) => {
+            eprintln!(
+                "warning: {path}: the existing lockfile records an identifier this build refuses \
+                 ({}) but is otherwise valid, as one an earlier Cairn wrote would be; it is being \
+                 replaced",
+                refused.error,
+            );
+            report_target_change(
+                &refused.target,
+                &refused.member_version_sensitivity,
+                edition,
+                target,
+            );
+        }
+        LockfileRead::NewerSchema { found, supported } => eprintln!(
+            "warning: {path}: the existing lockfile is schema version {found} and this build reads \
+             {supported}; it was written by a newer Cairn and is being replaced",
+        ),
+        LockfileRead::Invalid(err) => eprintln!(
+            "warning: {path}: the existing lockfile could not be read ({err}); replacing it",
+        ),
+    }
 }
 
 /// Warn where `verified`, the previous lockfile's target, differs from this build's.
@@ -106,8 +91,9 @@ fn report_target_change(
     );
 }
 
-/// The left half of the warning: `1.20.4/DataVersion 3700`.
-fn describe_verified(target: &LockTarget, show_edition: bool) -> String {
+/// A lock's target in its verified spelling, `1.20.4/DataVersion 3700`, led by the edition when
+/// `show_edition`.
+pub(crate) fn describe_verified(target: &LockTarget, show_edition: bool) -> String {
     let field = match target.edition {
         Edition::Java => "DataVersion",
         Edition::Bedrock => "block version",

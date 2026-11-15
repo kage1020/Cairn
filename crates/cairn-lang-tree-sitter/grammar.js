@@ -129,7 +129,11 @@ module.exports = grammar({
 
     requires_stmt: $ => seq('requires', field('arg', $.directive_literal)),
 
-    assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form, $.latency_form)),
+    assert_stmt: $ => seq(
+      'assert',
+      choice($.truth_form, $.temporal_form, $.latency_form),
+      optional(field('positional', $.positional_list)),
+    ),
 
     // A line break may stand between rows; the scanner measures no indent inside the braces.
     truth_form: $ => seq(
@@ -178,10 +182,11 @@ module.exports = grammar({
       field('bound', $.integer),
     ),
 
+    // Without its `=` the line still parses, and core reports it as binding nothing.
     logic_decl: $ => seq(
       'logic',
       field('name', $._dotted_ref),
-      '=',
+      optional('='),
       field('value', $._bool_expr),
     ),
 
@@ -296,6 +301,7 @@ module.exports = grammar({
       field('name', $.identifier),
       '->',
       field('target', $._value),
+      optional(field('positional', $.positional_list)),
     ),
 
     selector_rule: $ => seq(
@@ -313,7 +319,11 @@ module.exports = grammar({
 
     filter_list: $ => repeat1(choice($.attribute, ',')),
 
-    attribute_list: $ => repeat1($.attribute),
+    // A header's or a selector rule's arguments, among them the bare values core reports.
+    attribute_list: $ => repeat1(choice($.attribute, $._value)),
+
+    // The bare values on a line that takes no `key=value`, which core reports.
+    positional_list: $ => repeat1($._value),
 
     attribute: $ => seq(
       field('key', $.identifier),
