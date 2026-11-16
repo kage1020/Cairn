@@ -19,6 +19,40 @@ fn underlined<'s>(source: &'s str, ir: &BlockArrayIr, i: usize) -> &'s str {
     &source[ir.diagnostics[i].span.clone()]
 }
 
+// --- integer keys ----------------------------------------------------------
+
+/// An integer key is never handed a decimal it would have to round.
+#[test]
+fn a_decimal_on_an_integer_key_refuses_its_member() {
+    let source = "struct s size=7x3\n  \
+                  walls  mat_slot=wall height=2.5\n  \
+                  window side=front offset=1.5 y=1 size=1x1 mat_slot=glass\n\n\
+                  theme t:\n  \
+                  slot wall  -> @cobblestone\n  \
+                  slot glass -> @glass_pane\n";
+    let ir = lowered(source);
+    assert_eq!(
+        findings(&ir),
+        vec![
+            (
+                "E_INVALID_MEMBER",
+                "walls `height=` must be a positive integer that fits in u32, not decimal `2.5`",
+            ),
+            (
+                "E_INVALID_MEMBER",
+                "window has an `offset=` that is not a non-negative integer that fits in u32",
+            ),
+        ],
+    );
+    assert_eq!(
+        (underlined(source, &ir, 0), underlined(source, &ir, 1)),
+        (
+            "walls  mat_slot=wall height=2.5",
+            "window side=front offset=1.5 y=1 size=1x1 mat_slot=glass",
+        ),
+    );
+}
+
 // --- window `sym=` ---------------------------------------------------------
 
 /// A window at `offset=1` on a 7-wide wall, so a mirrored build differs from an unmirrored one.
@@ -47,6 +81,8 @@ fn an_unreadable_sym_draws_the_unmirrored_window_and_says_so() {
         ("\"true\"", "string `\"true\"`"),
         ("1", "integer `1`"),
         ("1,2,3", "coordinate `1,2,3`"),
+        ("1.5", "decimal `1.5`"),
+        ("{a:1}", "NBT compound `{a:1}`"),
     ] {
         let source = window(&format!(" sym={written}"));
         let ir = lowered(&source);
