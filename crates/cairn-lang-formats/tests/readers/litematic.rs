@@ -1,14 +1,10 @@
 //! `read_litematic` over what the writer wrote, and over files only another tool would write.
 
-use std::io::Write as _;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockState, Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY,
-    PaletteIndex,
+    BlockArrayIr, BlockState, Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY, PaletteIndex,
 };
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
-use cairn_lang_formats::java_structure::build_structure_tag;
 use cairn_lang_formats::litematic::{
     LitematicMetadata, LitematicReadError, LitematicReadRegion, LitematicSchematic,
     litematic_files, prepare_litematic, read_litematic,
@@ -17,7 +13,7 @@ use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 use cairn_lang_nbt::{NbtReadError, write_java_uncompressed};
 
-use crate::common::{array_of, comparator_array, ir_of, latest, lower_example};
+use crate::common::{array_of, comparator_array, gzip, ir_of, latest, lower_example, volume_of};
 
 fn target(version: &str) -> JavaTarget {
     resolve_java_target(version).expect("a targetable version")
@@ -36,53 +32,6 @@ fn round_trip(ir: &BlockArrayIr, target: &JavaTarget) -> Vec<LitematicSchematic>
             read_litematic(bytes.as_slice()).expect("the file reads back")
         })
         .collect()
-}
-
-/// `array` as the reader returns it at `target`: its palette, its grid, and the block entities its
-/// `.nbt` keeps, which a `.litematic` keeps as well.
-fn volume_of(array: &BlockArray, target: &JavaTarget) -> BlockVolume {
-    let root = build_structure_tag(array, target).expect("a lowered array builds");
-    let Some(Tag::List(blocks)) = root.entries.get("blocks") else {
-        panic!("blocks is a list");
-    };
-    let block_entities = blocks
-        .items
-        .iter()
-        .filter_map(|block| {
-            let Tag::Compound(block) = block else {
-                panic!("a block entry is a compound");
-            };
-            let Some(Tag::Compound(nbt)) = block.entries.get("nbt") else {
-                return None;
-            };
-            let Some(Tag::List(pos)) = block.entries.get("pos") else {
-                panic!("a block entry has a pos");
-            };
-            let [x, y, z] = &pos.items[..] else {
-                panic!("a pos has three axes");
-            };
-            let axis = |tag: &Tag| match tag {
-                Tag::Int(value) => u32::try_from(*value).expect("a voxel of the grid"),
-                other => panic!("an axis is an int: {other:?}"),
-            };
-            let mut data = nbt.clone();
-            let Some(Tag::String(id)) = data.entries.shift_remove("id") else {
-                panic!("a block entity has an id");
-            };
-            Some(StoredBlockEntity {
-                pos: (axis(x), axis(y), axis(z)),
-                id,
-                data,
-            })
-        })
-        .collect();
-    BlockVolume::new(
-        array.dims,
-        array.palette.entries.clone(),
-        array.voxels.clone(),
-        block_entities,
-    )
-    .expect("a lowered array is a volume")
 }
 
 #[test]
@@ -177,12 +126,6 @@ fn root_bytes(entries: Vec<(&str, Tag)>) -> Vec<u8> {
     let mut bytes = Vec::new();
     write_java_uncompressed(&mut bytes, "", &root).expect("the root writes");
     bytes
-}
-
-fn gzip(bytes: &[u8]) -> Vec<u8> {
-    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    gz.write_all(bytes).expect("the bytes compress");
-    gz.finish().expect("the member closes")
 }
 
 /// `{r: region}`, as a root's `Regions`.

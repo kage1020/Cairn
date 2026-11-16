@@ -1,5 +1,5 @@
-//! The Java `.nbt` and `.litematic` and Bedrock `.mcstructure` writers: their tag trees and
-//! streamed bytes.
+//! The Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers: their tag trees
+//! and streamed bytes.
 
 #[path = "../common/mod.rs"]
 pub mod common;
@@ -9,4 +9,5 @@ mod block_entities;
 mod entities;
 mod java_structure;
 mod litematic;
+mod schem;
 mod streaming;
