@@ -57,6 +57,7 @@ fn a_conflict_names_the_earliest_end_first_then_in_source_order() {
         ],
         &floors,
         &order(),
+        "3.0",
     );
     let [conflict] = found.as_slice() else {
         panic!("one floor, one conflict");
@@ -69,6 +70,38 @@ fn a_conflict_names_the_earliest_end_first_then_in_source_order() {
             ("minecraft:a", "2.0"),
         ],
     );
+}
+
+#[test]
+fn a_floor_between_two_ends_names_only_the_ids_below_it() {
+    let module = parse("@requires bedrock version>=2.0\n").expect("a header alone parses");
+    let floors = declared_version_floors(&module, Edition::Bedrock);
+    let found = conflicts(
+        &[
+            declared_at("minecraft:a", 10, "2.0"),
+            declared_at("minecraft:b", 20, "1.0"),
+        ],
+        &floors,
+        &order(),
+        "3.0",
+    );
+    let [conflict] = found.as_slice() else {
+        panic!("one floor, one conflict");
+    };
+    assert_eq!(named(&conflict.ids), [("minecraft:b", "1.0")]);
+}
+
+#[test]
+fn a_floor_above_the_newest_carried_version_is_not_weighed() {
+    let module = parse("@requires bedrock version>=3.0\n").expect("a header alone parses");
+    let floors = declared_version_floors(&module, Edition::Bedrock);
+    let found = conflicts(
+        &[declared_at("minecraft:b", 20, "1.0")],
+        &floors,
+        &order(),
+        "2.0",
+    );
+    assert_eq!(found.len(), 0, "it is `E_VERSION_CAP`'s");
 }
 
 #[test]
