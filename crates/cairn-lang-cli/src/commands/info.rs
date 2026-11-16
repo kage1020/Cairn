@@ -330,7 +330,7 @@ fn edition_rows(
         file,
         source,
         lines,
-        report,
+        ..
     } = reporting;
 
     for EditionLowering {
@@ -345,19 +345,7 @@ fn edition_rows(
             .into_iter()
             .filter(|d| !matches!(d, Found::Circuit(d) if shared.iter().any(|s| same_place(s, d))))
             .collect();
-        error_found |= only_here.iter().any(|d| d.severity() == Severity::Error);
-        let mut edition_header_printed = false;
-        for d in only_here {
-            if d.severity() == Severity::Error && report == FailureReport::Json {
-                refused.push(d);
-                continue;
-            }
-            if !edition_header_printed {
-                eprintln!("note: reported for --editions {}", edition.as_str());
-                edition_header_printed = true;
-            }
-            report_diagnostic(file, source, lines, &d);
-        }
+        error_found |= report_edition_findings(reporting, edition, only_here, &mut refused);
 
         // A refused palette does not end the walk: the scope and version notes below still print.
         let portability = portability_figure(edition, edition_portability(edition, &block_ir));
@@ -384,8 +372,15 @@ fn edition_rows(
             !dropped.is_empty() || !states_unmapped.is_empty(),
         );
         report_version_notes(file, source, lines, edition, &verdicts, &considered);
-        let inferred_range =
-            report_inferred_range(reporting, ir, &resolution, edition, &considered, &floors);
+        let inferred_range = report_inferred_range(
+            reporting,
+            ir,
+            &resolution,
+            edition,
+            &considered,
+            &floors,
+            |version| verdicts.pinned_errors(version),
+        );
         let respelled = respelled_tokens(&resolution, pack, &floors, &considered, source, lines);
         report_respelled_notes(file, edition, &respelled);
 
@@ -419,6 +414,35 @@ fn edition_rows(
         return Err(refused);
     }
     Ok(rows)
+}
+
+/// Report one edition's own findings under its header, keeping each error for the JSON failure
+/// document under [`FailureReport::Json`]; whether any is an error.
+fn report_edition_findings(
+    Reporting {
+        file,
+        source,
+        lines,
+        report,
+    }: Reporting<'_>,
+    edition: Edition,
+    found: Vec<Found>,
+    refused: &mut Vec<Found>,
+) -> bool {
+    let error_found = found.iter().any(|d| d.severity() == Severity::Error);
+    let mut edition_header_printed = false;
+    for d in found {
+        if d.severity() == Severity::Error && report == FailureReport::Json {
+            refused.push(d);
+            continue;
+        }
+        if !edition_header_printed {
+            eprintln!("note: reported for --editions {}", edition.as_str());
+            edition_header_printed = true;
+        }
+        report_diagnostic(file, source, lines, &d);
+    }
+    error_found
 }
 
 /// The circuit findings every edition of `lowered` raises at the same place, each reported once
