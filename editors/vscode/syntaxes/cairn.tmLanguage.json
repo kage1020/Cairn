@@ -12,6 +12,7 @@
     { "include": "#string" },
     { "include": "#material-token" },
     { "include": "#block-id" },
+    { "include": "#nbt" },
     { "include": "#attribute-key" },
     { "include": "#arrow" },
     { "include": "#coordinate" },
@@ -70,6 +71,51 @@
       "name": "entity.name.type.block-id.cairn",
       "match": "(?<==)[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*"
     },
+    "nbt": {
+      "name": "meta.nbt.cairn",
+      "begin": "(?<==)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.section.braces.begin.cairn" }
+      },
+      "end": "\\}|$",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.braces.end.cairn" }
+      },
+      "patterns": [{ "include": "#nbt-contents" }]
+    },
+    "nbt-contents": {
+      "patterns": [
+        {
+          "begin": "\\{",
+          "end": "\\}|$",
+          "patterns": [{ "include": "#nbt-contents" }]
+        },
+        {
+          "name": "string.quoted.double.cairn",
+          "match": "\"(?:[^\"\\\\]|\\\\[\"\\\\])*\""
+        },
+        {
+          "name": "string.quoted.single.cairn",
+          "match": "'(?:[^'\\\\]|\\\\['\\\\])*'"
+        },
+        {
+          "name": "variable.other.property.cairn",
+          "match": "[A-Za-z0-9_.+-]+(?=\\s*:)"
+        },
+        {
+          "name": "storage.type.array.cairn",
+          "match": "(?<=\\[)[BIL];"
+        },
+        {
+          "name": "constant.language.boolean.cairn",
+          "match": "\\b(?:true|false)\\b"
+        },
+        {
+          "name": "constant.numeric.cairn",
+          "match": "[+-]?\\b\\d+(?:\\.\\d+)?[bBsSlLfFdD]?\\b"
+        }
+      ]
+    },
     "attribute-key": {
       "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(=)",
       "captures": {
@@ -87,7 +133,7 @@
     },
     "number": {
       "name": "constant.numeric.cairn",
-      "match": "\\b\\d+(x\\d+)?\\b"
+      "match": "\\b\\d+(?:\\.\\d+|x\\d+)?\\b"
     }
   }
 }

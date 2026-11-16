@@ -42,10 +42,11 @@ value is dead text whatever a binding comes to mean. That is
 `E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error even while
 bindings are reserved, for the reason `E_DUPLICATE_ARG` refuses one key written twice inside one row
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Sameness is by meaning: attribute
-order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
-`window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
-different keys are not reported. They compose, and splitting a long binding list over two lines is
-allowed.
+order does not count, `class=` / `id=` / `mat_slot=` values compare as label text, and numbers
+compare by the number they write ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)), so
+`window[class=small]` and `window[class="small"]` are one selector, and so are `walls[height=4]`
+and `walls[height=4.0]`. Rows that coincide but bind different keys are not reported. They compose,
+and splitting a long binding list over two lines is allowed.
 
 **Selector bindings are reserved.** Which keys a row may bind on each keyword, and what each one
 paints, is not specified yet, and no lowering reads a binding. The two selector rows above build the
