@@ -78,14 +78,14 @@ pub(super) fn shed_slope_to(
     None
 }
 
-/// Whether the roof's own line keeps it from drawing, after the `E_INVALID_MEMBER` that says so.
+/// Whether the roof's own line keeps it from drawing, after an `E_INVALID_MEMBER` for each of
+/// its keys that does.
 pub(super) fn roof_line_refused(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
-    let refused = match parse_roof_kind(member, diagnostics) {
-        None => return true,
-        Some(RoofKind::Shed) => shed_slope_to(member, diagnostics).is_none(),
-        Some(_) => false,
-    };
-    refused || extent_refused(member, diagnostics)
+    let kind = parse_roof_kind(member, diagnostics);
+    let slope_refused =
+        kind == Some(RoofKind::Shed) && shed_slope_to(member, diagnostics).is_none();
+    let extent_refused = extent_refused(member, diagnostics);
+    kind.is_none() || slope_refused || extent_refused
 }
 
 /// A roof's `footprint=` and `bounds=`, each with the one value it takes and what that value
@@ -111,9 +111,10 @@ fn extent_readable(member: &Member) -> bool {
     })
 }
 
-/// Whether the roof's `footprint=` or `bounds=` keeps it from drawing, after the
-/// `E_INVALID_MEMBER` refusing the first that does.
+/// Whether the roof's `footprint=` or `bounds=` keeps it from drawing, after an
+/// `E_INVALID_MEMBER` refusing each that does.
 fn extent_refused(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
+    let mut refused = false;
     for (key, value, what) in EXTENT {
         let clause = match Written::of_ident(member, key) {
             Written::Absent => continue,
@@ -127,9 +128,9 @@ fn extent_refused(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
             format!("roof {clause}, not `{value}`"),
             vec![format!("{what}; write `{key}={value}` or drop `{key}=`")],
         ));
-        return true;
+        refused = true;
     }
-    false
+    refused
 }
 
 /// The kind the roof's `kind=` names, or `None` when it names none or names a `shed` with no
@@ -145,7 +146,8 @@ fn roof_shape(member: &Member) -> Option<RoofKind> {
 /// The kind this roof will draw with, or `None` when it draws nothing, such as a `shed` with no
 /// usable `slope_to=` or a roof whose `footprint=` or `bounds=` names another extent.
 ///
-/// Both roof walks ask this, so the footprint and the height agree on which roofs are real.
+/// Sizing asks this, not [`roof_shape`], so the footprint and the height agree on which roofs
+/// are real.
 pub(super) fn roof_draws(member: &Member) -> Option<RoofKind> {
     roof_shape(member).filter(|_| extent_readable(member))
 }

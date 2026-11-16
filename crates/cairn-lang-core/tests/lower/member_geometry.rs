@@ -1,10 +1,11 @@
 //! Lowering records each member's anchor, declared bbox, actual bbox and host face beside the grid
 //! it builds (`spec/entities` "Anchor conventions").
 
+use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::{Bbox, BlockArrayIr, Face, MemberGeometry};
 use serde_json::json;
 
-use crate::common::lowered;
+use crate::common::{findings, lowered};
 
 const PRELUDE: &str = "theme t:\n  \
                        slot wall -> @cobblestone\n  \
@@ -36,7 +37,7 @@ fn clean(size: &str, body: &str) -> BlockArrayIr {
 }
 
 fn boxed(min: (u32, u32, u32), max: (u32, u32, u32)) -> Bbox {
-    Bbox { min, max }
+    Bbox::spanning(min, max)
 }
 
 /// The geometry of a member that holds every cell it declares.
@@ -100,37 +101,86 @@ fn an_opening_declares_its_cut_against_the_outer_face_of_its_wall() {
 }
 
 #[test]
+fn an_opening_on_a_side_wall_declares_its_cut_against_that_wall_s_outer_face() {
+    let ir = clean(
+        "7x5",
+        "  walls mat_slot=wall height=4\n  \
+         door side=left at=center\n  \
+         window side=right offset=1 y=2 size=2x1 mat_slot=glass\n",
+    );
+    assert_eq!(
+        geometry(&ir)[1..],
+        [
+            (
+                "door",
+                whole((0, 1, 2), boxed((0, 1, 2), (0, 2, 2)), Some(Face::West)),
+            ),
+            (
+                "window",
+                whole((6, 2, 3), boxed((6, 2, 2), (6, 2, 3)), Some(Face::East)),
+            ),
+        ],
+    );
+}
+
+#[test]
 fn a_window_anchor_moves_the_cell_offset_and_y_place_and_nothing_else() {
     let body =
         |window: &str| format!("  walls mat_slot=wall height=4\n  {window} mat_slot=glass\n");
-    let unanchored = clean("7x3", &body("window side=front offset=2 y=2 size=3x2"));
-    for (anchor, offset, y) in [
-        ("bottom_left", 2, 2),
-        ("bottom_center", 3, 2),
-        ("bottom_right", 4, 2),
-        ("middle_left", 2, 3),
-        ("center", 3, 3),
-        ("middle_right", 4, 3),
-        ("top_left", 2, 3),
-        ("top_center", 3, 3),
-        ("top_right", 4, 3),
-    ] {
-        let window = format!("window side=front anchor={anchor} offset={offset} y={y} size=3x2");
-        let anchored = clean("7x3", &body(&window));
-        assert_eq!(anchored.structures, unanchored.structures, "{window}");
-        assert_eq!(
-            geometry(&anchored)[1],
-            (
-                "window",
-                whole(
-                    (offset, y, 2),
-                    boxed((2, 2, 2), (4, 3, 2)),
-                    Some(Face::South)
-                ),
-            ),
-            "{window}",
+    // The rows each third of a 2-high and a 3-high window lies above its lowest.
+    for (size, rows) in [("3x2", [0, 1, 1]), ("3x3", [0, 1, 2])] {
+        let top = 1 + rows[2];
+        let unanchored = clean(
+            "7x3",
+            &body(&format!("window side=front offset=2 y=1 size={size}")),
         );
+        for (anchor, along, up) in [
+            ("bottom_left", 0, 0),
+            ("bottom_center", 1, 0),
+            ("bottom_right", 2, 0),
+            ("middle_left", 0, 1),
+            ("center", 1, 1),
+            ("middle_right", 2, 1),
+            ("top_left", 0, 2),
+            ("top_center", 1, 2),
+            ("top_right", 2, 2),
+        ] {
+            let (offset, y) = (2 + along, 1 + rows[up]);
+            let window =
+                format!("window side=front anchor={anchor} offset={offset} y={y} size={size}");
+            let anchored = clean("7x3", &body(&window));
+            assert_eq!(anchored.structures, unanchored.structures, "{window}");
+            assert_eq!(
+                geometry(&anchored)[1],
+                (
+                    "window",
+                    whole(
+                        (offset, y, 2),
+                        boxed((2, 1, 2), (4, top, 2)),
+                        Some(Face::South)
+                    ),
+                ),
+                "{window}",
+            );
+        }
     }
+}
+
+#[test]
+fn a_window_anchor_names_its_cell_as_seen_from_outside_its_wall() {
+    // From outside the back wall its right end is its low `x`.
+    let ir = clean(
+        "7x3",
+        "  walls mat_slot=wall height=3\n  \
+         window side=back anchor=bottom_right offset=4 y=1 size=3x1 mat_slot=glass\n",
+    );
+    assert_eq!(
+        geometry(&ir)[1],
+        (
+            "window",
+            whole((2, 1, 0), boxed((2, 1, 0), (4, 1, 0)), Some(Face::North)),
+        ),
+    );
 }
 
 #[test]
@@ -197,6 +247,23 @@ fn an_eave_stair_declares_its_band_against_the_outer_face() {
         (
             "stair",
             whole((1, 0, 2), boxed((1, 0, 2), (3, 0, 2)), Some(Face::South)),
+        ),
+    );
+}
+
+#[test]
+fn an_eave_stair_is_anchored_at_its_wall_s_left_end_seen_from_outside() {
+    let ir = clean(
+        "3x1",
+        "  walls mat_slot=wall height=1\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  \
+         stair kind=stairs mat_slot=eave side=back half=top facing=out shape=outer_left\n",
+    );
+    assert_eq!(
+        geometry(&ir)[0],
+        (
+            "stair",
+            whole((3, 0, 0), boxed((1, 0, 0), (3, 0, 0)), Some(Face::North)),
         ),
     );
 }
@@ -301,60 +368,84 @@ fn a_roof_footprint_and_bounds_that_name_what_it_builds_change_nothing() {
     }
 }
 
+/// The note refusing a roof's `footprint=`.
+const FOOTPRINT: &str = "a roof covers its struct's `size=` footprint, which `footprint=struct` \
+                         names; write `footprint=struct` or drop `footprint=`";
+
+/// The note refusing a roof's `bounds=`.
+const BOUNDS: &str = "a roof's `overhang=` widens its body's block array past the footprint on \
+                      every side, which `bounds=expand` names; write `bounds=expand` or drop \
+                      `bounds=`";
+
+/// Each finding lowering `source` raises, as its code, the text it points at, its primary and
+/// its notes.
+fn found(source: &str) -> Vec<(DiagnosticCode, String, String, Vec<String>)> {
+    let ir = lowered(source);
+    findings(source, &ir)
+        .into_iter()
+        .map(|(code, at, primary, notes)| {
+            (
+                code,
+                at.to_owned(),
+                primary.to_owned(),
+                notes.into_iter().map(str::to_owned).collect(),
+            )
+        })
+        .collect()
+}
+
+/// The `E_INVALID_MEMBER` findings refusing the line `roof`, one per `(primary, notes)`.
+fn refusals(
+    roof: &str,
+    each: &[(&str, &[&str])],
+) -> Vec<(DiagnosticCode, String, String, Vec<String>)> {
+    each.iter()
+        .map(|&(primary, notes)| {
+            (
+                DiagnosticCode::InvalidMember,
+                roof.to_owned(),
+                primary.to_owned(),
+                notes.iter().map(|&n| n.to_owned()).collect(),
+            )
+        })
+        .collect()
+}
+
 #[test]
 fn a_roof_footprint_or_bounds_that_names_another_extent_is_refused_and_draws_nothing() {
-    const FOOTPRINT: &str = "a roof covers its struct's `size=` footprint, which \
-                             `footprint=struct` names; write `footprint=struct` or drop \
-                             `footprint=`";
-    const BOUNDS: &str = "a roof's `overhang=` widens its body's block array past the footprint \
-                          on every side, which `bounds=expand` names; write `bounds=expand` or \
-                          drop `bounds=`";
-    for (extent, primary, note) in [
-        (
-            "footprint=level",
-            "roof has `footprint=level`, not `struct`",
-            FOOTPRINT,
-        ),
+    let footprint_level = ("roof has `footprint=level`, not `struct`", &[FOOTPRINT][..]);
+    for (extent, each) in [
+        ("footprint=level", vec![footprint_level]),
         (
             "footprint=3",
-            "roof has `footprint=3`, not `struct`",
-            FOOTPRINT,
+            vec![("roof has `footprint=3`, not `struct`", &[FOOTPRINT][..])],
         ),
         (
             "bounds=clip",
-            "roof has `bounds=clip`, not `expand`",
-            BOUNDS,
+            vec![("roof has `bounds=clip`, not `expand`", &[BOUNDS][..])],
         ),
         (
             "bounds=\"expand\"",
-            "roof has a `bounds=` that is string `\"expand\"`, not `expand`",
-            BOUNDS,
+            vec![(
+                "roof has a `bounds=` that is string `\"expand\"`, not `expand`",
+                &[BOUNDS][..],
+            )],
         ),
         (
             "footprint=level bounds=clip",
-            "roof has `footprint=level`, not `struct`",
-            FOOTPRINT,
+            vec![
+                footprint_level,
+                ("roof has `bounds=clip`, not `expand`", &[BOUNDS][..]),
+            ],
         ),
     ] {
         for level in ["", "  level y=3\n  "] {
+            let roof = format!("roof kind=gable mat_slot=roof {extent}");
             let source = format!(
-                "{PRELUDE}struct s size=5x3\n  walls mat_slot=wall height=3\n{level}  roof kind=gable mat_slot=roof {extent}\n"
+                "{PRELUDE}struct s size=5x3\n  walls mat_slot=wall height=3\n{level}  {roof}\n"
             );
+            assert_eq!(found(&source), refusals(&roof, &each), "source:\n{source}");
             let ir = lowered(&source);
-            assert_eq!(
-                ir.diagnostics
-                    .iter()
-                    .map(|d| (d.code.as_str(), d.primary.as_str()))
-                    .collect::<Vec<_>>(),
-                [("E_INVALID_MEMBER", primary)],
-                "source:\n{source}",
-            );
-            let notes: Vec<&str> = ir.diagnostics[0]
-                .notes
-                .iter()
-                .map(|n| n.message.as_str())
-                .collect();
-            assert_eq!(notes, [note], "source:\n{source}");
             assert_eq!(
                 geometry(&ir)
                     .iter()
@@ -369,44 +460,69 @@ fn a_roof_footprint_or_bounds_that_names_another_extent_is_refused_and_draws_not
 }
 
 #[test]
-fn a_roof_refused_for_its_extent_still_writes_the_rows_its_shape_rises_to() {
-    let source = format!(
-        "{PRELUDE}struct s size=5x3\n  walls mat_slot=wall height=3\n  \
-         roof kind=flat mat_slot=wall footprint=level\n  \
-         raw_block mat=minecraft:stone at=2,4,1\n"
-    );
-    let ir = lowered(&source);
+fn a_roof_line_is_refused_for_each_of_its_keys_that_keeps_it_from_drawing() {
+    let kinds = "unknown roof `kind=bogus` (expected one of gable, shed, hip, flat)";
+    let slope = "shed roof requires `slope_to=` (one of front, back, left, right)";
+    let footprint = ("roof has `footprint=walls`, not `struct`", &[FOOTPRINT][..]);
+    for (roof, each) in [
+        (
+            "roof kind=bogus mat_slot=roof footprint=walls",
+            vec![(kinds, &[][..]), footprint],
+        ),
+        (
+            "roof kind=shed mat_slot=roof footprint=walls",
+            vec![(slope, &[][..]), footprint],
+        ),
+        (
+            "roof kind=gable mat_slot=roof footprint=walls bounds=shrink",
+            vec![
+                footprint,
+                ("roof has `bounds=shrink`, not `expand`", &[BOUNDS][..]),
+            ],
+        ),
+    ] {
+        let source =
+            format!("{PRELUDE}struct s size=5x3\n  walls mat_slot=wall height=3\n  {roof}\n");
+        assert_eq!(found(&source), refusals(roof, &each), "source:\n{source}");
+    }
+}
+
+#[test]
+fn a_refused_roof_s_overhang_leaves_the_footprint_alone() {
+    let roof = "roof kind=gable mat_slot=roof overhang=1 footprint=level";
+    let source = format!("{PRELUDE}struct s size=5x3\n  walls mat_slot=wall height=3\n  {roof}\n");
     assert_eq!(
-        ir.diagnostics
-            .iter()
-            .map(|d| (
-                d.code.as_str(),
-                d.primary.as_str(),
-                d.notes
-                    .iter()
-                    .map(|n| n.message.as_str())
-                    .collect::<Vec<_>>(),
-            ))
-            .collect::<Vec<_>>(),
-        [
-            (
-                "E_INVALID_MEMBER",
-                "roof has `footprint=level`, not `struct`",
-                vec![
-                    "a roof covers its struct's `size=` footprint, which `footprint=struct` \
-                     names; write `footprint=struct` or drop `footprint=`",
-                ],
-            ),
-            (
-                "W_DEFERRED_MEMBER",
-                "raw_block `at=2,4,1` does not fit in the struct (dims.y=4)",
-                vec![
-                    "a `roof` that would rise to this row draws nothing; the block is placed once \
-                     that roof draws",
-                ],
-            ),
-        ],
+        found(&source),
+        refusals(
+            roof,
+            &[("roof has `footprint=level`, not `struct`", &[FOOTPRINT])]
+        ),
     );
+    let dims = lowered(&source).structures["struct::s"].dims;
+    assert_eq!((dims.x, dims.z), (5, 3));
+}
+
+#[test]
+fn a_roof_refused_for_its_extent_still_writes_the_rows_its_shape_rises_to() {
+    let roof = "roof kind=flat mat_slot=wall footprint=level";
+    let raw = "raw_block mat=minecraft:stone at=2,4,1";
+    let source =
+        format!("{PRELUDE}struct s size=5x3\n  walls mat_slot=wall height=3\n  {roof}\n  {raw}\n");
+    let mut expected = refusals(
+        roof,
+        &[("roof has `footprint=level`, not `struct`", &[FOOTPRINT])],
+    );
+    expected.push((
+        DiagnosticCode::DeferredMember,
+        raw.to_owned(),
+        "raw_block `at=2,4,1` does not fit in the struct (dims.y=4)".to_owned(),
+        vec![
+            "a `roof` that would rise to this row draws nothing; the block is placed once that \
+             roof draws"
+                .to_owned(),
+        ],
+    ));
+    assert_eq!(found(&source), expected);
 }
 
 #[test]

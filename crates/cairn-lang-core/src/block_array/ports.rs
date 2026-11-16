@@ -157,7 +157,7 @@ impl PortRejection {
                 "is a window that runs past the end of its wall (`{} + size.w` = {} + {}, wall \
                  length {wall_length})",
                 args.column_term(),
-                args.column(),
+                args.column,
                 args.width,
             ),
             Self::WindowNoWalls { .. } => {
@@ -354,7 +354,7 @@ fn window_center_offset(
         fault,
         member: member.span.clone(),
     })?;
-    let (offset, y, sw, sh) = (args.column(), args.row(), args.width, args.height);
+    let (offset, y, sw, sh) = (args.column, args.row, args.width, args.height);
     match offset.checked_add(sw) {
         Some(end) if end <= len => {}
         _ => {

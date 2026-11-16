@@ -712,8 +712,8 @@ the entities a build places ([§11.4](#entity-aabb)). A frame, a painting and a 
 game counts as solid, which no table records, so attachment holds a frame and a painting only to a
 block behind them, which air, water and lava are not, and a sign, standing or on a wall, to nothing.
 edit_stability is planned, and no command checks it yet. AABB interference holds inside a body,
-where the phase order merges the members and `W_PHASE_CONFLICT` reports two of one phase that take a
-cell from each other ([Compilation Model
+where the phase order merges the members and `W_PHASE_CONFLICT` reports a later line of one phase
+that changes a cell an earlier one built ([Compilation Model
 §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and is planned between bodies:
 two `place` rows whose bodies overlap are not reported yet. Geometry holds only in part: a door,
 window, eave stair, chest, trapdoor, note block, sign, bed, entity, sensor or actuator its own line

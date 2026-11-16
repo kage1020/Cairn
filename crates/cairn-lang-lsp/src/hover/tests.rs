@@ -173,7 +173,8 @@ fn a_key_shows_the_entry_its_own_keyword_gives_it_above_that_keywords_entry() {
         shown(KEEP, "y=2"),
         Some((
             format!(
-                "**`y=`.** The row its lowest cells are on, counted from the floor.\n\n{}",
+                "**`y=`.** The row of the cell its `anchor=` names, counted from the floor: its \
+                 lowest row without one.\n\n{}",
                 quoted("window"),
             ),
             range(10, 19, 20),
