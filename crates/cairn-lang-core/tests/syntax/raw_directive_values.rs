@@ -77,6 +77,22 @@ fn an_unlexable_requires_value_is_a_floor_that_declares_nothing() {
     }
 }
 
+/// A raw value is text, so a `{` after its `=` opens no compound the lexer could refuse.
+#[test]
+fn a_brace_after_an_equals_sign_in_a_raw_value_is_text() {
+    for (header, raw) in [
+        ("@requires feature={a:1}\n", "feature={a:1}"),
+        ("@requires feature={a\n", "feature={a"),
+        ("@requires feature={a:01} >=1.21\n", "feature={a:01} >=1.21"),
+    ] {
+        let module = parse(&format!("{header}{BODY}")).expect("a raw value takes any text");
+        let Header::Requires { requirement, .. } = &module.headers[0] else {
+            panic!("expected a `@requires` header, got {:?}", module.headers);
+        };
+        assert_eq!(requirement.as_str(), raw, "{header:?}");
+    }
+}
+
 #[test]
 fn a_comment_after_the_value_is_still_a_comment() {
     assert_eq!(codes(&format!("@cairn 2026.6 # $ ~\n{BODY}")), []);

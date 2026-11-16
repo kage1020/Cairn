@@ -50,6 +50,43 @@ fn a_key_the_role_does_not_read_is_refused() {
     assert!(d.primary.contains("`walls`"), "got: {}", d.primary);
 }
 
+/// No keyword reads `nbt=` yet, so it is a key like any other a role does not take.
+#[test]
+fn a_compound_on_a_key_no_role_reads_is_refused_as_that_key() {
+    let src = "struct s size=5x5\n  walls mat_slot=wall height=3 nbt={CustomName:\"x\"}\n";
+    let d = exactly_one(diagnose(src));
+    assert_eq!(
+        (d.code.as_str(), d.primary.as_str(), &src[d.span.clone()]),
+        (
+            "E_UNKNOWN_ARGUMENT",
+            "`nbt=` is not an argument `walls` reads",
+            "{CustomName:\"x\"}",
+        ),
+    );
+}
+
+#[test]
+fn a_compound_on_a_header_or_a_theme_selector_binding_is_a_key_no_pass_reads() {
+    let header = "struct s size=5x5 nbt={a:1}\n  floor mat_slot=wall\n\ntheme t:\n  \
+                  slot wall -> @stone\n";
+    let d = exactly_one(diagnose(header));
+    assert_eq!(
+        (d.code.as_str(), d.primary.as_str(), &header[d.span.clone()]),
+        (
+            "E_UNKNOWN_ARGUMENT",
+            "`nbt=` is not an argument a `struct` header reads",
+            "{a:1}",
+        ),
+    );
+    let binding = "theme t:\n  slot wall -> @stone\n  walls[class=outer] -> nbt={a:1}\n\n\
+                   struct s size=5x5\n  walls class=outer mat_slot=wall\n";
+    let d = exactly_one(diagnose(binding));
+    assert_eq!(
+        (d.code.as_str(), &binding[d.span.clone()]),
+        ("W_IGNORED_ARGUMENT", "{a:1}"),
+    );
+}
+
 #[test]
 fn the_finding_points_at_the_argument_and_not_at_the_line() {
     // The IR carries no span for the key, so the anchor is the value.
