@@ -3422,9 +3422,9 @@ fn a_router_past_the_area_cap_names_the_placements_that_stretch_its_box() {
         note,
         format!(
             "the router searches the box spanning both ports and every placement floor of \
-             site `s` on the walk plane, here 4238888 cells, past its cap of {ROUTE_AREA_CAP} cells; \
-             the two ports span only 42 of those cells, and the floors of placements `a`, \
-             `b`, `c`, `d`, `e1`, and `e3` stretch the box past them, so bring those \
+             site `s` on the walk plane, here 4238888 cells, past its cap of {ROUTE_AREA_CAP} \
+             cells; the two ports span only 42 of those cells, and the floors of placements \
+             `a`, `b`, `c`, `d`, `e1`, and `e3` stretch the box past them, so bring those \
              placements closer to the two ports",
         ),
     );
@@ -3503,9 +3503,9 @@ fn a_router_past_the_area_cap_on_distant_ports_blames_the_ports() {
         note,
         format!(
             "the router searches the box spanning both ports and every placement floor of \
-             site `s` on the walk plane, here 4010006 cells, past its cap of {ROUTE_AREA_CAP} cells; \
-             the two ports alone span 4008004 of those cells, so place the two structures \
-             closer together",
+             site `s` on the walk plane, here 4010006 cells, past its cap of {ROUTE_AREA_CAP} \
+             cells; the two ports alone span 4008004 of those cells, so place the two \
+             structures closer together",
         ),
     );
 }
