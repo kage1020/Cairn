@@ -484,6 +484,8 @@ pub enum ValueKind {
     Bool(bool),
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
+    /// Decimal literal as written (`1.5`): the key that reads one picks a float or a double.
+    Decimal(String),
     /// Size literal `WxH` (`9x7`), in blocks.
     Size {
         /// Width in blocks.
@@ -504,6 +506,8 @@ pub enum ValueKind {
     Token(String),
     /// Block id as Minecraft spells it, with its state literal if any: `minecraft:light[level=15]`.
     BlockId(String),
+    /// SNBT compound as written, braces included, which a `{` after any key's `=` opens.
+    Nbt(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(DottedRef),
     /// Double-quoted string literal.
@@ -554,17 +558,42 @@ impl Value {
 
     /// Source text that parses back to this value (strings have no escapes), or `None` for a list.
     fn surface_form(&self) -> Option<String> {
-        (!matches!(self.kind, ValueKind::List(_))).then(|| self.spelling())
+        match &self.kind {
+            ValueKind::List(_) => None,
+            ValueKind::Decimal(text) => Some(text.clone()),
+            _ => Some(self.spelling()),
+        }
+    }
+
+    /// Whether `self` and `other` are one value: a number by the number it writes, so `2`,
+    /// `2.0` and `2.00` are one, and a list item by item.
+    pub(crate) fn same_value(&self, other: &Self) -> bool {
+        match (&self.kind, &other.kind) {
+            (ValueKind::List(left), ValueKind::List(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| left.same_value(right))
+            }
+            (
+                ValueKind::Int(_) | ValueKind::Decimal(_),
+                ValueKind::Int(_) | ValueKind::Decimal(_),
+            ) => self.spelling() == other.spelling(),
+            (left, right) => left == right,
+        }
     }
 
     /// The one spelling of this value that `spec/syntax` "IDs, classes, addresses" compares by:
-    /// source text that parses back to it, a list's items joined by `, ` between `[` and `]`.
+    /// source text that means it, a list's items joined by `, ` between `[` and `]`.
     pub(crate) fn spelling(&self) -> String {
         match &self.kind {
             ValueKind::Ident(s) | ValueKind::BlockId(s) => s.clone(),
             ValueKind::Str(s) => format!("\"{s}\""),
             ValueKind::Bool(b) => b.to_string(),
             ValueKind::Int(i) => i.to_string(),
+            ValueKind::Decimal(text) => decimal_spelling(text),
+            ValueKind::Nbt(text) => text.clone(),
             ValueKind::Size { w, h } => format!("{w}x{h}"),
             ValueKind::Coord { x, y, z } => format!("{x},{y},{z}"),
             ValueKind::Token(t) => format!("@{t}"),
@@ -592,14 +621,28 @@ impl Value {
             ValueKind::Ident(..) => "identifier",
             ValueKind::Bool(..) => "boolean",
             ValueKind::Int(..) => "integer",
+            ValueKind::Decimal(..) => "decimal",
             ValueKind::Size { .. } => "size",
             ValueKind::Coord { .. } => "coordinate",
             ValueKind::Token(..) => "token",
             ValueKind::BlockId(..) => "block id",
+            ValueKind::Nbt(..) => "NBT compound",
             ValueKind::DotRef(..) => "reference",
             ValueKind::Str(..) => "string",
             ValueKind::List(..) => "list",
         }
+    }
+}
+
+/// A decimal as `spec/syntax` "IDs, classes, addresses" spells it: no zero leads its whole part or
+/// ends its fraction, and no `.` stands with nothing after it, so `02.50` is `2.5` and `2.0` is `2`.
+fn decimal_spelling(text: &str) -> String {
+    let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+    let whole = whole.trim_start_matches('0');
+    let whole = if whole.is_empty() { "0" } else { whole };
+    match fraction.trim_end_matches('0') {
+        "" => whole.to_owned(),
+        fraction => format!("{whole}.{fraction}"),
     }
 }
 
