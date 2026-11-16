@@ -158,7 +158,7 @@ to compare.
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal, from a state a member's line writes, or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
-| `E_REQUIRES_CONFLICT` | An `@requires` floor lies above the edition's inferred range: every version it admits lacks a block the build paints ([Versioning and Editions](/spec/versioning-editions/#a-floor-is-weighed-against-the-registry)). |
+| `E_REQUIRES_CONFLICT` | An `@requires` floor lies above the edition's inferred range, and at or below the newest version the edition's pack carries: every version it admits lacks a block the build paints ([Versioning and Editions](/spec/versioning-editions/#a-floor-is-weighed-against-the-registry)). |
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
 | `W_INTENDED_TARGET_CAP` | Some, not all, of them are. |
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |

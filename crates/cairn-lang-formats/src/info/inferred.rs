@@ -2,6 +2,8 @@
 //! contradict it (`spec/versioning-editions` "The `inferred range` row", "A floor is weighed
 //! against the registry").
 
+use std::borrow::Cow;
+
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{DiagnosticData, LineStarts};
 use cairn_lang_core::intent::IntentModule;
@@ -15,7 +17,7 @@ use super::Reporter;
 use super::floors::{declared_floors, floor_keyword, floor_origin_note};
 use crate::registry::{RegistryPack, builtin_pack};
 
-/// An id a build paints, at the first place it paints it.
+/// An id a build paints, at the first place the source names it.
 #[derive(Debug, Clone)]
 struct Painted {
     id: String,
@@ -41,7 +43,8 @@ struct Inference {
     undeclared: Vec<Painted>,
 }
 
-/// A floor no version declaring every painted id clears, with the ids last declared below it.
+/// A floor above the last version that declares some id the build paints, with the ids last
+/// declared below it.
 #[derive(Debug, Clone)]
 pub struct Conflict {
     floor: VersionFloor,
@@ -57,13 +60,15 @@ struct Lacked {
 }
 
 impl Inference {
-    /// Lower `ir` at the oldest and the newest of `considered`, which ascends.
-    fn of(
+    /// Lower `ir` at the oldest and the newest of `considered`, which ascends, unless `known` holds
+    /// the errors of that version's pinned lowering.
+    fn of<'a>(
         ir: &IntentModule,
         resolution: &Resolution,
         pack: &RegistryPack,
         edition: Edition,
         considered: &[String],
+        known: impl Fn(&str) -> Option<&'a [Diagnostic]>,
     ) -> Self {
         let order = pack.version_order();
         let mut inference = Self {
@@ -75,12 +80,11 @@ impl Inference {
         let (Some(oldest), Some(newest)) = (considered.first(), considered.last()) else {
             return inference;
         };
-        let (first_declared, mut undeclared) =
-            bounds_at(ir, resolution, pack, oldest, &order, |l| l.since.clone());
+        let at = |version: &str| pinned(ir, resolution, pack, version, known(version));
+        let (first_declared, mut undeclared) = bounds(&at(oldest), &order, |l| l.since.clone());
         inference.first_declared = first_declared;
         if newest != oldest {
-            let (last_declared, more) =
-                bounds_at(ir, resolution, pack, newest, &order, |l| l.until.clone());
+            let (last_declared, more) = bounds(&at(newest), &order, |l| l.until.clone());
             inference.last_declared = last_declared;
             undeclared.extend(more);
         }
@@ -151,11 +155,6 @@ impl Inference {
         }
     }
 
-    /// The floors among `floors` that no carried version declaring every painted id clears.
-    fn conflicts(&self, floors: &[VersionFloor], order: &VersionOrder) -> Vec<Conflict> {
-        conflicts(&self.last_declared, floors, order)
-    }
-
     /// The `note:` lines naming each id that sets an edge, and each no version declares.
     fn report_notes(&self, out: &mut Reporter<'_>) {
         let edition = self.edition.as_str();
@@ -200,25 +199,35 @@ impl Inference {
 }
 
 /// One edition's `inferred range` row for `cairn info`, its notes and conflicts sent to `out`.
-pub(super) fn report_inferred_range(
+/// `known` gives the errors of a pinned lowering the caller already ran at a version.
+pub(super) fn report_inferred_range<'a>(
     out: &mut Reporter<'_>,
     ir: &IntentModule,
     resolution: &Resolution,
     edition: Edition,
     considered: &[String],
     floors: &[VersionFloor],
+    known: impl Fn(&str) -> Option<&'a [Diagnostic]>,
 ) -> InferredRange {
     let pack = builtin_pack(edition);
-    let inference = Inference::of(ir, resolution, pack, edition, considered);
+    let inference = Inference::of(ir, resolution, pack, edition, considered, known);
     inference.report_notes(out);
-    let conflicts = inference.conflicts(floors, &pack.version_order());
+    let conflicts = considered.last().map_or_else(Vec::new, |newest| {
+        conflicts(
+            &inference.last_declared,
+            floors,
+            &pack.version_order(),
+            newest,
+        )
+    });
     // Reported, not refused: the build is the command that refuses it.
     report_conflicts(out, edition, &conflicts);
     inference.range(out.source, out.lines, &conflicts)
 }
 
 /// The floors among `floors` above the last version declaring an id the newest of `considered`
-/// lacks.
+/// lacks, while that newest meets them. `at_newest` holds the findings of a lowering already pinned
+/// there, if the caller ran one.
 #[must_use]
 pub fn requires_conflicts(
     ir: &IntentModule,
@@ -227,21 +236,31 @@ pub fn requires_conflicts(
     considered: &[String],
     floors: &[VersionFloor],
     order: &VersionOrder,
+    at_newest: Option<&[Diagnostic]>,
 ) -> Vec<Conflict> {
     let Some(newest) = considered.last() else {
         return Vec::new();
     };
-    let (last_declared, _) = bounds_at(ir, resolution, pack, newest, order, |l| l.until.clone());
-    conflicts(&last_declared, floors, order)
+    let findings = pinned(ir, resolution, pack, newest, at_newest);
+    let (last_declared, _) = bounds(&findings, order, |l| l.until.clone());
+    conflicts(&last_declared, floors, order, newest)
 }
 
+/// The floors among `floors` above the last version that declares some id the build paints, while
+/// `newest`, the newest carried version, meets them.
 fn conflicts(
     last_declared: &[Bound],
     floors: &[VersionFloor],
     order: &VersionOrder,
+    newest: &str,
 ) -> Vec<Conflict> {
+    let newest = order
+        .key_of(newest)
+        .expect("a carried version is one the pack's table holds");
     floors
         .iter()
+        // One no carried version meets is `E_VERSION_CAP`'s, whatever the build paints.
+        .filter(|floor| order.verdict(&floor.version, newest) != FloorVerdict::Below)
         .filter_map(|floor| {
             // An unplaceable floor is `E_REQUIRES_UNORDERABLE`'s, and its verdict is never `Below`.
             let mut ids: Vec<Bound> = last_declared
@@ -299,20 +318,33 @@ pub fn report_conflicts(out: &mut Reporter<'_>, edition: Edition, conflicts: &[C
     !conflicts.is_empty()
 }
 
-/// The ids a lowering pinned at `version` refuses as undeclared: those `side` finds another
-/// version declaring, each bounded there and once, then those no version declares.
-fn bounds_at(
+/// The findings of `ir` lowered pinned at `version`: `known`, or a fresh lowering's.
+fn pinned<'a>(
     ir: &IntentModule,
     resolution: &Resolution,
     pack: &RegistryPack,
     version: &str,
+    known: Option<&'a [Diagnostic]>,
+) -> Cow<'a, [Diagnostic]> {
+    known.map_or_else(
+        || {
+            let lowered = lower_to_block_array(ir, resolution, Some(&pack.view(Some(version))));
+            Cow::Owned(lowered.diagnostics)
+        },
+        Cow::Borrowed,
+    )
+}
+
+/// The ids a pinned lowering's `findings` refuse as undeclared: those `side` finds another version
+/// declaring, each bounded there and once, then those no version declares.
+fn bounds(
+    findings: &[Diagnostic],
     order: &VersionOrder,
     side: impl Fn(&Lacked) -> Option<String>,
 ) -> (Vec<Bound>, Vec<Painted>) {
-    let pinned = lower_to_block_array(ir, resolution, Some(&pack.view(Some(version))));
     let mut bounds = Vec::new();
     let mut undeclared = Vec::new();
-    for lacked in pinned.diagnostics.iter().filter_map(lacked) {
+    for lacked in findings.iter().filter_map(lacked) {
         match side(&lacked) {
             Some(declaring) => bounds.push(bound(order, lacked.painted, declaring)),
             None => undeclared.push(lacked.painted),
@@ -351,7 +383,7 @@ fn bound(order: &VersionOrder, painted: Painted, version: String) -> Bound {
     }
 }
 
-/// Each id once, at the first place the build paints it, in source order.
+/// Each id once, at the first place the source names it, in source order.
 fn first_of_each<T>(mut items: Vec<T>, painted: impl Fn(&T) -> &Painted) -> Vec<T> {
     items.sort_by_key(|item| painted(item).span.start);
     let mut seen: Vec<String> = Vec::new();

@@ -73,7 +73,8 @@ pub struct Build {
     pub dropped_scopes: Vec<String>,
     /// The `@requires` floors the build is held to, if the source declares any.
     pub version_floors: Option<DeclaredFloors>,
-    /// The floors no version declaring every id the build paints clears, whatever the target.
+    /// The floors above the last version that declares some id the build paints, whatever the
+    /// target.
     pub conflicts: Vec<Conflict>,
 }
 
@@ -104,6 +105,21 @@ pub fn lower_for_build(
     let resolution = resolve(&ir, Some(edition));
     let registry = pack.view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
+    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
+        let considered = supported_versions(pack);
+        let at_newest = (mc_version.is_some()
+            && mc_version == considered.last().map(String::as_str))
+        .then_some(block_ir.diagnostics.as_slice());
+        requires_conflicts(
+            &ir,
+            &resolution,
+            pack,
+            &considered,
+            &declared.floors,
+            &declared.order,
+            at_newest,
+        )
+    });
     // `check`'s gate, so a build never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         module,
@@ -114,16 +130,6 @@ pub fn lower_for_build(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
-    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
-        requires_conflicts(
-            &ir,
-            &resolution,
-            pack,
-            &supported_versions(pack),
-            &declared.floors,
-            &declared.order,
-        )
-    });
     let build = Build {
         block_ir,
         circuits,

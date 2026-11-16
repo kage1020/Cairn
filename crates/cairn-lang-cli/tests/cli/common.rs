@@ -47,6 +47,23 @@ pub const QUASI_CONNECTED_DISPENSER: &str = concat!(
     "  circuit region=floor void=4\n",
 );
 
+/// A build that paints `@stonebrick`, last declared at Bedrock 1.21.0, under three floors: line 1's
+/// at that version, and line 2's and the line 8 `def cottage` floor above it.
+pub const STONEBRICK_UNDER_THREE_FLOORS: &str = concat!(
+    "@requires version>=1.21.0\n",
+    "@requires bedrock version>=1.21.40\n",
+    "\n",
+    "theme t:\n",
+    "  slot wall -> @stonebrick\n",
+    "\n",
+    "def cottage size=2x2:\n",
+    "  requires bedrock version>=1.21.40\n",
+    "  floor mat_slot=wall\n",
+    "\n",
+    "site hamlet:\n",
+    "  place id=a use=cottage theme=t at=origin\n",
+);
+
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

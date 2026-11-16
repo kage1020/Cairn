@@ -1,7 +1,7 @@
-//! `cairn compile` against a floor no target declaring every block the build paints clears:
+//! `cairn compile` against a floor above the last target that declares a block the build paints:
 //! `E_REQUIRES_CONFLICT`, per `spec/versioning-editions` "A floor is weighed against the registry".
 
-use crate::common::{Fixture, Run, assert_stream, compile_as};
+use crate::common::{Fixture, Run, STONEBRICK_UNDER_THREE_FLOORS, assert_stream, compile_as};
 
 /// Paints `@stonebrick`, which Bedrock declares last at 1.21.0 and no later version writes.
 const STONEBRICK: &str =
@@ -69,18 +69,47 @@ fn a_part_placed_twice_conflicts_once_and_names_its_block_once() {
     let source = "theme t:\n  slot floor -> @stonebrick\n\ndef cottage size=2x2:\n  requires \
                   bedrock version>=1.21.40\n  floor mat_slot=floor\n\nsite hamlet:\n  place id=a \
                   use=cottage theme=t at=origin\n  place id=b use=cottage theme=t east_of=a\n";
-    let (_, run) = compiled(source, "bedrock", "1.21.0");
+    let (fixture, run) = compiled(source, "bedrock", "1.21.0");
     assert_eq!(run.code, Some(1), "{}", run.stderr);
-    assert_stream(&run.stderr, &[(5, 3, "error", "E_REQUIRES_CONFLICT")]);
+    let path = fixture.source().display().to_string();
     assert_eq!(
-        run.stderr.matches("is last declared at").count(),
-        1,
-        "and the id both placements paint is named once: {}",
         run.stderr,
+        format!(
+            "error[E_REQUIRES_CONFLICT]: {path}:5:3: `def cottage` requires bedrock \
+             version>=1.21.40, but no bedrock target it admits declares `minecraft:stonebrick`, \
+             which this build paints.\n  `def cottage` declares it, and every `place use=cottage` \
+             inherits it\n  note: {path}:2:17: `minecraft:stonebrick` is last declared at bedrock \
+             1.21.0\n  fix: lower the `requires` floor to 1.21.0 or below, or replace \
+             `minecraft:stonebrick` with a block a bedrock target at or above 1.21.40 declares\n",
+        ),
+        "one finding for the part, naming the id both placements paint once",
     );
 }
 
-/// Bedrock's 1.21.40 flattening drops `stonebrick` and `monster_egg` together.
+#[test]
+fn each_floor_above_the_range_is_one_finding_in_source_order() {
+    let (fixture, run) = compiled(STONEBRICK_UNDER_THREE_FLOORS, "bedrock", "1.21.0");
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    let path = fixture.source().display().to_string();
+    assert_eq!(
+        run.stderr,
+        format!(
+            "error[E_REQUIRES_CONFLICT]: {path}:2:1: this file requires bedrock version>=1.21.40, \
+             but no bedrock target it admits declares `minecraft:stonebrick`, which this build \
+             paints.\n  note: {path}:5:16: `minecraft:stonebrick` is last declared at bedrock \
+             1.21.0\n  fix: lower the `@requires` floor to 1.21.0 or below, or replace \
+             `minecraft:stonebrick` with a block a bedrock target at or above 1.21.40 declares\n\
+             error[E_REQUIRES_CONFLICT]: {path}:8:3: `def cottage` requires bedrock \
+             version>=1.21.40, but no bedrock target it admits declares `minecraft:stonebrick`, \
+             which this build paints.\n  `def cottage` declares it, and every `place use=cottage` \
+             inherits it\n  note: {path}:5:16: `minecraft:stonebrick` is last declared at bedrock \
+             1.21.0\n  fix: lower the `requires` floor to 1.21.0 or below, or replace \
+             `minecraft:stonebrick` with a block a bedrock target at or above 1.21.40 declares\n",
+        ),
+        "the floor at 1.21.0 is no finding",
+    );
+}
+
 #[test]
 fn ids_last_declared_at_one_target_are_named_in_source_order() {
     let source = "@requires bedrock version>=1.21.40\n\ntheme t:\n  slot wall -> @monster_egg\n  \
@@ -101,6 +130,47 @@ fn ids_last_declared_at_one_target_are_named_in_source_order() {
              above 1.21.40 declares\n",
         ),
     );
+}
+
+#[test]
+fn a_floor_at_or_below_the_last_target_declaring_a_painted_id_is_no_conflict() {
+    for floor in ["1.21.0", "1.20.80"] {
+        let source = format!("@requires bedrock version>={floor}\n{STONEBRICK}");
+        let (fixture, run) = compiled(&source, "bedrock", "1.21.0");
+        assert_eq!(run.code, Some(0), "{floor}: {}", run.stderr);
+        assert_eq!(run.stderr, "", "{floor}");
+        assert_eq!(
+            fixture.artifacts(),
+            ["s.crn.lock", "s.mcstructure"],
+            "{floor}"
+        );
+    }
+}
+
+#[test]
+fn a_floor_no_carried_version_meets_is_left_to_e_version_cap() {
+    let source = format!("@requires version>=26.3\n{STONEBRICK}");
+    let (fixture, run) = compiled(&source, "bedrock", "1.21.0");
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    let path = fixture.source().display().to_string();
+    assert_eq!(
+        run.stderr,
+        format!(
+            "error[E_VERSION_CAP]: {path}:1:1: this file requires version>=26.3 (target \
+             1.21.0).\n  no supported bedrock target satisfies it: 1.21.0, 1.21.40, 1.21.60, \
+             1.26.60, latest\n  fix: lower the `@requires` floor, or build against another \
+             edition\n",
+        ),
+        "no bedrock target meets the floor, whatever the build paints",
+    );
+}
+
+#[test]
+fn an_unorderable_floor_is_left_to_its_own_code() {
+    let source = format!("@requires version>=1.21.4\n{STONEBRICK}");
+    let (_, run) = compiled(&source, "bedrock", "1.21.0");
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    assert_stream(&run.stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
 }
 
 #[test]

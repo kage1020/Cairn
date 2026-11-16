@@ -54,6 +54,19 @@ pub(super) struct VersionVerdicts<'a> {
     unplaceable_floors: Vec<&'a VersionFloor>,
 }
 
+impl VersionVerdicts<'_> {
+    /// The errors of the lowering pinned at `version`, if [`weigh_versions`] ran one.
+    pub(super) fn pinned_errors(&self, version: &str) -> Option<&[cairn_lang_core::Diagnostic]> {
+        if self.buildable.iter().any(|built| built == version) {
+            return Some(&[]);
+        }
+        self.refused
+            .iter()
+            .find(|(refused, _)| refused == version)
+            .map(|(_, errors)| errors.as_slice())
+    }
+}
+
 /// One version below the floors that refuse it.
 #[derive(Debug)]
 struct BelowFloor<'a> {

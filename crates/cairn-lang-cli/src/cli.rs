@@ -53,8 +53,9 @@ pub(crate) enum Command {
             on `cairn check` and see every lowering-stage finding `cairn compile` would refuse \
             on, plus the `E_PARTIAL_BUILD` a lost scope earns. Nothing is written either way — \
             `compile` remains the command that produces artifacts and the lockfile, and the only \
-            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`) and the \
-            floors to the blocks the build paints (`E_REQUIRES_CONFLICT`).\n\n\
+            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`) and \
+            refuses a floor the blocks the build paints contradict (`E_REQUIRES_CONFLICT`, which \
+            `cairn info` reports without refusing).\n\n\
             When nothing else is an error, each struct's `logic` is built into its circuit as \
             `cairn compile` builds it (`spec/redstone` \"Place-and-route\"), and the circuit's \
             findings follow the lowering's: the pinned edition's, at the `--target` version when \
@@ -136,12 +137,11 @@ pub(crate) enum Command {
             beside them. A floor above an edition's inferred range is printed \
             as `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. \
             Exits 0 on success, including when the lockfile is missing or cannot be read; 1 on a \
-            parse failure, on any \
-            `Error`-severity diagnostic (the check passes run here, as does each requested \
-            edition's lowering with its circuits laid, and a range derived from a file `cairn \
-            check` rejects is a confident wrong answer), or on any other I/O error reading the \
-            source (permission denied, non-UTF-8 contents); 2 when the source file cannot be \
-            located, and rejects an empty `--editions` value with exit 2"
+            parse failure, on any `Error`-severity diagnostic (the check passes run here, as does \
+            each requested edition's lowering with its circuits laid, and a range derived from a \
+            file `cairn check` rejects is a confident wrong answer), or on any other I/O error \
+            reading the source (permission denied, non-UTF-8 contents); 2 when the source file \
+            cannot be located, and rejects an empty `--editions` value with exit 2"
     )]
     Info {
         /// Path to the .crn file to inspect.
