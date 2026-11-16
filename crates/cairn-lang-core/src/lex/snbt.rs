@@ -298,13 +298,19 @@ impl Scanner<'_> {
             }
             self.pos += 1;
             self.skip_digits();
-            let sign = &self.src[start..whole_start];
             let fraction = &self.src[whole_start..self.pos];
+            let suffix_start = self.pos;
+            self.suffix();
+            let (sign, suffix) = (
+                &self.src[start..whole_start],
+                &self.src[suffix_start..self.pos],
+            );
             return Err(Refusal {
                 at: start,
                 reason: format!(
-                    "`{sign}{fraction}` has no digit before its `.`: a number in an NBT compound \
-                     with a fraction has digits on both sides of the `.`, as `{sign}0{fraction}`"
+                    "`{sign}{fraction}{suffix}` has no digit before its `.`: a number in an NBT \
+                     compound with a fraction has digits on both sides of the `.`, as \
+                     `{sign}0{fraction}{suffix}`"
                 ),
             });
         }
@@ -314,24 +320,21 @@ impl Scanner<'_> {
             let fraction_start = self.pos;
             self.skip_digits();
             if self.pos == fraction_start {
-                let written = &self.src[start..self.pos];
+                self.suffix();
+                let written = &self.src[start..fraction_start];
+                let suffix = &self.src[fraction_start..self.pos];
                 return Err(Refusal {
                     at: start,
                     reason: format!(
-                        "`{written}` has no digit after its `.`: a number in an NBT compound with \
-                         a fraction has digits on both sides of the `.`, as `{written}0`"
+                        "`{written}{suffix}` has no digit after its `.`: a number in an NBT \
+                         compound with a fraction has digits on both sides of the `.`, as \
+                         `{written}0{suffix}`"
                     ),
                 });
             }
         }
         let digits_end = self.pos;
-        let suffix = self
-            .peek()
-            .map(|b| b.to_ascii_lowercase())
-            .filter(|b| matches!(b, b'b' | b's' | b'l' | b'f' | b'd'));
-        if suffix.is_some() {
-            self.pos += 1;
-        }
+        let suffix = self.suffix();
         if let Some(next) = self.peek().filter(|&b| is_unquoted(b)) {
             let number_end = self.pos;
             self.skip_unquoted();
@@ -355,6 +358,18 @@ impl Scanner<'_> {
             fraction,
             suffix,
         })
+    }
+
+    /// The type suffix here, lowercased and read past, or `None` when there is none.
+    fn suffix(&mut self) -> Option<u8> {
+        let suffix = self
+            .peek()
+            .map(|b| b.to_ascii_lowercase())
+            .filter(|b| matches!(b, b'b' | b's' | b'l' | b'f' | b'd'));
+        if suffix.is_some() {
+            self.pos += 1;
+        }
+        suffix
     }
 
     /// The type `parts` writes, which ends where the scanner is, refused when it cannot hold them.

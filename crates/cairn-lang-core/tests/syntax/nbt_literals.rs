@@ -254,8 +254,15 @@ fn a_number_outside_the_subset_is_refused_with_the_spelling_to_write() {
         ),
         (
             "{a:.5f}",
-            "`.5` has no digit before its `.`: a number in an NBT compound with a fraction has \
-             digits on both sides of the `.`, as `0.5`"
+            "`.5f` has no digit before its `.`: a number in an NBT compound with a fraction has \
+             digits on both sides of the `.`, as `0.5f`"
+                .to_owned(),
+            16,
+        ),
+        (
+            "{a:2.F}",
+            "`2.F` has no digit after its `.`: a number in an NBT compound with a fraction has \
+             digits on both sides of the `.`, as `2.0F`"
                 .to_owned(),
             16,
         ),
