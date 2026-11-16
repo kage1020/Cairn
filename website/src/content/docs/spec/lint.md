@@ -10,7 +10,7 @@ shape is what feeds the loop in [Evaluation Framework](/spec/evaluation/).
 
 This section is the catalog: every code a stable command can raise has a row here, and a code a
 stable command raises with no row is a bug in this section rather than a code outside it. A code
-another chapter names that no command raises yet, such as `E_DECOMPILE_DIFF`, is a reserved code
+another chapter names that no command raises yet, such as `W_DEPRECATED`, is a reserved code
 ([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Where a code's
 rule belongs to another chapter, the row states what the code means and links there for the rule.
 The row is what a reader with a code in hand needs to find, and the chapter is where the behaviour
