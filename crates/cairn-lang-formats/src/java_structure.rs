@@ -211,9 +211,13 @@ impl JavaStructure<'_> {
     /// [`NbtIoError::Io`] only, since [`prepare_structure`] ruled out every encoding error.
     pub fn write_gzip<W: std::io::Write>(&self, writer: &mut W) -> Result<(), NbtIoError> {
         // As `write_java_gzip` does; the streaming API names no `flate2` type.
-        let mut gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+        let gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+        // The stream writes a few bytes at a time, and each write into the encoder compresses.
+        let mut gz = std::io::BufWriter::new(gz);
         stream_java_uncompressed(&mut gz, "", |root| self.write_root(root))?;
-        gz.finish()?;
+        gz.into_inner()
+            .map_err(std::io::IntoInnerError::into_error)?
+            .finish()?;
         Ok(())
     }
 
@@ -322,6 +326,7 @@ pub fn write_compound_gzip<W: std::io::Write>(
 
 /// The file extension of a compiled structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OutputExt {
     /// Java vanilla structure (`.nbt`).
     Nbt,
@@ -399,8 +404,8 @@ fn block_entities_at(block_array: &BlockArray) -> HashMap<(u32, u32, u32), &Bloc
         .collect()
 }
 
-/// The block entities a structure file holds, its `blocks` or a `.litematic` region's
-/// `TileEntities`: the last at each voxel, in the grid's `(y, z, x)` order.
+/// The block entities a structure file holds: the last at each voxel, in the grid's `(y, z, x)`
+/// order.
 pub(crate) fn placed_block_entities(block_array: &BlockArray) -> Vec<&BlockEntity> {
     let dims = block_array.dims;
     let mut placed: Vec<(usize, &BlockEntity)> = block_entities_at(block_array)

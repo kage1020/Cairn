@@ -7,7 +7,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
-use cairn_lang_formats::schem::{prepare_schem, schem_files};
+use cairn_lang_formats::schem::{SchemError, prepare_schem, schem_files};
 
 use crate::lockfile::build_lockfile;
 use crate::name_case::NameCase;
@@ -83,6 +83,9 @@ pub(crate) fn prepare_artifacts<'a>(
                 let file_name = output_filename(&file.stem, OutputExt::Schem);
                 let schematic = prepare_schem(file, java).map_err(|err| {
                     eprintln!("error: checking `{scope}`: {err}");
+                    if let Some(fix) = schem_fix(&err) {
+                        eprintln!("  note: {fix}");
+                    }
                     ExitCode::from(1)
                 })?;
                 prepared.push((
@@ -117,6 +120,25 @@ fn litematic_fix(refusal: &LitematicError) -> Option<&'static str> {
         LitematicError::MetadataOverflow { .. } => Some(
             "split the site into smaller ones, or compile with `--structure-format nbt`, which \
              writes a file per placement and walkway",
+        ),
+        _ => None,
+    }
+}
+
+/// How to build a structure `refusal` keeps from being a `.schem`, when another format can.
+fn schem_fix(refusal: &SchemError) -> Option<&'static str> {
+    match refusal {
+        SchemError::DimensionOverflow { .. } => Some(
+            "split the structure along that axis, or compile with `--structure-format nbt`, \
+             which stores each extent as an int",
+        ),
+        SchemError::UnspellableState { .. } => Some(
+            "compile with `--structure-format nbt` or `litematic`, which store each property \
+             apart rather than spelled into one key",
+        ),
+        SchemError::DuplicateState { .. } => Some(
+            "every palette the compiler builds holds each state once, so this is a bug in Cairn \
+             rather than in the source; please report it with the source that produced it",
         ),
         _ => None,
     }
