@@ -6,10 +6,10 @@ use cairn_lang_nbt::tag::{Compound, Tag};
 use cairn_lang_nbt::{Event, NbtReadError, NbtReader};
 
 /// The type id of `TAG_Compound`.
-pub(crate) const COMPOUND_ID: u8 = 10;
+const COMPOUND_ID: u8 = 10;
 
 /// The type id an empty list reads with.
-pub(crate) const END_ID: u8 = 0;
+const END_ID: u8 = 0;
 
 /// Whether a list whose items carry `element_type_id` holds compounds, or nothing.
 pub(crate) fn lists_compounds(element_type_id: u8) -> bool {

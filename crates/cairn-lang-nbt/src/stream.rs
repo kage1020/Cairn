@@ -1,6 +1,6 @@
 //! Streaming NBT encoder: writes a root entry by entry, in the bytes the tree writers produce for
-//! the same tags. A list declares its length up front, so a miscount panics, and the caller keeps
-//! compound keys unique.
+//! the same tags. A list or array declares its length up front, so a miscount panics, and the
+//! caller keeps compound keys unique.
 
 use std::io::Write;
 
