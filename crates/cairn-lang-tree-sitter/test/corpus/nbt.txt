@@ -1,0 +1,156 @@
+==================
+NBT compound as a key's value (field labels)
+==================
+
+struct s size=5x5
+  walls nbt={variant:"black", "a b":'it\'s'}
+
+---
+
+(source_file
+  (struct_decl
+    name: (identifier)
+    args: (attribute_list
+      (attribute
+        key: (identifier)
+        value: (size_literal
+          (integer)
+          (integer))))
+    body: (struct_body
+      (member_stmt
+        keyword: (member_keyword)
+        args: (command_arg_list
+          (command_arg
+            (attribute
+              key: (identifier)
+              value: (nbt_compound
+                (nbt_entry
+                  key: (nbt_key)
+                  value: (nbt_string))
+                (nbt_entry
+                  key: (nbt_string)
+                  value: (nbt_string))))))))))
+
+==================
+Every kind of SNBT value, nested
+==================
+
+struct s size=5x5
+  walls nbt={n:{d:[1.5, -2d, 3f]}, l:[[1], []], t:true, w:[B; 1b, -2B], i:[I;], g:[L; 7L]} height=3
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (nbt_compound
+                (nbt_entry
+                  (nbt_key)
+                  (nbt_compound
+                    (nbt_entry
+                      (nbt_key)
+                      (nbt_list
+                        (nbt_number)
+                        (nbt_number)
+                        (nbt_number)))))
+                (nbt_entry
+                  (nbt_key)
+                  (nbt_list
+                    (nbt_list
+                      (nbt_number))
+                    (nbt_list)))
+                (nbt_entry
+                  (nbt_key)
+                  (boolean))
+                (nbt_entry
+                  (nbt_key)
+                  (nbt_array
+                    (nbt_number)
+                    (nbt_number)))
+                (nbt_entry
+                  (nbt_key)
+                  (nbt_array))
+                (nbt_entry
+                  (nbt_key)
+                  (nbt_array
+                    (nbt_number))))))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))))))
+
+==================
+NBT compound in a selector, apart from its equals sign
+==================
+
+struct s size=5x5
+  door[nbt= {}] side=front
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt
+        (member_keyword)
+        (selector
+          (filter_list
+            (attribute
+              (identifier)
+              (nbt_compound))))
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
+
+==================
+An unquoted string in a compound
+:error
+==================
+
+struct s size=5x5
+  walls nbt={variant:black}
+
+---
+
+==================
+A compound left open at the end of its line
+:error
+==================
+
+struct s size=5x5
+  walls nbt={variant:"black"
+  floor mat_slot=f
+
+---
+
+==================
+A trailing comma in a compound
+:error
+==================
+
+struct s size=5x5
+  walls nbt={a:1,}
+
+---

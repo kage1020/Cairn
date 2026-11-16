@@ -22,7 +22,7 @@ pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> boo
 /// Whether swapping `a` for `b` leaves a selector's match answering the same under `key`.
 fn attr_values_select_alike(key: &str, a: &Value, b: &Value) -> bool {
     if !compares_as_label(key) {
-        return a.kind == b.kind;
+        return a.same_value(b);
     }
     match (&a.kind, &b.kind) {
         (
