@@ -406,6 +406,32 @@ fn a_schematics_offset_is_kept_as_a_comment() {
 }
 
 #[test]
+fn a_version_2_schematics_offset_is_kept_without_calling_it_a_paste() {
+    let mut palette = Compound::new();
+    palette.insert("minecraft:stone", Tag::Int(0));
+    let mut root = Compound::new();
+    for (name, tag) in [
+        ("Version", Tag::Int(2)),
+        ("DataVersion", Tag::Int(3700)),
+        ("Width", Tag::Short(1)),
+        ("Height", Tag::Short(1)),
+        ("Length", Tag::Short(1)),
+        ("Offset", Tag::IntArray(vec![1000, 64, -200])),
+        ("Palette", Tag::Compound(palette)),
+        ("BlockData", Tag::ByteArray(vec![0])),
+    ] {
+        root.insert(name, tag);
+    }
+    let import = imported(&gzip(&root), ImportFormat::Schem, "copied.schem");
+    let source = &import.transliteration.source;
+    let body = &source[source.find("\n\n").expect("a header and a body") + 2..];
+    assert_eq!(
+        body.lines().next(),
+        Some("# stored with an `Offset` of 1000,64,-200")
+    );
+}
+
+#[test]
 fn a_comparator_in_each_java_format_reports_its_block_entity_lost() {
     let ir = ir_of(comparator_array("minecraft:comparator"));
     let litematic = litematic_files(&ir).remove(0);

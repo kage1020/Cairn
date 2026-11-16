@@ -305,10 +305,13 @@ fn decode_schem<R: Read>(
     lose_block_entities(losses, &name, read.volume.block_entities());
     lose_entities(losses, &name, &read.entities);
     let (x, y, z) = read.offset;
+    // Version 2 leaves what `Offset` means open, so only version 3's is worded as a paste.
     let comment = if read.offset == (0, 0, 0) {
         Vec::new()
-    } else {
+    } else if read.version >= 3 {
         vec![format!("pasted at an offset of {x},{y},{z}")]
+    } else {
+        vec![format!("stored with an `Offset` of {x},{y},{z}")]
     };
     let unit = GridUnit {
         name,
