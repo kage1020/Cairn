@@ -133,6 +133,7 @@ fn an_attach_refusal_asks_for_fewer_layers_only_when_the_struct_outgrows_a_struc
     );
     for err in [
         AttachError::NoStructure,
+        AttachError::NoLayers,
         AttachError::OutOfBounds { at: (1, 5, 2) },
         AttachError::Overlap { at: (1, 0, 2) },
         AttachError::PositionedField {

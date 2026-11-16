@@ -32,8 +32,8 @@ def cottage class=house size=9x7:
 
 Important members carry `id=`. Every member of a `struct` or `def` body also gets a **meaning-based
 stable address** derived from parent / role / side / level / offset rather than from generation
-order. `window@front[0]` is the window nearest the left end of the front wall, and
-`level[1].window@front[0]` the one nearest it under the second `level` from the bottom. [Syntax
+order. `window@front[0]` is the window whose `offset=` is nearest the left end of the front wall,
+and `level[1].window@front[0]` the one nearest it under the second `level` from the bottom. [Syntax
 §5.5](/spec/syntax/#55-ids-classes-addresses) gives the form and how members of one role on one wall
 are counted. Reordering lines moves no address, except between members that tie at every step of
 that count, which trade theirs. Adding a member of another role, on another wall or further along
@@ -264,8 +264,9 @@ The wall-local offset comes from:
 
 - a `door`'s `at=` value of `center`, `left`, or `right` ([§5.4](/spec/syntax/#54-selectors)). Numeric
   offsets are reserved.
-- a `window`'s geometric centre, `offset + size.w / 2`, with an absent `offset=` read as `0` the
-  way the cut reads it.
+- a `window`'s geometric centre, `offset + size.w / 2`, where `offset` is the window's first
+  column, read the way the cut reads it: an absent `offset=` as `0`, and an `anchor=` naming a
+  later column moving it left ([§5.4](/spec/syntax/#54-selectors)).
 
 The placement's overhang shifts the port out into the overhang ring beyond the outer face. A
 `window`'s authored `y=` does **not** lift the port off the ground row: the walkway is a 1-voxel
@@ -284,6 +285,9 @@ rows 1 and 2 in one course                       # door (a port's door is a def-
 offset + size.w ≤ wall_length                    # window, horizontal
 every row of y … y + size.h - 1 in one course    # window, vertical
 ```
+
+There `offset` and `y` are the window's first column and lowest row, which its `anchor=` moves off
+the values written ([§5.4](/spec/syntax/#54-selectors)).
 
 Those are the rules a port reads for itself. It also anchors only on an opening the openings pass
 actually cut. A `window` left uncut by an argument only the cut reads (`repeat=` or `step=`,

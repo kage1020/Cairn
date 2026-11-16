@@ -335,6 +335,25 @@ entities, and entities all use one selector grammar.
 x so a `sym=true` opening looks symmetric from either side. The `left` and `right` walls anchor at
 low `z` and mirror the same way.
 
+**`anchor=` window anchors.** `offset=` and `y=` place one cell of a window, and `anchor=` names
+which, seen from outside the wall:
+
+| Anchor | Column from the window's first | Row from its lowest |
+|---|---|---|
+| `bottom_left`, `middle_left`, `top_left` | `0` | `0`, `size_h / 2`, `size_h - 1` |
+| `bottom_center`, `center`, `top_center` | `size_w / 2` | `0`, `size_h / 2`, `size_h - 1` |
+| `bottom_right`, `middle_right`, `top_right` | `size_w - 1` | `0`, `size_h / 2`, `size_h - 1` |
+
+The three rows are the anchors in the order the first column lists them, so `top_center` is the
+column `size_w / 2` and the row `size_h - 1`. Division rounds down, so on an even span the middle is
+the later of the two middle cells, as `at=center` picks on an even wall. A window without `anchor=`
+is placed by `bottom_left`, its first column and lowest row. `anchor=bottom_center offset=4
+size=3x3` cuts the columns `3` to `5`, as `offset=3` does without it. Any other value is
+`E_INVALID_MEMBER`, and so is an anchor that puts the window's first column before the left end of
+its wall or its lowest row below the base row of its struct or `level`. In what follows, `offset`
+is the window's first column, which is `offset=` itself unless `anchor=` names a later one, and a
+`repeat=` series steps from it ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
+
 `sym=true` mirrors the opening across the wall's midpoint
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle
 is rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. That includes the
@@ -404,8 +423,10 @@ first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `le
   1. along the wall: `offset=`, or else the column a door anchor in `at=` names
      ([§5.4](#54-selectors)) on the wall the line names, which runs the `W` of `size=` for `front`
      and `back` and its `H` for `left` and `right`. A line that writes neither, or whose `at=`
-     names a wall or a cell, stands at 0;
-  2. then up: `y=`, 0 when absent, so `level`s count from the lowest;
+     names a wall or a cell, stands at 0. A window counts by its `offset=` as written, which with
+     `anchor=` is the column of the cell the anchor names, not its first column;
+  2. then up: `y=`, 0 when absent, so `level`s count from the lowest; a window's `y=` counts as
+     written too;
   3. then the cell a coordinate `at=X,Y,Z` names, or else the box `from=` and `to=` span, whichever
      end is written first: its low corner, then its high corner, each compared by `y`, then `z`,
      then `x`. A line that writes none of them stands at `0,0,0`.
@@ -511,26 +532,27 @@ language server shows the entry's own line on hover.
 - **`window`.** An opening cut into a wall and filled with its `mat_slot=` material, or left open
   without one. See [§5.4](#54-selectors).
   - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
-  - **`y=`.** The row its lowest cells are on, counted from the floor.
-  - **`offset=`.** Its first column along the wall, counted from the wall's left end as seen
-    from outside.
+  - **`y=`.** The row of the cell its `anchor=` names, counted from the floor: its lowest row
+    without one.
+  - **`offset=`.** The column of the cell its `anchor=` names, counted from the wall's left end as
+    seen from outside: its first column without one.
   - **`size=`.** Its width and height, `WxH`.
   - **`sym=`.** With `true`, a mirrored copy across the wall's midpoint is cut too.
   - **`repeat=`.** How many windows the series cuts along the wall, the first included.
   - **`step=`.** How many columns each window starts after the one before it.
   - **`shape=`.** The opening's outline, read by nothing yet. See
     [Entities §8.2](/spec/entities/#82-anchor-conventions).
-  - **`anchor=`.** The opening's reference point, read by nothing yet. See
+  - **`anchor=`.** The cell of the window `offset=` and `y=` place, `bottom_left` when absent. See
     [Entities §8.2](/spec/entities/#82-anchor-conventions).
 - **`roof`.** A roof over the walls, in the shape its `kind=` names. See [Compilation Model
   §4.3](/spec/compilation/#43-gable-roof-voxel-rules).
   - **`kind=`.** Its shape: `gable`, `shed`, `hip` or `flat`.
   - **`overhang=`.** How many columns it reaches past the walls on every side.
   - **`slope_to=`.** The wall a `shed` roof rises toward.
-  - **`footprint=`.** An anchor key, read by nothing yet. See
+  - **`footprint=`.** The cells it covers: only `struct`, the struct's `size=` footprint. See
     [Entities §8.2](/spec/entities/#82-anchor-conventions).
-  - **`bounds=`.** An anchor key, read by nothing yet. See
-    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+  - **`bounds=`.** What its overhang does to the body: only `expand`, which widens the block array.
+    See [Entities §8.2](/spec/entities/#82-anchor-conventions).
 - **`stair`.** An eave: a band of stairs in the overhang outside one wall. See [Compilation Model
   §4.3](/spec/compilation/#43-gable-roof-voxel-rules).
   - **`kind=`.** The kind of stair: `stairs`.
