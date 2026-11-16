@@ -22,14 +22,11 @@ use crate::block_array::walkway::{
 use crate::block_array::{BlockArray, BlockState, Dims, Footprint, Placement, Walkway};
 
 use super::overlap::report_strip_overlaps;
-use super::site_floor::{FloorExtent, FloorPlan, PlacedBody, collect_floor_cells};
+use super::site_floor::{Cell, FloorExtent, FloorPlan, PlacedBody, collect_floor_cells};
 use super::token_diag::{
     IdSite, NamedBy, TokenSite, check_state_literal, diag_abstract_token, diag_state_unmapped,
     diag_undeclared_id, diag_unknown_abstract_token,
 };
-
-/// A world cell, `(x, y, z)`.
-type Cell = (i32, i32, i32);
 
 /// What laying the walkways reads: the whole finished site at once.
 pub(super) struct ConnectInputs<'a> {
@@ -55,7 +52,7 @@ pub(super) fn lower_connects(
     let ported = place_every_port(inputs, diagnostics);
     let floors = walk_planes(&ported, structures, placed);
     // Indexed once for every row on a plane, so many colliding rows cannot multiply a linear scan.
-    let indexes: BTreeMap<i32, BlockedIndex<'_, _>> = floors
+    let indexes: BTreeMap<(&SiteName, i32), BlockedIndex<'_, _>> = floors
         .iter()
         .map(|(plane, floor)| (*plane, BlockedIndex::new(&floor.cells)))
         .collect();
@@ -65,11 +62,10 @@ pub(super) fn lower_connects(
         let Some((from_pos, to_pos)) = ports else {
             continue;
         };
-        let (Some(floor), Some(blocked_index)) =
-            (floors.get(&from_pos.1), indexes.get(&from_pos.1))
-        else {
+        let plane = (&connect.site, from_pos.1);
+        let (Some(floor), Some(blocked_index)) = (floors.get(&plane), indexes.get(&plane)) else {
             // INVARIANT: `floors` and `indexes` hold the plane of every pair `place_ports` placed.
-            debug_assert!(false, "no floor plan for the plane y={}", from_pos.1);
+            debug_assert!(false, "no floor plan for the site and row {plane:?}");
             continue;
         };
         let blocked = &floor.cells;
@@ -179,18 +175,22 @@ fn place_every_port<'c>(
         .collect()
 }
 
-/// The [`FloorPlan`] of each row a pair of `ported` ports shares, collected once for all its rows.
-fn walk_planes(
-    ported: &[Ported<'_>],
+/// The [`FloorPlan`] of each site on each row a pair of its `ported` ports shares, collected once
+/// for all its rows.
+fn walk_planes<'c>(
+    ported: &[Ported<'c>],
     structures: &IndexMap<String, BlockArray>,
     placed: &IndexMap<String, PlacedBody>,
-) -> BTreeMap<i32, FloorPlan> {
+) -> BTreeMap<(&'c SiteName, i32), FloorPlan> {
     ported
         .iter()
-        .filter_map(|(.., ports)| ports.map(|(from, _)| from.1))
-        .collect::<BTreeSet<i32>>()
+        .filter_map(|(connect, .., ports)| ports.map(|(from, _)| (&connect.site, from.1)))
+        .collect::<BTreeSet<_>>()
         .into_iter()
-        .map(|plane| (plane, collect_floor_cells(structures, placed, plane)))
+        .map(|(site, plane)| {
+            let floor = collect_floor_cells(structures, placed, site, plane);
+            ((site, plane), floor)
+        })
         .collect()
 }
 
@@ -524,7 +524,8 @@ struct BlockedEndpoints<'a> {
     to: ((i32, i32, i32), &'a str),
 }
 
-/// The finished floor plan a `W_WALKWAY_BLOCKED` note reads to name what is in the way.
+/// The finished floor plan of a row's site, which a `W_WALKWAY_BLOCKED` note reads to name what is
+/// in the way.
 struct SiteFloor<'a> {
     structures: &'a IndexMap<String, BlockArray>,
     placed: &'a IndexMap<String, PlacedBody>,
@@ -545,10 +546,10 @@ fn walkway_blocked_note(
         }) => {
             let mut clauses = Vec::new();
             if from_blocked {
-                clauses.push(buried_port_clause(&connect.from, ends.from, connect, site));
+                clauses.push(buried_port_clause(&connect.from, ends.from, site));
             }
             if to_blocked {
-                clauses.push(buried_port_clause(&connect.to, ends.to, connect, site));
+                clauses.push(buried_port_clause(&connect.to, ends.to, site));
             }
             clauses.join("; ")
         }
@@ -580,8 +581,9 @@ fn area_cap_note(
 ) -> String {
     let (from, to) = (ends.from.0, ends.to.0);
     let head = format!(
-        "the router searches the box spanning both ports and every placement floor on the walk \
-         plane, here {area} cells, past its cap of {cap} cells"
+        "the router searches the box spanning both ports and every placement floor of site \
+         `{site}` on the walk plane, here {area} cells, past its cap of {cap} cells",
+        site = connect.site,
     );
     let ports_area = margin_box_area(from, to);
     if ports_area > cap {
@@ -593,7 +595,7 @@ fn area_cap_note(
     let labels: Vec<String> = edge_pushers(rect, from, to, &site.floor.extents)
         .into_iter()
         .filter_map(|key| site.placed.get(key))
-        .map(|body| placement_label(&body.placement, connect))
+        .map(|body| placement_label(&body.placement))
         .collect();
     if labels.is_empty() {
         debug_assert!(
@@ -645,20 +647,15 @@ pub(super) fn edge_pushers(
         .collect()
 }
 
-/// A placement as a note names it: its `place id=`, plus its site when not the row's own.
-fn placement_label(placement: &Placement, connect: &crate::resolve::ValidatedConnect) -> String {
-    if placement.site == connect.site {
-        format!("`{}`", placement.place_id)
-    } else {
-        format!("`{}` in site `{}`", placement.place_id, placement.site)
-    }
+/// A placement as a note names it.
+fn placement_label(placement: &Placement) -> String {
+    format!("`{}`", placement.place_id)
 }
 
 /// One clause of a buried-endpoint note: what covers the port cell, and the remedy for each.
 fn buried_port_clause(
     port: &crate::resolve::PortRef,
     (cell, own_key): ((i32, i32, i32), &str),
-    connect: &crate::resolve::ValidatedConnect,
     site: &SiteFloor<'_>,
 ) -> String {
     let mut own_block: Option<Option<&str>> = None;
@@ -688,9 +685,9 @@ fn buried_port_clause(
                     .filter(|state| !is_stand_in(state))
                     .map(|state| state.id.as_str()),
             );
-            own_label = Some(placement_label(&body.placement, connect));
+            own_label = Some(placement_label(&body.placement));
         } else {
-            others.push(placement_label(&body.placement, connect));
+            others.push(placement_label(&body.placement));
         }
     }
     let own = own_block.zip(own_label).map(|(block, own)| match block {

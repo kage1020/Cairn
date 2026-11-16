@@ -1,18 +1,23 @@
-//! The cells the placed bodies of a run hold on one walk plane, which a `connect` strip on that
-//! plane routes around.
+//! The cells the placed bodies of each site hold on one walk plane, which a `connect` strip of
+//! that site on that plane routes around.
 
 use std::collections::{HashMap, HashSet};
 
 use indexmap::IndexMap;
 
 use crate::error::Span;
+use crate::ids::SiteName;
 
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{BlockArray, PaletteIndex, Placement};
 
 use super::anchor::PlaceAnchor;
 
-/// One `place` row that lowered, with the masonry and openings its body lowered with.
+/// A world cell, `(x, y, z)`.
+pub(super) type Cell = (i32, i32, i32);
+
+/// One `place` row that lowered, with its span, its origin selector, and the masonry and openings
+/// its body lowered with.
 ///
 /// Not on [`Placement`], which is hashed into `resolved_ir_hash`.
 pub(super) struct PlacedBody {
@@ -27,13 +32,13 @@ pub(super) struct PlacedBody {
     pub(super) cut: HashSet<Span>,
 }
 
-/// What the placements hold on one walk plane: cells a walkway may not overwrite, and who lays
-/// each.
+/// What one site's placements hold on one walk plane: cells its walkways may not overwrite, and
+/// who lays each.
 pub(super) struct FloorPlan {
-    /// World cells of every non-air voxel of every placement on the plane.
-    pub(super) cells: HashSet<(i32, i32, i32)>,
+    /// World cells of every non-air voxel of every placement of the site on the plane.
+    pub(super) cells: HashSet<Cell>,
     /// For each cell in [`Self::cells`], what lays it, in placement order.
-    pub(super) owners: HashMap<(i32, i32, i32), Vec<FloorOwner>>,
+    pub(super) owners: HashMap<Cell, Vec<FloorOwner>>,
     /// The box each placement's cells span, under its `site::SITE::PLACE_ID` key.
     pub(super) extents: IndexMap<String, FloorExtent>,
 }
@@ -58,17 +63,21 @@ pub(super) struct FloorExtent {
     pub(super) max_z: i32,
 }
 
-/// Collect the [`FloorPlan`] every lowered placement lays on the world row `plane`: its floor
-/// on its ground row, and whatever its body holds on a row above.
+/// Collect the [`FloorPlan`] every lowered placement of `site` lays on the world row `plane`: its
+/// floor on its ground row, and whatever its body holds on a row above.
 pub(super) fn collect_floor_cells(
     structures: &IndexMap<String, BlockArray>,
     placed: &IndexMap<String, PlacedBody>,
+    site: &SiteName,
     plane: i32,
 ) -> FloorPlan {
-    let mut cells: HashSet<(i32, i32, i32)> = HashSet::new();
-    let mut owners: HashMap<(i32, i32, i32), Vec<FloorOwner>> = HashMap::new();
+    let mut cells: HashSet<Cell> = HashSet::new();
+    let mut owners: HashMap<Cell, Vec<FloorOwner>> = HashMap::new();
     let mut extents: IndexMap<String, FloorExtent> = IndexMap::new();
     for (index, (key, PlacedBody { placement, .. })) in placed.iter().enumerate() {
+        if placement.site != *site {
+            continue;
+        }
         let Some(ba) = structures.get(key) else {
             // INVARIANT: `lower_site` inserts each key into `placed` and `structures` together.
             debug_assert!(false, "placement `{key}` has no structure");

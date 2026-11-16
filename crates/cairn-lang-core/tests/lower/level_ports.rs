@@ -94,7 +94,7 @@ fn a_walkway_routes_around_what_the_placements_hold_on_its_own_row() {
             .collect::<Vec<_>>(),
         [(
             "E_PLACEMENT_OVERLAP",
-            "walkway `a.e ↔ b.e` lays 3 cells inside `place id=p`, from (4, 0, 3) to (6, 0, 3)",
+            "walkway `a.e ↔ b.e` lays 3 cells inside `place id=p`, within (4, 0, 3) to (6, 0, 3)",
         )],
     );
     assert_eq!(

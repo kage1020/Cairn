@@ -11,10 +11,7 @@ use crate::resolve::ValidatedConnect;
 use crate::block_array::Placement;
 
 use super::anchor::PlaceAnchor;
-use super::site_floor::PlacedBody;
-
-/// A world cell, `(x, y, z)`.
-type Cell = (i32, i32, i32);
+use super::site_floor::{Cell, PlacedBody};
 
 /// The cells a placement's structure file writes, or the part two of them share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,10 +90,6 @@ impl fmt::Display for WorldBox {
     }
 }
 
-/// What every overlap finding says the two files do to each other.
-const ERASES: &str = "each placement is written with air in every cell its body does not fill, so \
-                      whichever of the two is placed second decides what those cells hold";
-
 /// Report every `place` row whose box shares a cell with an earlier row's in the same site.
 pub(super) fn report_placement_overlaps(
     placed: &IndexMap<String, PlacedBody>,
@@ -147,8 +140,8 @@ fn diag_placement_overlap(
         code: DiagnosticCode::PlacementOverlap,
         span: later.row.clone(),
         primary: format!(
-            "`place id={later_id}` spans {later_box} and overlaps `place id={earlier_id}` from \
-             {shared}",
+            "`place id={later_id}` spans {later_box} and shares {shared} with `place \
+             id={earlier_id}`",
         ),
         notes: vec![
             DiagnosticNote {
@@ -157,7 +150,11 @@ fn diag_placement_overlap(
             },
             DiagnosticNote {
                 span: None,
-                message: format!("two placements of one site may share no cell: {ERASES}; {fix}"),
+                message: format!(
+                    "two placements of one site may share no cell: each is written with air in \
+                     every cell its body does not fill, so whichever of the two is placed second \
+                     decides what those cells hold; {fix}"
+                ),
             },
         ],
         data: None,
@@ -192,7 +189,7 @@ pub(super) fn report_strip_overlaps(
             code: DiagnosticCode::PlacementOverlap,
             span: connect.span.clone(),
             primary: format!(
-                "walkway `{from} ↔ {to}` lays {count} {cells} inside `place id={id}`, from \
+                "walkway `{from} ↔ {to}` lays {count} {cells} inside `place id={id}`, within \
                  {shared}",
                 from = connect.from,
                 to = connect.to,
@@ -207,8 +204,12 @@ pub(super) fn report_strip_overlaps(
                     span: None,
                     message: format!(
                         "a walkway may lay no cell inside a placement other than the two it \
-                         joins: {ERASES}, its own block or the walkway's; move `place id={id}` \
-                         clear of the strip"
+                         joins: `place id={id}`'s file writes air in every cell its body does \
+                         not fill, so whichever of it and the walkway is placed second decides \
+                         what those cells hold; move `place id={id}` off the route between \
+                         `{from}` and `{to}`",
+                        from = connect.from,
+                        to = connect.to,
                     ),
                 },
             ],

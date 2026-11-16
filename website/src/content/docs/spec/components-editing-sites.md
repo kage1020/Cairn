@@ -100,9 +100,10 @@ low-`x`, low-`z` corner, and `dims` is its full extent: the `size=WxH` footprint
 A `place` with no origin selector or more than one, an `at=` other than `origin`, or an `east_of=`
 / `north_of=` whose value is not a label is `E_INVALID_PLACE_ORIGIN`.
 
-A selector keeps its row clear of the row it names and of no other, so a second `at=origin`, or a
-chain of relative rows that comes back alongside another, can land on a placement. Two rows of one
-site whose boxes share a cell are `E_PLACEMENT_OVERLAP` ([Lint](/spec/lint/#sites-and-placements)).
+`east_of=` and `north_of=` keep a row clear of the row they name and of no other, and `at=origin`
+keeps it clear of nothing. So a second `at=origin`, or a chain of relative rows that comes back
+onto a row placed along another chain, can land on a placement. Two rows of one site whose boxes
+share a cell are `E_PLACEMENT_OVERLAP` ([Lint](/spec/lint/#sites-and-placements)).
 
 `gap=` belongs to the two relative selectors. An `at=origin` row is anchored absolutely and reads
 no distance, so a `gap=` written beside it is read by nothing and reported as `W_IGNORED_ARGUMENT`
@@ -258,22 +259,23 @@ different rows, such as a door under `level y=4` and a door in a `def` body, sha
 row lays nothing and is reported as `W_DEFERRED_MEMBER`. Two ports under a `level` of one `y=` in
 two placements are joined by a strip on that row, a bridge between upper floors.
 
-The strip's row is its plane. Every block a placement holds on that row is in the way: its floor
-and the foot of its walls on the ground row, and its walls on a row above. When the L would cross
-one, the compiler searches that plane for a detour: the shortest route around the obstacle, and
-among equal-length routes the one with the fewest turns, with deterministic tie-breaking so the
-same source always lays the same strip.
+The strip's row is its plane. Every block a placement of its site holds on that row is in the way:
+its floor and the foot of its walls on the ground row, and its walls on a row above. When the L
+would cross one, the compiler searches that plane for a detour: the shortest route around the
+obstacle, and among equal-length routes the one with the fewest turns, with deterministic
+tie-breaking so the same source always lays the same strip.
 
 The row falls back to the straight L, with the colliding cells skipped, only when no unobstructed
 route exists at all:
 
-- a port is buried under another placement's floor, or under a block its own placement lays on the
-  port cell;
+- a port is buried under the floor of another placement of its site, or under a block its own
+  placement lays on the port cell;
 - the target is fully enclosed;
 - the search goes past the router's area cap.
 
-The router searches the box spanning both ports and every placement floor on the walk plane, so
-the cap can be reached by a distant pair of ports or by a widely spread floor plan.
+The router searches the box spanning both ports and every placement floor of the walkway's site on
+the walk plane, so the cap can be reached by a distant pair of ports or by a widely spread floor
+plan. A placement of another site is never in the way, since each site is a layout of its own.
 
 That earns one `W_WALKWAY_BLOCKED` naming the concrete cause and its remedy: move the buried door
 or window (or the block on its port cell), widen the gap, bring the two structures closer, or bring
