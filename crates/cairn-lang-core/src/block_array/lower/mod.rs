@@ -128,15 +128,14 @@ fn lower_to_block_array_within(
         members,
     } = built;
     report_placement_overlaps(&placed, &mut diagnostics);
-    // After every site, so the collision set covers every floor tile a strip might cross.
-    let floor = collect_floor_cells(&structures, &placed);
+    let floors = collect_floor_cells(&structures, &placed);
     lower_connects(
         &ConnectInputs {
             resolution,
             defs: &intent.defs,
             registry,
             placed: &placed,
-            floor: &floor,
+            floors: &floors,
         },
         &mut structures,
         &mut walkways,
