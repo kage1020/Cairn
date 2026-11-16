@@ -4,7 +4,7 @@
 use cairn_lang_core::block_array::BlockArray;
 use cairn_lang_core::check::DiagnosticCode;
 
-use crate::common::{lowered, only_structure, refusals, state_at, walkway_was_laid};
+use crate::common::{findings, lowered, only_structure, refusals, state_at, walkway_was_laid};
 
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
@@ -155,6 +155,57 @@ fn a_window_on_a_struct_with_no_walls_says_there_is_no_wall() {
         ],
     );
     assert!(!contains_id(only_structure(&out), "minecraft:glass_pane"));
+}
+
+#[test]
+fn an_anchored_window_is_held_to_one_course_by_the_rows_its_anchor_places() {
+    let source = |window: &str| {
+        format!(
+            "{THEME}struct t size=7x5\n  walls mat_slot=wall height=3\n  {window} mat_slot=glass\n"
+        )
+    };
+    // Rows 1..=3, inside the course, though rows from `y=3` would run past it.
+    let src = source("window side=front anchor=top_left y=3 offset=3 size=1x3");
+    let inside = lowered(&src);
+    assert_eq!(findings(&src, &inside), []);
+    for y in 1..=3 {
+        assert_eq!(
+            state_at(only_structure(&inside), 3, y, 4).id,
+            "minecraft:glass_pane",
+            "row y={y}",
+        );
+    }
+    let window = "window side=front anchor=top_left y=4 offset=3 size=1x3";
+    let src = source(window);
+    assert_eq!(
+        findings(&src, &lowered(&src)),
+        [(
+            DiagnosticCode::InvalidMember,
+            &*format!("{window} mat_slot=glass"),
+            "window rows y=2..=4 are not all inside one wall course (size=1x3; the walls occupy \
+             y=1..=3)",
+            vec![
+                "move the window with `y=`, shorten it with `size=`, or raise the walls' \
+                 `height=`, so one course holds every row it cuts"
+            ],
+        )],
+    );
+}
+
+#[test]
+fn an_anchored_window_with_no_wall_names_the_y_and_anchor_it_writes() {
+    let window = "window side=front anchor=top_left y=3 offset=3 size=1x2 mat_slot=glass";
+    let src = format!("{THEME}struct t size=7x5\n  floor mat_slot=floor\n  {window}\n");
+    assert_eq!(
+        findings(&src, &lowered(&src)),
+        [(
+            DiagnosticCode::InvalidMember,
+            window,
+            "window at y=3 anchor=top_left size=1x2 has no wall to cut into: this struct declares \
+             no `walls` with a positive `height=`",
+            vec!["add a `walls` member whose course holds the window's rows"],
+        )],
+    );
 }
 
 #[test]
