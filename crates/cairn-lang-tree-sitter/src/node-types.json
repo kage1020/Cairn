@@ -114,6 +114,10 @@
             "named": true
           },
           {
+            "type": "decimal",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -123,6 +127,10 @@
           },
           {
             "type": "material_ref",
+            "named": true
+          },
+          {
+            "type": "nbt_compound",
             "named": true
           },
           {
@@ -159,6 +167,10 @@
         },
         {
           "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "decimal",
           "named": true
         },
         {
@@ -315,6 +327,10 @@
         },
         {
           "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "decimal",
           "named": true
         },
         {
@@ -697,6 +713,10 @@
             "named": true
           },
           {
+            "type": "decimal",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -778,6 +798,10 @@
         "types": [
           {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "decimal",
             "named": true
           },
           {
@@ -873,6 +897,121 @@
     }
   },
   {
+    "type": "nbt_array",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "nbt_number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "nbt_compound",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "nbt_entry",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "nbt_entry",
+    "named": true,
+    "fields": {
+      "key": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "nbt_key",
+            "named": true
+          },
+          {
+            "type": "nbt_string",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "nbt_array",
+            "named": true
+          },
+          {
+            "type": "nbt_compound",
+            "named": true
+          },
+          {
+            "type": "nbt_list",
+            "named": true
+          },
+          {
+            "type": "nbt_number",
+            "named": true
+          },
+          {
+            "type": "nbt_string",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "nbt_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "nbt_array",
+          "named": true
+        },
+        {
+          "type": "nbt_compound",
+          "named": true
+        },
+        {
+          "type": "nbt_list",
+          "named": true
+        },
+        {
+          "type": "nbt_number",
+          "named": true
+        },
+        {
+          "type": "nbt_string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "parenthesized_expression",
     "named": true,
     "fields": {},
@@ -921,6 +1060,10 @@
       "types": [
         {
           "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "decimal",
           "named": true
         },
         {
@@ -1152,6 +1295,10 @@
         "types": [
           {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "decimal",
             "named": true
           },
           {
@@ -1580,6 +1727,10 @@
           "named": true
         },
         {
+          "type": "decimal",
+          "named": true
+        },
+        {
           "type": "identifier",
           "named": true
         },
@@ -1655,6 +1806,18 @@
     "named": false
   },
   {
+    "type": "[B;",
+    "named": false
+  },
+  {
+    "type": "[I;",
+    "named": false
+  },
+  {
+    "type": "[L;",
+    "named": false
+  },
+  {
     "type": "]",
     "named": false
   },
@@ -1698,6 +1861,10 @@
   {
     "type": "counter",
     "named": false
+  },
+  {
+    "type": "decimal",
+    "named": true
   },
   {
     "type": "def",
@@ -1770,6 +1937,18 @@
   {
     "type": "nand",
     "named": false
+  },
+  {
+    "type": "nbt_key",
+    "named": true
+  },
+  {
+    "type": "nbt_number",
+    "named": true
+  },
+  {
+    "type": "nbt_string",
+    "named": true
   },
   {
     "type": "nor",
