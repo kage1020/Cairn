@@ -75,11 +75,7 @@ pub(crate) fn write_payload<W: Write>(
         Tag::Float(v) => endian.write_f32(w, *v)?,
         Tag::Double(v) => endian.write_f64(w, *v)?,
         Tag::ByteArray(bytes) => {
-            write_array_len(w, endian, "byte_array", bytes.len())?;
-            // A single byte has no byte order.
-            for &b in bytes {
-                w.write_all(&b.to_ne_bytes())?;
-            }
+            write_byte_array_payload(w, endian, bytes.len(), bytes.iter().copied())?;
         }
         Tag::String(s) => write_string(w, endian, s)?,
         Tag::List(list) => write_list(w, endian, list)?,
@@ -109,16 +105,46 @@ pub(crate) fn write_long_array_payload<W: Write>(
     values: impl IntoIterator<Item = i64>,
 ) -> Result<(), NbtIoError> {
     write_array_len(w, endian, "long_array", len)?;
+    write_counted(w, ("long array", len), values, |w, value| {
+        endian.write_i64(w, value)
+    })
+}
+
+/// A `TAG_Byte_Array` payload of the `len` values `values` yields.
+///
+/// # Panics
+///
+/// When `values` yields a number of values other than `len`.
+pub(crate) fn write_byte_array_payload<W: Write>(
+    w: &mut W,
+    endian: Endian,
+    len: usize,
+    values: impl IntoIterator<Item = i8>,
+) -> Result<(), NbtIoError> {
+    write_array_len(w, endian, "byte_array", len)?;
+    // A single byte has no byte order.
+    write_counted(w, ("byte array", len), values, |w, value| {
+        w.write_all(&value.to_ne_bytes())
+    })
+}
+
+/// Writes exactly the `len` values of the array `kind` names, each with `write_one`.
+fn write_counted<W: Write, T>(
+    w: &mut W,
+    (kind, len): (&str, usize),
+    values: impl IntoIterator<Item = T>,
+    mut write_one: impl FnMut(&mut W, T) -> std::io::Result<()>,
+) -> Result<(), NbtIoError> {
     let mut values = values.into_iter();
     for written in 0..len {
         let value = values.next().unwrap_or_else(|| {
-            panic!("a streamed long array declared {len} values and was given {written}")
+            panic!("a streamed {kind} declared {len} values and was given {written}")
         });
-        endian.write_i64(w, value)?;
+        write_one(w, value)?;
     }
     assert!(
         values.next().is_none(),
-        "a streamed long array declared {len} values and was given more",
+        "a streamed {kind} declared {len} values and was given more",
     );
     Ok(())
 }

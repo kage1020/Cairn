@@ -1,11 +1,8 @@
 //! `read_litematic` over what the writer wrote, and over files only another tool would write.
 
-use std::io::Write as _;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockState, Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY,
-    PaletteIndex,
+    BlockArrayIr, BlockState, Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY, PaletteIndex,
 };
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::litematic::{
@@ -16,7 +13,7 @@ use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 use cairn_lang_nbt::{NbtReadError, write_java_uncompressed};
 
-use crate::common::{array_of, comparator_array, ir_of, latest, lower_example};
+use crate::common::{array_of, comparator_array, gzip, ir_of, latest, lower_example, volume_of};
 
 fn target(version: &str) -> JavaTarget {
     resolve_java_target(version).expect("a targetable version")
@@ -35,32 +32,6 @@ fn round_trip(ir: &BlockArrayIr, target: &JavaTarget) -> Vec<LitematicSchematic>
             read_litematic(bytes.as_slice()).expect("the file reads back")
         })
         .collect()
-}
-
-/// `array` as the reader returns it: its palette, its grid and its block entities' fields.
-fn volume_of(array: &BlockArray) -> BlockVolume {
-    let block_entities = array
-        .block_entities
-        .iter()
-        .map(|entity| {
-            let mut data = Compound::new();
-            for (field, value) in &entity.fields {
-                data.insert(field.clone(), Tag::Int(*value));
-            }
-            StoredBlockEntity {
-                pos: entity.pos,
-                id: entity.id.clone(),
-                data,
-            }
-        })
-        .collect();
-    BlockVolume::new(
-        array.dims,
-        array.palette.entries.clone(),
-        array.voxels.clone(),
-        block_entities,
-    )
-    .expect("a lowered array is a volume")
 }
 
 #[test]
@@ -149,12 +120,6 @@ fn root_bytes(entries: Vec<(&str, Tag)>) -> Vec<u8> {
     let mut bytes = Vec::new();
     write_java_uncompressed(&mut bytes, "", &root).expect("the root writes");
     bytes
-}
-
-fn gzip(bytes: &[u8]) -> Vec<u8> {
-    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    gz.write_all(bytes).expect("the bytes compress");
-    gz.finish().expect("the member closes")
 }
 
 /// `{r: region}`, as a root's `Regions`.
