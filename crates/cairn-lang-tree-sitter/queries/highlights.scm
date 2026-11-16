@@ -41,12 +41,15 @@
 ["->" "=" "<="] @operator
 
 ; punctuation
-["[" "]" "(" ")" "{" "}"] @punctuation.bracket
+["[" "]" "(" ")" "{" "}" "[B;" "[I;" "[L;"] @punctuation.bracket
 ["," ";" "." ":"] @punctuation.delimiter
 
 ; literals
 (string) @string
 (integer) @number
+(decimal) @number.float
+(nbt_number) @number
+(nbt_string) @string
 (bit) @number
 (size_literal) @number.special
 (coordinate) @number.special
@@ -56,6 +59,7 @@
 (material_ref) @type
 (block_id) @type
 (attribute key: (identifier) @variable.parameter)
+(nbt_key) @property
 (operand_name) @variable.parameter
 ; Every segment after the first is a member; the first keeps the generic @variable.
 (signal_ref . (identifier) (identifier) @variable.member)

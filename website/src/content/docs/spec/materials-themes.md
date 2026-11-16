@@ -42,10 +42,11 @@ value is dead text whatever a binding comes to mean. That is
 `E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error even while
 bindings are reserved, for the reason `E_DUPLICATE_ARG` refuses one key written twice inside one row
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Sameness is by meaning: attribute
-order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
-`window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
-different keys are not reported. They compose, and splitting a long binding list over two lines is
-allowed.
+order does not count, `class=` / `id=` / `mat_slot=` values compare as label text, and numbers
+compare by the number they write ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)), so
+`window[class=small]` and `window[class="small"]` are one selector, and so are `walls[height=4]`
+and `walls[height=4.0]`. Rows that coincide but bind different keys are not reported. They compose,
+and splitting a long binding list over two lines is allowed.
 
 **Selector bindings are reserved.** Which keys a row may bind on each keyword, and what each one
 paints, is not specified yet, and no lowering reads a binding. The two selector rows above build the
@@ -197,8 +198,8 @@ No floor is inferred for a new block: `@pale_oak_planks` with no `@requires` che
 declares it, and `cairn info` starts Java's inferred range there ([Versioning and
 Editions](/spec/versioning-editions/#the-inferred-range-row)). A deleted id is `E_UNKNOWN_ID`,
 naming the last target that declares it, and ends the inferred range there, so a floor above that
-target is `E_REQUIRES_CONFLICT`; an id no version declares names the nearest block the target has
-when one is near enough.
+target that some target meets is `E_REQUIRES_CONFLICT`; an id no version declares names the nearest
+block the target has when one is near enough.
 
 **Only ID, state, and serialization differences may be absorbed.** Concept absence and
 game-behaviour differences are not.

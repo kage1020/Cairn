@@ -5,13 +5,13 @@
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{
-    InferredRange, LastDeclaredId, PaintedId, RequiresConflict, VersionFloor, VersionOrder,
+    InferredRange, LastDeclaredId, PaintedId, RequiresConflict, VersionFloor,
 };
-use cairn_lang_core::{Edition, Resolution};
+use cairn_lang_core::{Diagnostic, Edition, Resolution};
 
 use super::Reporter;
 use super::floors::declared_floors;
-use crate::build::conflicts::{Bound, Conflict, Painted, bounds_at, conflicts, first_of_each};
+use crate::build::conflicts::{Bound, Conflict, Painted, bounds, conflicts, first_of_each, pinned};
 use crate::build::run_level::requires_conflict;
 use crate::registry::{RegistryPack, builtin_pack};
 
@@ -27,13 +27,15 @@ struct Inference {
 }
 
 impl Inference {
-    /// Lower `ir` at the oldest and the newest of `considered`, which ascends.
-    fn of(
+    /// Lower `ir` at the oldest and the newest of `considered`, which ascends, unless `known` holds
+    /// the errors of that version's pinned lowering.
+    fn of<'a>(
         ir: &IntentModule,
         resolution: &Resolution,
         pack: &RegistryPack,
         edition: Edition,
         considered: &[String],
+        known: impl Fn(&str) -> Option<&'a [Diagnostic]>,
     ) -> Self {
         let order = pack.version_order();
         let mut inference = Self {
@@ -45,12 +47,11 @@ impl Inference {
         let (Some(oldest), Some(newest)) = (considered.first(), considered.last()) else {
             return inference;
         };
-        let (first_declared, mut undeclared) =
-            bounds_at(ir, resolution, pack, oldest, &order, |l| l.since.clone());
+        let at = |version: &str| pinned(ir, resolution, pack, version, known(version));
+        let (first_declared, mut undeclared) = bounds(&at(oldest), &order, |l| l.since.clone());
         inference.first_declared = first_declared;
         if newest != oldest {
-            let (last_declared, more) =
-                bounds_at(ir, resolution, pack, newest, &order, |l| l.until.clone());
+            let (last_declared, more) = bounds(&at(newest), &order, |l| l.until.clone());
             inference.last_declared = last_declared;
             undeclared.extend(more);
         }
@@ -121,11 +122,6 @@ impl Inference {
         }
     }
 
-    /// The floors among `floors` that no carried version declaring every painted id clears.
-    fn conflicts(&self, floors: &[VersionFloor], order: &VersionOrder) -> Vec<Conflict> {
-        conflicts(&self.last_declared, floors, order)
-    }
-
     /// The `note:` lines naming each id that sets an edge, and each no version declares.
     fn report_notes(&self, out: &mut Reporter<'_>) {
         let edition = self.edition.as_str();
@@ -170,18 +166,27 @@ impl Inference {
 }
 
 /// One edition's `inferred range` row for `cairn info`, its notes and conflicts sent to `out`.
-pub(super) fn report_inferred_range(
+/// `known` gives the errors of a pinned lowering the caller already ran at a version.
+pub(super) fn report_inferred_range<'a>(
     out: &mut Reporter<'_>,
     ir: &IntentModule,
     resolution: &Resolution,
     edition: Edition,
     considered: &[String],
     floors: &[VersionFloor],
+    known: impl Fn(&str) -> Option<&'a [Diagnostic]>,
 ) -> InferredRange {
     let pack = builtin_pack(edition);
-    let inference = Inference::of(ir, resolution, pack, edition, considered);
+    let inference = Inference::of(ir, resolution, pack, edition, considered, known);
     inference.report_notes(out);
-    let conflicts = inference.conflicts(floors, &pack.version_order());
+    let conflicts = considered.last().map_or_else(Vec::new, |newest| {
+        conflicts(
+            &inference.last_declared,
+            floors,
+            &pack.version_order(),
+            newest,
+        )
+    });
     // Reported, not refused: the build is the command that refuses it.
     report_conflicts(out, edition, &conflicts);
     inference.range(out.source, out.lines, &conflicts)

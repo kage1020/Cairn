@@ -83,7 +83,7 @@ title: "11. Lint と制約検証"
 | `E_STATE_DOMAIN` | メンバーが解決したブロックステートのプロパティか値を、固定したターゲットでそのブロックが取らない。ステートリテラルからのもの、メンバーの行が書いたステートのもの、lowering が導いたものがある ([バージョンとエディション](/ja/spec/versioning-editions/#ステートはターゲットでのブロックのステートと照らし合わせる))。 |
 | `E_VERSION_CAP` | `--target` が、ソースの宣言する `@requires` の下限を下回っている ([バージョンとエディション §10.4](/ja/spec/versioning-editions/))。 |
 | `E_REQUIRES_UNORDERABLE` | `@requires` の下限が、ターゲットのエディションの `DataVersion` 表で位置づけられないバージョンを指している ([バージョンとエディション §10.4](/ja/spec/versioning-editions/))。 |
-| `E_REQUIRES_CONFLICT` | `@requires` の下限がエディションの推定範囲より上にあり、下限が認めるどのバージョンも、ビルドが塗るブロックのどれかを欠いている ([バージョンとエディション](/ja/spec/versioning-editions/#下限はレジストリと突き合わせる))。 |
+| `E_REQUIRES_CONFLICT` | `@requires` の下限がエディションの推定範囲より上で、エディションのパックが持つ最新のバージョン以下にあり、下限が認めるどのバージョンも、ビルドが塗るブロックのどれかを欠いている ([バージョンとエディション](/ja/spec/versioning-editions/#下限はレジストリと突き合わせる))。 |
 | `E_INTENDED_TARGET_CAP` | `@intended_targets` が挙げるバージョンが、どれも同じファイルの宣言する下限を下回っている。 |
 | `W_INTENDED_TARGET_CAP` | そのうちの一部だけが下回っている。 |
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` が、そのエディションのどの `--target` でもビルドできないバージョンを挙げている。 |

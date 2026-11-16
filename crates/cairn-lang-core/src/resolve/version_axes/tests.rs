@@ -299,7 +299,7 @@ fn an_open_range_serializes_its_edges_and_nothing_it_lacks() {
 }
 
 #[test]
-fn a_bounded_range_names_its_ids_and_the_floors_above_it() {
+fn a_range_no_version_lies_in_still_gives_its_edges_ids_and_the_floors_above_them() {
     let at = |line: u32, col: u32| Position {
         line: std::num::NonZeroU32::new(line).expect("1-based"),
         col: std::num::NonZeroU32::new(col).expect("1-based"),
@@ -308,7 +308,7 @@ fn a_bounded_range_names_its_ids_and_the_floors_above_it() {
         edition: Edition::Java,
         min: "1.21.4".to_owned(),
         max: "1.21.4".to_owned(),
-        empty: false,
+        empty: true,
         min_ids: vec![PaintedId {
             id: "minecraft:pale_moss_block".to_owned(),
             position: at(4, 17),
@@ -340,7 +340,7 @@ fn a_bounded_range_names_its_ids_and_the_floors_above_it() {
             "edition": "java",
             "min": "1.21.4",
             "max": "1.21.4",
-            "empty": false,
+            "empty": true,
             "min_ids": [{ "id": "minecraft:pale_moss_block", "line": 4, "col": 17 }],
             "max_ids": [{ "id": "minecraft:chain", "line": 5, "col": 17 }],
             "undeclared": [{ "id": "minecraft:nonesuch", "line": 6, "col": 17 }],

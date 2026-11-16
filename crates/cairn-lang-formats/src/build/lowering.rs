@@ -80,8 +80,8 @@ pub struct Lowered {
     pub dropped_scopes: Vec<String>,
     /// The `@requires` floors this edition's build is held to, if the source declares any.
     pub version_floors: Option<DeclaredFloors>,
-    /// `E_REQUIRES_CONFLICT` for each floor no version declaring every id the build paints
-    /// clears, which refuses the build at every target.
+    /// `E_REQUIRES_CONFLICT` for each floor above the last version that declares some id the
+    /// build paints, which refuses the build at every target.
     pub conflicts: Vec<RunLevelMessage>,
 }
 
@@ -109,8 +109,27 @@ pub fn lower_for_target(
         .map(ResolvedTarget::mc_version);
     let ir = lower(module);
     let resolution = resolve(&ir, Some(edition));
-    let registry = builtin_pack(edition).view(mc_version);
+    let pack = builtin_pack(edition);
+    let registry = pack.view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
+    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
+        let considered = supported_versions(pack);
+        let at_newest = (mc_version.is_some()
+            && mc_version == considered.last().map(String::as_str))
+        .then_some(block_ir.diagnostics.as_slice());
+        requires_conflicts(
+            &ir,
+            &resolution,
+            pack,
+            &considered,
+            &declared.floors,
+            &declared.order,
+            at_newest,
+        )
+        .iter()
+        .map(|conflict| requires_conflict(edition, conflict))
+        .collect()
+    });
     // `check`'s gate, so a build never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         module,
@@ -121,20 +140,6 @@ pub fn lower_for_target(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
-    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
-        let pack = builtin_pack(edition);
-        requires_conflicts(
-            &ir,
-            &resolution,
-            pack,
-            &supported_versions(pack),
-            &declared.floors,
-            &declared.order,
-        )
-        .iter()
-        .map(|conflict| requires_conflict(edition, conflict))
-        .collect()
-    });
     Lowered {
         block_ir,
         circuits,
