@@ -138,7 +138,7 @@ pub(super) enum Written {
     Absent,
     /// The key carries an identifier its reader does not accept.
     Ident(String),
-    /// The key carries an integer.
+    /// The key carries an integer, which its reader does not accept.
     Int(i64),
     /// The key carries a value of some other shape, worded as [`crate::ast::Value::describe`] does.
     OtherShape(String),
@@ -169,7 +169,7 @@ pub(super) enum DoorColumnFault {
     OffsetMalformed(String),
     /// An `offset=` naming a corner column of the `side` wall.
     Corner { offset: u32, side: WallSide },
-    /// An `offset=` at or past the far end of the `side` wall, `length` long.
+    /// An `offset=` of `length` or more, past the far end of the `side` wall.
     PastTheWall {
         offset: u32,
         side: WallSide,
@@ -218,26 +218,40 @@ impl DoorColumnFault {
 
     /// The note on that refusal, saying what names a column the door can stand in.
     pub(super) fn fix(&self, length: u32) -> String {
-        const ONCE: &str = "name the door's column once: `at=center`, `at=left` or `at=right` for \
-                            an anchor, or `offset=N` for a column between the wall's corners, \
-                            counted from 0 at its left end seen from outside";
         match self {
-            Self::At(Written::Int(n)) => format!(
-                "a column by number is `offset={n}`, counted from 0 at the wall's left end seen \
-                 from outside; `at=` takes `center`, `left` or `right`"
-            ),
-            Self::At(_) | Self::Both => ONCE.to_owned(),
-            Self::OffsetMalformed(_) => format!(
-                "write `offset=N` with `N` a whole number; {}",
+            Self::At(Written::Int(n)) => numbered_at(*n, length),
+            Self::At(_) => format!(
+                "name the door's column with `at=center`, `at=left` or `at=right`, or with \
+                 `offset=N` counted from 0 at the wall's left end seen from outside; {}",
                 between_the_corners(length),
             ),
+            Self::Both => format!(
+                "keep one of `at=` and `offset=`: `at=` takes `center`, `left` or `right`, and \
+                 `offset=N` counts from 0 at the wall's left end seen from outside; {}",
+                between_the_corners(length),
+            ),
+            Self::OffsetMalformed(_) | Self::PastTheWall { .. } => between_the_corners(length),
             Self::Corner { offset, .. } => format!(
                 "{}; `at={}` stands the door in this corner",
                 between_the_corners(length),
                 if *offset == 0 { "left" } else { "right" },
             ),
-            Self::PastTheWall { .. } => between_the_corners(length),
         }
+    }
+}
+
+/// The note on `at={n}` for a wall `length` long: the key that names column `n`, when one does.
+fn numbered_at(n: i64, length: u32) -> String {
+    const ANCHORS: &str = "`at=` takes `center`, `left` or `right`";
+    let last = i64::from(length) - 1;
+    match n {
+        0 => format!("{ANCHORS}; `at=left` stands the door in column 0"),
+        n if n == last => format!("{ANCHORS}; `at=right` stands the door in column {n}"),
+        n if (1..last).contains(&n) => format!(
+            "a column by number is `offset={n}`, counted from 0 at the wall's left end seen from \
+             outside; {ANCHORS}"
+        ),
+        _ => format!("{ANCHORS}; {}", between_the_corners(length)),
     }
 }
 
