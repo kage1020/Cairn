@@ -146,7 +146,8 @@ pub(crate) struct Lowered {
     pub(crate) dropped_scopes: Vec<String>,
     /// The `@requires` floors this edition's build is held to, if the source declares any.
     pub(crate) version_floors: Option<DeclaredFloors>,
-    /// The floors no version declaring every id the build paints clears, whatever the target.
+    /// The floors above the last version that declares some id the build paints, whatever the
+    /// target.
     pub(crate) conflicts: Vec<Conflict>,
 }
 
@@ -174,8 +175,24 @@ pub(crate) fn load_and_lower(
         .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
-    let registry = builtin_pack(edition).view(mc_version);
+    let pack = builtin_pack(edition);
+    let registry = pack.view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
+    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
+        let considered = supported_versions(pack);
+        let at_newest = (mc_version.is_some()
+            && mc_version == considered.last().map(String::as_str))
+        .then_some(block_ir.diagnostics.as_slice());
+        requires_conflicts(
+            &ir,
+            &resolution,
+            pack,
+            &considered,
+            &declared.floors,
+            &declared.order,
+            at_newest,
+        )
+    });
     // `check`'s gate, so `compile` never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         &module,
@@ -186,17 +203,6 @@ pub(crate) fn load_and_lower(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
-    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
-        let pack = builtin_pack(edition);
-        requires_conflicts(
-            &ir,
-            &resolution,
-            pack,
-            &supported_versions(pack),
-            &declared.floors,
-            &declared.order,
-        )
-    });
     Ok(Lowered {
         source,
         block_ir,

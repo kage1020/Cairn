@@ -93,8 +93,15 @@ pub(super) fn edition_rows(
             !dropped.is_empty() || !states_unmapped.is_empty(),
         );
         report_version_notes(out, edition, &verdicts, &considered);
-        let inferred_range =
-            report_inferred_range(out, ir, &resolution, edition, &considered, &floors);
+        let inferred_range = report_inferred_range(
+            out,
+            ir,
+            &resolution,
+            edition,
+            &considered,
+            &floors,
+            |version| verdicts.pinned_errors(version),
+        );
         let respelled = respelled_tokens(
             &resolution,
             pack,
