@@ -421,8 +421,10 @@ first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `le
   1. along the wall: `offset=`, or else the column a door anchor in `at=` names
      ([§5.4](#54-selectors)) on the wall the line names, which runs the `W` of `size=` for `front`
      and `back` and its `H` for `left` and `right`. A line that writes neither, or whose `at=`
-     names a wall or a cell, stands at 0;
-  2. then up: `y=`, 0 when absent, so `level`s count from the lowest;
+     names a wall or a cell, stands at 0. A window counts by its `offset=` as written, which with
+     `anchor=` is the column of the cell the anchor names, not its first column;
+  2. then up: `y=`, 0 when absent, so `level`s count from the lowest; a window's `y=` counts as
+     written too;
   3. then the cell a coordinate `at=X,Y,Z` names, or else the box `from=` and `to=` span, whichever
      end is written first: its low corner, then its high corner, each compared by `y`, then `z`,
      then `x`. A line that writes none of them stands at `0,0,0`.

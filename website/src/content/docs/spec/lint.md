@@ -651,8 +651,9 @@ Beyond the codes above, lint covers:
 
 Of these, attachment, entity_aabb, support, fluid and edit_stability are planned, and no command
 checks them yet. AABB interference holds inside a body, where the phase order merges the members and
-`W_PHASE_CONFLICT` reports two of one phase that take a cell from each other ([Compilation Model
-§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and is planned between bodies:
+`W_PHASE_CONFLICT` reports a later line of one phase that changes a cell an earlier one built
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and is
+planned between bodies:
 two `place` rows whose bodies overlap are not reported yet. Geometry holds only in part: a door,
 window, eave stair, chest, trapdoor, note block, sensor or actuator its own line puts outside its
 struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt

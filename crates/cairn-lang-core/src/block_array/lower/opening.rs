@@ -347,15 +347,15 @@ pub(super) fn plan_window(
             return WindowPlan::Refused;
         }
     };
-    let (offset, sw, sh) = (args.column(), args.width, args.height);
-    let y_start = args.row().saturating_add(y_offset);
+    let (offset, sw, sh) = (args.column, args.width, args.height);
+    let y_start = args.row.saturating_add(y_offset);
     let Some((repeat, step)) = window_series(member, diagnostics) else {
         return WindowPlan::Refused;
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let refusal = window_span_refusal(side, args, (repeat, step), len)
         .map(|(reason, fix)| diag_invalid_member(member, reason, vec![fix]))
-        .or_else(|| window_course_refusal(member, y_start, (sw, sh), ctx));
+        .or_else(|| window_course_refusal(member, args, y_start, ctx));
     // The window's own line is asked before what the pass does not lower yet.
     let own_fault = refusal
         .as_ref()
@@ -398,7 +398,7 @@ pub(super) fn plan_window(
         height: sh,
         stamps,
         mirror,
-        anchor: (args.offset, args.y.saturating_add(y_offset)),
+        anchor: (args.offset(), args.y().saturating_add(y_offset)),
         fill,
     })
 }
@@ -476,7 +476,7 @@ fn window_span_refusal(
 ) -> Option<(String, String)> {
     let (sw, sh) = (args.width, args.height);
     let span_end = args
-        .column()
+        .column
         .saturating_add(step.saturating_mul(repeat.saturating_sub(1)))
         .saturating_add(sw);
     let first = args.column_term();
@@ -496,7 +496,7 @@ fn window_span_refusal(
             format!(
                 "window extends beyond the `{}` wall (offset={}{} size={sw}x{sh} repeat={repeat} step={step}, wall length={len})",
                 side_name(side),
-                args.offset,
+                args.offset(),
                 args.anchor_written(),
             ),
             fix,
@@ -504,19 +504,21 @@ fn window_span_refusal(
     })
 }
 
-/// The finding that refuses a window `sh` tall from row `y_start` that no one wall course holds,
-/// or `None`.
+/// The finding that refuses a window, `args` with its lowest row at `y_start`, that no one wall
+/// course holds, or `None`.
 ///
 /// Rows a `walls` member is written to hold and does not paint are that member's to repair.
 fn window_course_refusal(
     member: &Member,
+    args: WindowArgs,
     y_start: u32,
-    (sw, sh): (u32, u32),
     ctx: &StructCtx<'_>,
 ) -> Option<Diagnostic> {
+    let (sw, sh) = (args.width, args.height);
     if ctx.wall_column.contains_rows(y_start, sh) {
         return None;
     }
+    let at = format!("y={}{}", args.y(), args.anchor_written());
     let written = &ctx.written;
     let rows = match y_start.checked_add(sh.saturating_sub(1)) {
         Some(last) => format!("window rows y={y_start}..={last}"),
@@ -535,7 +537,7 @@ fn window_course_refusal(
     if written.walls.contains_rows(y_start, sh) {
         let primary = if ctx.wall_column.is_empty() {
             format!(
-                "window at y={y_start} size={sw}x{sh} has no wall to cut into: no `walls` member on this struct paints",
+                "window at {at} size={sw}x{sh} has no wall to cut into: no `walls` member on this struct paints",
             )
         } else {
             format!(
@@ -552,7 +554,7 @@ fn window_course_refusal(
     if written.unplaced_walls {
         let primary = if written.walls.is_empty() {
             format!(
-                "window at y={y_start} size={sw}x{sh} has no wall to cut into: every `walls` member on this struct sits under a `level` that is not placed",
+                "window at {at} size={sw}x{sh} has no wall to cut into: every `walls` member on this struct sits under a `level` that is not placed",
             )
         } else {
             format!(
@@ -569,7 +571,7 @@ fn window_course_refusal(
     let (primary, fix) = if written.walls.is_empty() {
         (
             format!(
-                "window at y={y_start} size={sw}x{sh} has no wall to cut into: this struct declares no `walls` with a positive `height=`",
+                "window at {at} size={sw}x{sh} has no wall to cut into: this struct declares no `walls` with a positive `height=`",
             ),
             if written.unsized_walls {
                 "give the `walls` a positive `height=`, or add a `walls` member whose course holds \
@@ -600,7 +602,7 @@ fn window_mirror(
     len: u32,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
-    let (offset, sw, sh) = (args.column(), args.width, args.height);
+    let (offset, sw, sh) = (args.column, args.width, args.height);
     let mirror_offset = mirror_column(args, len);
     let primary_end = offset.saturating_add(sw);
     let mirror_end = mirror_offset.saturating_add(sw);
@@ -632,7 +634,7 @@ fn window_mirror(
             member,
             &format!(
                 "`sym=true` window at offset={}{} size={sw}x{sh} on the `{}` wall {relation} its mirror (wall length={len}); the mirror was skipped",
-                args.offset,
+                args.offset(),
                 args.anchor_written(),
                 side_name(side),
             ),
@@ -645,7 +647,7 @@ fn window_mirror(
 
 /// The column a `sym=true` window's mirror starts at on a wall `len` long.
 fn mirror_column(args: WindowArgs, len: u32) -> u32 {
-    len.saturating_sub(args.column()).saturating_sub(args.width)
+    len.saturating_sub(args.column).saturating_sub(args.width)
 }
 
 /// The part of its wall an opening cuts, as a `beam` laid over it reads it.

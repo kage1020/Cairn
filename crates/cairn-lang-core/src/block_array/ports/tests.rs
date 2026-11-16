@@ -223,7 +223,7 @@ fn port_world_position_window_refuses_when_offset_size_overflows_wall() {
         port_at((0, 0, 0), dims, def, &pid("light"), &declared_column(def)),
         Err(PortRejection::WindowPastWall {
             args: WindowArgs {
-                offset: 2,
+                column: 2,
                 width: 2,
                 ..
             },
@@ -235,7 +235,8 @@ fn port_world_position_window_refuses_when_offset_size_overflows_wall() {
 
 #[test]
 fn port_world_position_window_centres_on_the_rectangle_its_anchor_places() {
-    // `offset=3` names the bottom-centre column of a 3-wide window, which spans columns 2..=4.
+    // `anchor=top_center offset=3` names the middle column of a 3-wide window, which spans
+    // columns 2..=4.
     let src = concat!(
         "def cottage size=7x3:\n",
         "  walls mat_slot=w height=5\n",
@@ -248,6 +249,36 @@ fn port_world_position_window_centres_on_the_rectangle_its_anchor_places() {
     let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
         .expect("port resolves");
     assert_eq!(pos, (13, 0, 23));
+}
+
+#[test]
+fn port_world_position_window_checks_the_course_by_the_rows_its_anchor_places() {
+    let port = |window: &str| {
+        let src = format!("def cottage size=3x3:\n  walls mat_slot=w height=3\n  {window}\n");
+        let module = crate::parse(&src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        port_at(
+            (0, 0, 0),
+            Dims { x: 3, y: 1, z: 3 },
+            def,
+            &pid("light"),
+            &declared_column(def),
+        )
+    };
+    // Rows 1..=3, inside the course y=1..=3, though rows from `y=3` would run past it.
+    assert_eq!(
+        port("window id=light side=front anchor=top_left y=3 offset=1 size=1x3 mat_slot=g"),
+        Ok((1, 0, 3)),
+    );
+    let rejection =
+        port("window id=light side=front anchor=top_left y=4 offset=1 size=1x3 mat_slot=g")
+            .expect_err("rows 2..=4 run past the course");
+    assert_eq!(
+        rejection.note("a.p").message,
+        "`a.p` is a window whose rows y=2..=4 are not all inside one wall course (the walls occupy \
+         y=1..=3); the member says so on its own line too",
+    );
 }
 
 #[test]
@@ -693,7 +724,7 @@ fn port_world_position_refuses_a_window_argument_by_name() {
             WindowArgFault::BeforeWallStart {
                 anchor: "bottom_right",
                 offset: 1,
-                shift: 2,
+                before: 1,
             },
         ),
         (
@@ -701,7 +732,7 @@ fn port_world_position_refuses_a_window_argument_by_name() {
             WindowArgFault::BelowBaseRow {
                 anchor: "top_left",
                 y: 1,
-                shift: 2,
+                below: 1,
             },
         ),
     ] {
@@ -950,19 +981,19 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
         .chain(
             written_samples("middle")
                 .into_iter()
-                .skip(1)
+                .filter(|written| *written != Written::Absent)
                 .map(WindowArgFault::AnchorUnknown),
         )
         .chain([
             WindowArgFault::BeforeWallStart {
                 anchor: "bottom_right",
                 offset: 1,
-                shift: 3,
+                before: 2,
             },
             WindowArgFault::BelowBaseRow {
                 anchor: "center",
                 y: 0,
-                shift: 1,
+                below: 1,
             },
         ])
         .map(|fault| PortRejection::WindowArgument {
@@ -973,7 +1004,7 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
         PortRejection::WindowPastWall { .. } => [None, Some("bottom_right")]
             .into_iter()
             .map(|anchor| PortRejection::WindowPastWall {
-                args: window_args(2 + u32::from(anchor.is_some()), 2, anchor),
+                args: window_args(2, 2, anchor),
                 wall_length: 3,
                 member: span.clone(),
             })
@@ -1001,11 +1032,11 @@ fn samples(r: &PortRejection) -> Vec<PortRejection> {
     }
 }
 
-/// A window `width` wide and 2 tall at `offset=` and `y=1`, anchored by the `anchor=` named.
-fn window_args(offset: u32, width: u32, anchor: Option<&str>) -> WindowArgs {
+/// A window `width` wide and 2 tall from `column` on row 1, anchored by the `anchor=` named.
+fn window_args(column: u32, width: u32, anchor: Option<&str>) -> WindowArgs {
     WindowArgs {
-        offset,
-        y: 1,
+        column,
+        row: 1,
         width,
         height: 2,
         anchor: anchor.map(|name| WindowAnchor::from_ident(name).expect("an anchor name")),

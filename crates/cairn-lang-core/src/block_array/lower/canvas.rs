@@ -304,11 +304,15 @@ impl MemberCanvas<'_> {
         self.member
     }
 
-    /// Record what this member's line declares, before it paints the cells it names.
+    /// Record what this member's line declares.
     pub(super) fn declare(&mut self, declared: Declared) {
-        if let Some(slot) = self.canvas.declared.get_mut(self.member as usize) {
-            *slot = Some(declared);
-        }
+        let member = self.member;
+        let Some(slot) = self.canvas.declared.get_mut(member as usize) else {
+            debug_assert!(false, "member {member} is not in the flattened paint list");
+            return;
+        };
+        debug_assert!(slot.is_none(), "member {member} declares twice");
+        *slot = Some(declared);
     }
 
     /// Hold every contest this member's writes take part in until

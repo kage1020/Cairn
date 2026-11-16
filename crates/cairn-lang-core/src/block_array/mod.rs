@@ -138,8 +138,8 @@ pub struct BlockArray {
     pub derived: Vec<Vec<String>>,
 }
 
-/// One member's `resolved_state`: each block state its cells hold, with those cells, as the
-/// lowering's target resolved them (`spec/blockstate` "`intent_state` and `resolved_state`").
+/// One member's `resolved_state`, each block state its cells hold as the lowering's target
+/// resolved them (`spec/blockstate` "`intent_state` and `resolved_state`"), and its geometry.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResolvedMember {
     /// The keyword the member was written with.

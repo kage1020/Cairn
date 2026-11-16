@@ -27,18 +27,14 @@ fn circuit(source: &str, edition: Edition) -> CircuitLayout {
 
 /// `members` with every run and every geometry `void` higher.
 fn risen(members: &[ResolvedMember], void: u32) -> Vec<ResolvedMember> {
+    let up = |(x, y, z): (u32, u32, u32)| (x, y + void, z);
+    let lift = |bbox: Bbox| Bbox::spanning(up(bbox.min()), up(bbox.max()));
     let mut members = members.to_vec();
     for member in &mut members {
         let geometry = &mut member.geometry;
-        for cell in [
-            &mut geometry.anchor,
-            &mut geometry.declared_bbox.min,
-            &mut geometry.declared_bbox.max,
-            &mut geometry.actual_bbox.min,
-            &mut geometry.actual_bbox.max,
-        ] {
-            cell.1 += void;
-        }
+        geometry.anchor = up(geometry.anchor);
+        geometry.declared_bbox = lift(geometry.declared_bbox);
+        geometry.actual_bbox = lift(geometry.actual_bbox);
         for run in member
             .resolved_state
             .iter_mut()
