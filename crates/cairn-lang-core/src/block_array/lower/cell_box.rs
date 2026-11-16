@@ -5,12 +5,11 @@ use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
+use crate::block_array::Bbox;
 use crate::block_array::args::{diag_deferred_member_noted, diag_invalid_member};
+pub(super) use crate::block_array::geometry::Cell;
 
 use super::members::{StructCtx, unplaced_walls_note};
-
-/// A cell of the block array, `(x, y, z)`.
-pub(super) type Cell = (u32, u32, u32);
 
 /// A corner as its line writes it, measured from the footprint's low corner.
 type Corner = (u64, u64, u64);
@@ -92,6 +91,11 @@ pub(super) struct CellBox {
 }
 
 impl CellBox {
+    /// The box, as a member's geometry records it.
+    pub(super) fn bbox(self) -> Bbox {
+        Bbox::spanning(self.low, self.high)
+    }
+
     /// Every cell of the box, `x` fastest and `y` slowest.
     pub(super) fn cells(self) -> impl Iterator<Item = Cell> {
         let Self { low, high } = self;
