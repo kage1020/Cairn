@@ -647,21 +647,25 @@ Beyond the codes above, lint covers:
 | **version_caps / parity** | Whether a state or entity schema is usable in the target ([Versioning and Editions](/spec/versioning-editions/)). |
 | **edit_stability** | Whether an `intent_state` change ripples into an unrelated member's `resolved_state`. |
 | **redstone** | Per-tick simulation against the declared truth table and temporal assertions; latency bounds, QC dependence, routing congestion ([Redstone](/spec/redstone/)). |
-| **AABB interference** | On overlap, priority-merge or reject. Boundary blockstate re-resolution is the IR layer's job. |
+| **AABB interference** | Members of one body that overlap priority-merge by phase; bodies of two `place` rows that overlap are an error ([Entities §8.2](/spec/entities/#82-anchor-conventions)). Boundary blockstate re-resolution is the IR layer's job. |
 
-Of these, attachment, entity_aabb, support, fluid, edit_stability and AABB interference are planned,
-and no command checks them yet: two `place` rows whose bodies overlap are not reported. Geometry
-holds only in part: a door, window, eave stair, chest, trapdoor, note block, sensor or actuator its
-own line puts outside its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that
-only a member left unbuilt keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in
-part, through codes of its own: `E_VERSION_CAP` holds `--target` to the `@requires` floors,
-`E_UNKNOWN_ID` refuses a block id the pinned target does not declare, `E_PARITY_UNSUPPORTED` a
-semantic member's block only the other edition has, `E_STATE_DOMAIN` a state its block does not take
-there, `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names
-what a version cannot carry, while no entity schema is checked. The redstone row runs through codes
-of its own: the truth-table codes check a table against itself, and the codes of
-[Redstone](#redstone) check a truth table, a temporal assertion and a latency bound against the
-circuit, and check its routing and its dependence on update order.
+Of these, attachment, entity_aabb, support, fluid and edit_stability are planned, and no command
+checks them yet. AABB interference holds inside a body, where the phase order merges the members and
+`W_PHASE_CONFLICT` reports a later line of one phase that changes a cell an earlier one built
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and is
+planned between bodies:
+two `place` rows whose bodies overlap are not reported yet. Geometry holds only in part: a door,
+window, eave stair, chest, trapdoor, note block, sensor or actuator its own line puts outside its
+struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt
+keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
+`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
+pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other
+edition has, `E_STATE_DOMAIN` a state its block does not take there, `E_STATE_UNMAPPED` a block
+state its state map has no form for, and `W_INTENT_DEGRADED` names what a version cannot carry,
+while no entity schema is checked. The redstone row runs through codes of its own: the truth-table
+codes check a table against itself, and the codes of [Redstone](#redstone) check a truth table, a
+temporal assertion and a latency bound against the circuit, and check its routing and its dependence
+on update order.
 
 ### "did you mean"
 
@@ -944,8 +948,8 @@ the key itself decides whether the member is built at all, the member is left ou
 `W_DEFERRED_MEMBER` (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
 [§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
 reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
-*unreached* key is one this specification defines that no pass reads yet. `window shape=` /
-`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today. Every
+*unreached* key is one this specification defines that no pass reads yet. `window shape=` and a
+header's `class=` are those keys today. Every
 `key=value` on the right of a `theme` selector row whose keyword the compiler knows is one too,
 reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
 ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
