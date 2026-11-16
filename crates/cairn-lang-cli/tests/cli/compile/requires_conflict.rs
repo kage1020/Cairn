@@ -1,7 +1,7 @@
 //! `cairn compile` against a floor above the last target that declares a block the build paints:
 //! `E_REQUIRES_CONFLICT`, per `spec/versioning-editions` "A floor is weighed against the registry".
 
-use crate::common::{Fixture, Run, assert_stream, compile_as};
+use crate::common::{CHAIN_UNDER_THREE_FLOORS, Fixture, Run, assert_stream, compile_as};
 
 /// Paints `@chain`, which Java declares last at 1.21.4 and Bedrock last at 1.21.60.
 const CHAIN: &str = "theme t:\n  slot wall -> @chain\n\nstruct s size=2x2\n  floor mat_slot=wall\n";
@@ -87,22 +87,7 @@ fn a_part_placed_twice_conflicts_once_and_names_its_block_once() {
 
 #[test]
 fn each_floor_above_the_range_is_one_finding_in_source_order() {
-    let source = "@requires version>=1.21
-@requires java version>=26.3
-
-theme t:
-  slot wall \
-                  -> @chain
-
-def cottage size=2x2:
-  requires java version>=26.3
-  floor \
-                  mat_slot=wall
-
-site hamlet:
-  place id=a use=cottage theme=t at=origin
-";
-    let (fixture, run) = compiled(source, "java", "1.21.4");
+    let (fixture, run) = compiled(CHAIN_UNDER_THREE_FLOORS, "java", "1.21.4");
     assert_eq!(run.code, Some(1), "{}", run.stderr);
     let path = fixture.source().display().to_string();
     assert_eq!(

@@ -2,7 +2,9 @@
 //! an id the build paints to the earliest that last declares one, per `spec/versioning-editions`
 //! "The `inferred range` row".
 
-use crate::common::{Fixture, Run, WALL_LEVER, assert_stream, cairn_argv};
+use crate::common::{
+    CHAIN_UNDER_THREE_FLOORS, Fixture, Run, WALL_LEVER, assert_stream, cairn_argv,
+};
 
 /// A struct whose floor and walls paint the theme's two slots.
 fn painting(floor: &str, wall: &str) -> String {
@@ -493,6 +495,44 @@ fn json_carries_each_editions_range_with_its_ids_and_conflicts() {
                 "max_ids": [{ "id": "minecraft:chain", "line": 4, "col": 16 }],
             },
         ]),
+    );
+}
+
+#[test]
+fn json_names_the_part_that_declares_a_conflicting_floor() {
+    let fixture = Fixture::new(CHAIN_UNDER_THREE_FLOORS);
+    let run = info(&fixture, "java", &["--format", "json"]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    let chain = serde_json::json!([{
+        "id": "minecraft:chain",
+        "last_declared": "1.21.4",
+        "line": 5,
+        "col": 16,
+    }]);
+    assert_eq!(
+        inferred_json(&run),
+        serde_json::json!([{
+            "edition": "java",
+            "min": "0.0",
+            "max": "1.21.4",
+            "empty": false,
+            "max_ids": [{ "id": "minecraft:chain", "line": 5, "col": 16 }],
+            "conflicts": [
+                {
+                    "floor": { "declared": "java version>=26.3", "line": 2, "col": 1 },
+                    "ids": chain,
+                },
+                {
+                    "floor": {
+                        "declared": "java version>=26.3",
+                        "line": 8,
+                        "col": 3,
+                        "declared_by": { "keyword": "def", "name": "cottage" },
+                    },
+                    "ids": chain,
+                },
+            ],
+        }]),
     );
 }
 
