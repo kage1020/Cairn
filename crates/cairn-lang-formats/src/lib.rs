@@ -2,9 +2,9 @@
 //! [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no
 //! promise: any release may change it.
 //!
-//! Java `.nbt` and `.litematic` and Bedrock `.mcstructure` writers for the block-array IR, a
-//! `.litematic` reader, the registry packs and portability reports the writers rely on, and the
-//! Java world a structure file is installed into.
+//! Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers for the block-array
+//! IR, `.litematic` and `.schem` readers, the registry packs and portability reports the writers
+//! rely on, and the Java world a structure file is installed into.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
@@ -14,7 +14,9 @@ mod dims;
 pub mod java_structure;
 pub mod litematic;
 pub mod portability;
+mod read_stream;
 pub mod registry;
+pub mod schem;
 mod site_frame;
 pub mod volume;
 pub mod world;
@@ -43,6 +45,10 @@ pub use portability::{
 pub use registry::{
     PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
     load_builtin_pack, load_from_dir,
+};
+pub use schem::{
+    Schem, SchemError, SchemFile, SchemReadError, SpongeSchematic, prepare_schem, read_schem,
+    schem_files,
 };
 pub use volume::{BlockVolume, StoredBlockEntity, VolumeError};
 pub use world::{

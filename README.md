@@ -95,7 +95,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 ## What works today
 
 - `cairn parse`, `check`, `info`, `lower`, `compile`, `install`, and `docs`.
-- Java `.nbt` or Litematica `.litematic`, and Bedrock `.mcstructure`, output from one source.
+- Java `.nbt`, Litematica `.litematic` or Sponge Schematic `.schem`, and Bedrock `.mcstructure`, output from one source.
 - `cairn install`, which puts Java structure files into a world for `/place template` to load, refusing one built for a newer version than the world, and one built for an older version unless `--allow-cross-version` is given.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
 - Themes with slots and per-edition variants.
@@ -111,7 +111,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
 - `edit` patches.
-- The `.schem` writer, and importing existing schematics.
+- Importing existing schematics.
 - The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas
