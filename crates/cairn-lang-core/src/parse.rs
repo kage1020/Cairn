@@ -158,6 +158,41 @@ fn not_a_guard(name: &str, policy: RequiresPolicy) -> String {
     }
 }
 
+/// The refusal for an `@intended_targets` value other than a list, `got` as written.
+fn not_a_target_list(got: &str) -> String {
+    format!("@intended_targets expects a list of strings such as `[\"1.21.4\"]`, got `{got}`")
+}
+
+/// The refusal for an `@intended_targets` item other than a string, `got` as written.
+fn not_a_target(got: &str) -> String {
+    format!("@intended_targets expects a string such as `\"1.21.4\"`, got `{got}`")
+}
+
+/// `err` from reading an `@intended_targets` value, with a version written unquoted, such as
+/// `1.20.4`, refused as one rather than as a decimal that runs on.
+fn unquoted_target(raw: &str, tokens: &[Token], err: ParseError) -> ParseError {
+    let ParseError::Lex(LexError::TrailingDecimalSegment { position, .. }) = &err else {
+        return err;
+    };
+    let Some(index) = tokens.iter().position(|t| t.position == *position) else {
+        return err;
+    };
+    let start = tokens[index].span.start;
+    let len = raw[start..]
+        .bytes()
+        .take_while(|b| b.is_ascii_digit() || *b == b'.')
+        .count();
+    let written = &raw[start..start + len];
+    ParseError::Syntax {
+        position: *position,
+        message: if index == 0 {
+            not_a_target_list(written)
+        } else {
+            not_a_target(written)
+        },
+    }
+}
+
 /// Parse a `.crn` source string into a [`Module`].
 ///
 /// A lex failure inside a line stands unless a raw directive value took it, which a stretch
@@ -335,9 +370,9 @@ impl<'a> Parser<'a> {
                 let sub_tokens =
                     lex(&raw).map_err(|err| ParseError::from(err).rebased(value_start_pos))?;
                 let mut p = Parser::new(&raw, &sub_tokens);
-                let value = p
-                    .parse_value()
-                    .map_err(|err| err.rebased(value_start_pos))?;
+                let value = p.parse_value().map_err(|err| {
+                    unquoted_target(&raw, &sub_tokens, err).rebased(value_start_pos)
+                })?;
                 if let Some(trailing) = p.peek().filter(|t| t.kind != TokenKind::Newline) {
                     return Err(ParseError::Syntax {
                         position: trailing.position.rebased(value_start_pos),
@@ -357,22 +392,14 @@ impl<'a> Parser<'a> {
                             ValueKind::Str(s) => Ok(s),
                             _ => Err(ParseError::Syntax {
                                 position: at(&v),
-                                message: format!(
-                                    "@intended_targets expects a string such as `\"1.21.4\"`, \
-                                     got `{}`",
-                                    &raw[v.span.clone()]
-                                ),
+                                message: not_a_target(&raw[v.span.clone()]),
                             }),
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                     _ => {
                         return Err(ParseError::Syntax {
                             position: at(&value),
-                            message: format!(
-                                "@intended_targets expects a list of strings such as \
-                                 `[\"1.21.4\"]`, got `{}`",
-                                &raw[value.span.clone()]
-                            ),
+                            message: not_a_target_list(&raw[value.span.clone()]),
                         });
                     }
                 };
@@ -1970,20 +1997,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Decimal { lexeme } => {
                 self.advance();
-                // The lexer leaves a touching `.` to the parse, since a raw directive value
-                // reads `1.21.4` as text.
-                if self
-                    .peek()
-                    .is_some_and(|t| t.kind == TokenKind::Dot && t.span.start == token.span.end)
-                {
-                    return Err(LexError::TrailingDecimalSegment {
-                        position,
-                        literal: lexeme,
-                        found: '.',
-                    }
-                    .into());
-                }
-                Ok(Value::new(ValueKind::Decimal(lexeme), token.span))
+                self.decimal_value(lexeme, token.span, position)
             }
             TokenKind::Nbt(text) => {
                 self.advance();
@@ -2025,6 +2039,38 @@ impl<'a> Parser<'a> {
                 message: format!("unexpected {other} in value position"),
             }),
         }
+    }
+
+    /// The decimal `lexeme`, refused when a `.` touches its end or a double cannot hold it.
+    fn decimal_value(
+        &self,
+        lexeme: String,
+        span: crate::error::Span,
+        position: Position,
+    ) -> Result<Value, ParseError> {
+        // The lexer leaves a touching `.` to the parse, since a raw directive value
+        // reads `1.21.4` as text.
+        if self
+            .peek()
+            .is_some_and(|t| t.kind == TokenKind::Dot && t.span.start == span.end)
+        {
+            return Err(LexError::TrailingDecimalSegment {
+                position,
+                literal: lexeme,
+                found: '.',
+            }
+            .into());
+        }
+        if !lexeme.parse::<f64>().is_ok_and(f64::is_finite) {
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "decimal `{lexeme}` is past the range of a double, about 1.8e308: \
+                     write a smaller number"
+                ),
+            });
+        }
+        Ok(Value::new(ValueKind::Decimal(lexeme), span))
     }
 
     fn parse_dotted_ref(&mut self) -> Result<DottedRef, ParseError> {

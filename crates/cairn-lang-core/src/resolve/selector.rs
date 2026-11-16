@@ -22,7 +22,7 @@ pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> boo
 /// Whether swapping `a` for `b` leaves [`member_attr_matches`] answering the same under `key`.
 fn attr_values_select_alike(key: &str, a: &Value, b: &Value) -> bool {
     if label_attr(key).is_none() {
-        return a.kind == b.kind;
+        return a.same_value(b);
     }
     match (&a.kind, &b.kind) {
         (
@@ -70,7 +70,7 @@ fn member_attr_matches(member: &Member, key: &str, expected: &Value) -> bool {
     let Some(field) = label_attr(key) else {
         return member
             .written(key)
-            .is_some_and(|actual| actual.value.kind == expected.kind);
+            .is_some_and(|actual| actual.value.same_value(expected));
     };
     field(member).is_some_and(|actual| value_eq_label(expected, actual))
 }

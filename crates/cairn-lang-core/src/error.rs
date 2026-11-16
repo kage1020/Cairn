@@ -216,8 +216,7 @@ pub enum LexError {
         /// The digits after the `.`.
         fraction: String,
     },
-    /// An `nbt={...}` compound strays from the SNBT that `spec/syntax` "Literals and separators"
-    /// reads.
+    /// An NBT compound strays from the SNBT that `spec/syntax` "Literals and separators" reads.
     #[error("{position}: {reason}")]
     InvalidNbt {
         /// Where in the compound it strays.

@@ -100,6 +100,63 @@ fn a_literal_that_is_not_digits_a_dot_and_digits_is_refused_at_the_literal() {
     }
 }
 
+#[test]
+fn a_decimal_is_refused_where_only_an_integer_stands() {
+    for (member, message, col) in [
+        (
+            "walls from=1.5,2,3",
+            "a coordinate component is a whole number, and `1.5` is a decimal: a coordinate \
+             triple names a cell by three integers, `x,y,z`, as `4,3,2`",
+            14,
+        ),
+        (
+            "walls mat=minecraft:light[level=1.5]",
+            "the state literal on `minecraft:light` expected a value for `level`, got decimal \
+             `1.5`; a state literal is `[property=value]` pairs separated by `,`, as in \
+             `@oak_log[axis=x]`",
+            35,
+        ),
+        (
+            "walls mat=@light[level=1.5]",
+            "the state literal on `@light` expected a value for `level`, got decimal `1.5`; a \
+             state literal is `[property=value]` pairs separated by `,`, as in \
+             `@oak_log[axis=x]`",
+            26,
+        ),
+        (
+            "assert always(sig.a -> eventually sig.b within 1.5)",
+            "expected integer literal, got decimal `1.5`",
+            50,
+        ),
+    ] {
+        assert_eq!(
+            member_refusal(member),
+            (message.to_owned(), col),
+            "{member:?}"
+        );
+    }
+}
+
+#[test]
+fn a_decimal_is_bounded_by_a_double_s_range() {
+    let largest = format!("{}.0", "9".repeat(308));
+    assert_eq!(
+        member_args(&format!("walls scale={largest}")),
+        [("scale".to_owned(), decimal(&largest))],
+    );
+    let past = format!("1{}.5", "0".repeat(309));
+    assert_eq!(
+        member_refusal(&format!("walls scale={past}")),
+        (
+            format!(
+                "decimal `{past}` is past the range of a double, about 1.8e308: write a smaller \
+                 number"
+            ),
+            15,
+        ),
+    );
+}
+
 /// A `.` after a name, a `]` or a `)` is that thing's own, so `sig.1` is still a bad name.
 #[test]
 fn a_dot_after_a_name_opens_no_decimal() {

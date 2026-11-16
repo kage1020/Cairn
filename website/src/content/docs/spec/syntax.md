@@ -56,9 +56,15 @@ is refused too, and the finding names `1.0` and `0.5`. A decimal stands where an
 a value: after a key's `=`, in a value list and as a bare value. It is not an integer, so a
 coordinate triple's component, a size's extent, a stage count, an assertion's bound and a value in
 a block-state literal each refuse one at the literal. The parser keeps it as written, digit for
-digit. The key that reads one says whether the writer stores it as a float or a double, and the
-writer rounds the written value to the nearest one of that type. Such a key reads an integer as the
-same number, so `scale=2` and `scale=2.0` are one value.
+digit, and refuses one past a double's range, about 1.8 × 10^308, as `E_PARSE` at the literal. The
+key that reads one says whether the writer stores it as a float or a double, and the writer rounds
+the written value to the nearest one of that type. Such a key reads an integer as the same number,
+so `scale=2` and `scale=2.0` are one value.
+
+Wherever two values are compared, a number compares by the number it writes: `1.5` and `1.50` are
+one value, and so are `2` and `2.0`. A theme selector's attribute matches a member's value that way
+([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), and an
+address spells each number one way ([§5.5](#55-ids-classes-addresses)).
 
 The key that reads one is a display's `scale=`, which the writer stores as a float ([Entities
 §8.1](/spec/entities/#displays)). A key that reads another kind of value treats a decimal as it
@@ -77,7 +83,7 @@ version Cairn targets reads alike:
   quoted, or a run of letters, digits, `_`, `-`, `.` and `+`, and a compound names each key once.
 - A list is `[]`, or values with exactly one `,` between two of them, all of one type. An array
   opens with `[B;`, `[I;` or `[L;`, nothing between the three characters, and holds bytes, ints or
-  longs.
+  longs, each written as a number with its suffix.
 - A number is an optional sign, digits, an optional `.` and digits, and an optional suffix, in
   either case: `b`, `s` and `l` for a byte, a short and a long, `f` and `d` for a float and a
   double. With no suffix it is an int, or a double when it has a `.`. A byte, a short, an int or a
@@ -247,16 +253,16 @@ reported there and never at the first column of the next one.
 
 The tree-sitter grammar is a known exception in three ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts fourteen forms the parser refuses, because tree-sitter cannot express
+correctly. It also accepts fifteen forms the parser refuses, because tree-sitter cannot express
 their rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word
 (`2x2y`), an integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within`
 or `<=` bound or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last
 component runs into a size (`1,2,3x4`), a truth row whose width differs from the input count, a
-block-state literal naming one property twice, a decimal that runs into a word (`1.5e3`), and an
-NBT compound that names one key twice, holds a list of mixed types or a number past its type's
-range, or nests past 64. And it refuses a bare value after the name on a `site` or
-`theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because taking one
-there would let error recovery read an over-indented first body line into the header.
+block-state literal naming one property twice, a decimal that runs into a word (`1.5e3`) or is past
+a double's range, and an NBT compound that names one key twice, holds a list of mixed types or a
+number past its type's range, or nests past 64. And it refuses a bare value after the name on a
+`site` or `theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because
+taking one there would let error recovery read an over-indented first body line into the header.
 
 ## 5.2 Nesting
 
@@ -494,11 +500,13 @@ first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `le
   that take an address: each body sorted by keyword, then by `@SIDE` with a line that names no wall
   first, then as this list orders members, and compared member by member. At each of these, the
   line that runs out first, or has no `->` or no guard, sorts first. Keys, values and editions
-  compare as text, by Unicode code point, each value spelled one way: a number in decimal digits, a
-  string between its double quotes, a token with its `@` and any state literal without spaces, a
-  list as its items joined by `, ` between `[` and `]`, a `mat_slot=` as the name of its slot, and
-  anything else as written. So `height=10` sorts before `height=9`, and `frame="oak"` before
-  `frame=oak`. Members that tie at every step keep the order their lines are written in.
+  compare as text, by Unicode code point, each value spelled one way: an integer in decimal digits,
+  a decimal with no zero leading its whole part or ending its fraction and no `.` left with nothing
+  after it, a string between its double quotes, a token with its `@` and any state literal without
+  spaces, a list as its items joined by `, ` between `[` and `]`, a `mat_slot=` as the name of its
+  slot, and anything else as written. So `height=10` sorts before `height=9`, `frame="oak"` before
+  `frame=oak`, and `scale=02.50` and `scale=2.5` tie, as `scale=2.0` and `scale=2` do. Members
+  that tie at every step keep the order their lines are written in.
 
 A member carries its address whether or not it has an `id=`, so adding an `id=`, a `class=` or a
 `[selector]` to a line renumbers nothing. A member under an `@edition` guard counts among the

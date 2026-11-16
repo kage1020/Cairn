@@ -44,7 +44,7 @@ pub enum TokenKind {
         /// Raw source lexeme.
         lexeme: String,
     },
-    /// An `nbt={...}` compound, verbatim with its braces: a `{` after `=` opens one.
+    /// An SNBT compound, verbatim with its braces, which a `{` after any key's `=` opens.
     Nbt(String),
     /// Boolean literal `true` / `false`.
     Bool(bool),
@@ -149,6 +149,49 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
         (Some(first), _) => Err(first.error),
         (None, Some(fatal)) => Err(fatal),
         (None, None) => Ok(tokens),
+    }
+}
+
+/// Where one line's comment opens, and whether its end falls inside a string or an NBT compound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineScan {
+    /// Byte offset of the `#` that opens the line's comment.
+    pub comment: Option<usize>,
+    /// Whether the line's end falls inside a string or an NBT compound, refused ones included.
+    pub in_literal: bool,
+}
+
+/// The [`LineScan`] of `line`, a whole line or the start of one, read as [`lex`] reads it.
+#[must_use]
+pub fn scan_line(line: &str) -> LineScan {
+    let mut lexer = Lexer::new(line);
+    loop {
+        lexer.skip_spaces();
+        let start = lexer.pos;
+        let b = match lexer.peek() {
+            None | Some(b'\n' | b'\r') => {
+                return LineScan {
+                    comment: None,
+                    in_literal: false,
+                };
+            }
+            Some(b'#') => {
+                return LineScan {
+                    comment: Some(start),
+                    in_literal: false,
+                };
+            }
+            Some(b) => b,
+        };
+        // Any other failure leaves the lexer past the token it refused, to read on from there.
+        if let Err(LexError::UnterminatedString { .. } | LexError::InvalidNbt { .. }) =
+            lexer.scan_token(b)
+        {
+            return LineScan {
+                comment: None,
+                in_literal: true,
+            };
+        }
     }
 }
 
@@ -427,9 +470,7 @@ impl<'src> Lexer<'src> {
                 self.advance();
                 self.push_at(TokenKind::RParen, start..self.pos, position);
             }
-            b'{' if matches!(self.out.last().map(|t| &t.kind), Some(TokenKind::Eq)) => {
-                self.scan_nbt(start, position)?;
-            }
+            b'{' if self.follows_a_key() => self.scan_nbt(start, position)?,
             b'{' => {
                 self.advance();
                 // A `{` in a directive's raw value is text, and must not suspend the layout of
@@ -684,6 +725,25 @@ impl<'src> Lexer<'src> {
             span,
             position,
         });
+    }
+
+    /// Whether the last two tokens are a key and its `=`. A `logic` line's `=` binds a signal
+    /// and its `name=` names an operand, so neither is a key's.
+    fn follows_a_key(&self) -> bool {
+        matches!(
+            self.out[self.line_first_token..],
+            [
+                ..,
+                Token {
+                    kind: TokenKind::Ident(_),
+                    ..
+                },
+                Token {
+                    kind: TokenKind::Eq,
+                    ..
+                }
+            ]
+        ) && !self.line_opens_with(&["logic"])
     }
 
     /// Whether the current line's first tokens are the identifiers `words`, in order.
