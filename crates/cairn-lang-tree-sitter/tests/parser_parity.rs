@@ -1943,6 +1943,19 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor scale=1.5e3\n",
         Accept,
     ),
+    // -- a decimal past a double's range --------------------------------
+    // Bounding a run of digits by its value is beyond the grammar, as it is for an integer.
+    (
+        "decimal_past_a_double_s_range",
+        "struct s size=3x3\n  floor scale=10000000000000000000000000000000000000000000000000\
+         00000000000000000000000000000000000000000000000000\
+         00000000000000000000000000000000000000000000000000\
+         00000000000000000000000000000000000000000000000000\
+         00000000000000000000000000000000000000000000000000\
+         00000000000000000000000000000000000000000000000000\
+         0000000000.5\n",
+        Accept,
+    ),
     // -- what an NBT compound holds ----------------------------------------
     // Comparing two keys, relating a list's values to each other and bounding a number by its
     // suffix's range are beyond the grammar, which reads each value on its own.
