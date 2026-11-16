@@ -9,8 +9,8 @@ use crate::error::Span;
 use crate::intent::MemberAddress;
 
 use super::{
-    BlockArrayIr, BlockEntity, BlockState, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex,
-    ResolvedBlock, ResolvedMember,
+    Bbox, BlockArrayIr, BlockEntity, BlockState, Dims, MAX_STRUCTURE_VOLUME, MemberGeometry,
+    PaletteFull, PaletteIndex, ResolvedBlock, ResolvedMember,
 };
 
 /// One block of a circuit, at `(x, y, z)` in the layers under the base plane, `y = 0` the lowest.
@@ -43,6 +43,9 @@ pub enum AttachError {
     /// No structure is built under that key.
     #[error("no structure is built under that key")]
     NoStructure,
+    /// The circuit reserves no layer under the base plane.
+    #[error("the circuit reserves no layer under the floor")]
+    NoLayers,
     /// The layers under the base plane take the structure past [`MAX_STRUCTURE_VOLUME`].
     #[error("the layers under the floor take the structure past {MAX_STRUCTURE_VOLUME} blocks")]
     TooLarge,
@@ -80,7 +83,7 @@ impl BlockArrayIr {
     ///
     /// # Errors
     ///
-    /// [`AttachError`] when no structure is built under `key` or the circuit does not fit it.
+    /// [`AttachError`] when `key` names no structure, `void` is `0`, or the circuit does not fit.
     pub fn attach_circuit(
         &mut self,
         key: &str,
@@ -93,6 +96,9 @@ impl BlockArrayIr {
             .structures
             .get_mut(key)
             .ok_or(AttachError::NoStructure)?;
+        if void == 0 {
+            return Err(AttachError::NoLayers);
+        }
         let mut dims = array.dims;
         dims.y = dims.y.checked_add(void).ok_or(AttachError::TooLarge)?;
         if !dims.fits_volume_budget() {
@@ -101,11 +107,23 @@ impl BlockArrayIr {
         let mut palette = array.palette.clone();
         let layer = (array.dims.x as usize) * (array.dims.z as usize);
         let mut voxels = vec![PaletteIndex::AIR; layer * void as usize];
+        let reserved = Bbox::spanning(
+            (0, 0, 0),
+            (dims.x.saturating_sub(1), void - 1, dims.z.saturating_sub(1)),
+        );
+        // A `Bbox` is never empty, so a circuit that lays no block holds the layers it reserves.
+        let actual = Bbox::around(blocks.iter().map(|block| block.at)).unwrap_or(reserved);
         let mut member = ResolvedMember {
             role: "circuit".to_owned(),
             id: None,
             address,
             resolved_state: Vec::new(),
+            geometry: MemberGeometry {
+                anchor: reserved.min(),
+                declared_bbox: reserved,
+                actual_bbox: actual,
+                host_face: None,
+            },
             span,
         };
         let sorted = indexed(blocks, dims, void)?;
@@ -160,6 +178,7 @@ impl BlockArrayIr {
         }
         if let Some(members) = self.members.get_mut(key) {
             for resolved in members.iter_mut() {
+                resolved.geometry = resolved.geometry.raised(void);
                 for state in &mut resolved.resolved_state {
                     for run in &mut state.runs {
                         run.from.1 += void;
