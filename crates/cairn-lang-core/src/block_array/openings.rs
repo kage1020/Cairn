@@ -131,12 +131,12 @@ pub fn wall_local_to_grid(
     }
 }
 
-/// How an argument a port cannot use was written.
+/// How an argument its reader cannot use was written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Written {
     /// The key is not on the line.
     Absent,
-    /// The key carries an identifier the port does not accept.
+    /// The key carries an identifier its reader does not accept.
     Ident(String),
     /// The key carries an integer.
     Int(i64),
@@ -332,17 +332,17 @@ pub(super) enum WindowArgFault {
     SizeMalformed,
     /// `anchor=` is present and names no anchor, so never [`Written::Absent`].
     AnchorUnknown(Written),
-    /// The anchor lies `shift` columns right of the window's first column, and `offset=` is less.
+    /// The anchor puts the window's first column `before` columns left of its wall's left end.
     BeforeWallStart {
         anchor: &'static str,
         offset: u32,
-        shift: u32,
+        before: u32,
     },
-    /// The anchor lies `shift` rows above the window's lowest row, and `y=` is less.
+    /// The anchor puts the window's lowest row `below` rows under the base row.
     BelowBaseRow {
         anchor: &'static str,
         y: u32,
-        shift: u32,
+        below: u32,
     },
 }
 
@@ -369,22 +369,22 @@ impl WindowArgFault {
                     Written::OtherShape(described) => {
                         format!("has an `anchor=` that is {described}, not one of {names}")
                     }
-                    Written::Absent => format!("has no `anchor=` (expected one of {names})"),
+                    Written::Absent => unreachable!("a window with no `anchor=` is `bottom_left`"),
                 }
             }
             Self::BeforeWallStart {
                 anchor,
                 offset,
-                shift,
+                before,
             } => format!(
                 "has `offset={offset}` at `anchor={anchor}`, which puts its first column at \
-                 `offset - {shift}` = -{}, before the left end of its wall",
-                shift - offset,
+                 `offset - {}` = -{before}, before the left end of its wall",
+                offset + before,
             ),
-            Self::BelowBaseRow { anchor, y, shift } => format!(
-                "has `y={y}` at `anchor={anchor}`, which puts its lowest row at `y - {shift}` = \
-                 -{}, below the base row",
-                shift - y,
+            Self::BelowBaseRow { anchor, y, below } => format!(
+                "has `y={y}` at `anchor={anchor}`, which puts its lowest row at `y - {}` = \
+                 -{below}, below the base row",
+                y + below,
             ),
         }
     }
@@ -417,15 +417,26 @@ impl WindowArgFault {
                  `offset=` and `y=` place; without `anchor=` they place its bottom-left cell",
                 window_anchor_names(),
             ),
-            Self::BeforeWallStart { anchor, shift, .. } => format!(
-                "`anchor={anchor}` names the cell {shift} along from the window's first column, \
-                 so `offset=` must be at least {shift}; raise `offset=`, or choose an `anchor=` \
-                 further left",
-            ),
-            Self::BelowBaseRow { anchor, shift, .. } => format!(
-                "`anchor={anchor}` names the cell {shift} up from the window's lowest row, so \
-                 `y=` must be at least {shift}; raise `y=`, or choose an `anchor=` further down",
-            ),
+            Self::BeforeWallStart {
+                anchor,
+                offset,
+                before,
+            } => {
+                let shift = offset + before;
+                format!(
+                    "`anchor={anchor}` names the cell {shift} along from the window's first \
+                     column, so `offset=` must be at least {shift}; raise `offset=`, or choose an \
+                     `anchor=` further left",
+                )
+            }
+            Self::BelowBaseRow { anchor, y, below } => {
+                let shift = y + below;
+                format!(
+                    "`anchor={anchor}` names the cell {shift} up from the window's lowest row, so \
+                     `y=` must be at least {shift}; raise `y=`, or choose an `anchor=` further \
+                     down",
+                )
+            }
         }
     }
 }
@@ -433,10 +444,10 @@ impl WindowArgFault {
 /// The window arguments a port and a cut both need, read once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct WindowArgs {
-    /// `offset=`, `0` when absent: the column of the window's anchor.
-    pub(super) offset: u32,
-    /// `y=`, relative to the member's own level: the row of the window's anchor.
-    pub(super) y: u32,
+    /// The window's first column along the wall.
+    pub(super) column: u32,
+    /// The window's lowest row, relative to the member's own level.
+    pub(super) row: u32,
     /// `size=`'s `W`.
     pub(super) width: u32,
     /// `size=`'s `H`.
@@ -455,14 +466,15 @@ impl WindowArgs {
         self.anchor_or_default().along.shift(self.width)
     }
 
-    /// The window's first column along the wall.
-    pub(super) fn column(self) -> u32 {
-        self.offset - self.column_shift()
+    /// The `offset=` the line writes, `0` when absent: the column of the window's anchor.
+    pub(super) fn offset(self) -> u32 {
+        self.column.saturating_add(self.column_shift())
     }
 
-    /// The window's lowest row, relative to the member's own level.
-    pub(super) fn row(self) -> u32 {
-        self.y - self.anchor_or_default().up.shift(self.height)
+    /// The `y=` the line writes, relative to the member's own level: the row of its anchor.
+    pub(super) fn y(self) -> u32 {
+        self.row
+            .saturating_add(self.anchor_or_default().up.shift(self.height))
     }
 
     /// The window's first column as a formula in `offset`, such as `offset - 1`.
@@ -512,31 +524,30 @@ pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgF
         },
         other => return Err(WindowArgFault::AnchorUnknown(other)),
     };
-    let args = WindowArgs {
-        offset,
-        y,
+    let at = anchor.unwrap_or(WindowAnchor::BOTTOM_LEFT);
+    let shift = at.along.shift(width);
+    let column = offset
+        .checked_sub(shift)
+        .ok_or_else(|| WindowArgFault::BeforeWallStart {
+            anchor: at.name,
+            offset,
+            before: shift - offset,
+        })?;
+    let shift = at.up.shift(height);
+    let row = y
+        .checked_sub(shift)
+        .ok_or_else(|| WindowArgFault::BelowBaseRow {
+            anchor: at.name,
+            y,
+            below: shift - y,
+        })?;
+    Ok(WindowArgs {
+        column,
+        row,
         width,
         height,
         anchor,
-    };
-    let at = args.anchor_or_default();
-    let shift = at.along.shift(width);
-    if offset < shift {
-        return Err(WindowArgFault::BeforeWallStart {
-            anchor: at.name,
-            offset,
-            shift,
-        });
-    }
-    let shift = at.up.shift(height);
-    if y < shift {
-        return Err(WindowArgFault::BelowBaseRow {
-            anchor: at.name,
-            y,
-            shift,
-        });
-    }
-    Ok(args)
+    })
 }
 
 /// Wall-local `u` of the column a door's `at=` anchor or `offset=` names on its `side` wall,

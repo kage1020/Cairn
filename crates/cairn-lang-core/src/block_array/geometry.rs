@@ -7,18 +7,28 @@ use super::joins::Face;
 use super::openings::WallSide;
 
 /// A cell of a block array, `(x, y, z)`.
-type Cell = (u32, u32, u32);
+pub(crate) type Cell = (u32, u32, u32);
 
-/// A box of cells, both corners included.
+/// A box of cells, both corners included, whose `min` is at most its `max` on every axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct Bbox {
-    /// The corner with the lowest `x`, `y` and `z`.
-    pub min: (u32, u32, u32),
-    /// The corner with the highest `x`, `y` and `z`.
-    pub max: (u32, u32, u32),
+    min: (u32, u32, u32),
+    max: (u32, u32, u32),
 }
 
 impl Bbox {
+    /// The corner with the lowest `x`, `y` and `z`.
+    #[must_use]
+    pub const fn min(self) -> (u32, u32, u32) {
+        self.min
+    }
+
+    /// The corner with the highest `x`, `y` and `z`.
+    #[must_use]
+    pub const fn max(self) -> (u32, u32, u32) {
+        self.max
+    }
+
     /// The box holding `cell` alone.
     #[must_use]
     pub const fn cell(cell: (u32, u32, u32)) -> Self {
