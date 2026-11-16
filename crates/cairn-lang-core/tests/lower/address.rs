@@ -81,6 +81,29 @@ fn members_at_one_column_count_up_the_wall() {
 }
 
 #[test]
+fn an_anchored_window_counts_by_the_offset_and_y_it_writes() {
+    // The first holds columns 1..=5 and rows 2..=3; the second column 2 and rows 1..=2.
+    let src = "struct s size=9x7\n  \
+               window side=front anchor=top_right offset=5 y=3 size=5x2\n  \
+               window side=front offset=2 y=1 size=1x2\n  \
+               window side=front anchor=top_center offset=2 y=2 size=1x2\n";
+    assert_eq!(
+        addresses(src),
+        pairs(&[
+            (
+                "window side=front anchor=top_right offset=5 y=3 size=5x2",
+                "window@front[2]",
+            ),
+            ("window side=front offset=2 y=1 size=1x2", "window@front[0]"),
+            (
+                "window side=front anchor=top_center offset=2 y=2 size=1x2",
+                "window@front[1]",
+            ),
+        ]),
+    );
+}
+
+#[test]
 fn reordering_the_lines_moves_no_address() {
     let lines = [
         "window side=front offset=6",
@@ -373,6 +396,26 @@ fn lines_at_one_place_are_ordered_by_their_pairs_as_text() {
             ("walls height=9 mat_slot=wall frame=oak", "walls[1]"),
             ("walls height=9 mat_slot=wall y=0", "walls[4]"),
             ("walls height=9 mat_slot=wall frame=\"oak\"", "walls[0]"),
+        ]),
+    );
+}
+
+#[test]
+fn a_number_is_compared_by_its_one_spelling() {
+    let src = "struct s size=9x7\n  \
+               walls height=9 mat_slot=wall scale=02.50\n  \
+               walls height=9 mat_slot=wall scale=1.5\n  \
+               walls height=9 mat_slot=wall scale=2.5\n  \
+               walls height=9 mat_slot=wall scale=2.0\n  \
+               walls height=9 mat_slot=wall scale=2\n";
+    assert_eq!(
+        addresses(src),
+        pairs(&[
+            ("walls height=9 mat_slot=wall scale=02.50", "walls[3]"),
+            ("walls height=9 mat_slot=wall scale=1.5", "walls[0]"),
+            ("walls height=9 mat_slot=wall scale=2.5", "walls[4]"),
+            ("walls height=9 mat_slot=wall scale=2.0", "walls[1]"),
+            ("walls height=9 mat_slot=wall scale=2", "walls[2]"),
         ]),
     );
 }

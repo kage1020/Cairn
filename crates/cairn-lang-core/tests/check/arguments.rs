@@ -51,6 +51,43 @@ fn a_key_the_role_does_not_read_is_refused() {
     assert!(d.primary.contains("`walls`"), "got: {}", d.primary);
 }
 
+/// No keyword reads `nbt=` yet, so it is a key like any other a role does not take.
+#[test]
+fn a_compound_on_a_key_no_role_reads_is_refused_as_that_key() {
+    let src = "struct s size=5x5\n  walls mat_slot=wall height=3 nbt={CustomName:\"x\"}\n";
+    let d = exactly_one(diagnose(src));
+    assert_eq!(
+        (d.code.as_str(), d.primary.as_str(), &src[d.span.clone()]),
+        (
+            "E_UNKNOWN_ARGUMENT",
+            "`nbt=` is not an argument `walls` reads",
+            "{CustomName:\"x\"}",
+        ),
+    );
+}
+
+#[test]
+fn a_compound_on_a_header_or_a_theme_selector_binding_is_a_key_no_pass_reads() {
+    let header = "struct s size=5x5 nbt={a:1}\n  floor mat_slot=wall\n\ntheme t:\n  \
+                  slot wall -> @stone\n";
+    let d = exactly_one(diagnose(header));
+    assert_eq!(
+        (d.code.as_str(), d.primary.as_str(), &header[d.span.clone()]),
+        (
+            "E_UNKNOWN_ARGUMENT",
+            "`nbt=` is not an argument a `struct` header reads",
+            "{a:1}",
+        ),
+    );
+    let binding = "theme t:\n  slot wall -> @stone\n  walls[class=outer] -> nbt={a:1}\n\n\
+                   struct s size=5x5\n  walls class=outer mat_slot=wall\n";
+    let d = exactly_one(diagnose(binding));
+    assert_eq!(
+        (d.code.as_str(), &binding[d.span.clone()]),
+        ("W_IGNORED_ARGUMENT", "{a:1}"),
+    );
+}
+
 #[test]
 fn the_finding_points_at_the_argument_and_not_at_the_line() {
     // The IR carries no span for the key, so the anchor is the value.
@@ -401,11 +438,11 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "window",
-        "  window id=n class=c mat_slot=m side=front y=2 offset=1 size=1x1 sym=false repeat=1 step=1\n",
+        "  window id=n class=c mat_slot=m side=front y=2 offset=1 size=1x1 sym=false repeat=1 step=1 anchor=bottom_left\n",
     ),
     (
         "roof",
-        "  roof id=r class=c mat_slot=m kind=shed overhang=1 slope_to=front\n",
+        "  roof id=r class=c mat_slot=m kind=shed overhang=1 slope_to=front footprint=struct bounds=expand\n",
     ),
     (
         "stair",
@@ -610,18 +647,9 @@ fn a_stair_reads_the_height_it_is_written_at() {
 }
 
 #[test]
-fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // Each is written on a known keyword in `spec/entities` "Anchor conventions".
-    let rows = [
-        ("window side=front y=2 offset=4 size=3x3", "shape", "arch"),
-        (
-            "window side=front y=2 offset=4 size=3x3",
-            "anchor",
-            "bottom_center",
-        ),
-        ("roof kind=gable", "footprint", "struct"),
-        ("roof kind=gable", "bounds", "expand"),
-    ];
+fn an_unreached_argument_the_spec_writes_is_accepted_and_reported() {
+    // Written on a known keyword in `spec/entities` "Anchor conventions".
+    let rows = [("window side=front y=2 offset=4 size=3x3", "shape", "arch")];
     for (line, key, value) in rows {
         let keyword = keyword_of(line);
         let src = format!("struct s size=9x9\n  {line} {key}={value}\n");

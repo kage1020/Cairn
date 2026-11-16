@@ -948,9 +948,10 @@ row](#the-verified-target-row). No constraint catalog ships yet
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and address assignment. The `members` record of each member that built a cell, a struct's
 `circuit` included, carries the address the compiler gave its line
-([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)). A change that moves one of those
-addresses, such as a member added ahead of others of its role on its wall, moves the hash as a
-change to what is built does. The address of a member that builds no cell, such as a `level`, is
+([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)) and its geometry ([Entities
+§8.2](/spec/entities/#82-anchor-conventions)). A change that moves one of those addresses, such as
+a member added ahead of others of its role on its wall, moves the hash as a change to what is built
+does. The address of a member that builds no cell, such as a `level`, is
 not recorded, and reaches the hash only as a step of the addresses of the members under it.
 
 `lock_schema_version` leads the document so a reader can decide whether it understands the rest
@@ -1129,8 +1130,10 @@ that it would get outside one. What the guard adds is the edition whose build ke
 What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
 §7.4](/spec/materials-themes/#74-raw-blocks)), and the Tier 0 parts of [Redstone
 §14.1](/spec/redstone/#tier-0-parts): `repeater`, `comparator`, `redstone_torch` and
-`redstone_dust`. Any other member, and a `logic` or `assert` line, is
-`E_SEMANTIC_IN_EDITION_GUARD` ([Lint](/spec/lint/)), once at the outermost such line, taking
+`redstone_dust`. A line that writes an `nbt={...}` compound belongs to that layer too, and stands
+under a guard ([Entities §8.1](/spec/entities/#81-two-tiers)), though no keyword reads `nbt=` yet.
+Any other member, and a `logic` or `assert` line, is `E_SEMANTIC_IN_EDITION_GUARD`
+([Lint](/spec/lint/)), once at the outermost such line, taking
 anything indented under it along. So is a `logic` or `assert` line under a guarded raw member or
 Tier 0 part, which outside a guard would still reach redstone synthesis. No build and no other
 check reads a refused line or what goes with it, so it draws that finding alone. A raw member or a
