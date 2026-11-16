@@ -415,7 +415,8 @@ fn a_beam_over_a_window_its_own_line_does_not_place_defers_and_lays_nothing() {
                 "window has no `y=`",
                 &[
                     "write `y=N`, where `N` is a non-negative integer: the window's lowest row, \
-                     counted up from 0, the base row of the struct or of the window's `level`",
+                     counted up from 0, the base row of the struct or of the window's `level`, or \
+                     the row of the cell its `anchor=` names",
                 ],
             ),
             (
