@@ -57,6 +57,11 @@ fn a_clean_build_answers_its_ir_beside_one_structure_file_per_structure() {
                                 { "from": [0, 0, 1], "len": 2 },
                             ],
                         }],
+                        "geometry": {
+                            "anchor": [0, 0, 0],
+                            "declared_bbox": { "min": [0, 0, 0], "max": [1, 0, 1] },
+                            "actual_bbox": { "min": [0, 0, 0], "max": [1, 0, 1] },
+                        },
                     }],
                 },
             },
