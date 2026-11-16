@@ -20,7 +20,7 @@ block-array IR                   ボクセル格子 + パレット + block entit
 
 ## 3.2 Intent IR は情報が豊富で、不変条件を持つ
 
-名前付きのメンバーは、`id`、`class`、`role`、アドレス ([構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス))、`mat_slot`、`intent_state`、`resolved_state` を持ちます ([ブロックステート](/ja/spec/blockstate/))。`resolved_state` は lowering が導くので、lowering が読む Intent IR ではなく、メンバーを lowering した先の block-array IR に、構造ごとのキーで記録します。
+名前付きのメンバーは、`id`、`class`、`role`、アドレス ([構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス))、`mat_slot`、`intent_state`、`resolved_state` を持ちます ([ブロックステート](/ja/spec/blockstate/))。`resolved_state` と、メンバーのアンカー、宣言上の bbox と実際の bbox、取り付ける面は lowering が導くので ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約))、lowering が読む Intent IR ではなく、メンバーを lowering した先の block-array IR に、構造ごとのキーで記録します。
 
 取り込みは独自の IR を加えません。`cairn import` が書き出すのはソース、つまり Intent IR のエスケープハッチである生のメンバーからなる `.crn` で、そのソースはほかのソースと同じようにパースされ、ファイルが持っていた block array へ lowering されます ([エコシステム連携 §12.2](/ja/spec/ecosystem-interop/#122-逆方向の変換-コンパイラは写し取りllm-がリフトする))。生のメンバーはブロックを名指し、`mat_slot` を読まないので、書き出したものは `semantic_level: grouped`、つまり L1 にあたります。リフトはそのソースを `lifted`、つまり上の不変条件が述べるメンバーへとリファクタリングします。
 

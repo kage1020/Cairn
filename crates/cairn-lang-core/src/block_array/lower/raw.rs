@@ -8,6 +8,7 @@ use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::diag_invalid_member;
+use crate::block_array::geometry::Declared;
 use crate::block_array::material::{IdOrigin, block_id_state, validated_id};
 use crate::resolve::{TokenKind, classify_token};
 
@@ -41,6 +42,7 @@ pub(super) fn fill_raw(
         return;
     };
     let idx = palette.intern(state);
+    canvas.declare(Declared::boxed(cells.repeated(repeat).bbox(), None));
     for shift in repeat.shifts() {
         for cell in cells.shifted(shift).cells() {
             canvas.paint(cell, || idx);
