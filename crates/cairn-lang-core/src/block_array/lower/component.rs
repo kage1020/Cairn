@@ -9,6 +9,7 @@ use crate::intent::Member;
 
 use crate::block_array::BlockState;
 use crate::block_array::args::{UnreadArgument, ident_or_ignore, read_or_ignore};
+use crate::block_array::geometry::Declared;
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{
@@ -298,6 +299,7 @@ fn place(
         Mount::Standing => {}
     }
     let state = BlockState { id, properties };
+    canvas.declare(Declared::cell(cell, Some(anchor.host_face())));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
         Ok(true)
