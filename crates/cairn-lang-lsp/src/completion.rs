@@ -11,6 +11,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::Span;
 use cairn_lang_core::ast::ItemKind;
 use cairn_lang_core::intent::{BodyKind, role_of};
+use cairn_lang_core::lex::scan_line;
 use cairn_lang_formats::builtin_pack;
 use cairn_lang_formats::registry::MaterialsIndex;
 
@@ -165,35 +166,6 @@ fn is_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '.'
 }
 
-/// Where a line's comment opens, and whether the line ends inside a string.
-struct LineScan {
-    /// Byte offset of the first `#` outside a string literal.
-    comment: Option<usize>,
-    /// `false` past a comment opener, whose quotes are comment text.
-    open_string: bool,
-}
-
-/// The [`LineScan`] of `line`, exact by quote parity: core's lexer reads no escapes in a string.
-fn scan_line(line: &str) -> LineScan {
-    let mut open_string = false;
-    for (i, c) in line.char_indices() {
-        match c {
-            '"' => open_string = !open_string,
-            '#' if !open_string => {
-                return LineScan {
-                    comment: Some(i),
-                    open_string: false,
-                };
-            }
-            _ => {}
-        }
-    }
-    LineScan {
-        comment: None,
-        open_string,
-    }
-}
-
 /// Byte offset of the first `#` in `line` that opens a comment.
 fn comment_start(line: &str) -> Option<usize> {
     scan_line(line).comment
@@ -208,9 +180,9 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
         return None;
     }
     let prefix = &source[line_start..offset];
-    // Comments and strings take free-form text.
+    // Comments, strings and NBT compounds take free-form text.
     let scan = scan_line(prefix);
-    if scan.comment.is_some() || scan.open_string {
+    if scan.comment.is_some() || scan.in_literal {
         return None;
     }
     let token_start = line_start + token_start_of(prefix);

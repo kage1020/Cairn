@@ -76,7 +76,7 @@ fn attr_matches(member: &Member, levels: &[&str], key: &str, expected: &Value) -
     let Some(field) = label_attr(key) else {
         return member
             .written(key)
-            .is_some_and(|actual| actual.value.kind == expected.kind);
+            .is_some_and(|actual| actual.value.same_value(expected));
     };
     field(member).is_some_and(|actual| value_eq_label(expected, actual))
 }

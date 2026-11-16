@@ -187,26 +187,6 @@ fn slot_value_replace_range_counts_utf16_units() {
 }
 
 #[test]
-fn the_line_scan_answers_both_questions_from_one_walk() {
-    let cases = [
-        ("door id=front", None, false),
-        ("door id=\"front\"", None, false),
-        ("door id=\"front", None, true),
-        // A `#` inside a string is content, not an opener.
-        ("door id=\"a # b\"", None, false),
-        ("door id=\"a # b", None, true),
-        // Quotes past a comment opener are comment text.
-        ("door id=a # say \"hi", Some(10), false),
-        ("# \"", Some(0), false),
-    ];
-    for (line, comment, open_string) in cases {
-        let scan = scan_line(line);
-        assert_eq!(scan.comment, comment, "comment offset for {line:?}");
-        assert_eq!(scan.open_string, open_string, "open string for {line:?}");
-    }
-}
-
-#[test]
 fn a_material_token_inside_a_string_offers_nothing() {
     let source = "theme a:\n  slot floor -> @oak_planks\n\
                   struct s size=2x2\n  door id=\"@oa";
@@ -251,6 +231,25 @@ fn an_unterminated_string_suppresses_only_its_own_line() {
                   struct s size=2x2\n  door id=\"oops\n  floor mat_slot=";
     let items = complete(source, "mat_slot=");
     assert_eq!(labels(&items), vec!["floor"]);
+}
+
+#[test]
+fn a_line_with_an_nbt_compound_completes_past_it_and_nothing_inside_it() {
+    let theme = "theme a:\n  slot wall -> @cobblestone\nstruct s size=2x2\n";
+    for (line, expected) in [
+        ("  floor nbt={a:1} mat_slot=", vec!["wall"]),
+        ("  floor nbt={a:'#'} mat_slot=", vec!["wall"]),
+        ("  floor nbt={a:'\"'} mat_slot=", vec!["wall"]),
+        ("  floor nbt={a:\"x\\\"y\"} mat_slot=", vec!["wall"]),
+        ("  floor nbt={a:\"mat_slot=", vec![]),
+        ("  floor nbt={mat_slot=", vec![]),
+    ] {
+        let source = format!("{theme}{line}");
+        let items = completions(&source, at_end_of(&source, line))
+            .expect("in the document")
+            .items;
+        assert_eq!(labels(&items), expected, "{line:?}");
+    }
 }
 
 #[test]
