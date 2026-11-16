@@ -1,1 +1,2 @@
-- *(formats)* `OutputExt` gains `Schem`, so an exhaustive match on it no longer compiles.
+- *(formats)* `OutputExt` gains `Schem` and is `#[non_exhaustive]`, so a match on it outside the
+  crate needs a wildcard arm.

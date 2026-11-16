@@ -4,9 +4,9 @@ use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockState, Dims};
 use cairn_lang_core::{Edition, WalkwayScopeKey};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::java_structure::JavaStructureError;
-use cairn_lang_formats::schem::{SchemError, SchemFile, prepare_schem, schem_files};
-use cairn_lang_nbt::read_java_gzip;
+use cairn_lang_formats::schem::{SchemError, SchemFile, prepare_schem, read_schem, schem_files};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
+use cairn_lang_nbt::{NbtIoError, read_java_gzip};
 
 use crate::common::{array_of, comparator_array, ir_of, lower_example, wide_array};
 
@@ -295,8 +295,32 @@ fn a_block_entity_off_the_grid_is_refused() {
 }
 
 #[test]
-fn an_extent_past_an_unsigned_short_is_refused() {
+fn an_extent_past_a_signed_short_is_written_as_its_bit_pattern_and_reads_back() {
     let array = array_of(
+        "probe",
+        Dims {
+            x: 32768,
+            y: 1,
+            z: 1,
+        },
+        &[],
+        &vec![0; 32768],
+    );
+    let schematic = written_schematic(struct_file(&array), &target("1.21.4"));
+    assert_eq!(schematic.entries["Width"], Tag::Short(-32768));
+
+    let mut bytes = Vec::new();
+    prepare_schem(struct_file(&array), &target("1.21.4"))
+        .expect("the file prepares")
+        .write_gzip(&mut bytes)
+        .expect("the file writes");
+    let read = read_schem(bytes.as_slice()).expect("the file reads back");
+    assert_eq!(read.volume.dims(), array.dims);
+}
+
+#[test]
+fn an_extent_past_an_unsigned_short_is_refused_before_the_nbt_writers_checks() {
+    let tall = array_of(
         "probe",
         Dims {
             x: 1,
@@ -306,33 +330,55 @@ fn an_extent_past_an_unsigned_short_is_refused() {
         &[],
         &vec![0; 65536],
     );
-    let err = prepare_schem(struct_file(&array), &target("1.21.4")).expect_err("too tall");
-    assert!(
-        matches!(
-            err,
-            SchemError::DimensionOverflow {
-                axis: "y",
-                field: "Height",
-                value: 65536
-            }
-        ),
-        "got {err:?}"
+    let past_i32 = array_of(
+        "probe",
+        Dims {
+            x: 1 << 31,
+            y: 0,
+            z: 0,
+        },
+        &[],
+        &[],
     );
+    let refused = [&tall, &past_i32].map(|array| {
+        match prepare_schem(struct_file(array), &target("1.21.4")).expect_err("too large") {
+            SchemError::DimensionOverflow { axis, field, value } => (axis, field, value),
+            other => panic!("not a dimension overflow: {other:?}"),
+        }
+    });
+    assert_eq!(refused, [("y", "Height", 65536), ("x", "Width", 1 << 31)]);
 }
 
 #[test]
 fn a_state_its_spelling_would_misread_is_refused() {
-    let mut array = array_of("probe", Dims { x: 1, y: 1, z: 1 }, &[], &[0]);
-    let mut state = BlockState::bare("minecraft:sign");
-    state.properties.insert("text".to_owned(), "a,b".to_owned());
-    array.palette.intern(state);
-    let err = prepare_schem(struct_file(&array), &target("1.21.4")).expect_err("a comma");
-    assert!(
-        matches!(
-            &err,
-            SchemError::UnspellableState { state } if state == "minecraft:sign[text=a,b]"
-        ),
-        "got {err:?}"
+    let states = [
+        ("minecraft:sign", "text", "a,b"),
+        ("minecraft:sign", "text", "a=b"),
+        ("minecraft:sign", "text", "[a"),
+        ("minecraft:sign", "te]xt", "a"),
+        ("minecraft:sign", "", "a"),
+        ("minecraft:si[gn", "text", "a"),
+    ];
+    let refused = states.map(|(id, name, value)| {
+        let mut array = array_of("probe", Dims { x: 1, y: 1, z: 1 }, &[], &[0]);
+        let mut state = BlockState::bare(id);
+        state.properties.insert(name.to_owned(), value.to_owned());
+        array.palette.intern(state);
+        match prepare_schem(struct_file(&array), &target("1.21.4")).expect_err("misread") {
+            SchemError::UnspellableState { state } => state,
+            other => panic!("not unspellable: {other:?}"),
+        }
+    });
+    assert_eq!(
+        refused,
+        [
+            "minecraft:sign[text=a,b]",
+            "minecraft:sign[text=a=b]",
+            "minecraft:sign[text=[a]",
+            "minecraft:sign[te]xt=a]",
+            "minecraft:sign[=a]",
+            "minecraft:si[gn[text=a]",
+        ]
     );
 }
 
@@ -379,7 +425,13 @@ fn a_name_the_nbt_encoder_cannot_write_is_refused() {
     file.stem = "h\u{f6}me".to_owned();
     let err = prepare_schem(file, &target("1.21.4")).expect_err("not ASCII");
     assert!(
-        matches!(&err, SchemError::UnencodableName { name, .. } if name == "h\u{f6}me"),
+        matches!(
+            &err,
+            SchemError::UnencodableName {
+                name,
+                source: NbtIoError::InvalidString { byte: 0xc3, index: 1 },
+            } if name == "h\u{f6}me"
+        ),
         "got {err:?}"
     );
 }

@@ -197,6 +197,37 @@ fn a_site_named_after_a_struct_collides_only_as_one_litematic() {
 }
 
 #[test]
+fn a_struct_wider_than_a_schem_extent_is_refused_with_a_format_that_holds_it() {
+    let source = "theme t:\n  slot floor -> @stone\n\n\
+                  struct strip size=65536x1\n  floor mat_slot=floor\n";
+    let fixture = Fixture::new(source);
+    let out = fixture.out();
+    let result = cairn(
+        "compile",
+        &[
+            fixture.source().to_str().expect("utf-8 path"),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--out",
+            out.to_str().expect("utf-8 path"),
+            "--structure-format",
+            "schem",
+        ],
+    );
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stderr),
+        "error: checking `struct::strip`: the array is 65536 blocks along x, past the 65535 \
+         `Width` holds\n  note: split the structure along that axis, or compile with \
+         `--structure-format nbt`, which stores each extent as an int\n",
+    );
+    assert!(fixture.artifacts().is_empty(), "{:?}", fixture.artifacts());
+    compile_with(&fixture, &["--structure-format", "nbt"]);
+}
+
+#[test]
 fn a_structure_format_for_bedrock_is_refused_before_the_file_is_read() {
     let result = cairn(
         "compile",

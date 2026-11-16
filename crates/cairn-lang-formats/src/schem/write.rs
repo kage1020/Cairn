@@ -84,7 +84,8 @@ pub enum SchemError {
         /// The entry, as `id[name=value,...]`.
         state: String,
     },
-    /// Two palette entries spelled alike, which one `Palette` key cannot map to both.
+    /// Two palette entries spelled alike, which one `Palette` key cannot map to both, reachable
+    /// only through the public [`Palette::entries`](cairn_lang_core::block_array::Palette::entries).
     #[error("palette entries {first} and {second} are both `{state}`")]
     DuplicateState {
         /// The spelling.
@@ -117,12 +118,12 @@ pub enum SchemError {
 pub struct Schem<'a> {
     file: SchemFile<'a>,
     data_version: i32,
-    size: [i16; 3],
+    size: [u16; 3],
     palette: Vec<String>,
     data_len: usize,
 }
 
-/// Checks that `file` writes as a `.schem` for `target`, without building anything.
+/// Checks that `file` writes as a `.schem` for `target`, without building its tag tree.
 ///
 /// # Errors
 ///
@@ -132,11 +133,6 @@ pub fn prepare_schem<'a>(
     target: &JavaTarget,
 ) -> Result<Schem<'a>, SchemError> {
     let block_array = file.block_array;
-    prepare_structure(block_array, target)?;
-    check_string(&file.stem).map_err(|source| SchemError::UnencodableName {
-        name: file.stem.clone(),
-        source,
-    })?;
     let dims = block_array.dims;
     let mut size = [0; 3];
     for (slot, (axis, field, value)) in size.iter_mut().zip([
@@ -144,13 +140,17 @@ pub fn prepare_schem<'a>(
         ("y", "Height", dims.y),
         ("z", "Length", dims.z),
     ]) {
-        let short = u16::try_from(value).map_err(|_| SchemError::DimensionOverflow {
+        *slot = u16::try_from(value).map_err(|_| SchemError::DimensionOverflow {
             axis,
             field,
             value,
         })?;
-        *slot = short.cast_signed();
     }
+    prepare_structure(block_array, target)?;
+    check_string(&file.stem).map_err(|source| SchemError::UnencodableName {
+        name: file.stem.clone(),
+        source,
+    })?;
     let mut palette = Vec::with_capacity(block_array.palette.entries.len());
     let mut seen = HashMap::with_capacity(palette.capacity());
     for (index, state) in block_array.palette.entries.iter().enumerate() {
@@ -233,11 +233,15 @@ impl Schem<'_> {
     ///
     /// [`NbtIoError::Io`] only, since [`prepare_schem`] ruled out every encoding error.
     pub fn write_gzip<W: Write>(&self, writer: &mut W) -> Result<(), NbtIoError> {
-        let mut gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+        let gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+        // The stream writes a few bytes at a time, and each write into the encoder compresses.
+        let mut gz = std::io::BufWriter::new(gz);
         stream_java_uncompressed(&mut gz, "", |root| {
             root.compound("Schematic", |schematic| self.write_schematic(schematic))
         })?;
-        gz.finish()?;
+        gz.into_inner()
+            .map_err(std::io::IntoInnerError::into_error)?
+            .finish()?;
         Ok(())
     }
 
@@ -250,7 +254,7 @@ impl Schem<'_> {
         schematic.tag("DataVersion", &Tag::Int(self.data_version))?;
         schematic.compound_tag("Metadata", &self.metadata())?;
         for (field, extent) in ["Width", "Height", "Length"].into_iter().zip(self.size) {
-            schematic.tag(field, &Tag::Short(extent))?;
+            schematic.tag(field, &Tag::Short(extent.cast_signed()))?;
         }
         let (x, y, z) = self.file.offset;
         schematic.tag("Offset", &Tag::IntArray(vec![x, y, z]))?;
@@ -269,7 +273,7 @@ impl Schem<'_> {
     fn write_blocks<W: Write>(&self, blocks: &mut CompoundStream<'_, W>) -> Result<(), NbtIoError> {
         blocks.compound("Palette", |palette| {
             for (index, spelled) in self.palette.iter().enumerate() {
-                let index = i32::try_from(index).expect("the palette fits an NBT list");
+                let index = i32::try_from(index).expect("a block array's palette fits an i32");
                 palette.tag(spelled, &Tag::Int(index))?;
             }
             Ok(())
