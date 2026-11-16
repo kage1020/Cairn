@@ -416,8 +416,8 @@ greater than 1 is the exception. Mirroring a series is reserved for a later exte
 not read as `false` there: that window is not cut either, and is reported as `W_DEFERRED_MEMBER`
 beside the `W_IGNORED_ARGUMENT`.
 
-**Which column a door stands in.** A door's wall-local column comes from one of three named
-anchors:
+**Which column a door stands in.** A door's wall-local column comes from an `at=` anchor or from
+`offset=N`. The anchors are:
 
 | Anchor | Column |
 |---|---|
@@ -425,12 +425,13 @@ anchors:
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-Or it comes from `offset=N`, counted as a window's `offset=` is: from 0 at the wall's left end as
-seen from outside. A number names a column between the wall's corners, `1 … wall_length - 2`. A
-corner column is where the wall meets the one beside it, and `at=left` and `at=right` are how a
-door stands there, so an `offset=` of 0 or `wall_length - 1` is refused, and so is one at or past
-`wall_length`. A wall shorter than 3 has no column between its corners. `at=` takes an anchor and
-nothing else, so `at=3` is refused, and the finding names `offset=3`.
+`offset=N` counts as a window's `offset=` does: from 0 at the wall's left end as seen from outside.
+A number names a column between the wall's corners, `1 … wall_length - 2`. A corner column is where
+the wall meets the one beside it, and `at=left` and `at=right` are how a door stands there, so an
+`offset=` of 0 or `wall_length - 1` is refused, and so is one of `wall_length` or more. A wall
+shorter than 3 has no column between its corners. `at=` takes an anchor and nothing else, so `at=3`
+is refused. Its finding names `offset=3` when column 3 lies between the corners, `at=left` or
+`at=right` when it is a corner, and the columns `offset=` takes otherwise.
 
 A door names its column once. A door with neither key, with both, with an `at=` that names no
 anchor, or with an `offset=` that is not a column between the corners is `E_INVALID_MEMBER` and
