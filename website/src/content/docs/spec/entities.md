@@ -119,9 +119,10 @@ under the base plane raises them with the struct ([Redstone
 | `door` | its lower half | both halves | the outer face of its wall |
 | `window` | the cell `offset=` and `y=` place | every rectangle its line places | the outer face of its wall |
 | eave `stair` | the band's cell at the wall's left end | the band | the outer face of its wall |
-| `chest`, `sign`, sensor, actuator, Tier 0 part by a wall | its one cell | its one cell | the face of its wall it stands by |
+| `beam` | the run's cell at the wall's left end | the run | the outer face of its wall |
+| `chest`, `trapdoor`, `sign`, sensor, actuator, Tier 0 part by a wall | its one cell | its one cell | the face of its wall it stands by |
 | `bed` | its head | both halves | the face of its wall its head is against, none at a coordinate triple |
-| `sign`, Tier 0 part at a coordinate triple, `raw_block` | its one cell | its one cell | none |
+| `trapdoor`, `sign`, `note_block`, Tier 0 part at a coordinate triple, `raw_block` | its one cell | its one cell | none |
 | `fill`, `raw_fill` | the low corner of its box | the box `from=` and `to=` span | none |
 | `circuit` | the low corner of its box | every layer it reserves | none |
 
