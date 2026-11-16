@@ -70,22 +70,25 @@ const SCOPED_FLOOR_NOTE: &str = "note: s.crn:1:1: `bedrock version>=1.21.40` is 
 /// What `buildable targets` prints for each Bedrock version after 1.21.0, which lacks the
 /// `@stonebrick` the source names at `at`.
 fn stonebrick_refusals(at: &str) -> String {
-    ["1.21.40", "1.21.60", "1.26.60"]
-        .iter()
-        .map(|version| {
-            format!(
-                "note: bedrock {version} refuses this source\n\
-                 s.crn:{at}: error[E_UNKNOWN_ID]: `minecraft:stonebrick` is not a block in \
-                 `bedrock {version}`\n  \
-                 note: `bedrock {version}` spells this block `minecraft:stone_bricks`, \
-                 `minecraft:chiseled_stone_bricks`, `minecraft:cracked_stone_bricks`, \
-                 `minecraft:mossy_stone_bricks`, per the registry pack's alias table\n  \
-                 note: the last target that declares `minecraft:stonebrick` is bedrock 1.21.0: \
-                 build with `--target 1.21.0` or another target that declares it, or pick a block \
-                 `bedrock {version}` has\n"
-            )
-        })
-        .collect()
+    use std::fmt::Write as _;
+
+    let mut refusals = String::new();
+    for version in ["1.21.40", "1.21.60", "1.26.60"] {
+        write!(
+            refusals,
+            "note: bedrock {version} refuses this source\n\
+             s.crn:{at}: error[E_UNKNOWN_ID]: `minecraft:stonebrick` is not a block in \
+             `bedrock {version}`\n  \
+             note: `bedrock {version}` spells this block `minecraft:stone_bricks`, \
+             `minecraft:chiseled_stone_bricks`, `minecraft:cracked_stone_bricks`, \
+             `minecraft:mossy_stone_bricks`, per the registry pack's alias table\n  \
+             note: the last target that declares `minecraft:stonebrick` is bedrock 1.21.0: \
+             build with `--target 1.21.0` or another target that declares it, or pick a block \
+             `bedrock {version}` has\n"
+        )
+        .expect("writing to a String cannot fail");
+    }
+    refusals
 }
 
 /// The floor's note, the range's note and the conflict of line 1's `bedrock version>=1.21.40` over
