@@ -9,8 +9,10 @@ use cairn_lang_core::block_array::{
 use cairn_lang_core::resolve::{DroppedIntent, declared_version_floors, versions_satisfying};
 use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::ParityNote;
-use cairn_lang_formats::data_version::BedrockTarget;
+use cairn_lang_formats::data_version::{BedrockTarget, JavaTarget};
+use cairn_lang_formats::java_structure::build_structure_tag;
 use cairn_lang_formats::registry::{RegistryPack, VersionStates, builtin_pack};
+use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
 
@@ -373,4 +375,91 @@ pub fn comparator_array(id: &str) -> BlockArray {
         source_scope: "struct::comparator".to_owned(),
         derived: Vec::new(),
     }
+}
+
+/// A row of one voxel per entry of `slots`, under `struct::wide`, whose palette after air is
+/// `minecraft:b1` up to `minecraft:b<len - 1>`.
+///
+/// # Panics
+///
+/// When `slots` is longer than a `u32` counts.
+pub fn wide_array(len: usize, slots: &[u16]) -> BlockArray {
+    let mut entries = vec![BlockState::air()];
+    entries.extend((1..len).map(|i| BlockState::bare(format!("minecraft:b{i}"))));
+    BlockArray {
+        dims: Dims {
+            x: u32::try_from(slots.len()).expect("a row a u32 counts"),
+            y: 1,
+            z: 1,
+        },
+        palette: Palette { entries },
+        voxels: slots.iter().map(|&slot| PaletteIndex(slot)).collect(),
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: "struct::wide".to_owned(),
+        derived: Vec::new(),
+    }
+}
+
+/// `array` as a reader returns it at `target`: its palette, its grid, and the block entities its
+/// `.nbt` keeps, which a `.litematic` and a `.schem` keep as well.
+///
+/// # Panics
+///
+/// When `array` does not build as a structure, which no written array fails to.
+pub fn volume_of(array: &BlockArray, target: &JavaTarget) -> BlockVolume {
+    let root = build_structure_tag(array, target).expect("a written array builds");
+    let Some(Tag::List(blocks)) = root.entries.get("blocks") else {
+        panic!("blocks is a list");
+    };
+    let block_entities = blocks
+        .items
+        .iter()
+        .filter_map(|block| {
+            let Tag::Compound(block) = block else {
+                panic!("a block entry is a compound");
+            };
+            let Some(Tag::Compound(nbt)) = block.entries.get("nbt") else {
+                return None;
+            };
+            let Some(Tag::List(pos)) = block.entries.get("pos") else {
+                panic!("a block entry has a pos");
+            };
+            let [x, y, z] = &pos.items[..] else {
+                panic!("a pos has three axes");
+            };
+            let axis = |tag: &Tag| match tag {
+                Tag::Int(value) => u32::try_from(*value).expect("a voxel of the grid"),
+                other => panic!("an axis is an int: {other:?}"),
+            };
+            let mut data = nbt.clone();
+            let Some(Tag::String(id)) = data.entries.shift_remove("id") else {
+                panic!("a block entity has an id");
+            };
+            Some(StoredBlockEntity {
+                pos: (axis(x), axis(y), axis(z)),
+                id,
+                data,
+            })
+        })
+        .collect();
+    BlockVolume::new(
+        array.dims,
+        array.palette.entries.clone(),
+        array.voxels.clone(),
+        block_entities,
+    )
+    .expect("a written array is a volume")
+}
+
+/// `bytes` as one gzip member.
+///
+/// # Panics
+///
+/// When compressing into memory fails, which it does not.
+pub fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(bytes).expect("the bytes compress");
+    gz.finish().expect("the member closes")
 }

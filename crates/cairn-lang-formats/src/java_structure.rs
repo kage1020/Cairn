@@ -235,9 +235,13 @@ impl JavaStructure<'_> {
     /// [`NbtIoError::Io`] only, since [`prepare_structure`] ruled out every encoding error.
     pub fn write_gzip<W: std::io::Write>(&self, writer: &mut W) -> Result<(), NbtIoError> {
         // As `write_java_gzip` does; the streaming API names no `flate2` type.
-        let mut gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+        let gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+        // The stream writes a few bytes at a time, and each write into the encoder compresses.
+        let mut gz = std::io::BufWriter::new(gz);
         stream_java_uncompressed(&mut gz, "", |root| self.write_root(root))?;
-        gz.finish()?;
+        gz.into_inner()
+            .map_err(std::io::IntoInnerError::into_error)?
+            .finish()?;
         Ok(())
     }
 
@@ -349,6 +353,7 @@ pub fn write_compound_gzip<W: std::io::Write>(
 
 /// The file extension of a compiled structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OutputExt {
     /// Java vanilla structure (`.nbt`).
     Nbt,
@@ -356,6 +361,8 @@ pub enum OutputExt {
     Mcstructure,
     /// Litematica schematic (`.litematic`).
     Litematic,
+    /// Sponge Schematic (`.schem`).
+    Schem,
 }
 
 impl OutputExt {
@@ -366,6 +373,7 @@ impl OutputExt {
             OutputExt::Nbt => "nbt",
             OutputExt::Mcstructure => "mcstructure",
             OutputExt::Litematic => "litematic",
+            OutputExt::Schem => "schem",
         }
     }
 }
@@ -430,9 +438,8 @@ fn block_entities_at(
         .collect()
 }
 
-/// The block entities a structure file holds, its `blocks` or a `.litematic` region's
-/// `TileEntities`, with the `nbt` `data_version` saves: the last at each voxel that Java keeps
-/// beside its block, in the grid's `(y, z, x)` order.
+/// The block entities a structure file holds, each as the compound `data_version` saves: the last
+/// at each voxel that Java keeps beside its block, in the grid's `(y, z, x)` order.
 pub(crate) fn placed_block_entities(
     block_array: &BlockArray,
     data_version: i32,

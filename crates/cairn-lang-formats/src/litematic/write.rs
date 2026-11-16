@@ -238,9 +238,13 @@ impl Litematic<'_> {
     ///
     /// [`NbtIoError::Io`] only, since [`prepare_litematic`] ruled out every encoding error.
     pub fn write_gzip<W: Write>(&self, writer: &mut W) -> Result<(), NbtIoError> {
-        let mut gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+        let gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+        // The stream writes a few bytes at a time, and each write into the encoder compresses.
+        let mut gz = std::io::BufWriter::new(gz);
         stream_java_uncompressed(&mut gz, "", |root| self.write_root(root))?;
-        gz.finish()?;
+        gz.into_inner()
+            .map_err(std::io::IntoInnerError::into_error)?
+            .finish()?;
         Ok(())
     }
 
