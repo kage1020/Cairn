@@ -85,11 +85,11 @@ than the milestone table because a monthly minor can ship without crossing a mil
 | **2027.5.0** | Entities and block entities (`spawn`, `painting`, `sign`, `bed`, …) with their anchors, Bedrock chest pairs written into the chests' block entities, and the decimal (`scale=1.5`) and `nbt={...}` values they take; theme selector bindings, specified and lowered; the first constraint catalog (attachment, support, fluids, entity AABB), so `cairn info` reports semantic-sensitive members and a lock records the catalog's hash. |
 | **2027.6.0** | `cairn-lang-wasm` and the browser playground (live compile in the docs site). |
 
-Beyond `2027.6.0` the schedule is not drawn yet. The spec describes more than this plan reaches:
-the lift that turns an import into walls, windows and themes, which the reverse direction leaves to
-an LLM, the harness the [evaluation framework](/spec/evaluation/) calls for, and the open questions
-that wait on its data, columns and arches as primitives and interiors. The roadmap will be redrawn around those,
-and around feedback from real use, as 2027.6.0 approaches.
+Beyond `2027.6.0` the schedule is not drawn yet. The spec describes more than this plan reaches: the
+lift that turns an import into walls, windows and themes, which the reverse direction leaves to an
+LLM, the harness the [evaluation framework](/spec/evaluation/) calls for, and the open questions
+that wait on its data, columns and arches as primitives and interiors. The roadmap will be redrawn
+around those, and around feedback from real use, as 2027.6.0 approaches.
 
 ## Leaving draft
 
