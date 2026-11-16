@@ -944,9 +944,10 @@ row](#the-verified-target-row). No constraint catalog ships yet
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and address assignment. The `members` record of each member that built a cell, a struct's
 `circuit` included, carries the address the compiler gave its line
-([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)). A change that moves one of those
-addresses, such as a member added ahead of others of its role on its wall, moves the hash as a
-change to what is built does. The address of a member that builds no cell, such as a `level`, is
+([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)) and its geometry ([Entities
+§8.2](/spec/entities/#82-anchor-conventions)). A change that moves one of those addresses, such as
+a member added ahead of others of its role on its wall, moves the hash as a change to what is built
+does. The address of a member that builds no cell, such as a `level`, is
 not recorded, and reaches the hash only as a step of the addresses of the members under it.
 
 `lock_schema_version` leads the document so a reader can decide whether it understands the rest
