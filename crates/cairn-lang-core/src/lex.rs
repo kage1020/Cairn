@@ -7,6 +7,10 @@
 //! A bad indentation ends the scan. A failure inside a line becomes a [`TokenKind::Unlexed`] in
 //! the parser's own pass, since a directive that takes raw text to end of line judges it itself.
 
+mod snbt;
+
+pub use snbt::MAX_NBT_DEPTH;
+
 use crate::error::{IntContext, LexError, Position, Span};
 
 const INDENT_STACK_NONEMPTY: &str = "indent_stack invariant: bottom 0 sentinel is never popped";
@@ -35,6 +39,13 @@ pub enum TokenKind {
         /// Raw source lexeme.
         lexeme: String,
     },
+    /// Two runs of decimal digits joined by `.`, verbatim, e.g. `1.5`.
+    Decimal {
+        /// Raw source lexeme.
+        lexeme: String,
+    },
+    /// An SNBT compound, verbatim with its braces, which a `{` after any key's `=` opens.
+    Nbt(String),
     /// Boolean literal `true` / `false`.
     Bool(bool),
     /// Double-quoted string literal, verbatim and without the quotes.
@@ -92,6 +103,8 @@ impl std::fmt::Display for TokenKind {
         match self {
             Self::Ident(name) => write!(f, "identifier `{name}`"),
             Self::Int { lexeme, .. } => write!(f, "integer `{lexeme}`"),
+            Self::Decimal { lexeme } => write!(f, "decimal `{lexeme}`"),
+            Self::Nbt(_) => f.write_str("NBT compound"),
             Self::Bool(b) => write!(f, "`{b}`"),
             Self::Str(_) => f.write_str("string literal"),
             Self::Size(w, h) => write!(f, "size `{w}x{h}`"),
@@ -136,6 +149,49 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
         (Some(first), _) => Err(first.error),
         (None, Some(fatal)) => Err(fatal),
         (None, None) => Ok(tokens),
+    }
+}
+
+/// Where one line's comment opens, and whether its end falls inside a string or an NBT compound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineScan {
+    /// Byte offset of the `#` that opens the line's comment.
+    pub comment: Option<usize>,
+    /// Whether the line's end falls inside a string or an NBT compound, refused ones included.
+    pub in_literal: bool,
+}
+
+/// The [`LineScan`] of `line`, a whole line or the start of one, read as [`lex`] reads it.
+#[must_use]
+pub fn scan_line(line: &str) -> LineScan {
+    let mut lexer = Lexer::new(line);
+    loop {
+        lexer.skip_spaces();
+        let start = lexer.pos;
+        let b = match lexer.peek() {
+            None | Some(b'\n' | b'\r') => {
+                return LineScan {
+                    comment: None,
+                    in_literal: false,
+                };
+            }
+            Some(b'#') => {
+                return LineScan {
+                    comment: Some(start),
+                    in_literal: false,
+                };
+            }
+            Some(b) => b,
+        };
+        // Any other failure leaves the lexer past the token it refused, to read on from there.
+        if let Err(LexError::UnterminatedString { .. } | LexError::InvalidNbt { .. }) =
+            lexer.scan_token(b)
+        {
+            return LineScan {
+                comment: None,
+                in_literal: true,
+            };
+        }
     }
 }
 
@@ -381,6 +437,7 @@ impl<'src> Lexer<'src> {
                 self.advance();
                 self.push_at(TokenKind::Less, start..self.pos, position);
             }
+            b'.' if self.starts_a_fraction(start) => return Err(self.scan_bare_fraction(position)),
             b'.' => {
                 self.advance();
                 self.push_at(TokenKind::Dot, start..self.pos, position);
@@ -413,6 +470,7 @@ impl<'src> Lexer<'src> {
                 self.advance();
                 self.push_at(TokenKind::RParen, start..self.pos, position);
             }
+            b'{' if self.follows_a_key() => self.scan_nbt(start, position)?,
             b'{' => {
                 self.advance();
                 // A `{` in a directive's raw value is text, and must not suspend the layout of
@@ -462,27 +520,23 @@ impl<'src> Lexer<'src> {
     }
 
     fn scan_number(&mut self, start: usize, position: Position) -> Result<(), LexError> {
-        while let Some(b) = self.peek() {
-            if b.is_ascii_digit() {
-                self.advance();
-            } else {
-                break;
-            }
-        }
+        self.skip_digits();
         let lexeme_end = self.pos;
+        if self.peek() == Some(b'.') {
+            return self.scan_decimal(start, position);
+        }
         if self.peek() == Some(b'x') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
             self.advance();
             let h_start = self.pos;
-            while let Some(b) = self.peek() {
-                if b.is_ascii_digit() {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
+            self.skip_digits();
             let w_str = &self.src[start..lexeme_end];
             let h_str = &self.src[h_start..self.pos];
-            if let Some(found) = self.peek().filter(|b| is_ident_continue(*b)) {
+            let fraction_follows =
+                self.peek() == Some(b'.') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit());
+            if let Some(found) = self
+                .peek()
+                .filter(|&b| is_ident_continue(b) || fraction_follows)
+            {
                 return Err(LexError::TrailingSizeSegment {
                     position,
                     literal: self.src[start..self.pos].to_owned(),
@@ -507,6 +561,79 @@ impl<'src> Lexer<'src> {
         let lexeme = self.src[start..lexeme_end].to_owned();
         self.push_at(TokenKind::Int { lexeme }, start..self.pos, position);
         Ok(())
+    }
+
+    /// Read the `.` and the digits after a decimal's whole part, which starts at `start`.
+    fn scan_decimal(&mut self, start: usize, position: Position) -> Result<(), LexError> {
+        self.advance();
+        let fraction_start = self.pos;
+        self.skip_digits();
+        if self.pos == fraction_start {
+            return Err(LexError::DecimalWithoutFraction {
+                position,
+                whole: self.src[start..fraction_start - 1].to_owned(),
+            });
+        }
+        if let Some(found) = self.peek().filter(|&b| is_ident_continue(b)) {
+            return Err(LexError::TrailingDecimalSegment {
+                position,
+                literal: self.src[start..self.pos].to_owned(),
+                found: char::from(found),
+            });
+        }
+        let lexeme = self.src[start..self.pos].to_owned();
+        self.push_at(TokenKind::Decimal { lexeme }, start..self.pos, position);
+        Ok(())
+    }
+
+    /// Whether the `.` at `start` opens a decimal written without its whole part, as `.5`: a
+    /// digit follows it, and no name, `]` or `)` it could continue stands before it.
+    fn starts_a_fraction(&self, start: usize) -> bool {
+        self.peek_at(1).is_some_and(|c| c.is_ascii_digit())
+            && !start
+                .checked_sub(1)
+                .and_then(|before| self.bytes.get(before))
+                .is_some_and(|&c| is_ident_continue(c) || c == b']' || c == b')')
+    }
+
+    /// Step past a `.` and the digits after it, which no whole part stands before.
+    fn scan_bare_fraction(&mut self, position: Position) -> LexError {
+        self.advance();
+        let fraction_start = self.pos;
+        self.skip_digits();
+        LexError::DecimalWithoutWhole {
+            position,
+            fraction: self.src[fraction_start..self.pos].to_owned(),
+        }
+    }
+
+    /// Read the compound whose `{` is at `start`, or refuse it with the rest of its line.
+    fn scan_nbt(&mut self, start: usize, position: Position) -> Result<(), LexError> {
+        match snbt::scan(self.src, start) {
+            Ok(end) => {
+                self.advance_to(end);
+                let text = self.src[start..end].to_owned();
+                self.push_at(TokenKind::Nbt(text), start..end, position);
+                Ok(())
+            }
+            Err(refusal) => {
+                self.advance_to(refusal.at);
+                let at = self.position();
+                while self.peek().is_some_and(|b| b != b'\n' && b != b'\r') {
+                    self.advance_char();
+                }
+                Err(LexError::InvalidNbt {
+                    position: at,
+                    reason: refusal.reason,
+                })
+            }
+        }
+    }
+
+    fn skip_digits(&mut self) {
+        while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+            self.advance();
+        }
     }
 
     fn scan_ident(&mut self, start: usize, position: Position) {
@@ -557,6 +684,13 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Advance by whole characters to `end`, a byte on the current line.
+    fn advance_to(&mut self, end: usize) {
+        while self.pos < end {
+            self.advance_char();
+        }
+    }
+
     /// Consume one line break and start the next line; whether there was one.
     fn consume_line_break(&mut self) -> bool {
         let Some(len) = crate::lines::terminator_len(self.src, self.pos) else {
@@ -591,6 +725,25 @@ impl<'src> Lexer<'src> {
             span,
             position,
         });
+    }
+
+    /// Whether the last two tokens are a key and its `=`. A `logic` line's `=` binds a signal
+    /// and its `name=` names an operand, so neither is a key's.
+    fn follows_a_key(&self) -> bool {
+        matches!(
+            self.out[self.line_first_token..],
+            [
+                ..,
+                Token {
+                    kind: TokenKind::Ident(_),
+                    ..
+                },
+                Token {
+                    kind: TokenKind::Eq,
+                    ..
+                }
+            ]
+        ) && !self.line_opens_with(&["logic"])
     }
 
     /// Whether the current line's first tokens are the identifiers `words`, in order.
