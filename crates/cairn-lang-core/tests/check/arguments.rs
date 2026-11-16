@@ -66,7 +66,7 @@ fn a_compound_on_a_key_no_role_reads_is_refused_as_that_key() {
 }
 
 #[test]
-fn a_compound_on_a_header_or_a_theme_selector_binding_is_a_key_no_pass_reads() {
+fn a_compound_on_a_header_or_on_a_key_a_selector_row_does_not_bind_is_refused() {
     let header = "struct s size=5x5 nbt={a:1}\n  floor mat_slot=wall\n\ntheme t:\n  \
                   slot wall -> @stone\n";
     let d = exactly_one(diagnose(header));
@@ -82,8 +82,16 @@ fn a_compound_on_a_header_or_a_theme_selector_binding_is_a_key_no_pass_reads() {
                    struct s size=5x5\n  walls class=outer mat_slot=wall\n";
     let d = exactly_one(diagnose(binding));
     assert_eq!(
-        (d.code.as_str(), &binding[d.span.clone()]),
-        ("W_IGNORED_ARGUMENT", "{a:1}"),
+        (
+            d.code.as_str(),
+            d.primary.as_str(),
+            &binding[d.span.clone()]
+        ),
+        (
+            "E_UNKNOWN_ARGUMENT",
+            "`nbt=` is not a key a theme binds on `walls`",
+            "{a:1}",
+        ),
     );
 }
 
