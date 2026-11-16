@@ -6,6 +6,7 @@
 
 mod args;
 mod attach;
+mod geometry;
 mod joins;
 mod lower;
 mod material;
@@ -19,6 +20,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
+pub use geometry::{Bbox, MemberGeometry};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{
     BUILTIN_BLOCK_IDS, findings_under_guards, findings_without_target, lower_to_block_array,
@@ -136,8 +138,8 @@ pub struct BlockArray {
     pub derived: Vec<Vec<String>>,
 }
 
-/// One member's `resolved_state`: each block state its cells hold, with those cells, as the
-/// lowering's target resolved them (`spec/blockstate` "`intent_state` and `resolved_state`").
+/// One member's `resolved_state`, each block state its cells hold as the lowering's target
+/// resolved them (`spec/blockstate` "`intent_state` and `resolved_state`"), and its geometry.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResolvedMember {
     /// The keyword the member was written with.
@@ -150,6 +152,8 @@ pub struct ResolvedMember {
     pub address: Option<MemberAddress>,
     /// Each block state the member resolved to, in the order its first cell is laid out.
     pub resolved_state: Vec<ResolvedBlock>,
+    /// Where the member sits and what it occupies (`spec/entities` "Anchor conventions").
+    pub geometry: MemberGeometry,
     /// Byte range of the member's own line.
     #[serde(skip)]
     pub span: Span,
