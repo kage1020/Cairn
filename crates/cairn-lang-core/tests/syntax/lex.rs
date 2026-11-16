@@ -1,7 +1,7 @@
 //! The lexer: the tokens a source becomes, and where each one sits.
 
 use cairn_lang_core::error::LexError;
-use cairn_lang_core::lex::{TokenKind, lex};
+use cairn_lang_core::lex::{LineScan, TokenKind, lex, scan_line};
 
 use crate::{kinds, pos};
 
@@ -39,24 +39,36 @@ fn lexes_header_and_at_token() {
     assert_eq!(kinds[1], TokenKind::Ident("cairn".into()));
     assert_eq!(
         kinds[2],
-        TokenKind::Int {
-            lexeme: "2026".into()
+        TokenKind::Decimal {
+            lexeme: "2026.06".into()
         }
     );
-    assert_eq!(kinds[3], TokenKind::Dot);
+    assert_eq!(kinds[3], TokenKind::Newline);
+    assert_eq!(kinds[4], TokenKind::Indent);
+    assert_eq!(kinds[5], TokenKind::Ident("slot".into()));
+    assert_eq!(kinds[6], TokenKind::Ident("floor".into()));
+    assert_eq!(kinds[7], TokenKind::Arrow);
+    assert_eq!(kinds[8], TokenKind::At);
+    assert_eq!(kinds[9], TokenKind::Ident("oak_planks".into()));
+}
+
+#[test]
+fn a_dotted_version_lexes_as_a_decimal_and_the_rest_of_its_run() {
     assert_eq!(
-        kinds[4],
-        TokenKind::Int {
-            lexeme: "06".into()
-        }
+        kinds("@requires version>=1.21.4\n"),
+        [
+            TokenKind::At,
+            TokenKind::Ident("requires".into()),
+            TokenKind::Ident("version".into()),
+            TokenKind::GreaterEq,
+            TokenKind::Decimal {
+                lexeme: "1.21".into()
+            },
+            TokenKind::Dot,
+            TokenKind::Int { lexeme: "4".into() },
+            TokenKind::Newline,
+        ],
     );
-    assert_eq!(kinds[5], TokenKind::Newline);
-    assert_eq!(kinds[6], TokenKind::Indent);
-    assert_eq!(kinds[7], TokenKind::Ident("slot".into()));
-    assert_eq!(kinds[8], TokenKind::Ident("floor".into()));
-    assert_eq!(kinds[9], TokenKind::Arrow);
-    assert_eq!(kinds[10], TokenKind::At);
-    assert_eq!(kinds[11], TokenKind::Ident("oak_planks".into()));
 }
 
 #[test]
@@ -603,5 +615,32 @@ mod refusals {
     fn a_byte_order_mark_alone_is_an_empty_file() {
         assert_eq!(lex("\u{feff}").expect("lex"), [] as [Token; 0]);
         assert!(lex("\u{feff}  struct s\n").is_ok());
+    }
+}
+
+#[test]
+fn a_line_scan_finds_the_comment_and_an_open_literal_as_the_lexer_reads_them() {
+    let scan = |comment, in_literal| LineScan {
+        comment,
+        in_literal,
+    };
+    for (line, expected) in [
+        ("door id=front", scan(None, false)),
+        ("door id=\"front\"", scan(None, false)),
+        ("door id=\"front", scan(None, true)),
+        ("door id=\"a # b\"", scan(None, false)),
+        ("door id=\"a # b", scan(None, true)),
+        ("door id=a # say \"hi", scan(Some(10), false)),
+        ("# \"", scan(Some(0), false)),
+        ("  door id=x # c", scan(Some(12), false)),
+        ("floor nbt={a:'#'} # note", scan(Some(18), false)),
+        ("floor nbt={a:'\"'}", scan(None, false)),
+        ("floor nbt={a:\"x\\\"y\"}", scan(None, false)),
+        ("floor nbt={a:'it", scan(None, true)),
+        ("floor nbt={a:1,} # note", scan(None, true)),
+        ("logic sig.a = {sig.b} # note", scan(Some(22), false)),
+        ("floor height=1. # note", scan(Some(16), false)),
+    ] {
+        assert_eq!(scan_line(line), expected, "{line:?}");
     }
 }
