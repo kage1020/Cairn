@@ -378,6 +378,26 @@ fn lines_at_one_place_are_ordered_by_their_pairs_as_text() {
 }
 
 #[test]
+fn a_number_is_compared_by_its_one_spelling() {
+    let src = "struct s size=9x7\n  \
+               walls height=9 mat_slot=wall scale=02.50\n  \
+               walls height=9 mat_slot=wall scale=1.5\n  \
+               walls height=9 mat_slot=wall scale=2.5\n  \
+               walls height=9 mat_slot=wall scale=2.0\n  \
+               walls height=9 mat_slot=wall scale=2\n";
+    assert_eq!(
+        addresses(src),
+        pairs(&[
+            ("walls height=9 mat_slot=wall scale=02.50", "walls[3]"),
+            ("walls height=9 mat_slot=wall scale=1.5", "walls[0]"),
+            ("walls height=9 mat_slot=wall scale=2.5", "walls[4]"),
+            ("walls height=9 mat_slot=wall scale=2.0", "walls[1]"),
+            ("walls height=9 mat_slot=wall scale=2", "walls[2]"),
+        ]),
+    );
+}
+
+#[test]
 fn lines_with_the_same_pairs_are_ordered_by_bare_values_then_binding_then_guard() {
     let stone = "raw_block mat=minecraft:stone at=1,1,1";
     let src = format!(

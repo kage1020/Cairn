@@ -38,8 +38,8 @@ item_display  id=trophy at=counter item=diamond_sword rotation=y90
   spawn id=cat type=cat at=inside.floor nbt={variant:"black"}
 ```
 
-A key that reads a decimal, such as `scale=`, is written as a float or a double, whichever the NBT
-field it fills holds.
+The decimal a key such as `scale=` reads is written as a float or a double, whichever the NBT field
+it fills holds.
 
 An `nbt={...}` compound is edition-specific by nature. Java and Bedrock name an entity's and a block
 entity's fields apart, and no registry pack holds those fields, so nothing checks a compound against
