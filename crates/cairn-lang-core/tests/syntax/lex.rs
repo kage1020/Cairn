@@ -1,7 +1,7 @@
 //! The lexer: the tokens a source becomes, and where each one sits.
 
 use cairn_lang_core::error::LexError;
-use cairn_lang_core::lex::{TokenKind, lex};
+use cairn_lang_core::lex::{LineScan, TokenKind, lex, scan_line};
 
 use crate::{kinds, pos};
 
@@ -615,5 +615,32 @@ mod refusals {
     fn a_byte_order_mark_alone_is_an_empty_file() {
         assert_eq!(lex("\u{feff}").expect("lex"), [] as [Token; 0]);
         assert!(lex("\u{feff}  struct s\n").is_ok());
+    }
+}
+
+#[test]
+fn a_line_scan_finds_the_comment_and_an_open_literal_as_the_lexer_reads_them() {
+    let scan = |comment, in_literal| LineScan {
+        comment,
+        in_literal,
+    };
+    for (line, expected) in [
+        ("door id=front", scan(None, false)),
+        ("door id=\"front\"", scan(None, false)),
+        ("door id=\"front", scan(None, true)),
+        ("door id=\"a # b\"", scan(None, false)),
+        ("door id=\"a # b", scan(None, true)),
+        ("door id=a # say \"hi", scan(Some(10), false)),
+        ("# \"", scan(Some(0), false)),
+        ("  door id=x # c", scan(Some(12), false)),
+        ("floor nbt={a:'#'} # note", scan(Some(18), false)),
+        ("floor nbt={a:'\"'}", scan(None, false)),
+        ("floor nbt={a:\"x\\\"y\"}", scan(None, false)),
+        ("floor nbt={a:'it", scan(None, true)),
+        ("floor nbt={a:1,} # note", scan(None, true)),
+        ("logic sig.a = {sig.b} # note", scan(Some(22), false)),
+        ("floor height=1. # note", scan(Some(16), false)),
+    ] {
+        assert_eq!(scan_line(line), expected, "{line:?}");
     }
 }

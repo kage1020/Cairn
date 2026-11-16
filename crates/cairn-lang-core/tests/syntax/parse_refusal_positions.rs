@@ -233,6 +233,23 @@ fn an_intended_targets_refusal_quotes_and_points_at_the_offending_value() {
             "@cairn 2026.06\n@intended_targets  [\"1.21\",   1]\n",
             "2:31: @intended_targets expects a string such as `\"1.21.4\"`, got `1`",
         ),
+        (
+            "@intended_targets [1.21]\n",
+            "1:20: @intended_targets expects a string such as `\"1.21.4\"`, got `1.21`",
+        ),
+        (
+            "@intended_targets [1.20.4, 1.21.4]\n",
+            "1:20: @intended_targets expects a string such as `\"1.21.4\"`, got `1.20.4`",
+        ),
+        (
+            "@intended_targets [\"1.21\", 1.21.4]\n",
+            "1:28: @intended_targets expects a string such as `\"1.21.4\"`, got `1.21.4`",
+        ),
+        (
+            "@intended_targets 1.20.4\n",
+            "1:19: @intended_targets expects a list of strings such as `[\"1.21.4\"]`, got \
+             `1.20.4`",
+        ),
     ] {
         assert_eq!(refusal(source), expected, "{source:?}");
     }
