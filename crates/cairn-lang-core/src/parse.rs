@@ -9,7 +9,7 @@ use crate::ast::{
 use crate::calver::future_version_note;
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition::Edition;
-use crate::error::{IntContext, ParseError, Position};
+use crate::error::{IntContext, LexError, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::lines::LineStarts;
 use crate::logic_library::{CallSignature, LogicPrimitive, Notation, StageCount, infix_rank_above};
@@ -155,6 +155,41 @@ fn not_a_guard(name: &str, policy: RequiresPolicy) -> String {
         )
     } else {
         format!("unknown directive `@{name}`: inside a body, `@` opens only an `@edition` guard")
+    }
+}
+
+/// The refusal for an `@intended_targets` value other than a list, `got` as written.
+fn not_a_target_list(got: &str) -> String {
+    format!("@intended_targets expects a list of strings such as `[\"1.21.4\"]`, got `{got}`")
+}
+
+/// The refusal for an `@intended_targets` item other than a string, `got` as written.
+fn not_a_target(got: &str) -> String {
+    format!("@intended_targets expects a string such as `\"1.21.4\"`, got `{got}`")
+}
+
+/// `err` from reading an `@intended_targets` value, with a version written unquoted, such as
+/// `1.20.4`, refused as one rather than as a decimal that runs on.
+fn unquoted_target(raw: &str, tokens: &[Token], err: ParseError) -> ParseError {
+    let ParseError::Lex(LexError::TrailingDecimalSegment { position, .. }) = &err else {
+        return err;
+    };
+    let Some(index) = tokens.iter().position(|t| t.position == *position) else {
+        return err;
+    };
+    let start = tokens[index].span.start;
+    let len = raw[start..]
+        .bytes()
+        .take_while(|b| b.is_ascii_digit() || *b == b'.')
+        .count();
+    let written = &raw[start..start + len];
+    ParseError::Syntax {
+        position: *position,
+        message: if index == 0 {
+            not_a_target_list(written)
+        } else {
+            not_a_target(written)
+        },
     }
 }
 
@@ -335,9 +370,9 @@ impl<'a> Parser<'a> {
                 let sub_tokens =
                     lex(&raw).map_err(|err| ParseError::from(err).rebased(value_start_pos))?;
                 let mut p = Parser::new(&raw, &sub_tokens);
-                let value = p
-                    .parse_value()
-                    .map_err(|err| err.rebased(value_start_pos))?;
+                let value = p.parse_value().map_err(|err| {
+                    unquoted_target(&raw, &sub_tokens, err).rebased(value_start_pos)
+                })?;
                 if let Some(trailing) = p.peek().filter(|t| t.kind != TokenKind::Newline) {
                     return Err(ParseError::Syntax {
                         position: trailing.position.rebased(value_start_pos),
@@ -357,22 +392,14 @@ impl<'a> Parser<'a> {
                             ValueKind::Str(s) => Ok(s),
                             _ => Err(ParseError::Syntax {
                                 position: at(&v),
-                                message: format!(
-                                    "@intended_targets expects a string such as `\"1.21.4\"`, \
-                                     got `{}`",
-                                    &raw[v.span.clone()]
-                                ),
+                                message: not_a_target(&raw[v.span.clone()]),
                             }),
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                     _ => {
                         return Err(ParseError::Syntax {
                             position: at(&value),
-                            message: format!(
-                                "@intended_targets expects a list of strings such as \
-                                 `[\"1.21.4\"]`, got `{}`",
-                                &raw[value.span.clone()]
-                            ),
+                            message: not_a_target_list(&raw[value.span.clone()]),
                         });
                     }
                 };
@@ -1603,14 +1630,20 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Whether the next tokens are an integer, a `,` and another component, or a `-` before the
+    /// Whether the next tokens are a number, a `,` and another component, or a `-` before the
     /// first: only a coordinate triple puts those after `=`, since a selector's `,` precedes a key.
     fn at_coordinate(&self) -> bool {
         let kind = |offset: usize| self.tokens.get(self.pos + offset).map(|t| &t.kind);
+        let number = |offset| {
+            matches!(
+                kind(offset),
+                Some(TokenKind::Int { .. } | TokenKind::Decimal { .. })
+            )
+        };
         let first = usize::from(matches!(kind(0), Some(TokenKind::Minus)));
-        matches!(kind(first), Some(TokenKind::Int { .. }))
+        number(first)
             && matches!(kind(first + 1), Some(TokenKind::Comma))
-            && (first == 1 || matches!(kind(2), Some(TokenKind::Int { .. } | TokenKind::Minus)))
+            && (first == 1 || number(2) || matches!(kind(2), Some(TokenKind::Minus)))
     }
 
     /// Read a coordinate triple `X,Y,Z`, three integers joined by `,` with nothing between.
@@ -1676,24 +1709,35 @@ impl<'a> Parser<'a> {
         matches!(kind(0), Some(TokenKind::Comma))
             && matches!(
                 kind(1),
-                Some(TokenKind::Int { .. } | TokenKind::Minus | TokenKind::Size(..))
+                Some(
+                    TokenKind::Int { .. }
+                        | TokenKind::Decimal { .. }
+                        | TokenKind::Minus
+                        | TokenKind::Size(..)
+                )
             )
     }
 
-    /// The refusal for a coordinate component that is a `-` or a size rather than an integer.
+    /// The refusal for a coordinate component that is a `-`, a size or a decimal rather than an
+    /// integer.
     fn coordinate_component_refusal(&self, position: Position) -> ParseError {
         let token = &self.tokens[self.pos];
-        let message = if let TokenKind::Size(..) = token.kind {
-            let written = &self.source[token.span.clone()];
-            let rest = &written[written.find('x').unwrap_or_default()..];
-            format!(
-                "a coordinate component runs into `{rest}`: `{written}` reads as a size, and a \
-                 coordinate triple is three integers, `x,y,z`, as `4,3,2`"
-            )
-        } else {
-            "a coordinate component is never negative: a coordinate counts from the low corner \
-             of the footprint, as `0,0,0`"
-                .to_owned()
+        let written = &self.source[token.span.clone()];
+        let message = match token.kind {
+            TokenKind::Size(..) => {
+                let rest = &written[written.find('x').unwrap_or_default()..];
+                format!(
+                    "a coordinate component runs into `{rest}`: `{written}` reads as a size, and \
+                     a coordinate triple is three integers, `x,y,z`, as `4,3,2`"
+                )
+            }
+            TokenKind::Decimal { .. } => format!(
+                "a coordinate component is a whole number, and `{written}` is a decimal: a \
+                 coordinate triple names a cell by three integers, `x,y,z`, as `4,3,2`"
+            ),
+            _ => "a coordinate component is never negative: a coordinate counts from the low \
+                  corner of the footprint, as `0,0,0`"
+                .to_owned(),
         };
         ParseError::Syntax { position, message }
     }
@@ -1943,6 +1987,14 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Value::new(ValueKind::Str(s), token.span))
             }
+            TokenKind::Decimal { lexeme } => {
+                self.advance();
+                self.decimal_value(lexeme, token.span, position)
+            }
+            TokenKind::Nbt(text) => {
+                self.advance();
+                Ok(Value::new(ValueKind::Nbt(text), token.span))
+            }
             TokenKind::Ident(first) => {
                 self.advance();
                 if self.peek_is(&TokenKind::Dot) {
@@ -1981,6 +2033,38 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// The decimal `lexeme`, refused when a `.` touches its end or a double cannot hold it.
+    fn decimal_value(
+        &self,
+        lexeme: String,
+        span: crate::error::Span,
+        position: Position,
+    ) -> Result<Value, ParseError> {
+        // The lexer leaves a touching `.` to the parse, since a raw directive value
+        // reads `1.21.4` as text.
+        if self
+            .peek()
+            .is_some_and(|t| t.kind == TokenKind::Dot && t.span.start == span.end)
+        {
+            return Err(LexError::TrailingDecimalSegment {
+                position,
+                literal: lexeme,
+                found: '.',
+            }
+            .into());
+        }
+        if !lexeme.parse::<f64>().is_ok_and(f64::is_finite) {
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "decimal `{lexeme}` is past the range of a double, about 1.8e308: \
+                     write a smaller number"
+                ),
+            });
+        }
+        Ok(Value::new(ValueKind::Decimal(lexeme), span))
+    }
+
     fn parse_dotted_ref(&mut self) -> Result<DottedRef, ParseError> {
         let head = self.expect_ident()?;
         let mut tail = Vec::new();
@@ -1998,6 +2082,7 @@ impl<'a> Parser<'a> {
             Some(
                 TokenKind::Ident(_)
                     | TokenKind::Int { .. }
+                    | TokenKind::Decimal { .. }
                     | TokenKind::Bool(_)
                     | TokenKind::Str(_)
                     | TokenKind::Size(..)
