@@ -3,13 +3,18 @@
 use crate::diagnostic::Diagnostic;
 use crate::intent::{BindingKey, Member};
 
-use crate::block_array::PaletteIndex;
+use crate::block_array::args::diag_deferred_member_reason;
+use crate::block_array::geometry::{Declared, outer_face};
 use crate::block_array::openings::{WallSide, wall_local_to_grid};
+use crate::block_array::{Bbox, PaletteIndex};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::frame::{Cut, Frame};
 use super::members::{StructCtx, bound_block, side_name};
 use super::opening::{WindowCut, WindowPlan, plan_window, read_sym};
+
+/// What an unreadable `sym=` leaves of a window that is not cut.
+const NOT_CUT: &str = "this window is not cut either way — see the finding on the same line";
 
 /// Cut a `window`'s rectangles, with the frame a theme binds on it round the ones it cut.
 pub(super) fn fill_window(
@@ -25,14 +30,14 @@ pub(super) fn fill_window(
     let (sym, sym_unread) = read_sym(member);
     let plan = plan_window(member, sym, y_offset, ctx, diagnostics);
     let (cuts, note) = match plan {
-        WindowPlan::Cut(cut) => (
-            Some(cut_window(cut, ctx, palette, canvas)),
-            "the window is drawn without its mirror, as `sym=false` would draw it",
-        ),
-        WindowPlan::Refused => (
-            None,
-            "this window is not cut either way — see the finding on the same line",
-        ),
+        WindowPlan::Cut(cut) => match cut_window(member, cut, ctx, palette, canvas, diagnostics) {
+            Some(cuts) => (
+                Some(cuts),
+                "the window is drawn without its mirror, as `sym=false` would draw it",
+            ),
+            None => (None, NOT_CUT),
+        },
+        WindowPlan::Refused => (None, NOT_CUT),
         WindowPlan::RefusedForUnreadSym => (
             None,
             "this window has `repeat=` greater than 1, which `sym=true` does not yet support, so \
@@ -46,17 +51,29 @@ pub(super) fn fill_window(
         .map(|(state, cuts)| Frame::new(canvas.member(), state, cuts))
 }
 
-/// Paint each rectangle `cut` names with its fill, returning the rectangles.
+/// Paint each rectangle `cut` names with its fill, returning the rectangles, or `None` for a
+/// window whose cells fall off the block array, which is deferred instead.
 fn cut_window(
+    member: &Member,
     cut: WindowCut,
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
-) -> Vec<Cut> {
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<Cut>> {
+    let Some(declared) = window_declared(ctx, &cut) else {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "window resolved to cells outside the struct's block array",
+        ));
+        return None;
+    };
+    canvas.declare(declared);
     let palette_index = cut
         .fill
         .map_or(PaletteIndex::AIR, |state| palette.intern(state));
-    cut.stamps
+    let cuts = cut
+        .stamps
         .into_iter()
         .map(|(offset, width)| {
             let rect = WindowRect {
@@ -70,7 +87,42 @@ fn cut_window(
             paint_window_rect(ctx, rect, canvas);
             rect.cut()
         })
-        .collect()
+        .collect();
+    Some(cuts)
+}
+
+/// What a window's line declares: the rectangles `cut` cuts and its mirror's, anchored at the cell
+/// its `offset=` and `y=` place.
+fn window_declared(ctx: &StructCtx<'_>, cut: &WindowCut) -> Option<Declared> {
+    let grid = |u: u32, y: u32| {
+        wall_local_to_grid(
+            cut.side,
+            u,
+            y,
+            ctx.overhang,
+            ctx.interior_w,
+            ctx.interior_h,
+            ctx.dims,
+        )
+    };
+    let top = cut.row.saturating_add(cut.height.saturating_sub(1));
+    let corners = cut
+        .stamps
+        .iter()
+        .chain(&cut.mirror)
+        .flat_map(|&(offset, width)| {
+            let far = offset.saturating_add(width.saturating_sub(1));
+            [grid(offset, cut.row), grid(far, top)]
+        })
+        .collect::<Option<Vec<_>>>();
+    // INVARIANT(wall-grid-validated): `plan_window` refused off-wall spans and rows.
+    debug_assert!(corners.is_some(), "a window corner fell off the wall grid");
+    let (anchor_u, anchor_y) = cut.anchor;
+    Some(Declared {
+        anchor: grid(anchor_u, anchor_y)?,
+        bbox: Bbox::around(corners?)?,
+        host_face: Some(outer_face(cut.side)),
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -113,8 +165,8 @@ fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberC
                 debug_assert!(
                     false,
                     "window cell u={along} y={row} on the {} wall is outside the wall grid; \
-                     `plan_window`'s span check (`offset + step*(repeat-1) + size.w <= wall \
-                     length`, which also bounds the mirror) / wall-course check stopped \
+                     `plan_window`'s span check (its first column `+ step*(repeat-1) + size.w \
+                     <= wall length`, which also bounds the mirror) / wall-course check stopped \
                      agreeing with `wall_local_to_grid`",
                     side_name(rect.side),
                 );

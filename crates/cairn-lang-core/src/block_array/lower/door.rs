@@ -7,9 +7,10 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::{BindingKey, Member};
 
 use crate::block_array::args::diag_deferred_member_reason;
+use crate::block_array::geometry::{Declared, outer_face};
 use crate::block_array::openings::{DOOR_HEIGHT, WallSide, wall_local_to_grid};
 use crate::block_array::roof::inward_cardinal;
-use crate::block_array::{BlockState, PaletteIndex};
+use crate::block_array::{Bbox, BlockState, PaletteIndex};
 
 use super::canvas::{Canvas, MemberCanvas, ScopePalette};
 use super::frame::{Cut, Frame};
@@ -84,6 +85,12 @@ pub(super) fn fill_door(
     }
     // A derived door stands hinged on the left until `hang_doors` settles it.
     let hinge = door.hinge.unwrap_or(Hinge::Left);
+    let [(_, lower), (_, upper)] = door.cells();
+    canvas.declare(Declared {
+        anchor: lower,
+        bbox: Bbox::spanning(lower, upper),
+        host_face: Some(outer_face(door.side)),
+    });
     let mut painted = [PaletteIndex::AIR; 2];
     for (slot, (half, pos)) in painted.iter_mut().zip(door.cells()) {
         canvas.paint(pos, || {

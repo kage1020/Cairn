@@ -1,8 +1,11 @@
 //! What a block is to the rules that join panes, fences, walls, chests and redstone dust to their
 //! neighbours (`spec/blockstate` "Connections").
 
+use serde::Serialize;
+
 /// A face of a block, named for the direction it looks toward.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Face {
     /// `-y`.
     Down,

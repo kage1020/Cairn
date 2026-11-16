@@ -3,6 +3,8 @@
 use crate::diagnostic::Diagnostic;
 use crate::intent::{BindingKey, Member, MemberRole};
 
+use crate::block_array::geometry::Declared;
+
 use super::beam::fill_beam;
 use super::canvas::{LazySlot, MemberCanvas, ScopePalette};
 use super::cell_box::Shape;
@@ -215,6 +217,7 @@ fn fill_floor(
         return;
     };
     let y = 0;
+    canvas.declare(Declared::boxed(ctx.footprint_box(y, y), None));
     for z_local in 0..ctx.interior_h {
         for x_local in 0..ctx.interior_w {
             let x = ctx.overhang + x_local;
@@ -253,6 +256,7 @@ fn fill_walls(
     let end = height
         .saturating_add(y_offset)
         .min(ctx.dims.y.saturating_sub(1));
+    canvas.declare(Declared::boxed(ctx.footprint_box(start, end), None));
     for y in start..=end {
         for z_local in 0..ctx.interior_h {
             for x_local in 0..ctx.interior_w {
