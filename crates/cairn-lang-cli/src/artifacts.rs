@@ -10,6 +10,7 @@ use cairn_lang_formats::build::run_level::{RunLevelNote, artifact_collision, bac
 use cairn_lang_formats::data_version::JavaTarget;
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
+use cairn_lang_formats::schem::{SchemError, prepare_schem, schem_files};
 use cairn_lang_formats::target::{PreparedStructure, ResolvedTarget};
 
 use crate::cli::StructureFormat;
@@ -57,6 +58,8 @@ pub(crate) enum Backend<'t> {
     PerArray(&'t ResolvedTarget),
     /// A `.litematic` per struct and per site.
     Litematic(&'t JavaTarget),
+    /// A `.schem` per array.
+    Schem(&'t JavaTarget),
 }
 
 impl<'t> Backend<'t> {
@@ -65,6 +68,7 @@ impl<'t> Backend<'t> {
     pub(crate) fn new(target: &'t ResolvedTarget, format: StructureFormat) -> Self {
         match (target, format) {
             (ResolvedTarget::Java(java), StructureFormat::Litematic) => Self::Litematic(java),
+            (ResolvedTarget::Java(java), StructureFormat::Schem) => Self::Schem(java),
             (ResolvedTarget::Java(_), StructureFormat::Nbt) | (ResolvedTarget::Bedrock(_), _) => {
                 Self::PerArray(target)
             }
@@ -106,6 +110,27 @@ pub(crate) fn prepare_artifacts<'a>(
             }
             return Ok(prepared);
         }
+        Backend::Schem(java) => {
+            for file in schem_files(block_ir) {
+                let scope = file.scope;
+                let file_name = output_filename(&file.stem, OutputExt::Schem);
+                let schematic = prepare_schem(file, java).map_err(|err| {
+                    let mut refusal = backend_refusal(scope, &err.to_string());
+                    if let Some(fix) = schem_fix(&err) {
+                        refusal
+                            .notes
+                            .push(RunLevelNote::Line(format!("note: {fix}")));
+                    }
+                    report_structure_message(&refusal);
+                    ExitCode::from(1)
+                })?;
+                prepared.push((
+                    claims.claim(scope, &file_name)?,
+                    PreparedStructure::Schem(schematic),
+                ));
+            }
+            return Ok(prepared);
+        }
     };
     for (scope, array) in &block_ir.structures {
         let PreparedArtifact {
@@ -134,6 +159,25 @@ fn litematic_fix(refusal: &LitematicError) -> Option<&'static str> {
         LitematicError::MetadataOverflow { .. } => Some(
             "split the site into smaller ones, or compile with `--structure-format nbt`, which \
              writes a file per placement and walkway",
+        ),
+        _ => None,
+    }
+}
+
+/// How to build a structure `refusal` keeps from being a `.schem`, when another format can.
+fn schem_fix(refusal: &SchemError) -> Option<&'static str> {
+    match refusal {
+        SchemError::DimensionOverflow { .. } => Some(
+            "split the structure along that axis, or compile with `--structure-format nbt`, \
+             which stores each extent as an int",
+        ),
+        SchemError::UnspellableState { .. } => Some(
+            "compile with `--structure-format nbt` or `litematic`, which store each property \
+             apart rather than spelled into one key",
+        ),
+        SchemError::DuplicateState { .. } => Some(
+            "every palette the compiler builds holds each state once, so this is a bug in Cairn \
+             rather than in the source; please report it with the source that produced it",
         ),
         _ => None,
     }

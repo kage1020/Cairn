@@ -10,6 +10,7 @@ use crate::data_version::{
 use crate::java_structure::{JavaStructure, OutputExt, prepare_structure};
 use crate::litematic::Litematic;
 use crate::registry::{RegistryPack, builtin_pack};
+use crate::schem::Schem;
 
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
 #[derive(Debug, Clone)]
@@ -126,6 +127,8 @@ pub enum PreparedStructure<'a> {
     Bedrock(McStructure<'a>),
     /// A gzip `.litematic` schematic of a struct or a site.
     Litematic(Litematic<'a>),
+    /// A gzip `.schem` schematic of a struct, a placement or a walkway.
+    Schem(Schem<'a>),
 }
 
 impl PreparedStructure<'_> {
@@ -139,6 +142,7 @@ impl PreparedStructure<'_> {
             PreparedStructure::Java(structure) => structure.write_gzip(writer),
             PreparedStructure::Bedrock(structure) => structure.write(writer),
             PreparedStructure::Litematic(schematic) => schematic.write_gzip(writer),
+            PreparedStructure::Schem(schematic) => schematic.write_gzip(writer),
         };
         encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }
