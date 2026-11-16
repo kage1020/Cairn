@@ -81,6 +81,29 @@ fn members_at_one_column_count_up_the_wall() {
 }
 
 #[test]
+fn an_anchored_window_counts_by_the_offset_and_y_it_writes() {
+    // The first holds columns 1..=5 and rows 2..=3; the second column 2 and rows 1..=2.
+    let src = "struct s size=9x7\n  \
+               window side=front anchor=top_right offset=5 y=3 size=5x2\n  \
+               window side=front offset=2 y=1 size=1x2\n  \
+               window side=front anchor=top_center offset=2 y=2 size=1x2\n";
+    assert_eq!(
+        addresses(src),
+        pairs(&[
+            (
+                "window side=front anchor=top_right offset=5 y=3 size=5x2",
+                "window@front[2]",
+            ),
+            ("window side=front offset=2 y=1 size=1x2", "window@front[0]"),
+            (
+                "window side=front anchor=top_center offset=2 y=2 size=1x2",
+                "window@front[1]",
+            ),
+        ]),
+    );
+}
+
+#[test]
 fn reordering_the_lines_moves_no_address() {
     let lines = [
         "window side=front offset=6",

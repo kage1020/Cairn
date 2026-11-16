@@ -316,6 +316,10 @@ pub(super) struct WindowCut {
     pub(super) height: u32,
     /// The `(offset, width)` of each rectangle: its `repeat=` series, then its `sym=true` mirror.
     pub(super) stamps: Vec<(u32, u32)>,
+    /// The `(offset, width)` its `sym=true` mirror takes, declared even when the mirror is skipped.
+    pub(super) mirror: Option<(u32, u32)>,
+    /// The wall-local `(u, y)` of the cell its `offset=` and `y=` place.
+    pub(super) anchor: (u32, u32),
     /// The block its `mat_slot=` binds, or `None` for an opening carved to air.
     pub(super) fill: Option<BlockState>,
 }
@@ -332,30 +336,26 @@ pub(super) fn plan_window(
     let Some(side) = side_of(member, diagnostics) else {
         return WindowPlan::Refused;
     };
-    let WindowArgs {
-        offset,
-        y: y_start_local,
-        width: sw,
-        height: sh,
-    } = match read_window_args(member) {
+    let args = match read_window_args(member) {
         Ok(args) => args,
         Err(fault) => {
             diagnostics.push(diag_invalid_member(
                 member,
                 fault.refusal(),
-                vec![fault.fix().to_owned()],
+                vec![fault.fix()],
             ));
             return WindowPlan::Refused;
         }
     };
-    let y_start = y_start_local.saturating_add(y_offset);
+    let (offset, sw, sh) = (args.column, args.width, args.height);
+    let y_start = args.row.saturating_add(y_offset);
     let Some((repeat, step)) = window_series(member, diagnostics) else {
         return WindowPlan::Refused;
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
-    let refusal = window_span_refusal(side, offset, (sw, sh), (repeat, step), len)
+    let refusal = window_span_refusal(side, args, (repeat, step), len)
         .map(|(reason, fix)| diag_invalid_member(member, reason, vec![fix]))
-        .or_else(|| window_course_refusal(member, y_start, (sw, sh), ctx));
+        .or_else(|| window_course_refusal(member, args, y_start, ctx));
     // The window's own line is asked before what the pass does not lower yet.
     let own_fault = refusal
         .as_ref()
@@ -387,17 +387,18 @@ pub(super) fn plan_window(
     let mut stamps: Vec<(u32, u32)> = (0..repeat)
         .map(|i| (offset.saturating_add(step.saturating_mul(i)), sw))
         .collect();
-    if sym == Some(true) {
-        stamps.extend(
-            window_mirror(member, side, offset, (sw, sh), len, diagnostics)
-                .map(|mirror| (mirror, sw)),
-        );
+    let mirror = (sym == Some(true)).then(|| (mirror_column(args, len), sw));
+    if mirror.is_some() {
+        stamps
+            .extend(window_mirror(member, side, args, len, diagnostics).map(|mirror| (mirror, sw)));
     }
     WindowPlan::Cut(WindowCut {
         side,
         row: y_start,
         height: sh,
         stamps,
+        mirror,
+        anchor: (args.offset(), args.y().saturating_add(y_offset)),
         fill,
     })
 }
@@ -469,49 +470,55 @@ fn series_mirror_deferral(
 /// when it does.
 fn window_span_refusal(
     side: WallSide,
-    offset: u32,
-    (sw, sh): (u32, u32),
+    args: WindowArgs,
     (repeat, step): (u32, u32),
     len: u32,
 ) -> Option<(String, String)> {
-    let span_end = offset
+    let (sw, sh) = (args.width, args.height);
+    let span_end = args
+        .column
         .saturating_add(step.saturating_mul(repeat.saturating_sub(1)))
         .saturating_add(sw);
+    let first = args.column_term();
     (span_end > len).then(|| {
         let fix = if repeat > 1 {
             format!(
-                "the last instance ends at `offset + step * (repeat - 1) + size.w`, which must be \
-                 at most {len}; lower `offset=`, `step=` or `repeat=`, or narrow `size=`"
+                "the last instance ends at `{first} + step * (repeat - 1) + size.w`, which must \
+                 be at most {len}; lower `offset=`, `step=` or `repeat=`, or narrow `size=`"
             )
         } else {
             format!(
-                "the window ends at `offset + size.w`, which must be at most {len}; lower \
+                "the window ends at `{first} + size.w`, which must be at most {len}; lower \
                  `offset=` or narrow `size=`"
             )
         };
         (
             format!(
-                "window extends beyond the `{}` wall (offset={offset} size={sw}x{sh} repeat={repeat} step={step}, wall length={len})",
+                "window extends beyond the `{}` wall (offset={}{} size={sw}x{sh} repeat={repeat} step={step}, wall length={len})",
                 side_name(side),
+                args.offset(),
+                args.anchor_written(),
             ),
             fix,
         )
     })
 }
 
-/// The finding that refuses a window `sh` tall from row `y_start` that no one wall course holds,
-/// or `None`.
+/// The finding that refuses a window, `args` with its lowest row at `y_start`, that no one wall
+/// course holds, or `None`.
 ///
 /// Rows a `walls` member is written to hold and does not paint are that member's to repair.
 fn window_course_refusal(
     member: &Member,
+    args: WindowArgs,
     y_start: u32,
-    (sw, sh): (u32, u32),
     ctx: &StructCtx<'_>,
 ) -> Option<Diagnostic> {
+    let (sw, sh) = (args.width, args.height);
     if ctx.wall_column.contains_rows(y_start, sh) {
         return None;
     }
+    let at = format!("y={}{}", args.y(), args.anchor_written());
     let written = &ctx.written;
     let rows = match y_start.checked_add(sh.saturating_sub(1)) {
         Some(last) => format!("window rows y={y_start}..={last}"),
@@ -530,7 +537,7 @@ fn window_course_refusal(
     if written.walls.contains_rows(y_start, sh) {
         let primary = if ctx.wall_column.is_empty() {
             format!(
-                "window at y={y_start} size={sw}x{sh} has no wall to cut into: no `walls` member on this struct paints",
+                "window at {at} size={sw}x{sh} has no wall to cut into: no `walls` member on this struct paints",
             )
         } else {
             format!(
@@ -547,7 +554,7 @@ fn window_course_refusal(
     if written.unplaced_walls {
         let primary = if written.walls.is_empty() {
             format!(
-                "window at y={y_start} size={sw}x{sh} has no wall to cut into: every `walls` member on this struct sits under a `level` that is not placed",
+                "window at {at} size={sw}x{sh} has no wall to cut into: every `walls` member on this struct sits under a `level` that is not placed",
             )
         } else {
             format!(
@@ -564,7 +571,7 @@ fn window_course_refusal(
     let (primary, fix) = if written.walls.is_empty() {
         (
             format!(
-                "window at y={y_start} size={sw}x{sh} has no wall to cut into: this struct declares no `walls` with a positive `height=`",
+                "window at {at} size={sw}x{sh} has no wall to cut into: this struct declares no `walls` with a positive `height=`",
             ),
             if written.unsized_walls {
                 "give the `walls` a positive `height=`, or add a `walls` member whose course holds \
@@ -591,12 +598,12 @@ fn window_course_refusal(
 fn window_mirror(
     member: &Member,
     side: WallSide,
-    offset: u32,
-    (sw, sh): (u32, u32),
+    args: WindowArgs,
     len: u32,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
-    let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
+    let (offset, sw, sh) = (args.column, args.width, args.height);
+    let mirror_offset = mirror_column(args, len);
     let primary_end = offset.saturating_add(sw);
     let mirror_end = mirror_offset.saturating_add(sw);
     // Strict: a mirror that only touches the primary shares no cell with it, so it is still a
@@ -615,17 +622,20 @@ fn window_mirror(
         } else {
             // On an odd wall the middle column is in neither half, so the two bounds differ.
             let (left_half_end, right_half_start) = (len / 2, len.div_ceil(2));
+            let first = args.column_term();
             format!(
                 "a `sym=true` window and its mirror are a pair only when the window lies in one \
-                 half of the wall (here `offset + size.w <= {left_half_end}` or \
-                 `offset >= {right_half_start}`); move or narrow the window to cut a pair, or \
+                 half of the wall (here `{first} + size.w <= {left_half_end}` or \
+                 `{first} >= {right_half_start}`); move or narrow the window to cut a pair, or \
                  drop `sym=true` to keep the one opening that was cut",
             )
         };
         diagnostics.push(diag_deferred_member_noted(
             member,
             &format!(
-                "`sym=true` window at offset={offset} size={sw}x{sh} on the `{}` wall {relation} its mirror (wall length={len}); the mirror was skipped",
+                "`sym=true` window at offset={}{} size={sw}x{sh} on the `{}` wall {relation} its mirror (wall length={len}); the mirror was skipped",
+                args.offset(),
+                args.anchor_written(),
                 side_name(side),
             ),
             &note,
@@ -633,6 +643,11 @@ fn window_mirror(
         return None;
     }
     Some(mirror_offset)
+}
+
+/// The column a `sym=true` window's mirror starts at on a wall `len` long.
+fn mirror_column(args: WindowArgs, len: u32) -> u32 {
+    len.saturating_sub(args.column).saturating_sub(args.width)
 }
 
 /// The part of its wall an opening cuts, as a `beam` laid over it reads it.
