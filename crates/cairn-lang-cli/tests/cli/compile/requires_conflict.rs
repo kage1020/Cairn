@@ -1,4 +1,4 @@
-//! `cairn compile` against a floor no target declaring every block the build paints clears:
+//! `cairn compile` against a floor above the last target that declares a block the build paints:
 //! `E_REQUIRES_CONFLICT`, per `spec/versioning-editions` "A floor is weighed against the registry".
 
 use crate::common::{Fixture, Run, assert_stream, compile_as};
@@ -68,14 +68,59 @@ fn a_part_placed_twice_conflicts_once_and_names_its_block_once() {
     let source = "theme t:\n  slot floor -> @chain\n\ndef cottage size=2x2:\n  requires java \
                   version>=26.3\n  floor mat_slot=floor\n\nsite hamlet:\n  place id=a \
                   use=cottage theme=t at=origin\n  place id=b use=cottage theme=t east_of=a\n";
-    let (_, run) = compiled(source, "java", "1.21.4");
+    let (fixture, run) = compiled(source, "java", "1.21.4");
     assert_eq!(run.code, Some(1), "{}", run.stderr);
-    assert_stream(&run.stderr, &[(5, 3, "error", "E_REQUIRES_CONFLICT")]);
+    let path = fixture.source().display().to_string();
     assert_eq!(
-        run.stderr.matches("is last declared at").count(),
-        1,
-        "and the id both placements paint is named once: {}",
         run.stderr,
+        format!(
+            "error[E_REQUIRES_CONFLICT]: {path}:5:3: `def cottage` requires java version>=26.3, but \
+             no java target it admits declares `minecraft:chain`, which this build paints.\n  \
+             `def cottage` declares it, and every `place use=cottage` inherits it\n  note: \
+             {path}:2:17: `minecraft:chain` is last declared at java 1.21.4\n  fix: lower the \
+             `requires` floor to 1.21.4 or below, or replace `minecraft:chain` with a block a java \
+             target at or above 26.3 declares\n",
+        ),
+        "one finding for the part, naming the id both placements paint once",
+    );
+}
+
+#[test]
+fn each_floor_above_the_range_is_one_finding_in_source_order() {
+    let source = "@requires version>=1.21
+@requires java version>=26.3
+
+theme t:
+  slot wall \
+                  -> @chain
+
+def cottage size=2x2:
+  requires java version>=26.3
+  floor \
+                  mat_slot=wall
+
+site hamlet:
+  place id=a use=cottage theme=t at=origin
+";
+    let (fixture, run) = compiled(source, "java", "1.21.4");
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    let path = fixture.source().display().to_string();
+    assert_eq!(
+        run.stderr,
+        format!(
+            "error[E_REQUIRES_CONFLICT]: {path}:2:1: this file requires java version>=26.3, but \
+             no java target it admits declares `minecraft:chain`, which this build paints.\n  \
+             note: {path}:5:16: `minecraft:chain` is last declared at java 1.21.4\n  fix: lower \
+             the `@requires` floor to 1.21.4 or below, or replace `minecraft:chain` with a block \
+             a java target at or above 26.3 declares\n\
+             error[E_REQUIRES_CONFLICT]: {path}:8:3: `def cottage` requires java version>=26.3, \
+             but no java target it admits declares `minecraft:chain`, which this build paints.\n  \
+             `def cottage` declares it, and every `place use=cottage` inherits it\n  note: \
+             {path}:5:16: `minecraft:chain` is last declared at java 1.21.4\n  fix: lower the \
+             `requires` floor to 1.21.4 or below, or replace `minecraft:chain` with a block a java \
+             target at or above 26.3 declares\n",
+        ),
+        "the floor at or below 1.21.4 is no finding",
     );
 }
 
@@ -99,6 +144,64 @@ fn the_id_last_declared_earliest_bounds_the_conflict() {
              1.26.60 declares\n",
         ),
     );
+}
+
+#[test]
+fn a_floor_between_two_last_declared_versions_names_only_the_ids_below_it() {
+    let source = "@requires bedrock version>=1.21.40\n\ntheme t:\n  slot wall -> @chain\n  slot \
+                  floor -> @stonebrick\n\nstruct s size=3x3\n  floor mat_slot=floor\n  walls \
+                  mat_slot=wall height=2\n";
+    let (fixture, run) = compiled(source, "bedrock", "1.21.0");
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    let path = fixture.source().display().to_string();
+    assert_eq!(
+        run.stderr,
+        format!(
+            "error[E_REQUIRES_CONFLICT]: {path}:1:1: this file requires bedrock version>=1.21.40, \
+             but no bedrock target it admits declares `minecraft:stonebrick`, which this build \
+             paints.\n  note: {path}:5:17: `minecraft:stonebrick` is last declared at bedrock \
+             1.21.0\n  fix: lower the `@requires` floor to 1.21.0 or below, or replace \
+             `minecraft:stonebrick` with a block a bedrock target at or above 1.21.40 declares\n",
+        ),
+        "`minecraft:chain`, last declared at 1.21.60, is at or above the floor",
+    );
+}
+
+#[test]
+fn a_floor_at_or_below_the_last_target_declaring_a_painted_id_is_no_conflict() {
+    for floor in ["1.21.4", "1.21"] {
+        let source = format!("@requires version>={floor}\n{CHAIN}");
+        let (fixture, run) = compiled(&source, "java", "1.21.4");
+        assert_eq!(run.code, Some(0), "{floor}: {}", run.stderr);
+        assert_eq!(run.stderr, "", "{floor}");
+        assert_eq!(fixture.artifacts(), ["s.crn.lock", "s.nbt"], "{floor}");
+    }
+}
+
+#[test]
+fn a_floor_no_carried_version_meets_is_left_to_e_version_cap() {
+    let source = format!("@requires version>=26.3\n{CHAIN}");
+    let (fixture, run) = compiled(&source, "bedrock", "1.21.60");
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    let path = fixture.source().display().to_string();
+    assert_eq!(
+        run.stderr,
+        format!(
+            "error[E_VERSION_CAP]: {path}:1:1: this file requires version>=26.3 (target \
+             1.21.60).\n  no supported bedrock target satisfies it: 1.21.0, 1.21.40, 1.21.60, \
+             1.26.60, latest\n  fix: lower the `@requires` floor, or build against another \
+             edition\n",
+        ),
+        "no bedrock target meets the floor, whatever the build paints",
+    );
+}
+
+#[test]
+fn an_unorderable_floor_is_left_to_its_own_code() {
+    let source = format!("@requires version>=1.21.4\n{CHAIN}");
+    let (_, run) = compiled(&source, "bedrock", "1.21.60");
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    assert_stream(&run.stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
 }
 
 #[test]

@@ -170,8 +170,8 @@ no `@requires` checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target tha
 1.21.4 as the first target that declares it, and `cairn info` starts Java's inferred range there
 ([Versioning and Editions](/spec/versioning-editions/#the-inferred-range-row)). A deleted id is
 `E_UNKNOWN_ID`, naming the last target that declares it, and ends the inferred range there, so a
-floor above that target is `E_REQUIRES_CONFLICT`; an id no version declares names the nearest block
-the target has when one is near enough.
+floor above that target that some target meets is `E_REQUIRES_CONFLICT`; an id no version declares
+names the nearest block the target has when one is near enough.
 
 **Only ID, state, and serialization differences may be absorbed.** Concept absence and
 game-behaviour differences are not.

@@ -50,7 +50,8 @@ pub struct EditionReport {
     pub considered: Vec<String>,
     /// Why [`Self::buildable`] is empty, when it is.
     pub refusal: Option<BuildableRefusal>,
-    /// The versions whose block tables declare every id the build paints.
+    /// The interval from the latest version first declaring an id the build paints to the earliest
+    /// last declaring one.
     pub inferred_range: InferredRange,
 }
 
@@ -153,8 +154,8 @@ pub struct RegistryRange {
     pub max: String,
 }
 
-/// The versions of one edition whose block tables declare every id a build paints, per
-/// `spec/versioning-editions` "The `inferred range` row".
+/// One edition's interval from the latest version first declaring an id a build paints to the
+/// earliest last declaring one, per `spec/versioning-editions` "The `inferred range` row".
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InferredRange {
     /// Target edition this row describes.
@@ -174,27 +175,29 @@ pub struct InferredRange {
     /// The ids no version the edition's pack carries declares.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub undeclared: Vec<PaintedId>,
-    /// The floors above `max`, each `E_REQUIRES_CONFLICT`, in source order.
+    /// The floors above `max` that a carried version meets, each `E_REQUIRES_CONFLICT`, in source
+    /// order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub conflicts: Vec<RequiresConflict>,
 }
 
-/// A block id a build paints, at the first place it paints it.
+/// A block id a build paints, at the first place the source names it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PaintedId {
     /// The fully namespaced id.
     pub id: String,
-    /// Where the build paints it.
+    /// Where the source first names it.
     #[serde(flatten)]
     pub position: Position,
 }
 
-/// A declared floor that admits no version declaring an id the build paints.
+/// A declared floor above the last version that declares some id the build paints, while a
+/// carried version meets it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RequiresConflict {
     /// The floor.
     pub floor: DeclaredFloor,
-    /// The ids last declared below it, the earliest `last_declared` first.
+    /// The ids last declared below it, the earliest `last_declared` first; never empty.
     pub ids: Vec<LastDeclaredId>,
 }
 
@@ -205,7 +208,7 @@ pub struct LastDeclaredId {
     pub id: String,
     /// The last version that declares it.
     pub last_declared: String,
-    /// Where the build paints it.
+    /// Where the source first names it.
     #[serde(flatten)]
     pub position: Position,
 }
@@ -305,6 +308,7 @@ pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxe
     let mut edition_portability = Vec::with_capacity(editions.len());
     let mut buildable_targets = Vec::with_capacity(editions.len());
     for report in editions {
+        debug_assert_eq!(report.inferred_range.edition, report.edition);
         inferred_range.push(report.inferred_range);
         edition_portability.push(EditionPortability {
             edition: report.edition,
