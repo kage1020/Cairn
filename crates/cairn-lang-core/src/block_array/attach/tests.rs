@@ -244,6 +244,22 @@ fn a_circuit_declares_every_layer_it_reserves_and_holds_the_box_around_its_block
 }
 
 #[test]
+fn a_circuit_that_lays_no_block_holds_every_layer_it_reserves() {
+    let mut ir = hut();
+    assert_eq!(ir.attach_circuit(KEY, 2, &[], 10..20, None), Ok(()));
+    let reserved = Bbox::spanning((0, 0, 0), (1, 1, 1));
+    assert_eq!(
+        ir.members[KEY][0].geometry,
+        MemberGeometry {
+            anchor: (0, 0, 0),
+            declared_bbox: reserved,
+            actual_bbox: reserved,
+            host_face: None,
+        },
+    );
+}
+
+#[test]
 fn the_circuit_is_recorded_under_the_address_of_its_line() {
     let mut ir = hut();
     let line = MemberAddress::new(AddressSegment::new("circuit".to_owned(), None, 0));
@@ -285,6 +301,7 @@ fn a_refused_circuit_leaves_the_structure_as_it_was() {
             circuit(),
             AttachError::NoStructure,
         ),
+        (hut(), KEY, 0, Vec::new(), AttachError::NoLayers),
         (hut(), KEY, u32::MAX, circuit(), AttachError::TooLarge),
         (hut(), KEY, 1 << 22, circuit(), AttachError::TooLarge),
         (

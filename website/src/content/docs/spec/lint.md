@@ -669,21 +669,22 @@ Beyond the codes above, lint covers:
 
 Of these, attachment, entity_aabb, support, fluid and edit_stability are planned, and no command
 checks them yet. AABB interference holds inside a body, where the phase order merges the members and
-`W_PHASE_CONFLICT` reports two of one phase that take a cell from each other ([Compilation Model
-§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and between bodies, where two
-`place` rows of a site whose boxes share a cell, or a walkway laid inside a placement it does not
-join, are `E_PLACEMENT_OVERLAP` ([Sites and placements](#sites-and-placements)). Geometry holds only
-in part: a door, window, eave stair, chest, trapdoor, note block, sensor or actuator its own line
-puts outside its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a
-member left unbuilt keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part,
-through codes of its own: `E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID`
-refuses a block id the pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's
-block only the other edition has, `E_STATE_DOMAIN` a state its block does not take there,
-`E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names what a
-version cannot carry, while no entity schema is checked. The redstone row runs through codes of its
-own: the truth-table codes check a table against itself, and the codes of [Redstone](#redstone)
-check a truth table, a temporal assertion and a latency bound against the circuit, and check its
-routing and its dependence on update order.
+`W_PHASE_CONFLICT` reports a later line of one phase that changes a cell an earlier one built
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and
+between bodies, where two `place` rows of a site whose boxes share a cell, or a walkway laid inside
+a placement it does not join, are `E_PLACEMENT_OVERLAP` ([Sites and
+placements](#sites-and-placements)). Geometry holds only in part: a door, window, eave stair, chest,
+trapdoor, note block, sensor or actuator its own line puts outside its struct is not drawn and is
+reported as `E_INVALID_MEMBER`, and one that only a member left unbuilt keeps out as
+`W_DEFERRED_MEMBER`. version_caps / parity runs only in part, through codes of its own:
+`E_VERSION_CAP` holds `--target` to the `@requires` floors, `E_UNKNOWN_ID` refuses a block id the
+pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only the other
+edition has, `E_STATE_DOMAIN` a state its block does not take there, `E_STATE_UNMAPPED` a block
+state its state map has no form for, and `W_INTENT_DEGRADED` names what a version cannot carry,
+while no entity schema is checked. The redstone row runs through codes of its own: the truth-table
+codes check a table against itself, and the codes of [Redstone](#redstone) check a truth table, a
+temporal assertion and a latency bound against the circuit, and check its routing and its dependence
+on update order.
 
 ### "did you mean"
 

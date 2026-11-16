@@ -562,7 +562,7 @@ fn a_stair_reads_the_height_it_is_written_at() {
 }
 
 #[test]
-fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
+fn an_unreached_argument_the_spec_writes_is_accepted_and_reported() {
     // Written on a known keyword in `spec/entities` "Anchor conventions".
     let rows = [("window side=front y=2 offset=4 size=3x3", "shape", "arch")];
     for (line, key, value) in rows {

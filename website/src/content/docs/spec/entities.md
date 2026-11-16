@@ -63,12 +63,13 @@ cell, and records them beside its `resolved_state` ([Blockstate Model
   smaller than the declared bbox where another member took cells at its edge, and larger where the
   member builds past what its line names, as a roof's overhang does.
 - The **host face** is the face of the wall or wall top the member is set against, named for the way
-  it looks: `north` is `-z`, `south` is `+z`, and `up` is the wall top's. A member set against no
-  face has none.
+  it looks: `north` is `-z`, `south` is `+z`, `west` is `-x`, `east` is `+x`, and `up` is the wall
+  top's. A member set against no face has none.
 
 Each is a cell, or a box of cells with both corners included, of the body's block array, counted
-from its low corner. An overhang moves them as it moves the member, and a `circuit` laid under the
-base plane raises them with the struct ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+from the array's low corner. An overhang moves them as it moves the member, and a `circuit` laid
+under the base plane raises them with the struct ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 | Member | Anchor | Declared bbox | Host face |
 |---|---|---|---|
@@ -84,10 +85,12 @@ base plane raises them with the struct ([Redstone §14.5](/spec/redstone/#145-pl
 | `circuit` | the low corner of its box | every layer it reserves | none |
 
 A window's rectangles are each one a `repeat=` series stamps and, with `sym=true`, the mirror, so a
-mirror skipped for overlapping the window stays in the declared bbox and out of the actual one
-([Syntax §5.4](/spec/syntax/#54-selectors)). A fixture by a wall stands against its outer face
-from outside the wall (`at=front.outside`) and its inner face from inside (`at=inside.front`). A
-`circuit` that lays no block holds the layers it reserves, which it writes as air.
+mirror skipped for overlapping the window stays in the declared bbox, and its cells outside the
+window stay out of the actual one ([Syntax §5.4](/spec/syntax/#54-selectors)). A fixture by a wall
+stands against its outer face from outside the wall (`at=front.outside`) and its inner face from
+inside (`at=inside.front`). A `circuit` holds the cells it lays a block in, not the air it writes
+over the rest of the layers it reserves, and one that lays no block holds every layer it reserves,
+since a bbox holds at least one cell.
 
 **`anchor=` on a window** names the cell of the window that `offset=` and `y=` place, seen from
 outside the wall: one of `bottom_left`, `bottom_center`, `bottom_right`, `middle_left`, `center`,
@@ -104,8 +107,9 @@ draws nothing, while the struct as written still rises as its shape does
 
 **Overlapping AABBs** resolve by priority merge inside one body, and are an error between bodies.
 The members of a body paint one block array, so a cell two of them name goes to the later phase,
-and inside one phase to the line written later, which `W_PHASE_CONFLICT` reports ([Compilation
-Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The member that loses
+and inside one phase to the line written later, which `W_PHASE_CONFLICT` reports when the later
+line changes the cell ([Compilation Model
+§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The member that loses
 the cell keeps its declared bbox, and its actual bbox is what it still holds. Two `place` rows
 share no array: each body is its own structure, written with air in every cell it does not fill, so
 placing one over the other erases what was there and there is nothing to merge. Once the

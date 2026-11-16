@@ -7,11 +7,9 @@ use crate::intent::Member;
 
 use crate::block_array::Bbox;
 use crate::block_array::args::{diag_deferred_member_noted, diag_invalid_member};
+pub(super) use crate::block_array::geometry::Cell;
 
 use super::members::{StructCtx, unplaced_walls_note};
-
-/// A cell of the block array, `(x, y, z)`.
-pub(super) type Cell = (u32, u32, u32);
 
 /// A corner as its line writes it, measured from the footprint's low corner.
 type Corner = (u64, u64, u64);
