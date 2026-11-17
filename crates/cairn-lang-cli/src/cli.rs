@@ -53,7 +53,9 @@ pub(crate) enum Command {
             on `cairn check` and see every lowering-stage finding `cairn compile` would refuse \
             on, plus the `E_PARTIAL_BUILD` a lost scope earns. Nothing is written either way — \
             `compile` remains the command that produces artifacts and the lockfile, and the only \
-            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`).\n\n\
+            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`) and \
+            refuses a floor the blocks the build paints contradict (`E_REQUIRES_CONFLICT`, which \
+            `cairn info` reports without refusing).\n\n\
             When nothing else is an error, each struct's `logic` is built into its circuit as \
             `cairn compile` builds it (`spec/redstone` \"Place-and-route\"), and the circuit's \
             findings follow the lowering's: the pinned edition's, at the `--target` version when \
@@ -127,19 +129,21 @@ pub(crate) enum Command {
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
-    /// Report a .crn source file's version range, edition portability, semantic-sensitive
-    /// members, the versions worth testing it in and its verified lock target.
+    /// Report a .crn source file's declared and inferred version ranges, edition portability,
+    /// semantic-sensitive members, the versions worth testing it in and its verified lock target.
     #[command(
-        long_about = "Report the three version axes (declared registry range, semantic-sensitive \
-            members, verified lock target) for a .crn source file, with each requested edition's \
-            portability and buildable targets beside them and the `recommended test targets` \
-            among those: the oldest and the newest, and the pair either side of each \
-            semantic-sensitivity boundary that falls between them. Exits 0 on success, including \
-            when the lockfile is missing or cannot be read; 1 on a parse failure, on any \
-            `Error`-severity diagnostic (the check passes run here, as does each requested \
-            edition's lowering with its circuits laid, and a range derived from a file `cairn \
-            check` rejects is a confident wrong answer), or on any other I/O error reading the \
-            source (permission denied, non-UTF-8 contents); 2 when the source file cannot be \
+        long_about = "Report the three version axes (the registry range the file declares and the \
+            one the blocks it paints imply per edition, semantic-sensitive members, verified lock \
+            target) for a .crn source file, with each requested edition's portability and \
+            buildable targets beside them and the `recommended test targets` among those: the \
+            oldest and the newest, and the pair either side of each semantic-sensitivity boundary \
+            that falls between them. A floor above an edition's inferred range is printed as \
+            `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. Exits 0 \
+            on success, including when the lockfile is missing or cannot be read; 1 on a parse \
+            failure, on any `Error`-severity diagnostic (the check passes run here, as does each \
+            requested edition's lowering with its circuits laid, and a range derived from a file \
+            `cairn check` rejects is a confident wrong answer), or on any other I/O error reading \
+            the source (permission denied, non-UTF-8 contents); 2 when the source file cannot be \
             located, and rejects an empty `--editions` value with exit 2"
     )]
     Info {
@@ -151,9 +155,9 @@ pub(crate) enum Command {
             value_delimiter = ',',
             default_values_t = vec!["java".to_owned(), "bedrock".to_owned()],
             long_help = "Comma-separated editions to evaluate portability against. Each distinct \
-                edition produces one entry in the output's `edition portability`, `buildable \
-                targets`, `semantic-sensitive` and `recommended test targets` sections; a \
-                repeated name is reported once",
+                edition produces one entry in the output's `inferred range`, `edition \
+                portability`, `buildable targets`, `semantic-sensitive` and `recommended test \
+                targets` sections; a repeated name is reported once",
         )]
         editions: Vec<String>,
         /// Lockfile to report the verified target of; defaults to `<source>.lock` next to the
