@@ -142,6 +142,16 @@ fn a_beam_over_a_door_lies_on_the_row_above_it_one_column_past_each_side() {
 }
 
 #[test]
+fn a_beam_over_a_door_at_an_offset_lies_over_that_column() {
+    let members = "walls mat_slot=wall height=4\n  door id=entry side=front offset=2\n  \
+                   beam kind=pillar at=entry.top";
+    assert_eq!(
+        laid(members),
+        logs("oak_log", "x", &[(1, 3, 4), (2, 3, 4), (3, 3, 4)]),
+    );
+}
+
+#[test]
 fn a_beam_over_a_window_lies_over_every_opening_its_line_cuts() {
     // Along the back wall `offset=` grows toward the west, so `u` is `6 - x`.
     let series = "window id=w side=back y=1 offset=1 size=1x1 repeat=2 step=2\n  \
@@ -380,9 +390,12 @@ fn a_beam_over_a_door_its_own_line_does_not_place_defers_and_lays_nothing() {
             (
                 "door id=d side=front at=middle",
                 DiagnosticCode::InvalidMember,
-                "door has `at=middle`, which is not one of center, left, right — use \
-                 `at=center | left | right`",
-                &[],
+                "door has `at=middle`, which is not one of center, left, right",
+                &[
+                    "name the door's column with `at=center`, `at=left` or `at=right`, or with \
+                     `offset=N` counted from 0 at the wall's left end seen from outside; `offset=` \
+                     takes a column between the wall's corners, from 1 to 5",
+                ],
             ),
             (
                 "door id=d side=front at=center hinge=sideways",
