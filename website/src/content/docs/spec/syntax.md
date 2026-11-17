@@ -415,7 +415,8 @@ greater than 1 is the exception. Mirroring a series is reserved for a later exte
 not read as `false` there: that window is not cut either, and is reported as `W_DEFERRED_MEMBER`
 beside the `W_IGNORED_ARGUMENT`.
 
-**`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
+**Which column a door stands in.** A door's wall-local column comes from an `at=` anchor or from
+`offset=N`. The anchors are:
 
 | Anchor | Column |
 |---|---|
@@ -423,10 +424,18 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the door and any `connect` walkway anchored to it
-([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)). Numeric offsets (`at=N`) are
-reserved for a future extension. A door with no `at=`, or one that names no anchor, is
-`E_INVALID_MEMBER` and cuts nothing.
+`offset=N` counts as a window's `offset=` does: from 0 at the wall's left end as seen from outside.
+A number names a column between the wall's corners, `1 … wall_length - 2`. A corner column is where
+the wall meets the one beside it, and `at=left` and `at=right` are how a door stands there, so an
+`offset=` of 0 or `wall_length - 1` is refused, and so is one of `wall_length` or more. A wall
+shorter than 3 has no column between its corners. `at=` takes an anchor and nothing else, so `at=3`
+is refused. Its finding names `offset=3` when column 3 lies between the corners, `at=left` or
+`at=right` when it is a corner, and the columns `offset=` takes otherwise.
+
+A door names its column once. A door with neither key, with both, with an `at=` that names no
+anchor, or with an `offset=` that is not a column between the corners is `E_INVALID_MEMBER` and
+cuts nothing. The same column resolves both the door and any `connect` walkway anchored to it
+([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
 level's base plane, and stands two rows tall: its door block takes that row and the one above it
@@ -571,6 +580,8 @@ language server shows the entry's own line on hover.
 - **`door`.** A door cut into a wall, two rows tall. See [§5.4](#54-selectors).
   - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
   - **`at=`.** Where along the wall it is cut: `center`, `left` or `right`.
+  - **`offset=`.** In place of `at=`, the column it is cut in, between the wall's corners, counted
+    from the wall's left end as seen from outside.
   - **`opened_by=`.** The signal that opens it. See
     [Redstone §14.2](/spec/redstone/#142-signal-binding).
   - **`hinge=`.** The side its hinge is on, `left` or `right`, in place of the derived side.
