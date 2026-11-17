@@ -449,7 +449,7 @@ fn a_directory_at_the_lock_path_is_unreadable_with_no_replacement_promised() {
 }
 
 #[test]
-fn a_lock_value_that_would_break_its_row_leaves_the_report_six_rows() {
+fn a_lock_value_that_would_break_its_row_adds_no_row_to_the_report() {
     let fixture = compiled("java", "1.21.4");
     let body = fs::read_to_string(fixture.lock()).expect("lock");
     let recorded = format!("cairn_version: {CAIRN_VERSION}\n");
@@ -464,6 +464,7 @@ fn a_lock_value_that_would_break_its_row_leaves_the_report_six_rows() {
     assert_eq!(
         run.stdout,
         "registry compatibility:  0.0 .. latest\n\
+         inferred range:          Java: 0.0 .. latest\n\
          edition portability:     Java: portable: 1  degraded: 0  unsupported: 0\n\
          buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3\n\
          intended targets:        (none declared)\n\

@@ -107,6 +107,7 @@ fn refuse_build(
         circuits,
         dropped_scopes,
         version_floors,
+        conflicts: _,
     } = lowered;
     let findings: Vec<Found> = block_ir
         .diagnostics
