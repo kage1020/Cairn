@@ -128,18 +128,18 @@ pub(super) fn inward_cardinal(side: WallSide) -> Cardinal {
     }
 }
 
-/// Stair `shape` property values a hip roof's corner cells and an eave `stair` carry.
+/// A stair's `shape` property value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StairShape {
-    /// Straight stair, for every cell that is not a hip corner.
+    /// Straight stair.
     Straight,
     /// Inner corner with an extra step on the left of the facing.
     InnerLeft,
     /// Inner corner with an extra step on the right of the facing.
     InnerRight,
-    /// Outer corner missing its step on the left of the facing.
+    /// Outer corner keeping only the step on the left of the facing.
     OuterLeft,
-    /// Outer corner missing its step on the right of the facing.
+    /// Outer corner keeping only the step on the right of the facing.
     OuterRight,
 }
 
