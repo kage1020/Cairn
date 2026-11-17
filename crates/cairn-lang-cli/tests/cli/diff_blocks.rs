@@ -288,20 +288,21 @@ fn a_source_that_does_not_build_at_the_stamp_is_refused_before_comparing() {
 
 #[test]
 fn a_floor_no_target_meets_is_refused_ahead_of_the_stamp() {
-    let (tmp, _src, artifact) = built("java", "1.21.4", "cottage.nbt");
+    let (tmp, _src, artifact) = built("bedrock", "1.21.0", "cottage.mcstructure");
+    // Bedrock declares `@stonebrick` last at 1.21.0, and no later version writes it.
     let conflicted = write_source(
         tmp.path(),
         "conflicted.crn",
-        "@requires java version>=26.3\ntheme t:\n  slot wall -> @chain\n\nstruct s size=2x2\n  \
-         floor mat_slot=wall\n",
+        "@requires bedrock version>=1.21.40\ntheme t:\n  slot wall -> @stonebrick\n\nstruct s \
+         size=2x2\n  floor mat_slot=wall\n",
     );
     let path = conflicted.display();
     let stderr = format!(
-        "error[E_REQUIRES_CONFLICT]: {path}:1:1: this file requires java version>=26.3, but no \
-         java target it admits declares `minecraft:chain`, which this build paints.\n  \
-         note: {path}:3:16: `minecraft:chain` is last declared at java 1.21.4\n  fix: lower the \
-         `@requires` floor to 1.21.4 or below, or replace `minecraft:chain` with a block a java \
-         target at or above 26.3 declares\n",
+        "error[E_REQUIRES_CONFLICT]: {path}:1:1: this file requires bedrock version>=1.21.40, \
+         but no bedrock target it admits declares `minecraft:stonebrick`, which this build \
+         paints.\n  note: {path}:3:16: `minecraft:stonebrick` is last declared at bedrock \
+         1.21.0\n  fix: lower the `@requires` floor to 1.21.0 or below, or replace \
+         `minecraft:stonebrick` with a block a bedrock target at or above 1.21.40 declares\n",
     );
     let run = diff_blocks(&[&artifact, &conflicted]);
     assert_eq!(
