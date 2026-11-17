@@ -14,7 +14,7 @@ use cairn_lang_core::resolve::{
 use cairn_lang_core::{Diagnostic, Edition, Module, Severity};
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
-use crate::report::render_diagnostics;
+use crate::report::{render_diagnostics, report_diagnostics};
 use crate::target::{ResolvedTarget, supported_versions};
 
 /// How each supported version of one edition answered.
@@ -30,6 +30,22 @@ pub(crate) struct VersionVerdicts<'a> {
     refusing_floors: Vec<&'a VersionFloor>,
     /// Floors this edition's version table cannot place.
     unplaceable_floors: Vec<&'a VersionFloor>,
+}
+
+impl VersionVerdicts<'_> {
+    /// The errors of the lowering pinned at `version`, if [`weigh_versions`] ran one.
+    pub(crate) fn pinned_errors(
+        &self,
+        version: &str,
+    ) -> Option<&[cairn_lang_core::check::Diagnostic]> {
+        if self.buildable.iter().any(|built| built == version) {
+            return Some(&[]);
+        }
+        self.refused
+            .iter()
+            .find(|(refused, _)| refused == version)
+            .map(|(_, errors)| errors.as_slice())
+    }
 }
 
 /// One version below the floors that refuse it.
@@ -170,7 +186,7 @@ pub(crate) fn buildable_refusal(
 }
 
 /// Floors as the wire spells them: what they say, and where.
-fn declared_floors(
+pub(crate) fn declared_floors(
     source: &str,
     lines: &LineStarts,
     floors: &[&VersionFloor],
@@ -195,15 +211,15 @@ fn declared_floors(
         .collect()
 }
 
-/// The finding that refuses `target` for the `@requires` floors `module` holds `edition`'s build
-/// to, or `None` when every floor admits it.
+/// The finding that refuses `target` for `floors`, the `@requires` floors `edition`'s build is
+/// held to, or `None` when every floor admits it.
 pub(crate) fn floor_refusal(
-    module: &Module,
+    floors: &[VersionFloor],
     edition: Edition,
     target: &ResolvedTarget,
 ) -> Option<Diagnostic> {
     weigh_target(
-        &declared_version_floors(module, edition),
+        floors,
         edition,
         target.mc_version(),
         &supported_versions(builtin_pack(edition)),
@@ -267,7 +283,8 @@ pub(crate) fn report_floors_left_out_of_the_neutral_row(
     }
 }
 
-/// The `note:` lines under one edition's `buildable targets` entry.
+/// What stderr says under one edition's `buildable targets` entry: each refused version's
+/// findings, then the `note:` lines on the floors.
 pub(crate) fn report_version_notes(
     file: &Path,
     source: &str,
@@ -276,6 +293,10 @@ pub(crate) fn report_version_notes(
     verdicts: &VersionVerdicts<'_>,
     considered: &[String],
 ) {
+    for (version, refusals) in &verdicts.refused {
+        eprintln!("note: {} {version} refuses this source", edition.as_str());
+        report_diagnostics(file, source, lines, refusals);
+    }
     for floor in &verdicts.unplaceable_floors {
         eprintln!(
             "note: {}:{}: no {} target can build this source: `{}` names no {} release, \

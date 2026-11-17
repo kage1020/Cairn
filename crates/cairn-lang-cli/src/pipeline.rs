@@ -12,7 +12,7 @@ use cairn_lang_core::block_array::{
 use cairn_lang_core::check::{LineStarts, weigh_intended_targets};
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::IntentModule;
-use cairn_lang_core::resolve::resolve;
+use cairn_lang_core::resolve::{declared_version_floors, resolve};
 use cairn_lang_core::{
     Diagnostic, DiagnosticCode, Edition, Severity, check, diagnose_parse_failure, lower, parse,
 };
@@ -20,6 +20,7 @@ use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{Diagnostic as CircuitDiagnostic, build_circuits};
 
 use crate::floors::floor_refusal;
+use crate::inferred::{Conflict, requires_conflicts};
 use crate::report::{FailureReport, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target, supported_versions};
 
@@ -365,6 +366,9 @@ pub(crate) struct Lowered {
     pub(crate) dropped_scopes: Vec<String>,
     /// The finding by which the source's floors refuse the target, which then pins no version.
     pub(crate) floor_refusal: Option<Diagnostic>,
+    /// The floors above the last version that declares some id the build paints, whatever the
+    /// target.
+    pub(crate) conflicts: Vec<Conflict>,
 }
 
 /// Read, parse, resolve and lower `file` for `edition`'s build.
@@ -377,14 +381,33 @@ pub(crate) fn load_and_lower(
     target: Option<&ResolvedTarget>,
 ) -> Result<Lowered, ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
-    let refusal = target.and_then(|target| floor_refusal(&module, edition, target));
+    let floors = declared_version_floors(&module, edition);
+    let refusal = target.and_then(|target| floor_refusal(&floors, edition, target));
     let mc_version = target
         .filter(|_| refusal.is_none())
         .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
-    let registry = builtin_pack(edition).view(mc_version);
+    let pack = builtin_pack(edition);
+    let registry = pack.view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
+    let conflicts = if floors.is_empty() {
+        Vec::new()
+    } else {
+        let considered = supported_versions(pack);
+        let at_newest = (mc_version.is_some()
+            && mc_version == considered.last().map(String::as_str))
+        .then_some(block_ir.diagnostics.as_slice());
+        requires_conflicts(
+            &ir,
+            &resolution,
+            pack,
+            &considered,
+            &floors,
+            &pack.version_order(),
+            at_newest,
+        )
+    };
     // `check`'s gate, so `compile` never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         &module,
@@ -401,6 +424,7 @@ pub(crate) fn load_and_lower(
         circuits,
         dropped_scopes,
         floor_refusal: refusal,
+        conflicts,
     })
 }
 
