@@ -179,6 +179,11 @@ low-`x`, low-`z` corner, and `dims` is its full extent: the `size=WxH` footprint
 A `place` with no origin selector or more than one, an `at=` other than `origin`, or an `east_of=`
 / `north_of=` whose value is not a label is `E_INVALID_PLACE_ORIGIN`.
 
+`east_of=` and `north_of=` keep a row clear of the row they name and of no other, and `at=origin`
+keeps it clear of nothing. So a second `at=origin`, or a chain of relative rows that comes back
+onto a row placed along another chain, can land on a placement. Two rows of one site whose boxes
+share a cell are `E_PLACEMENT_OVERLAP` ([Lint](/spec/lint/#sites-and-placements)).
+
 `gap=` belongs to the two relative selectors. An `at=origin` row is anchored absolutely and reads
 no distance, so a `gap=` written beside it is read by nothing and reported as `W_IGNORED_ARGUMENT`
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). The argument is real, and which of the two the
@@ -262,8 +267,7 @@ and roof ports, and ports on level-scoped members, are reserved for a future ext
 `front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` ([§9.3.1](#931-coordinate-convention)).
 The wall-local offset comes from:
 
-- a `door`'s `at=` value of `center`, `left`, or `right` ([§5.4](/spec/syntax/#54-selectors)). Numeric
-  offsets are reserved.
+- a `door`'s column, from its `at=` anchor or its `offset=` ([§5.4](/spec/syntax/#54-selectors)).
 - a `window`'s geometric centre, `offset + size.w / 2`, where `offset` is the window's first
   column, read the way the cut reads it: an absent `offset=` as `0`, and an `anchor=` naming a
   later column moving it left ([§5.4](/spec/syntax/#54-selectors)).
@@ -329,13 +333,14 @@ fewest turns, with deterministic tie-breaking so the same source always lays the
 The row falls back to the straight L, with the colliding cells skipped, only when no unobstructed
 route exists at all:
 
-- a port is buried under another placement's floor, or under a block its own placement lays on the
-  port cell;
+- a port is buried under the floor of another placement of its site, or under a block its own
+  placement lays on the port cell;
 - the target is fully enclosed;
 - the search goes past the router's area cap.
 
-The router searches the box spanning both ports and every placement floor on the walk plane, so
-the cap can be reached by a distant pair of ports or by a widely spread floor plan.
+The router searches the box spanning both ports and every placement floor of the walkway's site on
+the walk plane, so the cap can be reached by a distant pair of ports or by a widely spread floor
+plan. A placement of another site is never in the way, since each site is a layout of its own.
 
 That earns one `W_WALKWAY_BLOCKED` naming the concrete cause and its remedy: move the buried door
 or window (or the block on its port cell), widen the gap, bring the two structures closer, or bring
@@ -389,4 +394,5 @@ adds a note to `E_PARTIAL_BUILD` and one to the count of scopes that did not low
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |
 | `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. When every cell of the straight L overlaps a placement, or the straight L alone is past the router's search-area cap, nothing is laid and the walkway is lost. |
 | `W_DUPLICATE_WALKWAY` | The same two ports, in either order, already have a walkway laid in this site; the duplicate row is dropped. |
+| `E_PLACEMENT_OVERLAP` | The strip lays a cell inside the box of a placement other than the two it joins, as under that placement's eaves: the router keeps a strip off placement floors only ([Lint](/spec/lint/#sites-and-placements)). |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port id cannot be carried in the walkway's name ([Lint](/spec/lint/)); the row is dropped. |
