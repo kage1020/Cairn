@@ -20,6 +20,7 @@ use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{Diagnostic as CircuitDiagnostic, build_circuits};
 
 use crate::floors::{DeclaredFloors, floor_refusing_target};
+use crate::inferred::{Conflict, requires_conflicts};
 use crate::report::{FailureReport, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target, supported_versions};
 
@@ -365,6 +366,9 @@ pub(crate) struct Lowered {
     pub(crate) dropped_scopes: Vec<String>,
     /// The `@requires` floors this edition's build is held to, if the source declares any.
     pub(crate) version_floors: Option<DeclaredFloors>,
+    /// The floors above the last version that declares some id the build paints, whatever the
+    /// target.
+    pub(crate) conflicts: Vec<Conflict>,
 }
 
 /// Read, parse, resolve and lower `file` for `edition`'s build.
@@ -391,8 +395,24 @@ pub(crate) fn load_and_lower(
         .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
-    let registry = builtin_pack(edition).view(mc_version);
+    let pack = builtin_pack(edition);
+    let registry = pack.view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
+    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
+        let considered = supported_versions(pack);
+        let at_newest = (mc_version.is_some()
+            && mc_version == considered.last().map(String::as_str))
+        .then_some(block_ir.diagnostics.as_slice());
+        requires_conflicts(
+            &ir,
+            &resolution,
+            pack,
+            &considered,
+            &declared.floors,
+            &declared.order,
+            at_newest,
+        )
+    });
     // `check`'s gate, so `compile` never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         &module,
@@ -409,6 +429,7 @@ pub(crate) fn load_and_lower(
         circuits,
         dropped_scopes,
         version_floors,
+        conflicts,
     })
 }
 
