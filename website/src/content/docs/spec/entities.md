@@ -325,16 +325,23 @@ draws nothing, while the struct as written still rises as its shape does
 ([Lint](/spec/lint/#lowering)).
 
 **Overlapping AABBs** resolve by priority merge inside one body, and are an error between bodies.
-The members of a body paint one block array, so a cell two of them name goes to the later phase,
-and inside one phase to the line written later, which `W_PHASE_CONFLICT` reports when the later line
+The members of a body paint one block array, so a cell two of them name goes to the later phase, and
+inside one phase to the line written later, which `W_PHASE_CONFLICT` reports when the later line
 changes the cell ([Compilation Model
 §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). The member that loses the cell
 keeps its declared bbox, and its actual bbox is what it still holds. An entity is not merged: what
 its box reaches into, a block, a door or another entity, is the constraint checks'
 `W_ENTITY_CLIPPING` ([Lint §11.4](/spec/lint/#entity-aabb)). Two `place` rows share no array: each
 body is its own structure, written with air in every cell it does not fill, so placing one over the
-other erases what was there and there is nothing to merge. Their overlap is an error
-([Lint](/spec/lint/#semantic-categories)), which no command checks yet.
+other erases what was there and there is nothing to merge. Once the coordinate solver has placed
+every row of a site, two rows whose boxes share a cell are `E_PLACEMENT_OVERLAP` on the later row
+([Lint](/spec/lint/#sites-and-placements)). A walkway is a structure of its own too, and a cell its
+strip lays inside the box of a placement other than the two it joins is the same error. Its two ends
+are left out: the strip starts one block outside each port's wall, which an `overhang=` puts inside
+that placement's box. So a strip that runs on under the eaves of a placement it joins is not
+reported, though that placement's file writes air there too. Nor are the cells of the walkway's box
+that its strip does not lay, which its own file writes as air
+([Lint](/spec/lint/#sites-and-placements)).
 
 Neighbour-dependent blockstate (stairs, fences) breaks when overwritten without interference
 detection: an inner-corner stair left as an outer corner, hanging in mid-air. Re-resolving boundary
