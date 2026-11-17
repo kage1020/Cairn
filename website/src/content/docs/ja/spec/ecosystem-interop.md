@@ -143,7 +143,7 @@ error[E_DECOMPILE_DIFF]: block IoU = 0.962 < threshold 0.985
 
 ### 12.2.4 レポート
 
-まず FILE を組み、その診断を `cairn compile` と同じように stderr に出します。エラー、組むときに落ちたスコープ ([lint §11.1](/ja/spec/lint/#lowering))、記録されたターゲットが満たさない `@requires` の下限 ([バージョンとエディション](/ja/spec/versioning-editions/)) は、比較を拒否します。このコマンドは `--target` を受け取らないので、下限による拒否は、記録されたターゲットを示す note で終わります。
+まず FILE を組み、その診断を `cairn compile` と同じように stderr に出します。エラー、どのターゲットでも満たせない `@requires` の下限 (`E_REQUIRES_CONFLICT`、[バージョンとエディション](/ja/spec/versioning-editions/#下限はレジストリと突き合わせる))、組むときに落ちたスコープ ([lint §11.1](/ja/spec/lint/#lowering))、記録されたターゲットが満たさない `@requires` の下限 ([バージョンとエディション](/ja/spec/versioning-editions/)) は、比較を拒否します。このコマンドは `--target` を受け取らないので、記録されたターゲットの下限による拒否は、記録されたターゲットを示す note で終わります。
 
 テキストのレポートは stdout に次を出します。
 

@@ -17,6 +17,7 @@ use serde::Serialize;
 use crate::cli::DiffFormat;
 use crate::commands::import::{file_name, open_structure, refuse_extension};
 use crate::floors::enforce_version_floor;
+use crate::inferred::report_conflicts;
 use crate::pipeline::{Lowered, built_scopes, load_module, lower_parsed, report_partial_build};
 use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target};
@@ -92,7 +93,8 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
 }
 
 /// Report what `lowered` found, and the exit code when it refuses the comparison: an error, a
-/// scope it dropped, or a `@requires` floor the stamped `target` falls short of.
+/// floor no target can meet, a scope it dropped, or a `@requires` floor the stamped `target` falls
+/// short of.
 fn refuse_build(
     structure: &Path,
     file: &Path,
@@ -107,7 +109,7 @@ fn refuse_build(
         circuits,
         dropped_scopes,
         version_floors,
-        conflicts: _,
+        conflicts,
     } = lowered;
     let findings: Vec<Found> = block_ir
         .diagnostics
@@ -122,24 +124,27 @@ fn refuse_build(
     }
     let lines = LineStarts::new(source);
     report_diagnostics(file, source, &lines, &findings);
-    if !dropped_scopes.is_empty() {
-        report_partial_build(
-            file,
-            dropped_scopes,
-            built_scopes(block_ir),
-            "refusing to compare a partial build",
-        );
-    } else if let Some(floors) = version_floors
-        && let Err(_) = enforce_version_floor(file, source, floors, edition, target)
-    {
-        eprintln!(
-            "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {edition} {}, \
-             so its `@requires` must admit that target",
-            structure.display(),
-            target.mc_version(),
-        );
-    } else {
-        return None;
+    // As in `compile`, a conflict holds at every target, so it refuses ahead of the stamp's floor.
+    if !report_conflicts(file, source, &lines, edition, conflicts) {
+        if !dropped_scopes.is_empty() {
+            report_partial_build(
+                file,
+                dropped_scopes,
+                built_scopes(block_ir),
+                "refusing to compare a partial build",
+            );
+        } else if let Some(floors) = version_floors
+            && let Err(_) = enforce_version_floor(file, source, floors, edition, target)
+        {
+            eprintln!(
+                "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {edition} \
+                 {}, so its `@requires` must admit that target",
+                structure.display(),
+                target.mc_version(),
+            );
+        } else {
+            return None;
+        }
     }
     // One document per input under `--format json`: the refusal is stderr's, the warnings too.
     let none: [Found; 0] = [];

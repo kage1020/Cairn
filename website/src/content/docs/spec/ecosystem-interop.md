@@ -288,9 +288,11 @@ FILE reaches with all of them appended. When no candidate helps, there is no pat
 ### 12.2.4 The report
 
 FILE is built first, and its findings print on stderr as `cairn compile` prints them. An error, a
-scope the build drops ([Lint §11.1](/spec/lint/#lowering)), or a `@requires` floor the stamp falls
-short of ([Versioning and Editions](/spec/versioning-editions/)) refuses the comparison. The floor's
-refusal ends with a note naming the stamp, since the command takes no `--target`.
+`@requires` floor no target can meet (`E_REQUIRES_CONFLICT`, [Versioning and
+Editions](/spec/versioning-editions/#a-floor-is-weighed-against-the-registry)), a scope the build
+drops ([Lint §11.1](/spec/lint/#lowering)), or a `@requires` floor the stamp falls short of
+([Versioning and Editions](/spec/versioning-editions/)) refuses the comparison. A refusal on the
+stamp's floor ends with a note naming the stamp, since the command takes no `--target`.
 
 The text report prints on stdout:
 
