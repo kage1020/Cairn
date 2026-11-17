@@ -23,7 +23,10 @@ import {
 const execFileAsync = promisify(execFile);
 const RELEASE_URL = "https://github.com/kage1020/Cairn/releases";
 const PROBE_TIMEOUT_MS = 5_000;
-/** The command a quick-fix runs to pin another target; its argument is the version. */
+/**
+ * The command a quick-fix runs to pin another target; its arguments are the
+ * edition and the version.
+ */
 const SET_TARGET = "cairn.setTarget";
 
 let client: LanguageClient | undefined;
@@ -114,16 +117,33 @@ class ClientCommands implements StaticFeature {
   clear(): void {}
 }
 
-/** Writes `version` to `cairn.target`, which the server reads as the new pin. */
-async function setTarget(version: unknown): Promise<void> {
-  if (typeof version !== "string") {
+/**
+ * Writes `version` to `cairn.target`, which the server reads as the new pin,
+ * while `cairn.edition` still names the `edition` the quick-fix was offered in.
+ */
+async function setTarget(edition: unknown, version: unknown): Promise<void> {
+  if (typeof edition !== "string" || typeof version !== "string") {
     void window.showErrorMessage(
-      `${SET_TARGET} takes a version string, not ${JSON.stringify(version)}.`,
+      `${SET_TARGET} takes an edition and a version, not ${JSON.stringify([edition, version])}.`,
     );
     return;
   }
   const settings = workspace.getConfiguration("cairn");
-  await settings.update("target", version, pinScope(settings));
+  const pinned = settings.get<string>("edition", "").trim();
+  if (pinned !== edition) {
+    void window.showErrorMessage(
+      `The quick-fix pins ${edition} ${version}, but cairn.edition is now ` +
+        `${pinned === "" ? "unset" : pinned}. Ask for the quick-fix again.`,
+    );
+    return;
+  }
+  try {
+    await settings.update("target", version, pinScope(settings));
+  } catch (err) {
+    void window.showErrorMessage(
+      `Could not set cairn.target to ${version}: ${describeError(err)}`,
+    );
+  }
 }
 
 /**
@@ -131,16 +151,14 @@ async function setTarget(version: unknown): Promise<void> {
  * so the target lands beside the edition it is read with.
  */
 function pinScope(settings: WorkspaceConfiguration): ConfigurationTarget {
-  for (const key of ["target", "edition"]) {
-    const set = settings.inspect(key);
-    if (set?.workspaceValue !== undefined) {
-      return ConfigurationTarget.Workspace;
-    }
-    if (set?.globalValue !== undefined) {
-      return ConfigurationTarget.Global;
-    }
+  const target = settings.inspect("target");
+  if (target?.workspaceValue !== undefined) {
+    return ConfigurationTarget.Workspace;
   }
-  return workspace.workspaceFolders
+  if (target?.globalValue !== undefined) {
+    return ConfigurationTarget.Global;
+  }
+  return settings.inspect("edition")?.workspaceValue !== undefined
     ? ConfigurationTarget.Workspace
     : ConfigurationTarget.Global;
 }

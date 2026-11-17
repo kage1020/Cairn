@@ -103,8 +103,8 @@ pub(crate) fn apply_content_changes(
     Ok(text.into_owned())
 }
 
-/// Which of the texts a [`DocumentStore`] has stored one is, a [`DocumentStore::renumber`]
-/// storing every open text again; no two share one.
+/// Which text a [`DocumentStore`] holds for a document, numbered anew on each store and each
+/// [`DocumentStore::renumber`]; no two share one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Revision(u64);
 

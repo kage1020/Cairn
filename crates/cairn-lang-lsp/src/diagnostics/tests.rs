@@ -3,11 +3,11 @@
 use std::str::FromStr;
 
 use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::{Edition, resolve};
+use cairn_lang_core::{Edition, check, resolve};
 use cairn_lang_formats::builtin_pack;
 
 use super::*;
-use crate::test_fixtures::{CLEAN, DUPLICATE, PALE_OAK, SIGN, VARIANTS, java};
+use crate::test_fixtures::{CLEAN, DUPLICATE, PALE_OAK, SIGN, VARIANTS, bedrock, java};
 
 fn uri() -> lsp_types::Uri {
     lsp_types::Uri::from_str("file:///test.crn").expect("valid uri")
@@ -327,18 +327,22 @@ fn no_id_is_refused_unless_a_version_is_pinned() {
 }
 
 #[test]
-fn an_edition_pin_binds_that_edition_s_theme_variant() {
+fn an_edition_or_a_target_pin_binds_that_edition_s_theme_variant() {
     let rebound = [(
         "W_THEME_VARIANT_REBOUND".to_owned(),
         "place id=a use=hut theme=t_java at=origin",
     )];
-    let bedrock = compute_diagnostics(&uri(), VARIANTS, &Pin::Edition(Edition::Bedrock));
-    assert_eq!(covered(VARIANTS, &bedrock), rebound);
-    assert_eq!(
-        compute_diagnostics(&uri(), VARIANTS, &Pin::Edition(Edition::Java)),
-        vec![],
-    );
-    assert_eq!(compute_diagnostics(&uri(), VARIANTS, &Pin::Nothing), vec![]);
+    for pin in [Pin::Edition(Edition::Bedrock), bedrock("1.21.60")] {
+        let found = compute_diagnostics(&uri(), VARIANTS, &pin);
+        assert_eq!(covered(VARIANTS, &found), rebound, "{pin:?}");
+    }
+    for pin in [Pin::Edition(Edition::Java), java("1.21.4"), Pin::Nothing] {
+        assert_eq!(
+            compute_diagnostics(&uri(), VARIANTS, &pin),
+            vec![],
+            "{pin:?}"
+        );
+    }
 }
 
 #[test]
@@ -352,7 +356,7 @@ fn a_target_a_floor_refuses_is_refused_at_the_floor_and_pins_no_version() {
         found[0].message,
         "this file requires version>=1.21.4 (target 1.21)\n\
          note: valid java targets: 1.21.4, 26.3\n\
-         note: fix: --target 1.21.4, or lower the `@requires` floor",
+         note: fix: set `cairn.target` to 1.21.4, or lower the `@requires` floor",
     );
     assert_eq!(
         found[0].data,
@@ -380,4 +384,56 @@ fn a_target_no_floor_refuses_is_checked_for_the_ids_it_declares() {
         ),
         [("E_UNKNOWN_ID".to_owned(), "@pale_oak_planks")],
     );
+}
+
+#[test]
+fn a_bedrock_target_checks_ids_and_floors_against_bedrock_s_table() {
+    assert_eq!(
+        compute_diagnostics(&uri(), SIGN, &bedrock("1.21.60")),
+        vec![]
+    );
+    let found = compute_diagnostics(&uri(), PALE_OAK, &bedrock("1.21.60"));
+    assert_eq!(
+        covered(PALE_OAK, &found),
+        [(
+            "E_REQUIRES_UNORDERABLE".to_owned(),
+            "@requires version>=1.21.4"
+        )],
+    );
+}
+
+/// A floor above the one version the header intends.
+const INTENDED_BELOW_THE_FLOOR: &str = "\
+@requires version>=1.21
+@intended_targets [\"1.20.4\"]
+theme t:
+  slot wall -> @oak_planks
+struct s size=3x3
+  walls mat_slot=wall height=2
+";
+
+#[test]
+fn every_pin_weighs_intended_targets_in_the_editions_it_is_about() {
+    let source = INTENDED_BELOW_THE_FLOOR;
+    for (pin, expected) in [
+        (Pin::Nothing, vec!["E_INTENDED_TARGET_CAP"]),
+        (Pin::Edition(Edition::Java), vec!["E_INTENDED_TARGET_CAP"]),
+        (java("1.21.4"), vec!["E_INTENDED_TARGET_CAP"]),
+        (
+            Pin::Edition(Edition::Bedrock),
+            vec!["W_INTENDED_TARGET_UNSUPPORTED"],
+        ),
+    ] {
+        let found = compute_diagnostics(&uri(), source, &pin);
+        assert_eq!(
+            found.iter().map(code_of).collect::<Vec<_>>(),
+            expected,
+            "{pin:?}",
+        );
+        assert_eq!(
+            covered(source, &found),
+            [(expected[0].to_owned(), "@intended_targets [\"1.20.4\"]")],
+            "{pin:?}",
+        );
+    }
 }

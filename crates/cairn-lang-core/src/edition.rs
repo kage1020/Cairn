@@ -45,6 +45,12 @@ impl Edition {
             Self::Bedrock => Self::Java,
         }
     }
+
+    /// The editions a front end with one optional pin is about: the pin, or both without one.
+    #[must_use]
+    pub fn weighed(pin: Option<Self>) -> Vec<Self> {
+        pin.map_or_else(|| vec![Self::Java, Self::Bedrock], |one| vec![one])
+    }
 }
 
 impl fmt::Display for Edition {

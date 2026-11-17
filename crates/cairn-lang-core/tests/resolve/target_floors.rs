@@ -1,7 +1,7 @@
 //! A pinned target weighed against the version floors a build of its edition is held to:
 //! `E_VERSION_CAP` below one, `E_REQUIRES_UNORDERABLE` for one the edition's table cannot place.
 
-use cairn_lang_core::check::weigh_target;
+use cairn_lang_core::check::{VersionTables, weigh_target};
 use cairn_lang_core::resolve::{VersionOrder, declared_version_floors};
 use cairn_lang_core::{Diagnostic, Edition, parse};
 use serde_json::json;
@@ -47,6 +47,16 @@ struct hut size=5x5
   walls mat_slot=wall height=3
 ";
 
+fn targetable_of(edition: Edition) -> Vec<String> {
+    assert_eq!(edition, Edition::Java, "only a Java build is weighed");
+    java_targetable()
+}
+
+/// How `cairn compile` has its user pin `version`.
+fn flag(version: &str) -> String {
+    format!("--target {version}")
+}
+
 /// `source` weighed for a Java build at `target`.
 fn weighed(source: &str, target: &str) -> Option<Diagnostic> {
     let module = parse(source).expect("the fixtures all parse");
@@ -54,8 +64,11 @@ fn weighed(source: &str, target: &str) -> Option<Diagnostic> {
         &declared_version_floors(&module, Edition::Java),
         Edition::Java,
         target,
-        &java_targetable(),
-        &order_of,
+        &VersionTables {
+            order_of: &order_of,
+            targetable_of: &targetable_of,
+        },
+        &flag,
     )
 }
 
@@ -77,8 +90,11 @@ fn a_source_with_no_floor_reads_no_version_table() {
         &declared_version_floors(&module, Edition::Java),
         Edition::Java,
         "1.20.4",
-        &java_targetable(),
-        &|_| panic!("no floor to place"),
+        &VersionTables {
+            order_of: &|_| panic!("no floor to place"),
+            targetable_of: &|_| panic!("no floor to weigh"),
+        },
+        &flag,
     );
     assert_eq!(refusal, None);
 }
@@ -138,6 +154,39 @@ site v:
             "`def hut` declares it, and every `place use=hut` inherits it",
             "valid java targets: 1.21.4, 26.3",
             "fix: --target 1.21.4, or lower the `requires` floor",
+        ],
+    );
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({
+            "kind": "version_cap",
+            "edition": "java",
+            "target": "1.20.4",
+            "floor": "java version>=1.21.4",
+            "valid": ["1.21.4", "26.3"],
+        }),
+    );
+}
+
+#[test]
+fn the_fix_note_pins_the_lowest_valid_target_the_way_the_front_end_says() {
+    let module = parse(&format!("@requires version>=1.21.4\n{BUILD}")).expect("parses");
+    let d = weigh_target(
+        &declared_version_floors(&module, Edition::Java),
+        Edition::Java,
+        "1.21",
+        &VersionTables {
+            order_of: &order_of,
+            targetable_of: &targetable_of,
+        },
+        &|version| format!("set `cairn.target` to {version}"),
+    )
+    .expect("1.21 is below the floor");
+    assert_eq!(
+        notes(&d),
+        [
+            "valid java targets: 1.21.4, 26.3",
+            "fix: set `cairn.target` to 1.21.4, or lower the `@requires` floor",
         ],
     );
 }

@@ -210,11 +210,11 @@ the reason [Compilation Model §4.2](/spec/compilation/#42-target-axes) refuses 
 runs the same lowering pass against the same table `compile` does at any target the file's floors
 let through, so a lost scope earns the same `E_PARTIAL_BUILD`. What it does not do is anything
 `compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement. A lock certifies a
-build, so only the command that produces one holds `--target` to the floors (`E_VERSION_CAP`), and
-the language server, which shows what that command would refuse, holds the target it pins to them
-too. So at a target the floors refuse, the two commands name different causes: `check` pins the
-target and reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty,
-while `compile` checks no id and reports the floor ([Versioning and
+build, so of the two commands only `compile`, which produces one, holds `--target` to the floors
+(`E_VERSION_CAP`). The language server shows what `compile` would refuse, so it holds the target it
+pins to them as well. So at a target the floors refuse, the two commands name different causes:
+`check` pins the target and reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing
+ids leave empty, while `compile` checks no id and reports the floor ([Versioning and
 Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Leaving the flag off still
 lowers, with no target, and reports only the findings every target that reads their line raises
 ([§11.3](#113-error-vs-warning)). See [Versioning and Editions
@@ -227,13 +227,20 @@ and reports what a `cairn check` with no flag does. An edition alone reports wha
 refuses on before it writes anything: the target, which may be `latest`, is held to the floors, so a
 target below one is `E_VERSION_CAP`, a floor the edition's table cannot place is
 `E_REQUIRES_UNORDERABLE`, and a target either refuses pins no version ([Versioning and
-Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Where `compile` stops at the
-first error, the server reports every pass's findings together, since an editor shows them all at
-once. A setting the command line would refuse is refused rather than reported at a span: a target
+Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). The fix note of an
+`E_VERSION_CAP` names the setting, `cairn.target`, where the command line's names `--target`. Each
+state weighs `@intended_targets` as its command does: in the pinned edition, or in both with none
+pinned. Where `compile` stops at the first error, the server reports every pass's findings together,
+since an editor shows them all at once. A setting the server cannot read is refused rather than
+reported at a span: a `cairn` section that is not an object, a value that is not a string, a target
 with no edition, a name that is no edition and a target the edition does not ship are shown to the
 client as a message (`window/showMessage`), and the server pins what the rest of the settings name,
-the edition alone or nothing. `E_PARTIAL_BUILD` is a verdict on a build, so the server does not
-raise it. A new pin re-reports every open document: published again, or, for a client that pulls
+the edition alone or nothing. Three kinds of the commands' findings stay with the command line.
+`E_PARTIAL_BUILD` is a verdict on a build, so the server does not raise it. The server lays no
+circuit, so it raises none of the [Redstone](#redstone) codes. Nor does it weigh a floor against the
+blocks the build paints, so it raises no `E_REQUIRES_CONFLICT`: such a floor still shows at the
+pinned target, as `E_VERSION_CAP` below it, or at or above it as the `E_UNKNOWN_ID` of a block the
+target lacks. A new pin re-reports every open document: published again, or, for a client that pulls
 diagnostics, asked for again with `workspace/diagnostic/refresh` where the client takes it, and
 otherwise answered in full at its next pull.
 
@@ -859,10 +866,11 @@ holds `2^130`.
 `aliases`, the first as the preferred fix, then its `suggestion`, which is not preferred; a
 `catalog` or `builtin` one offers nothing, since the repair is in the pack. `E_UNKNOWN_KEYWORD` and
 `E_UNKNOWN_ARGUMENT` offer their `suggestion`, not preferred. `E_VERSION_CAP` offers lowering
-`floor` to `target` on the floor's line and, to a client that says it runs the `cairn.setTarget`
-command, pinning the first of `valid` instead. A fix rewrites only the text its payload names,
-spelled as the line spells it, with or without the `minecraft:` namespace, so a finding whose span
-no longer holds that text offers none.
+`floor` to `target` on the floor's line and, alongside it, to a client that says it runs the
+`cairn.setTarget` command, pinning the first of `valid`. That command's arguments are the `edition`
+and the version, and the client pins the version only while it still pins that edition. A fix
+rewrites only the text its payload names, spelled as the line spells it, with or without the
+`minecraft:` namespace, so a finding whose span no longer holds that text offers none.
 
 ## 11.3 Error vs warning
 

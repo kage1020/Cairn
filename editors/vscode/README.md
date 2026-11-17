@@ -19,10 +19,10 @@ Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside 
 | -------------------- | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `cairn.serverPath`   | string | `""`    | Absolute path to `cairn-lsp`. Empty → look up on `PATH`. Reload the window after changing.                                                             |
 | `cairn.edition`      | enum   | `""`    | Edition diagnostics are checked for (`java` / `bedrock`), as `cairn check --edition` checks it. Empty → no edition.                                    |
-| `cairn.target`       | string | `""`    | Version of `cairn.edition` diagnostics are checked against, as `cairn compile --target` checks it, `@requires` floors included. Empty → edition alone. |
+| `cairn.target`       | string | `""`    | Version of `cairn.edition` diagnostics are checked against, as `cairn compile --target` checks it, the file's floors included. Empty → edition alone.   |
 | `cairn.trace.server` | enum   | `off`   | Trace LSP messages in the Output panel (`off` / `messages` / `verbose`) for bug reports.                                                               |
 
-A change to `cairn.edition` or `cairn.target` re-checks every open document, with no reload. A setting the server refuses, such as a target the edition does not ship, is shown as an error message. The quick-fix for a target below a file's `@requires` floor (`E_VERSION_CAP`) can set `cairn.target` to the lowest target the floors admit: it writes the setting where `cairn.target` is already set, or else where `cairn.edition` is.
+A change to `cairn.edition` or `cairn.target` re-checks every open document, with no reload. A setting the server refuses, such as a target the edition does not ship, is shown as an error message. The quick-fix for a target below a floor the file declares, in an `@requires` header or a part's `requires` line (`E_VERSION_CAP`), can set `cairn.target` to the lowest target the floors admit. It writes the setting where `cairn.target` is already set, or else where `cairn.edition` is, and refuses with an error message when `cairn.edition` has changed since the fix was offered.
 
 ## Development
 

@@ -361,9 +361,19 @@ fn dispatch(
             Message::Notification(notification) => {
                 handle_notification(queue, &mut store, notification, client.mode, &pin)?;
             }
-            Message::Response(_) => {
-                // Only `workspace/diagnostic/refresh` is asked, and its answer carries nothing.
+            // Only `workspace/diagnostic/refresh` is asked, and its answer carries nothing.
+            Message::Response(Response {
+                id,
+                response_result: Err(error),
+            }) => {
+                eprintln!(
+                    "cairn-lsp: the client refused `{}` {id}: {} (code {})",
+                    WorkspaceDiagnosticRefresh::METHOD,
+                    error.message,
+                    error.code,
+                );
             }
+            Message::Response(_) => {}
         }
     }
     Ok(if shutdown_requested {

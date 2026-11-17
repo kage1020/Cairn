@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { commands, extensions } from "vscode";
+import { commands, extensions, workspace } from "vscode";
 import type { ServerEvent } from "./server-event";
 
 const EXTENSION_ID = "kage1020.cairn-lang";
@@ -10,8 +10,9 @@ const PIN_TIMEOUT_MS = 30_000;
 
 /**
  * Waits for the `.crn` document the window opened with to activate the
- * extension, runs `cairn.setTarget` when `CAIRN_TEST_SET_TARGET` names a
- * version, then stops its language client through `deactivate`.
+ * extension, runs `cairn.setTarget` with the edition and version
+ * `CAIRN_TEST_SET_TARGET` holds as JSON, then stops its language client
+ * through `deactivate`.
  */
 export async function run(): Promise<void> {
   const extension = extensions.getExtension(EXTENSION_ID);
@@ -27,10 +28,14 @@ export async function run(): Promise<void> {
     }
     await setTimeout(100);
   }
-  const target = process.env.CAIRN_TEST_SET_TARGET;
-  if (target) {
-    await commands.executeCommand("cairn.setTarget", target);
-    await pinReached(target);
+  const asked = process.env.CAIRN_TEST_SET_TARGET;
+  if (asked) {
+    const [edition, version] = JSON.parse(asked) as [string, string];
+    await commands.executeCommand("cairn.setTarget", edition, version);
+    // A refused command writes nothing, so no new pin is coming.
+    if (workspace.getConfiguration("cairn").get("target") === version) {
+      await pinReached(version);
+    }
   }
   const main = join(extension.extensionPath, extension.packageJSON.main);
   const loaded = require.cache[require.resolve(main)];

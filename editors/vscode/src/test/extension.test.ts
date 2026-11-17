@@ -70,21 +70,38 @@ function session(server: string, pins: Pin[]): Launch {
   };
 }
 
+/** What one run of VS Code is given. */
+interface Run {
+  /** The user settings. */
+  readonly user: Record<string, unknown>;
+  /**
+   * The settings of a folder VS Code opens around the document; without them
+   * it opens the document alone.
+   */
+  readonly workspace?: Record<string, unknown>;
+  /** The edition and version `cairn.setTarget` runs with once the extension is active. */
+  readonly setTarget?: readonly [string, string];
+}
+
 /**
- * A temporary directory holding a `.crn` document, the record the stand-ins
- * append to, and a stand-in `cairn-lsp` for `PATH`.
+ * A temporary directory holding a folder with a `.crn` document, the record
+ * the stand-ins append to, and a stand-in `cairn-lsp` for `PATH`.
  */
 class Fixture {
   readonly root = mkdtempSync(join(tmpdir(), "cairn-vscode-"));
-  readonly document = join(this.root, "main.crn");
+  readonly folder = join(this.root, "workspace");
+  readonly document = join(this.folder, "main.crn");
   readonly record = join(this.root, "launches.jsonl");
   readonly userData = join(this.root, "user-data");
+  readonly userSettings = join(this.userData, "User", "settings.json");
+  readonly workspaceSettings = join(this.folder, ".vscode", "settings.json");
   readonly pathServer: string;
   private readonly t: TestContext;
 
   constructor(t: TestContext) {
     this.t = t;
     t.after(() => rmSync(this.root, { recursive: true, force: true }));
+    mkdirSync(this.folder);
     writeFileSync(this.document, "");
     writeFileSync(this.record, "");
     this.pathServer = this.server("path");
@@ -104,17 +121,11 @@ class Fixture {
   }
 
   /**
-   * Runs VS Code with user `settings`, running `cairn.setTarget` with
-   * `setTarget` once the extension is active when it is given, and asserts the
-   * stand-ins' launches equal `expected`, reporting the record and the server
-   * log if not.
+   * Runs VS Code as `run` says and asserts the stand-ins' launches equal
+   * `expected`, reporting the record and the server log if not.
    */
-  async expectLaunches(
-    settings: Record<string, unknown>,
-    expected: Launch[],
-    setTarget?: string,
-  ): Promise<void> {
-    const failure = await this.open(settings, setTarget).then(
+  async expectLaunches(run: Run, expected: Launch[]): Promise<void> {
+    const failure = await this.open(run).then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -132,24 +143,26 @@ class Fixture {
     }
   }
 
-  /**
-   * Runs VS Code on the document with the extension and user `settings`
-   * until it exits.
-   */
-  private async open(
-    settings: Record<string, unknown>,
-    setTarget: string | undefined,
-  ): Promise<void> {
-    mkdirSync(join(this.userData, "User"), { recursive: true });
-    const settingsFile = join(this.userData, "User", "settings.json");
-    writeFileSync(settingsFile, JSON.stringify(settings));
+  /** Runs VS Code on the document with the extension, as `run` says, until it exits. */
+  private async open(run: Run): Promise<void> {
+    mkdirSync(dirname(this.userSettings), { recursive: true });
+    writeFileSync(this.userSettings, JSON.stringify(run.user));
+    const opened = [this.document];
+    if (run.workspace) {
+      mkdirSync(dirname(this.workspaceSettings));
+      writeFileSync(this.workspaceSettings, JSON.stringify(run.workspace));
+      opened.unshift(this.folder);
+    }
     await runTests({
       version: VSCODE_VERSION,
       extensionDevelopmentPath: EXTENSION_ROOT,
       extensionTestsPath: join(__dirname, "host.js"),
       launchArgs: [
-        this.document,
+        ...opened,
         "--disable-extensions",
+        // A folder would otherwise open in Restricted Mode, which disables
+        // the extension.
+        "--disable-workspace-trust",
         // Otherwise VS Code takes `PATH` from a login shell, whose profile
         // could put an installed `cairn-lsp` ahead of the stand-in.
         "--force-disable-user-env",
@@ -159,7 +172,7 @@ class Fixture {
       extensionTestsEnv: {
         PATH: [dirname(this.pathServer), process.env.PATH].join(delimiter),
         CAIRN_TEST_RECORD: this.record,
-        CAIRN_TEST_SET_TARGET: setTarget,
+        CAIRN_TEST_SET_TARGET: run.setTarget && JSON.stringify(run.setTarget),
       },
     });
   }
@@ -255,7 +268,7 @@ test(
   async (t) => {
     const fixture = new Fixture(t);
     const server = fixture.pathServer;
-    await fixture.expectLaunches({}, [
+    await fixture.expectLaunches({ user: {} }, [
       probe(server),
       probe(server),
       session(server, [UNPINNED]),
@@ -269,7 +282,7 @@ test(
   async (t) => {
     const fixture = new Fixture(t);
     const server = fixture.server("configured");
-    await fixture.expectLaunches({ "cairn.serverPath": server }, [
+    await fixture.expectLaunches({ user: { "cairn.serverPath": server } }, [
       probe(server),
       probe(server),
       session(server, [UNPINNED]),
@@ -277,27 +290,113 @@ test(
   },
 );
 
+/** The settings JSON at `path`. */
+function settingsAt(path: string): unknown {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
 test(
-  "sends the pin the settings name, and the target cairn.setTarget writes beside the edition",
+  "sends the pin the settings name, and the target cairn.setTarget writes where it is set",
   POSIX_ONLY,
   async (t) => {
     const fixture = new Fixture(t);
     const server = fixture.pathServer;
-    const pinned = { edition: "java", target: "1.21" };
     await fixture.expectLaunches(
-      { "cairn.edition": "java", "cairn.target": "1.21" },
+      {
+        user: { "cairn.edition": "java", "cairn.target": "1.21" },
+        setTarget: ["java", "1.21.4"],
+      },
       [
         probe(server),
         probe(server),
-        session(server, [pinned, { edition: "java", target: "1.21.4" }]),
+        session(server, [
+          { edition: "java", target: "1.21" },
+          { edition: "java", target: "1.21.4" },
+        ]),
       ],
-      "1.21.4",
     );
-    const settings = join(fixture.userData, "User", "settings.json");
-    assert.deepEqual(JSON.parse(readFileSync(settings, "utf8")), {
+    assert.deepEqual(settingsAt(fixture.userSettings), {
       "cairn.edition": "java",
       "cairn.target": "1.21.4",
     });
+  },
+);
+
+test(
+  "writes the target to the workspace that sets cairn.target, not beside a user edition",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    await fixture.expectLaunches(
+      {
+        user: { "cairn.edition": "java" },
+        workspace: { "cairn.target": "1.21" },
+        setTarget: ["java", "1.21.4"],
+      },
+      [
+        probe(server),
+        probe(server),
+        session(server, [
+          { edition: "java", target: "1.21" },
+          { edition: "java", target: "1.21.4" },
+        ]),
+      ],
+    );
+    assert.deepEqual(settingsAt(fixture.userSettings), {
+      "cairn.edition": "java",
+    });
+    assert.deepEqual(settingsAt(fixture.workspaceSettings), {
+      "cairn.target": "1.21.4",
+    });
+  },
+);
+
+test(
+  "writes a target no scope sets beside the workspace's cairn.edition",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    await fixture.expectLaunches(
+      {
+        user: {},
+        workspace: { "cairn.edition": "java" },
+        setTarget: ["java", "1.21.4"],
+      },
+      [
+        probe(server),
+        probe(server),
+        session(server, [
+          { edition: "java", target: "" },
+          { edition: "java", target: "1.21.4" },
+        ]),
+      ],
+    );
+    assert.deepEqual(settingsAt(fixture.userSettings), {});
+    assert.deepEqual(settingsAt(fixture.workspaceSettings), {
+      "cairn.edition": "java",
+      "cairn.target": "1.21.4",
+    });
+  },
+);
+
+test(
+  "refuses a target of an edition cairn.edition no longer names",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const user = { "cairn.edition": "java", "cairn.target": "1.21" };
+    await fixture.expectLaunches(
+      { user, setTarget: ["bedrock", "1.21.60"] },
+      [
+        probe(server),
+        probe(server),
+        session(server, [{ edition: "java", target: "1.21" }]),
+      ],
+    );
+    assert.deepEqual(settingsAt(fixture.userSettings), user);
   },
 );
 
@@ -307,6 +406,6 @@ test(
   async (t) => {
     const fixture = new Fixture(t);
     const missing = join(fixture.root, "missing", "cairn-lsp");
-    await fixture.expectLaunches({ "cairn.serverPath": missing }, []);
+    await fixture.expectLaunches({ user: { "cairn.serverPath": missing } }, []);
   },
 );

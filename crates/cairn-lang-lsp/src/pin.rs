@@ -2,7 +2,7 @@
 //! settings a `workspace/didChangeConfiguration` carries (`spec/lint` "Materials and targets").
 
 use cairn_lang_core::Edition;
-use cairn_lang_formats::{resolve_bedrock_target, resolve_java_target};
+use cairn_lang_formats::{ResolvedTarget, resolve_target};
 
 /// The settings section the server reads.
 const SECTION: &str = "cairn";
@@ -17,12 +17,25 @@ pub enum Pin {
     /// One edition and no version, as `cairn check --edition E`.
     Edition(Edition),
     /// A target, as `cairn compile --edition E --target V` up to what it writes.
-    Target {
-        /// The target's edition.
-        edition: Edition,
-        /// The version `cairn.target` resolves to in the edition's table.
-        version: String,
-    },
+    Target(PinnedTarget),
+}
+
+/// A target the settings name, resolved in its edition's table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinnedTarget(ResolvedTarget);
+
+impl PinnedTarget {
+    /// The target's edition.
+    #[must_use]
+    pub fn edition(&self) -> Edition {
+        self.0.edition()
+    }
+
+    /// The version `cairn.target` resolves to in the edition's table.
+    #[must_use]
+    pub fn version(&self) -> &str {
+        self.0.mc_version()
+    }
 }
 
 /// A setting the server refused, and the pin the rest of the settings ask for.
@@ -39,10 +52,21 @@ impl Pin {
     ///
     /// # Errors
     ///
-    /// A [`PinRefused`] for an edition that is not one, a target without an edition, or a target
-    /// the edition does not ship.
+    /// A [`PinRefused`] for a setting `spec/lint` "Materials and targets" refuses.
     pub fn from_settings(settings: &serde_json::Value) -> Result<Self, PinRefused> {
-        let edition = match setting(settings, "edition") {
+        let section = match settings.get(SECTION) {
+            None | Some(serde_json::Value::Null) => &serde_json::Value::Null,
+            Some(section @ serde_json::Value::Object(_)) => section,
+            Some(other) => {
+                return Err(PinRefused {
+                    reason: format!(
+                        "`{SECTION}` is {other}, which is not an object; the settings were ignored"
+                    ),
+                    pinned: Self::Nothing,
+                });
+            }
+        };
+        let edition = match setting(section, "edition") {
             Err(reason) => {
                 return Err(PinRefused {
                     reason,
@@ -61,7 +85,7 @@ impl Pin {
             },
         };
         let unversioned = edition.map_or(Self::Nothing, Self::Edition);
-        let target = match setting(settings, "target") {
+        let target = match setting(section, "target") {
             Err(reason) => {
                 return Err(PinRefused {
                     reason,
@@ -80,25 +104,19 @@ impl Pin {
                 ),
                 pinned: Self::Nothing,
             }),
-            (Some(edition), Some(target)) => {
-                let resolved = match edition {
-                    Edition::Java => resolve_java_target(target).map(|t| t.mc_version),
-                    Edition::Bedrock => resolve_bedrock_target(target).map(|t| t.mc_version),
-                };
-                resolved
-                    .map(|version| Self::Target { edition, version })
-                    .map_err(|err| PinRefused {
-                        reason: format!("`{SECTION}.target`: {err}"),
-                        pinned: unversioned,
-                    })
-            }
+            (Some(edition), Some(target)) => resolve_target(edition, target)
+                .map(|resolved| Self::Target(PinnedTarget(resolved)))
+                .map_err(|err| PinRefused {
+                    reason: format!("`{SECTION}.target`: {err}"),
+                    pinned: unversioned,
+                }),
         }
     }
 }
 
-/// The string `settings` gives `cairn.KEY`, `None` when it is absent, `null` or empty.
-fn setting<'a>(settings: &'a serde_json::Value, key: &str) -> Result<Option<&'a str>, String> {
-    match settings.get(SECTION).and_then(|section| section.get(key)) {
+/// The string `section` gives `KEY`, `None` when it is absent, `null` or blank.
+fn setting<'a>(section: &'a serde_json::Value, key: &str) -> Result<Option<&'a str>, String> {
+    match section.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::String(value)) => {
             Ok(Some(value.trim()).filter(|value| !value.is_empty()))

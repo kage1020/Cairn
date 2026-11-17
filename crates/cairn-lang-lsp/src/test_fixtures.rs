@@ -1,7 +1,5 @@
 //! Documents the unit tests open, and the targets they pin.
 
-use cairn_lang_core::Edition;
-
 use crate::pin::Pin;
 
 /// A document with a finding on every line.
@@ -55,8 +53,18 @@ site v:
 
 /// The pin of a Java target.
 pub(crate) fn java(version: &str) -> Pin {
-    Pin::Target {
-        edition: Edition::Java,
-        version: version.to_owned(),
-    }
+    target("java", version)
+}
+
+/// The pin of a Bedrock target.
+pub(crate) fn bedrock(version: &str) -> Pin {
+    target("bedrock", version)
+}
+
+/// The pin the settings name for `edition` at `version`.
+fn target(edition: &str, version: &str) -> Pin {
+    let settings = serde_json::json!({ "cairn": { "edition": edition, "target": version } });
+    let pin = Pin::from_settings(&settings).expect("the edition ships the version");
+    assert!(matches!(pin, Pin::Target(_)), "{settings} pins a target");
+    pin
 }

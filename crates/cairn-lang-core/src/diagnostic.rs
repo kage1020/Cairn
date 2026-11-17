@@ -530,7 +530,8 @@ pub enum DiagnosticData {
         edition: String,
         /// The target's version.
         target: String,
-        /// The version of the floor that refuses it, as written.
+        /// The floor that refuses it as its line renders it after the keyword, such as
+        /// `java version>=1.21.4`, ending in `>=` and the version.
         floor: String,
         /// The edition's targetable versions every floor admits, oldest first; may be empty.
         valid: Vec<String>,

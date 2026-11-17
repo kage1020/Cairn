@@ -6,30 +6,38 @@ use crate::edition::Edition;
 use crate::resolve::{VersionFloor, versions_satisfying};
 use crate::version::{FloorPlacement, FloorVerdict, VersionOrder};
 
-/// The finding that refuses `target` for `floors`, given the versions the edition's pack builds
-/// and each edition's version table, or `None` when every floor admits it.
+use super::VersionTables;
+
+/// The finding that refuses `target` for `floors`, or `None` when every floor admits it.
+///
+/// `pin_target` words how the front end's user pins a version, as `--target 1.21.4`.
 ///
 /// # Panics
 ///
-/// When `target` names no row of `edition`'s table.
+/// When every floor is placeable and `target` names no row of `edition`'s table.
 #[must_use]
 pub fn weigh_target(
     floors: &[VersionFloor],
     edition: Edition,
     target: &str,
-    targetable: &[String],
-    order_of: &dyn Fn(Edition) -> VersionOrder,
+    tables: &VersionTables<'_>,
+    pin_target: &dyn Fn(&str) -> String,
 ) -> Option<Diagnostic> {
     if floors.is_empty() {
         return None;
     }
-    let order = order_of(edition);
+    let order = (tables.order_of)(edition);
     // No higher target meets a floor the table cannot place, so it is named ahead of any cap.
     if let Some(floor) = floors
         .iter()
         .find(|floor| order.place(&floor.version) == FloorPlacement::Unplaceable)
     {
-        return Some(requires_unorderable(floor, edition, &order, order_of));
+        return Some(requires_unorderable(
+            floor,
+            edition,
+            &order,
+            tables.order_of,
+        ));
     }
     let key = order
         .key_of(target)
@@ -37,12 +45,14 @@ pub fn weigh_target(
     let floor = floors
         .iter()
         .find(|floor| order.verdict(&floor.version, key) == FloorVerdict::Below)?;
+    let targetable = (tables.targetable_of)(edition);
     Some(version_cap(
         floor,
         edition,
         target,
-        versions_satisfying(&order, floors, targetable),
-        targetable,
+        versions_satisfying(&order, floors, &targetable),
+        &targetable,
+        pin_target,
     ))
 }
 
@@ -53,13 +63,15 @@ fn version_cap(
     target: &str,
     valid: Vec<&str>,
     targetable: &[String],
+    pin_target: &dyn Fn(&str) -> String,
 ) -> Diagnostic {
     let mut notes: Vec<String> = floor.inheritance().into_iter().collect();
     let keyword = floor.keyword();
     if let Some(lowest) = valid.first() {
         notes.push(format!("valid {edition} targets: {}", valid.join(", ")));
         notes.push(format!(
-            "fix: --target {lowest}, or lower the {keyword} floor"
+            "fix: {}, or lower the {keyword} floor",
+            pin_target(lowest),
         ));
     } else {
         // `latest` is a `--target` value too, so it is listed with the versions.

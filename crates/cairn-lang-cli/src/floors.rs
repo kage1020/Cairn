@@ -1,5 +1,5 @@
-//! The `@requires` floors: the compile's refusal of a target a floor rules out, and the
-//! per-version verdicts `cairn info` reports.
+//! The version floors a source declares: the compile's refusal of a target a floor rules out, and
+//! the per-version verdicts `cairn info` reports.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -12,10 +12,10 @@ use cairn_lang_core::resolve::{
     unscoped_version_floors,
 };
 use cairn_lang_core::{Diagnostic, Edition, Module, Severity};
-use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+use cairn_lang_formats::registry::{RegistryPack, builtin_version_tables};
 
 use crate::report::{render_diagnostics, report_diagnostics};
-use crate::target::{ResolvedTarget, supported_versions};
+use crate::target::ResolvedTarget;
 
 /// How each supported version of one edition answered.
 #[derive(Debug, Default)]
@@ -211,8 +211,8 @@ pub(crate) fn declared_floors(
         .collect()
 }
 
-/// The finding that refuses `target` for `floors`, the `@requires` floors `edition`'s build is
-/// held to, or `None` when every floor admits it.
+/// The finding that refuses `target` for `floors`, the floors `edition`'s build is held to, or
+/// `None` when every floor admits it.
 pub(crate) fn floor_refusal(
     floors: &[VersionFloor],
     edition: Edition,
@@ -222,8 +222,8 @@ pub(crate) fn floor_refusal(
         floors,
         edition,
         target.mc_version(),
-        &supported_versions(builtin_pack(edition)),
-        &|edition| builtin_pack(edition).version_order(),
+        &builtin_version_tables(),
+        &|version| format!("--target {version}"),
     )
 }
 

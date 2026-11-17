@@ -2,13 +2,13 @@
 //! pinned target.
 
 use cairn_lang_core::block_array::{findings_without_target, lower_to_block_array};
-use cairn_lang_core::check::{LineStarts, weigh_target};
+use cairn_lang_core::check::{LineStarts, check_with_intended_targets, weigh_target};
 use cairn_lang_core::resolve::declared_version_floors;
 use cairn_lang_core::{
-    Diagnostic as CoreDiagnostic, Edition, Module, Severity, check, diagnose_parse_failure, lower,
-    parse, resolve,
+    Diagnostic as CoreDiagnostic, Edition, Module, Severity, diagnose_parse_failure, lower, parse,
+    resolve,
 };
-use cairn_lang_formats::builtin_pack;
+use cairn_lang_formats::{builtin_pack, builtin_version_tables};
 
 use crate::line_index::LineIndex;
 use crate::pin::Pin;
@@ -37,47 +37,40 @@ pub fn compute_diagnostics(
 }
 
 /// What `cairn check` reports on `module` with `pin`'s edition, or, for a target, what
-/// `cairn compile` refuses on before it writes anything.
+/// `cairn compile` refuses on before it writes anything, circuits aside.
 fn findings(module: &Module, pin: &Pin) -> Vec<CoreDiagnostic> {
     let declared = |edition: Edition, id: &str| builtin_pack(edition).may_declare(id);
+    let tables = builtin_version_tables();
     let ir = lower(module);
-    match pin {
-        Pin::Edition(edition) => {
-            let mut found = check(module, &ir, Some(*edition));
-            found.extend(findings_without_target(&ir, Some(*edition), &declared));
-            found
-        }
-        Pin::Target { edition, version } => {
-            let pack = builtin_pack(*edition);
-            let targetable: Vec<String> = pack
-                .targetable()
-                .into_iter()
-                .map(|entry| entry.mc_version.clone())
-                .collect();
-            let refusal = weigh_target(
-                &declared_version_floors(module, *edition),
-                *edition,
-                version,
-                &targetable,
-                &|edition| builtin_pack(edition).version_order(),
-            );
-            // A target a floor refuses pins no version (`spec/versioning-editions` "The declared
-            // floor is enforced").
-            let pinned = refusal.is_none().then_some(version.as_str());
-            let mut found = check(module, &ir, Some(*edition));
-            let resolution = resolve(&ir, Some(*edition));
-            found.extend(
-                lower_to_block_array(&ir, &resolution, Some(&pack.view(pinned))).diagnostics,
-            );
-            found.extend(refusal);
-            found
-        }
-        Pin::Nothing => {
-            let mut found = check(module, &ir, None);
-            found.extend(findings_without_target(&ir, None, &declared));
-            found
-        }
-    }
+    let edition = match pin {
+        Pin::Edition(edition) => Some(*edition),
+        Pin::Target(target) => Some(target.edition()),
+        Pin::Nothing => None,
+    };
+    let mut found =
+        check_with_intended_targets(module, &ir, edition, &Edition::weighed(edition), &tables);
+    let Pin::Target(target) = pin else {
+        found.extend(findings_without_target(&ir, edition, &declared));
+        return found;
+    };
+    let edition = target.edition();
+    let refusal = weigh_target(
+        &declared_version_floors(module, edition),
+        edition,
+        target.version(),
+        &tables,
+        &|version| format!("set `cairn.target` to {version}"),
+    );
+    // A target a floor refuses pins no version (`spec/versioning-editions` "The declared floor is
+    // enforced").
+    let pinned = refusal.is_none().then_some(target.version());
+    let resolution = resolve(&ir, Some(edition));
+    found.extend(
+        lower_to_block_array(&ir, &resolution, Some(&builtin_pack(edition).view(pinned)))
+            .diagnostics,
+    );
+    found.extend(refusal);
+    found
 }
 
 /// Map one core [`CoreDiagnostic`] into the LSP shape.

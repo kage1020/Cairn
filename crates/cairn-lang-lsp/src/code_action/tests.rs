@@ -43,23 +43,36 @@ fn offered(source: &str, pin: &Pin, runs_set_target: bool) -> Vec<(String, bool,
     )
 }
 
-/// Each quick-fix for `diagnostics` in `source`, as [`offered`] lists them.
+/// Each quick-fix for `diagnostics` in `source`, as [`offered`] lists them, after checking that
+/// each names the diagnostic it was built from and nothing else.
 fn fixed(
     source: &str,
     diagnostics: &[lsp_types::Diagnostic],
     runs_set_target: bool,
 ) -> Vec<(String, bool, Does)> {
-    code_actions(&uri(), source, diagnostics, runs_set_target)
+    let actions = code_actions(&uri(), source, diagnostics, runs_set_target);
+    let one_by_one: Vec<_> = diagnostics
+        .iter()
+        .flat_map(|diagnostic| {
+            let alone = std::slice::from_ref(diagnostic);
+            let actions = code_actions(&uri(), source, alone, runs_set_target);
+            for action in &actions {
+                let lsp_types::CodeActionOrCommand::CodeAction(action) = action else {
+                    panic!("a bare command: {action:?}");
+                };
+                assert_eq!(action.diagnostics.as_deref(), Some(alone), "{action:?}");
+            }
+            actions
+        })
+        .collect();
+    assert_eq!(actions, one_by_one, "each diagnostic's fixes, in its order");
+    actions
         .into_iter()
         .map(|action| {
             let lsp_types::CodeActionOrCommand::CodeAction(action) = action else {
                 panic!("a bare command: {action:?}");
             };
             assert_eq!(action.kind, Some(lsp_types::CodeActionKind::QUICKFIX));
-            assert!(
-                matches!(action.diagnostics.as_deref(), Some([d]) if diagnostics.contains(d)),
-                "{action:?} names the one diagnostic it fixes",
-            );
             let does = match (action.edit, action.command) {
                 (Some(edit), None) => Does::Edit(applied(source, edit)),
                 (None, Some(command)) => {
@@ -83,14 +96,25 @@ fn applied(source: &str, edit: lsp_types::WorkspaceEdit) -> String {
     let [edit] = edits.as_slice() else {
         panic!("one range changed: {edits:?}");
     };
-    let index = LineIndex::new(source);
-    let start = index
-        .offset_at(source, edit.range.start)
-        .expect("in the text");
-    let end = index
-        .offset_at(source, edit.range.end)
-        .expect("in the text");
+    let start = offset_of(source, edit.range.start);
+    let end = offset_of(source, edit.range.end);
     format!("{}{}{}", &source[..start], edit.new_text, &source[end..])
+}
+
+/// Where `position` falls in `source`, whose lines end in `\n`, its character counted in UTF-16
+/// code units as the protocol counts it.
+fn offset_of(source: &str, position: lsp_types::Position) -> usize {
+    let line = usize::try_from(position.line).expect("fits usize");
+    let character = usize::try_from(position.character).expect("fits usize");
+    let start: usize = source.split_inclusive('\n').take(line).map(str::len).sum();
+    let mut units = 0;
+    for (at, c) in source[start..].char_indices() {
+        if units == character {
+            return start + at;
+        }
+        units += c.len_utf16();
+    }
+    panic!("{position:?} is past the text");
 }
 
 fn edit(title: &str, preferred: bool, text: String) -> (String, bool, Does) {
@@ -178,6 +202,39 @@ fn a_misspelled_key_is_offered_the_one_it_resembles_wherever_the_line_writes_it(
 }
 
 #[test]
+fn each_of_two_findings_on_one_document_is_offered_its_own_fix() {
+    let source = "struct s size=3x3\n  wals height=2\n  walls hieght=2\n";
+    assert_eq!(
+        offered(source, &Pin::Nothing, false),
+        [
+            edit(
+                "Change `wals` to `walls`",
+                false,
+                source.replacen("wals", "walls", 1),
+            ),
+            edit(
+                "Change `hieght=` to `height=`",
+                false,
+                source.replace("hieght", "height"),
+            ),
+        ],
+    );
+}
+
+#[test]
+fn an_edit_after_a_character_outside_the_basic_plane_lands_on_its_utf16_column() {
+    let source = "struct s size=3x3\n  door id=\"🚪\" sid=front\n";
+    assert_eq!(
+        offered(source, &Pin::Nothing, false),
+        [edit(
+            "Change `sid=` to `side=`",
+            false,
+            source.replace("sid=", "side="),
+        )],
+    );
+}
+
+#[test]
 fn a_misspelling_nothing_resembles_is_offered_nothing() {
     for source in [
         "struct s size=3x3\n  qqzx height=2\n",
@@ -212,7 +269,7 @@ fn a_client_that_runs_set_target_is_offered_the_lowest_target_the_floor_admits()
             (
                 "Build against java 1.21.4".to_owned(),
                 false,
-                Does::Run(SET_TARGET.to_owned(), vec![json!("1.21.4")]),
+                Does::Run(SET_TARGET.to_owned(), vec![json!("java"), json!("1.21.4")]),
             ),
         ],
     );
@@ -231,7 +288,7 @@ fn a_part_s_floor_is_lowered_on_its_requires_line_with_its_edition() {
             (
                 "Build against java 1.21.4".to_owned(),
                 false,
-                Does::Run(SET_TARGET.to_owned(), vec![json!("1.21.4")]),
+                Does::Run(SET_TARGET.to_owned(), vec![json!("java"), json!("1.21.4")]),
             ),
         ],
     );
@@ -279,6 +336,21 @@ fn a_diagnostic_whose_range_no_longer_holds_what_its_payload_names_is_offered_no
             "sxhieght",
         ),
         (PALE_OAK, java("1.21"), "1.21.4", "1.21.5"),
+        (SIGN, java("1.21.4"), "@standing_sign", "@standing_signs"),
+        (
+            "struct s size=3x3\n  raw_block mat= minecraft:standing_sign at=1,0,1\n",
+            java("1.21.4"),
+            "= minecraft",
+            "=xminecraft",
+        ),
+        (
+            "struct s size=3x3\n  wals height=2\n",
+            Pin::Nothing,
+            "  wals",
+            " xwals",
+        ),
+        (PALE_OAK, java("1.21"), "1.21.4", "1.21.40"),
+        (PALE_OAK, java("1.21"), ">=1.21.4", ">11.21.4"),
     ] {
         let diagnostics = compute_diagnostics(&uri(), source, &pin);
         assert_eq!(fixed(source, &diagnostics, false).len(), 1, "{source}");

@@ -1,5 +1,6 @@
 //! The `cairn.edition` and `cairn.target` settings read as a pin, and the settings refused.
 
+use cairn_lang_formats::{resolve_bedrock_target, resolve_java_target};
 use serde_json::json;
 
 use super::*;
@@ -37,22 +38,28 @@ fn an_edition_alone_pins_the_edition() {
     );
 }
 
+/// The edition and version `pin` pins, when it pins a target.
+fn target(pin: &Pin) -> Option<(Edition, &str)> {
+    match pin {
+        Pin::Target(target) => Some((target.edition(), target.version())),
+        Pin::Nothing | Pin::Edition(_) => None,
+    }
+}
+
 #[test]
 fn an_edition_and_a_target_it_ships_pin_the_target_at_the_version_it_resolves_to() {
     assert_eq!(
-        pinned(&json!({ "cairn": { "edition": "java", "target": "1.21.4" } })),
-        Pin::Target {
-            edition: Edition::Java,
-            version: "1.21.4".to_owned(),
-        },
+        target(&pinned(
+            &json!({ "cairn": { "edition": "java", "target": "1.21.4" } })
+        )),
+        Some((Edition::Java, "1.21.4")),
     );
     let latest = resolve_bedrock_target("latest").expect("latest resolves");
     assert_eq!(
-        pinned(&json!({ "cairn": { "edition": "bedrock", "target": "latest" } })),
-        Pin::Target {
-            edition: Edition::Bedrock,
-            version: latest.mc_version,
-        },
+        target(&pinned(
+            &json!({ "cairn": { "edition": "bedrock", "target": " latest " } })
+        )),
+        Some((Edition::Bedrock, latest.mc_version.as_str())),
     );
 }
 
@@ -107,4 +114,23 @@ fn a_setting_that_is_not_a_string_is_refused() {
         refused(&json!({ "cairn": { "edition": ["java"] } })).pinned,
         Pin::Nothing,
     );
+}
+
+#[test]
+fn a_section_that_is_not_an_object_is_refused_and_pins_nothing() {
+    for (section, shown) in [
+        (json!("java"), "\"java\""),
+        (json!(5), "5"),
+        (json!([]), "[]"),
+    ] {
+        assert_eq!(
+            refused(&json!({ "cairn": section })),
+            PinRefused {
+                reason: format!(
+                    "`cairn` is {shown}, which is not an object; the settings were ignored"
+                ),
+                pinned: Pin::Nothing,
+            },
+        );
+    }
 }

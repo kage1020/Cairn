@@ -1095,7 +1095,7 @@ fn a_refused_setting_is_shown_and_the_rest_of_the_settings_still_pin() {
 }
 
 #[test]
-fn a_new_pin_asks_a_client_that_pulls_and_can_be_told_to_pull_again() {
+fn a_new_pin_asks_a_client_that_pulls_and_can_be_told_to_pull_again_whatever_it_answers() {
     let session = Session::start_with(Client {
         mode: DiagnosticsMode::Pull,
         refreshes: true,
@@ -1104,21 +1104,26 @@ fn a_new_pin_asks_a_client_that_pulls_and_can_be_told_to_pull_again() {
     session.did_open(SIGN, 1);
     let held = session.pull(80, TEST_URI, None);
     assert_eq!(held["result"]["items"], serde_json::json!([]));
-    for (n, pin) in [(1, "1.21.4"), (2, "1.21")] {
-        session.configure(&pinning("java", pin));
-        let refresh = session.read_message();
-        assert_eq!(
-            refresh,
+    for (pin, answer) in [
+        (
+            "1.21.4",
+            serde_json::json!({ "jsonrpc": "2.0", "id": "cairn-refresh-1", "result": null }),
+        ),
+        (
+            "1.21",
             serde_json::json!({
-                "id": format!("cairn-refresh-{n}"),
-                "method": "workspace/diagnostic/refresh",
+                "jsonrpc": "2.0",
+                "id": "cairn-refresh-2",
+                "error": { "code": -32603, "message": "no views to refresh" },
             }),
+        ),
+    ] {
+        session.configure(&pinning("java", pin));
+        assert_eq!(
+            session.read_message(),
+            serde_json::json!({ "id": answer["id"], "method": "workspace/diagnostic/refresh" }),
         );
-        session.send(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": format!("cairn-refresh-{n}"),
-            "result": null,
-        }));
+        session.send(&answer);
     }
     let after = session.pull(81, TEST_URI, Some("1"));
     assert_eq!(

@@ -4,25 +4,22 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::ast::Header;
 use cairn_lang_core::block_array::{
     BlockArray, BlockArrayIr, BlockState, TargetRegistry, findings_without_target,
     lower_to_block_array,
 };
-use cairn_lang_core::check::{LineStarts, weigh_intended_targets};
+use cairn_lang_core::check::{LineStarts, check_with_intended_targets};
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{declared_version_floors, resolve};
-use cairn_lang_core::{
-    Diagnostic, DiagnosticCode, Edition, Severity, check, diagnose_parse_failure, lower, parse,
-};
-use cairn_lang_formats::registry::builtin_pack;
+use cairn_lang_core::{Diagnostic, Edition, Severity, diagnose_parse_failure, lower, parse};
+use cairn_lang_formats::registry::{builtin_pack, builtin_version_tables};
 use cairn_lang_redstone::{Diagnostic as CircuitDiagnostic, build_circuits};
 
 use crate::floors::floor_refusal;
 use crate::inferred::{Conflict, requires_conflicts};
 use crate::report::{FailureReport, report_failure_document};
-use crate::target::{ResolvedTarget, resolve_target, supported_versions};
+use crate::target::{ResolvedTarget, resolve_target};
 
 pub(crate) use requested::{RequestedEditions, requested_editions};
 
@@ -164,10 +161,8 @@ pub(crate) fn report_partial_build(file: &Path, dropped: &[String], built: usize
     }
 }
 
-/// Every diagnostic a command must report, in the order the passes ran: [`check()`]'s, which
-/// include the resolver's, then `lowering`'s.
-///
-/// `asked` is the editions `@intended_targets` is weighed in.
+/// Every diagnostic a command must report, in the order the passes ran: `check`'s, which include
+/// the resolver's, with `@intended_targets` weighed in each edition of `asked`, then `lowering`'s.
 pub(crate) fn build_diagnostics(
     module: &cairn_lang_core::ast::Module,
     ir: &cairn_lang_core::intent::IntentModule,
@@ -175,62 +170,10 @@ pub(crate) fn build_diagnostics(
     asked: &[Edition],
     lowering: Vec<cairn_lang_core::check::Diagnostic>,
 ) -> Vec<cairn_lang_core::check::Diagnostic> {
-    let mut combined = check(module, ir, edition);
-    // Merged by span into `check`'s sorted half; the lowering stage's findings follow.
-    for finding in intended_target_findings(module, asked) {
-        let at = combined.partition_point(|kept| {
-            (kept.span.start, kept.span.end) <= (finding.span.start, finding.span.end)
-        });
-        combined.insert(at, finding);
-    }
+    let mut combined =
+        check_with_intended_targets(module, ir, edition, asked, &builtin_version_tables());
     combined.extend(lowering);
     combined
-}
-
-/// `@intended_targets` weighed in the table of every edition in `asked`, one cap finding a span.
-///
-/// `W_INTENDED_TARGET_UNSUPPORTED` waits for a single edition: a version Java cannot build is
-/// routinely the Bedrock target the author means.
-fn intended_target_findings(
-    module: &cairn_lang_core::ast::Module,
-    asked: &[Edition],
-) -> Vec<cairn_lang_core::check::Diagnostic> {
-    // Packs parse on first use, which a file without the header should not pay for.
-    if !module
-        .headers
-        .iter()
-        .any(|header| matches!(header, Header::IntendedTargets { .. }))
-    {
-        return Vec::new();
-    }
-    let mut findings: Vec<cairn_lang_core::check::Diagnostic> = Vec::new();
-    for edition in asked {
-        let pack = builtin_pack(*edition);
-        let targetable = supported_versions(pack);
-        for finding in weigh_intended_targets(module, *edition, &pack.version_order(), &targetable)
-        {
-            if asked.len() > 1 && finding.code == DiagnosticCode::IntendedTargetUnsupported {
-                continue;
-            }
-            let clash = findings.iter().position(|kept| {
-                kept.span == finding.span
-                    && (kept.code == finding.code
-                        || (is_intended_target_cap(kept.code)
-                            && is_intended_target_cap(finding.code)))
-            });
-            match clash {
-                // The error wins: one edition's partial answer leaves the other's "none" true.
-                Some(at) if findings[at].code == DiagnosticCode::IntendedTargetCapPartial => {
-                    if finding.code == DiagnosticCode::IntendedTargetCap {
-                        findings[at] = finding;
-                    }
-                }
-                Some(_) => {}
-                None => findings.push(finding),
-            }
-        }
-    }
-    findings
 }
 
 /// Its own module, so [`requested_editions`] is the only way to build a [`RequestedEditions`].
@@ -267,19 +210,6 @@ mod requested {
     }
 }
 
-/// The editions a command with one optional pin is about: the pin, or both without one.
-pub(crate) fn weighed_editions(pin: Option<Edition>) -> Vec<Edition> {
-    pin.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |one| vec![one])
-}
-
-/// Whether `code` is one of the two `@intended_targets` cap findings.
-fn is_intended_target_cap(code: DiagnosticCode) -> bool {
-    matches!(
-        code,
-        DiagnosticCode::IntendedTargetCap | DiagnosticCode::IntendedTargetCapPartial
-    )
-}
-
 /// Lay each struct's circuit under it for `edition`, its ids read from `registry`, unless
 /// `built` already holds an error: a member that failed to lower is not there to wire.
 pub(crate) fn lay_circuits(
@@ -310,7 +240,7 @@ pub(crate) fn check_circuits(
         .zip(target)
         .and_then(|(edition, target)| resolve_target(edition, target).ok());
     let pinned = resolved.as_ref().map(ResolvedTarget::mc_version);
-    let editions = weighed_editions(edition);
+    let editions = Edition::weighed(edition);
     let runs: Vec<Vec<CircuitDiagnostic>> = editions
         .iter()
         .map(|&edition| {
@@ -394,7 +324,7 @@ pub(crate) fn load_and_lower(
     let conflicts = if floors.is_empty() {
         Vec::new()
     } else {
-        let considered = supported_versions(pack);
+        let considered = pack.targetable_versions();
         let at_newest = (mc_version.is_some()
             && mc_version == considered.last().map(String::as_str))
         .then_some(block_ir.diagnostics.as_slice());
@@ -413,7 +343,7 @@ pub(crate) fn load_and_lower(
         &module,
         &ir,
         Some(edition),
-        &weighed_editions(Some(edition)),
+        &Edition::weighed(Some(edition)),
         std::mem::take(&mut block_ir.diagnostics),
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);

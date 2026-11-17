@@ -9,7 +9,7 @@ use cairn_lang_core::check::DiagnosticData;
 
 use crate::line_index::LineIndex;
 
-/// The client command that pins another target, its one argument the version.
+/// The client command that pins another target, its arguments the edition and the version.
 pub const SET_TARGET: &str = "cairn.setTarget";
 
 /// The namespace of a block id written without one (`spec/materials-themes` "Canonical vocabulary").
@@ -26,14 +26,12 @@ struct Fix {
 enum Change {
     /// Replace the text at a byte range.
     Replace(Span, String),
-    /// Have the client pin this version of the edition it pins.
-    SetTarget(String),
+    /// Have the client pin this version of this edition.
+    SetTarget(String, String),
 }
 
-/// The quick-fixes for `diagnostics` in the document at `uri`, whose stored text is `source`.
-///
-/// `runs_set_target` says whether the client runs [`SET_TARGET`]. A diagnostic whose range no
-/// longer holds what its payload names gets none.
+/// The quick-fixes for `diagnostics` in the document at `uri`, whose stored text is `source`, when
+/// the client runs [`SET_TARGET`] if `runs_set_target`.
 #[must_use]
 pub fn code_actions(
     uri: &lsp_types::Uri,
@@ -118,7 +116,7 @@ fn fixes(
             if runs_set_target && let Some(lowest) = valid.into_iter().next() {
                 fixes.push(Fix {
                     title: format!("Build against {edition} {lowest}"),
-                    change: Change::SetTarget(lowest),
+                    change: Change::SetTarget(edition, lowest),
                     preferred: false,
                 });
             }
@@ -128,8 +126,7 @@ fn fixes(
     }
 }
 
-/// An alias for an id the author wrote, the first preferred since an alias names the same block,
-/// then the nearest spelling, which is a guess and so is not.
+/// Each alias of an id the author wrote, the first preferred, then the nearest spelling.
 fn id_fixes(
     source: &str,
     span: &Span,
@@ -182,14 +179,15 @@ fn written_id(source: &str, span: &Span, id: &str) -> Option<Span> {
     } else {
         id.strip_prefix(VANILLA) == Some(written)
     };
-    names.then_some(start..end)
+    (names && stands_alone(source, &(start..end), |c| is_identifier(c) || c == ':'))
+        .then_some(start..end)
 }
 
 /// The suggested keyword in place of the one that opens `span`.
 fn keyword_fix(source: &str, span: &Span, keyword: &str, suggestion: String) -> Option<Fix> {
     let end = span.start + keyword.len();
     let whole = source.get(span.start..end) == Some(keyword)
-        && !source[end..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_');
+        && stands_alone(source, &(span.start..end), is_identifier);
     whole.then(|| Fix {
         title: format!("Change `{keyword}` to `{suggestion}`"),
         change: Change::Replace(span.start..end, suggestion),
@@ -206,7 +204,7 @@ fn key_fix(source: &str, value: &Span, key: &str, suggestion: String) -> Option<
         .strip_suffix('=')?
         .trim_end_matches([' ', '\t']);
     let start = before.strip_suffix(key)?.len();
-    if before[..start].ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
+    if !stands_alone(source, &(start..start + key.len()), is_identifier) {
         return None;
     }
     Some(Fix {
@@ -220,11 +218,26 @@ fn key_fix(source: &str, value: &Span, key: &str, suggestion: String) -> Option<
 fn floor_fix(source: &str, span: &Span, floor: &str, target: &str) -> Option<Fix> {
     let (scope, version) = floor.rsplit_once(">=")?;
     let start = span.end.checked_sub(version.len())?;
-    (source.get(start..span.end) == Some(version)).then(|| Fix {
+    let whole = source.get(start..span.end) == Some(version)
+        && stands_alone(source, &(start..span.end), |c| {
+            c.is_ascii_alphanumeric() || c == '.' || c == '-'
+        });
+    whole.then(|| Fix {
         title: format!("Lower the floor to `{scope}>={target}`"),
         change: Change::Replace(start..span.end, target.to_owned()),
         preferred: false,
     })
+}
+
+/// Whether no character `continues` admits touches `span` on either side, so the text it holds is
+/// the whole word and not part of a longer one.
+fn stands_alone(source: &str, span: &Span, continues: impl Fn(char) -> bool) -> bool {
+    !source[..span.start].ends_with(&continues) && !source[span.end..].starts_with(&continues)
+}
+
+/// Whether `c` can continue a keyword, a key or either half of a block id.
+fn is_identifier(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
 /// `fix` as the quick-fix the protocol carries, for `diagnostic` in the document at `uri`.
@@ -252,11 +265,14 @@ fn addressed(
             };
             (Some(edit), None)
         }
-        Change::SetTarget(version) => {
+        Change::SetTarget(edition, version) => {
             let command = lsp_types::Command {
                 title: fix.title.clone(),
                 command: SET_TARGET.to_owned(),
-                arguments: Some(vec![serde_json::Value::String(version)]),
+                arguments: Some(vec![
+                    serde_json::Value::String(edition),
+                    serde_json::Value::String(version),
+                ]),
             };
             (None, Some(command))
         }

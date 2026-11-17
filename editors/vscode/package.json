@@ -82,7 +82,7 @@
           "type": "string",
           "default": "",
           "scope": "window",
-          "markdownDescription": "The version of `cairn.edition` diagnostics are checked against, as `cairn compile --target` checks it: a version the edition ships, or `latest`. Block ids and states are checked against its tables, and the file's `@requires` floors hold it (`E_VERSION_CAP`). Needs `cairn.edition`. Leave empty to pin the edition alone."
+          "markdownDescription": "The version of `cairn.edition` diagnostics are checked against, as `cairn compile --target` checks it: a version the edition ships, or `latest`. Block ids and states are checked against its tables, and the floors the file declares, in `@requires` and `requires` lines, hold it (`E_VERSION_CAP`). Needs `cairn.edition`. Leave empty to pin the edition alone."
         },
         "cairn.trace.server": {
           "type": "string",
