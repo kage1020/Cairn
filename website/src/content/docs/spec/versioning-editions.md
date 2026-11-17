@@ -262,20 +262,24 @@ it `stone_bricks`, so an edition-wide answer would accept both everywhere and ca
 The tables ship in the registry pack's `blocks` component, folded with the `inherits + diffs` rule
 of [§10.3](#103-backend--data-tables).
 
-The check therefore runs where a version is pinned and nowhere else: on `cairn compile --target`,
-on `cairn check --edition E --target V`, which pins the same pair to run the same pass without
-writing anything, on `cairn lower --edition E --target V`, which prints what that pass builds, and
-in the `buildable targets` row of `cairn info`, which pins each supported version in turn. A
+The check therefore runs where a version is pinned and nowhere else: on `cairn compile --target`, on
+`cairn check --edition E --target V`, which pins the same pair to run the same pass without writing
+anything, on `cairn lower --edition E --target V`, which prints what that pass builds, in the
+`buildable targets` row of `cairn info`, which pins each supported version in turn, and in its
+`inferred range` row, which pins the oldest and the newest ([§10.5](#the-inferred-range-row)). A
 `compile` whose target the file's floors refuse pins none: it checks no id and is refused on the
-floor instead ([§10.4](#the-declared-floor-is-enforced)), while `check --target` and
-`lower --target` are not held to the floors and pin the target regardless. The `buildable targets`
-row reports each version's `E_UNKNOWN_ID` under that version and leaves the exit code alone
-([§10.5](#the-buildable-targets-row)). The other rows of `info` report across the whole range by
-design, and `cairn lower` without `--target` lowers with no target, so neither pins a version: they
-skip the comparison rather than pick one on the author's behalf. A `cairn check` with no
-`--target` lowers with no target at all, which pins no version and leaves each abstract token to
-the pack of the target that builds it, so neither this check, `E_UNKNOWN_ABSTRACT_TOKEN` nor
-`W_ABSTRACT_TOKEN_DEFERRED` reaches it ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+floor instead ([§10.4](#the-declared-floor-is-enforced)), while `check --target` and `lower
+--target` are not held to the floors and pin the target regardless. A `compile` held to a floor also
+lowers once at the newest version, whatever its target, to weigh the floors against the registry
+([below](#a-floor-is-weighed-against-the-registry)); that pin reports nothing but
+`E_REQUIRES_CONFLICT`. The `buildable targets` row reports each version's `E_UNKNOWN_ID` under that
+version and leaves the exit code alone ([§10.5](#the-buildable-targets-row)). The other rows of
+`info` report across the whole range by design, and `cairn lower` without `--target` lowers with no
+target, so neither pins a version: they skip the comparison rather than pick one on the author's
+behalf. A `cairn check` with no `--target` lowers with no target at all, which pins no version and
+leaves each abstract token to the pack of the target that builds it, so neither this check,
+`E_UNKNOWN_ABSTRACT_TOKEN` nor `W_ABSTRACT_TOKEN_DEFERRED` reaches it ([Lint
+§11.3](/spec/lint/#113-error-vs-warning)).
 
 Checking against *every* version the edition ships and refusing only the ids valid in none of them
 would need no flag, and would answer a different question: `stone_bricks` is valid somewhere on
@@ -332,9 +336,16 @@ row, and the typo search still runs behind it.
 
 The same per-version scoping applies to a pack's own material mappings. An entry may carry
 `overrides` naming the versions that spell it differently, which is what lets one
-`@floor.stone.smooth` resolve across a range containing a rename. The first target that declares
-an ID is named by an error and nowhere else: no floor is inferred from it, so the `E_VERSION_CAP`
-example above is an `@requires` floor the file declares rather than one the registry inferred.
+`@floor.stone.smooth` resolve across a range containing a rename.
+
+The first target that declares an ID is where the build's **inferred range** starts, unless another
+ID it paints starts later ([§10.5](#the-inferred-range-row)). That lower edge is the minimum version
+the title of [§10.4](#104-fail-loud-and-minimum-version-inference) promises, and it is reported
+rather than enforced: no target is refused for lying below it, other than by the `E_UNKNOWN_ID` that
+target raises, which names the first target itself. No floor is inferred from it either, so the
+`E_VERSION_CAP` example above is an `@requires` floor the file declares rather than one the registry
+inferred. What the registry's answer does decide is whether a declared floor can hold at all
+([below](#a-floor-is-weighed-against-the-registry)).
 
 ### A part may declare its own floor
 
@@ -411,10 +422,11 @@ unchecked, including one no version declares, until the target clears every floo
 refused on the floor instead, with `E_VERSION_CAP` or `E_REQUIRES_UNORDERABLE`, and no
 `E_UNKNOWN_ID` tells the author to replace the block the floor was declared for. What needs no
 version is still reported ahead of that refusal: the check pass's findings, such as
-`E_INVALID_REQUIRES`, and lowering's, such as `E_UNKNOWN_ABSTRACT_TOKEN`. An error among them stops
-the build before the refusal is reached. `cairn check --edition E --target V` is not held to the
-floors, so at a target they refuse it reports the ids that target lacks, where `compile` reports
-the floor ([Lint](/spec/lint/#materials-and-targets)).
+`E_INVALID_REQUIRES`, lowering's, such as `E_UNKNOWN_ABSTRACT_TOKEN`, and `E_REQUIRES_CONFLICT`,
+which no target repairs ([§10.4](#a-floor-is-weighed-against-the-registry)). An error among them
+stops the build before the refusal is reached. `cairn check --edition E --target V` is not held to
+the floors, so at a target they refuse it reports the ids that target lacks, where `compile`
+reports the floor ([Lint](/spec/lint/#materials-and-targets)).
 
 ### The hint is weighed against the floor
 
@@ -466,11 +478,61 @@ cannot build is routinely the Bedrock target the author means. `cairn info --edi
 one edition in scope, and is weighed in Bedrock's table alone. A report scoped to one edition is not
 refused by the other's answer.
 
-`E_REQUIRES_CONFLICT` is **reserved**. It is defined as a declared floor contradicting the
-registry-*inferred* range, and no inferred range is derived yet from the `since` / `until` the packs
-carry. It is not a conflict between two `@requires` lines: floors compose by taking the
-strictest, so their intersection is never empty. A constraint needing an upper bound, such as
-`version<1.20`, is not a shape the language accepts; that is `E_INVALID_REQUIRES`.
+### A floor is weighed against the registry
+
+A floor says which versions the file admits, and the inferred range
+([§10.5](#the-inferred-range-row)) runs from the latest version that first declares a block the
+build paints to the earliest that last declares one. A floor above the range's upper edge admits
+only versions that lack one of those blocks. `@requires java version>=26.3` on a build that paints
+`@chain`, which Java's table declares last at 1.21.4, is a file no Java target can build, and no
+`--target` repairs it. That is `E_REQUIRES_CONFLICT`:
+
+```text
+$ cat shed.crn
+@requires java version>=26.3
+
+theme t:
+  slot wall -> @chain
+
+struct shed size=3x3
+  walls mat_slot=wall height=2
+
+$ cairn compile shed.crn --edition java --target 1.21.4
+error[E_REQUIRES_CONFLICT]: shed.crn:1:1: this file requires java version>=26.3, but no java target it admits declares `minecraft:chain`, which this build paints.
+  note: shed.crn:4:16: `minecraft:chain` is last declared at java 1.21.4
+  fix: lower the `@requires` floor to 1.21.4 or below, or replace `minecraft:chain` with a block a java target at or above 26.3 declares
+```
+
+It is weighed per edition, in that edition's table, against every floor a build of the edition is
+held to: the composite fold [§10.4](#a-part-may-declare-its-own-floor) defines, so a floor a placed
+`def` or a bound `theme` declares conflicts on its own line and the finding names the part. One
+finding per floor names, in the primary, the ID that bounds the range: of the IDs last declared
+below the floor, the one last declared earliest. A note per ID follows, earliest first, naming the
+last target that declares it and where the source first names it, and the fix is the floor lowered
+to the earliest of those targets or a block that a target the floor admits declares.
+
+Only the upper edge is weighed. A floor below the lower edge, such as `@requires version>=1.20.4` on
+a build that paints `@pale_moss_block`, is weaker than the registry rather than contrary to it. The
+build is held to the floor alone, and a target between the floor and the lower edge is refused by
+its own `E_UNKNOWN_ID`, which names the first target that declares the block. Floors compose by
+taking the strictest, so two `@requires` lines never conflict either: their intersection is never
+empty. A constraint needing an upper bound, such as `version<1.20`, is not a shape the language
+accepts; that is `E_INVALID_REQUIRES`. An ID no target of the edition declares bounds no edge, so it
+conflicts with no floor, and `E_UNKNOWN_ID` refuses it at every target, as `E_PARITY_UNSUPPORTED`
+does a semantic member's block only the other edition has. A floor the edition's table cannot place
+is `E_REQUIRES_UNORDERABLE`'s and is not weighed. Nor is a floor above every version the edition's
+pack carries: no target meets it, whatever the build paints, so it is `E_VERSION_CAP`'s
+([§10.4](#the-declared-floor-is-enforced)), and replacing a block would not repair it. A floor
+scoped to the other edition is inert here as everywhere.
+
+`cairn compile --target` raises the conflict whatever the target, since no target repairs it. It is
+reported with the lowering's findings, ahead of the refusal on the floor
+([§10.4](#the-declared-floor-is-enforced)), and stops the build there. So a target below the floor
+reports the conflict rather than `E_VERSION_CAP`, whose fix of raising `--target` would lead only
+to the `E_UNKNOWN_ID` the conflict foretells. `cairn info` prints the same finding on stderr for
+each edition it reports and carries it in `inferred_range[].conflicts`, without refusing
+([§10.5](#the-inferred-range-row)). `cairn check` does not raise it: it weighs no floor, even with
+`--edition` and `--target` pinned ([§10.4](#which-labels-a-floor-may-use)).
 
 ### Ordering is by DataVersion, per edition
 
@@ -562,10 +624,12 @@ check` does not ask: it never weighs a floor against its target, even with `--ed
 
 There is no single "for-version". `cairn info` reports three axes:
 
-1. **Declared registry range `[Vmin, Vmax]`**: the floors the file declares without naming an
-   edition, composed, against an open upper edge. A reading of what the source and the parts it
-   instantiates declare, not a fact derived from the blocks they use. See [the `registry
-   compatibility` row](#the-registry-compatibility-row).
+1. **Registry range `[Vmin, Vmax]`**, declared and inferred. The declared range is the floors the
+   file declares without naming an edition, composed, against an open upper edge: a reading of
+   what the source and the parts it instantiates declare, not a fact derived from the blocks they
+   use. See [the `registry compatibility` row](#the-registry-compatibility-row). The inferred range
+   is that fact, per edition: from the latest version that first declares an ID the build paints
+   to the earliest that last declares one. See [the `inferred range` row](#the-inferred-range-row).
 2. **Semantic-sensitive members**: cases where the ID stays valid but meaning, behaviour, or
    appearance changes. This matters more than the range: behaviour changes far more often than IDs
    disappear, so deciding Vmax from the registry alone is dangerous. The constraint catalog carries
@@ -583,6 +647,7 @@ There is no single "for-version". `cairn info` reports three axes:
 ```text
 $ cairn info build.crn --editions java,bedrock
 registry compatibility:  1.21.40 .. latest
+inferred range:          Java: 0.0 .. latest   Bedrock: 1.21.40 .. latest
 edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
 buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
 intended targets:        1.21.40, 1.21.60
@@ -590,10 +655,12 @@ semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16
 verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
-Every version named is one the built-in packs declare. The file behind this output carries
-`@requires version>=1.21.40`, which is what puts every Java target below the floor, and Bedrock
-1.21.0 with them, and its last compile built it for Bedrock 1.21.60. The `semantic-sensitive` row
-shows what a constraint catalog would add; today it reads `(none)`.
+Every version named, other than the open edge `0.0`, is one the built-in packs declare. The file
+behind this output carries `@requires version>=1.21.40`, which is what puts every Java target below
+the floor, and Bedrock 1.21.0 with them, and its last compile built it for Bedrock 1.21.60. Its
+Bedrock build paints a block Bedrock's table first declares at 1.21.40, which is why the floor was
+declared and where Bedrock's inferred range starts; nothing the Java build paints bounds Java's. The
+`semantic-sensitive` row shows what a constraint catalog would add; today it reads `(none)`.
 
 `intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
 declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
@@ -601,10 +668,10 @@ contradict. [§10.4](#the-hint-is-weighed-against-the-floor) automates the compa
 that is decidable, and the reader makes it for the rest. A file declaring none gets `(none
 declared)` rather than a missing row.
 
-The six lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A pipeline
-reading the rows sees the same six lines every time `cairn info` runs to completion. A run that
-does not complete is a different case: a finding refuses the command before any row is computed, so
-stdout is empty rather than short a line.
+The seven lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A
+pipeline reading the rows sees the same seven lines every time `cairn info` runs to completion. A
+run that does not complete is a different case: a finding refuses the command before any row is
+computed, so stdout is empty rather than short a line.
 
 ### The `registry compatibility` row
 
@@ -628,8 +695,8 @@ that declares no floor and one whose every floor names an edition, and the row c
 apart. The note on stderr can.
 
 `Vmax` is the literal `latest`. An upper edge is the half of a *derived* range and this row carries
-the declaration, so the range the packs' `since` / `until` imply would give its answer to
-`buildable targets` rather than fill this in.
+the declaration, so the edge the packs' `since` / `until` imply is the `inferred range` row's
+rather than this one's.
 
 **The row is a declaration, not an answer about which versions build.** Those are easy to read as
 one thing, and a source can make them look identical. This one declares a floor every supported
@@ -650,6 +717,7 @@ struct hut size=5x5
 
 $ cairn info hut.crn --editions java
 registry compatibility:  1.20.4 .. latest
+inferred range:          Java: 1.21.4 .. latest
 edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
 buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
 intended targets:        (none declared)
@@ -657,23 +725,90 @@ semantic-sensitive:      (none)
 verified target:         (no lock)
 ```
 
-`1.20.4 .. latest` reads as an answer, and the row two below disproves it, with `1.20.4` itself in
-the refusal list. The declared floor is not wrong; it is answering a different question.
-`minecraft:pale_moss_block` arriving in 1.21.4 is a fact about the pack, and this row reads only
-what the file declares.
+`1.20.4 .. latest` reads as an answer, and the row below disproves it: Java's table first declares
+`minecraft:pale_moss_block` at 1.21.4, and `buildable targets` puts `1.20.4` itself in the refusal
+list. The declared floor is not wrong; it is answering a different question. The block arriving in
+1.21.4 is a fact about the pack, and this row reads only what the file declares. Nor do the two
+conflict: the floor lies below the inferred range rather than above it
+([§10.4](#a-floor-is-weighed-against-the-registry)).
 
-**The derivation is the `buildable targets` row**, two rows down. It weighs the source against every
-supported version and reports which ones a build would accept, per edition. That is the answer an
-intersection of `since` / `until` was meant to approximate, reached by asking rather than by
-inferring. It is also the shape the intersection could not take: the answer is per edition, and it
-need not be contiguous, so a `[Vmin, Vmax]` pair would have to claim a gap it cannot see.
+**The derivation is two rows: `inferred range` and `buildable targets`.** The first reads the
+packs' `since` / `until` for the IDs the build paints. The second weighs the source against every
+supported version and reports which ones a build would accept, reached by asking rather than by
+inferring. They are not the same answer. `buildable targets` need not be contiguous, and an
+interval cannot see a gap, so an inferred `[Vmin, Vmax]` can hold a version that refuses: one whose
+table lacks an ID the versions on either side declare, or one refused for a reason other than an
+ID. Which versions build is the `buildable targets` row's answer; the inferred range is what a
+declared floor is compared with.
 
 The declared floor stays a row of its own because it is a different kind of fact: an **input** the
 author wrote, which bounds what `cairn compile --target` accepts and what the file promises a
-reader, where `buildable targets` is an **output** about the packs that happen to ship.
-`E_REQUIRES_CONFLICT` ([§10.4](#104-fail-loud-and-minimum-version-inference)) is reserved for the
-day the two can be compared, when a declared floor could contradict a registry-*inferred* range. It
-stays unreachable until a range is inferred from the packs' `since` / `until`.
+reader, where the two derived rows are **outputs** about the packs that happen to ship.
+`E_REQUIRES_CONFLICT` ([§10.4](#a-floor-is-weighed-against-the-registry)) is where the input and
+an output meet: a declared floor above the inferred range's upper edge.
+
+### The `inferred range` row
+
+Per requested edition, the row gives an interval of the versions the edition's pack carries: from
+the latest that first declares an ID the build paints to the earliest that last declares one. The
+hut above paints `@pale_moss_block`, which Java first declares at 1.21.4 and Bedrock at 1.21.60, so
+with `--editions java,bedrock` the row reads:
+
+```text
+inferred range:          Java: 1.21.4 .. latest   Bedrock: 1.21.60 .. latest
+```
+
+It is read off two lowerings, pinned to the oldest and the newest version the pack carries, the
+same pass `cairn compile --target` runs at each. An ID the oldest version lacks starts the range at
+the first version that declares it, and an ID the newest lacks ends it at the last version that
+declares it. Those are the `since` and `until` the `E_UNKNOWN_ID` at that pin carries
+([§10.4](#which-registry-an-unknown-id-is-unknown-to)). The range is their intersection: the latest
+start and the earliest end. The IDs counted are the ones the pinned lowering checks against the
+version's table, as that pin spells them: a member's block, a raw block and a walkway's `path=`,
+whether the author wrote the ID or the pack's materials catalog chose it. A catalog token the pack
+respells for one version with an `overrides` row is declared at both pins and bounds nothing. A
+circuit's components are not checked against the table and do not count. Each pin resolves the
+edition's theme variants, so the two editions can paint different IDs for one slot.
+
+An edge no ID sets is open: `0.0` below, as the `registry compatibility` row writes it, and `latest`
+above. The tables say nothing about a release before the first version the pack carries or after
+the last, so an open edge is the absence of a bound rather than a claim about those releases. The
+range is `none` when no version can lie in it: an ID no carried version declares, or one ID's start
+above another's end.
+
+The range is reported, not enforced. No target is refused for lying outside it: one that lacks an ID
+raises its own `E_UNKNOWN_ID`, which names the nearest targets that declare it. The interval does
+not say that every version inside it builds, for the reasons
+[above](#the-registry-compatibility-row); `buildable targets` does. What the range decides is
+whether a declared floor can hold, `E_REQUIRES_CONFLICT`, which `cairn info` prints on stderr for
+each edition it reports, with the exit code left alone as for every other figure. A run refused by
+an edition's own findings, such as a palette the edition cannot carry, still prints the notes and
+the finding, as it does those of `buildable targets`, and its `--format json` failure document
+carries only the findings that refused it.
+
+Each ID that sets an edge is named on stderr, at the first place the source names it and once
+however often it is painted:
+
+```text
+note: hut.crn:5:17: java's inferred range starts at 1.21.4, the first java target that declares `minecraft:pale_moss_block`
+```
+
+An ID that sets the upper edge is named the same way, as `ends at V, the last java target that
+declares` it, and an ID no carried version declares as `java has no inferred range: no java target
+declares` it. Edges that cross add a note with no position, `java has no inferred range: it would
+start at X and end at Y`, after the two that set them.
+
+`--format json` carries the row as `inferred_range`, one object per requested edition in the
+`--editions` order:
+
+| Field | Carries |
+|---|---|
+| `edition` | The edition. |
+| `min`, `max` | The edges as the text row spells them: a version label, or `0.0` and `latest` when open. |
+| `empty` | Whether no version can lie in the range, which the text row prints as `none`. The edges are given either way. |
+| `min_ids`, `max_ids` | The IDs that set each edge, as `{id, line, col}` at the first place the source names each. Omitted for an open edge. |
+| `undeclared` | The IDs no carried version declares, in the same shape. Omitted when there are none. |
+| `conflicts` | One `{floor, ids}` per floor the build is held to that lies above `max` and at or below the newest version the pack carries, in source order: `floor` as [the `buildable targets` row](#why-the-list-is-empty) shapes one, and `ids` as `{id, last_declared, line, col}`, the earliest `last_declared` first. Omitted when there are none. |
 
 ### The `edition portability` row
 
