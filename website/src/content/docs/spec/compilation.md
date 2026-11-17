@@ -108,9 +108,9 @@ stair renders straight, with `W_INTENT_DEGRADED`
 ([§10.7](/spec/versioning-editions/#107-java--bedrock-portability)). An identifier outside the
 list is `E_INVALID_MEMBER`, and the stair is not built. A value of another shape (`half="bottom"`,
 `facing=1`) is an unreadable value: the stair is built with that key's default, and the value is
-reported as `W_IGNORED_ARGUMENT`.
-The value is reported even when the stair is refused for another reason, with a note saying the
-stair is not built either way ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+reported as `W_IGNORED_ARGUMENT`. The value is reported even when the stair is refused for another
+reason, with a note saying the stair is not built either way
+([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **Ridge axis.** The ridge runs along the long horizontal axis of the footprint. A square footprint
 (`size=WxW`) ties to `x`, giving an east-west ridge.
