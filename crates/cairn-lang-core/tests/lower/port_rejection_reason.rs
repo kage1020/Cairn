@@ -341,28 +341,47 @@ fn one_refused_port_is_named_in_the_singular() {
 }
 
 #[test]
-fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
-    let src = site(&format!("{WALLS}  door id=p side=front at=3\n"), 6);
-    let out = lowered(&src);
-    let clause =
-        "has `at=3`, which is not one of center, left, right (numeric offsets are reserved)";
-    let notes = skip_notes(&src, &out);
-    assert_eq!(notes.len(), 1, "{notes:#?}");
-    assert_eq!(
-        notes[0].message,
-        format!("`a.p` is a door that {clause}{OWN_LINE}")
-    );
-    let span = notes[0].span.clone().expect("points at the door");
-    let own: Vec<_> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.span == span)
-        .map(|d| d.primary.as_str())
-        .collect();
-    assert_eq!(
-        own,
-        [format!("door {clause} — use `at=center | left | right`")]
-    );
+fn a_door_column_fault_reads_the_same_on_the_row_and_on_the_door() {
+    for (args, clause) in [
+        (
+            "offset=4",
+            "has `offset=4`, the front wall's corner with the right wall",
+        ),
+        (
+            "offset=6",
+            "has `offset=6`, past the end of the front wall (length 5)",
+        ),
+        (
+            "offset=x",
+            "has an `offset=` that is identifier `x`, not a non-negative integer that fits in u32",
+        ),
+        (
+            "at=center offset=2",
+            "names its column twice, with `at=` and with `offset=`",
+        ),
+        (
+            "at=3",
+            "has `at=3`, which is not one of center, left, right",
+        ),
+    ] {
+        let src = site(&format!("{WALLS}  door id=p side=front {args}\n"), 6);
+        let out = lowered(&src);
+        let notes = skip_notes(&src, &out);
+        assert_eq!(notes.len(), 1, "{args}: {notes:#?}");
+        assert_eq!(
+            notes[0].message,
+            format!("`a.p` is a door that {clause}{OWN_LINE}"),
+            "{args}",
+        );
+        let span = notes[0].span.clone().expect("points at the door");
+        let own: Vec<_> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.span == span)
+            .map(|d| d.primary.as_str())
+            .collect();
+        assert_eq!(own, [format!("door {clause}")], "{args}");
+    }
 }
 
 #[test]
