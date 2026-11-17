@@ -1199,6 +1199,7 @@ fn naming_the_entry_does_not_move_the_rows() {
         labels,
         [
             "registry compatibility",
+            "inferred range",
             "edition portability",
             "buildable targets",
             "intended targets",
