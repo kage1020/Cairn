@@ -1,16 +1,12 @@
 //! Where a `place` row lands relative to the rows placed before it.
 
-use indexmap::IndexMap;
-
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 use crate::resolve::place_scope_key;
 
-use crate::block_array::Dims;
 use crate::block_array::args::{UnreadArgument, read_or_ignore};
-
-use super::site_floor::PlacedBody;
+use crate::block_array::{Dims, Placement};
 
 /// Where one `place` line lands relative to prior placements, finished by [`PlaceAnchor::origin`]
 /// once the new body's dims are known.
@@ -127,11 +123,12 @@ impl PlaceAnchor {
 
 /// Read a `place` line's `at=origin` / `east_of=` / `north_of=` selector into a [`PlaceAnchor`].
 ///
-/// The anchor is `None` when the prior place did not lower. An unreadable `gap=` reads as `0`,
-/// and its [`UnreadArgument`] comes back for the caller to report.
-pub(super) fn resolve_place_anchor(
+/// `placed` finds a prior placement by its `site::SITE::PLACE_ID` key. The anchor is `None` when
+/// the prior place did not lower. An unreadable `gap=` reads as `0`, and its [`UnreadArgument`]
+/// comes back for the caller to report.
+pub(super) fn resolve_place_anchor<'p>(
     member: &Member,
-    placed: &IndexMap<String, PlacedBody>,
+    placed: impl Fn(&str) -> Option<&'p Placement>,
     site_name: &str,
 ) -> (Option<PlaceAnchor>, Option<UnreadArgument>) {
     if let Some(value) = member.arguments.get("at")
@@ -156,8 +153,8 @@ pub(super) fn resolve_place_anchor(
             .arguments
             .get(key)
             .and_then(|v| v.value.as_label_str())
-            .and_then(|target| placed.get(&place_scope_key(site_name, target)))
-            .map(|body| (body.placement.origin, body.placement.dims.x))
+            .and_then(|target| placed(&place_scope_key(site_name, target)))
+            .map(|placement| (placement.origin, placement.dims.x))
     };
     let anchor = if let Some((prior_origin, prior_dims_x)) = prior("east_of") {
         Some(PlaceAnchor::EastOf {
