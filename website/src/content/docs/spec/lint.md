@@ -360,6 +360,7 @@ author means, so with both in scope the question has not been asked.
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_PLACEMENT_OVERLAP` | Two `place` rows of one site resolve to boxes that share a cell, or a `connect` row's walkway lays a cell inside the box of a placement it does not join ([Entities §8.2](/spec/entities/#82-anchor-conventions)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
 | `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
@@ -403,6 +404,33 @@ row names no prior place, as it would for any other id, and is `E_UNRESOLVED_PLA
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
+
+`E_PLACEMENT_OVERLAP` compares every pair of rows of one site by the boxes the coordinate solver
+gives them, each from its origin to `origin + dims - 1`. `east_of=` and `north_of=` keep a row clear
+of the row it names and of no other: a second `at=origin` lands on the first, and a chain of
+relative rows can come back onto a row placed along another chain. The finding is on the later
+row, with a note at the earlier one, and names both boxes and the box they share. Its fix is the
+`gap=` that moves the later row clear along the axis its selector steps, which moves every row
+placed relative to it too, or for an `at=origin` row, which no `gap=` moves, a relative selector.
+A walkway is compared by the cells it lays rather than by its box, against every placement of its
+site but its two ends, and the finding is on the `connect` row with a note at the placement. The
+router keeps a strip off placement floors only, so a strip routed under the eaves of a third
+placement is one. Each site is a layout of its own whose first row stands at the world origin, so
+rows of two sites are not compared, and a walkway routes around the floors of its own site only.
+Inside one body, overlapping members merge by phase; between two structure files there is nothing
+to merge. Each writes air in every cell its body does not fill, so which of two overlapping files
+holds a shared cell depends on the order they are placed in, and the source names no order. That
+is why the overlap is an error. Lowering raises it once every row is placed, so `cairn check`
+reports it without a `--target` too.
+
+Three overlaps between structure files are not compared yet:
+
+- a walkway's file writes air in every cell of its box that its strip does not lay, including the
+  cells a `W_WALKWAY_BLOCKED` fallback skips, and those cells are compared with no placement;
+- a strip inside the box of a placement it joins, as under that placement's eaves, is not
+  reported, though that placement's file writes air there too;
+- two walkways are not compared with each other, so an L-shaped walkway's box can write air over
+  another walkway's strip.
 
 `W_UNUSED_DEF` counts every `place` row in a `site` body whose `use=` names the def, including a row
 refused for its id or its origin. That row does reference the def, and the finding with the repair
@@ -655,20 +683,23 @@ Beyond the codes above, lint covers:
 Of these, attachment, entity_aabb, support, fluid and edit_stability are planned, and no command
 checks them yet. AABB interference holds inside a body, where the phase order merges the members and
 `W_PHASE_CONFLICT` reports a later line of one phase that changes a cell an earlier one built
-([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and is
-planned between bodies: two `place` rows whose bodies overlap are not reported yet. Geometry holds
-only in part: a door, window, eave stair, chest, trapdoor, note block, sign, bed, sensor or actuator
-its own line puts outside its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one
-that only a member left unbuilt keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in
-part, through codes of its own: `E_VERSION_CAP` holds `--target` to the `@requires` floors,
-`E_REQUIRES_CONFLICT` holds the floors to the blocks the build paints, `E_UNKNOWN_ID` refuses a
-block id the pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only
-the other edition has, `E_STATE_DOMAIN` a state its block does not take there, `E_STATE_UNMAPPED` a
-block state its state map has no form for, and `W_INTENT_DEGRADED` names what a version cannot
-carry, while no entity schema is checked. The redstone row runs through codes of its own: the
-truth-table codes check a table against itself, and the codes of [Redstone](#redstone) check a truth
-table, a temporal assertion and a latency bound against the circuit, and check its routing and its
-dependence on update order.
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). Between
+bodies it holds only in part: two `place` rows of a site whose boxes share a cell, or a walkway that
+lays a cell inside a placement it does not join, are `E_PLACEMENT_OVERLAP`, while the air a
+walkway's file writes beyond its strip, a strip under the eaves of a placement it joins, and two
+walkways against each other are not compared yet ([Sites and placements](#sites-and-placements)).
+Geometry holds only in part: a door, window, eave stair, chest, trapdoor, note block, sign, bed,
+sensor or actuator its own line puts outside its struct is not drawn and is reported as
+`E_INVALID_MEMBER`, and one that only a member left unbuilt keeps out as `W_DEFERRED_MEMBER`.
+version_caps / parity runs only in part, through codes of its own: `E_VERSION_CAP` holds `--target`
+to the `@requires` floors, `E_REQUIRES_CONFLICT` holds the floors to the blocks the build paints,
+`E_UNKNOWN_ID` refuses a block id the pinned target does not declare, `E_PARITY_UNSUPPORTED` a
+semantic member's block only the other edition has, `E_STATE_DOMAIN` a state its block does not take
+there, `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names
+what a version cannot carry, while no entity schema is checked. The redstone row runs through codes
+of its own: the truth-table codes check a table against itself, and the codes of
+[Redstone](#redstone) check a truth table, a temporal assertion and a latency bound against the
+circuit, and check its routing and its dependence on update order.
 
 ### "did you mean"
 
