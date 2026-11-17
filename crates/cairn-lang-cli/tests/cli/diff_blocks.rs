@@ -287,6 +287,41 @@ fn a_source_that_does_not_build_at_the_stamp_is_refused_before_comparing() {
 }
 
 #[test]
+fn a_floor_no_target_meets_is_refused_ahead_of_the_stamp() {
+    let (tmp, _src, artifact) = built("java", "1.21.4", "cottage.nbt");
+    let conflicted = write_source(
+        tmp.path(),
+        "conflicted.crn",
+        "@requires java version>=26.3\ntheme t:\n  slot wall -> @chain\n\nstruct s size=2x2\n  \
+         floor mat_slot=wall\n",
+    );
+    let path = conflicted.display();
+    let stderr = format!(
+        "error[E_REQUIRES_CONFLICT]: {path}:1:1: this file requires java version>=26.3, but no \
+         java target it admits declares `minecraft:chain`, which this build paints.\n  \
+         note: {path}:3:16: `minecraft:chain` is last declared at java 1.21.4\n  fix: lower the \
+         `@requires` floor to 1.21.4 or below, or replace `minecraft:chain` with a block a java \
+         target at or above 26.3 declares\n",
+    );
+    let run = diff_blocks(&[&artifact, &conflicted]);
+    assert_eq!(
+        (run.code, run.stdout.as_str(), run.stderr.as_str()),
+        (Some(1), "", stderr.as_str()),
+        "the conflict stops the comparison ahead of `E_VERSION_CAP`, as it stops `compile`",
+    );
+    let json = diff_blocks(&[
+        &artifact,
+        &conflicted,
+        Path::new("--format"),
+        Path::new("json"),
+    ]);
+    assert_eq!(
+        (json.code, json.stdout.as_str(), json.stderr.as_str()),
+        (Some(1), "{\n  \"diagnostics\": []\n}\n", stderr.as_str())
+    );
+}
+
+#[test]
 fn a_file_diff_blocks_cannot_read_is_refused() {
     let (tmp, src, artifact) = built("java", "1.21.4", "cottage.nbt");
     let missing = tmp.path().join("absent.nbt");
