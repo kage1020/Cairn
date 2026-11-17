@@ -1077,7 +1077,7 @@ fn window_args(column: u32, width: u32, anchor: Option<&str>) -> WindowArgs {
     }
 }
 
-/// One [`DoorColumnFault`] per variant, and per way of writing an `at=`.
+/// Each [`DoorColumnFault`] variant, a corner at either end, and each way of writing an `at=`.
 fn door_column_samples() -> Vec<DoorColumnFault> {
     let mut samples: Vec<DoorColumnFault> = written_samples("middle")
         .into_iter()
@@ -1183,7 +1183,10 @@ fn the_member_line_and_the_note_word_a_door_column_fault_alike() {
         .note("a.p")
         .message;
         let clause = fault.clause();
-        assert!(refusal.starts_with(&format!("door {clause}")), "{refusal}");
-        assert!(note.contains(&clause), "{note}");
+        assert_eq!(refusal, format!("door {clause}"));
+        assert_eq!(
+            note,
+            format!("`a.p` is a door that {clause}; the member says so on its own line too"),
+        );
     }
 }

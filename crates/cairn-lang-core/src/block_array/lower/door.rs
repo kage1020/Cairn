@@ -133,9 +133,9 @@ fn stand_door(
         // INVARIANT(wall-grid-validated): `at < length`, and both rows sit in a painted course.
         debug_assert!(
             false,
-            "door row y={base_row} at u={at} on the {} wall is outside the wall grid; `at=` \
-             against `wall_length` / the rows against the course stopped agreeing with \
-             `wall_local_to_grid`",
+            "door row y={base_row} at u={at} on the {} wall is outside the wall grid; the \
+             door's column against `wall_length` / the rows against the course stopped agreeing \
+             with `wall_local_to_grid`",
             side_name(side),
         );
         diagnostics.push(diag_deferred_member_reason(
