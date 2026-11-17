@@ -241,12 +241,16 @@ fn a_member_an_edit_leaves_unbuildable_is_refused_at_its_line_with_the_edit_note
     let expected: Vec<Finding<'_>> = vec![(
         DiagnosticCode::InvalidMember,
         "door id=entry side=front at=center",
-        "door has `at=middle`, which is not one of center, left, right — use `at=center | left | \
-         right`",
-        vec!["this edit changes this member"],
+        "door has `at=middle`, which is not one of center, left, right",
+        vec![
+            "name the door's column with `at=center`, `at=left` or `at=right`, or with `offset=N` \
+             counted from 0 at the wall's left end seen from outside; `offset=` takes a column \
+             between the wall's corners, from 1 to 5",
+            "this edit changes this member",
+        ],
     )];
     assert_eq!(found, expected);
-    let edit = out.diagnostics[0].notes[0]
+    let edit = out.diagnostics[0].notes[1]
         .span
         .clone()
         .map(|span| &source[span]);
