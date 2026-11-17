@@ -125,6 +125,33 @@ fn without_a_target_the_same_source_still_passes() {
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
 }
 
+/// `spec/versioning-editions` "A floor is weighed against the registry": `check` weighs no floor.
+#[test]
+fn a_pinned_check_weighs_no_floor_against_the_blocks_the_build_paints() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = fixture(
+        tmp.path(),
+        "@requires java version>=26.3\ntheme t:\n  slot floor -> @chain\nstruct s size=2x2\n  \
+         floor mat_slot=floor\n",
+    );
+    let out = cairn(
+        "check",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
+    assert_eq!(
+        stderr, "",
+        "no `E_REQUIRES_CONFLICT` and no `E_VERSION_CAP`"
+    );
+}
+
 #[test]
 fn a_renamed_id_is_judged_per_version_not_per_edition() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
