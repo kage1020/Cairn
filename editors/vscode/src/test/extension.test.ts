@@ -382,6 +382,35 @@ test(
 );
 
 test(
+  "writes a target no scope sets beside a user cairn.edition, though a folder is open",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    await fixture.expectLaunches(
+      {
+        user: { "cairn.edition": "java" },
+        workspace: {},
+        setTarget: ["java", "1.21.4"],
+      },
+      [
+        probe(server),
+        probe(server),
+        session(server, [
+          { edition: "java", target: "" },
+          { edition: "java", target: "1.21.4" },
+        ]),
+      ],
+    );
+    assert.deepEqual(settingsAt(fixture.userSettings), {
+      "cairn.edition": "java",
+      "cairn.target": "1.21.4",
+    });
+    assert.deepEqual(settingsAt(fixture.workspaceSettings), {});
+  },
+);
+
+test(
   "refuses a target of an edition cairn.edition no longer names",
   POSIX_ONLY,
   async (t) => {
