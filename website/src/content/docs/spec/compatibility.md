@@ -173,7 +173,7 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 
 **Reserved codes.** The codes a stable command raises are the ones [Lint
 §11.1](/spec/lint/#111-diagnostic-codes) lists, the redstone pipeline's among them. Any other code
-the spec names, such as `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
+the spec names, such as `E_DECOMPILE_DIFF`, is a reserved code: no command raises it yet. A
 reserved code lands with the meaning the spec states for it, where it states one, and its row
 landing is adding a code.
 
@@ -213,8 +213,6 @@ Two classes of change sit outside this matrix:
 - **Bug fixes** that align behaviour with the spec are never breaking, even if a consumer was
   depending on the buggy behaviour. The spec, not the implementation, defines the contract.
 - **Output bit-equality** of emitted `.nbt` / `.litematic` / `.schem` / `.mcstructure` is not
-  promised at any tier. The `.schem` writer does not exist yet
-  ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases may produce
-  structurally-different files for the same source; what matters is that the result is valid for
-  the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See
-  [§10.6](/spec/versioning-editions/#106-provenance-and-lock).
+  promised at any tier. Two releases may produce structurally-different files for the same source;
+  what matters is that the result is valid for the target `(edition, version)` and matches the
+  lockfile's `resolved_ir_hash`. See [§10.6](/spec/versioning-editions/#106-provenance-and-lock).

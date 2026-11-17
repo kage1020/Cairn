@@ -48,9 +48,9 @@ fn a_door_whose_at_names_no_anchor_is_refused_beside_walls_that_paint_nothing() 
             "door side=front at=middle",
             "door has `at=middle`, which is not one of center, left, right",
             vec![
-                "name the door's column once: `at=center`, `at=left` or `at=right` for an \
-                 anchor, or `offset=N` for a column between the wall's corners, counted from 0 \
-                 at its left end seen from outside",
+                "name the door's column with `at=center`, `at=left` or `at=right`, or with \
+                 `offset=N` counted from 0 at the wall's left end seen from outside; `offset=` \
+                 takes a column between the wall's corners, from 1 to 3",
             ],
         )],
     );

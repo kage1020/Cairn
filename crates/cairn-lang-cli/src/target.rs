@@ -9,6 +9,7 @@ use cairn_lang_formats::data_version::{
 use cairn_lang_formats::java_structure::{JavaStructure, OutputExt, prepare_structure};
 use cairn_lang_formats::litematic::Litematic;
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+use cairn_lang_formats::schem::Schem;
 
 use crate::cli::StructureFormat;
 
@@ -106,6 +107,8 @@ pub(crate) enum Backend<'t> {
     PerArray(&'t ResolvedTarget),
     /// A `.litematic` per struct and per site.
     Litematic(&'t JavaTarget),
+    /// A `.schem` per array.
+    Schem(&'t JavaTarget),
 }
 
 impl<'t> Backend<'t> {
@@ -114,6 +117,7 @@ impl<'t> Backend<'t> {
     pub(crate) fn new(target: &'t ResolvedTarget, format: StructureFormat) -> Self {
         match (target, format) {
             (ResolvedTarget::Java(java), StructureFormat::Litematic) => Self::Litematic(java),
+            (ResolvedTarget::Java(java), StructureFormat::Schem) => Self::Schem(java),
             (ResolvedTarget::Java(_), StructureFormat::Nbt) | (ResolvedTarget::Bedrock(_), _) => {
                 Self::PerArray(target)
             }
@@ -126,6 +130,7 @@ pub(crate) enum PreparedStructure<'a> {
     Java(JavaStructure<'a>),
     Bedrock(McStructure<'a>),
     Litematic(Litematic<'a>),
+    Schem(Schem<'a>),
 }
 
 impl PreparedStructure<'_> {
@@ -134,6 +139,7 @@ impl PreparedStructure<'_> {
             PreparedStructure::Java(structure) => structure.write_gzip(writer),
             PreparedStructure::Bedrock(structure) => structure.write(writer),
             PreparedStructure::Litematic(schematic) => schematic.write_gzip(writer),
+            PreparedStructure::Schem(schematic) => schematic.write_gzip(writer),
         };
         encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }

@@ -77,6 +77,7 @@ Diagnostics name what is wrong and what a valid value looks like, so a failed bu
 ```
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
+inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
@@ -87,7 +88,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 ## What works today
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
-- Java `.nbt` or Litematica `.litematic`, and Bedrock `.mcstructure`, output from one source.
+- Java `.nbt`, Litematica `.litematic` or Sponge Schematic `.schem`, and Bedrock `.mcstructure`, output from one source.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
 - Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
@@ -102,7 +103,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - Theme selector bindings. `window[class=small] -> frame=@spruce_wood` matches its windows but paints nothing, and `cairn check` says so.
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
 - `edit` patches.
-- The `.schem` writer, and importing existing schematics.
+- Importing existing schematics.
 - The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas
