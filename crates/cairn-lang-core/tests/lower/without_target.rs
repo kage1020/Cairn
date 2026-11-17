@@ -387,6 +387,25 @@ fn a_blocked_walkway_is_reported_whichever_plate_buries_its_port() {
 }
 
 #[test]
+fn two_placements_that_share_a_cell_are_reported_with_no_target() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  def hut size=3x3:\n  floor mat_slot=wall\n  walls mat_slot=wall height=2\n\n\
+                  site s:\n  place id=a use=hut theme=t at=origin\n  \
+                  place id=b use=hut theme=t at=origin\n";
+    let found = without_target(source, None);
+    assert_eq!(
+        located(source, &found),
+        [(
+            "E_PLACEMENT_OVERLAP",
+            "place id=b use=hut theme=t at=origin"
+        )],
+    );
+    for edition in [Edition::Java, Edition::Bedrock] {
+        assert_eq!(found, lowered_for(source, edition), "{edition:?}");
+    }
+}
+
+#[test]
 fn a_finding_on_a_line_both_editions_read_needs_each_to_raise_it_there() {
     // Java's roof alone drops its state literal's properties, on the shared `roof` line.
     let source = variant_roofs("@oak_stairs[half=top]", "@spruce_stairs");
