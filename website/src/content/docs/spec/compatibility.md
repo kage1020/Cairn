@@ -191,8 +191,7 @@ placeholder's code still means what it meant. A placeholder stands in only for w
 build yet, or what the spec reserves for a later extension. Source the spec itself refuses keeps its
 code. The placeholders today include:
 
-- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as decimals,
-  `nbt={...}` values and `edit`;
+- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as `edit`;
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
   `spawn`, `bed`, `sign` and `raw_repeat`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
@@ -214,8 +213,6 @@ Two classes of change sit outside this matrix:
 - **Bug fixes** that align behaviour with the spec are never breaking, even if a consumer was
   depending on the buggy behaviour. The spec, not the implementation, defines the contract.
 - **Output bit-equality** of emitted `.nbt` / `.litematic` / `.schem` / `.mcstructure` is not
-  promised at any tier. The `.schem` writer does not exist yet
-  ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases may produce
-  structurally-different files for the same source; what matters is that the result is valid for
-  the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See
-  [§10.6](/spec/versioning-editions/#106-provenance-and-lock).
+  promised at any tier. Two releases may produce structurally-different files for the same source;
+  what matters is that the result is valid for the target `(edition, version)` and matches the
+  lockfile's `resolved_ir_hash`. See [§10.6](/spec/versioning-editions/#106-provenance-and-lock).

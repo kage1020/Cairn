@@ -41,15 +41,65 @@ its missing `=`.
 
 ### 5.1.1 Literals and separators
 
-**Subject to change.** Decimals (`scale=1.5`) and `nbt={...}` values, which other chapters write,
-do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
-No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
-parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
+No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` and `scale=-1.5`
+are `E_PARSE`. An **integer** is a run of decimal digits, up to 2^63 − 1, or 2^32 − 1 for the
 `within` bound of an `assert always`, the `<=` bound of an `assert latency` and the stage count of
 a macro such as `pulse(sig.ring, 4)`, which is at least 1 ([Redstone
-§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)). A decimal such as `scale=1.5`
-([Entities](/spec/entities/)) is therefore `E_PARSE` too until the parser reads one.
+§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)).
+
+A **decimal** is two runs of decimal digits joined by `.`, as in `scale=1.5`. It has no exponent
+and no type suffix, so a run that continues past its digits, such as `1.5e3`, `1.5f` or `1.5.2`, is
+refused at the literal, as a size's is. A `.` with no digit after it, `1.`, or none before it, `.5`,
+is refused too, and the finding names `1.0` and `0.5`. A decimal stands where an integer stands as
+a value: after a key's `=`, in a value list and as a bare value. It is not an integer, so a
+coordinate triple's component, a size's extent, a stage count, an assertion's bound and a value in
+a block-state literal each refuse one at the literal. The parser keeps it as written, digit for
+digit, and refuses one past a double's range, about 1.8 × 10^308, as `E_PARSE` at the literal. The
+key that reads one says whether the writer stores it as a float or a double, and the writer rounds
+the written value to the nearest one of that type. Such a key reads an integer as the same number,
+so `scale=2` and `scale=2.0` are one value.
+
+Wherever two values are compared, a number compares by the number it writes: `1.5` and `1.50` are
+one value, and so are `2` and `2.0`. A theme selector's attribute matches a member's value that way
+([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), and an
+address spells each number one way ([§5.5](#55-ids-classes-addresses)).
+
+No key reads a decimal yet: the keys that will, such as the `scale=` of a display entity
+([Entities §8.1](/spec/entities/#81-two-tiers)), belong to keywords the compiler does not know. A
+key that reads another kind of value treats a decimal as it treats a coordinate triple (below): a
+label or size key refuses it as a type mismatch, a member key such as `height=` or `offset=` refuses
+its member as `E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or
+`overhang=`, says so with `W_IGNORED_ARGUMENT`.
+
+An **NBT compound** is raw NBT written as SNBT in braces, as in `nbt={variant:"black"}`. It is what
+a key reads when a `{` follows its `=`, with a space between them or none. Anywhere else a `{` keeps
+its own meaning, so a bare `{a:1}` and a compound in a value list are `E_PARSE`. A compound closes
+on the line it opens on, since only a truth table's braces run onto the lines below, and one left
+open at the end of its line is `E_PARSE` there. What it holds is the part of Java's SNBT that every
+version Cairn targets reads alike:
+
+- A compound is `{}`, or entries `key:value` with exactly one `,` between two of them. A key is
+  quoted, or a run of letters, digits, `_`, `-`, `.` and `+`, and a compound names each key once.
+- A list is `[]`, or values with exactly one `,` between two of them, all of one type. An array
+  opens with `[B;`, `[I;` or `[L;`, nothing between the three characters, and holds bytes, ints or
+  longs, each written as a number with its suffix.
+- A number is an optional sign, digits, an optional `.` and digits, and an optional suffix, in
+  either case: `b`, `s` and `l` for a byte, a short and a long, `f` and `d` for a float and a
+  double. With no suffix it is an int, or a double when it has a `.`. A byte, a short, an int or a
+  long has no `.` and no leading zero, and every number is inside its type's range.
+- A string is quoted with `"` or `'`, and escapes only `\` and its own quote. `true` and `false` are
+  the bytes `1b` and `0b`, and any other unquoted word is refused, so a value is a string only
+  where it is quoted: `variant:black` is written `variant:"black"`.
+- Compounds, lists and arrays nest at most 64 deep, the outermost compound included.
+
+Anything else is `E_PARSE` where it starts, an exponent, a hexadecimal or binary number, a `_`
+between digits, an escape such as `\n`, a function such as `bool(...)` and a comment among them. The
+parser keeps the compound as written, braces included, and checks no field in it against the
+target: what its fields mean, and the `@edition` guard a line that writes one stands under, are
+[Entities §8.1](/spec/entities/#81-two-tiers)'s. No keyword reads `nbt=` yet, so it is a key like
+any other that its line does not read: `E_UNKNOWN_ARGUMENT` on a header or a member, and
+`W_IGNORED_ARGUMENT` as a theme selector's binding. A key that reads another kind of value treats a
+compound as it treats a decimal.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
@@ -201,14 +251,16 @@ reported there and never at the first column of the next one.
 
 The tree-sitter grammar is a known exception in three ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts nine forms the parser refuses, because tree-sitter cannot express their
-rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within` or `<=` bound
-or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last component runs
-into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
-literal naming one property twice. And it refuses a bare value after the name on a `site` or
-`theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because taking one
-there would let error recovery read an over-indented first body line into the header.
+correctly. It also accepts fifteen forms the parser refuses, because tree-sitter cannot express
+their rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word
+(`2x2y`), an integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within`
+or `<=` bound or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last
+component runs into a size (`1,2,3x4`), a truth row whose width differs from the input count, a
+block-state literal naming one property twice, a decimal that runs into a word (`1.5e3`) or is past
+a double's range, and an NBT compound that names one key twice, holds a list of mixed types or a
+number past its type's range, or nests past 64. And it refuses a bare value after the name on a
+`site` or `theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because
+taking one there would let error recovery read an over-indented first body line into the header.
 
 ## 5.2 Nesting
 
@@ -364,7 +416,8 @@ greater than 1 is the exception. Mirroring a series is reserved for a later exte
 not read as `false` there: that window is not cut either, and is reported as `W_DEFERRED_MEMBER`
 beside the `W_IGNORED_ARGUMENT`.
 
-**`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
+**Which column a door stands in.** A door's wall-local column comes from an `at=` anchor or from
+`offset=N`. The anchors are:
 
 | Anchor | Column |
 |---|---|
@@ -372,10 +425,18 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the door and any `connect` walkway anchored to it
-([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)). Numeric offsets (`at=N`) are
-reserved for a future extension. A door with no `at=`, or one that names no anchor, is
-`E_INVALID_MEMBER` and cuts nothing.
+`offset=N` counts as a window's `offset=` does: from 0 at the wall's left end as seen from outside.
+A number names a column between the wall's corners, `1 … wall_length - 2`. A corner column is where
+the wall meets the one beside it, and `at=left` and `at=right` are how a door stands there, so an
+`offset=` of 0 or `wall_length - 1` is refused, and so is one of `wall_length` or more. A wall
+shorter than 3 has no column between its corners. `at=` takes an anchor and nothing else, so `at=3`
+is refused. Its finding names `offset=3` when column 3 lies between the corners, `at=left` or
+`at=right` when it is a corner, and the columns `offset=` takes otherwise.
+
+A door names its column once. A door with neither key, with both, with an `at=` that names no
+anchor, or with an `offset=` that is not a column between the corners is `E_INVALID_MEMBER` and
+cuts nothing. The same column resolves both the door and any `connect` walkway anchored to it
+([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
 level's base plane, and stands two rows tall: its door block takes that row and the one above it
@@ -442,11 +503,13 @@ first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `le
   that take an address: each body sorted by keyword, then by `@SIDE` with a line that names no wall
   first, then as this list orders members, and compared member by member. At each of these, the
   line that runs out first, or has no `->` or no guard, sorts first. Keys, values and editions
-  compare as text, by Unicode code point, each value spelled one way: a number in decimal digits, a
-  string between its double quotes, a token with its `@` and any state literal without spaces, a
-  list as its items joined by `, ` between `[` and `]`, a `mat_slot=` as the name of its slot, and
-  anything else as written. So `height=10` sorts before `height=9`, and `frame="oak"` before
-  `frame=oak`. Members that tie at every step keep the order their lines are written in.
+  compare as text, by Unicode code point, each value spelled one way: an integer in decimal digits,
+  a decimal with no zero leading its whole part or ending its fraction and no `.` left with nothing
+  after it, a string between its double quotes, a token with its `@` and any state literal without
+  spaces, a list as its items joined by `, ` between `[` and `]`, a `mat_slot=` as the name of its
+  slot, and anything else as written. So `height=10` sorts before `height=9`, `frame="oak"` before
+  `frame=oak`, and `scale=02.50` and `scale=2.5` tie, as `scale=2.0` and `scale=2` do. Members
+  that tie at every step keep the order their lines are written in.
 
 A member carries its address whether or not it has an `id=`, so adding an `id=`, a `class=` or a
 `[selector]` to a line renumbers nothing. A member under an `@edition` guard counts among the
@@ -518,6 +581,8 @@ language server shows the entry's own line on hover.
 - **`door`.** A door cut into a wall, two rows tall. See [§5.4](#54-selectors).
   - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
   - **`at=`.** Where along the wall it is cut: `center`, `left` or `right`.
+  - **`offset=`.** In place of `at=`, the column it is cut in, between the wall's corners, counted
+    from the wall's left end as seen from outside.
   - **`opened_by=`.** The signal that opens it. See
     [Redstone §14.2](/spec/redstone/#142-signal-binding).
   - **`hinge=`.** The side its hinge is on, `left` or `right`, in place of the derived side.
@@ -552,7 +617,8 @@ language server shows the entry's own line on hover.
   - **`side=`.** The wall the band runs outside.
   - **`half=`.** The half of the cell the stairs sit in: `top` or `bottom`.
   - **`facing=`.** Which way the stairs face: `out` from the wall or `in` toward it.
-  - **`shape=`.** The stairs' shape: `straight`, `outer_left` or `outer_right`.
+  - **`shape=`.** The stairs' shape: `straight`, `inner_left`, `inner_right`, `outer_left` or
+    `outer_right`.
   - **`y=`.** The row the band is on.
   - **`waterlogged=`.** `true` or `false` written into the stairs' state, or `auto` to let a water
     `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).

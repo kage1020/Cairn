@@ -11,6 +11,7 @@ use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::ParityNote;
 use cairn_lang_formats::data_version::BedrockTarget;
 use cairn_lang_formats::registry::{RegistryPack, VersionStates, builtin_pack};
+use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
 
@@ -210,6 +211,47 @@ pub fn written_palette(root: &Compound) -> Vec<String> {
     written
 }
 
+/// Each `palette` entry of a Java structure root as `Name[key=value,…]`, its properties sorted by
+/// key and the entries sorted.
+///
+/// # Panics
+///
+/// When the root has no `palette` list, or an entry is not a compound with a `Name` whose
+/// `Properties`, if any, are strings.
+pub fn written_java_palette(root: &Compound) -> Vec<String> {
+    let Some(Tag::List(palette)) = root.entries.get("palette") else {
+        panic!("palette is not a List: {:?}", root.entries.get("palette"));
+    };
+    let mut written: Vec<String> = palette
+        .items
+        .iter()
+        .map(|entry| {
+            let Tag::Compound(entry) = entry else {
+                panic!("palette entry: {entry:?}");
+            };
+            let Some(Tag::String(name)) = entry.entries.get("Name") else {
+                panic!("palette entry: {entry:?}");
+            };
+            let mut properties: Vec<String> = match entry.entries.get("Properties") {
+                None => Vec::new(),
+                Some(Tag::Compound(properties)) => properties
+                    .entries
+                    .iter()
+                    .map(|(key, value)| match value {
+                        Tag::String(v) => format!("{key}={v}"),
+                        other => panic!("{key}: {other:?}"),
+                    })
+                    .collect(),
+                Some(other) => panic!("Properties: {other:?}"),
+            };
+            properties.sort();
+            format!("{name}[{}]", properties.join(","))
+        })
+        .collect();
+    written.sort();
+    written
+}
+
 /// A blockstate property map from `(key, value)` pairs, in the order given.
 pub fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
     pairs
@@ -327,4 +369,81 @@ pub fn comparator_array(id: &str) -> BlockArray {
         source_scope: "struct::comparator".to_owned(),
         derived: Vec::new(),
     }
+}
+
+/// A row of one voxel per entry of `slots`, under `struct::wide`, whose palette after air is
+/// `minecraft:b1` up to `minecraft:b<len - 1>`.
+///
+/// # Panics
+///
+/// When `slots` is longer than a `u32` counts.
+pub fn wide_array(len: usize, slots: &[u16]) -> BlockArray {
+    let mut entries = vec![BlockState::air()];
+    entries.extend((1..len).map(|i| BlockState::bare(format!("minecraft:b{i}"))));
+    BlockArray {
+        dims: Dims {
+            x: u32::try_from(slots.len()).expect("a row a u32 counts"),
+            y: 1,
+            z: 1,
+        },
+        palette: Palette { entries },
+        voxels: slots.iter().map(|&slot| PaletteIndex(slot)).collect(),
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: "struct::wide".to_owned(),
+        derived: Vec::new(),
+    }
+}
+
+/// `array` as a reader returns it: its palette, its grid, and the block entities a structure
+/// holds, the last at each voxel in `(y, z, x)` order, with their fields.
+///
+/// # Panics
+///
+/// When a block entity of `array` lies off its grid, which no written array holds.
+pub fn volume_of(array: &BlockArray) -> BlockVolume {
+    let mut placed: Vec<(usize, &BlockEntity)> = Vec::new();
+    for entity in &array.block_entities {
+        let (x, y, z) = entity.pos;
+        let index = array
+            .dims
+            .index(x, y, z)
+            .expect("a written array holds no block entity off its grid");
+        placed.retain(|&(at, _)| at != index);
+        placed.push((index, entity));
+    }
+    placed.sort_by_key(|&(index, _)| index);
+    let block_entities = placed
+        .into_iter()
+        .map(|(_, entity)| {
+            let mut data = Compound::new();
+            for (field, value) in &entity.fields {
+                data.insert(field.clone(), Tag::Int(*value));
+            }
+            StoredBlockEntity {
+                pos: entity.pos,
+                id: entity.id.clone(),
+                data,
+            }
+        })
+        .collect();
+    BlockVolume::new(
+        array.dims,
+        array.palette.entries.clone(),
+        array.voxels.clone(),
+        block_entities,
+    )
+    .expect("a written array is a volume")
+}
+
+/// `bytes` as one gzip member.
+///
+/// # Panics
+///
+/// When compressing into memory fails, which it does not.
+pub fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(bytes).expect("the bytes compress");
+    gz.finish().expect("the member closes")
 }
