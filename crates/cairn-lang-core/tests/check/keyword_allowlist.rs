@@ -1,8 +1,9 @@
 //! `E_UNKNOWN_KEYWORD`: a member or selector keyword no role defines is an error at the keyword.
 
 use cairn_lang_core::DiagnosticCode;
+use serde_json::json;
 
-use crate::common::{diagnose, slice};
+use crate::common::{diagnose, exactly_one, slice};
 
 #[test]
 fn unknown_top_level_keyword_emits_e_unknown_keyword() {
@@ -129,5 +130,25 @@ site h:
     assert!(
         kw_diags.is_empty(),
         "every known keyword should be silent, got: {kw_diags:#?}",
+    );
+}
+
+#[test]
+fn the_payload_names_the_keyword_and_the_suggestion_its_note_offers() {
+    let src = "struct s size=5x5\n  wals height=3 mat_slot=m\n";
+    let d = exactly_one(diagnose(src));
+    assert_eq!(slice(src, &d), "wals height=3 mat_slot=m");
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({"kind": "unknown_keyword", "keyword": "wals", "suggestion": "walls"}),
+    );
+}
+
+#[test]
+fn a_keyword_nothing_resembles_carries_no_suggestion() {
+    let d = exactly_one(diagnose("struct s size=1x1\n  mystery foo=1\n"));
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({"kind": "unknown_keyword", "keyword": "mystery"}),
     );
 }

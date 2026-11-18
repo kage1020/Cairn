@@ -26,7 +26,8 @@ pub use bedrock_structure::{
     write_mcstructure,
 };
 pub use data_version::{
-    BedrockTarget, JavaTarget, UnsupportedTarget, resolve_bedrock_target, resolve_java_target,
+    BedrockTarget, JavaTarget, ResolvedTarget, UnsupportedTarget, resolve_bedrock_target,
+    resolve_java_target, resolve_target,
 };
 pub use java_structure::{
     Compound, JavaStructure, JavaStructureError, OutputExt, build_structure_tag, output_filename,
@@ -43,8 +44,8 @@ pub use portability::{
 };
 pub use registry::{
     ConstraintIndex, ConstraintsError, PackFiles, PackManifest, PackSource, RegistryError,
-    RegistryPack, builtin_constraints, builtin_pack, load_builtin_constraints, load_builtin_pack,
-    load_from_dir, parse_constraints,
+    RegistryPack, builtin_constraints, builtin_pack, builtin_version_tables,
+    load_builtin_constraints, load_builtin_pack, load_from_dir, parse_constraints,
 };
 pub use schem::{
     Schem, SchemError, SchemFile, SchemReadError, SpongeSchematic, prepare_schem, read_schem,

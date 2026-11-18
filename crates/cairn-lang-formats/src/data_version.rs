@@ -3,8 +3,78 @@
 
 use cairn_lang_core::Edition;
 
-use crate::registry::builtin_pack;
+use crate::java_structure::OutputExt;
 pub use crate::registry::data_versions::{BedrockTarget, JavaTarget, UnsupportedTarget};
+use crate::registry::{RegistryPack, builtin_pack};
+
+/// A `--target` value resolved against the built-in pack of its edition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedTarget {
+    /// A Java target.
+    Java(JavaTarget),
+    /// A Bedrock target.
+    Bedrock(BedrockTarget),
+}
+
+impl ResolvedTarget {
+    /// The edition whose table the target was resolved in.
+    #[must_use]
+    pub fn edition(&self) -> Edition {
+        match self {
+            Self::Java(_) => Edition::Java,
+            Self::Bedrock(_) => Edition::Bedrock,
+        }
+    }
+
+    /// The version the target names, `latest` resolved.
+    #[must_use]
+    pub fn mc_version(&self) -> &str {
+        match self {
+            Self::Java(target) => &target.mc_version,
+            Self::Bedrock(target) => &target.mc_version,
+        }
+    }
+
+    /// `DataVersion` on Java, the block palette `version` on Bedrock: the integer the artifact
+    /// and its lockfile carry.
+    #[must_use]
+    pub fn version_int(&self) -> i32 {
+        match self {
+            Self::Java(target) => target.data_version,
+            Self::Bedrock(target) => target.block_version,
+        }
+    }
+
+    /// The built-in pack the target was resolved against.
+    #[must_use]
+    pub fn registry_pack(&self) -> &'static RegistryPack {
+        builtin_pack(self.edition())
+    }
+
+    /// The extension of one array's structure file in the edition's own format.
+    #[must_use]
+    pub fn output_ext(&self) -> OutputExt {
+        match self {
+            Self::Java(_) => OutputExt::Nbt,
+            Self::Bedrock(_) => OutputExt::Mcstructure,
+        }
+    }
+}
+
+/// Resolves a `--target` value against the built-in pack of `edition`.
+///
+/// # Errors
+///
+/// [`UnsupportedTarget`] when `requested` is neither `"latest"` nor a targetable version.
+pub fn resolve_target(
+    edition: Edition,
+    requested: &str,
+) -> Result<ResolvedTarget, UnsupportedTarget> {
+    match edition {
+        Edition::Java => resolve_java_target(requested).map(ResolvedTarget::Java),
+        Edition::Bedrock => resolve_bedrock_target(requested).map(ResolvedTarget::Bedrock),
+    }
+}
 
 /// Resolves a `--target` value against the built-in Java pack.
 ///
