@@ -15,7 +15,7 @@ use cairn_lang_core::resolve::{
 use cairn_lang_core::{Diagnostic, Edition, Resolution, Span};
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
-use crate::floors::{declared_floors, floor_keyword, floor_origin_note};
+use crate::floors::declared_floors;
 use crate::report::Reporting;
 
 /// An id a build paints, at the first place the source names it.
@@ -306,8 +306,8 @@ pub(crate) fn report_conflicts(
             floor.rendered(),
             bounding.painted.id,
         );
-        if let Some(note) = floor_origin_note(floor) {
-            eprintln!("{note}");
+        if let Some(note) = floor.inheritance() {
+            eprintln!("  {note}");
         }
         for b in ids {
             eprintln!(
@@ -322,7 +322,7 @@ pub(crate) fn report_conflicts(
         eprintln!(
             "  fix: lower the {} floor to {} or below, or replace {} with {} a {edition} target at \
              or above {} declares",
-            floor_keyword(floor),
+            floor.keyword(),
             bounding.version,
             replaced.join(", "),
             if ids.len() == 1 { "a block" } else { "blocks" },

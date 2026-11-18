@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use crate::cli::DiffFormat;
 use crate::commands::import::{file_name, open_structure, refuse_extension};
-use crate::floors::enforce_version_floor;
+use crate::floors::report_floor_refusal;
 use crate::inferred::report_conflicts;
 use crate::pipeline::{Lowered, built_scopes, load_module, lower_parsed, report_partial_build};
 use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
@@ -108,7 +108,7 @@ fn refuse_build(
         block_ir,
         circuits,
         dropped_scopes,
-        version_floors,
+        floor_refusal,
         conflicts,
     } = lowered;
     let findings: Vec<Found> = block_ir
@@ -133,9 +133,8 @@ fn refuse_build(
                 built_scopes(block_ir),
                 "refusing to compare a partial build",
             );
-        } else if let Some(floors) = version_floors
-            && let Err(_) = enforce_version_floor(file, source, floors, edition, target)
-        {
+        } else if let Some(refusal) = floor_refusal {
+            report_floor_refusal(file, source, refusal);
             eprintln!(
                 "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {edition} \
                  {}, so its `@requires` must admit that target",
