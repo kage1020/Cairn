@@ -1,5 +1,6 @@
 //! The stdio JSON-RPC loop: diagnostics pushed on each change or answered when the client pulls
-//! them, and completion and hover from the stored text.
+//! them, against what the client's settings pin; completion, hover and quick-fixes from the
+//! stored text.
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
@@ -10,23 +11,27 @@ use lsp_server::{
     Connection, ErrorCode, Message, Notification, Request, RequestId, Response, ResponseError,
 };
 use lsp_types::notification::{
-    Cancel, DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit,
-    Notification as _, PublishDiagnostics,
+    Cancel, DidChangeConfiguration, DidChangeTextDocument, DidCloseTextDocument,
+    DidOpenTextDocument, Exit, Notification as _, PublishDiagnostics, ShowMessage,
 };
 use lsp_types::request::{
-    Completion, DocumentDiagnosticRequest, HoverRequest, Request as _, Shutdown,
+    CodeActionRequest, Completion, DocumentDiagnosticRequest, HoverRequest, Request as _, Shutdown,
+    WorkspaceDiagnosticRefresh,
 };
 
+use crate::code_action::{SET_TARGET, code_actions};
 use crate::completion::completions;
 use crate::diagnostics::compute_diagnostics;
 use crate::hover::hover;
+use crate::pin::{Pin, PinRefused};
 use crate::store::{DocumentStore, Revision};
 
 /// A transport or protocol failure, which ends the process.
 type DynError = Box<dyn std::error::Error + Send + Sync>;
 
-/// What computes the findings on one document's text, as [`compute_diagnostics`] does.
-type Diagnose = fn(&lsp_types::Uri, &str) -> Vec<lsp_types::Diagnostic>;
+/// What computes the findings on one document's text against a pin, as [`compute_diagnostics`]
+/// does.
+type Diagnose = fn(&lsp_types::Uri, &str, &Pin) -> Vec<lsp_types::Diagnostic>;
 
 /// The capabilities the `initialize` response advertises.
 fn server_capabilities() -> lsp_types::ServerCapabilities {
@@ -43,10 +48,16 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
             ..lsp_types::CompletionOptions::default()
         }),
         hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
+        code_action_provider: Some(lsp_types::CodeActionProviderCapability::Options(
+            lsp_types::CodeActionOptions {
+                code_action_kinds: Some(vec![lsp_types::CodeActionKind::QUICKFIX]),
+                ..lsp_types::CodeActionOptions::default()
+            },
+        )),
         diagnostic_provider: Some(lsp_types::DiagnosticServerCapabilities::Options(
             lsp_types::DiagnosticOptions {
                 identifier: Some("cairn".to_owned()),
-                // A document's findings depend on its own text alone.
+                // A document's findings depend on no other document.
                 inter_file_dependencies: false,
                 workspace_diagnostics: false,
                 ..lsp_types::DiagnosticOptions::default()
@@ -66,14 +77,42 @@ enum DiagnosticsMode {
     Pull,
 }
 
-impl DiagnosticsMode {
-    /// `Pull` when `initialize` declares the `textDocument.diagnostic` capability object, and
-    /// `Push` otherwise.
+/// What the client's `initialize` request says it supports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Client {
+    mode: DiagnosticsMode,
+    /// Whether it re-pulls on `workspace/diagnostic/refresh`, which the server sends when the pin
+    /// changes.
+    refreshes: bool,
+    /// Whether it runs [`SET_TARGET`], which a quick-fix for `E_VERSION_CAP` asks it to.
+    runs_set_target: bool,
+}
+
+impl Client {
+    /// The client whose `initialize` params are `params`, one that pulls when they declare the
+    /// `textDocument.diagnostic` capability object.
     fn negotiate(params: &serde_json::Value) -> Self {
         let pulls = params
             .pointer("/capabilities/textDocument/diagnostic")
             .is_some_and(serde_json::Value::is_object);
-        if pulls { Self::Pull } else { Self::Push }
+        let refreshes = params
+            .pointer("/capabilities/workspace/diagnostics/refreshSupport")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        // Where a client lists the client-side commands it runs, as no standard capability does.
+        let runs_set_target = params
+            .pointer("/capabilities/experimental/commands/commands")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|commands| commands.iter().any(|command| command == SET_TARGET));
+        Self {
+            mode: if pulls {
+                DiagnosticsMode::Pull
+            } else {
+                DiagnosticsMode::Push
+            },
+            refreshes,
+            runs_set_target,
+        }
     }
 }
 
@@ -87,8 +126,8 @@ pub fn run() -> Result<(), DynError> {
     let (connection, io_threads) = Connection::stdio();
     let capabilities = serde_json::to_value(server_capabilities())?;
     let params = connection.initialize(capabilities)?;
-    let mode = DiagnosticsMode::negotiate(&params);
-    let teardown = main_loop(&connection, mode, compute_diagnostics)?;
+    let client = Client::negotiate(&params);
+    let teardown = main_loop(&connection, client, compute_diagnostics)?;
     // The writer thread ends only once `connection` drops.
     drop(connection);
     match (io_threads.join(), teardown) {
@@ -119,8 +158,13 @@ enum Teardown {
 /// What the diagnostics thread publishes next for one document.
 #[derive(Debug, PartialEq, Eq)]
 enum Publication {
-    /// The findings on one text, published with the `version` the client gave that text.
-    Findings { version: i32, text: String },
+    /// The findings on one text against one pin, published with the `version` the client gave
+    /// that text, or none when the pin changed and the text did not.
+    Findings {
+        version: Option<i32>,
+        text: String,
+        pin: Pin,
+    },
     /// No findings, for a closed document.
     Cleared,
 }
@@ -128,12 +172,14 @@ enum Publication {
 /// A document and what to publish for it.
 type Queued = (lsp_types::Uri, Publication);
 
-/// A `textDocument/diagnostic` request still to answer, with the text of the revision it names.
+/// A `textDocument/diagnostic` request still to answer, with the text of the revision it names
+/// and the pin that revision is checked against.
 #[derive(Debug, PartialEq, Eq)]
 struct Report {
     id: RequestId,
     uri: lsp_types::Uri,
     text: String,
+    pin: Pin,
     revision: Revision,
 }
 
@@ -152,7 +198,7 @@ enum Job {
 /// and ends with an error as soon as that thread stops before `dispatch` does.
 fn main_loop(
     connection: &Connection,
-    mode: DiagnosticsMode,
+    client: Client,
     diagnose: Diagnose,
 ) -> Result<Teardown, DynError> {
     let (queue, queued) = mpsc::channel();
@@ -166,7 +212,7 @@ fn main_loop(
                 drop(alive);
                 served
             })?;
-        let dispatched = dispatch(connection, &queue, &diagnostics_ended, mode);
+        let dispatched = dispatch(connection, &queue, &diagnostics_ended, client);
         drop(queue);
         let published = diagnostics_thread.join().unwrap_or_else(|panic| {
             let message = panic_message(&*panic);
@@ -230,9 +276,9 @@ fn serve_queued(
         };
         match job {
             Job::Report(report) => respond_with_report(connection, report, diagnose)?,
-            Job::Publish((uri, Publication::Findings { version, text })) => {
-                let diagnostics = diagnose(&uri, &text);
-                publish(connection, uri, Some(version), diagnostics)?;
+            Job::Publish((uri, Publication::Findings { version, text, pin })) => {
+                let diagnostics = diagnose(&uri, &text, &pin);
+                publish(connection, uri, version, diagnostics)?;
             }
             // An empty set clears the closed document's squiggles.
             Job::Publish((uri, Publication::Cleared)) => {
@@ -251,9 +297,11 @@ fn dispatch(
     connection: &Connection,
     queue: &mpsc::Sender<Job>,
     diagnostics_ended: &crossbeam_channel::Receiver<Infallible>,
-    mode: DiagnosticsMode,
+    client: Client,
 ) -> Result<Teardown, DynError> {
     let mut store = DocumentStore::new();
+    let mut pin = Pin::default();
+    let mut refreshes_sent: u64 = 0;
     let mut shutdown_requested = false;
     loop {
         let message = crossbeam_channel::select! {
@@ -283,9 +331,11 @@ fn dispatch(
                 connection.sender.send(Message::Response(response))?;
             }
             Message::Request(request) if request.method == DocumentDiagnosticRequest::METHOD => {
-                handle_pull(connection, queue, &store, request)?;
+                handle_pull(connection, queue, &store, &pin, request)?;
             }
-            Message::Request(request) => handle_request(connection, &store, request)?,
+            Message::Request(request) => {
+                handle_request(connection, &store, request, client.runs_set_target)?;
+            }
             Message::Notification(notification) if notification.method == Exit::METHOD => {
                 return if shutdown_requested {
                     Ok(Teardown::AfterShutdown)
@@ -294,12 +344,36 @@ fn dispatch(
                 };
             }
             Message::Notification(_) if shutdown_requested => {}
+            Message::Notification(notification)
+                if notification.method == DidChangeConfiguration::METHOD =>
+            {
+                let Some(params) = parse_params::<lsp_types::DidChangeConfigurationParams>(
+                    DidChangeConfiguration::METHOD,
+                    notification.params,
+                ) else {
+                    continue;
+                };
+                if repin(connection, &mut pin, &params.settings)? {
+                    store.renumber();
+                    refresh(connection, queue, &store, &pin, client, &mut refreshes_sent)?;
+                }
+            }
             Message::Notification(notification) => {
-                handle_notification(queue, &mut store, notification, mode)?;
+                handle_notification(queue, &mut store, notification, client.mode, &pin)?;
             }
-            Message::Response(_) => {
-                // The server sends no requests.
+            // Only `workspace/diagnostic/refresh` is asked, and its answer carries nothing.
+            Message::Response(Response {
+                id,
+                response_result: Err(error),
+            }) => {
+                eprintln!(
+                    "cairn-lsp: the client refused `{}` {id}: {} (code {})",
+                    WorkspaceDiagnosticRefresh::METHOD,
+                    error.message,
+                    error.code,
+                );
             }
+            Message::Response(_) => {}
         }
     }
     Ok(if shutdown_requested {
@@ -314,6 +388,7 @@ fn handle_request(
     connection: &Connection,
     store: &DocumentStore,
     request: Request,
+    runs_set_target: bool,
 ) -> Result<(), DynError> {
     let response = if request.method == Completion::METHOD {
         match serde_json::from_value::<lsp_types::CompletionParams>(request.params) {
@@ -349,6 +424,8 @@ fn handle_request(
         }
     } else if request.method == HoverRequest::METHOD {
         answer_hover(store, request)
+    } else if request.method == CodeActionRequest::METHOD {
+        answer_code_action(store, request, runs_set_target)
     } else {
         Response::new_err(
             request.id,
@@ -383,12 +460,116 @@ fn answer_hover(store: &DocumentStore, request: Request) -> Response {
     }
 }
 
+/// The answer to a `textDocument/codeAction` request: the quick-fixes for the diagnostics it
+/// carries back, for a client that asks for quick-fixes.
+fn answer_code_action(store: &DocumentStore, request: Request, runs_set_target: bool) -> Response {
+    let params = match serde_json::from_value::<lsp_types::CodeActionParams>(request.params) {
+        Ok(params) => params,
+        Err(err) => {
+            return Response::new_err(
+                request.id,
+                ErrorCode::InvalidParams as i32,
+                format!("malformed `{}` params: {err}", CodeActionRequest::METHOD),
+            );
+        }
+    };
+    let uri = params.text_document.uri;
+    let Some(source) = store.get(&uri) else {
+        return Response::new_err(
+            request.id,
+            ErrorCode::InvalidParams as i32,
+            format!("document not open: {}", uri.as_str()),
+        );
+    };
+    let asks_for_quick_fixes = params.context.only.as_ref().is_none_or(|kinds| {
+        kinds
+            .iter()
+            .any(|kind| kind.as_str().is_empty() || *kind == lsp_types::CodeActionKind::QUICKFIX)
+    });
+    let actions = if asks_for_quick_fixes {
+        code_actions(&uri, source, &params.context.diagnostics, runs_set_target)
+    } else {
+        Vec::new()
+    };
+    Response::new_ok(request.id, actions)
+}
+
+/// Takes the pin `settings` ask for, showing the client a setting it refused; whether the pin
+/// changed.
+fn repin(
+    connection: &Connection,
+    pin: &mut Pin,
+    settings: &serde_json::Value,
+) -> Result<bool, DynError> {
+    let asked = match Pin::from_settings(settings) {
+        Ok(asked) => asked,
+        Err(PinRefused { reason, pinned }) => {
+            let params = lsp_types::ShowMessageParams {
+                typ: lsp_types::MessageType::ERROR,
+                message: format!("cairn-lsp: {reason}"),
+            };
+            let notification = Notification::new(
+                ShowMessage::METHOD.to_owned(),
+                serde_json::to_value(params)?,
+            );
+            connection
+                .sender
+                .send(Message::Notification(notification))?;
+            pinned
+        }
+    };
+    if asked == *pin {
+        return Ok(false);
+    }
+    *pin = asked;
+    Ok(true)
+}
+
+/// Has the client shown every open document's findings against a new pin: published again, or,
+/// for a client that pulls, re-pulled once it is told to.
+fn refresh(
+    connection: &Connection,
+    queue: &mpsc::Sender<Job>,
+    store: &DocumentStore,
+    pin: &Pin,
+    client: Client,
+    refreshes_sent: &mut u64,
+) -> Result<(), DynError> {
+    match client.mode {
+        DiagnosticsMode::Push => {
+            for (uri, text) in store.documents() {
+                let findings = Publication::Findings {
+                    version: None,
+                    text: text.to_owned(),
+                    pin: pin.clone(),
+                };
+                queue
+                    .send(Job::Publish((uri.clone(), findings)))
+                    .map_err(|_| "the diagnostics thread stopped")?;
+            }
+        }
+        DiagnosticsMode::Pull if client.refreshes => {
+            *refreshes_sent += 1;
+            let request = Request::new(
+                RequestId::from(format!("cairn-refresh-{refreshes_sent}")),
+                WorkspaceDiagnosticRefresh::METHOD.to_owned(),
+                serde_json::Value::Null,
+            );
+            connection.sender.send(Message::Request(request))?;
+        }
+        // Such a client pulls when it next would, and the new revisions make it a full report.
+        DiagnosticsMode::Pull => {}
+    }
+    Ok(())
+}
+
 /// Answers a `textDocument/diagnostic` request: at once when it is refused or the client holds
 /// the stored revision's report already, and otherwise from the diagnostics thread.
 fn handle_pull(
     connection: &Connection,
     queue: &mpsc::Sender<Job>,
     store: &DocumentStore,
+    pin: &Pin,
     request: Request,
 ) -> Result<(), DynError> {
     let params = match serde_json::from_value::<lsp_types::DocumentDiagnosticParams>(request.params)
@@ -421,7 +602,7 @@ fn handle_pull(
         connection.sender.send(Message::Response(response))?;
         return Ok(());
     };
-    // Findings are a function of the text alone, so a revision names its report.
+    // A new pin renumbers every document, so a revision names its report.
     let result_id = revision.to_string();
     if params.previous_result_id.as_deref() == Some(result_id.as_str()) {
         let unchanged = lsp_types::DocumentDiagnosticReport::Unchanged(
@@ -440,6 +621,7 @@ fn handle_pull(
         id: request.id,
         uri,
         text: text.to_owned(),
+        pin: pin.clone(),
         revision,
     };
     queue
@@ -458,6 +640,7 @@ fn respond_with_report(
         id,
         uri,
         text,
+        pin,
         revision,
     } = report;
     let full =
@@ -465,7 +648,7 @@ fn respond_with_report(
             related_documents: None,
             full_document_diagnostic_report: lsp_types::FullDocumentDiagnosticReport {
                 result_id: Some(revision.to_string()),
-                items: diagnose(&uri, &text),
+                items: diagnose(&uri, &text, &pin),
             },
         });
     let result = lsp_types::DocumentDiagnosticReportResult::Report(full);
@@ -504,12 +687,14 @@ fn parse_params<T: serde::de::DeserializeOwned>(
 }
 
 /// Mirrors one notification's text into the store and, for a client diagnostics are pushed to,
-/// queues that document's publication; hands a `$/cancelRequest` to the diagnostics thread.
+/// queues that document's publication against `pin`; hands a `$/cancelRequest` to the
+/// diagnostics thread.
 fn handle_notification(
     queue: &mpsc::Sender<Job>,
     store: &mut DocumentStore,
     notification: Notification,
     mode: DiagnosticsMode,
+    pin: &Pin,
 ) -> Result<(), DynError> {
     let pushed = mode == DiagnosticsMode::Push;
     let job = match notification.method.as_str() {
@@ -525,8 +710,9 @@ fn handle_notification(
             } = params.text_document;
             let job = pushed.then(|| {
                 let findings = Publication::Findings {
-                    version,
+                    version: Some(version),
                     text: text.clone(),
+                    pin: pin.clone(),
                 };
                 Job::Publish((uri.clone(), findings))
             });
@@ -562,8 +748,9 @@ fn handle_notification(
             };
             pushed.then(|| {
                 let findings = Publication::Findings {
-                    version: params.text_document.version,
+                    version: Some(params.text_document.version),
                     text: source.to_owned(),
+                    pin: pin.clone(),
                 };
                 Job::Publish((uri, findings))
             })

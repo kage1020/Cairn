@@ -10,6 +10,7 @@ mod blockstate_members;
 mod canonical_spelling;
 mod connections;
 mod declared_elsewhere;
+mod eave_stair_shapes;
 mod ids_exist;
 mod spelling;
 mod state_domain;

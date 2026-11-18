@@ -28,7 +28,8 @@ pub use bedrock_structure::{
     write_mcstructure,
 };
 pub use data_version::{
-    BedrockTarget, JavaTarget, UnsupportedTarget, resolve_bedrock_target, resolve_java_target,
+    BedrockTarget, JavaTarget, ResolvedTarget, UnsupportedTarget, resolve_bedrock_target,
+    resolve_java_target, resolve_target,
 };
 pub use import::{
     DecodedStructure, ImportError, ImportFormat, ImportStamp, RawImport, SemanticLoss, StampFit,
@@ -50,7 +51,7 @@ pub use portability::{
 };
 pub use registry::{
     PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
-    load_builtin_pack, load_from_dir,
+    builtin_version_tables, load_builtin_pack, load_from_dir,
 };
 pub use schem::{
     Schem, SchemError, SchemFile, SchemReadError, SpongeSchematic, prepare_schem, read_schem,
