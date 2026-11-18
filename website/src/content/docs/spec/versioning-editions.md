@@ -301,9 +301,11 @@ anything, and in the `buildable targets` row of `cairn info`, which pins each su
 turn, and its `inferred range` row, which pins the oldest and the newest
 ([§10.5](#the-inferred-range-row)). A `compile` whose target the file's floors refuse pins none: it
 checks no id and is refused on the floor instead ([§10.4](#the-declared-floor-is-enforced)), while
-`check --target` is not held to the floors and pins the target regardless. A `compile` held to a
-floor also lowers once at the newest version, whatever its target, to weigh the floors against the
-registry ([below](#a-floor-is-weighed-against-the-registry)); that pin reports nothing but
+`check --target` is not held to the floors and pins the target regardless. The language server pins
+a target once the client's settings name one, and holds it to the floors as `compile` does
+([Lint](/spec/lint/#materials-and-targets)). A `compile` held to a floor also lowers once at the
+newest version, whatever its target, to weigh the floors against the registry
+([below](#a-floor-is-weighed-against-the-registry)); that pin reports nothing but
 `E_REQUIRES_CONFLICT`. The `buildable targets` row reports each version's `E_UNKNOWN_ID` under that
 version and leaves the exit code alone ([§10.5](#the-buildable-targets-row)). The other rows of
 `info` report across the whole range by design, and `cairn lower` lowers with no target, so neither
@@ -457,8 +459,10 @@ version is still reported ahead of that refusal: the check pass's findings, such
 `E_INVALID_REQUIRES`, lowering's, such as `E_UNKNOWN_ABSTRACT_TOKEN`, and `E_REQUIRES_CONFLICT`,
 which no target repairs ([§10.4](#a-floor-is-weighed-against-the-registry)). An error among them
 stops the build before the refusal is reached. `cairn check --edition E --target V` is not held to
-the floors, so at a target they refuse it reports the ids that target lacks, where `compile`
-reports the floor ([Lint](/spec/lint/#materials-and-targets)).
+the floors, so at a target they refuse it reports the ids that target lacks, where `compile` reports
+the floor ([Lint](/spec/lint/#materials-and-targets)). The language server, at a target its settings
+pin, is held to them as `compile` is: it pins no version for a target they refuse, and reports the
+refusal beside the findings that need none.
 
 ### The hint is weighed against the floor
 

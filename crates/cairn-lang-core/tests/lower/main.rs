@@ -16,6 +16,7 @@ mod cottage;
 mod door_block;
 mod door_column;
 mod door_wall_fit;
+mod eave_stair_shape;
 mod edition_guard;
 mod entities;
 mod entity_constraints;

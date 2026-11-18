@@ -256,6 +256,47 @@ pub fn written_palette(root: &Compound) -> Vec<String> {
     written
 }
 
+/// Each `palette` entry of a Java structure root as `Name[key=value,…]`, its properties sorted by
+/// key and the entries sorted.
+///
+/// # Panics
+///
+/// When the root has no `palette` list, or an entry is not a compound with a `Name` whose
+/// `Properties`, if any, are strings.
+pub fn written_java_palette(root: &Compound) -> Vec<String> {
+    let Some(Tag::List(palette)) = root.entries.get("palette") else {
+        panic!("palette is not a List: {:?}", root.entries.get("palette"));
+    };
+    let mut written: Vec<String> = palette
+        .items
+        .iter()
+        .map(|entry| {
+            let Tag::Compound(entry) = entry else {
+                panic!("palette entry: {entry:?}");
+            };
+            let Some(Tag::String(name)) = entry.entries.get("Name") else {
+                panic!("palette entry: {entry:?}");
+            };
+            let mut properties: Vec<String> = match entry.entries.get("Properties") {
+                None => Vec::new(),
+                Some(Tag::Compound(properties)) => properties
+                    .entries
+                    .iter()
+                    .map(|(key, value)| match value {
+                        Tag::String(v) => format!("{key}={v}"),
+                        other => panic!("{key}: {other:?}"),
+                    })
+                    .collect(),
+                Some(other) => panic!("Properties: {other:?}"),
+            };
+            properties.sort();
+            format!("{name}[{}]", properties.join(","))
+        })
+        .collect();
+    written.sort();
+    written
+}
+
 /// A blockstate property map from `(key, value)` pairs, in the order given.
 pub fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
     pairs
