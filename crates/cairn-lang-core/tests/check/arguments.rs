@@ -180,9 +180,9 @@ fn a_key_nothing_resembles_carries_no_suggestion() {
 #[test]
 fn a_typo_written_twice_carries_the_suggestion_its_note_offers() {
     let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  \
-               walls[hieght=3] -> frame=@spruce_wood\n\n\
+               walls[hieght=3] -> trim=@spruce_wood\n\n\
                struct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
-    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 1);
     assert_eq!(
         serde_json::to_value(&d.data).expect("serialises"),
         json!({"kind": "unknown_argument", "key": "hieght", "suggestion": "height"}),
