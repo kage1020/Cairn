@@ -128,14 +128,18 @@ pub(super) fn inward_cardinal(side: WallSide) -> Cardinal {
     }
 }
 
-/// Stair `shape` property values used by hip-roof corner cells.
+/// A stair's `shape` property value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StairShape {
-    /// Straight stair, for every cell that is not a hip corner.
+    /// Straight stair.
     Straight,
-    /// Outer corner missing its step on the left of the facing.
+    /// Inner corner with an extra step on the left of the facing.
+    InnerLeft,
+    /// Inner corner with an extra step on the right of the facing.
+    InnerRight,
+    /// Outer corner keeping only the step on the left of the facing.
     OuterLeft,
-    /// Outer corner missing its step on the right of the facing.
+    /// Outer corner keeping only the step on the right of the facing.
     OuterRight,
 }
 
@@ -145,6 +149,8 @@ impl StairShape {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Straight => "straight",
+            Self::InnerLeft => "inner_left",
+            Self::InnerRight => "inner_right",
             Self::OuterLeft => "outer_left",
             Self::OuterRight => "outer_right",
         }
