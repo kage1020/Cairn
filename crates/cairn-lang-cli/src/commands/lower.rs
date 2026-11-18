@@ -13,7 +13,7 @@ use cairn_lang_core::{Edition, Severity, lower};
 use cairn_lang_formats::registry::builtin_pack;
 
 use crate::cli::LowerFormat;
-use crate::pipeline::{build_diagnostics, lay_circuits, load_module, weighed_editions};
+use crate::pipeline::{build_diagnostics, lay_circuits, load_module};
 use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target};
 
@@ -56,7 +56,7 @@ pub(crate) fn run_lower(
         &module,
         &ir,
         edition,
-        &weighed_editions(edition),
+        &Edition::weighed(edition),
         std::mem::take(&mut block_ir.diagnostics),
     );
     let circuits = edition.map_or_else(Vec::new, |edition| {

@@ -13,7 +13,7 @@ use crate::lockfile::build_lockfile;
 use crate::name_case::NameCase;
 use crate::report::degraded_warning;
 use crate::staging;
-use crate::target::{Backend, PreparedStructure, ResolvedTarget};
+use crate::target::{Backend, PreparedStructure, ResolvedTarget, prepare};
 
 pub(crate) fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, ExitCode> {
     let Some(out_dir) = resolve_out_dir(file, requested) else {
@@ -97,7 +97,7 @@ pub(crate) fn prepare_artifacts<'a>(
         }
     };
     for (scope, array) in &block_ir.structures {
-        let (structure, degraded) = target.prepare(array).map_err(|err| {
+        let (structure, degraded) = prepare(target, array).map_err(|err| {
             eprintln!("error: checking `{scope}`: {err}");
             ExitCode::from(1)
         })?;

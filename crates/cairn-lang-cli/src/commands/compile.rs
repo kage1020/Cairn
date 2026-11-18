@@ -12,7 +12,7 @@ use crate::artifacts::{
     write_artifacts_and_lock,
 };
 use crate::cli::StructureFormat;
-use crate::floors::enforce_version_floor;
+use crate::floors::report_floor_refusal;
 use crate::inferred::report_conflicts;
 use crate::lockfile::{default_lock_path, report_previous_target};
 use crate::name_case::NameCase;
@@ -45,7 +45,7 @@ pub(crate) fn run_compile(
         block_ir,
         circuits,
         dropped_scopes,
-        version_floors,
+        floor_refusal,
         conflicts,
     } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
@@ -77,10 +77,9 @@ pub(crate) fn run_compile(
             return ExitCode::from(1);
         }
     };
-    if let Some(floors) = &version_floors
-        && let Err(code) = enforce_version_floor(file, &source, floors, edition, &target)
-    {
-        return code;
+    if let Some(refusal) = &floor_refusal {
+        report_floor_refusal(file, &source, refusal);
+        return ExitCode::from(1);
     }
 
     let out_dir = match prepare_out_dir(file, out) {
