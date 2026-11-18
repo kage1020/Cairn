@@ -647,8 +647,8 @@ pub(crate) fn drop_repeats_within(diagnostics: &mut Vec<Diagnostic>, lines: &[Sp
 }
 
 /// Point each finding on a member line an `edit` selected at the edits that changed the member,
-/// since what the finding quotes may be an edit's rather than the line's; `edited` pairs each
-/// such line with its edit's.
+/// since what the finding quotes may be an edit's and not the line's; `edited` pairs each such
+/// line with its edit's.
 pub(crate) fn note_edits(diagnostics: &mut [Diagnostic], edited: &[(Span, Span)]) {
     for d in diagnostics {
         for (line, edit) in edited {

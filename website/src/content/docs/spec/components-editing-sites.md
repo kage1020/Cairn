@@ -94,10 +94,10 @@ every other key into the member's arguments. An edit never writes `resolved_stat
 it again from the edited members. Every later pass reads the edited members, so a key an edit sets
 is checked as the line's own would be. A value of the wrong type is a type mismatch, a key written
 twice in one edit's selector or after its `set` is `E_DUPLICATE_ARG`, and a key no pass reads yet is
-`W_IGNORED_ARGUMENT`. A finding of lowering on the line of a member an edit changed, such as the
-refusal of a member the edit leaves unbuildable, carries a note at each edit that changed it. A
-finding about a value an edit wrote points at that value on the edit's line, and is reported once
-however many members the edit selects.
+`W_IGNORED_ARGUMENT`. A finding on the line of a member an edit changed, such as the refusal of a
+member the edit leaves unbuildable, carries a note at each edit that changed it. A finding about a
+value an edit wrote points at that value on the edit's line, and is reported once however many
+members the edit selects.
 
 **What an edit may set.** An edit sets the keys a line of its keyword takes, and the keys a `theme`
 selector of that keyword matches on ([Lint §11.3](/spec/lint/#113-error-vs-warning)), apart from
@@ -109,8 +109,8 @@ member's `id=` is written on its own line.
 
 **An edit that selects nothing.** An edit whose target matches no member changes nothing, and is
 `E_EDIT_UNMATCHED`, an error ([Lint §11.3](/spec/lint/#113-error-vs-warning)). For an address, the
-finding lists the addresses the members of its keyword carry. An edit whose keyword is not a member
-keyword is `E_UNKNOWN_KEYWORD` alone.
+finding lists the addresses the members of its keyword carry. An edit that names a keyword that is
+not a member keyword, as its selector's or at any step of its address, is `E_UNKNOWN_KEYWORD` alone.
 
 **Edit stability.** Editing at the level of a concept, such as "make only the second-floor windows
 arched", must be possible without breaking the whole. Edit diffs look only at what a line writes,
@@ -122,22 +122,23 @@ that changes this way ([Lint](/spec/lint/#edits)), so an edit meant for the seco
 says so when it changed something else.
 
 When an edit selects a member, lowering builds each body twice, with its edits and as written, and
-compares the cells of every member no edit selected, matched by its line. Such a member is reported
-once per structure when one of its cells holds another state with the edits than without them, or
-when it holds a cell in one build and not in the other. The finding names the first such cell in
-block-array order and the edits that changed a member of that body. A cell a selected member holds
-in either build is left out, since what stands there is the edit's own doing. An edit that changes
-the box a body builds into moves every other member's cells with it, as a roof's `overhang=` widens
-the box on each side alike, so the written build's cells are shifted by half the change in width and
-in depth before they are compared.
+compares the cells of every member no edit selected, matched by its line. A member under one an edit
+selects counts as selected, since it moves with that member, as the windows of a `level` do when an
+edit sets the level's `y=`. Such a member is reported once per structure when one of its cells holds
+another state with the edits than without them, or when it holds a cell in one build and not in the
+other. The finding names the first such cell in block-array order and the edits that changed a
+member of that body. A cell a selected member holds in either build is left out, since what stands
+there is the edit's own doing. An edit that changes the box a body builds into moves every other
+member's cells with it, as a roof's `overhang=` widens the box on each side alike, so the written
+build's cells are shifted by half the change in width and in depth before they are compared.
 
 `W_EDIT_RIPPLE` is a finding of block-array lowering, and each command sees the changes its lowering
-derives. `cairn compile`, `cairn lower`, `cairn info` and `cairn check --edition E --target V` read
-the blocks beside a member from a registry pack ([Blockstate Model
-§6.1](/spec/blockstate/#connections)), so they see a chest's pairing or a pane's sides change. A
-`cairn check` with no `--target`, and the language server, lower with no target at all and derive no
-connection, so they see only the changes in where a member's blocks stand, such as the roof that
-taller walls lift.
+derives. `cairn compile`, `cairn lower`, `cairn info`, `cairn synth` from its `edition` stage on,
+and `cairn check --edition E --target V` read the blocks beside a member from a registry pack
+([Blockstate Model §6.1](/spec/blockstate/#connections)), so they see a chest's pairing or a pane's
+sides change. A `cairn check` with no `--target`, and the language server, lower with no target at
+all and derive no connection, so they see only the changes in where a member's blocks stand, such as
+the roof that taller walls lift.
 
 ## 9.3 Multi-building with `site`
 

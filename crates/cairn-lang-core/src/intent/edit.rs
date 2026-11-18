@@ -6,13 +6,14 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 use serde::Serialize;
 
-use crate::ast::{Edit, EditTarget, ValueKind};
+use crate::address::MemberAddress;
+use crate::ast::{Edit, EditTarget};
 use crate::error::Span;
 
-use super::member::args_to_map;
+use super::member::{Destination, LabelKey, args_to_map, destination};
 use super::{
-    IntentModule, Label, Member, MemberRole, SelectorKeys, ValueWithSpan, levels_under, role_of,
-    selector_keys, selects,
+    IntentModule, Member, MemberRole, SelectorKeys, ValueWithSpan, levels_under, patched_actuator,
+    role_of, selector_keys, selects,
 };
 
 /// A top-level `edit` line, with the members it selected.
@@ -60,16 +61,48 @@ pub(super) fn apply_edits(module: &mut IntentModule, edits: &[Edit]) {
     module.as_written = Some(Box::new(as_written));
 }
 
+/// Whether `target` names a keyword that is no member keyword, at any step of an address.
+pub(crate) fn names_an_unknown_keyword(target: &EditTarget) -> bool {
+    target
+        .keywords()
+        .iter()
+        .any(|(keyword, _)| matches!(role_of(keyword), MemberRole::Other(_)))
+}
+
+/// What an edit's target matches a member by.
+enum Matcher<'a> {
+    /// The address the member carries.
+    Address(&'a MemberAddress),
+    /// A selector's keyword and attributes.
+    Selector {
+        keyword: &'a str,
+        attrs: IndexMap<String, ValueWithSpan>,
+    },
+}
+
+impl Matcher<'_> {
+    /// Whether it matches `member`, standing under the `level`s whose ids are `levels`.
+    fn matches(&self, member: &Member, levels: &[&str]) -> bool {
+        match self {
+            Self::Address(address) => member.address.as_ref() == Some(*address),
+            Self::Selector { keyword, attrs } => selects(keyword, attrs, member, levels),
+        }
+    }
+}
+
 /// The lines of the members `target` selects in the `struct` and `def` bodies of `module`.
 fn select(module: &IntentModule, target: &EditTarget) -> Vec<Span> {
     let mut out = Vec::new();
     // An unknown keyword's own finding carries the repair.
-    if matches!(role_of(target.keyword()), MemberRole::Other(_)) {
+    if names_an_unknown_keyword(target) {
         return out;
     }
-    let attrs = match target {
-        EditTarget::Selector { attrs, .. } => Some(args_to_map(attrs)),
-        EditTarget::Address { .. } => None,
+    let matcher = match target {
+        EditTarget::Selector { keyword, attrs, .. } => Matcher::Selector {
+            keyword,
+            attrs: args_to_map(attrs),
+        },
+        EditTarget::Address { address, .. } => Matcher::Address(address),
     };
     let bodies = module
         .structs
@@ -77,35 +110,22 @@ fn select(module: &IntentModule, target: &EditTarget) -> Vec<Span> {
         .map(|s| &s.members)
         .chain(module.defs.iter().map(|d| &d.members));
     for members in bodies {
-        select_in(members, &[], target, attrs.as_ref(), &mut out);
+        select_in(members, &[], &matcher, &mut out);
     }
     out
 }
 
-fn select_in(
-    members: &[Member],
-    levels: &[&str],
-    target: &EditTarget,
-    attrs: Option<&IndexMap<String, ValueWithSpan>>,
-    out: &mut Vec<Span>,
-) {
+fn select_in(members: &[Member], levels: &[&str], matcher: &Matcher<'_>, out: &mut Vec<Span>) {
     for member in members {
-        // An actuator patch adds to the member it names rather than standing as one.
-        if member.selector.is_some() {
+        // An actuator patch stands nowhere: it adds to the member its selector picks.
+        if patched_actuator(member).is_some() {
             continue;
         }
-        let hit = match (target, attrs) {
-            (EditTarget::Address { address, .. }, _) => member.address.as_ref() == Some(address),
-            (EditTarget::Selector { keyword, .. }, Some(attrs)) => {
-                selects(keyword, attrs, member, levels)
-            }
-            (EditTarget::Selector { .. }, None) => false,
-        };
-        if hit {
+        if matcher.matches(member, levels) {
             out.push(member.span.clone());
         }
         let under = levels_under(levels, member);
-        select_in(&member.children.members, &under, target, attrs, out);
+        select_in(&member.children.members, &under, matcher, out);
     }
 }
 
@@ -139,35 +159,21 @@ pub(crate) fn edit_may_set(role: &MemberRole, key: &str, widened: &SelectorKeys<
                 .is_some_and(|extra| extra.contains(key)))
 }
 
-/// Write `key=value` onto `member` where its line would have put it.
+/// Write `key=value` onto `member` where its line would have put it, in place of what the line
+/// wrote under `key`.
 fn set_key(member: &mut Member, key: &str, value: &ValueWithSpan) {
-    let label = match &value.value.kind {
-        ValueKind::Ident(name) | ValueKind::Str(name) => Some(name),
-        _ => None,
-    };
-    match (key, label) {
-        ("class", Some(name)) => {
-            member.class = Some(name.clone());
+    match destination(&member.role, key, value) {
+        Destination::Label(label_key, label) => {
+            label_key.write(member, label);
             member.arguments.remove(key);
         }
-        ("mat_slot", Some(name)) => {
-            member.mat_slot = Some(Label {
-                name: name.clone(),
-                span: value.span.clone(),
-            });
-            member.arguments.remove(key);
-        }
-        _ => {
-            if key == "class" {
-                member.class = None;
-            } else if key == "mat_slot" {
-                member.mat_slot = None;
+        Destination::State => member.intent_state.insert(key.to_owned(), value.clone()),
+        Destination::Argument => {
+            // A value that is no label leaves the key's own field empty, as it does on a line.
+            if let Some(label_key) = LabelKey::of(key) {
+                label_key.clear(member);
             }
-            if member.role.state_arguments().contains(&key) {
-                member.intent_state.insert(key.to_owned(), value.clone());
-            } else {
-                member.arguments.insert(key.to_owned(), value.clone());
-            }
+            member.arguments.insert(key.to_owned(), value.clone());
         }
     }
 }

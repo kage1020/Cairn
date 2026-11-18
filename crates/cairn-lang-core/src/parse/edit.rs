@@ -9,10 +9,10 @@ use crate::lex::TokenKind;
 use super::Parser;
 
 /// The word that opens a top-level `edit` line.
-pub(super) const EDIT: &str = "edit";
+pub const EDIT: &str = "edit";
 
 /// The word that opens an edit's `key=value` list.
-const SET: &str = "set";
+pub const SET: &str = "set";
 
 impl Parser<'_> {
     /// The rest of an `edit` line, its keyword consumed from `start_byte`.
@@ -71,21 +71,22 @@ impl Parser<'_> {
                 position: self.position(),
                 message: format!(
                     "expected `[` or `@` after `{keyword}`: an edit selects by a selector, \
-                     `{keyword}[class=NAME]`, or by an address, `{keyword}@front[0]`"
+                     `{keyword}[class=NAME]`, or by an address, `{keyword}@front[0]` for a member \
+                     on a wall or `{keyword}[0]` for one on none"
                 ),
             });
         }
         let mut address = MemberAddress::new(self.parse_address_step(keyword)?);
-        let mut role_span = keyword_span;
+        let mut keyword_spans = vec![keyword_span];
         while self.peek_is(&TokenKind::Dot) {
             self.advance();
             let (role, span) = self.expect_ident_spanned()?;
-            role_span = span;
+            keyword_spans.push(span);
             address = address.child(self.parse_address_step(role)?);
         }
         Ok(EditTarget::Address {
             address,
-            keyword_span: role_span,
+            keyword_spans,
             span: start..self.last_byte(),
         })
     }

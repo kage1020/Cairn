@@ -7,6 +7,7 @@ mod compile;
 mod contract;
 mod diff_blocks;
 mod docs;
+mod edit;
 mod import;
 mod info;
 mod limits;

@@ -389,21 +389,22 @@ author means, so with both in scope the question has not been asked.
 server raise them with or without a target, and every command that builds refuses them. Each edit
 selects among the members as their lines write them, so an edit is never unmatched because an
 earlier edit changed the attribute it selects on, and never matches a member only another edit gave
-that attribute. An edit whose keyword is not in the known-keyword table is `E_UNKNOWN_KEYWORD`
-alone, with the keywords of a `struct` or `def` body as its candidates. The rest of an edit is
-checked as a line is: a key it writes twice is `E_DUPLICATE_ARG` and a value of the wrong type is a
-type mismatch, and a finding about a value an edit wrote is reported once at that value, however
-many members the edit selects.
+that attribute. An edit that names a keyword not in the known-keyword table, as its selector's or at
+any step of its address, is `E_UNKNOWN_KEYWORD` alone at that keyword, with the keywords of a
+`struct` or `def` body as its candidates. The rest of an edit is checked as a line is: a key it
+writes twice is `E_DUPLICATE_ARG` and a value of the wrong type is a type mismatch, and a finding
+about a value an edit wrote is reported once at that value, however many members the edit selects.
 
 `W_EDIT_RIPPLE` is raised by block-array lowering, which builds each body with its edits and as
-written and compares them member by member, leaving out every cell a selected member holds in either
-build ([§9.2](/spec/components-editing-sites/#92-editing-model)). One finding names one member of
-one structure, the first cell where it changed, and the edits that changed a member of that body.
-Which ripples a command reports follows what its lowering derives. `cairn compile`, `cairn lower`,
-`cairn info` and `cairn check --edition E --target V` read the blocks beside a member from a
-registry pack, so a chest's pairing or a pane's sides count. A `cairn check` with no `--target`, and
-the language server, derive no connection, so they report a ripple only in where a member's blocks
-stand, such as the roof that taller walls lift.
+written and compares them member by member. It leaves out the members an edit selects and those
+under them, which move with them, and every cell one of them holds in either build
+([§9.2](/spec/components-editing-sites/#92-editing-model)). One finding names one member of one
+structure, the first cell where it changed, and the edits that changed a member of that body. Which
+ripples a command reports follows what its lowering derives. `cairn compile`, `cairn lower`,
+`cairn info`, `cairn synth` from its `edition` stage on, and `cairn check --edition E --target V`
+read the blocks beside a member from a registry pack, so a chest's pairing or a pane's sides count.
+A `cairn check` with no `--target`, and the language server, derive no connection, so they report a
+ripple only in where a member's blocks stand, such as the roof that taller walls lift.
 
 ### Sites and placements
 

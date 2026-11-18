@@ -171,7 +171,7 @@ fn lower_to_block_array_within(
             registry,
             palette_capacity,
         );
-        let ripples = ripple::edit_ripples(&intent.edits, &lowered, &written);
+        let ripples = ripple::edit_ripples(&intent.edits, as_written, &lowered, &written);
         lowered.diagnostics.extend(ripples);
         sort_by_position(&mut lowered.diagnostics);
     }
