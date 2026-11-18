@@ -1,6 +1,6 @@
 //! Validation passes over a parsed [`Module`] and its [`IntentModule`], collected by [`check`].
-//! Block-array lowering and [`weigh_intended_targets`] raise codes [`check`] never sees; a caller
-//! that runs them merges their findings itself.
+//! Block-array lowering and [`weigh_intended_targets`] raise codes [`check`] never sees:
+//! [`check_with_intended_targets`] merges the latter in, and a caller merges lowering's itself.
 
 mod arguments;
 mod binding;
@@ -17,6 +17,7 @@ mod nesting;
 mod positional;
 mod requires;
 mod sink;
+mod target_floors;
 mod truth;
 mod type_mismatch;
 
@@ -25,13 +26,26 @@ pub use crate::diagnostic::{
     Severity,
 };
 pub use crate::lines::{LineStarts, position_at};
-pub use intended_targets::weigh_intended_targets;
+pub use intended_targets::{
+    check_with_intended_targets, intended_target_findings, weigh_intended_targets,
+};
 pub use sink::DiagnosticSink;
+pub use target_floors::weigh_target;
 
 use crate::ast::Module;
 use crate::diagnostic::{EditionFindings, agreed};
 use crate::edition::Edition;
 use crate::intent::IntentModule;
+use crate::version::VersionOrder;
+
+/// Each edition's version table and the versions its pack builds, as a front end's packs give
+/// them, for the passes that weigh a version.
+pub struct VersionTables<'a> {
+    /// The edition's version order.
+    pub order_of: &'a dyn Fn(Edition) -> VersionOrder,
+    /// The versions the edition's pack builds, ascending.
+    pub targetable_of: &'a dyn Fn(Edition) -> Vec<String>,
+}
 
 /// Every pass's findings, [`crate::resolve::resolve`]'s included, sorted by span.
 ///
@@ -95,6 +109,7 @@ mod tests {
         ResolverAndLowering,
         LoweringOnly,
         NeedsVersionTable,
+        NeedsTarget,
     }
 
     /// No wildcard arm, so a new code must say which pass raises it.
@@ -172,6 +187,7 @@ mod tests {
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
             }
+            C::VersionCap | C::RequiresUnorderable => RaisedBy::NeedsTarget,
         }
     }
 
@@ -194,6 +210,15 @@ mod tests {
                 "W_INTENDED_TARGET_UNSUPPORTED",
             ],
             "these codes are invisible to `check`",
+        );
+    }
+
+    #[test]
+    fn the_floor_refusals_are_the_codes_only_a_pinned_target_reaches() {
+        assert_eq!(
+            codes_where(|c| raised_by(c) == RaisedBy::NeedsTarget),
+            ["E_REQUIRES_UNORDERABLE", "E_VERSION_CAP"],
+            "`weigh_target` raises these, for a front end that pins a target",
         );
     }
 
