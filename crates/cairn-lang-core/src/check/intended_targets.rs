@@ -7,8 +7,84 @@ use crate::ast::{Header, Module};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
+use crate::intent::IntentModule;
 use crate::resolve::{VersionFloor, declared_version_floors, versions_satisfying};
 use crate::version::{FloorVerdict, VersionOrder, compare_versions};
+
+use super::VersionTables;
+
+/// [`super::check`]'s findings on `module`, with [`intended_target_findings`] in the editions of
+/// `asked` merged in by span.
+#[must_use]
+pub fn check_with_intended_targets(
+    module: &Module,
+    ir: &IntentModule,
+    edition: Option<Edition>,
+    asked: &[Edition],
+    tables: &VersionTables<'_>,
+) -> Vec<Diagnostic> {
+    let mut combined = super::check(module, ir, edition);
+    for finding in intended_target_findings(module, asked, tables) {
+        let at = combined.partition_point(|kept| {
+            (kept.span.start, kept.span.end) <= (finding.span.start, finding.span.end)
+        });
+        combined.insert(at, finding);
+    }
+    combined
+}
+
+/// `@intended_targets` weighed in each edition of `asked`, one cap finding a span.
+///
+/// `W_INTENDED_TARGET_UNSUPPORTED` waits for a single edition: a version Java cannot build is
+/// routinely the Bedrock target the author means.
+#[must_use]
+pub fn intended_target_findings(
+    module: &Module,
+    asked: &[Edition],
+    tables: &VersionTables<'_>,
+) -> Vec<Diagnostic> {
+    // The tables load on first use, which a file without the header should not pay for.
+    if !module
+        .headers
+        .iter()
+        .any(|header| matches!(header, Header::IntendedTargets { .. }))
+    {
+        return Vec::new();
+    }
+    let mut findings: Vec<Diagnostic> = Vec::new();
+    for edition in asked {
+        let order = (tables.order_of)(*edition);
+        let targetable = (tables.targetable_of)(*edition);
+        for finding in weigh_intended_targets(module, *edition, &order, &targetable) {
+            if asked.len() > 1 && finding.code == DiagnosticCode::IntendedTargetUnsupported {
+                continue;
+            }
+            let clash = findings.iter().position(|kept| {
+                kept.span == finding.span
+                    && (kept.code == finding.code || (is_cap(kept.code) && is_cap(finding.code)))
+            });
+            match clash {
+                // The error wins: one edition's partial answer leaves the other's "none" true.
+                Some(at) if findings[at].code == DiagnosticCode::IntendedTargetCapPartial => {
+                    if finding.code == DiagnosticCode::IntendedTargetCap {
+                        findings[at] = finding;
+                    }
+                }
+                Some(_) => {}
+                None => findings.push(finding),
+            }
+        }
+    }
+    findings
+}
+
+/// Whether `code` is one of the two `@intended_targets` cap findings.
+fn is_cap(code: DiagnosticCode) -> bool {
+    matches!(
+        code,
+        DiagnosticCode::IntendedTargetCap | DiagnosticCode::IntendedTargetCapPartial
+    )
+}
 
 /// The findings for each `@intended_targets` version weighed against `edition`'s floors.
 ///
@@ -143,7 +219,7 @@ fn capped(
         message: format!(
             "fix: name a version at or above the floor in `@intended_targets`, or lower the {} \
              floor",
-            keyword(first_floor),
+            first_floor.keyword(),
         ),
     });
     Some(Diagnostic {
@@ -241,13 +317,5 @@ fn candidates_note(
     DiagnosticNote {
         span: None,
         message,
-    }
-}
-
-fn keyword(floor: &VersionFloor) -> &'static str {
-    if floor.origin.part().is_some() {
-        "`requires`"
-    } else {
-        "`@requires`"
     }
 }

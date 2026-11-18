@@ -130,13 +130,15 @@ fn crossed<'s>(
     }
     let order = builtin_pack(edition).version_order();
     let before = order.key_of(&verified.mc_version);
+    let after = order
+        .key_of(target.mc_version())
+        .expect("a resolved target is a row of its edition's version order");
     let below = |boundary: &str, key| order.verdict(boundary, key) == FloorVerdict::Below;
     sensitive
         .iter()
         .filter(|finding| {
             before.is_none_or(|before| {
-                below(&finding.boundary_version, before)
-                    != below(&finding.boundary_version, target.order_key())
+                below(&finding.boundary_version, before) != below(&finding.boundary_version, after)
             })
         })
         .collect()
