@@ -3,11 +3,11 @@
 use std::str::FromStr;
 
 use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::{Edition, resolve};
+use cairn_lang_core::{Edition, check, resolve};
 use cairn_lang_formats::builtin_pack;
 
 use super::*;
-use crate::test_fixtures::{CLEAN, DUPLICATE};
+use crate::test_fixtures::{CLEAN, DUPLICATE, PALE_OAK, SIGN, VARIANTS, bedrock, java};
 
 fn uri() -> lsp_types::Uri {
     lsp_types::Uri::from_str("file:///test.crn").expect("valid uri")
@@ -22,7 +22,7 @@ fn code_of(d: &lsp_types::Diagnostic) -> &str {
 
 #[test]
 fn duplicate_fixture_reports_e_duplicate_size_with_error_severity() {
-    let diagnostics = compute_diagnostics(&uri(), DUPLICATE);
+    let diagnostics = compute_diagnostics(&uri(), DUPLICATE, &Pin::Nothing);
     let dup = diagnostics
         .iter()
         .find(|d| code_of(d) == "E_DUPLICATE_SIZE")
@@ -37,7 +37,7 @@ fn duplicate_fixture_reports_e_duplicate_size_with_error_severity() {
 
 #[test]
 fn span_notes_become_related_information() {
-    let diagnostics = compute_diagnostics(&uri(), DUPLICATE);
+    let diagnostics = compute_diagnostics(&uri(), DUPLICATE, &Pin::Nothing);
     let dup = diagnostics
         .iter()
         .find(|d| code_of(d) == "E_DUPLICATE_SIZE")
@@ -61,7 +61,7 @@ fn span_notes_become_related_information() {
 fn spanless_notes_append_to_message_as_note_lines() {
     // The "expected one of" footer on E_UNKNOWN_KEYWORD has no span.
     let source = "struct s size=2x2\n  wals height=4\n";
-    let diagnostics = compute_diagnostics(&uri(), source);
+    let diagnostics = compute_diagnostics(&uri(), source, &Pin::Nothing);
     let unknown = diagnostics
         .iter()
         .find(|d| code_of(d) == "E_UNKNOWN_KEYWORD")
@@ -77,7 +77,7 @@ fn spanless_notes_append_to_message_as_note_lines() {
 fn parse_error_yields_exactly_one_error_diagnostic() {
     let source = "struct s size=2x2\n\tfloor\n";
     let err = parse(source).expect_err("tab indent should be rejected");
-    let diagnostics = compute_diagnostics(&uri(), source);
+    let diagnostics = compute_diagnostics(&uri(), source, &Pin::Nothing);
     assert_eq!(diagnostics.len(), 1);
     let d = &diagnostics[0];
     assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
@@ -97,7 +97,7 @@ fn artifacts_that_share_a_file_name_report_e_output_name_collision() {
                   struct hut size=3x3\n  floor mat_slot=floor\n\n\
                   def house size=3x3:\n  floor mat_slot=floor\n\n\
                   site s:\n  place id=hut use=house theme=t at=origin\n";
-    let diagnostics = compute_diagnostics(&uri(), source);
+    let diagnostics = compute_diagnostics(&uri(), source, &Pin::Nothing);
     let found: Vec<&lsp_types::Diagnostic> = diagnostics
         .iter()
         .filter(|d| code_of(d) == "E_OUTPUT_NAME_COLLISION")
@@ -153,7 +153,7 @@ fn range(start: (u32, u32), end: (u32, u32)) -> lsp_types::Range {
 #[test]
 fn a_lowering_finding_every_target_raises_is_reported_as_a_pinned_check_words_it() {
     let source = SHED_ON_COBBLESTONE;
-    let diagnostics = compute_diagnostics(&uri(), source);
+    let diagnostics = compute_diagnostics(&uri(), source, &Pin::Nothing);
     assert_eq!(
         located(&diagnostics),
         [
@@ -188,7 +188,7 @@ fn an_id_no_shipped_version_declares_is_left_to_a_pinned_check() {
     let source = "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @oak_stair\n\n\
                   struct hut size=5x5\n  walls mat_slot=wall height=3\n  \
                   roof kind=gable mat_slot=roof\n";
-    assert_eq!(compute_diagnostics(&uri(), source), vec![]);
+    assert_eq!(compute_diagnostics(&uri(), source, &Pin::Nothing), vec![]);
 }
 
 #[test]
@@ -196,25 +196,32 @@ fn a_token_bedrock_writes_under_another_id_is_weighed_as_its_block() {
     let source = "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @oak_sign\n\n\
                   struct hut size=5x5\n  walls mat_slot=wall height=3\n  \
                   roof kind=shed slope_to=front mat_slot=roof\n";
-    assert_eq!(
-        located(&compute_diagnostics(&uri(), source)),
-        [(
-            "E_INCOMPATIBLE_MATERIAL",
-            lsp_types::DiagnosticSeverity::ERROR,
-            range((2, 15), (2, 24)),
-        )],
-    );
+    for pin in [
+        Pin::Nothing,
+        Pin::Edition(Edition::Bedrock),
+        bedrock("1.21.60"),
+    ] {
+        assert_eq!(
+            located(&compute_diagnostics(&uri(), source, &pin)),
+            [(
+                "E_INCOMPATIBLE_MATERIAL",
+                lsp_types::DiagnosticSeverity::ERROR,
+                range((2, 15), (2, 24)),
+            )],
+            "{pin:?}",
+        );
+    }
 }
 
 #[test]
 fn clean_fixture_reports_no_diagnostics() {
-    assert_eq!(compute_diagnostics(&uri(), CLEAN), vec![]);
+    assert_eq!(compute_diagnostics(&uri(), CLEAN, &Pin::Nothing), vec![]);
 }
 
 #[test]
 fn ranges_count_utf16_code_units_on_non_ascii_lines() {
     let source = "struct s size=2x2\n  door id=\"😀\" id=x\n";
-    let diagnostics = compute_diagnostics(&uri(), source);
+    let diagnostics = compute_diagnostics(&uri(), source, &Pin::Nothing);
     let dup = diagnostics
         .iter()
         .find(|d| code_of(d) == "E_DUPLICATE_ARG")
@@ -246,7 +253,7 @@ fn a_diagnostic_covers_the_same_text_whatever_the_line_ending() {
     ] {
         let source = rendering.as_str();
         let index = LineIndex::new(source);
-        let covered: Vec<(String, String)> = compute_diagnostics(&uri(), source)
+        let covered: Vec<(String, String)> = compute_diagnostics(&uri(), source, &Pin::Nothing)
             .iter()
             .map(|d| {
                 let start = index
@@ -280,7 +287,7 @@ fn a_parse_error_lands_on_its_own_line_whatever_the_line_ending() {
         base.replace('\n', "\r"),
     ] {
         let source = rendering.as_str();
-        let diagnostics = compute_diagnostics(&uri(), source);
+        let diagnostics = compute_diagnostics(&uri(), source, &Pin::Nothing);
         assert_eq!(diagnostics.len(), 1, "{source:?}");
         let range = diagnostics[0].range;
         // The end of `  floor mat_slot=`, not the start of line 2.
@@ -293,9 +300,162 @@ fn a_parse_error_lands_on_its_own_line_whatever_the_line_ending() {
 #[test]
 fn a_parse_error_inside_a_line_covers_the_rest_of_it() {
     let source = "struct s size=2x2\n\tfloor\n";
-    let diagnostics = compute_diagnostics(&uri(), source);
+    let diagnostics = compute_diagnostics(&uri(), source, &Pin::Nothing);
     assert_eq!(diagnostics.len(), 1);
     let range = diagnostics[0].range;
     assert_eq!(range.start.line, 1);
     assert!(range.end > range.start, "{range:?}");
+}
+
+/// Each finding's code and the source text its range covers.
+fn covered<'s>(source: &'s str, diagnostics: &[lsp_types::Diagnostic]) -> Vec<(String, &'s str)> {
+    let index = LineIndex::new(source);
+    diagnostics
+        .iter()
+        .map(|d| {
+            let start = index.offset_at(source, d.range.start).expect("in the text");
+            let end = index.offset_at(source, d.range.end).expect("in the text");
+            (code_of(d).to_owned(), &source[start..end])
+        })
+        .collect()
+}
+
+#[test]
+fn a_pinned_target_reports_an_id_it_does_not_declare_with_the_payload_a_quick_fix_reads() {
+    let found = compute_diagnostics(&uri(), SIGN, &java("1.21.4"));
+    assert_eq!(
+        covered(SIGN, &found),
+        [("E_UNKNOWN_ID".to_owned(), "@standing_sign")],
+    );
+    assert_eq!(
+        found[0].data,
+        Some(serde_json::json!({
+            "kind": "unknown_id",
+            "id": "minecraft:standing_sign",
+            "registry": "java 1.21.4",
+            "origin": "authored",
+            "aliases": ["minecraft:oak_sign"],
+        })),
+    );
+}
+
+#[test]
+fn no_id_is_refused_unless_a_version_is_pinned() {
+    assert_eq!(compute_diagnostics(&uri(), SIGN, &Pin::Nothing), vec![]);
+    assert_eq!(
+        compute_diagnostics(&uri(), SIGN, &Pin::Edition(Edition::Java)),
+        vec![],
+    );
+}
+
+#[test]
+fn an_edition_or_a_target_pin_binds_that_edition_s_theme_variant() {
+    let rebound = [(
+        "W_THEME_VARIANT_REBOUND".to_owned(),
+        "place id=a use=hut theme=t_java at=origin",
+    )];
+    for pin in [Pin::Edition(Edition::Bedrock), bedrock("1.21.60")] {
+        let found = compute_diagnostics(&uri(), VARIANTS, &pin);
+        assert_eq!(covered(VARIANTS, &found), rebound, "{pin:?}");
+    }
+    for pin in [Pin::Edition(Edition::Java), java("1.21.4"), Pin::Nothing] {
+        assert_eq!(
+            compute_diagnostics(&uri(), VARIANTS, &pin),
+            vec![],
+            "{pin:?}"
+        );
+    }
+}
+
+#[test]
+fn a_target_a_floor_refuses_is_refused_at_the_floor_and_pins_no_version() {
+    let found = compute_diagnostics(&uri(), PALE_OAK, &java("1.21"));
+    assert_eq!(
+        covered(PALE_OAK, &found),
+        [("E_VERSION_CAP".to_owned(), "@requires version>=1.21.4")],
+    );
+    assert_eq!(
+        found[0].message,
+        "this file requires version>=1.21.4 (target 1.21)\n\
+         note: valid java targets: 1.21.4, 26.3\n\
+         note: fix: set `cairn.target` to 1.21.4, or lower the `@requires` floor",
+    );
+    assert_eq!(
+        found[0].data,
+        Some(serde_json::json!({
+            "kind": "version_cap",
+            "edition": "java",
+            "target": "1.21",
+            "floor": "version>=1.21.4",
+            "valid": ["1.21.4", "26.3"],
+        })),
+    );
+    assert_eq!(
+        compute_diagnostics(&uri(), PALE_OAK, &java("1.21.4")),
+        vec![]
+    );
+}
+
+#[test]
+fn a_target_no_floor_refuses_is_checked_for_the_ids_it_declares() {
+    let source = PALE_OAK.replace("@requires version>=1.21.4\n", "");
+    assert_eq!(
+        covered(
+            &source,
+            &compute_diagnostics(&uri(), &source, &java("1.21"))
+        ),
+        [("E_UNKNOWN_ID".to_owned(), "@pale_oak_planks")],
+    );
+}
+
+#[test]
+fn a_bedrock_target_checks_ids_and_floors_against_bedrock_s_table() {
+    assert_eq!(
+        compute_diagnostics(&uri(), SIGN, &bedrock("1.21.60")),
+        vec![]
+    );
+    let found = compute_diagnostics(&uri(), PALE_OAK, &bedrock("1.21.60"));
+    assert_eq!(
+        covered(PALE_OAK, &found),
+        [(
+            "E_REQUIRES_UNORDERABLE".to_owned(),
+            "@requires version>=1.21.4"
+        )],
+    );
+}
+
+/// A floor above the one version the header intends.
+const INTENDED_BELOW_THE_FLOOR: &str = "\
+@requires version>=1.21
+@intended_targets [\"1.20.4\"]
+theme t:
+  slot wall -> @oak_planks
+struct s size=3x3
+  walls mat_slot=wall height=2
+";
+
+#[test]
+fn every_pin_weighs_intended_targets_in_the_editions_it_is_about() {
+    let source = INTENDED_BELOW_THE_FLOOR;
+    for (pin, expected) in [
+        (Pin::Nothing, vec!["E_INTENDED_TARGET_CAP"]),
+        (Pin::Edition(Edition::Java), vec!["E_INTENDED_TARGET_CAP"]),
+        (java("1.21.4"), vec!["E_INTENDED_TARGET_CAP"]),
+        (
+            Pin::Edition(Edition::Bedrock),
+            vec!["W_INTENDED_TARGET_UNSUPPORTED"],
+        ),
+    ] {
+        let found = compute_diagnostics(&uri(), source, &pin);
+        assert_eq!(
+            found.iter().map(code_of).collect::<Vec<_>>(),
+            expected,
+            "{pin:?}",
+        );
+        assert_eq!(
+            covered(source, &found),
+            [(expected[0].to_owned(), "@intended_targets [\"1.20.4\"]")],
+            "{pin:?}",
+        );
+    }
 }

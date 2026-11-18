@@ -35,7 +35,6 @@ use crate::report::{
     report_failure_document,
 };
 use crate::respelled::{report_respelled_notes, respelled_tokens};
-use crate::target::supported_versions;
 
 pub(crate) fn run_info(
     file: &Path,
@@ -362,7 +361,7 @@ fn edition_rows(
             edition_wide_refusals(edition, &resolution, &block_ir, portability.as_ref());
 
         let floors = declared_version_floors(module, edition);
-        let considered = supported_versions(pack);
+        let considered = pack.targetable_versions();
         let verdicts = weigh_versions(
             ir,
             &resolution,

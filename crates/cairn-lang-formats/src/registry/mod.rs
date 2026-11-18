@@ -29,7 +29,8 @@ pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
 pub use load::{
     PackSource, PackView, RegistryError, RegistryPack, Respelling, SUPPORTED_DATA_VERSIONS_SCHEMA,
-    SUPPORTED_MANIFEST_SCHEMA, builtin_pack, load_builtin_pack, load_from_dir,
+    SUPPORTED_MANIFEST_SCHEMA, builtin_pack, builtin_version_tables, load_builtin_pack,
+    load_from_dir,
 };
 pub use manifest::{PackFiles, PackManifest};
 pub use states::{
