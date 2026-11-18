@@ -1,9 +1,11 @@
 //! Per-edition palette-entry portability for `cairn info`, counted over the lowered IR so each
 //! figure matches what `cairn compile --edition` emits. An id no version of the edition declares
-//! is unsupported, answered by the pack's `absent` reason when it is the other edition's block; on
-//! Bedrock the rest go through the `.mcstructure` writer's state translation at every version that
-//! writes them, under their own spelling or another, and are asked of the edition: a state some
-//! version maps is not unsupported, and a loss at some version is a degradation.
+//! is unsupported, unless a canonical token names it that some version writes under another
+//! spelling (`spec/materials-themes` "Mappings across version and edition"), and is answered by
+//! the pack's `absent` reason when it is the other edition's block. On Bedrock the rest go through
+//! the `.mcstructure` writer's state translation at every version that writes them, a raw block
+//! only under its own id, and are asked of the edition: a state some version maps is not
+//! unsupported, and a loss at some version is a degradation.
 
 use std::borrow::Cow;
 
@@ -14,7 +16,9 @@ use cairn_lang_core::suggest::nearest_namespaced_id;
 use thiserror::Error;
 
 use crate::bedrock_state::{BedrockStateError, translate_states};
-use crate::registry::{AbsentIndex, AliasIndex, BlocksIndex, StateMapIndex};
+use crate::registry::{
+    AbsentIndex, AliasIndex, BlocksIndex, Respelled, StateMapIndex, respelled_at,
+};
 
 /// One edition's portability counts and the entries behind them. The fields are private so each
 /// count always matches its list.
@@ -135,8 +139,9 @@ pub fn portability_for_java(
     report
 }
 
-/// Bedrock's report, each entry its tables declare classified by [`translate_states`] at every
-/// version that declares it; without `states`, no entry has a form.
+/// Bedrock's report, each entry classified by [`translate_states`] at every version that writes
+/// it, under its own id or, for a canonical token, the one the version writes it as; without
+/// `states`, no entry has a form.
 ///
 /// # Errors
 ///
@@ -150,13 +155,22 @@ pub fn portability_for_bedrock(
 ) -> Result<PortabilityReport, InvalidPalette> {
     let mut report = PortabilityReport::default();
     let mut leaks = Vec::new();
-    for (entry, derived) in entries_with_derived(ir) {
-        let written_apart = |version| {
-            states
-                .and_then(|states| states.at(version))
-                .is_some_and(|map| map.written_apart(&entry.id).is_some())
+    for PaletteEntry {
+        state: entry,
+        derived,
+        raw,
+    } in palette_entries(ir)
+    {
+        let respelled = |version: &str| {
+            (!raw)
+                .then(|| respelled_at(blocks, aliases, states, version, &entry.id))
+                .flatten()
         };
-        if absent_from_edition(blocks, entry) && !blocks.versions().any(written_apart) {
+        if absent_from_edition(blocks, entry)
+            && !blocks
+                .versions()
+                .any(|version| respelled(version).is_some())
+        {
             report.push_unsupported(absent_entry(blocks, aliases, absent, entry));
             continue;
         }
@@ -171,15 +185,17 @@ pub fn portability_for_bedrock(
             ) else {
                 continue;
             };
-            let spelled = if ids.binary_search(&entry.id).is_ok() || written_apart(version) {
+            let spelled = if ids.binary_search(&entry.id).is_ok() {
                 Cow::Borrowed(entry)
-            } else if let Some(spelling) = aliases.renamed(blocks, ids, &entry.id) {
-                Cow::Owned(BlockState {
-                    id: spelling.to_owned(),
-                    properties: entry.properties.clone(),
-                })
             } else {
-                continue;
+                match respelled(version) {
+                    Some(Respelled::Renamed(spelling)) => Cow::Owned(BlockState {
+                        id: spelling.to_owned(),
+                        properties: entry.properties.clone(),
+                    }),
+                    Some(Respelled::Apart) => Cow::Borrowed(entry),
+                    None => continue,
+                }
             };
             // No wildcard arm: a new refusal must be classified here.
             match translate_states(&map, &spelled, derived) {
@@ -210,7 +226,7 @@ pub fn portability_for_bedrock(
                 reason: UnsupportedReason::StatesUnmapped {
                     states: entry.properties_text(),
                     detail: detail.unwrap_or_else(|| {
-                        "no version that declares the block carries a state map".to_owned()
+                        "no version that writes the block carries a state map".to_owned()
                     }),
                 },
             }),
@@ -263,22 +279,44 @@ fn absent_entry(
     }
 }
 
-/// Every non-air palette entry across the IR's structures, walkways included.
-fn non_air_entries(ir: &BlockArrayIr) -> impl Iterator<Item = &BlockState> {
-    entries_with_derived(ir).map(|(entry, _)| entry)
+/// One non-air palette entry of a structure, as portability weighs it.
+struct PaletteEntry<'a> {
+    state: &'a BlockState,
+    /// The keys the structure's array says the lowering derived for it.
+    derived: &'a [String],
+    /// Whether a raw member wrote it, naming the id it writes rather than a canonical token's.
+    raw: bool,
 }
 
-/// Each non-air palette entry, with the keys its array says the lowering derived for it.
-fn entries_with_derived(ir: &BlockArrayIr) -> impl Iterator<Item = (&BlockState, &[String])> {
+/// Every non-air palette entry across the IR's structures, walkways included.
+fn non_air_entries(ir: &BlockArrayIr) -> impl Iterator<Item = &BlockState> {
+    palette_entries(ir).map(|entry| entry.state)
+}
+
+/// Each non-air palette entry across the IR's structures, walkways included.
+fn palette_entries(ir: &BlockArrayIr) -> impl Iterator<Item = PaletteEntry<'_>> {
     ir.structures
-        .values()
-        .flat_map(|ba| {
-            ba.palette.entries.iter().enumerate().map(|(slot, entry)| {
-                let derived = ba.derived.get(slot).map_or(&[][..], Vec::as_slice);
-                (entry, derived)
-            })
+        .iter()
+        .flat_map(|(scope, ba)| {
+            let raw: Vec<&BlockState> = ir
+                .members
+                .get(scope)
+                .into_iter()
+                .flatten()
+                .filter(|member| member.is_raw())
+                .flat_map(|member| member.resolved_state.iter().map(|block| &block.state))
+                .collect();
+            ba.palette
+                .entries
+                .iter()
+                .enumerate()
+                .map(move |(slot, state)| PaletteEntry {
+                    state,
+                    derived: ba.derived.get(slot).map_or(&[][..], Vec::as_slice),
+                    raw: raw.contains(&state),
+                })
         })
-        .filter(|(entry, _)| !is_air(entry))
+        .filter(|entry| !is_air(entry.state))
 }
 
 /// Whether the tables prove no version has this block; a pack without tables proves nothing.

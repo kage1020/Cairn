@@ -1,5 +1,5 @@
-//! `cairn info`: a source's version axes, with one portability and buildable-targets row per
-//! requested edition.
+//! `cairn info`: a source's version axes, with one portability, respelled and buildable-targets
+//! row per requested edition.
 
 use std::path::Path;
 use std::process::ExitCode;

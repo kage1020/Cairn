@@ -2,7 +2,7 @@
 //! ripple into (`spec/components-editing-sites` "Editing model").
 
 use cairn_lang_core::DiagnosticCode;
-use cairn_lang_core::block_array::findings_without_target;
+use cairn_lang_core::block_array::{IdStanding, findings_without_target};
 use cairn_lang_core::intent::{IntentModule, Member};
 use cairn_lang_core::{Diagnostic, lower, parse};
 
@@ -277,7 +277,7 @@ fn the_intent_ir_lists_each_edit_with_its_target_as_written() {
 /// `source`'s findings lowered with no target for either edition, as `cairn check` reports them
 /// without `--target`.
 fn without_target(source: &str) -> Vec<Diagnostic> {
-    findings_without_target(&edited(source), None, &|_, _| true)
+    findings_without_target(&edited(source), None, &|_, _| IdStanding::Declared)
 }
 
 /// A 7x5 struct with 3-row walls under a flat roof one voxel past them, `members` after the roof

@@ -255,7 +255,8 @@ pub struct WrittenSpelling {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpellingTable {
-    /// `aliases`: the version declares another spelling of the block, one it renamed.
+    /// `aliases`: the version declares the one other spelling of the block's group, a rename
+    /// across the edition's versions.
     Aliases,
     /// The Bedrock state map, which writes the canonical block as one of the version's own.
     StateMap,
@@ -656,6 +657,30 @@ impl VersionFloor {
             || "this file".to_owned(),
             |(keyword, name)| format!("`{keyword} {name}`"),
         )
+    }
+
+    /// The line that declared the floor, as a quoted keyword: `` `@requires` `` or `` `requires` ``.
+    #[must_use]
+    pub fn keyword(&self) -> &'static str {
+        match self.origin {
+            FloorOrigin::Module => "`@requires`",
+            FloorOrigin::Def(_) | FloorOrigin::Theme(_) => "`requires`",
+        }
+    }
+
+    /// Which part declared the floor and what inherits it, as a sentence; `None` for an
+    /// `@requires` header.
+    #[must_use]
+    pub fn inheritance(&self) -> Option<String> {
+        let inherited_by = match &self.origin {
+            FloorOrigin::Module => return None,
+            FloorOrigin::Def(name) => format!("every `place use={name}` inherits it"),
+            FloorOrigin::Theme(_) => "every scope that binds the theme inherits it".to_owned(),
+        };
+        Some(format!(
+            "{} declares it, and {inherited_by}",
+            self.declarer()
+        ))
     }
 }
 

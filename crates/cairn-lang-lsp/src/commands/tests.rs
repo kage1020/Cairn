@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use cairn_lang_core::parse;
-use cairn_lang_formats::build::{BuildTarget, lower_for_build};
+use cairn_lang_formats::build::lower_for_build;
 use cairn_lang_formats::data_version::resolve_java_target;
 use cairn_lang_formats::java_structure::write_structure_gzip;
 use serde_json::json;
@@ -235,11 +235,7 @@ struct s size=2x2
 fn structure_file(source: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
     let module = parse(source).expect("the source parses");
     let target = resolve_java_target("1.21.4").expect("a shipped target");
-    let pinned = BuildTarget {
-        mc_version: &target.mc_version,
-        order_key: i64::from(target.data_version),
-    };
-    let (_, build) = lower_for_build(&module, Edition::Java, Some(pinned));
+    let (_, build) = lower_for_build(&module, Edition::Java, Some(&target.mc_version));
     let array = build
         .block_ir
         .structures

@@ -4,10 +4,10 @@
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::voxel_diff::{DiffInput, DiffReport, diff};
-use cairn_lang_core::{Edition, Severity, diagnose_parse_failure, parse};
+use cairn_lang_core::{Diagnostic, Edition, Severity, diagnose_parse_failure, parse};
 use serde::Serialize;
 
-use crate::build::{Build, BuildTarget, DeclaredFloors, lower_for_build};
+use crate::build::{Build, lower_for_build};
 use crate::import::DecodedStructure;
 use crate::info::{Conflict, FailureDocument, Found, built_scopes};
 
@@ -48,8 +48,8 @@ pub enum DiffBlocksRefusal {
         /// How many scopes did.
         built: usize,
     },
-    /// A `@requires` floor refuses the stamp.
-    Floor(DeclaredFloors),
+    /// A version floor refuses the stamp, with the finding that says so.
+    Floor(Box<Diagnostic>),
 }
 
 /// A run of `cairn diff-blocks`: what the build found, and the document or why there is none.
@@ -96,13 +96,13 @@ pub fn diff_blocks(source: &str, structure: &DecodedStructure) -> DiffBlocksRun 
         }
     };
     let stamp = &structure.stamp;
-    let target = stamp.build_target();
+    let target = stamp.mc_version.as_str();
     let (ir, build) = lower_for_build(&module, stamp.edition, Some(target));
     let Build {
         block_ir,
         circuits,
         dropped_scopes,
-        version_floors,
+        floor_refusal,
         conflicts,
     } = build;
     let findings: Vec<Found> = block_ir
@@ -122,9 +122,7 @@ pub fn diff_blocks(source: &str, structure: &DecodedStructure) -> DiffBlocksRun 
             built: built_scopes(&block_ir),
         })
     } else {
-        version_floors
-            .filter(|declared| declared.refusing(target.order_key).is_some())
-            .map(DiffBlocksRefusal::Floor)
+        floor_refusal.map(|refusal| DiffBlocksRefusal::Floor(Box::new(refusal)))
     };
     if let Some(refusal) = refusal {
         return DiffBlocksRun {
@@ -158,7 +156,7 @@ pub fn diff_blocks(source: &str, structure: &DecodedStructure) -> DiffBlocksRun 
 
 /// What `text` builds at `target`, `None` when it does not parse, a pass raises an error or a
 /// scope is dropped.
-fn build_candidate(text: &str, edition: Edition, target: BuildTarget<'_>) -> Option<BlockArrayIr> {
+fn build_candidate(text: &str, edition: Edition, target: &str) -> Option<BlockArrayIr> {
     let module = parse(text).ok()?;
     let (_, build) = lower_for_build(&module, edition, Some(target));
     let refused = build

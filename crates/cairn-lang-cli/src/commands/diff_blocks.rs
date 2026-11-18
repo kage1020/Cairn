@@ -15,7 +15,7 @@ use cairn_lang_formats::info::{Reporter, report_conflicts};
 
 use crate::cli::DiffFormat;
 use crate::commands::import::{file_name, open_structure, refuse_extension};
-use crate::floors::enforce_version_floor;
+use crate::floors::report_floor_refusal;
 use crate::pipeline::{read_source, report_partial_build};
 use crate::report::{
     FailureReport, Found, Stderr, print_json, report_diagnostics, report_failure_document,
@@ -112,17 +112,15 @@ fn report_run(
         DiffBlocksRefusal::PartialBuild { dropped, built } => {
             report_partial_build(file, &dropped, built, "refusing to compare a partial build");
         }
-        DiffBlocksRefusal::Floor(declared) => {
-            let target = stamp.build_target();
-            if enforce_version_floor(file, source, &declared, stamp.edition, target).is_err() {
-                eprintln!(
-                    "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {} {}, \
-                     so its `@requires` must admit that target",
-                    structure.display(),
-                    stamp.edition,
-                    stamp.mc_version,
-                );
-            }
+        DiffBlocksRefusal::Floor(refusal) => {
+            report_floor_refusal(file, source, &refusal);
+            eprintln!(
+                "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {} {}, so \
+                 its `@requires` must admit that target",
+                structure.display(),
+                stamp.edition,
+                stamp.mc_version,
+            );
         }
     }
     // One document per input under `--format json`: the refusal is stderr's, the warnings too.

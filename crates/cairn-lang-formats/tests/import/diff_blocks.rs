@@ -1,7 +1,7 @@
 //! `cairn diff-blocks`' library half: the document a lift compared at its structure's stamp
 //! gives, and which refusal ends a run that compares nothing.
 
-use cairn_lang_core::Edition;
+use cairn_lang_core::{DiagnosticCode, Edition};
 use cairn_lang_formats::diff_blocks::{DiffBlocksRefusal, DiffBlocksRun, diff_blocks};
 use cairn_lang_formats::import::{
     DecodedStructure, ImportFormat, ImportStamp, StampFit, decode_structure,
@@ -151,11 +151,17 @@ fn each_refusal_of_the_whole_run_comes_after_the_findings_in_the_order_compile_g
 
     let floor = format!("@requires version>=26.3\n{STONE}");
     let run = diff_blocks(&floor, &java_structure(STONE));
-    let Err(DiffBlocksRefusal::Floor(declared)) = &run.outcome else {
+    let Err(DiffBlocksRefusal::Floor(refusal)) = &run.outcome else {
         panic!("a floor past the stamp refuses the run: {:?}", run.outcome);
     };
-    let floors: Vec<&str> = declared.floors.iter().map(|f| f.version.as_str()).collect();
-    assert_eq!(floors, ["26.3"]);
+    assert_eq!(
+        (refusal.code, refusal.span.clone(), refusal.primary.as_str()),
+        (
+            DiagnosticCode::VersionCap,
+            0..23,
+            "this file requires version>=26.3 (target 1.21.4)",
+        ),
+    );
     assert_eq!(
         serde_json::to_value(run.failure_document(&floor)).expect("serialises"),
         serde_json::json!({ "diagnostics": [] }),

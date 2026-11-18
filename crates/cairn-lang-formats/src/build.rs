@@ -1,66 +1,17 @@
 //! A source lowered for one edition's build as `cairn compile` lowers it, with what can still
-//! refuse the build: its findings, the scopes it dropped, and the `@requires` floors it declares.
+//! refuse the build: its findings, the scopes it dropped, and a version floor that rules out the
+//! target.
 
 use cairn_lang_core::ast::Module;
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::check::weigh_target;
 use cairn_lang_core::intent::IntentModule;
-use cairn_lang_core::resolve::{
-    FloorPlacement, FloorVerdict, VersionFloor, VersionOrder, declared_version_floors, resolve,
-};
-use cairn_lang_core::{Edition, lower};
+use cairn_lang_core::resolve::{VersionFloor, declared_version_floors, resolve};
+use cairn_lang_core::{Diagnostic, Edition, lower};
 use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
-use crate::info::{
-    Conflict, build_diagnostics, dropped_scopes, lay_circuits, requires_conflicts,
-    supported_versions,
-};
-use crate::registry::builtin_pack;
-
-/// The target a build is pinned to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BuildTarget<'a> {
-    /// The version, as a registry view takes it.
-    pub mc_version: &'a str,
-    /// Its key in its edition's version order, which a floor is weighed against.
-    pub order_key: i64,
-}
-
-/// The `@requires` floors one edition's build is held to, with that edition's version order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeclaredFloors {
-    /// Never empty.
-    pub floors: Vec<VersionFloor>,
-    /// The edition's `DataVersion` table.
-    pub order: VersionOrder,
-}
-
-/// The floor that refuses a target, and on which ground.
-#[derive(Debug, Clone, Copy)]
-pub enum FloorRefusal<'a> {
-    /// The edition's version table cannot place this floor.
-    Unplaceable(&'a VersionFloor),
-    /// The target sits below this floor.
-    Below(&'a VersionFloor),
-}
-
-impl DeclaredFloors {
-    /// The floor that refuses the target at `order_key`, or `None`; an unplaceable floor is named
-    /// first, since a later target cannot satisfy it.
-    #[must_use]
-    pub fn refusing(&self, order_key: i64) -> Option<FloorRefusal<'_>> {
-        if let Some(floor) = self
-            .floors
-            .iter()
-            .find(|floor| self.order.place(&floor.version) == FloorPlacement::Unplaceable)
-        {
-            return Some(FloorRefusal::Unplaceable(floor));
-        }
-        self.floors
-            .iter()
-            .find(|floor| self.order.verdict(&floor.version, order_key) == FloorVerdict::Below)
-            .map(FloorRefusal::Below)
-    }
-}
+use crate::info::{Conflict, build_diagnostics, dropped_scopes, lay_circuits, requires_conflicts};
+use crate::registry::{builtin_pack, builtin_version_tables};
 
 /// A source lowered for one edition's build.
 #[derive(Debug, Clone)]
@@ -71,42 +22,59 @@ pub struct Build {
     pub circuits: Vec<CircuitDiagnostic>,
     /// The scopes that produced no voxels.
     pub dropped_scopes: Vec<String>,
-    /// The `@requires` floors the build is held to, if the source declares any.
-    pub version_floors: Option<DeclaredFloors>,
+    /// The finding by which the source's floors refuse the target, which then pins no version.
+    pub floor_refusal: Option<Diagnostic>,
     /// The floors above the last version that declares some id the build paints, whatever the
     /// target.
     pub conflicts: Vec<Conflict>,
 }
 
-/// `module` resolved and lowered for `edition`'s build, with its Intent IR.
+/// The finding that refuses the version `target` for `floors`, the floors `edition`'s build is
+/// held to, or `None` when every floor admits it.
 ///
-/// Ids are checked against `target` unless it is `None` or a floor refuses it: the floor refusal
-/// then explains the failed build, not an `E_UNKNOWN_ID`.
+/// # Panics
+///
+/// When every floor is placeable and `target` names no row of `edition`'s version table.
+#[must_use]
+pub fn floor_refusal(
+    floors: &[VersionFloor],
+    edition: Edition,
+    target: &str,
+) -> Option<Diagnostic> {
+    weigh_target(
+        floors,
+        edition,
+        target,
+        &builtin_version_tables(),
+        &|version| format!("--target {version}"),
+    )
+}
+
+/// `module` resolved and lowered for `edition`'s build at the version `target`, with its Intent
+/// IR. Ids are checked against no version when `target` is `None` or a floor refuses it, so the
+/// refusal, not an `E_UNKNOWN_ID`, explains the failed build.
+///
+/// # Panics
+///
+/// When the source declares a floor `edition` can place and `target` is no row of its table.
 #[must_use]
 pub fn lower_for_build(
     module: &Module,
     edition: Edition,
-    target: Option<BuildTarget<'_>>,
+    target: Option<&str>,
 ) -> (IntentModule, Build) {
     let pack = builtin_pack(edition);
     let floors = declared_version_floors(module, edition);
-    let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
-        floors,
-        order: pack.version_order(),
-    });
-    let mc_version = target
-        .filter(|target| {
-            version_floors
-                .as_ref()
-                .is_none_or(|declared| declared.refusing(target.order_key).is_none())
-        })
-        .map(|target| target.mc_version);
+    let refusal = target.and_then(|target| floor_refusal(&floors, edition, target));
+    let mc_version = target.filter(|_| refusal.is_none());
     let ir = lower(module);
     let resolution = resolve(&ir, Some(edition));
     let registry = pack.view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
-    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
-        let considered = supported_versions(pack);
+    let conflicts = if floors.is_empty() {
+        Vec::new()
+    } else {
+        let considered = pack.targetable_versions();
         let at_newest = (mc_version.is_some()
             && mc_version == considered.last().map(String::as_str))
         .then_some(block_ir.diagnostics.as_slice());
@@ -115,11 +83,11 @@ pub fn lower_for_build(
             &resolution,
             pack,
             &considered,
-            &declared.floors,
-            &declared.order,
+            &floors,
+            &pack.version_order(),
             at_newest,
         )
-    });
+    };
     // `check`'s gate, so a build never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         module,
@@ -134,7 +102,7 @@ pub fn lower_for_build(
         block_ir,
         circuits,
         dropped_scopes,
-        version_floors,
+        floor_refusal: refusal,
         conflicts,
     };
     (ir, build)

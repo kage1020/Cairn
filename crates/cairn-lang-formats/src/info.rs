@@ -21,8 +21,7 @@ use serde::Serialize;
 use crate::registry::builtin_pack;
 
 pub use circuits::{kept_findings, lay_circuits, raised_by_each, same_place};
-pub use floors::{floor_keyword, floor_origin_note};
-pub use gate::{build_diagnostics, supported_versions};
+pub use gate::build_diagnostics;
 pub use inferred::{Conflict, report_conflicts, requires_conflicts};
 pub use requested::{RequestedEditions, requested_editions};
 pub use scopes::{built_scopes, dropped_scopes};

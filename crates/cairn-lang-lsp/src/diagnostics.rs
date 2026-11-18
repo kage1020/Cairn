@@ -1,18 +1,26 @@
-//! Source text → LSP diagnostics, from the pipeline `cairn check` runs.
+//! Source text → LSP diagnostics, from the pipeline `cairn check` runs, or `cairn compile` for a
+//! pinned target.
 
-use cairn_lang_core::block_array::findings_without_target;
-use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::block_array::{findings_without_target, lower_to_block_array};
+use cairn_lang_core::check::{LineStarts, check_with_intended_targets, weigh_target};
+use cairn_lang_core::resolve::declared_version_floors;
 use cairn_lang_core::{
-    Diagnostic as CoreDiagnostic, Severity, check, diagnose_parse_failure, lower, parse,
+    Diagnostic as CoreDiagnostic, Edition, Module, Severity, diagnose_parse_failure, lower, parse,
+    resolve,
 };
-use cairn_lang_formats::builtin_pack;
+use cairn_lang_formats::{builtin_pack, builtin_version_tables};
 
 use crate::line_index::LineIndex;
+use crate::pin::Pin;
 
-/// The findings of `parse → lower → check` on `source`, and of block-array lowering with no
-/// target, as diagnostics in the document at `uri`.
+/// The findings of `parse → lower → check` on `source`, and of block-array lowering against what
+/// `pin` pins, as diagnostics in the document at `uri`.
 #[must_use]
-pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types::Diagnostic> {
+pub fn compute_diagnostics(
+    uri: &lsp_types::Uri,
+    source: &str,
+    pin: &Pin,
+) -> Vec<lsp_types::Diagnostic> {
     let index = LineIndex::new(source);
     let module = match parse(source) {
         Ok(module) => module,
@@ -22,16 +30,47 @@ pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types:
             return vec![to_lsp_diagnostic(uri, source, &index, &diagnostic)];
         }
     };
-    let ir = lower(&module);
-    // No edition, as `cairn check` without `--edition`.
-    let mut findings = check(&module, &ir, None);
-    findings.extend(findings_without_target(&ir, None, &|edition, id| {
-        builtin_pack(edition).may_declare(id)
-    }));
-    findings
+    findings(&module, pin)
         .iter()
         .map(|d| to_lsp_diagnostic(uri, source, &index, d))
         .collect()
+}
+
+/// What `cairn check` reports on `module` with `pin`'s edition, or, for a target, what
+/// `cairn compile` refuses on before it writes anything, circuits aside.
+fn findings(module: &Module, pin: &Pin) -> Vec<CoreDiagnostic> {
+    let standing = |edition: Edition, id: &str| builtin_pack(edition).id_standing(id);
+    let tables = builtin_version_tables();
+    let ir = lower(module);
+    let edition = match pin {
+        Pin::Edition(edition) => Some(*edition),
+        Pin::Target(target) => Some(target.edition()),
+        Pin::Nothing => None,
+    };
+    let mut found =
+        check_with_intended_targets(module, &ir, edition, &Edition::weighed(edition), &tables);
+    let Pin::Target(target) = pin else {
+        found.extend(findings_without_target(&ir, edition, &standing));
+        return found;
+    };
+    let edition = target.edition();
+    let refusal = weigh_target(
+        &declared_version_floors(module, edition),
+        edition,
+        target.version(),
+        &tables,
+        &|version| format!("set `cairn.target` to {version}"),
+    );
+    // A target a floor refuses pins no version (`spec/versioning-editions` "The declared floor is
+    // enforced").
+    let pinned = refusal.is_none().then_some(target.version());
+    let resolution = resolve(&ir, Some(edition));
+    found.extend(
+        lower_to_block_array(&ir, &resolution, Some(&builtin_pack(edition).view(pinned)))
+            .diagnostics,
+    );
+    found.extend(refusal);
+    found
 }
 
 /// Map one core [`CoreDiagnostic`] into the LSP shape.

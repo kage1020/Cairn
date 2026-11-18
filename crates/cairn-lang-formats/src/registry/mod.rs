@@ -12,6 +12,7 @@ pub mod load;
 pub mod manifest;
 pub mod materials;
 pub mod meanings;
+mod respelled;
 pub mod states;
 
 pub use absent::{AbsentCatalog, AbsentEntry, AbsentError, AbsentIndex, SUPPORTED_ABSENT_SCHEMA};
@@ -28,7 +29,8 @@ pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
 pub use load::{
     PackSource, PackView, RegistryError, RegistryPack, Respelling, SUPPORTED_DATA_VERSIONS_SCHEMA,
-    SUPPORTED_MANIFEST_SCHEMA, builtin_pack, load_builtin_pack, load_from_dir,
+    SUPPORTED_MANIFEST_SCHEMA, builtin_pack, builtin_version_tables, load_builtin_pack,
+    load_from_dir,
 };
 pub use manifest::{PackFiles, PackManifest};
 pub use states::{
@@ -36,6 +38,8 @@ pub use states::{
     SUPPORTED_STATES_SCHEMA, SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal,
     StatesCatalog, StatesError, VersionStates,
 };
+
+pub(crate) use respelled::{Respelled, respelled_at};
 
 /// Prepends `namespace` to a component entry that does not carry one.
 pub(crate) fn namespaced(namespace: &str, block: &str) -> String {

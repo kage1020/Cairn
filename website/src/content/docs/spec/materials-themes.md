@@ -194,10 +194,13 @@ A token none of them answers is `E_UNKNOWN_ID`, with a note naming the target's 
 pack's `aliases` where it has one: `@stonebrick` on Bedrock 1.21.60 is answered with the four blocks
 1.21.40 split it into, since choosing one would be the silent substitution [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference) forbids. With no
-target pinned, a token some targetable version writes under another spelling passes as itself, so
-the range-wide passes of `cairn check` and `cairn info` do not refuse what a pinned build writes. A
-raw block names the ID it writes and is not read through these tables ([§7.4](#74-raw-blocks)), and
-an abstract token resolves through its catalog entry and that entry's `overrides`
+target pinned, a token some targetable version writes under another spelling lowers as itself, so
+the range-wide passes of `cairn check` and `cairn info`, and the language server, neither refuse
+what a pinned build writes nor miss what every pinned build raises on it: a `shed` roof bound to
+`@oak_sign` is `E_INCOMPATIBLE_MATERIAL` there too. A raw block names the ID it writes and is not
+read through these tables ([§7.4](#74-raw-blocks)), so a meaning token is no state of it and
+`raw_block mat=minecraft:cauldron[fluid=water]` is `E_STATE_DOMAIN`, since `cauldron` has no
+`fluid`. An abstract token resolves through its catalog entry and that entry's `overrides`
 ([§7.2](#72-canonical-vocabulary)). `cairn info` names each token a version writes under another ID,
 with the ID it writes ([Versioning and Editions](/spec/versioning-editions/#the-respelled-row)).
 

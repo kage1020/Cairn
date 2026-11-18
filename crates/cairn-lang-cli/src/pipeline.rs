@@ -70,7 +70,7 @@ pub(crate) fn check_lowering(
     let (Some(edition), Some(target)) = (edition, target) else {
         return CheckLowering {
             diagnostics: findings_without_target(ir, edition, &|edition, id| {
-                builtin_pack(edition).may_declare(id)
+                builtin_pack(edition).id_standing(id)
             }),
             dropped_scopes: Vec::new(),
             built_scopes: 0,
@@ -104,11 +104,6 @@ pub(crate) fn report_partial_build(file: &Path, dropped: &[String], built: usize
     }
 }
 
-/// The editions a command with one optional pin is about: the pin, or both without one.
-pub(crate) fn weighed_editions(pin: Option<Edition>) -> Vec<Edition> {
-    pin.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |one| vec![one])
-}
-
 /// The circuit findings `cairn check` reports: the pinned edition's, at the pinned version when
 /// `target` names one it ships, or without a pin those each edition raises at the same span and
 /// each edition's own, which touch a line under its guards (`spec/lint` "Error vs warning").
@@ -121,7 +116,7 @@ pub(crate) fn check_circuits(
         .zip(target)
         .and_then(|(edition, target)| resolve_target(edition, target).ok());
     let pinned = resolved.as_ref().map(ResolvedTarget::mc_version);
-    let editions = weighed_editions(edition);
+    let editions = Edition::weighed(edition);
     let runs: Vec<Vec<CircuitDiagnostic>> = editions
         .iter()
         .map(|&edition| {
@@ -147,7 +142,7 @@ pub(crate) fn load_and_lower(
     target: Option<&ResolvedTarget>,
 ) -> Result<(String, Build), ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
-    let (_, build) = lower_for_build(&module, edition, target.map(ResolvedTarget::build_target));
+    let (_, build) = lower_for_build(&module, edition, target.map(ResolvedTarget::mc_version));
     Ok((source, build))
 }
 
