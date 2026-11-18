@@ -6,8 +6,8 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    AbsentConcept, BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, Joins, OutOfDomain,
-    StateDomain, TargetRegistry, UnmappedState,
+    AbsentConcept, BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, IdStanding, Joins,
+    OutOfDomain, StateDomain, TargetRegistry, UnmappedState,
 };
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{SpellingTable, VersionOrder, compare_versions};
@@ -27,6 +27,7 @@ use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
 use super::meanings::{MeaningIndex, MeaningsError};
+use super::respelled::{Respelled, respelled_at};
 use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates, WATER_LAYER_STATE};
 
 /// The state of a slab that fills its cell, which the game never lets hold water although its
@@ -236,44 +237,11 @@ impl TargetRegistry for PackView<'_> {
     }
 
     fn state_domain(&self, state: &BlockState) -> StateDomain {
-        let Some(version) = self.mc_version else {
-            return StateDomain::Unpinned;
-        };
-        let id = state.id.as_str();
-        let recorded = match self.edition {
-            // An id the target does not declare is `E_UNKNOWN_ID`'s to answer.
-            Edition::Java => self.ids.is_some_and(|ids| {
-                !contains(ids, id) || self.blocks.states_of(version, id).is_some()
-            }),
-            Edition::Bedrock => self.states.is_some(),
-        };
-        if !recorded {
-            return StateDomain::Unrecorded;
-        }
-        let Some(mut domain) = self.domain_at(version, id) else {
-            return StateDomain::AnsweredElsewhere;
-        };
-        if let Some((meaning, values)) = self.meanings.meaning_of(id) {
-            domain.insert(meaning.to_owned(), values);
-        }
-        let outside = state.properties.iter().filter_map(|(key, value)| {
-            let fault = match domain.get(key) {
-                None => DomainFault::UnknownProperty {
-                    properties: domain.keys().cloned().collect(),
-                },
-                Some(values) if !values.contains(value) => DomainFault::ValueOutside {
-                    values: values.clone(),
-                },
-                Some(_) => return None,
-            };
-            Some(OutOfDomain {
-                key: key.clone(),
-                value: value.clone(),
-                fault,
-                valid_at: self.valid_at(version, id, key, value),
-            })
-        });
-        StateDomain::Checked(outside.collect())
+        self.domain_check(state, None)
+    }
+
+    fn token_state_domain(&self, state: &BlockState) -> StateDomain {
+        self.domain_check(state, self.meanings.meaning_of(&state.id))
     }
 
     fn joins(&self, state: &BlockState) -> Option<Joins> {
@@ -324,13 +292,14 @@ impl TargetRegistry for PackView<'_> {
     }
 
     fn respelled(&self, state: &BlockState) -> Option<BlockState> {
-        if self.mc_version.is_some() {
-            return self.respelling(state).map(|respelling| respelling.state);
+        let version = self.mc_version?;
+        match self.respelled_here(version, &state.id)? {
+            Respelled::Renamed(spelling) => Some(BlockState {
+                id: spelling.to_owned(),
+                properties: state.properties.clone(),
+            }),
+            Respelled::Apart => Some(state.clone()),
         }
-        self.targetable
-            .iter()
-            .any(|version| self.respelled_at(version, &state.id).is_some())
-            .then(|| state.clone())
     }
 
     fn aliases_for(&self, id: &str) -> Vec<String> {
@@ -350,55 +319,91 @@ impl TargetRegistry for PackView<'_> {
 /// A block's canonical states at one version: each property with the values it takes.
 type Domain = IndexMap<String, Vec<String>>;
 
-impl PackView<'_> {
-    /// How the pinned version writes the canonical token `state` when its table does not declare
-    /// the id (`spec/materials-themes` "Mappings across version and edition"); `None` when it
-    /// writes the token under no other spelling, or no version is pinned.
+impl<'a> PackView<'a> {
+    /// The id the pinned version writes for the canonical token `token` when it is not the
+    /// token's own, with the table that maps it there (`spec/materials-themes` "Mappings across
+    /// version and edition"); `None` when the version writes the token's own id, refuses its id or
+    /// states, or no version is pinned.
     #[must_use]
-    pub fn respelling(&self, state: &BlockState) -> Option<Respelling> {
+    pub fn respelling(&self, token: &BlockState) -> Option<Respelling> {
         let version = self.mc_version?;
-        if self.ids.is_some_and(|ids| contains(ids, &state.id)) {
-            return None;
-        }
-        match self.respelled_at(version, &state.id)? {
-            Respelled::Apart(bedrock) => {
-                let written = self
-                    .states
-                    .and_then(|map| map.resolve(state).ok())
-                    .map_or_else(|| bedrock.to_owned(), |form| form.id);
-                Some(Respelling {
-                    state: state.clone(),
-                    written,
-                    through: SpellingTable::StateMap,
-                })
-            }
-            Respelled::Renamed(spelling) => Some(Respelling {
-                state: BlockState {
+        let meant = self.meanings.meant(token);
+        let state = meant.as_ref().unwrap_or(token);
+        let (palette, through) = match self.respelled_here(version, &state.id) {
+            Some(Respelled::Renamed(spelling)) => (
+                BlockState {
                     id: spelling.to_owned(),
                     properties: state.properties.clone(),
                 },
-                written: spelling.to_owned(),
-                through: SpellingTable::Aliases,
-            }),
-        }
-    }
-
-    /// How `version`, whose table does not declare `id`, writes the canonical block `id` names.
-    fn respelled_at<'s>(&'s self, version: &'s str, id: &str) -> Option<Respelled<'s>> {
-        let ids = self.blocks.ids_for(version)?;
-        if contains(ids, id) {
+                SpellingTable::Aliases,
+            ),
+            Some(Respelled::Apart) => (state.clone(), SpellingTable::StateMap),
+            None if meant.is_some() && self.ids.is_some_and(|ids| contains(ids, &state.id)) => {
+                (state.clone(), SpellingTable::Meanings)
+            }
+            None => return None,
+        };
+        if matches!(self.state_domain(&palette), StateDomain::Checked(outside) if !outside.is_empty())
+        {
             return None;
         }
-        if let Some(bedrock) = self
-            .state_maps
-            .and_then(|maps| maps.at(version))
-            .and_then(|map| map.written_apart(id))
-        {
-            return Some(Respelled::Apart(bedrock));
+        let written = match self.states {
+            Some(map) => map.resolve(&palette).ok()?.id,
+            None => palette.id,
+        };
+        (written != token.id).then_some(Respelling { written, through })
+    }
+
+    /// How `version` writes the canonical block `id` names when its table does not declare `id`.
+    fn respelled_here(&self, version: &str, id: &str) -> Option<Respelled<'a>> {
+        respelled_at(self.blocks, self.aliases, self.state_maps, version, id)
+    }
+
+    /// What the pinned version's tables say about `state`'s properties, with `meaning`, a meaning
+    /// token and the values it takes, read as one of them.
+    fn domain_check(
+        &self,
+        state: &BlockState,
+        meaning: Option<(&str, Vec<String>)>,
+    ) -> StateDomain {
+        let Some(version) = self.mc_version else {
+            return StateDomain::Unpinned;
+        };
+        let id = state.id.as_str();
+        let recorded = match self.edition {
+            // An id the target does not declare is `E_UNKNOWN_ID`'s to answer.
+            Edition::Java => self.ids.is_some_and(|ids| {
+                !contains(ids, id) || self.blocks.states_of(version, id).is_some()
+            }),
+            Edition::Bedrock => self.states.is_some(),
+        };
+        if !recorded {
+            return StateDomain::Unrecorded;
         }
-        self.aliases
-            .renamed(self.blocks, ids, id)
-            .map(Respelled::Renamed)
+        let Some(mut domain) = self.domain_at(version, id) else {
+            return StateDomain::AnsweredElsewhere;
+        };
+        if let Some((meaning, values)) = meaning {
+            domain.insert(meaning.to_owned(), values);
+        }
+        let outside = state.properties.iter().filter_map(|(key, value)| {
+            let fault = match domain.get(key) {
+                None => DomainFault::UnknownProperty {
+                    properties: domain.keys().cloned().collect(),
+                },
+                Some(values) if !values.contains(value) => DomainFault::ValueOutside {
+                    values: values.clone(),
+                },
+                Some(_) => return None,
+            };
+            Some(OutOfDomain {
+                key: key.clone(),
+                value: value.clone(),
+                fault,
+                valid_at: self.valid_at(version, id, key, value),
+            })
+        });
+        StateDomain::Checked(outside.collect())
     }
 
     /// What `state` is to the connection rules at `version`, read as the canonical blocks its id
@@ -460,23 +465,14 @@ impl PackView<'_> {
     }
 }
 
-/// How a pinned version writes a canonical token whose id its table does not declare.
+/// The id a pinned version writes for a canonical token under an id other than its own, and the
+/// table that maps it there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Respelling {
-    /// The state the palette holds.
-    pub state: BlockState,
     /// The id the structure file names.
     pub written: String,
     /// The table that maps the token onto [`Self::written`].
     pub through: SpellingTable,
-}
-
-/// How a version writes a canonical block it does not declare under the token's spelling.
-enum Respelled<'a> {
-    /// The state map writes it as this Bedrock block, in forms no other block takes there.
-    Apart(&'a str),
-    /// The version declares this other spelling of the block's `aliases` group.
-    Renamed(&'a str),
 }
 
 /// Whether the sorted `ids` hold `id`.
@@ -681,6 +677,14 @@ pub enum RegistryError {
         /// The validation error.
         #[source]
         source: MeaningsError,
+    },
+    /// A `meanings` row's token is a block no version of the edition writes.
+    #[error(
+        "registry pack meanings token `{token}` is no block any version of `blocks` declares or its state map writes"
+    )]
+    MeaningTokenUnwritten {
+        /// The token.
+        token: String,
     },
     /// A `meanings` row names a block no version of the edition writes.
     #[error(
@@ -965,11 +969,22 @@ impl RegistryPack {
         )
     }
 
-    /// Whether some version this pack describes declares `id`; any id may be, without block
-    /// tables.
+    /// What the pack's versions make of `id`, which any version may declare without block tables
+    /// (`spec/lint` "Error vs warning").
     #[must_use]
-    pub fn may_declare(&self, id: &str) -> bool {
-        self.blocks.declared_by_some_version(id).unwrap_or(true)
+    pub fn id_standing(&self, id: &str) -> IdStanding {
+        if self.blocks.declared_by_some_version(id) != Some(false) {
+            return IdStanding::Declared;
+        }
+        let states = self.states.as_ref();
+        let respelled = self.targetable().into_iter().any(|entry| {
+            respelled_at(&self.blocks, &self.aliases, states, &entry.mc_version, id).is_some()
+        });
+        if respelled {
+            IdStanding::Respelled
+        } else {
+            IdStanding::Unknown
+        }
     }
 
     /// The view block-array lowering consults for `mc_version`; `None` skips the id and state
@@ -1382,8 +1397,9 @@ fn validate_absent_undeclared(
     Ok(())
 }
 
-/// Refuses a `meanings` row that names a block no version writes, or whose meaning token is a
-/// state of its token's block, which the row would hide.
+/// Refuses a `meanings` row whose token, or a block it names, no version writes, or whose meaning
+/// token is a state of its token's block, which the row would hide; a pack without block tables
+/// has nothing to check a row against.
 fn validate_meanings(
     meanings: &MeaningIndex,
     blocks: &BlocksIndex,
@@ -1392,13 +1408,23 @@ fn validate_meanings(
     fn maps<'a>(states: Option<&'a StateMapIndex>, version: &'a str) -> Option<VersionStates<'a>> {
         states.and_then(|states| states.at(version))
     }
+    if blocks.is_empty() {
+        return Ok(());
+    }
+    let written = |id: &str| {
+        blocks.declared_by_some_version(id) == Some(true)
+            || blocks
+                .versions()
+                .any(|version| maps(states, version).is_some_and(|map| map.writes_apart(id)))
+    };
     for (token, meaning, named) in meanings.rows() {
+        if !written(token) {
+            return Err(RegistryError::MeaningTokenUnwritten {
+                token: token.to_owned(),
+            });
+        }
         for block in named {
-            let written = blocks.declared_by_some_version(block) != Some(false)
-                || blocks.versions().any(|version| {
-                    maps(states, version).is_some_and(|map| map.written_apart(block).is_some())
-                });
-            if !written {
+            if !written(block) {
                 return Err(RegistryError::MeaningUnwritten {
                     token: token.to_owned(),
                     block: block.to_owned(),

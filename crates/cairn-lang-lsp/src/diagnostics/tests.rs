@@ -192,6 +192,21 @@ fn an_id_no_shipped_version_declares_is_left_to_a_pinned_check() {
 }
 
 #[test]
+fn a_token_bedrock_writes_under_another_id_is_weighed_as_its_block() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @oak_sign\n\n\
+                  struct hut size=5x5\n  walls mat_slot=wall height=3\n  \
+                  roof kind=shed slope_to=front mat_slot=roof\n";
+    assert_eq!(
+        located(&compute_diagnostics(&uri(), source)),
+        [(
+            "E_INCOMPATIBLE_MATERIAL",
+            lsp_types::DiagnosticSeverity::ERROR,
+            range((2, 15), (2, 24)),
+        )],
+    );
+}
+
+#[test]
 fn clean_fixture_reports_no_diagnostics() {
     assert_eq!(compute_diagnostics(&uri(), CLEAN), vec![]);
 }

@@ -5,6 +5,7 @@ use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{Member, MemberRole, ValueWithSpan};
+use crate::resolve::{TokenKind, classify_token};
 use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
 use crate::block_array::BlockState;
@@ -194,7 +195,12 @@ pub(super) fn check_state_literal(
     if state.properties.is_empty() || !text.contains('[') {
         return true;
     }
-    match registry.state_domain(state) {
+    let domain = if classify_token(&value.value) == TokenKind::Canonical {
+        registry.token_state_domain(state)
+    } else {
+        registry.state_domain(state)
+    };
+    match domain {
         StateDomain::Unpinned | StateDomain::AnsweredElsewhere => true,
         StateDomain::Unrecorded => {
             diagnostics.push(diag_state_literal_unchecked(

@@ -12,6 +12,7 @@ pub mod load;
 pub mod manifest;
 pub mod materials;
 pub mod meanings;
+mod respelled;
 pub mod states;
 
 pub use absent::{AbsentCatalog, AbsentEntry, AbsentError, AbsentIndex, SUPPORTED_ABSENT_SCHEMA};
@@ -36,6 +37,8 @@ pub use states::{
     SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal, StatesCatalog, StatesError,
     VersionStates,
 };
+
+pub(crate) use respelled::{Respelled, respelled_at};
 
 /// Prepends `namespace` to a component entry that does not carry one.
 pub(crate) fn namespaced(namespace: &str, block: &str) -> String {

@@ -255,7 +255,8 @@ pub struct WrittenSpelling {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpellingTable {
-    /// `aliases`: the version declares another spelling of the block, one it renamed.
+    /// `aliases`: the version declares the one other spelling of the block's group, a rename
+    /// across the edition's versions.
     Aliases,
     /// The Bedrock state map, which writes the canonical block as one of the version's own.
     StateMap,

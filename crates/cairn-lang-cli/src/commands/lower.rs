@@ -29,10 +29,10 @@ pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerForm
     // With no edition pinned the guarded lines are left out, but an error on one still fails the
     // command.
     if edition.is_none() {
-        let declared = |edition, id: &str| builtin_pack(edition).may_declare(id);
+        let standing = |edition, id: &str| builtin_pack(edition).id_standing(id);
         block_ir
             .diagnostics
-            .extend(findings_under_guards(&ir, &declared));
+            .extend(findings_under_guards(&ir, &standing));
     }
     // Check findings lead, ahead of the lowering deferrals they cascade into.
     block_ir.diagnostics = build_diagnostics(

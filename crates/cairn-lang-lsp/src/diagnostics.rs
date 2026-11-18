@@ -26,7 +26,7 @@ pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types:
     // No edition, as `cairn check` without `--edition`.
     let mut findings = check(&module, &ir, None);
     findings.extend(findings_without_target(&ir, None, &|edition, id| {
-        builtin_pack(edition).may_declare(id)
+        builtin_pack(edition).id_standing(id)
     }));
     findings
         .iter()

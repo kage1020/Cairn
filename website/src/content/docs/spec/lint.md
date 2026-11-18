@@ -190,9 +190,9 @@ Editions](/spec/versioning-editions/#the-buildable-targets-row)). `lower` lowers
 as does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
 check` with no `--target`, and the language server, lower with no target at all, so they raise
-`E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
-`E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` or `E_STATE_UNMAPPED`
-([§11.3](#113-error-vs-warning)).
+`E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares or writes under
+another ID, and never `E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` or
+`E_STATE_UNMAPPED` ([§11.3](#113-error-vs-warning)).
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering at a pinned target, in place of the
 `E_STATE_DOMAIN` check, on a state literal it reads from a theme slot or a `connect … path=` whose
@@ -894,11 +894,14 @@ A finding of block-array lowering is reported wherever a source is checked, whet
 pinned or not. With no `--target`, in a plain `cairn check` and in the language server, which pins
 nothing, lowering runs with no target and reports the findings every target that reads their line
 raises, with the code, span and text a pinned check gives them. It weighs the source as if every
-block id some shipped version of the edition declares were declared. An abstract token, and an id no
-shipped version declares, are not deferred: each stands in for the block a target's pack names for
-it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no
-`W_PHASE_CONFLICT` between it and another block, and no `W_PALETTE_TOO_LARGE` that only it could
-cause, since the palette is counted without it. A stand-in overwritten by air, or air by a stand-in,
+block id some shipped version of the edition declares were declared, and every canonical token some
+shipped version writes under another ID too, as Bedrock writes `@oak_sign` ([Materials and
+Themes](/spec/materials-themes/#73-mappings-across-version-and-edition)). An abstract token, a
+canonical token no shipped version writes, and a raw block whose id no shipped version declares are
+not deferred: each stands in for the block a target's pack names for it, and no verdict on that
+block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no `W_PHASE_CONFLICT` between it and
+another block, and no `W_PALETTE_TOO_LARGE` that only it could cause, since the palette is counted
+without it. A stand-in overwritten by air, or air by a stand-in,
 is still a `W_PHASE_CONFLICT`, since no pack names air. A `beam`, `door`, `chest`, `trapdoor`,
 `note_block`, sensor or actuator built from its default block takes the block the pack names for it,
 so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a block" where a pinned check would

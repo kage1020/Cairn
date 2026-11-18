@@ -68,8 +68,14 @@ impl MeaningIndex {
         let mut rows = IndexMap::new();
         for row in catalog.tokens {
             let token = namespaced(namespace, &row.token);
+            if row.meaning.is_empty() {
+                return Err(MeaningsError::NoMeaning { token });
+            }
             if row.blocks.is_empty() {
                 return Err(MeaningsError::NoBlocks { token });
+            }
+            if row.blocks.contains_key("") {
+                return Err(MeaningsError::EmptyValue { token });
             }
             let blocks = row
                 .blocks
@@ -84,7 +90,8 @@ impl MeaningIndex {
     }
 
     /// The block `state` names through its token's meaning token, the meaning token dropped from
-    /// its states; `None` when its id has no row or the value names no block.
+    /// its states; `None` when its id has no row, or it carries no meaning token or one whose value
+    /// names no block.
     #[must_use]
     pub fn meant(&self, state: &BlockState) -> Option<BlockState> {
         let (meaning, blocks) = self.rows.get(&state.id)?;
@@ -133,9 +140,21 @@ pub enum MeaningsError {
     /// The catalog declared no tokens; a pack without meanings leaves the component out.
     #[error("registry pack meanings declares no tokens")]
     NoTokens,
+    /// A row's meaning token is empty.
+    #[error("registry pack meanings token `{token}` gives an empty meaning token")]
+    NoMeaning {
+        /// The token, namespaced.
+        token: String,
+    },
     /// A row named no block.
     #[error("registry pack meanings token `{token}` names no block")]
     NoBlocks {
+        /// The token, namespaced.
+        token: String,
+    },
+    /// A row gives a block for an empty value.
+    #[error("registry pack meanings token `{token}` names a block for an empty value")]
+    EmptyValue {
         /// The token, namespaced.
         token: String,
     },

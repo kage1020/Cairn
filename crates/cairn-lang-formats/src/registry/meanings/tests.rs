@@ -76,8 +76,22 @@ fn a_catalog_is_refused_for_each_fault() {
         ),
         (
             r#"{"schema_version": 1, "namespace": "minecraft",
+                "tokens": [{"token": "cauldron", "meaning": "", "blocks": {"water": "water_cauldron"}}]}"#,
+            MeaningsError::NoMeaning {
+                token: "minecraft:cauldron".to_owned(),
+            },
+        ),
+        (
+            r#"{"schema_version": 1, "namespace": "minecraft",
                 "tokens": [{"token": "cauldron", "meaning": "fluid", "blocks": {}}]}"#,
             MeaningsError::NoBlocks {
+                token: "minecraft:cauldron".to_owned(),
+            },
+        ),
+        (
+            r#"{"schema_version": 1, "namespace": "minecraft",
+                "tokens": [{"token": "cauldron", "meaning": "fluid", "blocks": {"": "water_cauldron"}}]}"#,
+            MeaningsError::EmptyValue {
                 token: "minecraft:cauldron".to_owned(),
             },
         ),

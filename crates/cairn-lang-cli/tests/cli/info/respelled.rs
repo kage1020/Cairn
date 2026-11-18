@@ -1,7 +1,7 @@
 //! The `respelled` row: per edition, the canonical tokens a version writes under another id, per
 //! `spec/versioning-editions` "The `respelled` row".
 
-use crate::common::{Fixture, Run, cairn_argv};
+use crate::common::{Fixture, Run, assert_stream, cairn_argv};
 
 /// A struct whose floor, walls and roof paint the theme's three slots.
 fn painting(floor: &str, wall: &str, roof: &str) -> String {
@@ -96,6 +96,100 @@ fn only_the_versions_the_floors_admit_are_weighed() {
           1.21.40, 1.21.60, 1.26.60, per the registry pack's state map"
         ],
         "1.21.0, which writes `stone_bricks` as `stonebrick`, is below the floor",
+    );
+}
+
+#[test]
+fn a_token_bound_twice_is_named_at_each_binding_and_listed_once() {
+    let fixture = Fixture::new(&painting("chain", "chain", "stone"));
+    let run = info(&fixture, "java,bedrock", &[]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(
+        respelled_row(&run),
+        "Java: minecraft:chain   Bedrock: minecraft:chain"
+    );
+    assert_eq!(
+        respelled_notes(&fixture, &run),
+        [
+            "note: s.crn:2:17: `minecraft:chain` is written `minecraft:iron_chain` at java 26.3, \
+             per the registry pack's alias table",
+            "note: s.crn:3:16: `minecraft:chain` is written `minecraft:iron_chain` at java 26.3, \
+             per the registry pack's alias table",
+            "note: s.crn:2:17: `minecraft:chain` is written `minecraft:iron_chain` at bedrock \
+             1.26.60, per the registry pack's alias table",
+            "note: s.crn:3:16: `minecraft:chain` is written `minecraft:iron_chain` at bedrock \
+             1.26.60, per the registry pack's alias table",
+        ],
+    );
+}
+
+/// Bedrock 1.21.0 spells the dandelion `yellow_flower`, which its state map also writes.
+#[test]
+fn a_rename_is_named_through_the_alias_table_before_the_state_map() {
+    let fixture = Fixture::new(&painting("dandelion", "cobblestone", "stone"));
+    let run = info(&fixture, "bedrock", &[]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(
+        respelled_notes(&fixture, &run),
+        [
+            "note: s.crn:2:17: `minecraft:dandelion` is written `minecraft:yellow_flower` at \
+             bedrock 1.21.0, per the registry pack's alias table"
+        ],
+    );
+}
+
+#[test]
+fn a_version_that_refuses_the_states_names_no_spelling() {
+    let fixture = Fixture::new(&painting("oak_sign[rotation=99]", "cobblestone", "stone"));
+    let run = info(&fixture, "bedrock", &[]);
+    assert_eq!(
+        run.code,
+        Some(1),
+        "the range-wide palette carries the state: {}",
+        run.stderr
+    );
+    assert_stream(&run.stderr, &[(2, 17, "error", "E_STATE_DOMAIN"); 4]);
+    assert_eq!(respelled_notes(&fixture, &run), Vec::<String>::new());
+}
+
+#[test]
+fn a_walkway_path_is_named_where_it_is_written() {
+    let fixture = Fixture::new(
+        "theme t:\n  slot floor -> @oak_planks\n  slot wall -> @cobblestone\n\n\
+         def hut size=3x3:\n  floor id=f mat_slot=floor\n  \
+         walls id=w mat_slot=wall height=2\n  door id=entry side=front at=center\n\n\
+         site duo:\n  place id=a use=hut theme=t at=origin\n  \
+         place id=b use=hut theme=t east_of=a gap=2\n  \
+         connect a.entry to b.entry path=@chain\n",
+    );
+    let run = info(&fixture, "java", &[]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(respelled_row(&run), "Java: minecraft:chain");
+    assert_eq!(
+        respelled_notes(&fixture, &run),
+        [
+            "note: s.crn:13:35: `minecraft:chain` is written `minecraft:iron_chain` at java 26.3, \
+             per the registry pack's alias table"
+        ],
+    );
+}
+
+#[test]
+fn a_theme_floor_leaves_the_versions_below_it_unweighed() {
+    let fixture = Fixture::new(&painting("stone_bricks", "oak_sign", "stone").replacen(
+        "theme t:\n",
+        "theme t:\n  requires bedrock version>=1.21.40\n",
+        1,
+    ));
+    let run = info(&fixture, "bedrock", &[]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(
+        respelled_notes(&fixture, &run),
+        [
+            "note: s.crn:4:16: `minecraft:oak_sign` is written `minecraft:standing_sign` at bedrock \
+             1.21.40, 1.21.60, 1.26.60, per the registry pack's state map"
+        ],
+        "1.21.0, which writes `stone_bricks` as `stonebrick`, is below the theme's floor",
     );
 }
 
