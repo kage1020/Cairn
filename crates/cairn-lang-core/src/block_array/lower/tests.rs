@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::anchor::{PlaceAnchor, PlacementCorner, PlacementOutOfRange};
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::connect::edge_pushers;
@@ -5,7 +7,7 @@ use super::geometry_material::{Family, GeometryMemberDescription, geometry_mater
 use super::opening::{DOOR_BASE_ID, DOOR_TOKEN};
 use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
-use super::site_floor::{FloorExtent, collect_floor_cells};
+use super::site_floor::{FloorExtent, FloorOwner, collect_floor_cells};
 use super::*;
 use crate::ast::ValueKind;
 use crate::block_array::material::{NoTarget, resolve_block_state, stand_in};
@@ -104,6 +106,7 @@ fn one_placed_row(
             anchor: PlaceAnchor::WorldOrigin,
             walls: WallColumn::default(),
             cut: HashSet::new(),
+            footprint: Footprint { x: width, z: 1 },
         },
     );
     (structures, placed)
@@ -128,6 +131,47 @@ fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
         plan.owners,
     );
     assert_eq!(plan.extents["site::s::b"].max_x, i32::MAX);
+}
+
+#[test]
+fn a_body_takes_up_its_footprint_and_its_blocks_on_its_rows_alone() {
+    // A 3x3 body standing on row 3: air but for one block in the ring round its 1x1 footprint.
+    let (mut structures, mut placed) = one_placed_row((0, 3, 0), 9);
+    let dims = Dims { x: 3, y: 1, z: 3 };
+    let ba = &mut structures["site::s::b"];
+    let stone = ba.voxels[0];
+    ba.dims = dims;
+    ba.voxels = vec![PaletteIndex::AIR; 9];
+    ba.voxels[0] = stone;
+    let body = &mut placed["site::s::b"];
+    body.placement.dims = dims;
+    body.footprint = Footprint { x: 1, z: 1 };
+    let site = SiteName::new("s").expect("a site name");
+    let plan = collect_floor_cells(&structures, &placed, &site, 3);
+    assert_eq!(plan.cells, HashSet::from([(0, 3, 0), (1, 3, 1)]));
+    assert_eq!(
+        plan.owners,
+        HashMap::from([
+            (
+                (0, 3, 0),
+                vec![FloorOwner {
+                    placement: 0,
+                    voxel: Some(stone),
+                }],
+            ),
+            (
+                (1, 3, 1),
+                vec![FloorOwner {
+                    placement: 0,
+                    voxel: None,
+                }],
+            ),
+        ]),
+    );
+    for plane in [0, 2, 4] {
+        let plan = collect_floor_cells(&structures, &placed, &site, plane);
+        assert_eq!(plan.cells, HashSet::new(), "plane {plane}");
+    }
 }
 
 // No source reaches this: the far-edge refusal stops the row first.
@@ -3297,10 +3341,10 @@ fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
         blocked[0].data,
         blocked[0].primary,
     );
-    let note = &blocked[0].notes[0].message;
-    assert!(
-        note.contains("port `a.back` is buried"),
-        "note must point at the buried port, got {note}",
+    assert_eq!(
+        blocked[0].notes[0].message,
+        "port `a.back` stands on a cell placement `c` takes up on that row; move that \
+         door/window to an unobstructed wall or pull the placements apart",
     );
     assert!(
         blocked[0].primary.contains("skipped 5 cells"),
@@ -3438,11 +3482,48 @@ fn a_router_past_the_area_cap_names_the_placements_that_stretch_its_box() {
     assert_eq!(
         note,
         format!(
-            "the router searches the box spanning both ports and every placement floor of \
-             site `s` on the walk plane, here 4238888 cells, past its cap of {ROUTE_AREA_CAP} \
-             cells; the two ports span only 42 of those cells, and the floors of placements \
-             `a`, `b`, `c`, `d`, `e1`, and `e3` stretch the box past them, so bring those \
-             placements closer to the two ports",
+            "the router searches the box spanning both ports and every cell the placements of \
+             site `s` take up on the walk plane, here 4238888 cells, past its cap of \
+             {ROUTE_AREA_CAP} cells; the two ports span only 42 of those cells, and what \
+             placements `a`, `b`, `c`, `d`, `e1`, and `e3` take up stretches the box past them, \
+             so bring those placements closer to the two ports",
+        ),
+    );
+}
+
+#[test]
+fn a_router_past_the_area_cap_on_a_raised_row_names_only_the_placements_on_that_row() {
+    // `p` is a floor below the walk plane, so it sets no edge however far it lies.
+    let note = walkway_blocked_note_of(concat!(
+        "def hut size=3x3:\n",
+        "  floor id=f mat_slot=wall\n",
+        "  walls id=w mat_slot=wall height=5\n",
+        "  level y=2\n",
+        "    door id=front side=front at=center\n",
+        "    door id=back  side=back  at=center\n",
+        "\n",
+        "def pad size=3x3:\n",
+        "  floor id=f mat_slot=wall\n",
+        "\n",
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "site s:\n",
+        "  place id=a use=hut theme=t at=origin\n",
+        "  place id=b use=hut theme=t north_of=a gap=2000\n",
+        "  place id=c use=hut theme=t east_of=b gap=2000\n",
+        "  place id=d use=hut theme=t north_of=c gap=4\n",
+        "  place id=p use=pad theme=t east_of=d gap=3000\n",
+        "  connect c.front to d.back path=@gravel\n",
+    ));
+    assert_eq!(
+        note,
+        format!(
+            "the router searches the box spanning both ports and every cell the placements of \
+             site `s` take up on the walk plane, here 4048128 cells, past its cap of \
+             {ROUTE_AREA_CAP} cells; the two ports span only 42 of those cells, and what \
+             placements `a`, `b`, `c`, and `d` take up stretches the box past them, so bring \
+             those placements closer to the two ports",
         ),
     );
 }
@@ -3519,10 +3600,10 @@ fn a_router_past_the_area_cap_on_distant_ports_blames_the_ports() {
     assert_eq!(
         note,
         format!(
-            "the router searches the box spanning both ports and every placement floor of \
-             site `s` on the walk plane, here 4010006 cells, past its cap of {ROUTE_AREA_CAP} \
-             cells; the two ports alone span 4008004 of those cells, so place the two \
-             structures closer together",
+            "the router searches the box spanning both ports and every cell the placements of \
+             site `s` take up on the walk plane, here 4012008 cells, past its cap of \
+             {ROUTE_AREA_CAP} cells; the two ports alone span 4008004 of those cells, so place \
+             the two structures closer together",
         ),
     );
 }
@@ -3596,7 +3677,7 @@ fn a_port_on_its_own_plate_and_another_floor_names_both() {
     ));
     assert_eq!(
         note,
-        "port `a.e` is buried inside the floor of placement `o` and sits on the \
+        "port `a.e` stands on a cell placement `o` takes up on that row and sits on the \
          `minecraft:oak_pressure_plate` its own placement `a` lays on that cell; move that \
          block, and move that door/window to an unobstructed wall or pull the placements \
          apart; port `b.e` sits on the `minecraft:oak_pressure_plate` its own placement `b` \

@@ -465,6 +465,45 @@ fn a_typo_in_a_def_with_a_level_is_still_not_declared() {
 }
 
 #[test]
+fn a_typo_of_a_member_under_a_level_suggests_that_member() {
+    let src = concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "def tower size=3x3:\n",
+        "  walls mat_slot=wall height=4\n",
+        "  level y=0\n",
+        "    door id=entry side=front at=center\n",
+        "\n",
+        "site s:\n",
+        "  place id=a use=tower theme=t at=origin\n",
+        "  place id=b use=tower theme=t east_of=a gap=2\n",
+        "  connect a.entr to b.entry path=@gravel\n",
+    );
+    let r = resolve(&ir(src), None);
+    let [refusal] = unresolved_ports(&r)[..] else {
+        panic!("expected one E_UNRESOLVED_PORT, got {:?}", r.diagnostics);
+    };
+    assert_eq!(
+        (refusal.span.clone(), refusal.primary.as_str()),
+        (
+            span_of(src, "a.entr", 0),
+            "port `entr` is not declared by `def tower` (used by `place a`)",
+        ),
+    );
+    let notes: Vec<&str> = refusal.notes.iter().map(|n| n.message.as_str()).collect();
+    assert_eq!(
+        notes,
+        [
+            "did you mean `a.entry`?",
+            "add `id=entr` to a member of `def tower` (e.g. `door id=entr ...`)",
+        ],
+    );
+    assert_eq!(r.diagnostics.len(), 1, "{:?}", r.diagnostics);
+    assert!(r.connects.is_empty(), "{:?}", r.connects);
+}
+
+#[test]
 fn connect_ambiguous_port_emits_e_ambiguous_port() {
     let src = concat!(
         "theme t:\n",

@@ -182,16 +182,17 @@ placements within the same `site`.
 
 **What a port is.** A port is the `(place, member_id)` pair that `PLACE.PORT` resolves to. Ports are
 exposed on `door` and `window` members declared in the body of the referenced `def` or directly
-under one of its `level`s. Those are the two candidates, so one `id=` on a body member and on a
-member under a `level` is `E_AMBIGUOUS_PORT`. A member under a `level` inside a `level` is no port:
-that nesting builds nothing (`E_UNSUPPORTED_NESTING`). A `stair` or a `roof` is never a port. A port
-is where a strip enters a building, through a wall the source opened, and neither member opens one:
-an eave `stair` is a band along the top of a wall, and a roof is reached only by climbing, which
-a walkway does not do.
+under one of its `level`s. Every such member is a candidate, so one `id=` carried by two of them is
+`E_AMBIGUOUS_PORT`, whether the two are a member of the body and one under a `level` or members
+under two `level`s. A member under a `level` inside a `level` is no port: that nesting builds
+nothing (`E_UNSUPPORTED_NESTING`). A `stair` or a `roof` is never a port. A port is where a strip
+enters a building, through a wall the source opened, and neither member opens one: an eave `stair`
+is a band along the top of a wall, and a roof is reached only by climbing, which a walkway does not
+do.
 
 **Where a port sits.** One block outside the member's `side=` wall, on the base row of the `level`
 it stands under: `place_origin.1 + N` under `level y=N`, and the placement's ground row
-`place_origin.1` for a member of the body. That is the row its doorway's threshold stands on.
+`place_origin.1` for a member of the body. For a door, that is the row its threshold stands on.
 `front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` ([§9.3.1](#931-coordinate-convention)).
 The wall-local offset comes from:
 
@@ -236,8 +237,8 @@ the level's base row. The base row is where that level's floor slab would go, th
 spanning the seam is inside it. Courses with air between them do not merge, and a window hung in
 the gap is outside every one of them. A `door` member of the `def` body opens at row `1`, so a
 placement whose only masonry is a `level y=6 walls` is a wall the doorway never reaches. The same
-body's `window` is refused for the same reason, while a `door` under that `level y=6` opens at
-row `7`, inside it.
+body's `window` is refused for the same reason, while a `door` under that `level y=6` opens at row
+`7`, inside it once those walls are two rows tall.
 
 The rows a port is judged against are the rows the placement **painted**. That is the same value
 the openings pass cut against, not a second reading of the `def`. A `walls` whose `mat_slot=` does
@@ -247,8 +248,10 @@ declared inside a `level` paints its rows, so the cut happens and the port stand
 A port that cannot be placed drops its row with a `W_DEFERRED_MEMBER` carrying one note per refused
 endpoint, naming the one rule that endpoint broke: a role that cannot anchor a port, the `side=` or
 `at=` it was written with, the window argument it lacks or wrote in the wrong shape, how far its
-rectangle runs past the wall, which rows the masonry does and does not cover, or that the openings
-pass did not cut it. The note points at the member's line. When the fault is `side=`, an argument or
+rectangle runs past the wall, which rows the masonry does and does not cover, that the openings pass
+did not cut it, or that the `level` it stands under has a `y=` that does not read. The note points
+at the member's line, or for that last rule at the `level`'s line; the `E_UNSUPPORTED_NESTING` on
+the `level`'s members says why its `y=` does not read. When the fault is `side=`, an argument or
 the masonry, that line carries the member's own finding too, worded from the same reading of the
 argument, so the two never disagree about what was written. A port pushed past the coordinate range
 by its `place` has no member line to point at and says so on the row alone.
@@ -256,26 +259,31 @@ by its `place` has no member line to point at and says so on the row alone.
 **How the path runs.** A Manhattan L, x-axis leg then z-axis leg, at the two ports' shared Y. 3D
 path search over staircases and multi-level walkways is out of scope by design. Two ports on
 different rows, such as a door under `level y=4` and a door in a `def` body, share no Y, so the
-row lays nothing and is reported as `W_DEFERRED_MEMBER`. Two ports under a `level` of one `y=` in
-two placements are joined by a strip on that row, a bridge between upper floors.
+row lays nothing and is reported as `W_DEFERRED_MEMBER`. Two ports on one row in two placements are
+joined by a strip on that row: two under `level`s of one `y=`, or a member of the body and one under
+`level y=0`. Above the ground row, that strip is a bridge between upper floors.
 
-The strip's row is its plane. Every block a placement of its site holds on that row is in the way:
-its floor and the foot of its walls on the ground row, and its walls on a row above. When the L
-would cross one, the compiler searches that plane for a detour: the shortest route around the
-obstacle, and among equal-length routes the one with the fewest turns, with deterministic
-tie-breaking so the same source always lays the same strip.
+The strip's row is its plane, and every cell a placement of its site takes up on that plane is in
+the way. On a row from its ground row to its top, a placement takes up every cell of its `size=`
+footprint, the room inside its walls as much as the walls, so a strip neither crosses a room nor
+runs in at a window. It also takes up every block it builds there outside the footprint, such as an
+eave. A placement whose top is below the row takes up none of it, so a strip can bridge over a lower
+building. When the L would cross a taken cell, the compiler searches that plane for a detour: the
+shortest route around the obstacle, and among equal-length routes the one with the fewest turns,
+with deterministic tie-breaking so the same source always lays the same strip.
 
 The row falls back to the straight L, with the colliding cells skipped, only when no unobstructed
 route exists at all:
 
-- a port is buried under the floor of another placement of its site, or under a block its own
+- a port stands on a cell another placement of its site takes up, or on a block its own
   placement lays on the port cell;
 - the target is fully enclosed;
 - the search goes past the router's area cap.
 
-The router searches the box spanning both ports and every placement floor of the walkway's site on
-the walk plane, so the cap can be reached by a distant pair of ports or by a widely spread floor
-plan. A placement of another site is never in the way, since each site is a layout of its own.
+The router searches the box spanning both ports and every cell the placements of the walkway's site
+take up on the walk plane, so the cap can be reached by a distant pair of ports or by placements
+spread wide. A placement of another site is never in the way, since each site is a layout of its
+own.
 
 That earns one `W_WALKWAY_BLOCKED` naming the concrete cause and its remedy: move the buried door
 or window (or the block on its port cell), widen the gap, bring the two structures closer, or bring
@@ -330,5 +338,5 @@ adds a note to `E_PARTIAL_BUILD` and one to the count of scopes that did not low
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |
 | `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. When every cell of the straight L overlaps a placement, or the straight L alone is past the router's search-area cap, nothing is laid and the walkway is lost. |
 | `W_DUPLICATE_WALKWAY` | The same two ports, in either order, already have a walkway laid in this site; the duplicate row is dropped. |
-| `E_PLACEMENT_OVERLAP` | The strip lays a cell inside the box of a placement other than the two it joins, as under that placement's eaves: the router keeps a strip off placement floors only ([Lint](/spec/lint/#sites-and-placements)). |
+| `E_PLACEMENT_OVERLAP` | The strip lays a cell inside the box of a placement other than the two it joins, as under that placement's eaves: the router keeps a strip off the cells placements take up on its row only, which leave out the overhang under their eaves ([Lint](/spec/lint/#sites-and-placements)). |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port id cannot be carried in the walkway's name ([Lint](/spec/lint/)); the row is dropped. |

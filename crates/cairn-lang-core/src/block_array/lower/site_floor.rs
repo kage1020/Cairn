@@ -1,4 +1,4 @@
-//! The cells the placed bodies of each site hold on one walk plane, which a `connect` strip of
+//! The cells the placed bodies of each site take up on one walk plane, which a `connect` strip of
 //! that site on that plane routes around.
 
 use std::collections::{HashMap, HashSet};
@@ -9,7 +9,7 @@ use crate::error::Span;
 use crate::ids::SiteName;
 
 use crate::block_array::wall_column::WallColumn;
-use crate::block_array::{BlockArray, PaletteIndex, Placement};
+use crate::block_array::{BlockArray, Dims, Footprint, PaletteIndex, Placement};
 
 use super::anchor::PlaceAnchor;
 
@@ -30,26 +30,29 @@ pub(super) struct PlacedBody {
     pub(super) walls: WallColumn,
     /// The doors and windows the openings phase cut, by member span.
     pub(super) cut: HashSet<Span>,
+    /// The `def`'s `size=`: the outer face of its walls, centred in the array's overhang ring.
+    pub(super) footprint: Footprint,
 }
 
-/// What one site's placements hold on one walk plane: cells its walkways may not overwrite, and
-/// who lays each.
+/// What one site's placements take up on one walk plane: cells its walkways may not overwrite,
+/// and the placements that take up each.
 pub(super) struct FloorPlan {
-    /// World cells of every non-air voxel of every placement of the site on the plane.
+    /// World cells every placement of the site takes up on the plane: on a row from its ground row
+    /// to its top, every cell of its footprint and every block it builds there.
     pub(super) cells: HashSet<Cell>,
-    /// For each cell in [`Self::cells`], what lays it, in placement order.
+    /// For each cell in [`Self::cells`], who takes it up, in placement order.
     pub(super) owners: HashMap<Cell, Vec<FloorOwner>>,
     /// The box each placement's cells span, under its `site::SITE::PLACE_ID` key.
     pub(super) extents: IndexMap<String, FloorExtent>,
 }
 
-/// One placement's voxel on a cell of [`FloorPlan::cells`].
+/// One placement taking up a cell of [`FloorPlan::cells`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct FloorOwner {
     /// The placement's index in `placed`.
     pub(super) placement: usize,
-    /// The voxel, as an index into that placement's palette.
-    pub(super) voxel: PaletteIndex,
+    /// The block it lays there, as an index into its palette, or `None` for air in its footprint.
+    pub(super) voxel: Option<PaletteIndex>,
 }
 
 /// The world-space box one placement's cells in [`FloorPlan::cells`] span.
@@ -63,8 +66,7 @@ pub(super) struct FloorExtent {
     pub(super) max_z: i32,
 }
 
-/// Collect the [`FloorPlan`] every lowered placement of `site` lays on the world row `plane`: its
-/// floor on its ground row, and whatever its body holds on a row above.
+/// Collect the [`FloorPlan`] of every lowered placement of `site` on the world row `plane`.
 pub(super) fn collect_floor_cells(
     structures: &IndexMap<String, BlockArray>,
     placed: &IndexMap<String, PlacedBody>,
@@ -74,7 +76,12 @@ pub(super) fn collect_floor_cells(
     let mut cells: HashSet<Cell> = HashSet::new();
     let mut owners: HashMap<Cell, Vec<FloorOwner>> = HashMap::new();
     let mut extents: IndexMap<String, FloorExtent> = IndexMap::new();
-    for (index, (key, PlacedBody { placement, .. })) in placed.iter().enumerate() {
+    for (index, (key, body)) in placed.iter().enumerate() {
+        let PlacedBody {
+            placement,
+            footprint,
+            ..
+        } = body;
         if placement.site != *site {
             continue;
         }
@@ -92,6 +99,7 @@ pub(super) fn collect_floor_cells(
         else {
             continue;
         };
+        let encloses = in_footprint(ba.dims, *footprint);
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
                 let Some(i) = ba.dims.index(x, row, z) else {
@@ -103,8 +111,8 @@ pub(super) fn collect_floor_cells(
                     );
                     continue;
                 };
-                let voxel = ba.voxels[i];
-                if voxel == PaletteIndex::AIR {
+                let voxel = Some(ba.voxels[i]).filter(|&voxel| voxel != PaletteIndex::AIR);
+                if voxel.is_none() && !encloses(x, z) {
                     continue;
                 }
                 let world = |origin: i32, local: u32| {
@@ -152,5 +160,16 @@ pub(super) fn collect_floor_cells(
         cells,
         owners,
         extents,
+    }
+}
+
+/// Whether array column `(x, z)` of a body of `dims` is inside `footprint`, with the overhang
+/// ring around it as wide on every side.
+fn in_footprint(dims: Dims, footprint: Footprint) -> impl Fn(u32, u32) -> bool {
+    let ring_x = dims.x.saturating_sub(footprint.x) / 2;
+    let ring_z = dims.z.saturating_sub(footprint.z) / 2;
+    move |x, z| {
+        (ring_x..ring_x.saturating_add(footprint.x)).contains(&x)
+            && (ring_z..ring_z.saturating_add(footprint.z)).contains(&z)
     }
 }

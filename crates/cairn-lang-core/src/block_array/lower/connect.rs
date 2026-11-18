@@ -302,8 +302,8 @@ fn diag_ports_on_two_rows(
         notes: vec![DiagnosticNote {
             span: None,
             message: "a walkway is a flat strip on the row its two ports share and does not \
-                      climb; join two openings that open onto one row, both in their `def` body \
-                      or both under a `level` of one `y=`"
+                      climb; join two openings whose `level`s have one `y=`, a member of the \
+                      body counting as `y=0`"
                 .to_owned(),
         }],
         data: None,
@@ -524,8 +524,8 @@ struct BlockedEndpoints<'a> {
     to: ((i32, i32, i32), &'a str),
 }
 
-/// The finished floor plan of a row's site, which a `W_WALKWAY_BLOCKED` note reads to name what is
-/// in the way.
+/// The finished floor plan of a row's site and plane, which a `W_WALKWAY_BLOCKED` note reads to
+/// name what is in the way.
 struct SiteFloor<'a> {
     structures: &'a IndexMap<String, BlockArray>,
     placed: &'a IndexMap<String, PlacedBody>,
@@ -581,8 +581,8 @@ fn area_cap_note(
 ) -> String {
     let (from, to) = (ends.from.0, ends.to.0);
     let head = format!(
-        "the router searches the box spanning both ports and every placement floor of site \
-         `{site}` on the walk plane, here {area} cells, past its cap of {cap} cells",
+        "the router searches the box spanning both ports and every cell the placements of site \
+         `{site}` take up on the walk plane, here {area} cells, past its cap of {cap} cells",
         site = connect.site,
     );
     let ports_area = margin_box_area(from, to);
@@ -600,19 +600,19 @@ fn area_cap_note(
     if labels.is_empty() {
         debug_assert!(
             false,
-            "the search rectangle {rect:?} passed the cap, but no floor stretches it past the \
-             ports {from:?} and {to:?}",
+            "the search rectangle {rect:?} passed the cap, but no placement stretches it past \
+             the ports {from:?} and {to:?}",
         );
         return format!("{head}; bring the outlying placements closer together");
     }
-    let (floors, verb, pronoun) = if labels.len() == 1 {
-        ("the floor of placement", "stretches", "that placement")
+    let (placements, take, pronoun) = if labels.len() == 1 {
+        ("placement", "takes", "that placement")
     } else {
-        ("the floors of placements", "stretch", "those placements")
+        ("placements", "take", "those placements")
     };
     format!(
-        "{head}; the two ports span only {ports_area} of those cells, and {floors} {list} \
-         {verb} the box past them, so bring {pronoun} closer to the two ports",
+        "{head}; the two ports span only {ports_area} of those cells, and what {placements} \
+         {list} {take} up stretches the box past them, so bring {pronoun} closer to the two ports",
         list = and_list(&labels).unwrap_or_default(),
     )
 }
@@ -623,7 +623,7 @@ fn margin_box_area(from: (i32, i32, i32), to: (i32, i32, i32)) -> u64 {
     span(from.0, to.0).saturating_mul(span(from.2, to.2))
 }
 
-/// The keys of the placements whose floor sets an edge of `rect` beyond both ports.
+/// The keys of the placements whose taken cells set an edge of `rect` beyond both ports.
 pub(super) fn edge_pushers(
     rect: SearchRect,
     from: (i32, i32, i32),
@@ -652,7 +652,7 @@ fn placement_label(placement: &Placement) -> String {
     format!("`{}`", placement.place_id)
 }
 
-/// One clause of a buried-endpoint note: what covers the port cell, and the remedy for each.
+/// One clause of a buried-endpoint note: what takes up the port cell, and the remedy for each.
 fn buried_port_clause(
     port: &crate::resolve::PortRef,
     (cell, own_key): ((i32, i32, i32), &str),
@@ -668,17 +668,17 @@ fn buried_port_clause(
             continue;
         };
         if key == own_key {
-            let block = site
-                .structures
-                .get(key)
-                .and_then(|ba| ba.palette.entries.get(usize::from(owner.voxel.0)));
-            if block.is_none() {
-                // INVARIANT: the voxel was read from this placement's own array and palette.
-                debug_assert!(
-                    false,
-                    "voxel {owner:?} of `{key}` names no entry of its palette",
-                );
-            }
+            let block = owner.voxel.and_then(|voxel| {
+                site.structures
+                    .get(key)
+                    .and_then(|ba| ba.palette.entries.get(usize::from(voxel.0)))
+            });
+            // INVARIANT: a port stands outside its own footprint, so its own placement takes up
+            // the port cell only with a block, read from its own array and palette.
+            debug_assert!(
+                block.is_some(),
+                "cell {cell:?} of `{key}` is {owner:?}, which names no block of its palette",
+            );
             // Only a target's pack names the block a stand-in becomes.
             own_block = Some(
                 block
@@ -695,13 +695,13 @@ fn buried_port_clause(
         None => format!("a block its own placement {own} lays on that cell"),
     });
     let others = (!others.is_empty()).then(|| {
-        let noun = if others.len() == 1 {
-            "placement"
+        let (placements, take) = if others.len() == 1 {
+            ("placement", "takes")
         } else {
-            "placements"
+            ("placements", "take")
         };
         format!(
-            "the floor of {noun} {}",
+            "a cell {placements} {} {take} up on that row",
             and_list(&others).unwrap_or_default()
         )
     });
@@ -710,12 +710,12 @@ fn buried_port_clause(
             format!("port `{port}` sits on {own}; move that block or the door/window")
         }
         (None, Some(others)) => format!(
-            "port `{port}` is buried inside {others}; move that door/window to an \
-             unobstructed wall or pull the placements apart"
+            "port `{port}` stands on {others}; move that door/window to an unobstructed wall or \
+             pull the placements apart"
         ),
         (Some(own), Some(others)) => format!(
-            "port `{port}` is buried inside {others} and sits on {own}; move that block, and \
-             move that door/window to an unobstructed wall or pull the placements apart"
+            "port `{port}` stands on {others} and sits on {own}; move that block, and move that \
+             door/window to an unobstructed wall or pull the placements apart"
         ),
         (None, None) => {
             // INVARIANT: every cell the router reports blocked was recorded with its owners.
@@ -724,8 +724,8 @@ fn buried_port_clause(
                 "port `{port}` at {cell:?} is blocked but has no owner"
             );
             format!(
-                "port `{port}` is buried inside another placement's floor; move that \
-                 door/window to an unobstructed wall or pull the placements apart"
+                "port `{port}` stands on a cell another placement takes up on that row; move \
+                 that door/window to an unobstructed wall or pull the placements apart"
             )
         }
     }

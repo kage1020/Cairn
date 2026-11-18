@@ -55,7 +55,8 @@ use super::args::diag_deferred_member_reason;
 use super::material::TargetRegistry;
 use super::roof::{FLAT_BASE_ID, STAIR_BASE_ID};
 use super::{
-    BlockArray, BlockArrayIr, BlockState, PALETTE_CAPACITY, Placement, ResolvedMember, Walkway,
+    BlockArray, BlockArrayIr, BlockState, Footprint, PALETTE_CAPACITY, Placement, ResolvedMember,
+    Walkway,
 };
 
 use anchor::{GapOutcome, report_unread_gap, resolve_place_anchor};
@@ -290,6 +291,7 @@ fn lower_site<'a>(
                 anchor,
                 walls: lowered.walls,
                 cut: lowered.cut,
+                footprint: Footprint::of_size(def_size),
                 placement: Placement {
                     site: placement_site,
                     place_id: placement_id,

@@ -169,7 +169,8 @@ fn deferred_connect_to_refused_id_diag(endpoint: &str, span: Span, refused: &Spa
     }
 }
 
-/// Whether exactly one of the def body's own members carries `port.port`; if not, pushes why.
+/// Whether exactly one member of the def's body, or of a `level` directly in it, carries
+/// `port.port`; if not, pushes why.
 fn validate_port(
     port: &PortRef,
     defs: &[DefIr],
