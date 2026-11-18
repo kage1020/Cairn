@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashMap};
 use indexmap::IndexMap;
 
 use crate::ast::{Item, Module, ThemeRule, ValueKind};
-use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::intent::{
     Actuator, BindingKey, IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS,
     Unread, ValueWithSpan, role_of,
@@ -369,8 +369,9 @@ fn unknown_key(
     span: &crate::error::Span,
     accepted: &[&str],
 ) -> Diagnostic {
+    let suggestion = nearest_match(key, accepted.iter().copied());
     let mut notes = Vec::with_capacity(2);
-    notes.extend(nearest_match(key, accepted.iter().copied()).map(did_you_mean_note));
+    notes.extend(suggestion.map(did_you_mean_note));
     notes.push(DiagnosticNote {
         span: None,
         message: format!("expected one of: {}", accepted.join(", ")),
@@ -381,7 +382,7 @@ fn unknown_key(
         span: span.clone(),
         primary: field.nothing_reads(keyword, key),
         notes,
-        data: None,
+        data: Some(unknown_argument_data(key, suggestion)),
     }
 }
 
@@ -421,7 +422,14 @@ fn coined_near_miss(
                 message: format!("expected one of: {}", own.join(", ")),
             },
         ],
-        data: None,
+        data: Some(unknown_argument_data(key, Some(suggested))),
+    }
+}
+
+fn unknown_argument_data(key: &str, suggestion: Option<&str>) -> DiagnosticData {
+    DiagnosticData::UnknownArgument {
+        key: key.to_owned(),
+        suggestion: suggestion.map(str::to_owned),
     }
 }
 

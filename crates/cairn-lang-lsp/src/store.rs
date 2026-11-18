@@ -103,7 +103,8 @@ pub(crate) fn apply_content_changes(
     Ok(text.into_owned())
 }
 
-/// Which of the texts a [`DocumentStore`] has stored one is; no two texts share one.
+/// Which text a [`DocumentStore`] holds for a document, numbered anew on each store and each
+/// [`DocumentStore::renumber`]; no two share one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Revision(u64);
 
@@ -189,6 +190,21 @@ impl DocumentStore {
         self.docs
             .get(uri)
             .map(|document| (document.text.as_str(), document.revision))
+    }
+
+    /// Every open document's URI and latest text, in no particular order.
+    pub fn documents(&self) -> impl Iterator<Item = (&lsp_types::Uri, &str)> {
+        self.docs
+            .iter()
+            .map(|(uri, document)| (uri, document.text.as_str()))
+    }
+
+    /// Gives every open document a new revision, for findings that changed with no text change.
+    pub fn renumber(&mut self) {
+        for document in self.docs.values_mut() {
+            self.last_revision += 1;
+            document.revision = Revision(self.last_revision);
+        }
     }
 }
 
@@ -442,6 +458,22 @@ mod tests {
             Some(("one", Revision(4))),
             "a reopened text is a new revision"
         );
+    }
+
+    #[test]
+    fn renumbering_gives_every_open_text_a_revision_none_had() {
+        let mut store = DocumentStore::new();
+        let (a, b) = (uri("file:///a.crn"), uri("file:///b.crn"));
+        store.open(a.clone(), "one".to_owned());
+        store.open(b.clone(), "two".to_owned());
+        store.renumber();
+        let mut revisions =
+            [&a, &b].map(|uri| store.get_with_revision(uri).map(|(_, revision)| revision.0));
+        revisions.sort_unstable();
+        assert_eq!(revisions, [Some(3), Some(4)]);
+        let mut documents: Vec<_> = store.documents().collect();
+        documents.sort_unstable_by_key(|(uri, _)| uri.as_str().to_owned());
+        assert_eq!(documents, [(&a, "one"), (&b, "two")]);
     }
 
     #[test]
