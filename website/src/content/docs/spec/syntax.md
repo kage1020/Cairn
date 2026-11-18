@@ -619,7 +619,8 @@ language server shows the entry's own line on hover.
   - **`side=`.** The wall the band runs outside.
   - **`half=`.** The half of the cell the stairs sit in: `top` or `bottom`.
   - **`facing=`.** Which way the stairs face: `out` from the wall or `in` toward it.
-  - **`shape=`.** The stairs' shape: `straight`, `outer_left` or `outer_right`.
+  - **`shape=`.** The stairs' shape: `straight`, `inner_left`, `inner_right`, `outer_left` or
+    `outer_right`.
   - **`y=`.** The row the band is on.
   - **`waterlogged=`.** `true` or `false` written into the stairs' state, or `auto` to let a water
     `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).

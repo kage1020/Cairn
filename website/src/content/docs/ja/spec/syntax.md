@@ -269,7 +269,7 @@ tree-sitter の文法は、3 つの点で既知の例外です。1 つ目に、�
   - **`side=`。** 帯を外側に並べる壁です。
   - **`half=`。** 階段が収まるセルの半分で、`top` か `bottom` です。
   - **`facing=`。** 階段の向きで、壁から離れる `out` か壁に向かう `in` です。
-  - **`shape=`。** 階段の形で、`straight`、`outer_left`、`outer_right` のいずれかです。
+  - **`shape=`。** 階段の形で、`straight`、`inner_left`、`inner_right`、`outer_left`、`outer_right` のいずれかです。
   - **`y=`。** 帯がある段です。
   - **`waterlogged=`。** 階段のステートに書き込む `true` か `false`、または水の `fill` に決めさせる `auto` です。[ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged) を参照してください。
 - **`beam`。** 壁のいちばん上の段に沿って、または開口の上に横たえる柱状ブロックの列です。[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) を参照してください。
