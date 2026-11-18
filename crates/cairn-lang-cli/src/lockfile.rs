@@ -8,7 +8,7 @@ use cairn_lang_core::lock::{
     Lockfile, LockfileRead, MemberSensitivity, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::{CAIRN_VERSION, Edition};
-use cairn_lang_formats::target::ResolvedTarget;
+use cairn_lang_formats::data_version::ResolvedTarget;
 
 /// Warn where the lockfile at `lock_path` records another target, as `spec/versioning-editions`
 /// "Provenance and lock" does, or cannot be read; an absent one is silent.

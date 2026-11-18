@@ -25,7 +25,6 @@ use crate::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
 };
 use crate::registry::builtin_pack;
-use crate::target::supported_versions;
 
 /// Each requested edition's report row, from a dry-run lower per edition, its circuits laid, and
 /// one per version.
@@ -85,7 +84,7 @@ pub(super) fn edition_rows(
             edition_wide_refusals(out, edition, &resolution, &block_ir, portability.as_ref());
 
         let floors = declared_version_floors(module, edition);
-        let considered = supported_versions(pack);
+        let considered = pack.targetable_versions();
         let verdicts = weigh_versions(
             ir,
             &resolution,

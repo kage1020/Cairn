@@ -3,7 +3,9 @@
 
 use std::fs;
 
-use crate::common::{Fixture, assert_stream, compile_as, nbt_body, stderr_of, string_tags};
+use crate::common::{
+    Fixture, assert_stream, compile_as, int_tags, nbt_body, stderr_of, string_tags,
+};
 
 /// A struct with one painted floor whose `slot floor` binds `@{token}`.
 fn source_binding(token: &str) -> String {
@@ -21,14 +23,18 @@ fn java_palette(token: &str, target: &str) -> Vec<String> {
     string_tags(&nbt_body(&fixture.out().join("s.nbt")), tag, false)
 }
 
-/// The block names a Bedrock build of `@{token}` at `target` writes.
-fn bedrock_palette(token: &str, target: &str) -> Vec<String> {
+/// The `.mcstructure` a Bedrock build of `@{token}` at `target` writes.
+fn bedrock_structure(token: &str, target: &str) -> Vec<u8> {
     let fixture = Fixture::new(&source_binding(token));
     let out = compile_as(&fixture, "bedrock", target);
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
     assert_stream(&stderr_of(&out), &[]);
-    let structure = fs::read(fixture.out().join("s.mcstructure")).expect("read artifact");
-    string_tags(&structure, "name", true)
+    fs::read(fixture.out().join("s.mcstructure")).expect("read artifact")
+}
+
+/// The block names a Bedrock build of `@{token}` at `target` writes.
+fn bedrock_palette(token: &str, target: &str) -> Vec<String> {
+    string_tags(&bedrock_structure(token, target), "name", true)
 }
 
 #[test]
@@ -65,6 +71,30 @@ fn a_java_spelling_is_written_as_the_bedrock_block_its_state_map_names() {
         bedrock_palette("stone_bricks", "1.21.60"),
         ["minecraft:air", "minecraft:stone_bricks"]
     );
+}
+
+/// The writer maps the Java block the palette keeps, so its states reach the Bedrock block.
+#[test]
+fn a_token_written_through_the_state_map_keeps_its_states() {
+    let bricks = bedrock_structure("mossy_stone_bricks", "1.21.0");
+    assert_eq!(
+        string_tags(&bricks, "name", true),
+        ["minecraft:air", "minecraft:stonebrick"]
+    );
+    assert_eq!(string_tags(&bricks, "stone_brick_type", true), ["mossy"]);
+    let sign = bedrock_structure("oak_sign[rotation=4]", "1.21.60");
+    assert_eq!(
+        string_tags(&sign, "name", true),
+        ["minecraft:air", "minecraft:standing_sign"]
+    );
+    assert_eq!(int_tags(&sign, "ground_sign_direction", true), [4]);
+    let cauldron = bedrock_structure("cauldron[fluid=water,level=3]", "1.21.60");
+    assert_eq!(
+        string_tags(&cauldron, "name", true),
+        ["minecraft:air", "minecraft:cauldron"]
+    );
+    assert_eq!(string_tags(&cauldron, "cauldron_liquid", true), ["water"]);
+    assert_eq!(int_tags(&cauldron, "fill_level", true), [6]);
 }
 
 #[test]

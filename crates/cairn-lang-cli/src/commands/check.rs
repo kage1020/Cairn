@@ -8,7 +8,7 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, Severity, diagnose_parse_failure, lower, parse};
 use cairn_lang_formats::build::circuits::check_circuits;
 use cairn_lang_formats::build::finding::{Finding, Found, render_findings};
-use cairn_lang_formats::build::gate::{build_diagnostics, weighed_editions};
+use cairn_lang_formats::build::gate::build_diagnostics;
 use cairn_lang_formats::build::lowering::{CheckLowering, check_lowering};
 use cairn_lang_formats::build::run_level::{partial_build, unsupported_target};
 
@@ -55,7 +55,7 @@ pub(crate) fn run_check(
         unsupported,
     } = check_lowering(&ir, edition, target);
     let mut diagnostics: Vec<Found> =
-        build_diagnostics(&module, &ir, pin, &weighed_editions(pin), lowering)
+        build_diagnostics(&module, &ir, pin, &Edition::weighed(pin), lowering)
             .into_iter()
             .map(Found::Core)
             .collect();

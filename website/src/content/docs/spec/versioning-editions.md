@@ -124,9 +124,11 @@ and the block each value names ([Materials and Themes
               "powder_snow": "powder_snow_cauldron" } }
 ```
 
-The loader refuses a component with no rows, a row that names no block, a token two rows name, a
-block no version of `blocks` declares and no version's state map writes, and a meaning token its
-block takes as a state at some version, which the row would hide.
+The loader refuses a component with no rows, a row that names no block, an empty meaning token or
+value, a token two rows name, a token or block no version of `blocks` declares and no version's
+state map writes, and a meaning token its block takes as a state at some version, which the row
+would hide. A pack without `blocks` tables has nothing to check a row's token and blocks against, so
+it checks only the rest.
 
 The Bedrock pack carries its state maps as two more components. `states` is generated from
 GeyserMC's mappings, one pinned per version, and checked against that version's block palette when
@@ -296,9 +298,11 @@ anything, and in the `buildable targets` row of `cairn info`, which pins each su
 turn, and its `inferred range` row, which pins the oldest and the newest
 ([§10.5](#the-inferred-range-row)). A `compile` whose target the file's floors refuse pins none: it
 checks no id and is refused on the floor instead ([§10.4](#the-declared-floor-is-enforced)), while
-`check --target` is not held to the floors and pins the target regardless. A `compile` held to a
-floor also lowers once at the newest version, whatever its target, to weigh the floors against the
-registry ([below](#a-floor-is-weighed-against-the-registry)); that pin reports nothing but
+`check --target` is not held to the floors and pins the target regardless. The language server pins
+a target once the client's settings name one, and holds it to the floors as `compile` does
+([Lint](/spec/lint/#materials-and-targets)). A `compile` held to a floor also lowers once at the
+newest version, whatever its target, to weigh the floors against the registry
+([below](#a-floor-is-weighed-against-the-registry)); that pin reports nothing but
 `E_REQUIRES_CONFLICT`. The `buildable targets` row reports each version's `E_UNKNOWN_ID` under that
 version and leaves the exit code alone ([§10.5](#the-buildable-targets-row)). The other rows of
 `info` report across the whole range by design, and `cairn lower` lowers with no target, so neither
@@ -453,8 +457,10 @@ version is still reported ahead of that refusal: the check pass's findings, such
 `E_INVALID_REQUIRES`, lowering's, such as `E_UNKNOWN_ABSTRACT_TOKEN`, and `E_REQUIRES_CONFLICT`,
 which no target repairs ([§10.4](#a-floor-is-weighed-against-the-registry)). An error among them
 stops the build before the refusal is reached. `cairn check --edition E --target V` is not held to
-the floors, so at a target they refuse it reports the ids that target lacks, where `compile`
-reports the floor ([Lint](/spec/lint/#materials-and-targets)).
+the floors, so at a target they refuse it reports the ids that target lacks, where `compile` reports
+the floor ([Lint](/spec/lint/#materials-and-targets)). The language server, at a target its settings
+pin, is held to them as `compile` is: it pins no version for a target they refuse, and reports the
+refusal beside the findings that need none.
 
 ### The hint is weighed against the floor
 
@@ -873,14 +879,16 @@ would keep only its own version's. `--format json` carries them as
 
 Both questions are asked of the *edition* rather than of a version, because this row reports across
 a whole compatible range. An ID valid for only part of that range is therefore not `unsupported`, as
-`stonebrick`, which Bedrock split four ways at 1.21.40. Nor is a Java block some version's state map
-writes as a block of its own ([Materials and Themes
-§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)): `oak_sign` is portable on
-Bedrock, which writes it as `standing_sign`. Whether the version being built has it is what a pinned
-target answers, as `E_UNKNOWN_ID`, from `cairn compile --target` or `cairn check --edition E
---target V` for the same answer without a build
+`stonebrick`, which Bedrock split four ways at 1.21.40. Nor is a canonical token some version writes
+under another spelling ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)): `@oak_sign` is portable on
+Bedrock, which writes it as `standing_sign`. A raw block names the ID it writes ([Materials and
+Themes §7.4](/spec/materials-themes/#74-raw-blocks)), so it is asked only of the versions that
+declare that ID, and a raw `minecraft:oak_sign` is `unsupported` on Bedrock, where none does.
+Whether the version being built has it is what a pinned target answers, as `E_UNKNOWN_ID`, from
+`cairn compile --target` or `cairn check --edition E --target V` for the same answer without a build
 ([§10.4](#104-fail-loud-and-minimum-version-inference)). States are asked the same way, of every
-version that declares the block: `cherry_wood[axis=x]` is portable because three versions write it,
+version that writes the block: `cherry_wood[axis=x]` is portable because three versions write it,
 although 1.21.40's palette has no form for it, and a build pinned there answers `E_STATE_UNMAPPED`.
 
 #### Which entries degraded, and what they lost
@@ -972,7 +980,8 @@ note: shop.crn:3:16: `minecraft:oak_sign` is written `minecraft:standing_sign` a
 The ID is the one the structure file names, so a token Bedrock writes back under its own ID is not
 listed: `@cauldron[fluid=water]` is Bedrock's `cauldron`, with the water in a state. A raw block
 names the ID it writes, and a catalog token the block its entry maps, so neither is listed. A
-version below a floor is not weighed, since no build writes it.
+version below a floor is not weighed, since no build writes it, and nor is a version that refuses
+the token's states, as `@oak_sign[rotation=99]` is refused by every Bedrock version.
 
 A lockfile records no spelling: the target and the pack hash it records
 ([§10.6](#106-provenance-and-lock)) fix every such choice, and this row reads them back for each

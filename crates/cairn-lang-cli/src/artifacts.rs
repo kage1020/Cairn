@@ -7,11 +7,11 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::build::artifact::{PreparedArtifact, prepare_artifact};
 use cairn_lang_formats::build::run_level::{RunLevelNote, artifact_collision, backend_refusal};
-use cairn_lang_formats::data_version::JavaTarget;
+use cairn_lang_formats::data_version::{JavaTarget, ResolvedTarget};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
 use cairn_lang_formats::schem::{SchemError, prepare_schem, schem_files};
-use cairn_lang_formats::target::{PreparedStructure, ResolvedTarget};
+use cairn_lang_formats::target::PreparedStructure;
 
 use crate::cli::StructureFormat;
 use crate::lockfile::build_lockfile;

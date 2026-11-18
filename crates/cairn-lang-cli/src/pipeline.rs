@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, diagnose_parse_failure, parse};
 use cairn_lang_formats::build::lowering::{Lowered, lower_for_target};
-use cairn_lang_formats::target::ResolvedTarget;
+use cairn_lang_formats::data_version::ResolvedTarget;
 
 use crate::report::{FailureReport, report_failure_document};
 

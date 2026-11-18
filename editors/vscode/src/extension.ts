@@ -1,21 +1,26 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  ConfigurationTarget,
   ExtensionContext,
   OutputChannel,
   TextDocument,
   Uri,
   ViewColumn,
+  WorkspaceConfiguration,
   commands,
   env,
   window,
   workspace,
 } from "vscode";
 import {
+  ClientCapabilities,
   ExecuteCommandRequest,
+  FeatureState,
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
+  StaticFeature,
 } from "vscode-languageclient/node";
 
 const execFileAsync = promisify(execFile);
@@ -24,6 +29,11 @@ const PROBE_TIMEOUT_MS = 5_000;
 // Not `cairn.info`: the client registers that one itself, from the server's capabilities.
 const SHOW_INFO = "cairn.showInfo";
 const INFO = "cairn.info";
+/**
+ * The command a quick-fix runs to pin another target; its arguments are the
+ * edition and the version.
+ */
+const SET_TARGET = "cairn.setTarget";
 
 let client: LanguageClient | undefined;
 
@@ -61,6 +71,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
     serverOptions,
     clientOptions,
   );
+  client.registerFeature(new ClientCommands());
+  context.subscriptions.push(commands.registerCommand(SET_TARGET, setTarget));
 
   try {
     await client.start();
@@ -137,6 +149,77 @@ async function showInfo(): Promise<TextDocument | undefined> {
     preserveFocus: true,
   });
   return shown;
+}
+
+/**
+ * Declares the commands the extension runs for the server, under
+ * `experimental.commands`, as no standard client capability lists them.
+ */
+class ClientCommands implements StaticFeature {
+  fillClientCapabilities(capabilities: ClientCapabilities): void {
+    const experimental = (capabilities.experimental ?? {}) as Record<
+      string,
+      unknown
+    >;
+    capabilities.experimental = {
+      ...experimental,
+      commands: { commands: [SET_TARGET] },
+    };
+  }
+
+  initialize(): void {}
+
+  getState(): FeatureState {
+    return { kind: "static" };
+  }
+
+  clear(): void {}
+}
+
+/**
+ * Writes `version` to `cairn.target`, which the server reads as the new pin,
+ * while `cairn.edition` still names the `edition` the quick-fix was offered in.
+ */
+async function setTarget(edition: unknown, version: unknown): Promise<void> {
+  if (typeof edition !== "string" || typeof version !== "string") {
+    void window.showErrorMessage(
+      `${SET_TARGET} takes an edition and a version, not ${JSON.stringify([edition, version])}.`,
+    );
+    return;
+  }
+  const settings = workspace.getConfiguration("cairn");
+  const pinned = settings.get<string>("edition", "").trim();
+  if (pinned !== edition) {
+    void window.showErrorMessage(
+      `The quick-fix pins ${edition} ${version}, but cairn.edition is now ` +
+        `${pinned === "" ? "unset" : pinned}. Ask for the quick-fix again.`,
+    );
+    return;
+  }
+  try {
+    await settings.update("target", version, pinScope(settings));
+  } catch (err) {
+    void window.showErrorMessage(
+      `Could not set cairn.target to ${version}: ${describeError(err)}`,
+    );
+  }
+}
+
+/**
+ * The scope that sets `cairn.target`, else the one that sets `cairn.edition`,
+ * so the target lands beside the edition it is read with.
+ */
+function pinScope(settings: WorkspaceConfiguration): ConfigurationTarget {
+  const target = settings.inspect("target");
+  if (target?.workspaceValue !== undefined) {
+    return ConfigurationTarget.Workspace;
+  }
+  if (target?.globalValue !== undefined) {
+    return ConfigurationTarget.Global;
+  }
+  return settings.inspect("edition")?.workspaceValue !== undefined
+    ? ConfigurationTarget.Workspace
+    : ConfigurationTarget.Global;
 }
 
 async function resolveServerPath(

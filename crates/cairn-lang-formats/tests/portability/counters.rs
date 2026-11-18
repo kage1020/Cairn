@@ -388,7 +388,7 @@ fn a_bedrock_pack_without_a_state_map_writes_no_entry() {
         only_reason(&report),
         &UnsupportedReason::StatesUnmapped {
             states: String::new(),
-            detail: "no version that declares the block carries a state map".to_owned(),
+            detail: "no version that writes the block carries a state map".to_owned(),
         },
     );
 }
@@ -598,6 +598,47 @@ fn an_alias_this_edition_lacks_is_not_offered() {
             aliases: Vec::new(),
         },
         "`oak_sign` is no more in this table than `standing_sign` is",
+    );
+}
+
+/// [`table`]'s `stonebrick`, which 1.1 renamed `stone_bricks`, mapped at 1.0 alone.
+fn renamed_states() -> StateMapIndex {
+    let catalog: StatesCatalog = serde_json::from_str(
+        r#"{
+        "schema_version": 1,
+        "namespace": "minecraft",
+        "families": [
+            { "mc_versions": ["1.0"], "ids": ["stonebrick"], "java": {}, "defaults": {}, "states": {} }
+        ]
+    }"#,
+    )
+    .expect("test states parse as JSON");
+    let sensitivity: SensitivityCatalog = serde_json::from_str(
+        r#"{ "schema_version": 1, "namespace": "minecraft", "dropped_states": {} }"#,
+    )
+    .expect("test sensitivity parses as JSON");
+    StateMapIndex::from_catalogs(catalog, sensitivity, &table()).expect("test states validate")
+}
+
+/// 1.0 writes the token under the spelling it declares, the one version whose map has a form.
+#[test]
+fn a_token_is_weighed_at_a_version_that_writes_it_under_its_old_spelling() {
+    let ir = one_state_ir(vec![BlockState::bare("minecraft:stone_bricks")]);
+    let report = portability_for_bedrock(
+        &ir,
+        &table(),
+        &aliases(),
+        &AbsentIndex::empty(),
+        Some(&renamed_states()),
+    )
+    .expect("no leak");
+    assert_eq!(
+        report.counts(),
+        PortabilityCounts {
+            portable: 1,
+            degraded: 0,
+            unsupported: 0,
+        },
     );
 }
 

@@ -7,7 +7,7 @@ use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, IntentModule, lower, resolve};
 use cairn_lang_formats::build::finding::Finding;
-use cairn_lang_formats::build::gate::{build_diagnostics, weighed_editions};
+use cairn_lang_formats::build::gate::build_diagnostics;
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::{
     LayoutStage, compile_delay, compile_edition_netlist, compile_legalize, compile_netlist,
@@ -47,7 +47,7 @@ pub(crate) fn run_synth(
     let ir = lower(&module);
     let lines = LineStarts::new(&source);
 
-    let diagnostics = build_diagnostics(&module, &ir, None, &weighed_editions(None), Vec::new());
+    let diagnostics = build_diagnostics(&module, &ir, None, &Edition::weighed(None), Vec::new());
     if report_diagnostics(file, &source, &lines, &diagnostics) {
         return ExitCode::from(1);
     }

@@ -8,7 +8,7 @@ use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
 use super::site_floor::FloorExtent;
 use super::*;
 use crate::ast::ValueKind;
-use crate::block_array::material::{NoTarget, resolve_block_state, stand_in};
+use crate::block_array::material::{IdStanding, NoTarget, resolve_block_state, stand_in};
 use crate::block_array::roof::is_stair;
 use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
 use crate::block_array::wall_column::WallColumn;
@@ -460,7 +460,7 @@ fn without_a_target_the_palette_counts_no_stand_in() {
     fn without_target(source: &str) -> Vec<(&'static str, &str)> {
         let ir = lower(&parse(source).expect("parse"));
         let registry = NoTarget {
-            declared: &|_| true,
+            standing: &|_| IdStanding::Declared,
         };
         let out = lower_to_block_array_within(&ir, &resolve(&ir, None), Some(&registry), 4);
         out.diagnostics
@@ -3981,9 +3981,11 @@ fn a_stair_with_an_unknown_state_is_refused_with_the_values_it_takes() {
             vec!["`facing=` takes one of out, in"],
         ),
         (
-            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left",
-            "unknown stair `shape=inner_left`",
-            vec!["`shape=` takes one of straight, outer_left, outer_right"],
+            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner",
+            "unknown stair `shape=inner`",
+            vec![
+                "`shape=` takes one of straight, inner_left, inner_right, outer_left, outer_right",
+            ],
         ),
     ] {
         assert_eq!(

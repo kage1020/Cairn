@@ -94,7 +94,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - スロットを持つテーマと、そのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別のブロック ID、改名前の旧名、意味トークンを収めたレジストリパック。正規トークンはターゲットごとの綴りで書き出されます
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
-- 診断・補完・ホバーと `cairn info` のレポートを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
+- エディタで固定したターゲットに対する診断と、補完、ホバー、クイックフィックス、`cairn info` のレポートを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)
 - ドキュメントサイトの[プレイグラウンド](https://cairn.kage1020.com/ja/playground/)。`cairn-lang-wasm` が入力に合わせてソースをブラウザ内でコンパイルし、構造物ファイルをダウンロードできます。
 

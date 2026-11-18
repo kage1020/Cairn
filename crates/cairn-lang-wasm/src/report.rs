@@ -12,11 +12,11 @@ use cairn_lang_formats::build::lowering::lower_for_target;
 use cairn_lang_formats::build::run_level::{
     RenderedRunLevelMessage, RunLevelMessage, artifact_collision,
 };
+use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
 use cairn_lang_formats::info::{
     FailureDocument, InfoDocument, InfoRequest, InfoSink, RequestedEditions,
 };
 use cairn_lang_formats::registry::builtin_pack;
-use cairn_lang_formats::target::{ResolvedTarget, resolve_target, supported_versions};
 use serde::Serialize;
 
 /// One structure file a build writes.
@@ -84,7 +84,7 @@ pub fn compile(source: &str, edition: Edition, target: &str) -> Compiled {
     }
     // A conflict holds at every target, so it stops the build ahead of the target's floor check.
     if lowered.conflicts.is_empty() {
-        match lowered.writable_target(edition, resolved) {
+        match lowered.writable_target(resolved) {
             Ok(target) => {
                 match artifacts(&lowered.block_ir, &target, &mut compiled.run_level, |m| {
                     m.render(source, &lines)
@@ -203,7 +203,7 @@ pub fn targets(edition: Edition) -> Targets {
         .to_owned();
     Targets {
         latest,
-        versions: supported_versions(builtin_pack(edition)),
+        versions: builtin_pack(edition).targetable_versions(),
     }
 }
 

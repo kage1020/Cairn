@@ -1025,30 +1025,44 @@ fn several_java_blocks_are_listed_with_a_count_past_four() {
 fn a_java_block_is_written_apart_only_where_its_forms_are_its_own() {
     let index = load(states(), sensitivity()).expect("the fixture loads");
     let at = index.at("1.0").expect("the fixture maps 1.0");
-    assert_eq!(
-        at.written_apart("minecraft:stone_bricks"),
-        Some("minecraft:stonebrick")
-    );
-    assert_eq!(
-        at.written_apart("minecraft:birch_log"),
-        Some("minecraft:log")
-    );
-    assert_eq!(
-        at.written_apart("minecraft:oak_sign"),
-        None,
+    assert!(at.writes_apart("minecraft:stone_bricks"));
+    assert!(at.writes_apart("minecraft:birch_log"));
+    assert!(
+        !at.writes_apart("minecraft:oak_sign"),
         "`spruce_sign` writes the same forms"
     );
-    assert_eq!(
-        at.written_apart("minecraft:oak_slab"),
-        None,
+    assert!(
+        !at.writes_apart("minecraft:oak_slab"),
         "a Bedrock spelling is written as itself"
     );
+    assert!(!at.writes_apart("minecraft:creeper_head"), "refused here");
+    assert!(!at.writes_apart("minecraft:no_such_block"));
+}
+
+#[test]
+fn a_version_writes_a_java_block_spelled_as_no_bedrock_id_only_where_it_writes_it_apart() {
+    let index = load(states(), sensitivity()).expect("the fixture loads");
+    let sign = BlockState {
+        id: "minecraft:oak_sign".to_owned(),
+        properties: [("rotation".to_owned(), "1".to_owned())]
+            .into_iter()
+            .collect(),
+    };
     assert_eq!(
-        at.written_apart("minecraft:creeper_head"),
-        None,
-        "refused here"
+        index.versions_writing(&sign).collect::<Vec<_>>(),
+        Vec::<&str>::new(),
+        "`spruce_sign` writes the same forms at both versions",
     );
-    assert_eq!(at.written_apart("minecraft:no_such_block"), None);
+    let bed = BlockState {
+        id: "minecraft:white_bed".to_owned(),
+        properties: [("part".to_owned(), "head".to_owned())]
+            .into_iter()
+            .collect(),
+    };
+    assert_eq!(
+        index.versions_writing(&bed).collect::<Vec<_>>(),
+        ["1.0", "1.1"]
+    );
 }
 
 #[test]
@@ -1056,12 +1070,9 @@ fn a_java_block_sharing_one_form_or_refused_one_pair_is_not_written_apart() {
     let apart = |catalog: Value, java: &str| {
         let index = load(catalog, sensitivity()).expect("the variant loads");
         let at = index.at("1.0").expect("the fixture maps 1.0");
-        at.written_apart(java).map(str::to_owned)
+        at.writes_apart(java)
     };
-    assert_eq!(
-        apart(states(), "minecraft:white_bed"),
-        Some("minecraft:bed".to_owned())
-    );
+    assert!(apart(states(), "minecraft:white_bed"));
     let mut shared = states();
     let red_bed = shared["families"]
         .as_array_mut()
@@ -1074,12 +1085,12 @@ fn a_java_block_sharing_one_form_or_refused_one_pair_is_not_written_apart() {
     red_bed["java"] = json!({ "occupied": ["true"], "part": ["head", "foot"] });
     red_bed["states"] =
         json!({ "head_piece_bit": { "reads": ["part"], "map": { "head": true, "foot": false } } });
-    assert_eq!(apart(shared.clone(), "minecraft:red_bed"), None);
-    assert_eq!(apart(shared, "minecraft:white_bed"), None);
+    assert!(!apart(shared.clone(), "minecraft:red_bed"));
+    assert!(!apart(shared, "minecraft:white_bed"));
     let refused = with(
         states(),
         "/refused",
         json!({ "1.0": ["jigsaw", "skull=creeper_head", "frame=white_bed"] }),
     );
-    assert_eq!(apart(refused, "minecraft:white_bed"), None);
+    assert!(!apart(refused, "minecraft:white_bed"));
 }

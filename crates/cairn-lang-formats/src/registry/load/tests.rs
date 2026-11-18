@@ -2001,3 +2001,74 @@ fn the_meanings_bytes_reach_the_pack_hash() {
     });
     assert_ne!(one.bytes_hash(), other.bytes_hash());
 }
+
+#[test]
+fn a_meaning_row_whose_token_no_version_writes_is_refused() {
+    let typo =
+        meanings_naming("pale_oak_planks").replace(r#""token": "stone""#, r#""token": "stoen""#);
+    let err = load_from_dir_err("meanings-token", |dir| {
+        write_pack_with_meanings(dir, good_blocks(), &typo);
+    });
+    let RegistryError::MeaningTokenUnwritten { token } = err else {
+        panic!("expected MeaningTokenUnwritten, got {err:?}");
+    };
+    assert_eq!(token, "minecraft:stoen");
+}
+
+#[test]
+fn a_pack_without_block_tables_takes_its_meaning_rows_unchecked() {
+    let pack = load_from_dir_or_die("meanings-no-blocks", |dir| {
+        write_pack_with_materials(
+            dir,
+            r#"{
+                "schema_version": 1,
+                "edition": "java",
+                "name": "test",
+                "description": "test",
+                "files": {
+                    "data_versions": "data_versions.json",
+                    "materials": "materials.json",
+                    "meanings": "meanings.json"
+                }
+            }"#,
+            good_data_versions(),
+            &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+        );
+        std::fs::write(dir.join("meanings.json"), meanings_naming("paleoak_planks"))
+            .expect("write meanings");
+    });
+    let mut asked = BlockState::bare("minecraft:stone");
+    asked
+        .properties
+        .insert("kind".to_owned(), "pale".to_owned());
+    assert_eq!(
+        pack.view(None).meant(&asked),
+        Some(BlockState::bare("minecraft:paleoak_planks"))
+    );
+}
+
+/// Bedrock's stairs take `facing` through its state map, which holds Bedrock's canonical states.
+#[test]
+fn a_meaning_token_the_state_map_gives_its_block_is_refused() {
+    let files = BuiltinFiles {
+        meanings: r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "tokens": [{ "token": "oak_stairs", "meaning": "facing", "blocks": { "north": "oak_planks" } }]
+        }"#,
+        ..BUILTIN_BEDROCK
+    };
+    let err = load_pack(&files, Edition::Bedrock).expect_err("the row hides a state");
+    let RegistryError::MeaningIsAState {
+        token,
+        meaning,
+        mc_version,
+    } = err
+    else {
+        panic!("expected MeaningIsAState, got {err:?}");
+    };
+    assert_eq!(
+        (token.as_str(), meaning.as_str(), mc_version.as_str()),
+        ("minecraft:oak_stairs", "facing", "1.21.0")
+    );
+}

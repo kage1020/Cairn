@@ -44,18 +44,18 @@ pub trait TargetRegistry {
         Vec::new()
     }
 
-    /// The block `state` names through a meaning token, a property its block lacks whose value
-    /// picks one of the blocks it split into (`@cauldron[fluid=water]` is `water_cauldron`), with
-    /// that property dropped; `None` when it carries none.
+    /// The block the canonical token `state` names through a meaning token, a property its block
+    /// lacks whose value picks one of the blocks it split into (`@cauldron[fluid=water]` is
+    /// `water_cauldron`), with that property dropped; `None` when it carries none, or a value that
+    /// names no block.
     fn meant(&self, state: &BlockState) -> Option<BlockState> {
         let _ = state;
         None
     }
 
     /// The state the palette holds for the canonical token `state` when the pinned target does
-    /// not declare its id but writes the block under another spelling, or, with no version
-    /// pinned, `state` itself when some version would (`spec/materials-themes` "Mappings across
-    /// version and edition"); `None` otherwise.
+    /// not declare its id but writes the block under another spelling (`spec/materials-themes`
+    /// "Mappings across version and edition"); `None` otherwise, and with no version pinned.
     fn respelled(&self, state: &BlockState) -> Option<BlockState> {
         let _ = state;
         None
@@ -99,6 +99,13 @@ pub trait TargetRegistry {
         StateDomain::Unrecorded
     }
 
+    /// [`Self::state_domain`] for the state a canonical token names, whose block also takes the
+    /// meaning token [`Self::meant`] reads (`spec/materials-themes` "Mappings across version and
+    /// edition").
+    fn token_state_domain(&self, state: &BlockState) -> StateDomain {
+        self.state_domain(state)
+    }
+
     /// What `state` is to the rules joining panes, fences, walls and chests to their neighbours
     /// at the pinned target (`spec/blockstate` "Connections"), or `None` when the registry cannot
     /// say.
@@ -121,14 +128,35 @@ pub trait TargetRegistry {
         let _ = id;
         true
     }
+
+    /// Whether a version this registry covers may write the canonical token naming `id`, under
+    /// that id or another, asked only when [`Self::block_ids`] is `None`; a token this denies is
+    /// a stand-in, as for [`Self::may_declare`], which it answers unless the registry overrides it.
+    fn may_write_token(&self, id: &str) -> bool {
+        self.may_declare(id)
+    }
 }
 
-/// The registry of a lowering with no target. It lifts every abstract token, and every id no
-/// version of the edition declares, to a stand-in rather than a canonical state; that is safe
-/// because nothing it lowers leaves [`findings_without_target`](super::findings_without_target).
+/// What the versions of an edition make of a block id, as a lowering with no target weighs it,
+/// in ascending order of standing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IdStanding {
+    /// No version declares it, nor writes the canonical token naming it.
+    Unknown,
+    /// No version declares it, but some version writes the canonical token naming it under
+    /// another id (`spec/materials-themes` "Mappings across version and edition").
+    Respelled,
+    /// Some version declares it.
+    Declared,
+}
+
+/// The registry of a lowering with no target. It lifts every abstract token, block id no version
+/// of the edition declares, and canonical token none writes to a stand-in rather than a canonical
+/// state, which is safe because nothing it lowers leaves
+/// [`findings_without_target`](super::findings_without_target).
 pub(crate) struct NoTarget<'a> {
-    /// Whether some version of the edition being lowered declares a block id.
-    pub(crate) declared: &'a dyn Fn(&str) -> bool,
+    /// What the versions of the editions being lowered make of a block id.
+    pub(crate) standing: &'a dyn Fn(&str) -> IdStanding,
 }
 
 impl TargetRegistry for NoTarget<'_> {
@@ -145,7 +173,11 @@ impl TargetRegistry for NoTarget<'_> {
     }
 
     fn may_declare(&self, id: &str) -> bool {
-        id.starts_with(STAND_IN_MARK) || (self.declared)(id)
+        id.starts_with(STAND_IN_MARK) || (self.standing)(id) == IdStanding::Declared
+    }
+
+    fn may_write_token(&self, id: &str) -> bool {
+        (self.standing)(id) > IdStanding::Unknown
     }
 
     fn state_domain(&self, _state: &BlockState) -> StateDomain {
@@ -518,10 +550,15 @@ fn validated_token(
         return Ok(state);
     };
     let state = registry.meant(&state).unwrap_or(state);
-    let declared = registry
-        .block_ids()
-        .is_some_and(|ids| ids.contains(&state.id));
-    if !declared && let Some(respelled) = registry.respelled(&state) {
+    let Some(ids) = registry.block_ids() else {
+        if registry.may_write_token(&state.id) {
+            return Ok(state);
+        }
+        return Ok(stand_in(&state.id));
+    };
+    if !ids.contains(&state.id)
+        && let Some(respelled) = registry.respelled(&state)
+    {
         return Ok(respelled);
     }
     validated_id(state, Some(registry), &IdOrigin::Authored)

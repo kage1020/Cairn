@@ -9,15 +9,14 @@ use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
 use super::circuits::lay_circuits;
 use super::conflicts::requires_conflicts;
-use super::floors::{DeclaredFloors, floor_refusing_target};
-use super::gate::{build_diagnostics, weighed_editions};
+use super::floors::floor_refusal;
+use super::gate::build_diagnostics;
 use super::run_level::{
-    RunLevelMessage, partial_build, requires_conflict, unsupported_target, version_floor_refusal,
+    RunLevelMessage, floor_refusal_message, partial_build, requires_conflict, unsupported_target,
 };
 use super::scopes::{built_scopes, dropped_scopes};
-use crate::data_version::UnsupportedTarget;
+use crate::data_version::{ResolvedTarget, UnsupportedTarget, resolve_target};
 use crate::registry::builtin_pack;
-use crate::target::{ResolvedTarget, resolve_target, supported_versions};
 
 /// What [`check_lowering`] found, and what the run owes a refusal for.
 #[derive(Debug)]
@@ -46,7 +45,7 @@ pub fn check_lowering(
     let (Some(edition), Some(target)) = (edition, target) else {
         return CheckLowering {
             diagnostics: findings_without_target(ir, edition, &|edition, id| {
-                builtin_pack(edition).may_declare(id)
+                builtin_pack(edition).id_standing(id)
             }),
             dropped_scopes: Vec::new(),
             built_scopes: 0,
@@ -78,8 +77,8 @@ pub struct Lowered {
     pub circuits: Vec<CircuitDiagnostic>,
     /// Scopes that produced no voxels.
     pub dropped_scopes: Vec<String>,
-    /// The `@requires` floors this edition's build is held to, if the source declares any.
-    pub version_floors: Option<DeclaredFloors>,
+    /// The finding by which the source's floors refuse the target, which then pins no version.
+    pub floor_refusal: Option<Diagnostic>,
     /// `E_REQUIRES_CONFLICT` for each floor above the last version that declares some id the
     /// build paints, which refuses the build at every target.
     pub conflicts: Vec<RunLevelMessage>,
@@ -96,24 +95,19 @@ pub fn lower_for_target(
     target: Option<&ResolvedTarget>,
 ) -> Lowered {
     let floors = declared_version_floors(module, edition);
-    let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
-        floors,
-        order: builtin_pack(edition).version_order(),
-    });
+    let refusal = target.and_then(|target| floor_refusal(&floors, edition, target));
     let mc_version = target
-        .filter(|target| {
-            version_floors.as_ref().is_none_or(|declared| {
-                floor_refusing_target(&declared.floors, &declared.order, target).is_none()
-            })
-        })
+        .filter(|_| refusal.is_none())
         .map(ResolvedTarget::mc_version);
     let ir = lower(module);
     let resolution = resolve(&ir, Some(edition));
     let pack = builtin_pack(edition);
     let registry = pack.view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
-    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
-        let considered = supported_versions(pack);
+    let conflicts = if floors.is_empty() {
+        Vec::new()
+    } else {
+        let considered = pack.targetable_versions();
         let at_newest = (mc_version.is_some()
             && mc_version == considered.last().map(String::as_str))
         .then_some(block_ir.diagnostics.as_slice());
@@ -122,20 +116,20 @@ pub fn lower_for_target(
             &resolution,
             pack,
             &considered,
-            &declared.floors,
-            &declared.order,
+            &floors,
+            &pack.version_order(),
             at_newest,
         )
         .iter()
         .map(|conflict| requires_conflict(edition, conflict))
         .collect()
-    });
+    };
     // `check`'s gate, so a build never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         module,
         &ir,
         Some(edition),
-        &weighed_editions(Some(edition)),
+        &Edition::weighed(Some(edition)),
         std::mem::take(&mut block_ir.diagnostics),
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
@@ -144,7 +138,7 @@ pub fn lower_for_target(
         block_ir,
         circuits,
         dropped_scopes,
-        version_floors,
+        floor_refusal: refusal,
         conflicts,
     }
 }
@@ -152,14 +146,13 @@ pub fn lower_for_target(
 impl Lowered {
     /// The target a build whose findings hold no error and whose floors raise no conflict writes
     /// for, or the run-level refusal `cairn compile` makes before it writes: a lost scope, an
-    /// unshipped `--target`, then a floor that rules the target out.
+    /// unshipped `--target`, then a floor that rules out the target the build was lowered for.
     ///
     /// # Errors
     ///
     /// The first of those refusals that holds.
     pub fn writable_target(
         &self,
-        edition: Edition,
         target: Result<ResolvedTarget, UnsupportedTarget>,
     ) -> Result<ResolvedTarget, RunLevelMessage> {
         // Every code that drops a scope is a warning, so this is what refuses a partial build.
@@ -171,12 +164,8 @@ impl Lowered {
             ));
         }
         let target = target.map_err(|err| unsupported_target(&err))?;
-        match self
-            .version_floors
-            .as_ref()
-            .and_then(|floors| version_floor_refusal(floors, edition, &target))
-        {
-            Some(refusal) => Err(refusal),
+        match &self.floor_refusal {
+            Some(refusal) => Err(floor_refusal_message(refusal)),
             None => Ok(target),
         }
     }

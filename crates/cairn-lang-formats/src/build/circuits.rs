@@ -8,9 +8,8 @@ use cairn_lang_core::resolve::resolve;
 use cairn_lang_core::{Edition, Severity};
 use cairn_lang_redstone::{Diagnostic as CircuitDiagnostic, build_circuits};
 
-use super::gate::weighed_editions;
+use crate::data_version::{ResolvedTarget, resolve_target};
 use crate::registry::builtin_pack;
-use crate::target::{ResolvedTarget, resolve_target};
 
 /// Lay each struct's circuit under it for `edition`, its ids read from `registry`, unless
 /// `built` already holds an error: a member that failed to lower is not there to wire.
@@ -43,7 +42,7 @@ pub fn check_circuits(
         .zip(target)
         .and_then(|(edition, target)| resolve_target(edition, target).ok());
     let pinned = resolved.as_ref().map(ResolvedTarget::mc_version);
-    let editions = weighed_editions(edition);
+    let editions = Edition::weighed(edition);
     let runs: Vec<Vec<CircuitDiagnostic>> = editions
         .iter()
         .map(|&edition| {

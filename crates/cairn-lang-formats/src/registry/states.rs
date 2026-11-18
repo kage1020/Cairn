@@ -464,8 +464,7 @@ impl StateMapIndex {
                 mc_version: version,
                 map,
             };
-            let names =
-                map.onto.contains_key(&state.id) || states.written_apart(&state.id).is_some();
+            let names = map.onto.contains_key(&state.id) || states.writes_apart(&state.id);
             (names && states.resolve(state).is_ok()).then_some(version.as_str())
         })
     }
@@ -831,17 +830,19 @@ impl<'a> VersionStates<'a> {
         ids
     }
 
-    /// The Bedrock id this version writes the Java block `java` as, when `java` is no Bedrock
-    /// spelling here and no other Java block mapped onto that id takes any of its forms, so the
-    /// written block still says which one it is (`spec/materials-themes` "Mappings across version
-    /// and edition"); `None` otherwise.
+    /// Whether this version writes the Java block `java` as Bedrock blocks of its own: `java` is
+    /// no Bedrock spelling here, the palette refuses none of its pairs, and no other Java block
+    /// mapped onto the ids it is written as takes any of its forms, so what is written still says
+    /// which block it was (`spec/materials-themes` "Mappings across version and edition").
     #[must_use]
-    pub fn written_apart(&self, java: &str) -> Option<&'a str> {
-        let map: &'a VersionMap = self.map;
+    pub fn writes_apart(&self, java: &str) -> bool {
+        let map: &VersionMap = self.map;
         if map.onto.contains_key(java) || map.refused_from.contains(java) {
-            return None;
+            return false;
         }
-        let forms = map.from.get(java)?;
+        let Some(forms) = map.from.get(java) else {
+            return false;
+        };
         let mut theirs: HashSet<String> = HashSet::new();
         for (bedrock, _) in forms {
             for (other, at) in map.onto.get(bedrock).map_or(&[][..], Vec::as_slice) {
@@ -850,12 +851,11 @@ impl<'a> VersionStates<'a> {
                 }
             }
         }
-        let apart = forms.iter().all(|(bedrock, at)| {
+        forms.iter().all(|(bedrock, at)| {
             self.form_keys(bedrock, java, *at)
                 .iter()
                 .all(|key| !theirs.contains(key))
-        });
-        apart.then(|| forms[0].0.as_str())
+        })
     }
 
     /// The Bedrock id that writes `state` here when no family of its own id holds its states but
@@ -917,8 +917,9 @@ impl VersionStates<'_> {
     }
 
     /// Every canonical property `id` takes here with the values it holds, those of each block
-    /// [`Self::resolve`] may read the id as, or `None` when no Java block maps onto it or the
-    /// palette refuses some of its states, so the map cannot tell which states it takes.
+    /// [`Self::resolve`] may read the id as, or `None` when the map has no form for it, as a Java
+    /// block or a Bedrock spelling, or the palette refuses some of its states, so the map cannot
+    /// tell which states it takes.
     #[must_use]
     pub fn canonical_domain(&self, id: &str) -> Option<IndexMap<String, Vec<String>>> {
         let own = self.reads_as_java(id);
@@ -961,7 +962,8 @@ impl VersionStates<'_> {
             || (!self.map.onto.contains_key(id) && self.map.from.contains_key(id))
     }
 
-    /// Every form the Java block `java` takes as `bedrock` through family `at`, as comparable keys.
+    /// Every form the Java block `java` takes as `bedrock` through family `at`, as keys equal for
+    /// one form whatever order a family keeps its states in.
     fn form_keys(&self, bedrock: &str, java: &str, at: usize) -> Vec<String> {
         let family = self.family(at);
         let mut states: Vec<IndexMap<String, String>> = vec![IndexMap::new()];
@@ -981,7 +983,9 @@ impl VersionStates<'_> {
             .iter()
             .map(|full| {
                 let form = self.form(bedrock, java, family, full, full);
-                format!("{}|{:?}|{}", form.id, form.states, form.waterlogged)
+                let mut states = form.states;
+                states.sort_by(|(a, _), (b, _)| a.cmp(b));
+                format!("{}|{states:?}|{}", form.id, form.waterlogged)
             })
             .collect()
     }

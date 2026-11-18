@@ -6,8 +6,8 @@ use std::process::ExitCode;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
 use cairn_lang_formats::info::default_lock_path;
-use cairn_lang_formats::target::{ResolvedTarget, resolve_target};
 
 use crate::artifacts::{
     Backend, PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
@@ -53,7 +53,7 @@ pub(crate) fn run_compile(
     if refused || !lowered.conflicts.is_empty() {
         return ExitCode::from(1);
     }
-    let target = match lowered.writable_target(edition, resolved_target) {
+    let target = match lowered.writable_target(resolved_target) {
         Ok(target) => target,
         Err(refusal) => {
             report_run_level(file, &source, &lines, &refusal);

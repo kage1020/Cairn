@@ -1,4 +1,4 @@
-//! The per-version verdicts the `buildable targets` row reports, and the notes on the `@requires`
+//! The per-version verdicts the `buildable targets` row reports, and the notes on the version
 //! floors behind them.
 
 use std::collections::HashSet;
@@ -15,7 +15,6 @@ use cairn_lang_core::{Edition, Module, Resolution, Severity};
 
 use super::Reporter;
 use crate::build::finding::Found;
-use crate::build::floors::floor_origin_note;
 use crate::registry::RegistryPack;
 
 /// How each supported version of one edition answered.
@@ -272,7 +271,7 @@ pub(super) fn report_version_notes(
             edition.as_str(),
         );
         out.line(&line);
-        if let Some(note) = floor_origin_note(floor) {
+        if let Some(note) = floor.inheritance() {
             out.line(&format!("  {note}"));
         }
         out.line(&format!(

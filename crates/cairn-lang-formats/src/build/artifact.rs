@@ -3,8 +3,9 @@
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 
 use super::run_level::{RunLevelMessage, backend_refusal, degraded};
+use crate::data_version::ResolvedTarget;
 use crate::java_structure::output_filename;
-use crate::target::{PreparedStructure, ResolvedTarget};
+use crate::target::{PreparedStructure, prepare};
 
 /// A structure its target's backend has checked, under the file name a build gives it.
 pub struct PreparedArtifact<'a> {
@@ -27,9 +28,8 @@ pub fn prepare_artifact<'a>(
     array: &'a BlockArray,
     target: &ResolvedTarget,
 ) -> Result<PreparedArtifact<'a>, RunLevelMessage> {
-    let (structure, notes) = target
-        .prepare(array)
-        .map_err(|reason| backend_refusal(scope, &reason))?;
+    let (structure, notes) =
+        prepare(target, array).map_err(|reason| backend_refusal(scope, &reason))?;
     Ok(PreparedArtifact {
         file_name: output_filename(&block_ir.artifact_stem(scope), target.output_ext()),
         structure,
