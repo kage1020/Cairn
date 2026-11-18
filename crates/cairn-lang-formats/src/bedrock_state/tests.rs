@@ -105,34 +105,35 @@ fn each_stair_facing_has_its_own_weirdo_direction() {
 
 #[test]
 fn a_stair_shape_is_lost_where_the_version_has_no_corner_state() {
-    let corner = [
-        ("facing", "south"),
-        ("half", "top"),
-        ("shape", "outer_left"),
-    ];
-    let t = translate("1.21.60", "minecraft:oak_stairs", &corner).expect("stairs");
-    assert_eq!(
-        states(&t),
-        [
-            ("upside_down_bit", &Tag::Byte(1)),
-            ("weirdo_direction", &Tag::Int(2))
-        ],
-    );
-    assert_eq!(
-        t.degraded,
-        [dropped("shape", "outer_left", "1.21.60", NO_SHAPE)]
-    );
+    for shape in ["inner_left", "inner_right", "outer_left", "outer_right"] {
+        let corner = [("facing", "south"), ("half", "top"), ("shape", shape)];
+        let t = translate("1.21.60", "minecraft:oak_stairs", &corner).expect("stairs");
+        assert_eq!(
+            states(&t),
+            [
+                ("upside_down_bit", &Tag::Byte(1)),
+                ("weirdo_direction", &Tag::Int(2))
+            ],
+            "shape={shape}",
+        );
+        assert_eq!(
+            t.degraded,
+            [dropped("shape", shape, "1.21.60", NO_SHAPE)],
+            "shape={shape}",
+        );
 
-    let t = translate("1.26.60", "minecraft:oak_stairs", &corner).expect("stairs");
-    assert_eq!(
-        states(&t),
-        [
-            ("minecraft:corner", &Tag::String("outer_left".to_owned())),
-            ("upside_down_bit", &Tag::Byte(1)),
-            ("weirdo_direction", &Tag::Int(2)),
-        ],
-    );
-    assert_eq!(t.degraded, []);
+        let t = translate("1.26.60", "minecraft:oak_stairs", &corner).expect("stairs");
+        assert_eq!(
+            states(&t),
+            [
+                ("minecraft:corner", &Tag::String(shape.to_owned())),
+                ("upside_down_bit", &Tag::Byte(1)),
+                ("weirdo_direction", &Tag::Int(2)),
+            ],
+            "shape={shape}",
+        );
+        assert_eq!(t.degraded, [], "shape={shape}");
+    }
 }
 
 #[test]
