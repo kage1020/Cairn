@@ -50,7 +50,13 @@ fn a_selector_edit_joins_its_brackets_and_keeps_its_keys_in_order() {
         ],
     );
     assert_eq!(edit.target.keyword(), "window");
-    assert_eq!(text(source, edit.target.keyword_span()), "window");
+    let keywords: Vec<(&str, &str)> = edit
+        .target
+        .keywords()
+        .into_iter()
+        .map(|(keyword, span)| (keyword, text(source, span)))
+        .collect();
+    assert_eq!(keywords, [("window", "window")]);
     assert_eq!(
         text(source, edit.target.span()),
         "window[class=vent][level=floor2]"
@@ -76,7 +82,13 @@ fn an_address_edit_reads_each_step_and_a_dotted_side() {
     );
     assert_eq!(address.to_string(), "level[1].door@inside.back[0]");
     assert_eq!(module.edits[0].target.keyword(), "door");
-    assert_eq!(text(source, module.edits[0].target.keyword_span()), "door");
+    let keywords: Vec<(&str, &str)> = module.edits[0]
+        .target
+        .keywords()
+        .into_iter()
+        .map(|(keyword, span)| (keyword, text(source, span)))
+        .collect();
+    assert_eq!(keywords, [("level", "level"), ("door", "door")]);
     assert_eq!(
         text(source, module.edits[0].target.span()),
         "level[1].door@inside.back[0]"
@@ -132,7 +144,8 @@ fn a_malformed_edit_is_refused_where_it_goes_wrong() {
         (
             "edit window set shape=arch\n",
             "1:13: expected `[` or `@` after `window`: an edit selects by a selector, \
-             `window[class=NAME]`, or by an address, `window@front[0]`",
+             `window[class=NAME]`, or by an address, `window@front[0]` for a member on a wall \
+             or `window[0]` for one on none",
         ),
         (
             "edit window@front set shape=arch\n",

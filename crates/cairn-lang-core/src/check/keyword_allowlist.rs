@@ -20,14 +20,10 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
         }
     }
     for edit in &ir.edits {
-        let keyword = edit.target.keyword();
-        if matches!(role_of(keyword), MemberRole::Other(_)) {
-            push_unknown_keyword(
-                keyword,
-                edit.target.keyword_span(),
-                &BodyKind::Geometry.allowed_keywords(),
-                sink,
-            );
+        for (keyword, span) in edit.target.keywords() {
+            if matches!(role_of(keyword), MemberRole::Other(_)) {
+                push_unknown_keyword(keyword, span, &BodyKind::Geometry.allowed_keywords(), sink);
+            }
         }
     }
 }

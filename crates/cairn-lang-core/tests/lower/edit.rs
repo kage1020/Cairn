@@ -274,6 +274,16 @@ fn the_intent_ir_lists_each_edit_with_its_target_as_written() {
     assert!(without.get("edits").is_none(), "{without}");
 }
 
+/// The last note of a `W_EDIT_RIPPLE` on the member at `address`.
+fn advice(address: &str) -> String {
+    format!(
+        "a member's resolved state follows the members around it, as a roof sits on its walls and \
+         a chest pairs with the chest beside it: if the change is meant, the build can stand as it \
+         is; if not, change the edit so it leaves what `{address}` follows as it was, or write the \
+         state `{address}` should keep on its own line, where its keyword takes it"
+    )
+}
+
 /// `source`'s findings lowered with no target for either edition, as `cairn check` reports them
 /// without `--target`.
 fn without_target(source: &str) -> Vec<Diagnostic> {
@@ -331,9 +341,24 @@ fn an_edit_that_changes_only_the_members_it_selects_ripples_into_none() {
         "edit walls[0] set mat_slot=wall\n",
     ] {
         let source = storeroom(chests, edits);
+        let ir = edited(&source);
+        assert!(
+            ir.edits.iter().all(|edit| !edit.selected.is_empty()),
+            "{edits}"
+        );
         let out = lowered_with(&source, &Rules);
         assert_eq!(findings(&source, &out), [], "{edits}");
     }
+    // The wider overhang widens the box, so the comparison runs on shifted cells.
+    let widths: Vec<u32> = ["", "edit roof[0] set overhang=2\n"]
+        .into_iter()
+        .map(|edits| {
+            lowered_with(&storeroom(chests, edits), &Rules).structures["struct::s"]
+                .dims
+                .x
+        })
+        .collect();
+    assert_eq!(widths, [9, 11]);
 }
 
 #[test]
@@ -364,6 +389,281 @@ fn with_no_target_only_a_ripple_in_where_blocks_stand_is_seen() {
     let source = storeroom(
         "chest at=inside.back offset=1 y=1\n  chest at=inside.back offset=2 y=1",
         "edit chest@inside.back[1] set offset=4\n",
+    );
+    assert_eq!(without_target(&source), []);
+}
+
+#[test]
+fn an_edit_selects_every_member_it_reaches_in_each_body_wherever_it_stands() {
+    let source = "edit window[] set y=2\n\n\
+                  struct a size=9x7\n  \
+                  window side=front offset=1 y=1\n  \
+                  level y=4\n    \
+                  window side=front offset=2 y=1\n  \
+                  @edition java\n    \
+                  raw_block mat=minecraft:stone at=1,1,1\n\n\
+                  struct b size=9x7\n  \
+                  window side=front offset=3 y=1\n\n\
+                  edit level[0].window@front[0] set y=2\n\
+                  edit window@front[0] set y=3\n\
+                  edit raw_block[0] set at=2,1,1\n";
+    let ir = edited(source);
+    assert_eq!(
+        selected(source, &ir),
+        [
+            vec![
+                "window side=front offset=1 y=1",
+                "window side=front offset=2 y=1",
+                "window side=front offset=3 y=1",
+            ],
+            vec!["window side=front offset=2 y=1"],
+            vec![
+                "window side=front offset=1 y=1",
+                "window side=front offset=3 y=1",
+            ],
+            vec!["raw_block mat=minecraft:stone at=1,1,1"],
+        ],
+    );
+    // A window under a `level` carries the level's step, so the bare address names none.
+    let nested = "struct a size=9x7\n  level y=4\n    window side=front offset=2 y=1\n\
+                  edit window@front[0] set y=2\n";
+    assert_eq!(selected(nested, &edited(nested)), [Vec::<&str>::new()]);
+}
+
+#[test]
+fn a_bracketed_member_line_is_selected_and_an_actuator_patch_is_not() {
+    let source = "struct s size=7x5\n  \
+                  window[class=a] side=front offset=2 y=1 size=1x1\n  \
+                  window side=back offset=2 y=1 size=1x1\n  \
+                  door id=entry side=left at=center\n  \
+                  door[id=entry] opened_by=sig.open\n\
+                  edit window[] set y=2\n\
+                  edit window@front[0] set y=2\n\
+                  edit door[] set hinge=right\n";
+    let ir = edited(source);
+    assert_eq!(
+        selected(source, &ir),
+        [
+            vec![
+                "window[class=a] side=front offset=2 y=1 size=1x1",
+                "window side=back offset=2 y=1 size=1x1",
+            ],
+            vec!["window[class=a] side=front offset=2 y=1 size=1x1"],
+            vec!["door id=entry side=left at=center"],
+        ],
+    );
+}
+
+#[test]
+fn a_value_that_is_no_label_empties_the_field_its_key_names() {
+    let source = "struct s size=9x7\n  \
+                  window class=small mat_slot=glass side=front offset=1 y=1\n  \
+                  window class=5 side=front offset=5 y=1\n\
+                  edit window@front[0] set class=5 mat_slot=5\n\
+                  edit window@front[1] set class=vent\n";
+    let ir = edited(source);
+    assert_eq!(
+        fields(source, member(source, &ir, "window class=small")),
+        [
+            ("argument", "side", "front"),
+            ("argument", "offset", "1"),
+            ("argument", "y", "1"),
+            ("argument", "class", "5"),
+            ("argument", "mat_slot", "5"),
+        ],
+    );
+    assert_eq!(
+        fields(source, member(source, &ir, "window class=5")),
+        [
+            ("class", "class", "vent"),
+            ("argument", "side", "front"),
+            ("argument", "offset", "5"),
+            ("argument", "y", "1"),
+        ],
+    );
+}
+
+#[test]
+fn a_finding_on_a_member_two_edits_change_notes_each_edit() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+                  door id=entry side=front at=center\n\
+                  edit door[id=entry] set at=middle\n\
+                  edit door@front[0] set hinge=right\n";
+    let out = lowered_with(source, &Rules);
+    let edits: Vec<Vec<Option<&str>>> = out
+        .diagnostics
+        .iter()
+        .map(|d| {
+            d.notes
+                .iter()
+                .filter(|note| note.message == "this edit changes this member")
+                .map(|note| note.span.clone().map(|span| &source[span]))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        edits,
+        [vec![
+            Some("edit door[id=entry] set at=middle"),
+            Some("edit door@front[0] set hinge=right"),
+        ]],
+    );
+}
+
+/// Two chests side by side against the back wall, the first of them under a `level` of
+/// `id=up` at `y=0`, then `edits`.
+fn paired_across_a_level(edits: &str) -> String {
+    storeroom(
+        "chest at=inside.back offset=1 y=1\n  level id=up y=0\n    chest at=inside.back offset=2 y=1",
+        edits,
+    )
+}
+
+#[test]
+fn a_ripple_notes_an_edit_of_a_member_that_holds_no_cell() {
+    let source = paired_across_a_level("edit level[id=up] set y=1\n");
+    let out = lowered_with(&source, &Rules);
+    let advice = advice("chest@inside.back[0]");
+    let expected: Vec<Finding<'_>> = vec![(
+        DiagnosticCode::EditRipple,
+        "chest at=inside.back offset=1 y=1",
+        "no edit selects `chest@inside.back[0]`, and the edits change its resolved state at 1 cell",
+        vec![
+            "first at (6, 1, 2) of `struct::s`, which holds \
+             `minecraft:chest[facing=south,type=left]` as written and \
+             `minecraft:chest[facing=south,type=single]` with the edits",
+            "this edit changes a member of the same body",
+            &advice,
+        ],
+    )];
+    assert_eq!(findings(&source, &out), expected);
+    let edit = &out.diagnostics[0].notes[1];
+    assert_eq!(edit.message, "this edit changes a member of the same body");
+    assert_eq!(
+        edit.span.clone().map(|span| &source[span]),
+        Some("edit level[id=up] set y=1"),
+    );
+}
+
+#[test]
+fn the_members_under_a_selected_member_move_with_it_and_ripple_into_none() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n  slot glass -> @glass\n\n\
+                  struct s size=7x5\n  walls mat_slot=wall height=6\n  \
+                  level id=up y=2\n    \
+                  window side=front offset=2 y=1 size=1x1 mat_slot=glass\n\
+                  edit level[id=up] set y=3\n";
+    let out = lowered_with(source, &Rules);
+    assert_eq!(findings(source, &out), []);
+    assert_eq!(without_target(source), []);
+}
+
+#[test]
+fn a_def_placed_twice_ripples_once_in_each_structure() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  def hut size=7x5:\n  walls mat_slot=wall height=3\n  \
+                  roof kind=flat mat_slot=wall overhang=1\n  \
+                  chest at=inside.back offset=1 y=1\n  \
+                  chest at=inside.back offset=2 y=1\n\n\
+                  site v:\n  \
+                  place id=a use=hut theme=t at=origin\n  \
+                  place id=b use=hut theme=t east_of=a\n\n\
+                  edit chest@inside.back[1] set offset=4\n";
+    let out = lowered_with(source, &Rules);
+    let found: Vec<(DiagnosticCode, &str, &str)> = out
+        .diagnostics
+        .iter()
+        .map(|d| (d.code, slice(source, d), d.notes[0].message.as_str()))
+        .collect();
+    let chest = "chest at=inside.back offset=1 y=1";
+    assert_eq!(
+        found,
+        [
+            (
+                DiagnosticCode::EditRipple,
+                chest,
+                "first at (6, 1, 2) of `site::v::a`, which holds \
+                 `minecraft:chest[facing=south,type=left]` as written and \
+                 `minecraft:chest[facing=south,type=single]` with the edits",
+            ),
+            (
+                DiagnosticCode::EditRipple,
+                chest,
+                "first at (6, 1, 2) of `site::v::b`, which holds \
+                 `minecraft:chest[facing=south,type=left]` as written and \
+                 `minecraft:chest[facing=south,type=single]` with the edits",
+            ),
+        ],
+    );
+}
+
+#[test]
+fn a_member_an_edit_leaves_unbuildable_ripples_from_the_build_as_written() {
+    let source = storeroom(
+        "pressure_plate id=plate at=front.outside offset=3 y=0",
+        "edit roof[0] set overhang=0\n",
+    );
+    let out = lowered_with(&source, &Rules);
+    let advice = advice("pressure_plate@front.outside[0]");
+    let expected: Vec<Finding<'_>> = vec![
+        (
+            DiagnosticCode::InvalidMember,
+            "pressure_plate id=plate at=front.outside offset=3 y=0",
+            "pressure_plate `at=front.outside` at y=0 has no exterior voxel to sit on",
+            vec![
+                "no roof on this struct draws an overhang, so it has no voxel outside its walls",
+                "give a `roof` in the struct's body an `overhang=` of at least 1, or use \
+                 `at=inside.front` with an `offset=` from 1 to 5",
+            ],
+        ),
+        (
+            DiagnosticCode::EditRipple,
+            "pressure_plate id=plate at=front.outside offset=3 y=0",
+            "no edit selects `pressure_plate@front.outside[0]`, and the edits change its resolved \
+             state at 1 cell",
+            vec![
+                "first at (3, 0, 5) of `struct::s`, which holds `minecraft:oak_pressure_plate` as \
+                 written and none of its blocks with the edits",
+                "this edit changes a member of the same body",
+                &advice,
+            ],
+        ),
+    ];
+    assert_eq!(findings(&source, &out), expected);
+}
+
+#[test]
+fn a_ripple_notes_only_the_edits_of_its_own_body() {
+    let source = format!(
+        "{}\nstruct b size=5x5\n  floor mat_slot=wall\n\nedit floor[0] set mat_slot=wall\n",
+        storeroom(
+            "chest at=inside.back offset=1 y=1\n  chest at=inside.back offset=2 y=1",
+            "edit chest@inside.back[1] set offset=4\n",
+        ),
+    );
+    let out = lowered_with(&source, &Rules);
+    let notes: Vec<Vec<Option<&str>>> = out
+        .diagnostics
+        .iter()
+        .map(|d| {
+            d.notes
+                .iter()
+                .filter_map(|note| note.span.clone())
+                .map(|span| Some(&source[span]))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        notes,
+        [vec![Some("edit chest@inside.back[1] set offset=4")]]
+    );
+}
+
+#[test]
+fn with_no_target_two_stand_ins_hold_the_same_block() {
+    let source = format!(
+        "{}\nedit door[id=front] set hinge=right\n",
+        include_str!("../../../../examples/redstone-door.crn"),
     );
     assert_eq!(without_target(&source), []);
 }

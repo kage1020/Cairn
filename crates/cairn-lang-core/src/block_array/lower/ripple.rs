@@ -7,26 +7,25 @@ use indexmap::IndexMap;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::EditIr;
+use crate::intent::{EditIr, IntentModule, Member};
 
+use super::super::material::is_stand_in;
 use super::super::{BlockArrayIr, BlockState, ResolvedMember};
 
 /// A cell, `(x, y, z)`, in the edited build's coordinates.
 type Cell = (i64, i64, i64);
 
-/// One finding per member that no edit selected and whose cells resolve differently in `edited`
-/// than in `written`, the same module built without its edits, naming the first such cell in
-/// block-array order.
+/// One finding per structure for each member no edit selected whose cells resolve differently in
+/// `edited` than in `written`, `as_written` built without its edits, naming the first such cell
+/// in block-array order.
 pub(super) fn edit_ripples(
     edits: &[EditIr],
+    as_written: &IntentModule,
     edited: &BlockArrayIr,
     written: &BlockArrayIr,
 ) -> Vec<Diagnostic> {
-    let selected: HashSet<usize> = edits
-        .iter()
-        .flat_map(|edit| &edit.selected)
-        .map(|span| span.start)
-        .collect();
+    let bodies = body_lines(as_written);
+    let selected = selected_lines(edits, as_written);
     let mut out = Vec::new();
     for (key, after) in &edited.members {
         let (Some(before), Some(after_array), Some(before_array)) = (
@@ -50,12 +49,17 @@ pub(super) fn edit_ripples(
             .filter(|(line, _)| selected.contains(&line.start))
             .flat_map(|(_, held)| held.keys().copied())
             .collect();
+        let body = after.iter().chain(before).find_map(|record| {
+            bodies
+                .iter()
+                .find(|lines| lines.contains(&record.span.start))
+        });
         let touching: Vec<&EditIr> = edits
             .iter()
             .filter(|edit| {
-                edit.selected
-                    .iter()
-                    .any(|span| after_cells.contains_key(span) || before_cells.contains_key(span))
+                body.is_some_and(|lines| {
+                    edit.selected.iter().any(|span| lines.contains(&span.start))
+                })
             })
             .collect();
         let empty = BTreeMap::new();
@@ -73,7 +77,7 @@ pub(super) fn edit_ripples(
                 .into_iter()
                 .filter(|cell| !edited_cells.contains(cell))
                 .map(|cell| (cell, was.get(&cell).copied(), is.get(&cell).copied()))
-                .filter(|(_, was, is)| was != is)
+                .filter(|(_, was, is)| differs(*was, *is))
                 .collect();
             if let Some(first) = changed.first() {
                 out.push(ripple(record, key, changed.len(), *first, &touching));
@@ -81,6 +85,63 @@ pub(super) fn edit_ripples(
         }
     }
     out
+}
+
+/// The line starts of the members of each `struct` and `def` body of `module`, at any depth, one
+/// set per body.
+fn body_lines(module: &IntentModule) -> Vec<HashSet<usize>> {
+    module
+        .structs
+        .iter()
+        .map(|s| &s.members)
+        .chain(module.defs.iter().map(|d| &d.members))
+        .map(|members| {
+            let mut lines = HashSet::new();
+            mark(members, &|_| true, false, &mut lines);
+            lines
+        })
+        .collect()
+}
+
+/// The line starts of the members an edit selected and of every member under one, which moves
+/// with it.
+fn selected_lines(edits: &[EditIr], module: &IntentModule) -> HashSet<usize> {
+    let picked: HashSet<usize> = edits
+        .iter()
+        .flat_map(|edit| &edit.selected)
+        .map(|span| span.start)
+        .collect();
+    let mut out = HashSet::new();
+    for members in module
+        .structs
+        .iter()
+        .map(|s| &s.members)
+        .chain(module.defs.iter().map(|d| &d.members))
+    {
+        mark(members, &|line| picked.contains(&line), false, &mut out);
+    }
+    out
+}
+
+/// Add the line start of each of `members`, at any depth, that `pick` takes or that stands under
+/// one it takes; `under` takes them all.
+fn mark(members: &[Member], pick: &dyn Fn(usize) -> bool, under: bool, out: &mut HashSet<usize>) {
+    for member in members {
+        let taken = under || pick(member.span.start);
+        if taken {
+            out.insert(member.span.start);
+        }
+        mark(&member.children.members, pick, taken, out);
+    }
+}
+
+/// Whether a cell holds another state with the edits than without them; a stand-in's block is
+/// only a target's pack's to name, and every stand-in shares one state with no target.
+fn differs(was: Option<&BlockState>, is: Option<&BlockState>) -> bool {
+    match (was, is) {
+        (Some(was), Some(is)) => was != is && !is_stand_in(was) && !is_stand_in(is),
+        (was, is) => was.is_some() != is.is_some(),
+    }
 }
 
 /// Each member's cells and the state each holds, keyed by its line, shifted by `(dx, dz)`.

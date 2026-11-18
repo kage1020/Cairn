@@ -5,7 +5,7 @@ use crate::ast::EditTarget;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{
     BodyKind, EditIr, IntentModule, MemberRole, SelectorKeys, ValueWithSpan, args_to_map,
-    edit_may_set, role_of, selector_keys,
+    edit_may_set, names_an_unknown_keyword, role_of, selector_keys,
 };
 use crate::prose::{and_list, selector_text};
 use crate::suggest::{did_you_mean_note, nearest_match};
@@ -18,18 +18,28 @@ const LISTED_ADDRESSES: usize = 8;
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     let widened = selector_keys(&ir.themes);
     for edit in &ir.edits {
-        let role = role_of(edit.target.keyword());
         // An unknown keyword's own finding carries the repair.
-        if matches!(role, MemberRole::Other(_)) {
+        if names_an_unknown_keyword(&edit.target) {
             continue;
         }
+        let role = role_of(edit.target.keyword());
         if edit.selected.is_empty() {
             sink.push(unmatched(ir, edit, &role));
         }
-        for (key, value) in &edit.set {
-            if !edit_may_set(&role, key, &widened) {
-                sink.push(unknown_key(&role, key, value, &widened));
-            }
+        let refused: Vec<&String> = edit
+            .set
+            .keys()
+            .filter(|key| !edit_may_set(&role, key, &widened))
+            .collect();
+        let sets_others = refused.len() < edit.set.len();
+        for key in refused {
+            sink.push(unknown_key(
+                &role,
+                key,
+                &edit.set[key],
+                &widened,
+                sets_others,
+            ));
         }
     }
 }
@@ -44,7 +54,7 @@ fn target_text(target: &EditTarget) -> String {
 
 fn unmatched(ir: &IntentModule, edit: &EditIr, role: &MemberRole) -> Diagnostic {
     let keyword = role.keyword();
-    let mut notes = Vec::with_capacity(2);
+    let mut notes = Vec::with_capacity(3);
     if !role.is_read_in(BodyKind::Geometry) {
         notes.push(DiagnosticNote {
             span: None,
@@ -54,16 +64,18 @@ fn unmatched(ir: &IntentModule, edit: &EditIr, role: &MemberRole) -> Diagnostic 
             ),
         });
     }
+    if matches!(edit.target, EditTarget::Selector { .. }) {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: "an edit selects among the members of every `struct` and `def` body as their \
+                      lines write them, before any edit applies: check each attribute against the \
+                      lines it means, or name one member by its address"
+                .to_owned(),
+        });
+    }
     notes.push(DiagnosticNote {
         span: None,
-        message: match &edit.target {
-            EditTarget::Selector { .. } => format!(
-                "an edit selects among the members of every `struct` and `def` body as their \
-                 lines write them, before any edit applies: check each attribute against the \
-                 lines it means, or name one member by its address, such as `{keyword}@front[0]`"
-            ),
-            EditTarget::Address { .. } => standing_addresses(ir, keyword),
-        },
+        message: standing_addresses(ir, keyword),
     });
     Diagnostic {
         code: DiagnosticCode::EditUnmatched,
@@ -100,11 +112,13 @@ fn standing_addresses(ir: &IntentModule, keyword: &str) -> String {
     }
 }
 
+/// `sets_others` says whether the edit sets some other key, which it applies all the same.
 fn unknown_key(
     role: &MemberRole,
     key: &str,
     value: &ValueWithSpan,
     widened: &SelectorKeys<'_>,
+    sets_others: bool,
 ) -> Diagnostic {
     let keyword = role.keyword();
     if key == "id" {
@@ -121,12 +135,7 @@ fn unknown_key(
             data: None,
         };
     }
-    let mut accepted: Vec<&str> = role
-        .accepted_arguments()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|accepted| *accepted != "id")
-        .collect();
+    let mut accepted: Vec<&str> = role.accepted_arguments().unwrap_or_default();
     if let Some(extra) = widened.get(keyword) {
         let coined: Vec<&str> = extra
             .iter()
@@ -135,6 +144,7 @@ fn unknown_key(
             .collect();
         accepted.extend(coined);
     }
+    accepted.retain(|accepted| *accepted != "id");
     let mut notes = Vec::with_capacity(2);
     notes.extend(nearest_match(key, accepted.iter().copied()).map(did_you_mean_note));
     notes.push(DiagnosticNote {
@@ -148,8 +158,12 @@ fn unknown_key(
         code: DiagnosticCode::EditUnknownKey,
         span: value.span.clone(),
         primary: format!(
-            "`{key}=` is not an argument `{keyword}` reads, so no edit of one sets it; the edit \
-             sets the rest"
+            "`{key}=` is not an argument `{keyword}` reads, so no edit of one sets it{}",
+            if sets_others {
+                "; the edit sets the rest"
+            } else {
+                ""
+            }
         ),
         notes,
         data: None,

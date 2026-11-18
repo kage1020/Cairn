@@ -2,13 +2,13 @@
 
 use indexmap::IndexMap;
 
-use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
+use crate::ast::{Arg, Item, Module, Statement, ThemeRule, ValueKind};
 
 use super::addressing::assign_addresses;
 use super::edit::apply_edits;
-use super::member::args_to_map;
+use super::member::{Destination, LabelKey, args_to_map, destination};
 use super::{
-    Arguments, AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
+    Arguments, AssertIr, DefIr, IntentModule, IntentState, LogicBinding, Member, MemberBody,
     SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan,
     refused_under_guard, role_of,
 };
@@ -294,20 +294,23 @@ fn lower_member(stmt: &Statement) -> Member {
     let mut intent_state = IntentState::new();
 
     for arg in args {
-        let hoisted = match arg.key.as_str() {
-            "id" => hoist_label(&arg.value, &mut id),
-            "class" => hoist_label(&arg.value, &mut class),
-            "mat_slot" => hoist_label(&arg.value, &mut mat_slot),
-            _ => false,
-        };
-        if hoisted {
-            continue;
-        }
         let value = ValueWithSpan::from_value(arg.value.clone());
-        if role.state_arguments().contains(&arg.key.as_str()) {
-            intent_state.insert(arg.key.clone(), value);
-        } else {
-            arguments.insert(arg.key.clone(), value);
+        match destination(&role, &arg.key, &value) {
+            Destination::Label(key, label) => {
+                let field = match key {
+                    LabelKey::Id => &mut id,
+                    LabelKey::Class => &mut class,
+                    LabelKey::MatSlot => &mut mat_slot,
+                };
+                // The first label wins; a repeat stays an argument, for `E_DUPLICATE_ARG`.
+                if field.is_none() {
+                    *field = Some(label);
+                } else {
+                    arguments.insert(arg.key.clone(), value);
+                }
+            }
+            Destination::State => intent_state.insert(arg.key.clone(), value),
+            Destination::Argument => arguments.insert(arg.key.clone(), value),
         }
     }
 
@@ -348,20 +351,4 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
         edition_guard: None,
         span,
     }
-}
-
-/// Move an identifier or string `value` into an empty `slot`; `false` leaves it in [`Arguments`].
-fn hoist_label(value: &Value, slot: &mut Option<Label>) -> bool {
-    if slot.is_some() {
-        return false;
-    }
-    let name = match &value.kind {
-        ValueKind::Ident(s) | ValueKind::Str(s) => s.clone(),
-        _ => return false,
-    };
-    *slot = Some(Label {
-        name,
-        span: value.span().clone(),
-    });
-    true
 }

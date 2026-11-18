@@ -69,7 +69,7 @@ impl MemberRequires {
     }
 }
 
-/// A whole `.crn` source file: leading directives, then top-level items, in source order.
+/// A whole `.crn` source file: leading directives, then top-level items and `edit` lines.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Module {
     /// Leading `@cairn` / `@requires` / `@intended_targets` directives.
@@ -117,9 +117,9 @@ pub enum EditTarget {
     Address {
         /// The address as written.
         address: MemberAddress,
-        /// Byte range of the last step's keyword.
+        /// Byte range of each step's keyword, outermost first.
         #[serde(skip)]
-        keyword_span: Span,
+        keyword_spans: Vec<Span>,
         /// Byte range of the whole address.
         #[serde(skip)]
         span: Span,
@@ -138,13 +138,26 @@ impl EditTarget {
         }
     }
 
-    /// Byte range of [`Self::keyword`].
+    /// Each keyword the target names, with its byte range: the selector's, or each address
+    /// step's, outermost first.
     #[must_use]
-    pub fn keyword_span(&self) -> &Span {
+    pub fn keywords(&self) -> Vec<(&str, &Span)> {
         match self {
-            Self::Selector { keyword_span, .. } | Self::Address { keyword_span, .. } => {
-                keyword_span
-            }
+            Self::Selector {
+                keyword,
+                keyword_span,
+                ..
+            } => vec![(keyword.as_str(), keyword_span)],
+            Self::Address {
+                address,
+                keyword_spans,
+                ..
+            } => address
+                .segments()
+                .iter()
+                .map(AddressSegment::role)
+                .zip(keyword_spans)
+                .collect(),
         }
     }
 
