@@ -1,8 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
-import type { ServerEvent } from "./server-event";
+import type { Pin, ServerEvent } from "./server-event";
 
-type Message = { readonly id?: number | string; readonly method?: string };
+type Message = {
+  readonly id?: number | string;
+  readonly method?: string;
+  readonly params?: {
+    readonly capabilities?: {
+      readonly experimental?: {
+        readonly commands?: { readonly commands?: string[] };
+      };
+    };
+    readonly settings?: { readonly cairn?: Partial<Pin> };
+  };
+};
 
 const [log, server, ...argv] = process.argv.slice(2);
 const id = randomUUID();
@@ -19,10 +30,13 @@ function send(message: object): void {
 
 function handle(message: Message): void {
   switch (message.method) {
-    case "initialize":
+    case "initialize": {
       record({ id, received: message.method });
+      const experimental = message.params?.capabilities?.experimental;
+      record({ id, commands: experimental?.commands?.commands ?? [] });
       send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
       break;
+    }
     case "initialized":
       record({ id, received: message.method });
       break;
@@ -30,6 +44,11 @@ function handle(message: Message): void {
       record({ id, received: message.method });
       send({ jsonrpc: "2.0", id: message.id, result: null });
       break;
+    case "workspace/didChangeConfiguration": {
+      const cairn = message.params?.settings?.cairn;
+      record({ id, pin: { edition: cairn?.edition, target: cairn?.target } });
+      break;
+    }
     case "exit":
       record({ id, received: message.method });
       process.exit(0);

@@ -9,6 +9,7 @@ use cairn_lang_core::block_array::{
     AbsentConcept, BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, Joins, OutOfDomain,
     StateDomain, TargetRegistry, UnmappedState,
 };
+use cairn_lang_core::check::VersionTables;
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{VersionOrder, compare_versions};
 use cairn_lang_core::suggest::nearest_match;
@@ -820,6 +821,15 @@ impl RegistryPack {
             .collect()
     }
 
+    /// The versions `--target` may name, ascending by `data_version`.
+    #[must_use]
+    pub fn targetable_versions(&self) -> Vec<String> {
+        self.targetable()
+            .into_iter()
+            .map(|entry| entry.mc_version.clone())
+            .collect()
+    }
+
     /// Every row, targetable or not, as the ordering an `@requires` floor is placed against
     /// (`spec/versioning-editions` "The target is a compile-time parameter").
     #[must_use]
@@ -916,6 +926,23 @@ pub fn builtin_pack(edition: Edition) -> &'static RegistryPack {
         load_builtin_pack(edition)
             .expect("built-in registry pack failed to load — this is a build invariant")
     })
+}
+
+/// The built-in packs' version tables, for the core passes that weigh a version.
+#[must_use]
+pub fn builtin_version_tables() -> VersionTables<'static> {
+    VersionTables {
+        order_of: &builtin_version_order,
+        targetable_of: &builtin_targetable_versions,
+    }
+}
+
+fn builtin_version_order(edition: Edition) -> VersionOrder {
+    builtin_pack(edition).version_order()
+}
+
+fn builtin_targetable_versions(edition: Edition) -> Vec<String> {
+    builtin_pack(edition).targetable_versions()
 }
 
 /// Parses the built-in pack for `edition`, returning the error [`builtin_pack`] panics on.

@@ -1,9 +1,11 @@
 //! `@intended_targets` weighed against the floors the same file declares, with labels ordered by
 //! `DataVersion` in one edition's table, never as text.
 
-use cairn_lang_core::check::weigh_intended_targets;
+use cairn_lang_core::check::{
+    VersionTables, check_with_intended_targets, intended_target_findings, weigh_intended_targets,
+};
 use cairn_lang_core::resolve::VersionOrder;
-use cairn_lang_core::{Diagnostic, Edition, parse};
+use cairn_lang_core::{Diagnostic, Edition, lower, parse};
 
 use crate::common::slice;
 
@@ -383,5 +385,116 @@ fn each_edition_answers_for_itself() {
         .map(|d| d.code.as_str())
         .collect::<Vec<_>>(),
         ["W_INTENDED_TARGET_UNSUPPORTED"],
+    );
+}
+
+fn order_of(edition: Edition) -> VersionOrder {
+    match edition {
+        Edition::Java => java_order(),
+        Edition::Bedrock => bedrock_order(),
+    }
+}
+
+fn targetable_of(edition: Edition) -> Vec<String> {
+    match edition {
+        Edition::Java => java_targetable(),
+        Edition::Bedrock => bedrock_targetable(),
+    }
+}
+
+const TABLES: VersionTables<'static> = VersionTables {
+    order_of: &order_of,
+    targetable_of: &targetable_of,
+};
+
+/// Each finding of `headers` weighed in both editions, as its code, the text it points at and the
+/// edition its payload names.
+fn weighed_in_both(headers: &str) -> Vec<(&'static str, String, String)> {
+    let source = format!("{headers}{BUILD}");
+    let module = parse(&source).expect("the fixtures all parse");
+    intended_target_findings(&module, &[Edition::Java, Edition::Bedrock], &TABLES)
+        .iter()
+        .map(|d| {
+            let data = serde_json::to_value(&d.data).expect("serialises");
+            let edition = data["edition"].as_str().expect("an edition").to_owned();
+            (d.code.as_str(), slice(&source, d).to_owned(), edition)
+        })
+        .collect()
+}
+
+#[test]
+fn a_header_both_editions_cap_alike_is_reported_once() {
+    let headers = "@requires java version>=1.21.4\n@requires bedrock version>=1.21.60\n\
+                   @intended_targets [\"1.21\",\"1.21.40\"]\n";
+    assert_eq!(
+        weighed_in_both(headers),
+        [(
+            "E_INTENDED_TARGET_CAP",
+            "@intended_targets [\"1.21\",\"1.21.40\"]".to_owned(),
+            "java".to_owned(),
+        )],
+    );
+}
+
+#[test]
+fn one_edition_s_cap_wins_over_the_other_s_partial_answer() {
+    let headers = "@requires java version>=1.21\n@requires bedrock version>=1.21.60\n\
+                   @intended_targets [\"1.20.4\",\"1.21.4\",\"1.21.40\"]\n";
+    assert_eq!(
+        weighed_in_both(headers),
+        [(
+            "E_INTENDED_TARGET_CAP",
+            "@intended_targets [\"1.20.4\",\"1.21.4\",\"1.21.40\"]".to_owned(),
+            "bedrock".to_owned(),
+        )],
+    );
+}
+
+#[test]
+fn a_version_one_edition_does_not_build_waits_for_a_single_edition() {
+    assert_eq!(weighed_in_both("@intended_targets [\"1.20.4\"]\n"), []);
+    let module = parse(&format!("@intended_targets [\"1.20.4\"]\n{BUILD}")).expect("parses");
+    assert_eq!(
+        intended_target_findings(&module, &[Edition::Bedrock], &TABLES)
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>(),
+        ["W_INTENDED_TARGET_UNSUPPORTED"],
+    );
+}
+
+#[test]
+fn a_source_without_the_header_reads_no_version_table() {
+    let module = parse(BUILD).expect("parses");
+    let tables = VersionTables {
+        order_of: &|_| panic!("no header to weigh"),
+        targetable_of: &|_| panic!("no header to weigh"),
+    };
+    assert_eq!(
+        intended_target_findings(&module, &[Edition::Java, Edition::Bedrock], &tables),
+        [],
+    );
+}
+
+#[test]
+fn the_findings_are_merged_into_check_s_by_span() {
+    let source = "@cairn 2026.7\n@cairn 2026.7\n@requires version>=1.21.4\n\
+                  @intended_targets [\"1.20.4\"]\n\
+                  theme t:\n  slot wall -> @oak_planks\n\n\
+                  struct hut size=5x5 size=5x5\n  walls mat_slot=wall height=3\n";
+    let module = parse(source).expect("parses");
+    let ir = lower(&module);
+    let found: Vec<(&str, &str)> =
+        check_with_intended_targets(&module, &ir, Some(Edition::Java), &[Edition::Java], &TABLES)
+            .iter()
+            .map(|d| (d.code.as_str(), slice(source, d)))
+            .collect();
+    assert_eq!(
+        found,
+        [
+            ("E_DUPLICATE_HEADER", "@cairn 2026.7"),
+            ("E_INTENDED_TARGET_CAP", "@intended_targets [\"1.20.4\"]"),
+            ("E_DUPLICATE_SIZE", "size=5x5"),
+        ],
     );
 }
