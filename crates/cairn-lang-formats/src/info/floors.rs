@@ -1,5 +1,5 @@
-//! The per-version verdicts the `buildable targets` row reports, and how the `@requires` floors
-//! behind them are named.
+//! The per-version verdicts the `buildable targets` row reports, and how the version floors behind
+//! them are named.
 
 use std::collections::HashSet;
 
@@ -15,29 +15,6 @@ use cairn_lang_core::{Edition, Module, Resolution, Severity};
 
 use super::{Found, Reporter};
 use crate::registry::RegistryPack;
-
-/// The directive `floor` is written with, as a fix names it.
-#[must_use]
-pub fn floor_keyword(floor: &VersionFloor) -> &'static str {
-    match floor.origin {
-        FloorOrigin::Module => "`@requires`",
-        FloorOrigin::Def(_) | FloorOrigin::Theme(_) => "`requires`",
-    }
-}
-
-/// The line naming the `def` or `theme` that imposed a floor, or `None` for an `@requires` header.
-#[must_use]
-pub fn floor_origin_note(floor: &VersionFloor) -> Option<String> {
-    let inherited_by = match &floor.origin {
-        FloorOrigin::Module => return None,
-        FloorOrigin::Def(name) => format!("every `place use={name}` inherits it"),
-        FloorOrigin::Theme(_) => "every scope that binds the theme inherits it".to_owned(),
-    };
-    Some(format!(
-        "  {} declares it, and {inherited_by}",
-        floor.declarer(),
-    ))
-}
 
 /// How each supported version of one edition answered.
 #[derive(Debug, Default)]
@@ -293,8 +270,8 @@ pub(super) fn report_version_notes(
             edition.as_str(),
         );
         out.line(&line);
-        if let Some(note) = floor_origin_note(floor) {
-            out.line(&note);
+        if let Some(note) = floor.inheritance() {
+            out.line(&format!("  {note}"));
         }
         out.line(&format!(
             "  note: {} builds against {}",

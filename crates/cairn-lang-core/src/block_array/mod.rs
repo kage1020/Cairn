@@ -26,9 +26,9 @@ pub use lower::{
     BUILTIN_BLOCK_IDS, findings_under_guards, findings_without_target, lower_to_block_array,
 };
 pub use material::{
-    AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, MaterialDeferred,
-    OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, bound_canonical_tokens,
-    resolve_block_state,
+    AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, IdStanding,
+    MaterialDeferred, OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState,
+    bound_canonical_tokens, resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.
@@ -38,7 +38,7 @@ use crate::error::Span;
 use crate::ids::{
     PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem, walkway_artifact_stem,
 };
-use crate::intent::MemberAddress;
+use crate::intent::{MemberAddress, MemberRole, role_of};
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -158,6 +158,18 @@ pub struct ResolvedMember {
     /// Byte range of the member's own line.
     #[serde(skip)]
     pub span: Span,
+}
+
+impl ResolvedMember {
+    /// Whether the member is a `raw_block` or `raw_fill`, whose block id is written as given
+    /// (`spec/materials-themes` "Raw blocks").
+    #[must_use]
+    pub fn is_raw(&self) -> bool {
+        matches!(
+            role_of(&self.role),
+            MemberRole::RawBlock | MemberRole::RawFill
+        )
+    }
 }
 
 /// One block state a member resolved to, and the cells that hold it.

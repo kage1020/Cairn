@@ -18,7 +18,6 @@ use super::inferred::report_inferred_range;
 use super::respelled::{report_respelled_notes, respelled_tokens};
 use super::{
     Found, Reporter, dropped_scopes, lay_circuits, palette_entry_name, raised_by_each, same_place,
-    supported_versions,
 };
 use crate::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
@@ -83,7 +82,7 @@ pub(super) fn edition_rows(
             edition_wide_refusals(out, edition, &resolution, &block_ir, portability.as_ref());
 
         let floors = declared_version_floors(module, edition);
-        let considered = supported_versions(pack);
+        let considered = pack.targetable_versions();
         let verdicts = weigh_versions(
             ir,
             &resolution,

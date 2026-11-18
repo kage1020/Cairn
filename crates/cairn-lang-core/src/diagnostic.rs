@@ -3,7 +3,7 @@
 mod agreement;
 pub(crate) use agreement::{EditionFindings, agreed};
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::error::{Position, Span};
 use crate::lines::{LineStarts, position_at};
@@ -146,6 +146,9 @@ pub enum DiagnosticCode {
     /// A `place` with no origin selector or more than one, an `at=` other than `origin`, or an
     /// `east_of=` / `north_of=` that is not a label.
     InvalidPlaceOrigin,
+    /// Two `place` rows of one site whose boxes share a cell, or a walkway laid inside a
+    /// placement it does not join.
+    PlacementOverlap,
     /// A `def NAME` that no `place use=NAME` references.
     UnusedDef,
     /// A `connect` row names a port no member of the referenced def's own body carries.
@@ -186,6 +189,10 @@ pub enum DiagnosticCode {
     IntendedTargetCapPartial,
     /// `@intended_targets` names a version no `--target` of the pinned edition can build.
     IntendedTargetUnsupported,
+    /// The pinned target is below a version floor the build is held to.
+    VersionCap,
+    /// A version floor names no release of the pinned target's edition, so no target meets it.
+    RequiresUnorderable,
 }
 
 impl DiagnosticCode {
@@ -245,6 +252,7 @@ impl DiagnosticCode {
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
+            Self::PlacementOverlap => "E_PLACEMENT_OVERLAP",
             Self::UnusedDef => "W_UNUSED_DEF",
             Self::UnresolvedPort => "E_UNRESOLVED_PORT",
             Self::AmbiguousPort => "E_AMBIGUOUS_PORT",
@@ -264,6 +272,8 @@ impl DiagnosticCode {
             Self::IntendedTargetCap => "E_INTENDED_TARGET_CAP",
             Self::IntendedTargetCapPartial => "W_INTENDED_TARGET_CAP",
             Self::IntendedTargetUnsupported => "W_INTENDED_TARGET_UNSUPPORTED",
+            Self::VersionCap => "E_VERSION_CAP",
+            Self::RequiresUnorderable => "E_REQUIRES_UNORDERABLE",
         }
     }
 
@@ -307,6 +317,7 @@ impl DiagnosticCode {
             | Self::InvalidStructName
             | Self::InvalidSiteName
             | Self::InvalidPlaceOrigin
+            | Self::PlacementOverlap
             | Self::UnresolvedPort
             | Self::AmbiguousPort
             | Self::MissingPathMaterial
@@ -317,6 +328,8 @@ impl DiagnosticCode {
             | Self::TruthTableEmpty
             | Self::TruthTableDuplicateInput
             | Self::IntendedTargetCap
+            | Self::VersionCap
+            | Self::RequiresUnorderable
             | Self::TruthTableConflict => Severity::Error,
             Self::InvalidCairnVersion
             | Self::FutureCairnVersion
@@ -354,7 +367,7 @@ impl Serialize for DiagnosticCode {
 
 /// Machine-readable payload attached to a [`Diagnostic`], tagged by `kind` (`spec/lint`
 /// "Machine-readable payload").
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DiagnosticData {
@@ -394,6 +407,22 @@ pub enum DiagnosticData {
         /// Keys this row rebinds from an earlier one (`frame`, `sill`); never empty.
         rebound: Vec<String>,
     },
+    /// Companion payload for [`DiagnosticCode::UnknownKeyword`].
+    UnknownKeyword {
+        /// The keyword as written.
+        keyword: String,
+        /// The nearest keyword the line's body takes, when one is within the suggestion cap.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggestion: Option<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::UnknownArgument`].
+    UnknownArgument {
+        /// The key as written, without the trailing `=`.
+        key: String,
+        /// The nearest key the line accepts, when one is within the suggestion cap.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggestion: Option<String>,
+    },
     /// Companion payload for [`DiagnosticCode::UnknownId`].
     UnknownId {
         /// The fully namespaced id the target does not declare.
@@ -411,7 +440,7 @@ pub enum DiagnosticData {
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
         /// Ids the pack's alias table declares for the same block: facts, unlike `suggestion`.
-        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         aliases: Vec<String>,
         /// The first version of the edition after the target that declares the id.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -464,7 +493,7 @@ pub enum DiagnosticData {
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
         /// The edition's other versions whose tables take the pair, oldest first.
-        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         valid_at: Vec<String>,
     },
     /// Companion payload for [`DiagnosticCode::IncompatibleMaterial`].
@@ -499,6 +528,18 @@ pub enum DiagnosticData {
         /// The floor that refuses the first of them, as written, when a floor is involved.
         #[serde(skip_serializing_if = "Option::is_none")]
         floor: Option<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::VersionCap`].
+    VersionCap {
+        /// The target's edition, as [`crate::edition::Edition::as_str`] spells it.
+        edition: String,
+        /// The target's version.
+        target: String,
+        /// The floor that refuses it as its line renders it after the keyword, such as
+        /// `java version>=1.21.4`, ending in `>=` and the version.
+        floor: String,
+        /// The edition's targetable versions every floor admits, oldest first; may be empty.
+        valid: Vec<String>,
     },
 }
 

@@ -9,14 +9,14 @@ use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{declared_version_floors, resolve};
 use cairn_lang_core::{Diagnostic, Edition, diagnose_parse_failure, lower, parse};
-use cairn_lang_formats::info::{Conflict, kept_findings, requires_conflicts, supported_versions};
+use cairn_lang_formats::info::{Conflict, kept_findings, requires_conflicts};
 pub(crate) use cairn_lang_formats::info::{
     build_diagnostics, built_scopes, dropped_scopes, lay_circuits,
 };
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
-use crate::floors::{DeclaredFloors, floor_refusing_target};
+use crate::floors::floor_refusal;
 use crate::report::{FailureReport, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target};
 
@@ -70,7 +70,7 @@ pub(crate) fn check_lowering(
     let (Some(edition), Some(target)) = (edition, target) else {
         return CheckLowering {
             diagnostics: findings_without_target(ir, edition, &|edition, id| {
-                builtin_pack(edition).may_declare(id)
+                builtin_pack(edition).id_standing(id)
             }),
             dropped_scopes: Vec::new(),
             built_scopes: 0,
@@ -104,11 +104,6 @@ pub(crate) fn report_partial_build(file: &Path, dropped: &[String], built: usize
     }
 }
 
-/// The editions a command with one optional pin is about: the pin, or both without one.
-pub(crate) fn weighed_editions(pin: Option<Edition>) -> Vec<Edition> {
-    pin.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |one| vec![one])
-}
-
 /// The circuit findings `cairn check` reports: the pinned edition's, at the pinned version when
 /// `target` names one it ships, or without a pin those each edition raises at the same span and
 /// each edition's own, which touch a line under its guards (`spec/lint` "Error vs warning").
@@ -121,7 +116,7 @@ pub(crate) fn check_circuits(
         .zip(target)
         .and_then(|(edition, target)| resolve_target(edition, target).ok());
     let pinned = resolved.as_ref().map(ResolvedTarget::mc_version);
-    let editions = weighed_editions(edition);
+    let editions = Edition::weighed(edition);
     let runs: Vec<Vec<CircuitDiagnostic>> = editions
         .iter()
         .map(|&edition| {
@@ -144,8 +139,8 @@ pub(crate) struct Lowered {
     /// The findings of laying each struct's circuit, none when the lowering held an error.
     pub(crate) circuits: Vec<CircuitDiagnostic>,
     pub(crate) dropped_scopes: Vec<String>,
-    /// The `@requires` floors this edition's build is held to, if the source declares any.
-    pub(crate) version_floors: Option<DeclaredFloors>,
+    /// The finding by which the source's floors refuse the target, which then pins no version.
+    pub(crate) floor_refusal: Option<Diagnostic>,
     /// The floors above the last version that declares some id the build paints, whatever the
     /// target.
     pub(crate) conflicts: Vec<Conflict>,
@@ -162,24 +157,19 @@ pub(crate) fn load_and_lower(
 ) -> Result<Lowered, ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
     let floors = declared_version_floors(&module, edition);
-    let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
-        floors,
-        order: builtin_pack(edition).version_order(),
-    });
+    let refusal = target.and_then(|target| floor_refusal(&floors, edition, target));
     let mc_version = target
-        .filter(|target| {
-            version_floors.as_ref().is_none_or(|declared| {
-                floor_refusing_target(&declared.floors, &declared.order, target).is_none()
-            })
-        })
+        .filter(|_| refusal.is_none())
         .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
     let pack = builtin_pack(edition);
     let registry = pack.view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
-    let conflicts = version_floors.as_ref().map_or_else(Vec::new, |declared| {
-        let considered = supported_versions(pack);
+    let conflicts = if floors.is_empty() {
+        Vec::new()
+    } else {
+        let considered = pack.targetable_versions();
         let at_newest = (mc_version.is_some()
             && mc_version == considered.last().map(String::as_str))
         .then_some(block_ir.diagnostics.as_slice());
@@ -188,17 +178,17 @@ pub(crate) fn load_and_lower(
             &resolution,
             pack,
             &considered,
-            &declared.floors,
-            &declared.order,
+            &floors,
+            &pack.version_order(),
             at_newest,
         )
-    });
+    };
     // `check`'s gate, so `compile` never certifies a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         &module,
         &ir,
         Some(edition),
-        &weighed_editions(Some(edition)),
+        &Edition::weighed(Some(edition)),
         std::mem::take(&mut block_ir.diagnostics),
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
@@ -208,7 +198,7 @@ pub(crate) fn load_and_lower(
         block_ir,
         circuits,
         dropped_scopes,
-        version_floors,
+        floor_refusal: refusal,
         conflicts,
     })
 }

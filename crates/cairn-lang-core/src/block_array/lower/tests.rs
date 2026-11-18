@@ -8,7 +8,7 @@ use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
 use super::site_floor::FloorExtent;
 use super::*;
 use crate::ast::ValueKind;
-use crate::block_array::material::{NoTarget, resolve_block_state, stand_in};
+use crate::block_array::material::{IdStanding, NoTarget, resolve_block_state, stand_in};
 use crate::block_array::roof::is_stair;
 use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
 use crate::block_array::wall_column::WallColumn;
@@ -100,6 +100,8 @@ fn one_placed_row(
                 origin,
                 dims,
             },
+            row: 0..0,
+            anchor: PlaceAnchor::WorldOrigin,
             walls: WallColumn::default(),
             cut: HashSet::new(),
         },
@@ -110,7 +112,8 @@ fn one_placed_row(
 #[test]
 fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
     let (structures, placed) = one_placed_row((i32::MAX - 2, 0, 0), 3);
-    let plan = collect_floor_cells(&structures, &placed);
+    let plans = collect_floor_cells(&structures, &placed);
+    let plan = &plans[&SiteName::new("s").expect("a site name")];
     assert_eq!(
         plan.cells,
         HashSet::from([(i32::MAX - 2, 0, 0), (i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
@@ -128,7 +131,8 @@ fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
 #[cfg_attr(debug_assertions, should_panic(expected = "has no world coordinate"))]
 fn a_body_past_the_i32_edge_folds_nothing_onto_it() {
     let (structures, placed) = one_placed_row((i32::MAX - 1, 0, 0), 3);
-    let plan = collect_floor_cells(&structures, &placed);
+    let plans = collect_floor_cells(&structures, &placed);
+    let plan = &plans[&SiteName::new("s").expect("a site name")];
     assert_eq!(
         plan.cells,
         HashSet::from([(i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
@@ -456,7 +460,7 @@ fn without_a_target_the_palette_counts_no_stand_in() {
     fn without_target(source: &str) -> Vec<(&'static str, &str)> {
         let ir = lower(&parse(source).expect("parse"));
         let registry = NoTarget {
-            declared: &|_| true,
+            standing: &|_| IdStanding::Declared,
         };
         let out = lower_to_block_array_within(&ir, &resolve(&ir, None), Some(&registry), 4);
         out.diagnostics
@@ -2226,8 +2230,7 @@ fn door_at_unknown_value_is_refused_naming_the_anchors() {
         invalid_lines(src, &out),
         [(
             "door side=front at=middle",
-            "door has `at=middle`, which is not one of center, left, right — use \
-             `at=center | left | right`",
+            "door has `at=middle`, which is not one of center, left, right",
         )],
     );
     assert_eq!(deferred_count(&out), 0);
@@ -3370,8 +3373,8 @@ fn a_port_on_its_own_placements_pressure_plate_is_not_blamed_on_another_floor() 
 }
 
 #[test]
-fn a_port_buried_by_another_sites_placement_names_that_site() {
-    // `c` buries `a`'s back port from another site, so its bare id names nothing in `s`.
+fn a_floor_of_another_site_on_a_port_leaves_the_walkway_whole() {
+    // `c` floors over `a`'s back port from site `u`, which lays its walkways around its own floors.
     let source = walkway_with_unroutable_port_source()
         .replace("  place id=c use=front_home theme=t north_of=a gap=0\n", "")
         + concat!(
@@ -3380,12 +3383,15 @@ fn a_port_buried_by_another_sites_placement_names_that_site() {
             "  place id=o use=front_home theme=t at=origin\n",
             "  place id=c use=front_home theme=t north_of=o gap=0\n",
         );
-    let note = walkway_blocked_note_of(&source);
-    assert_eq!(
-        note,
-        "port `a.back` is buried inside the floor of placement `c` in site `u`; move that \
-         door/window to an unobstructed wall or pull the placements apart",
+    let alone = lowered(
+        &walkway_with_unroutable_port_source()
+            .replace("  place id=c use=front_home theme=t north_of=a gap=0\n", ""),
     );
+    let beside = lowered(&source);
+    assert_eq!(beside.diagnostics, Vec::<Diagnostic>::new());
+    assert_eq!(beside.walkways, alone.walkways);
+    let key = "walkway::s::a.back__b.front";
+    assert_eq!(beside.structures[key], alone.structures[key]);
 }
 
 #[test]
@@ -3414,10 +3420,10 @@ fn a_router_past_the_area_cap_names_the_placements_that_stretch_its_box() {
     assert_eq!(
         note,
         format!(
-            "the router searches the box spanning both ports and every placement floor on \
-             the walk plane, here 4238888 cells, past its cap of {ROUTE_AREA_CAP} cells; \
-             the two ports span only 42 of those cells, and the floors of placements `a`, \
-             `b`, `c`, `d`, `e1`, and `e3` stretch the box past them, so bring those \
+            "the router searches the box spanning both ports and every placement floor of \
+             site `s` on the walk plane, here 4238888 cells, past its cap of {ROUTE_AREA_CAP} \
+             cells; the two ports span only 42 of those cells, and the floors of placements \
+             `a`, `b`, `c`, `d`, `e1`, and `e3` stretch the box past them, so bring those \
              placements closer to the two ports",
         ),
     );
@@ -3495,10 +3501,10 @@ fn a_router_past_the_area_cap_on_distant_ports_blames_the_ports() {
     assert_eq!(
         note,
         format!(
-            "the router searches the box spanning both ports and every placement floor on \
-             the walk plane, here 4010006 cells, past its cap of {ROUTE_AREA_CAP} cells; \
-             the two ports alone span 4008004 of those cells, so place the two structures \
-             closer together",
+            "the router searches the box spanning both ports and every placement floor of \
+             site `s` on the walk plane, here 4010006 cells, past its cap of {ROUTE_AREA_CAP} \
+             cells; the two ports alone span 4008004 of those cells, so place the two \
+             structures closer together",
         ),
     );
 }
@@ -3549,7 +3555,7 @@ fn a_straight_l_past_the_area_cap_is_not_laid_and_says_why() {
 
 #[test]
 fn a_port_on_its_own_plate_and_another_floor_names_both() {
-    // `o`, from another site, floors over the cell where `a`'s own plate sits.
+    // `o` floors over the cell where `a`'s own plate sits.
     let note = walkway_blocked_note_of(concat!(
         "def hut size=5x5:\n",
         "  floor id=f mat_slot=wall\n",
@@ -3567,14 +3573,12 @@ fn a_port_on_its_own_plate_and_another_floor_names_both() {
         "site s:\n",
         "  place id=a use=hut theme=t at=origin\n",
         "  place id=b use=hut theme=t east_of=a gap=4\n",
-        "  connect a.e to b.e path=@gravel\n",
-        "\n",
-        "site u:\n",
         "  place id=o use=slab theme=t at=origin\n",
+        "  connect a.e to b.e path=@gravel\n",
     ));
     assert_eq!(
         note,
-        "port `a.e` is buried inside the floor of placement `o` in site `u` and sits on the \
+        "port `a.e` is buried inside the floor of placement `o` and sits on the \
          `minecraft:oak_pressure_plate` its own placement `a` lays on that cell; move that \
          block, and move that door/window to an unobstructed wall or pull the placements \
          apart; port `b.e` sits on the `minecraft:oak_pressure_plate` its own placement `b` \
@@ -3977,9 +3981,11 @@ fn a_stair_with_an_unknown_state_is_refused_with_the_values_it_takes() {
             vec!["`facing=` takes one of out, in"],
         ),
         (
-            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left",
-            "unknown stair `shape=inner_left`",
-            vec!["`shape=` takes one of straight, outer_left, outer_right"],
+            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner",
+            "unknown stair `shape=inner`",
+            vec![
+                "`shape=` takes one of straight, inner_left, inner_right, outer_left, outer_right",
+            ],
         ),
     ] {
         assert_eq!(

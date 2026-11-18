@@ -10,7 +10,7 @@ use cairn_lang_core::{Edition, Severity, diagnose_parse_failure, lower, parse};
 use crate::cli::CheckFormat;
 use crate::pipeline::{
     CheckLowering, build_diagnostics, check_circuits, check_lowering, read_source,
-    report_partial_build, weighed_editions,
+    report_partial_build,
 };
 use crate::report::{
     Found, print_json, render_diagnostics, report_diagnostic, report_parse_failure,
@@ -55,7 +55,7 @@ pub(crate) fn run_check(
         unsupported,
     } = check_lowering(&ir, edition, target);
     let mut diagnostics: Vec<Found> =
-        build_diagnostics(&module, &ir, pin, &weighed_editions(pin), lowering)
+        build_diagnostics(&module, &ir, pin, &Edition::weighed(pin), lowering)
             .into_iter()
             .map(Found::Core)
             .collect();

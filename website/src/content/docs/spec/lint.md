@@ -153,7 +153,7 @@ to compare.
 | `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
 | `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal, from a state a member's line writes, or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
-| `E_VERSION_CAP` | `--target` is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
+| `E_VERSION_CAP` | `--target`, or the target the language server pins, is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_UNORDERABLE` | An `@requires` floor names a version the target edition's `DataVersion` table cannot place ([versioning-editions §10.4](/spec/versioning-editions/)). |
 | `E_REQUIRES_CONFLICT` | An `@requires` floor lies above the edition's inferred range, and at or below the newest version the edition's pack carries: every version it admits lacks a block the build paints ([Versioning and Editions](/spec/versioning-editions/#a-floor-is-weighed-against-the-registry)). |
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
@@ -186,13 +186,14 @@ three commands raise them: `cairn compile --target`, `cairn check --edition E
 --target V`, and `cairn info`, which lowers once per supported version for its `buildable targets`
 row and prints each refusing version's findings under `note: <edition> <version> refuses this
 source`, exiting 0 all the same ([Versioning and
-Editions](/spec/versioning-editions/#the-buildable-targets-row)). `lower` lowers against no version,
-as does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
+Editions](/spec/versioning-editions/#the-buildable-targets-row)). The language server raises them as
+well, once the client's settings pin a target (see below). `lower` lowers against no version, as
+does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
-check` with no `--target`, and the language server, lower with no target at all, so they raise
-`E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
-`E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` or `E_STATE_UNMAPPED`
-([§11.3](#113-error-vs-warning)).
+check` with no `--target`, and a language server that pins no target, lower with no target at all,
+so they raise `E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares or
+writes under another ID, and never `E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` or
+`E_STATE_UNMAPPED` ([§11.3](#113-error-vs-warning)).
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering at a pinned target, in place of the
 `E_STATE_DOMAIN` check, on a state literal it reads from a theme slot or a `connect … path=` whose
@@ -209,14 +210,39 @@ the reason [Compilation Model §4.2](/spec/compilation/#42-target-axes) refuses 
 runs the same lowering pass against the same table `compile` does at any target the file's floors
 let through, so a lost scope earns the same `E_PARTIAL_BUILD`. What it does not do is anything
 `compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement. A lock certifies a
-build, and only the command that produces one holds `--target` to the floors (`E_VERSION_CAP`). So
-at a target the floors refuse, the two commands name different causes: `check` pins the target and
-reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty, while
-`compile` checks no id and reports the floor ([Versioning and
+build, so of the two commands only `compile`, which produces one, holds `--target` to the floors
+(`E_VERSION_CAP`). The language server shows what `compile` would refuse, so it holds the target it
+pins to them as well. So at a target the floors refuse, the two commands name different causes:
+`check` pins the target and reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing
+ids leave empty, while `compile` checks no id and reports the floor ([Versioning and
 Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Leaving the flag off still
 lowers, with no target, and reports only the findings every target that reads their line raises
 ([§11.3](#113-error-vs-warning)). See [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
+
+The language server lowers against what the client pins in its `cairn.edition` and `cairn.target`
+settings, which each `workspace/didChangeConfiguration` carries. With neither set it pins nothing
+and reports what a `cairn check` with no flag does. An edition alone reports what `cairn check
+--edition E` does. An edition and a target report what `cairn compile --edition E --target V`
+refuses on before it writes anything: the target, which may be `latest`, is held to the floors, so a
+target below one is `E_VERSION_CAP`, a floor the edition's table cannot place is
+`E_REQUIRES_UNORDERABLE`, and a target either refuses pins no version ([Versioning and
+Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). The fix note of an
+`E_VERSION_CAP` names the setting, `cairn.target`, where the command line's names `--target`. Each
+state weighs `@intended_targets` as its command does: in the pinned edition, or in both with none
+pinned. Where `compile` stops at the first error, the server reports every pass's findings together,
+since an editor shows them all at once. A setting the server cannot read is refused rather than
+reported at a span: a `cairn` section that is not an object, a value that is not a string, a target
+with no edition, a name that is no edition and a target the edition does not ship are shown to the
+client as a message (`window/showMessage`), and the server pins what the rest of the settings name,
+the edition alone or nothing. Three kinds of the commands' findings stay with the command line.
+`E_PARTIAL_BUILD` is a verdict on a build, so the server does not raise it. The server lays no
+circuit, so it raises none of the [Redstone](#redstone) codes. Nor does it weigh a floor against the
+blocks the build paints, so it raises no `E_REQUIRES_CONFLICT`: such a floor still shows at the
+pinned target, as `E_VERSION_CAP` below it, or at or above it as the `E_UNKNOWN_ID` of a block the
+target lacks. A new pin re-reports every open document: published again, or, for a client that pulls
+diagnostics, asked for again with `workspace/diagnostic/refresh` where the client takes it, and
+otherwise answered in full at its next pull.
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
 family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)), a `door` bound
@@ -298,8 +324,8 @@ answered. A pack was offered and does not declare the token, so the build stops 
 towards the closest one it does declare; no pack was offered, so nothing was asked and the member
 degrades with a warning. The second is the path only a library caller reaches, by lowering with no
 pack at all, and it is a warning for that reason: refusing there would refuse every source read
-without a pack. A front end with no target (the language server, or a `cairn check` with no
-`--target`) raises neither, and leaves the token to the pack of the target that builds it
+without a pack. A front end with no target (a language server that pins none, or a `cairn check`
+with no `--target`) raises neither, and leaves the token to the pack of the target that builds it
 ([§11.3](#113-error-vs-warning)).
 
 The warning says how the member degrades. A `floor` leaves its cells air, a `fill` paints none of
@@ -358,6 +384,7 @@ author means, so with both in scope the question has not been asked.
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_PLACEMENT_OVERLAP` | Two `place` rows of one site resolve to boxes that share a cell, or a `connect` row's walkway lays a cell inside the box of a placement it does not join ([Entities §8.2](/spec/entities/#82-anchor-conventions)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
 | `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
@@ -401,6 +428,33 @@ row names no prior place, as it would for any other id, and is `E_UNRESOLVED_PLA
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
+
+`E_PLACEMENT_OVERLAP` compares every pair of rows of one site by the boxes the coordinate solver
+gives them, each from its origin to `origin + dims - 1`. `east_of=` and `north_of=` keep a row clear
+of the row it names and of no other: a second `at=origin` lands on the first, and a chain of
+relative rows can come back onto a row placed along another chain. The finding is on the later
+row, with a note at the earlier one, and names both boxes and the box they share. Its fix is the
+`gap=` that moves the later row clear along the axis its selector steps, which moves every row
+placed relative to it too, or for an `at=origin` row, which no `gap=` moves, a relative selector.
+A walkway is compared by the cells it lays rather than by its box, against every placement of its
+site but its two ends, and the finding is on the `connect` row with a note at the placement. The
+router keeps a strip off placement floors only, so a strip routed under the eaves of a third
+placement is one. Each site is a layout of its own whose first row stands at the world origin, so
+rows of two sites are not compared, and a walkway routes around the floors of its own site only.
+Inside one body, overlapping members merge by phase; between two structure files there is nothing
+to merge. Each writes air in every cell its body does not fill, so which of two overlapping files
+holds a shared cell depends on the order they are placed in, and the source names no order. That
+is why the overlap is an error. Lowering raises it once every row is placed, so `cairn check`
+reports it without a `--target` too.
+
+Three overlaps between structure files are not compared yet:
+
+- a walkway's file writes air in every cell of its box that its strip does not lay, including the
+  cells a `W_WALKWAY_BLOCKED` fallback skips, and those cells are compared with no placement;
+- a strip inside the box of a placement it joins, as under that placement's eaves, is not
+  reported, though that placement's file writes air there too;
+- two walkways are not compared with each other, so an L-shaped walkway's box can write air over
+  another walkway's strip.
 
 `W_UNUSED_DEF` counts every `place` row in a `site` body whose `use=` names the def, including a row
 refused for its id or its origin. That row does reference the def, and the finding with the repair
@@ -495,13 +549,13 @@ state a member writes counts, including one a later member covers, so the limit 
 written rather than the states the finished scope keeps. A vanilla registry has far fewer states, so
 a source reaches it only through block ids or state literals no pinned target checks. Both go
 unchecked wherever lowering runs with no version pinned: in `cairn lower`, the range-wide lowering
-behind `cairn info`'s report, the language server and a `cairn check` with no `--target`, in a
-`cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
-and in a `cairn compile` whose target the file's floors refuse ([Versioning and
-Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A pinned target checks both,
-save a literal on a block its pack records no states for, which `W_STATE_LITERAL_UNCHECKED` names,
-so the note asks a build that pins one to split the scope rather than to pin a target. A warning,
-for the reason above.
+behind `cairn info`'s report, a language server that pins no target and a `cairn check` with no
+`--target`, in a `cairn compile` or `cairn check --edition E --target V` naming a version the
+edition does not ship, and in a `cairn compile` or a language server whose target the file's floors
+refuse ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A
+pinned target checks both, save a literal on a block its pack records no states for, which
+`W_STATE_LITERAL_UNCHECKED` names, so the note asks a build that pins one to split the scope rather
+than to pin a target. A warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it. In a struct body it covers three
@@ -653,12 +707,15 @@ Beyond the codes above, lint covers:
 Of these, attachment, entity_aabb, support, fluid and edit_stability are planned, and no command
 checks them yet. AABB interference holds inside a body, where the phase order merges the members and
 `W_PHASE_CONFLICT` reports a later line of one phase that changes a cell an earlier one built
-([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)), and is
-planned between bodies: two `place` rows whose bodies overlap are not reported yet. Geometry holds
-only in part: a door, window, eave stair, chest, trapdoor, note block, sensor or actuator its own
-line puts outside its struct is not drawn and is reported as `E_INVALID_MEMBER`, and one that only a
-member left unbuilt keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs only in part,
-through codes of its own: `E_VERSION_CAP` holds `--target` to the `@requires` floors,
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). Between
+bodies it holds only in part: two `place` rows of a site whose boxes share a cell, or a walkway that
+lays a cell inside a placement it does not join, are `E_PLACEMENT_OVERLAP`, while the air a
+walkway's file writes beyond its strip, a strip under the eaves of a placement it joins, and two
+walkways against each other are not compared yet ([Sites and placements](#sites-and-placements)).
+Geometry holds only in part: a door, window, eave stair, chest, trapdoor, note block, sensor or
+actuator its own line puts outside its struct is not drawn and is reported as `E_INVALID_MEMBER`,
+and one that only a member left unbuilt keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs
+only in part, through codes of its own: `E_VERSION_CAP` holds `--target` to the `@requires` floors,
 `E_REQUIRES_CONFLICT` holds the floors to the blocks the build paints, `E_UNKNOWN_ID` refuses a
 block id the pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only
 the other edition has, `E_STATE_DOMAIN` a state its block does not take there, `E_STATE_UNMAPPED` a
@@ -678,9 +735,10 @@ member set by a wall, the anchor in a `beam`'s `at=`, a block id, a block state'
 and a `--target` version. The note reads ``did you mean `X`?``, with `X` written as the line would
 be (`home1.entry` for a port, `at=front.outside` for a member set by a wall, `axis=x` for a state).
 `E_UNKNOWN_ID` instead names the target's nearest block, or, when another version of the edition
-declares the ID, that version. The nearest block, and the nearest pair of `E_STATE_DOMAIN`, is
-carried as `data.suggestion` too ([§11.2](#112-machine-readable-payload)); on a state lowering
-derived, `E_STATE_DOMAIN` carries it there alone, since the source has no literal to correct.
+declares the ID, that version. The nearest keyword, argument key and block, and the nearest pair of
+`E_STATE_DOMAIN`, are carried as `data.suggestion` too ([§11.2](#112-machine-readable-payload)); on
+a state lowering derived, `E_STATE_DOMAIN` carries it there alone, since the source has no literal
+to correct.
 
 An unknown keyword, argument key or `mat_slot=` name also prints the closed set (`expected one of:
 ...`), and an unknown `--target` the versions it could have named (`supported targets: ...`). A
@@ -764,6 +822,8 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 |---|---|
 | `W_WALKWAY_BLOCKED` | `{ "kind": "walkway_blocked", "skipped": <u64> }`. Cells along the fallback L-shaped path that overlapped an existing structure and were dropped. Present when cells were dropped; absent when the walkway was past the router's cap and not laid. |
 | `E_DUPLICATE_SELECTOR` | `{ "kind": "duplicate_selector", "rebound": ["frame"] }`. The binding keys this row takes over from an earlier one, without the trailing `=`. Never empty. |
+| `E_UNKNOWN_KEYWORD` | `{ "kind": "unknown_keyword", "keyword", "suggestion"? }`. The keyword as written, and the nearest one the line's body takes, the one the `did you mean` note names; absent when none is within the threshold. |
+| `E_UNKNOWN_ARGUMENT` | `{ "kind": "unknown_argument", "key", "suggestion"? }`. The key as written, without the trailing `=`, and the nearest key the line takes, the one the note names; absent when none is within the threshold. The span is the argument's value, so the key is the word before the value's `=`. |
 | `E_UNKNOWN_ID` | `{ "kind": "unknown_id", "id", "registry", "origin", "token"?, "suggestion"?, "aliases"?, "since"?, "until"?, "declared_by"? }`. See below. |
 | `E_PARITY_UNSUPPORTED` | `{ "kind": "parity_unsupported", "id", "registry", "declared_by", "reason" }`. The block ID, the target that cannot build it as `"<edition> <version>"`, the edition that has it (`java` or `bedrock`), and the pack's sentence for what the block is and why the target's edition has none. |
 | `E_STATE_DOMAIN` | `{ "kind": "state_domain", "id", "key", "value", "registry", "reason", "valid", "origin", "suggestion"?, "valid_at"? }`. See below. |
@@ -771,6 +831,7 @@ below omit `data` entirely, so the JSON key is absent rather than `null`.
 | `E_INCOMPATIBLE_MATERIAL` | `{ "kind": "incompatible_material", "id", "required", "slot"?, "token"? }`. The bound material, the family the geometry needs, and where the binding came from. |
 | `E_INCOMPLETE_PLACE` | `{ "kind": "incomplete_place", "missing": ["id", "use", "theme"] }`. The keys the row does not declare. Never empty. |
 | `E_INVALID_REQUIRES` | `{ "kind": "invalid_requires", "reason", "found" }`. `reason` is one of `not_a_version_requirement`, `unknown_edition_scope`, `unsupported_operator`, `empty_version`, `component_not_a_number`, `component_too_large`, `prerelease_not_a_tag`, `trailing_tokens`. `found` is empty when the failure names no fragment. |
+| `E_VERSION_CAP` | `{ "kind": "version_cap", "edition", "target", "floor", "valid" }`. The edition, the refused target as a bare label, the floor that refuses it as its line renders it after the keyword (`version>=1.21.4`, `java version>=1.21.4`), and the targets of the edition every floor admits, oldest first; `valid` is empty when no target does. The span is the floor's line, from its keyword to its version label. |
 | `W_INVALID_CAIRN_VERSION` | `{ "kind": "invalid_cairn_version", "reason", "found" }`. `reason` is one of `component_count`, `component_not_a_number`, `year_not_four_digits`, `month_out_of_range`, `patch_too_large`, `trailing_tokens`. `found` is the component the reason is about, and is empty when the failure names no fragment: `component_count`, and `component_not_a_number` on a value whose component is itself empty (`2026.`). |
 | `W_FUTURE_CAIRN_VERSION` | `{ "kind": "future_cairn_version", "declared", "compiler" }`. Both verbatim: `declared` is the string in the file, `compiler` is the build that reported it. |
 | `W_TRUTH_TABLE_PARTIAL` | `{ "kind": "truth_table_partial", "inputs": 2, "covered": 1, "missing": ["01","10","11"] }`. See below. |
@@ -831,6 +892,17 @@ combinations. Take the count from `2^inputs - covered`, never from `missing.len(
 carried instead of that total because the grammar puts no ceiling on the input list and no integer
 holds `2^130`.
 
+**Quick-fixes** in the language server are built from these payloads and from nothing else:
+`primary` and the notes are prose for a person. An `authored` `E_UNKNOWN_ID` offers each of its
+`aliases`, the first as the preferred fix, then its `suggestion`, which is not preferred; a
+`catalog` or `builtin` one offers nothing, since the repair is in the pack. `E_UNKNOWN_KEYWORD` and
+`E_UNKNOWN_ARGUMENT` offer their `suggestion`, not preferred. `E_VERSION_CAP` offers lowering
+`floor` to `target` on the floor's line and, alongside it, to a client that says it runs the
+`cairn.setTarget` command, pinning the first of `valid`. That command's arguments are the `edition`
+and the version, and the client pins the version only while it still pins that edition. A fix
+rewrites only the text its payload names, spelled as the line spells it, with or without the
+`minecraft:` namespace, so a finding whose span no longer holds that text offers none.
+
 ## 11.3 Error vs warning
 
 - **Errors** are things that, left alone, produce unintended results: concept absence, unknown IDs,
@@ -860,14 +932,17 @@ pass raises: parsing precedes them all, and a source that does not parse reaches
 is the one finding a build reports alone.
 
 A finding of block-array lowering is reported wherever a source is checked, whether a target is
-pinned or not. With no `--target`, in a plain `cairn check` and in the language server, which pins
-nothing, lowering runs with no target and reports the findings every target that reads their line
+pinned or not. With no `--target`, in a plain `cairn check` and in a language server that pins no
+target, lowering runs with no target and reports the findings every target that reads their line
 raises, with the code, span and text a pinned check gives them. It weighs the source as if every
-block id some shipped version of the edition declares were declared. An abstract token, and an id no
-shipped version declares, are not deferred: each stands in for the block a target's pack names for
-it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no
-`W_PHASE_CONFLICT` between it and another block, and no `W_PALETTE_TOO_LARGE` that only it could
-cause, since the palette is counted without it. A stand-in overwritten by air, or air by a stand-in,
+block id some shipped version of the edition declares were declared, and every canonical token some
+shipped version writes under another ID too, as Bedrock writes `@oak_sign` ([Materials and
+Themes](/spec/materials-themes/#73-mappings-across-version-and-edition)). An abstract token, a
+canonical token no shipped version writes, and a raw block whose id no shipped version declares are
+not deferred: each stands in for the block a target's pack names for it, and no verdict on that
+block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no `W_PHASE_CONFLICT` between it and
+another block, and no `W_PALETTE_TOO_LARGE` that only it could cause, since the palette is counted
+without it. A stand-in overwritten by air, or air by a stand-in,
 is still a `W_PHASE_CONFLICT`, since no pack names air. A `beam`, `door`, `chest`, `trapdoor`,
 `note_block`, sensor or actuator built from its default block takes the block the pack names for it,
 so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a block" where a pinned check would

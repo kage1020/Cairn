@@ -48,14 +48,14 @@ fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
 fn the_refusal_names_the_floor_the_target_and_the_fix() {
     let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
     let stderr = String::from_utf8(compile_as(&fixture, "java", "1.20.4").stderr).expect("utf-8");
-    assert!(stderr.contains("1.21"), "should name the floor: {stderr}");
-    assert!(
-        stderr.contains("1.20.4"),
-        "should name the target: {stderr}",
-    );
-    assert!(
-        stderr.contains("--target"),
-        "should name the flag to change: {stderr}",
+    assert_eq!(
+        stderr,
+        format!(
+            "error[E_VERSION_CAP]: {}:1:1: this file requires version>=1.21 (target 1.20.4).\n  \
+             valid java targets: 1.21, 1.21.4, 26.3\n  \
+             fix: --target 1.21, or lower the `@requires` floor\n",
+            fixture.source().display(),
+        ),
     );
 }
 
@@ -291,7 +291,19 @@ fn a_java_shaped_floor_is_not_evaluated_against_bedrock_numbering() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     // Not a cap: `--target` is not the thing to change.
-    assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
+    assert_eq!(
+        stderr,
+        format!(
+            "error[E_REQUIRES_UNORDERABLE]: {}:1:1: this file requires version>=1.21.4, which \
+             names no bedrock release.\n  \
+             bedrock ships 1.21.0 and then 1.21.20, and nothing between them; Cairn orders \
+             versions by DataVersion and a label that names no release has none\n  \
+             `1.21.4` is a java release; if that is the numbering this floor is written in, say \
+             so\n  \
+             fix: `@requires java version>=1.21.4`, or name a bedrock release\n",
+            fixture.source().display(),
+        ),
+    );
     assert_eq!(
         fixture.artifacts(),
         Vec::<String>::new(),
