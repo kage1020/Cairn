@@ -7,9 +7,10 @@ use indexmap::IndexMap;
 
 use crate::ast::{Value, ValueKind};
 
+use super::member::LabelKey;
 use super::{Member, MemberRole, ThemeIr, ValueWithSpan};
 
-/// The attribute that names a `level` the member stands under, rather than a key of its line.
+/// The attribute that names a `level` the member stands under, not a key of its line.
 const LEVEL_ATTR: &str = "level";
 
 /// Keys the theme selectors match on, per keyword; ordered for a stable closed-set note.
@@ -30,29 +31,9 @@ pub(crate) fn selector_keys(themes: &[ThemeIr]) -> SelectorKeys<'_> {
     keys
 }
 
-/// Reads the [`Member`] field one label selector attribute filters on.
-type LabelField = fn(&Member) -> Option<&str>;
-
-/// The selector attributes lowering lifts onto [`Member`]'s own fields, with each one's accessor.
-const LABEL_ATTRS: [(&str, LabelField); 3] = [
-    ("id", |member| member.id.as_deref()),
-    ("class", |member| member.class.as_deref()),
-    ("mat_slot", |member| {
-        member.mat_slot.as_ref().map(|slot| slot.name.as_str())
-    }),
-];
-
-/// Whether `key`'s value is compared as label text rather than as the value a line writes.
+/// Whether `key`'s value is compared as label text, not as the value a line writes.
 pub(crate) fn compares_as_label(key: &str) -> bool {
-    key == LEVEL_ATTR || label_attr(key).is_some()
-}
-
-/// The accessor for `key`, or `None` for a key [`Member::written`] answers for.
-fn label_attr(key: &str) -> Option<LabelField> {
-    LABEL_ATTRS
-        .iter()
-        .find(|(name, _)| *name == key)
-        .map(|(_, field)| *field)
+    key == LEVEL_ATTR || LabelKey::of(key).is_some()
 }
 
 /// Whether `member`, standing under the `level`s whose ids are `levels`, has `keyword` and
@@ -73,12 +54,14 @@ fn attr_matches(member: &Member, levels: &[&str], key: &str, expected: &Value) -
     if key == LEVEL_ATTR {
         return levels.iter().any(|level| value_eq_label(expected, level));
     }
-    let Some(field) = label_attr(key) else {
+    let Some(label) = LabelKey::of(key) else {
         return member
             .written(key)
             .is_some_and(|actual| actual.value.same_value(expected));
     };
-    field(member).is_some_and(|actual| value_eq_label(expected, actual))
+    label
+        .read(member)
+        .is_some_and(|actual| value_eq_label(expected, actual))
 }
 
 fn value_eq_label(expected: &Value, raw: &str) -> bool {

@@ -12,16 +12,11 @@ use cairn_lang_core::Span;
 use cairn_lang_core::ast::ItemKind;
 use cairn_lang_core::intent::{BodyKind, role_of};
 use cairn_lang_core::lex::scan_line;
+use cairn_lang_core::parse::{EDIT, SET};
 use cairn_lang_formats::builtin_pack;
 use cairn_lang_formats::registry::MaterialsIndex;
 
 use crate::line_index::LineIndex;
-
-/// The word that opens a top-level `edit` line (`spec/components-editing-sites` "Editing model").
-const EDIT: &str = "edit";
-
-/// The word between an edit's target and the keys it sets.
-const SET: &str = "set";
 
 /// Where the cursor sits, and the byte span of the partial token to replace.
 enum Context {

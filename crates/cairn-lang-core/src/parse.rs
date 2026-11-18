@@ -20,6 +20,8 @@ use indexmap::IndexSet;
 
 mod edit;
 
+pub use edit::{EDIT, SET};
+
 /// The word that introduces a version floor, after `@` or at the start of a body line.
 const REQUIRES: &str = "requires";
 

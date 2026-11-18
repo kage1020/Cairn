@@ -34,7 +34,7 @@ pub use sink::DiagnosticSink;
 pub use target_floors::weigh_target;
 
 use crate::ast::Module;
-use crate::diagnostic::{EditionFindings, agreed, drop_repeats_within};
+use crate::diagnostic::{EditionFindings, agreed, drop_repeats_within, note_edits};
 use crate::edition::Edition;
 use crate::intent::IntentModule;
 use crate::version::VersionOrder;
@@ -76,6 +76,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     }
     let mut found = sink.into_sorted();
     drop_repeats_within(&mut found, &ir.edit_lines());
+    note_edits(&mut found, &ir.edited_members());
     found
 }
 

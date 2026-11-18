@@ -22,7 +22,7 @@ use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
 pub use self::edit::EditIr;
-pub(crate) use self::edit::edit_may_set;
+pub(crate) use self::edit::{edit_may_set, names_an_unknown_keyword};
 pub(crate) use self::guard::{guarded_lines, refused_under_guard};
 pub use self::keyword_table::{
     Actuator, MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue,
