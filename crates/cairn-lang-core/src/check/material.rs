@@ -56,7 +56,13 @@ enum WithoutAMaterial {
 fn without_a_material(member: &Member) -> WithoutAMaterial {
     match &member.role {
         MemberRole::Fill if member.pours_fluid() => WithoutAMaterial::NamesItsMaterialElsewhere,
-        MemberRole::Floor | MemberRole::Walls | MemberRole::Fill => WithoutAMaterial::PaintsNothing,
+        // A block display shows the block its slot binds, and a hologram is built as the member
+        // form its slot binds.
+        MemberRole::Floor
+        | MemberRole::Walls
+        | MemberRole::Fill
+        | MemberRole::BlockDisplay
+        | MemberRole::Hologram => WithoutAMaterial::PaintsNothing,
         // A `window` without `mat_slot=` is an opening carved to air.
         MemberRole::Window => WithoutAMaterial::Carves,
         MemberRole::Roof
@@ -81,6 +87,14 @@ fn without_a_material(member: &Member) -> WithoutAMaterial {
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
         | MemberRole::RedstoneDust => WithoutAMaterial::BuildsItsOwnBlock,
+        MemberRole::Painting
+        | MemberRole::ItemFrame
+        | MemberRole::ArmorStand
+        | MemberRole::Villager
+        | MemberRole::Trade
+        | MemberRole::TextDisplay
+        | MemberRole::ItemDisplay
+        | MemberRole::Spawn => WithoutAMaterial::PutsNothingDown,
         // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`, and `mat=`, whose absence is
         // `E_INVALID_MEMBER`.
         MemberRole::Connect | MemberRole::RawBlock | MemberRole::RawFill => {

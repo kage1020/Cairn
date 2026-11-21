@@ -5,14 +5,15 @@ use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
-use crate::block_array::BlockState;
 use crate::block_array::args::diag_invalid_member;
 use crate::block_array::geometry::Declared;
 use crate::block_array::material::{IdOrigin, block_id_state, validated_id};
+use crate::block_array::{BlockEntityData, BlockState};
 use crate::resolve::{TokenKind, classify_token};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::cell_box::{Shape, written_cells};
+use super::entity::{nbt_of, report_unread};
 use super::members::StructCtx;
 use super::token_diag::{IdSite, check_state_literal, diag_undeclared_id};
 
@@ -39,9 +40,24 @@ pub(super) fn fill_raw(
     };
     let idx = palette.intern(state);
     canvas.declare(Declared::boxed(cells.bbox(), None));
+    // A `raw_fill` reads no `nbt=`, which `check` reports.
+    let mut unread = Vec::new();
+    let compound = (shape == Shape::Cell)
+        .then(|| nbt_of(member, &mut unread))
+        .flatten();
     for cell in cells.cells() {
-        canvas.paint(cell, || idx);
+        match &compound {
+            Some(compound) => canvas.paint_with_entity(
+                cell,
+                || idx,
+                BlockEntityData::Nbt {
+                    compound: compound.clone(),
+                },
+            ),
+            None => canvas.paint(cell, || idx),
+        }
     }
+    report_unread(unread, diagnostics, |_| "the block is placed without it");
 }
 
 /// The block a raw member's `mat=` names, checked against the target, or `None` after the finding

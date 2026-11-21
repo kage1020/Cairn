@@ -25,7 +25,7 @@ DataFixerUpper は前方向にしか変換できず、情報を失い、対応�
 - 見た目の一貫性 (色温度のずれ)。
 - 物理ルールの変更 (1.21 のウィンドチャージが従来のトラップを壊す)。
 
-出力される NBT は幾何的には正しいものの、ゲーム内での体験までは保証しません。
+出力される NBT は幾何的には正しいものの、ゲーム内での体験までは保証しません。ゲームがブロックを落とす、落下させる、水を流れ出させることを制約カタログが知っている場合は、固定したビルドが警告し ([Lint](/ja/spec/lint/#制約の検査))、メンバーの意味があるバージョンで変わることを知っている場合は、`cairn info` とロックがそのメンバーを示します ([§10.5](#semantic-sensitive-の行))。どちらも保証ではありません。カタログは知っていることを挙げるだけです。
 
 ## 10.3 バックエンドはデータテーブル
 
@@ -33,20 +33,15 @@ DataFixerUpper は前方向にしか変換できず、情報を失い、対応�
 
 **機械的な抽出。** ゲームの `--reports` やレジストリダンプから取り出します。構文とドメインに関する真実はここにあります。ブロックとエンティティの ID、ブロックステートのプロパティとそのドメイン、アイテムとコンポーネントのスキーマ、DataVersion、タグです。誰かの記憶ではなくゲームそのものを真実の源にするので、新しいバージョンについての知識の抜けが根本からなくなります。上に挙げたもののうち組み込みパックが持っているのは、バージョンごとのブロック ID、各ブロックのステートのプロパティとそのドメイン、バージョン表です。ブロック表は抽出したものです。Java の表はサーバー jar の `--reports` から、Bedrock の表は、そのリリースのブロックパレット、つまりゲームが受け付けるすべてのブロックステートから取り出します。各 `pack.json` には、それぞれの表の抽出元のファイルとそのハッシュを記録しており、抽出をやり直してそれらと突き合わせることが検査になります。
 
-**バージョンタグ付きの、手書きの制約カタログ。** データに含まれない事柄を扱います。取り付け (額縁はガラスには掛けられない)、重力と支え (砂利、吊るしたランタン)、流体の挙動、エンティティの AABB、レッドストーンです。新しいバージョンごとに一度定義すれば、すべてのユーザーがその恩恵を受けます。制約カタログはまだ同梱していないので、ロックの `constraint_catalog_hash` はゼロで、意味が変わりうるメンバーとして報告されるものもありません ([§10.5](#105-どのバージョン向けかの答えは-3-つある))。
+**手書きの制約カタログ。** データに含まれない事柄を扱います。取り付け (レバーは板ガラスには付けられない)、重力と支え (砂利、吊るしたランタン)、流体の挙動、エンティティの AABB、レッドストーン、そしてブロックの意味が変わるバージョンです。一度定義すれば、すべてのユーザーがその恩恵を受けます。組み込みのカタログはパックの隣に同梱しており、両方のエディションに使う 1 つのファイルで、正規の ID で書きます。規則はそのブロックを宣言するすべてのバージョンで成り立ち、各バージョンの面はパックから読みます。あるバージョンで変わる意味には、そのバージョンを付けます。表とそれを読む検査は [Lint §11.4](/ja/spec/lint/#114-制約カタログ) が定めます。ロックはその本文の sha256 を記録します ([§10.6](#106-来歴-provenance-とロック))。
 
-```yaml
-constraints:
-  minecraft:item_frame:
-    type: entity_attachment
-    since: "1.13"
-    targets: { solid_full_face: true, glass_pane: false }
-    error: "item_frame requires a solid attachable face"
-  minecraft:lantern:
-    type: support
-    states:
-      hanging=true:  { requires_above: solid_or_chain }
-      hanging=false: { requires_below: solid_top }
+```json
+"support": [
+  {"ids": ["lantern"], "when": {"hanging": "false"}, "defaults": {"hanging": "false"},
+   "on": "below", "needs": "center"},
+  {"ids": ["lantern"], "when": {"hanging": "true"}, "defaults": {"hanging": "false"},
+   "on": "above", "needs": "center"}
+]
 ```
 
 ### `(edition, version)` 行列の畳み込み
@@ -123,6 +118,15 @@ Bedrock のパックは、ステートマップをさらに 2 つのコンポー
 行の `kind` は `pane`、`wall`、`fence`、`wooden_fence`、`fence_gate`、`chest`、`redstone_dust` のいずれかです。`never_joined_by_face` はガラス板・フェンス・壁が面でつながることのないブロックを、`raises_post` は `wall_post_override` タグに含まれるブロックを示し、`defaults` は規則が読む各ステートの既定値で、そのステートを書かないステートはこの値を取ります。フェンスゲートの `facing` と `open`、チェストの `facing` もここにあります。`covers` は `post` と各側の方向を挙げ、`kind` のある行は `covers` を持ちません。規則はつながるブロックをそのつながりのステートで読むからです。`dust` は、隣のダストがつながるそのブロックの横向きの面を、`sturdy` と同じくリストか表で挙げます。リピーターの表は `facing` を引きます。`dust` のない行は、どのダストともつながりません。どの行も挙げないブロックは、規則にとって何でもありません。どのターゲットも、壁の接続が bool から `none` / `low` / `tall` に変わった 1.16 より後なので ([§10.5](#105-どのバージョン向けかの答えは-3-つある))、壁の側はどのターゲットでもこの 3 つの値で導出します。
 
 ローダーは、行のないコンポーネント、ブロックかバージョンを挙げない行、どのプロパティも読まないかどの値も引かない表、どの規則も読まない既定値、既定の `facing` が横向きの面でないか `open` が真偽値でないフェンスゲート、既定の `facing` が横向きの面でないチェスト、横向きの面でない `dust` の面を拒否します。ダストは下のブロックの上に載るからです。Java では、そのバージョンのブロックの表にないブロックや、ステートの値を挙げる行も拒否します。
+
+両方のパックは `paintings` コンポーネントも持ちます。ターゲットにできる各バージョンが持つ絵画と、それぞれのブロック単位の `width` と `height` で、`painting` の `variant=` はこれで絵画を示し、その大きさで掛けます ([エンティティ §8.1](/ja/spec/entities/#掛けるエンティティ))。これはゲームから手で書き起こします。Java のものは各バージョンのサーバー jar から書き起こし、1.21 からはそのデータファイルが絵画の大きさを与えます。Bedrock のものは、各バージョンの `blocks` の元になったブロックパレットとともに GeyserMC が同梱する絵画の表から書き起こし、この表は Bedrock が絵画の `Motive` として保存する `spelling` も与えます。行は、同じ絵画を持つバージョンをまとめます。
+
+```json
+{ "versions": ["1.21", "1.21.4", "26.3"],
+  "paintings": [{"variant": "orb", "width": 4, "height": 4}] }
+```
+
+ローダーは、バージョンも絵画も挙げない表、バージョン表のターゲットにできる行が挙げないバージョン、絵画を与えられないターゲットにできるバージョン、1 つのバージョンで 2 回与えられた絵画、名前だけでない `variant`、1 から 16 ブロックの外の辺、空の `spelling` を拒否します。
 
 ## 10.4 Fail-loud と最小バージョン推定
 
@@ -304,7 +308,7 @@ Java のリリースは `1.20.4 / 1.21 / 1.21.4 / 26.3`、Bedrock のリリー�
 「対応バージョン」は 1 つには決まりません。`cairn info` は 3 つの軸を報告します。
 
 1. **レジストリ範囲 `[Vmin, Vmax]`**。宣言したものと推定したものの 2 つがあります。宣言した範囲は、ファイルがエディションを指定せずに宣言した下限を合成したものと、開いた上端です。使っているブロックから導いた事実ではなく、ソースとそれがインスタンス化する構成要素が宣言した内容を読み返したものです。詳しくは [`registry compatibility` の行](#registry-compatibility-の行)を参照してください。推定した範囲はその事実のほうで、エディションごとに、ビルドが塗る ID のどれかを初めて宣言するバージョンのうち最も遅いものから、どれかを最後に宣言するバージョンのうち最も早いものまでです。詳しくは [`inferred range` の行](#inferred-range-の行)を参照してください。
-2. **意味が変わりうるメンバー**: ID は有効なまま、意味、挙動、見た目が変わる箇所です。範囲よりもこちらが重要です。挙動の変化は ID の消滅よりはるかに頻繁に起きるので、レジストリだけで Vmax を決めるのは危険です。制約カタログは `since`/`until` とは別に `semantic_sensitivity` (境界のバージョンと理由) を持ち、その境界をまたぐコンパイルは警告を出します。例: 1.17 の大釜の分割、1.16 で壁の接続が bool から `none/low/tall` に変わった件、1.20.5 のアイテムフォーマット。制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、`semantic-sensitive` の行は常に `(none)` で、警告を出すコンパイルもありません。
+2. **意味が変わりうるメンバー**: ID は有効なまま、意味、挙動、見た目が変わる箇所です。範囲よりもこちらが重要です。挙動の変化は ID の消滅よりはるかに頻繁に起きるので、レジストリだけで Vmax を決めるのは危険です。制約カタログは `since`/`until` とは別に `semantic_sensitivity` (境界のバージョンと理由) を持ち、その境界をまたぐコンパイルは警告を出します。例: 1.17 の大釜の分割、1.16 で壁の接続が bool から `none/low/tall` に変わった件、1.20.5 のアイテムフォーマット。この 3 つは組み込みのカタログが同梱しているものです。[`semantic-sensitive` の行](#semantic-sensitive-の行) を参照してください。
 3. **検証済みのロックターゲット** ([§10.6](#106-来歴-provenance-とロック)): ソースのロックファイルが記録している `(edition, version, data_version)`、ソースがいまもそのロックの `source_hash` と同じハッシュになるかどうか、そのロックを書き出した Cairn のリリースの 3 つです。詳しくは [`verified target` の行](#verified-target-の行)を参照してください。このターゲットをビルドするターゲットと比べるのは `cairn compile` で、違いがあれば `W_PREVIOUSLY_VERIFIED_TARGET` で知らせます。
 
 ```text
@@ -315,11 +319,11 @@ edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedro
 respelled:               Java: none   Bedrock: minecraft:oak_sign
 buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
 intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16)
+semantic-sensitive:      Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
 verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
-開いた下端の `0.0` を除き、名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。また、最後のコンパイルでは Bedrock 1.21.60 向けにビルドしています。Bedrock のビルドは Bedrock の表が 1.21.40 で初めて宣言するブロックを塗っており、それが下限を宣言した理由で、Bedrock の推定範囲の始まりでもあります。Java のビルドが塗るものは、Java の推定範囲を区切りません。Bedrock は、ビルドが塗る `@oak_sign` を `standing_sign` として書き出し、`respelled` の行がそれを名指します。`semantic-sensitive` の行は、制約カタログがあれば加わる内容を示したもので、現在は `(none)` と表示します。
+開いた下端の `0.0` を除き、名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。また、最後のコンパイルでは Bedrock 1.21.60 向けにビルドしています。Bedrock のビルドは Bedrock の表が 1.21.40 で初めて宣言するブロックを塗っており、それが下限を宣言した理由で、Bedrock の推定範囲の始まりでもあります。Java のビルドが塗るものは、Java の推定範囲を区切りません。Bedrock は、ビルドが塗る `@oak_sign` を `standing_sign` として書き出し、`respelled` の行がそれを名指します。`semantic-sensitive` の行が Java のメンバーだけを示すのは、組み込みのカタログの境界がすべて Java のものだからです。
 
 `intended targets` はファイル自身の `@intended_targets` 行をそのまま写したもので、答えではなく宣言である唯一の行です。`buildable targets` の隣にあるのは、矛盾しうる相手がその行だからです。判定できる半分の比較は [§10.4](#ヒントは下限と突き合わせる) が自動で行い、残りは読み手が突き合わせます。何も宣言していないファイルでも行は消えず、`(none declared)` と表示します。
 
@@ -357,7 +361,7 @@ edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
 respelled:               Java: none
 buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
 intended targets:        (none declared)
-semantic-sensitive:      (none)
+semantic-sensitive:      Java: (none)
 verified target:         (no lock)
 ```
 
@@ -504,6 +508,14 @@ ID は構造ファイルが名指すものなので、Bedrock が自分の ID �
 
 さらに別の行 `recommended test targets` もこの軸に属し、また別の問い (どのバージョンでテストする価値があるか) に答えます。まだこれを出力するコードはありません。
 
+### `semantic-sensitive` の行
+
+この行は、2 つ目の軸に、指定されたエディションごとに `Java: <members>   Bedrock: <members>` の形で答えます。各メンバーは `name(reason @boundary)` と書き、そのエディションに該当がなければ `(none)` と書きます。メンバーが建てるブロックを、そのエディションの `semantic_sensitivity` の行が挙げているとき ([Lint §11.4](/ja/spec/lint/#114-制約カタログ))、そのメンバーを、該当する行ごとに 1 回、メンバーの順に挙げます。名前はその `id=` で、持たない場合はアドレス ([構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス)) です。そのため、1 つのブロックを建てる 2 つのメンバーは 2 つの項目になります。ブロックは範囲全体の lowering が建てるもので、`edition portability` の行が読むのも同じなので、Bedrock のブロックは、いずれかのバージョンのステートマップがそれから作るすべての正規のブロックとして読みます。`--format json` はこの行を `semantic_sensitive` として、項目ごとに `{edition, member, reason, boundary_version}` を、指定されたエディションの順に出力します。
+
+この行が示すのは、何が変わりうるかであって、どこで変わるかではありません。メンバーは、それをビルドするバージョンが境界のどちら側にあっても挙げます。この行はソースを読むもので、そのソースをどのバージョン向けにビルドするかは、ほかの行が答えるからです。境界はそのエディション自身のバージョンなので、別のエディションの境界のためにメンバーを挙げることはありません。組み込みのカタログの境界はすべて Java のものです。
+
+コンパイルは、ターゲット自身についての答えを、そのバージョンがブロックを読むとおりに読んで、ロックの `member_version_sensitivity` に記録します。そして同じエディションの別のバージョン向けに再コンパイルするとき、2 つのバージョンの間に境界があるメンバーについて警告します ([§10.6](#106-来歴-provenance-とロック))。
+
 ### `verified target` の行
 
 この行が読むのは、`--lock` で指定したロックファイルです。指定しなければ、ソースの隣の `<source>.lock` を読みます。これは `cairn compile` が書き出すパスです ([§10.6](#106-来歴-provenance-とロック))。報告するのはそのロックに記録されている内容で、いまビルドしたら検証できるかどうかではありません。ロックが保証するのはそれを書き出したときのビルドで、ロックを読んでも何もビルドしません。
@@ -559,22 +571,22 @@ note が約束するのは、コンパイルが実際にすることだけです
 `.crn` が持つのは、書かれた言語のバージョン (`@cairn`) と、ターゲットについてはヒントである `@intended_targets` だけです。`verified: true`、DataVersion、各種ハッシュはロックにだけ存在し、ビルドが成功したときにコンパイラが書き込みます。手で書くことはありません。
 
 ```yaml
-# build.crn.lock (コンパイラが生成)
+# yard.crn.lock (コンパイラが生成)
 lock_schema_version: 1        # この文書自身のスキーマの改訂番号
 source_hash: sha256:...
 cairn_version: 2026.11.0      # 書き出した Cairn のリリース。`cairn --version` の表示と同じ
-target: { edition: bedrock, mc_version: 1.21.60, data_version: 18168865 }
+target: { edition: java, mc_version: 1.20.4, data_version: 3700 }
 inputs: { registry_pack_hash: sha256:..., constraint_catalog_hash: sha256:... }
 resolved_ir_hash: sha256:...
 verified: true
 member_version_sensitivity:
   - { id: yard_water, reason: "cauldron split at 1.17" }
-  - { id: fence, reason: "wall conn at 1.16" }
+  - { id: pantry, reason: "item format at 1.20.5" }
 ```
 
-コンパイルは、`--lock` で別のパスを指定しないかぎり、ロックをソースの隣に `<source>.lock` として書き出します。`cairn info` は同じパスを [`verified target` の行](#verified-target-の行)として読み返します。制約カタログはまだ同梱していないので ([§10.3](#103-バックエンドはデータテーブル))、現在の `constraint_catalog_hash` はゼロで、`member_version_sensitivity` は `[]` です。
+コンパイルは、`--lock` で別のパスを指定しないかぎり、ロックをソースの隣に `<source>.lock` として書き出します。`cairn info` は同じパスを [`verified target` の行](#verified-target-の行)として読み返します。`constraint_catalog_hash` は制約カタログの本文の sha256 です ([§10.3](#103-バックエンドはデータテーブル))。`member_version_sensitivity` は、[`semantic-sensitive` の行](#semantic-sensitive-の行) がターゲットのエディションについて見つけるものを、ターゲットがブロックを読むとおりに読んで並べたもので、各 `reason` は行の理由と境界を `<reason> at <boundary>` と書いたものです。
 
-`resolved_ir_hash` が再現性の中心です。マクロ展開、デフォルト値の補完、アドレスの割り当てを終えた後の IR を固定します。セルを組み上げた各メンバーの `members` の記録は、struct の `circuit` のものも含め、コンパイラがその行に与えたアドレス ([構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス)) と、その幾何 ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約)) を持ちます。壁の上で同じロールのメンバーより手前にメンバーを足すなどしてそうしたアドレスが動くと、組み上げるものが変わったときと同じく、ハッシュも変わります。`level` のようにセルを組み上げないメンバーのアドレスは記録されず、その下のメンバーのアドレスの段としてだけハッシュに入ります。
+`resolved_ir_hash` が再現性の中心です。マクロ展開、デフォルト値の補完、アドレスの割り当てを終えた後の IR を固定します。セルを組み上げたメンバーとエンティティを置いたメンバーの `members` の記録は、struct の `circuit` のものも含め、コンパイラがその行に与えたアドレス ([構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス)) と、その幾何 ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約)) を持ちます。壁の上で同じロールのメンバーより手前にメンバーを足すなどしてそうしたアドレスが動くと、組み上げるものが変わったときと同じく、ハッシュも変わります。`level` のように、セルを組み上げずエンティティも置かないメンバーのアドレスは記録されず、その下のメンバーのアドレスの段としてだけハッシュに入ります。
 
 `lock_schema_version` を先頭に置くのは、読み手が残りをパースする前に、内容を理解できるかどうか判断できるようにするためです。バージョン `1` は、上の形に、空でないときにだけ書き出す 2 つのキーを加えたものです。`placements` は各 `place` 行の解決済みの原点と大きさ、`walkways` は各 `connect` 行の解決済みの通路と経路のマテリアルです。`lock_schema_version` を省いた文書もバージョン `1` とみなします。より高いバージョンを宣言する文書は、フィールド名の意味が変わっていないと仮定して読むのではなく、拒否します。スキーマが宣言していないキーは、どこにあっても拒否します。
 
@@ -583,12 +595,12 @@ member_version_sensitivity:
 別のターゲットで再コンパイルすると、検証済みのターゲットとの違いをはっきり報告します。
 
 ```text
-$ cairn compile build.crn --edition bedrock --target 1.21.40 --lock build.crn.lock
-W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.21.60/block version 18168865, now 1.21.40/18163713.
-W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
+$ cairn compile yard.crn --edition java --target 1.21.4 --lock yard.crn.lock
+W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
+W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: pantry (item format at 1.20.5)
 ```
 
-2 つ目の警告は前のロックに記録されたメンバーを読むものなので、現在のコンパイルが書き出すロックからは出ません。
+2 つ目の警告は、このビルドのメンバーのうち、ロックが検証したバージョンとターゲットの間に境界があるものを、またぐ境界とともに示します。1.20.4 と 1.21.4 の間にある境界は 1.20.5 だけなので、`yard_water` の 1.17 は示しません。読むのはロックに記録されたリストではなく、このビルドです。そのリストは比べるべき境界を持たず、ソースがもう建てないメンバーを挙げていることもあるからです。エディションをまたぐ場合は、2 つのエディションのバージョンの間に順序がないので、メンバーを示しません。ロックのバージョンの位置をエディションの表が決められない場合は、それがどこにあったかわからないので、意味が変わりうるメンバーをすべて示します。
 
 ## 10.7 Java / Bedrock の可搬性
 
@@ -616,7 +628,7 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 トークンで吸収できるのは、ID、ステート、シリアライズの違いだけです。**概念がないことと、ゲーム挙動の違いは吸収しません。** 吸収できない代表例は次のとおりです。
 
 - 一方のエディションにしかないブロック ([下記](#もう一方のエディションにしかないブロック))
-- display エンティティ (Bedrock にはない)
+- display エンティティ (Bedrock にはない。[後述](#もう一方のエディションにしかないブロック))
 - 1.26.60 より前の Bedrock での階段の `shape` (そこにはこのステートがない)
 - 防具立て (armor_stand) のポーズ
 - レッドストーン信号の伝わり方
@@ -634,6 +646,8 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 
 ローダーは、パック自身の `blocks` がいずれかのバージョンで宣言している `absent` の ID を拒否します。その綴りでも、`aliases` の同じグループの別の綴りでも同じです。そのエディションがそのブロックを持っていることになるからです。
 
+このコンポーネントの `entities` は、メンバーが置くもう一方のエディションのエンティティのうち、そのエディションに対応するものがないものを、同じ形の行で挙げます。Bedrock のものは display エンティティを挙げます。それを置くメンバーは、そのエディションのビルドでは、固定してもしなくても、その行で `E_PARITY_UNSUPPORTED` になり、パックの理由を示します。注記は、下の階層の次の段を求めます。浮かぶ文字なら `hologram`、そうでなければ両方のエディションが持つブロックか `item_frame` です ([エンティティ §8.1](/ja/spec/entities/#display))。
+
 意味メンバーの `mat_slot=` がそうしたブロックに解決されたとき、`theme` のセレクタ行がキーをそうしたブロックに割り当てたとき、また `connect … path=` がそうなったときは、それを欠くエディションの固定したターゲットで、トークンの位置に `E_PARITY_UNSUPPORTED` を出します ([Lint](/ja/spec/lint/))。タイプミスではないので、最も近い ID は示しません。ノートは、パックの理由と、代わりに書くものを示します。メンバーなら、[下記](#代替を書くとき)の階層を 1 段下りた手です。各エディションが持つブロックにスロットを束縛するエディション別テーマか、もう一方のエディションの `@edition` ガードの下の `raw_block` です。walkway にはどちらも使えません。`path=` はブロックを直接名指すので束縛するスロットがなく、`site` の本体ではガードの中身が何も建たないからです ([§10.7](#edition-ガードはエスケープハッチを囲む))。そこで `path=` には、両方のエディションが持つブロックか、各エディションのマテリアルカタログが対応付ける抽象トークンを求めます。セレクタ行には、各エディションが持つブロックにそのキーを割り当てるエディション別テーマか、両方のエディションが持つブロックを求めます。
 
 そうしたブロックを名指す `raw_block` や `raw_fill` は `E_UNKNOWN_ID` です。生の ID はもともとエディション固有だからで、そのかわり、ノートがパックの理由と、その行を残すガードを示します。パック自身の対応が行き着いた ID も `E_UNKNOWN_ID` のままで、ノートは理由だけを示し、ガードは示しません。直すのはパックの対応で、ソースの行ではないからです。
@@ -641,8 +655,6 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 `E_UNKNOWN_ID` と同じく、この指摘には固定したターゲットが必要です ([§10.4](#未知の-id-はどのレジストリに照らして未知なのか))。`cairn info` の `edition portability` の行は、そのエディションの `absent` が挙げるエントリに同じ理由で答えます ([§10.5](#edition-portability-の行))。
 
 ### 代替を書くとき
-
-**変更の余地あり。** `hologram` と、引数を取る `slot` のルールは、まだ組み上げられません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
 
 意味層で `@edition` による条件分岐を書くことは禁止です。代替が必要なときは、次の階層を上から順に検討します。
 
@@ -653,26 +665,35 @@ warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs[facing=south
 ```
 @requires bedrock version>=1.21.40   # 下の Bedrock 分岐は平坦化後の ID で書いている
 
-theme shop_java:    slot floating_text -> text_display scale=2.0
-theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock のフォールバック
+theme shop_java:
+  slot stone         -> @cobblestone
+  slot floating_text -> text_display scale=2.0
+
+theme shop_bedrock:
+  slot stone         -> @cobblestone
+  slot floating_text -> sign glowing=true   # Bedrock のフォールバック
 
 struct shop size=9x7
-  hologram id=shop_sign text="Weapon" mat_slot=floating_text   # 意味層は常に中立
+  floor    mat_slot=stone
+  walls    mat_slot=stone height=4
+  hologram id=shop_sign at=4,1,2 text="Weapon" mat_slot=floating_text   # 意味層は常に中立
   @edition java
-    raw_block mat=minecraft:light[level=15] at=4,3,2
+    raw_block mat=minecraft:light[level=15] at=4,3,4
   @edition bedrock
-    raw_block mat=minecraft:light_block_15 at=4,3,2
+    raw_block mat=minecraft:light_block_15 at=4,3,4
 ```
 
-このスニペットのうち、現時点でパースできるのは `@requires` の行です。`struct` も、ヘッダ、`hologram` の行、2 つのガードとその中身まで、すべてパースできる形です。ただし、パースは `struct` まで届きません。`theme` のルールはヘッダの下にインデントして書くので、1 行の形は最初の `slot` の位置で `E_PARSE` になり、パースはそこで終わります。インデントしても、`slot` のルールが割り当てるのは 1 つのトークンで、その後には何も書けないので、`scale=2.0` と `glowing=true` は `E_PARSE` になります。本体の中に書いた `hologram` は `E_UNKNOWN_KEYWORD` です。`E_PARITY_UNSUPPORTED` は、メンバーをもう一方のエディションにしかないブロックに束縛したときに出ます ([上記](#もう一方のエディションにしかないブロック))。例の `edition-fallback` は、いま使える段を組み上げています。エディション別のテーマと、ガードの下の光源ブロックです。
+`hologram` は、エディションごとに別のやり方で組み上げる浮かぶ文字で、`mat_slot=` が束縛するメンバーの形として組み上げます。`slot` の行は、メンバーの形を名前だけの語 `text_display` か `sign` で束縛し、その後にその形が取るキーを書きます。テキストの display なら `billboard=` と `scale=`、看板なら `glowing=` です ([マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット))。hologram の行は `text=` を書いてそれを置き、その `at=`、`offset=`、`y=`、`facing=` は、組み上げるメンバーを置くとおりに置きます。テキストの display は行が示す場所に立ち ([エンティティ §8.1](/ja/spec/entities/#display))、看板は、`sign` の行と同じく、下のブロックの上に立つか壁に掛かります ([ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する))。形が取らないキーは、スロットの行で `E_UNKNOWN_ARGUMENT` です。スロットがブロックを束縛する hologram は `E_INVALID_MEMBER` で、スロットがメンバーの形を束縛するほかのキーワードのメンバーも、メンバーの形として組み上げるのは hologram だけなので `E_INVALID_MEMBER` です。Bedrock のビルドでテキストの display として組み上げる hologram は `E_PARITY_UNSUPPORTED` で、その注記は、Bedrock のテーマがスロットを `sign` に束縛するよう求めます。
+
+このスニペットは両方のエディションで組み上がります。Java のビルドは、床の上に 2 倍のテキストの display を立て、ガードが囲む光源ブロックを置きます。Bedrock のビルドは、そこに表に文字を書いた光る看板を立て、Bedrock の光源ブロックを置きます。`E_PARITY_UNSUPPORTED` は、メンバーをもう一方のエディションにしかないブロックに束縛したとき、またはメンバーがもう一方のエディションにしかないエンティティを置くときに出ます ([上記](#もう一方のエディションにしかないブロック))。例の `edition-fallback` は、ブロックについて 2 つ目の段を、つまり両方のエディションが持つ看板を束縛するエディション別のテーマを組み上げ、`trading-post` は hologram について同じ段を組み上げます。
 
 ### `@edition` ガードはエスケープハッチを囲む
 
-ガードはそれだけで 1 行を占めます。`@edition` に `java` か `bedrock` を続け、その後には何も書きません。ガードする行は、その下に 1 段深くインデントして書きます。ガードを置けるのは `struct`、`def`、`site` の本体の中と、そこにあるメンバーの本体の中です。ファイルディレクティブと同じ記号で始まりますが、ディレクティブではありません。ファイルの項目はエディションに中立なので、トップレベルのガードは `E_PARSE` です。`theme` の本体の中のガードも同じで、そこでは `NAME_java` と `NAME_bedrock` のバリアントが違いを表します ([後述](#バリアントはソースではなくビルドが選ぶ))。エディションを書かないガード、ほかの語を書いたガード、エディションの後に何かを続けたガード、行を波かっこで囲んだガード、下に何もインデントしていないガードも `E_PARSE` です。ガードは入れ子にできません。外側のガードがすでにエディションを決めているので、ガードの直下のガードは `E_PARSE` です。それより深い行は、ガードの外にある場合と同じく、その行がインデントされている親の行に従って判定します。生のメンバーや Tier 0 の部品の下のメンバーは、もう一度ガードで囲んでいてもいなくても `E_UNSUPPORTED_NESTING` で、拒否した行の下にあるものは、その行とまとめて扱います。
+ガードはそれだけで 1 行を占めます。`@edition` に `java` か `bedrock` を続け、その後には何も書きません。ガードする行は、その下に 1 段深くインデントして書きます。ガードを置けるのは `struct`、`def`、`site` の本体の中と、そこにあるメンバーの本体の中です。ファイルディレクティブと同じ記号で始まりますが、ディレクティブではありません。ファイルの項目はエディションに中立なので、トップレベルのガードは `E_PARSE` です。`theme` の本体の中のガードも同じで、そこでは `NAME_java` と `NAME_bedrock` のバリアントが違いを表します ([後述](#バリアントはソースではなくビルドが選ぶ))。エディションを書かないガード、ほかの語を書いたガード、エディションの後に何かを続けたガード、行を波かっこで囲んだガード、下に何もインデントしていないガードも `E_PARSE` です。ガードは入れ子にできません。外側のガードがすでにエディションを決めているので、ガードの直下のガードは `E_PARSE` です。それより深い行は、ガードの外にある場合と同じく、その行がインデントされている親の行に従って判定します。エスケープハッチの層の行の下のメンバーは、もう一度ガードで囲んでいてもいなくても `E_UNSUPPORTED_NESTING` で、拒否した行の下にあるものは、その行とまとめて扱います。
 
-ガードはスコープを作りません。その行は、ガードが立つ位置に書いたものとして読みます。`level` の下のガードにある行は、その `level` の `y=` を受け継ぎます。また、生のメンバーと Tier 0 の部品は、ガードの外で受ける検査をガードの中でもすべて受けます。ガードが加えるのは、その行を残すビルドのエディションだけです。
+ガードはスコープを作りません。その行は、ガードが立つ位置に書いたものとして読みます。`level` の下のガードにある行は、その `level` の `y=` を受け継ぎます。また、エスケープハッチの層の行は、ガードの外で受ける検査をガードの中でもすべて受けます。ガードが加えるのは、その行を残すビルドのエディションだけです。
 
-ガードの中に書けるのはエスケープハッチの層です。つまり `raw_block` と `raw_fill` ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))、そして [レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品) の Tier 0 の部品 (`repeater`、`comparator`、`redstone_torch`、`redstone_dust`) です。`nbt={...}` のコンパウンドを書く行もこの層に属し、ガードの下に置きます ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階))。ただし、`nbt=` を読むキーワードはまだありません。それ以外のメンバー、`logic` の行、`assert` の行は `E_SEMANTIC_IN_EDITION_GUARD` です ([リント](/ja/spec/lint/))。報告は最も外側の該当行で 1 回だけ行い、その下にインデントした行もまとめて扱います。ガードの中の生のメンバーや Tier 0 の部品の下にある `logic` や `assert` の行も同じです。ガードの外であれば、その行はレッドストーン合成まで届きます。拒否した行とそれにまとめた行は、どのビルドもほかのどの検査も読まないので、その指摘だけが出ます。`site` の本体にある生のメンバーと Tier 0 の部品は、ガードの有無にかかわらず `E_MISPLACED_MEMBER` なので、そこにあるガードの中にはビルドされるものがありません。
+ガードの中に書けるのはエスケープハッチの層です。つまり `raw_block` と `raw_fill` ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))、ID で任意のエンティティを置く `spawn` ([エンティティ §8.1](/ja/spec/entities/#立つエンティティ))、そして [レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品) の Tier 0 の部品 (`repeater`、`comparator`、`redstone_torch`、`redstone_dust`) です。`nbt={...}` のコンパウンドを書くエンティティの行もこの層に属し、コンパウンドがフィールド名を綴るエディションのガードの下に置きます ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階))。コンパウンドを書かない同じ行は意味メンバーです。それ以外のメンバー、`logic` の行、`assert` の行は `E_SEMANTIC_IN_EDITION_GUARD` です ([リント](/ja/spec/lint/))。報告は最も外側の該当行で 1 回だけ行い、その下にインデントした行もまとめて扱います。ガードの中のこの層の行の下にある `logic` や `assert` の行も同じです。ガードの外であれば、その行はレッドストーン合成まで届きます。拒否した行とそれにまとめた行は、どのビルドもほかのどの検査も読まないので、その指摘だけが出ます。`site` の本体にあるこの層の行は、ガードの有無にかかわらず `E_MISPLACED_MEMBER` なので、そこにあるガードの中にはビルドされるものがありません。
 
 エディションを固定したビルドは、そのエディションのガードの中の行を残し、もう一方のエディションの行を捨てます。`cairn compile --edition java` はスニペットの `minecraft:light` を組み上げ、`light_block_15` は組み上げません。エディションを固定しない lowering は、どちらも残しません。`--edition` を付けない `cairn lower` はエディションに中立な中間表現を出力するので、ガードの中の行をすべて省き、省いた数を注記で示します。それでも、各エディションの分岐がそれらの行に見つけた指摘は報告し、そこにエラーがあれば終了コード 1 で終わります。
 

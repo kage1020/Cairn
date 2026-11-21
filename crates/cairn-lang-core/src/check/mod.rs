@@ -132,6 +132,7 @@ mod tests {
             | C::UnsupportedNesting
             | C::MisplacedMember
             | C::SemanticInEditionGuard
+            | C::NbtOutsideEditionGuard
             | C::UnknownKeyword
             | C::UnknownArgument
             | C::MisplacedBinding
@@ -191,7 +192,11 @@ mod tests {
             | C::InvalidWalkwayIdent
             | C::EditRipple
             | C::PlacementOverlap
-            | C::PhaseConflict => RaisedBy::LoweringOnly,
+            | C::PhaseConflict
+            | C::NoAttachmentFace
+            | C::UnsupportedBlock
+            | C::WaterSpill
+            | C::EntityClipping => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
             }
@@ -252,6 +257,7 @@ mod tests {
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
+                "E_NBT_OUTSIDE_EDITION_GUARD",
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "E_TRUTH_TABLE_CONFLICT",
                 "E_TRUTH_TABLE_DUPLICATE_INPUT",

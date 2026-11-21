@@ -67,8 +67,9 @@ Evolving surfaces:
   minors after introduction. What `cairn.info` returns is `cairn info`'s JSON document, at that
   document's tier.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
-  but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
-  its hash as zeros.
+  but the *internal structure* is Evolving), and which blocks the built-in catalog lists, so a
+  release may raise a constraint check or a `semantic-sensitive` entry on a source an earlier one
+  passed ([Lint §11.4](/spec/lint/#114-constraint-catalog)).
 - The tier-2 material vocabulary: the block each tier-1 token resolves to at a target
   ([§7.2](/spec/materials-themes/#tier-1-tokens)).
 - Canonical block tokens: the names a target accepts, which follow its registry pack, and the
@@ -206,7 +207,7 @@ build yet, or what the spec reserves for a later extension. Source the spec itse
 code. The placeholders today include:
 
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
-  `spawn`, `painting` and `raw_repeat`;
+  `raw_repeat`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet

@@ -2,7 +2,7 @@
 //! name, as given, after every other member (`spec/materials-themes` "Raw blocks").
 
 use cairn_lang_core::DiagnosticCode;
-use cairn_lang_core::block_array::BlockArrayIr;
+use cairn_lang_core::block_array::{BlockArrayIr, BlockEntity, BlockEntityData};
 
 use crate::common::{
     BIN_THEME, Finding, Wet, bin, findings, layer, lowered, lowered_with, only_structure,
@@ -168,6 +168,43 @@ fn two_raw_members_writing_one_cell_contest_it_and_the_later_line_wins() {
         )],
     );
     assert_eq!(layer(only_structure(&out), 1), EMPTY_ROW);
+}
+
+#[test]
+fn two_raw_blocks_of_one_block_with_different_compounds_contest_its_block_entity() {
+    let line = r#"raw_block mat=minecraft:chest at=2,1,2 nbt={Lock:"b"}"#;
+    let src = bin(&format!(
+        "raw_block mat=minecraft:chest at=2,1,2 nbt={{Lock:\"a\"}}\n  {line}"
+    ));
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::PhaseConflict,
+            line,
+            "`raw_block` overwrites 1 voxel that `raw_block` painted in the same phase, so which \
+             block entity the build keeps is decided by the order the two lines are written in",
+            vec![
+                "overwritten member declared here",
+                "If the override is deliberate this is the local-override rule of \
+                 spec/compilation \"Phase evaluation\" and the later line wins as written. If it \
+                 is not, move one of the two so their footprints do not meet.",
+                "Members in different phases may overlap freely — a `door` cut through a `walls` \
+                 is the evaluation model working — so this is only reported for two members the \
+                 same phase evaluates.",
+            ],
+        )],
+    );
+    assert_eq!(
+        only_structure(&out).block_entities,
+        // The bin's overhang of one moves `at=2,1,2` to the array's `(3, 1, 3)`.
+        [BlockEntity {
+            pos: (3, 1, 3),
+            data: BlockEntityData::Nbt {
+                compound: r#"{Lock:"b"}"#.to_owned(),
+            },
+        }],
+    );
 }
 
 #[test]

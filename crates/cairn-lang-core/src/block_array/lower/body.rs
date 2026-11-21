@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use indexmap::IndexMap;
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
 use crate::error::Span;
 use crate::intent::{Member, MemberRole, Size, patched_actuator, role_of};
 use crate::resolve::ScopeResolution;
@@ -14,7 +14,7 @@ use crate::block_array::geometry::Declared;
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{
-    Bbox, BlockArray, Dims, MAX_STRUCTURE_VOLUME, Palette, PaletteFull, PaletteIndex,
+    Bbox, BlockArray, Dims, Entity, MAX_STRUCTURE_VOLUME, Palette, PaletteFull, PaletteIndex,
     ResolvedBlock, ResolvedMember,
 };
 
@@ -23,6 +23,7 @@ use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::cell_box::Cell;
 use super::circuit::{recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector};
 use super::connections::derive_connections;
+use super::constraints::{Built, PlacedEntity, constraint_findings, entity_findings};
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::door::{hang_doors, split_doors};
 use super::fill::pour_fluids;
@@ -78,6 +79,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         palette_capacity,
     } = bodies;
     let (interior_w, interior_h) = (body.size.w.get(), body.size.h.get());
+    let raised = diagnostics.len();
 
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
 
@@ -133,6 +135,7 @@ pub(super) fn lower_body_to_block_array<'a>(
             .copied()
             .filter(|(_, member)| matches!(member.role, MemberRole::Door | MemberRole::Window))
             .collect(),
+        villagers: villagers_of(&flattened),
     };
     let (canvas, split_doors, derived) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
@@ -159,9 +162,22 @@ pub(super) fn lower_body_to_block_array<'a>(
 
     let mut array = finished_array(dims, palette, voxels, body.source_scope, &derived);
     array.block_entities = canvas.block_entities();
-    let members = resolved_members(&flattened, &canvas, &array);
+    let placed = canvas.entities();
+    array.entities = placed.iter().map(|(_, entity)| entity.clone()).collect();
+    let members = resolved_members(&flattened, &canvas, &array, &placed);
     if let Some(registry) = registry {
-        diagnostics.extend(state_findings(&members, registry));
+        let built = Built {
+            members: &members,
+            array: &array,
+            overhang,
+        };
+        let entities = placed_entities(&flattened, &placed);
+        let refused = flattened.iter().any(|(_, member)| {
+            scope
+                .and_then(|scope| scope.members.get(&member.span.start))
+                .is_some_and(|binding| binding.refused)
+        });
+        target_findings(&built, &entities, registry, refused, raised, diagnostics);
     }
 
     Some(LoweredBody {
@@ -170,6 +186,56 @@ pub(super) fn lower_body_to_block_array<'a>(
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// The findings `registry`, a pinned target's, gives on `built` and its `entities`: the constraint
+/// checks only when no member is `refused` and nothing raised since `raised` is an error.
+fn target_findings(
+    built: &Built<'_>,
+    entities: &[PlacedEntity<'_>],
+    registry: &dyn TargetRegistry,
+    refused: bool,
+    raised: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    diagnostics.extend(state_findings(built.members, registry));
+    // A member an error refuses may paint nothing, and no block of the body is judged against the
+    // air it leaves.
+    if !refused
+        && diagnostics[raised..]
+            .iter()
+            .all(|d| d.severity() != Severity::Error)
+    {
+        diagnostics.extend(constraint_findings(built, registry));
+        diagnostics.extend(entity_findings(built, entities, registry));
+    }
+}
+
+/// Each of `placed` with the keyword and line of the member of `flattened` that placed it.
+fn placed_entities<'a>(
+    flattened: &[(u32, &'a Member)],
+    placed: &'a [(u32, Entity)],
+) -> Vec<PlacedEntity<'a>> {
+    placed
+        .iter()
+        .map(|(index, entity)| {
+            let (_, member) = flattened[*index as usize];
+            PlacedEntity {
+                role: member.role.keyword(),
+                span: &member.span,
+                entity,
+            }
+        })
+        .collect()
+}
+
+/// Every `villager` of `flattened`, for a `trade` to name.
+fn villagers_of<'a>(flattened: &[(u32, &'a Member)]) -> Vec<&'a Member> {
+    flattened
+        .iter()
+        .map(|(_, member)| *member)
+        .filter(|member| matches!(member.role, MemberRole::Villager))
+        .collect()
 }
 
 /// A `W_PHASE_CONFLICT` for each pair of members, and each pair of frames, of one phase on
@@ -298,11 +364,13 @@ fn state_findings<'a>(
 }
 
 /// Each member of `flattened` that owns a cell of `array`, with the states its cells hold and its
-/// geometry, in the order of the first cell each owns.
+/// geometry, in the order of the first cell each owns, then each that placed an entity, in the
+/// order of the entities.
 fn resolved_members(
     flattened: &[(u32, &Member)],
     canvas: &Canvas,
     array: &BlockArray,
+    placed: &[(u32, Entity)],
 ) -> Vec<ResolvedMember> {
     let owners = canvas.owners();
     debug_assert_eq!(
@@ -333,6 +401,18 @@ fn resolved_members(
             })
             .push(cell);
     }
+    let placed = placed.iter().filter_map(|&(index, _)| {
+        let (_, member) = flattened[index as usize];
+        let declared = canvas.declared(index)?;
+        Some(ResolvedMember {
+            role: member.role.keyword().to_owned(),
+            id: member.id.clone(),
+            address: member.address.clone(),
+            resolved_state: Vec::new(),
+            geometry: declared.holding(declared.bbox),
+            span: member.span.clone(),
+        })
+    });
     built
         .into_iter()
         .map(|(index, (held, blocks))| {
@@ -355,6 +435,7 @@ fn resolved_members(
                 span: member.span.clone(),
             }
         })
+        .chain(placed)
         .collect()
 }
 

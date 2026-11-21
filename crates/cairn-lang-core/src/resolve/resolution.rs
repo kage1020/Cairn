@@ -105,9 +105,16 @@ pub struct ResolvedMemberBinding {
     /// `None` covers several cases, each already reported elsewhere.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slot_value: Option<ValueWithSpan>,
+    /// The arguments of the member form [`Self::slot_value`] names, if it names one.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub slot_arguments: IndexMap<String, ValueWithSpan>,
     /// Bindings from matching theme selectors, the later row winning on a shared key.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub selector_extras: IndexMap<String, ValueWithSpan>,
+    /// Whether an error refuses the member's `mat_slot=`: the bound theme declares no such slot
+    /// (`E_UNRESOLVED_SLOT`) or binds it to no material token (`E_UNKNOWN_SLOT_TARGET`).
+    #[serde(skip)]
+    pub refused: bool,
 }
 
 pub(super) fn struct_key(s: &StructIr) -> String {

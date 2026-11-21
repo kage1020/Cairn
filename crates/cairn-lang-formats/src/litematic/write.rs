@@ -93,7 +93,7 @@ pub enum LitematicError {
         /// The region's name.
         region: String,
         /// The `.nbt` writer's refusal.
-        source: JavaStructureError,
+        source: Box<JavaStructureError>,
     },
     /// The file's or a region's name is not a string the NBT encoder writes.
     #[error("the name `{name}` cannot be written as NBT: {source}")]
@@ -155,7 +155,7 @@ pub fn prepare_litematic<'a>(
         check_string(&region.name).map_err(|source| unencodable(&region.name, source))?;
         prepare_structure(region.block_array, target).map_err(|source| LitematicError::Region {
             region: region.name.clone(),
-            source,
+            source: Box::new(source),
         })?;
         let dims = region.block_array.dims;
         let corner = [

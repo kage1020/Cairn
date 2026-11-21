@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "namespace": "minecraft",
+  "source": "Each targetable version's paintings and the `Motive` each saves as, from GeyserMC's `PaintingType` table at the commit whose block palette that version's `blocks` table came from; the sizes match Java's, which name the same paintings.",
+  "tables": [
+    {
+      "versions": ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
+      "paintings": [
+        {"variant": "kebab", "width": 1, "height": 1, "spelling": "Kebab"},
+        {"variant": "aztec", "width": 1, "height": 1, "spelling": "Aztec"},
+        {"variant": "alban", "width": 1, "height": 1, "spelling": "Alban"},
+        {"variant": "aztec2", "width": 1, "height": 1, "spelling": "Aztec2"},
+        {"variant": "bomb", "width": 1, "height": 1, "spelling": "Bomb"},
+        {"variant": "plant", "width": 1, "height": 1, "spelling": "Plant"},
+        {"variant": "wasteland", "width": 1, "height": 1, "spelling": "Wasteland"},
+        {"variant": "wanderer", "width": 1, "height": 2, "spelling": "Wanderer"},
+        {"variant": "graham", "width": 1, "height": 2, "spelling": "Graham"},
+        {"variant": "pool", "width": 2, "height": 1, "spelling": "Pool"},
+        {"variant": "courbet", "width": 2, "height": 1, "spelling": "Courbet"},
+        {"variant": "sunset", "width": 2, "height": 1, "spelling": "Sunset"},
+        {"variant": "sea", "width": 2, "height": 1, "spelling": "Sea"},
+        {"variant": "creebet", "width": 2, "height": 1, "spelling": "Creebet"},
+        {"variant": "match", "width": 2, "height": 2, "spelling": "Match"},
+        {"variant": "bust", "width": 2, "height": 2, "spelling": "Bust"},
+        {"variant": "stage", "width": 2, "height": 2, "spelling": "Stage"},
+        {"variant": "void", "width": 2, "height": 2, "spelling": "Void"},
+        {"variant": "skull_and_roses", "width": 2, "height": 2, "spelling": "SkullAndRoses"},
+        {"variant": "wither", "width": 2, "height": 2, "spelling": "Wither"},
+        {"variant": "fighters", "width": 4, "height": 2, "spelling": "Fighters"},
+        {"variant": "skeleton", "width": 4, "height": 3, "spelling": "Skeleton"},
+        {"variant": "donkey_kong", "width": 4, "height": 3, "spelling": "DonkeyKong"},
+        {"variant": "pointer", "width": 4, "height": 4, "spelling": "Pointer"},
+        {"variant": "pigscene", "width": 4, "height": 4, "spelling": "Pigscene"},
+        {"variant": "burning_skull", "width": 4, "height": 4, "spelling": "BurningSkull"},
+        {"variant": "earth", "width": 2, "height": 2, "spelling": "Earth"},
+        {"variant": "wind", "width": 2, "height": 2, "spelling": "Wind"},
+        {"variant": "water", "width": 2, "height": 2, "spelling": "Water"},
+        {"variant": "fire", "width": 2, "height": 2, "spelling": "Fire"}
+      ]
+    },
+    {
+      "versions": ["1.21.40", "1.21.60", "1.26.60"],
+      "paintings": [
+        {"variant": "meditative", "width": 1, "height": 1, "spelling": "meditative"},
+        {"variant": "prairie_ride", "width": 1, "height": 2, "spelling": "prairie_ride"},
+        {"variant": "baroque", "width": 2, "height": 2, "spelling": "baroque"},
+        {"variant": "humble", "width": 2, "height": 2, "spelling": "humble"},
+        {"variant": "unpacked", "width": 4, "height": 4, "spelling": "unpacked"},
+        {"variant": "backyard", "width": 3, "height": 4, "spelling": "backyard"},
+        {"variant": "bouquet", "width": 3, "height": 3, "spelling": "bouquet"},
+        {"variant": "cavebird", "width": 3, "height": 3, "spelling": "cavebird"},
+        {"variant": "changing", "width": 4, "height": 2, "spelling": "changing"},
+        {"variant": "cotan", "width": 3, "height": 3, "spelling": "cotan"},
+        {"variant": "endboss", "width": 3, "height": 3, "spelling": "endboss"},
+        {"variant": "fern", "width": 3, "height": 3, "spelling": "fern"},
+        {"variant": "finding", "width": 4, "height": 2, "spelling": "finding"},
+        {"variant": "lowmist", "width": 4, "height": 2, "spelling": "lowmist"},
+        {"variant": "orb", "width": 4, "height": 4, "spelling": "orb"},
+        {"variant": "owlemons", "width": 3, "height": 3, "spelling": "owlemons"},
+        {"variant": "passage", "width": 4, "height": 2, "spelling": "passage"},
+        {"variant": "pond", "width": 3, "height": 4, "spelling": "pond"},
+        {"variant": "sunflowers", "width": 3, "height": 3, "spelling": "sunflowers"},
+        {"variant": "tides", "width": 3, "height": 3, "spelling": "tides"}
+      ]
+    },
+    {
+      "versions": ["1.26.60"],
+      "paintings": [
+        {"variant": "dennis", "width": 3, "height": 3, "spelling": "dennis"}
+      ]
+    }
+  ]
+}
