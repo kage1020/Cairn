@@ -6,10 +6,10 @@ use cairn_lang_core::block_array::{BlockArray, BlockState, Dims};
 use cairn_lang_core::transliterate::{CHUNK_FOOTPRINT, WrittenBody};
 use cairn_lang_formats::bedrock_structure::{prepare_mcstructure, read_mcstructure};
 use cairn_lang_formats::import::{ImportFormat, RawImport, import_raw};
-use cairn_lang_formats::java_structure::prepare_structure;
-use cairn_lang_formats::litematic::{litematic_files, prepare_litematic};
+use cairn_lang_formats::java_structure::{prepare_structure, read_structure};
+use cairn_lang_formats::litematic::{litematic_files, prepare_litematic, read_litematic};
 use cairn_lang_formats::registry::builtin_pack;
-use cairn_lang_formats::schem::{prepare_schem, schem_files};
+use cairn_lang_formats::schem::{prepare_schem, read_schem, schem_files};
 
 use crate::common::{
     admitted_versions, bedrock_cells, compile_source, examples, latest, states_for,
@@ -206,9 +206,36 @@ fn imported(file: &Written<'_>, format: ImportFormat) -> RawImport {
         .unwrap_or_else(|error| panic!("{} does not import: {error}", file.name))
 }
 
-/// Whether the decoded file reports its block entities lost exactly when it holds some.
-fn block_entities_reported(import: &RawImport, arrays: &[&BlockArray]) -> bool {
-    let held = arrays.iter().any(|array| !array.block_entities.is_empty());
+/// Whether `file`, read back in `format`, holds a block entity.
+fn holds_block_entities(file: &Written<'_>, format: ImportFormat) -> bool {
+    let bytes = file.bytes.as_slice();
+    match format {
+        ImportFormat::Nbt => !read_structure(bytes)
+            .expect("a written file reads back")
+            .volume
+            .block_entities()
+            .is_empty(),
+        ImportFormat::Litematic => read_litematic(bytes)
+            .expect("a written file reads back")
+            .regions
+            .iter()
+            .any(|region| !region.volume.block_entities().is_empty()),
+        ImportFormat::Schem => !read_schem(bytes)
+            .expect("a written file reads back")
+            .volume
+            .block_entities()
+            .is_empty(),
+        ImportFormat::Mcstructure => !read_mcstructure(bytes)
+            .expect("a written file reads back")
+            .volume
+            .block_entities()
+            .is_empty(),
+    }
+}
+
+/// Whether the decoded `file` reports its block entities lost exactly when it holds some.
+fn block_entities_reported(import: &RawImport, file: &Written<'_>, format: ImportFormat) -> bool {
+    let held = holds_block_entities(file, format);
     let reported = import
         .decoded
         .losses
@@ -247,7 +274,7 @@ fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
                         stamp_key(edition, &version),
                         "{label}"
                     );
-                    assert!(block_entities_reported(&import, &file.arrays), "{label}");
+                    assert!(block_entities_reported(&import, &file, format), "{label}");
                     let built = compile_source(&import.transliteration.source, edition, &version)
                         .unwrap_or_else(|codes| panic!("{label}: the import refuses {codes:?}"));
                     let bodies = &import.transliteration.bodies;

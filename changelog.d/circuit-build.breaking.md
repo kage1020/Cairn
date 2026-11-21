@@ -19,7 +19,7 @@
   and a `def` placed in a `site` has its origin lowered by as many, so its structure file, its
   `cairn lower` output and its lockfile hash differ from one built before.
   `RenderedDiagnostic::code` is a `&'static str`, so a finding of the redstone crate renders through
-  it too, and `BlockEntity` gains `fields`, so a struct literal of it no longer compiles.
+  it too.
 - *(redstone)* Place-and-route lays the circuit at full size in the layers under the floor. The
   `plane` / `via` / `bridge` model is gone, and with it `W_ROUTE_CROSS_LAYER_CLEARANCE` and the
   straight-line refusal of a sink past 256 steps. `cairn synth --stage crossing` is
