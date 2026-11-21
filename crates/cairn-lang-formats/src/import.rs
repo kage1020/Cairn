@@ -11,6 +11,7 @@ use std::io::Read;
 use std::path::Path;
 
 use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::PALETTE_CAPACITY;
 use cairn_lang_core::transliterate::{
     GridUnit, Stamp, TransliterateError, Transliteration, transliterate, unit_names,
 };
@@ -24,7 +25,7 @@ use crate::schem::{SchemReadError, read_schem};
 use crate::volume::StoredBlockEntity;
 use cairn_lang_core::block_array::TargetRegistry as _;
 
-pub use stamp::{ImportStamp, StampFit, UnshippedVersion};
+pub use stamp::{ImportStamp, SavedVersion, StampFit, UnshippedVersion};
 
 /// A structure file format an import reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,8 +90,38 @@ impl ImportFormat {
 pub struct SemanticLoss {
     /// The body it concerns, `None` for the whole file.
     pub unit: Option<String>,
+    /// What kind of thing is lost.
+    pub kind: LossKind,
     /// What is lost, as a clause.
     pub what: String,
+}
+
+/// What a [`SemanticLoss`] says the raw members do not carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LossKind {
+    /// The author's intent, which no raw member names.
+    Intent,
+    /// Block entity data, such as a chest's contents.
+    BlockEntities,
+    /// Entities.
+    Entities,
+    /// Structure voids, written as air.
+    StructureVoids,
+    /// The palettes of a `.nbt` past the first.
+    ExtraPalettes,
+    /// A Bedrock block with no canonical state at the stamped target, written by its id alone.
+    Unspelled,
+    /// Water on Bedrock's second layer that the written block does not stand in.
+    Dried,
+    /// Water on Bedrock's second layer over a structure void.
+    VoidWater,
+    /// Water the written Bedrock block stands in that the file's second layer does not hold.
+    Flooded,
+    /// A block other than water on Bedrock's second layer.
+    Layered,
+    /// What a `.mcstructure`'s `block_position_data` holds other than block entity data.
+    PositionData,
 }
 
 impl fmt::Display for SemanticLoss {
@@ -121,7 +152,7 @@ impl DecodedStructure {
     /// The registry view of the stamped target, which checks the written blocks.
     #[must_use]
     pub fn registry(&self) -> PackView<'_> {
-        builtin_pack(self.stamp.edition).view(Some(&self.stamp.mc_version))
+        builtin_pack(self.stamp.edition()).view(Some(self.stamp.mc_version()))
     }
 
     /// The comment lines the written source opens with: where it came from and why it is
@@ -137,8 +168,8 @@ impl DecodedStructure {
             ),
             format!(
                 "stamped {} {}: {}",
-                self.stamp.edition,
-                self.stamp.mc_version,
+                self.stamp.edition(),
+                self.stamp.mc_version(),
                 self.stamp.reason()
             ),
             "raw transliteration: blocks and their regularity, not the author's intent \
@@ -176,6 +207,15 @@ pub enum ImportError {
     /// A `.litematic` with no region, so nothing to write.
     #[error("the schematic holds no region, so there is nothing to write")]
     NoRegions,
+    /// A `.mcstructure` whose blocks take more palette entries than a block array holds once air
+    /// and each block standing in water are told apart.
+    #[error(
+        "the structure's blocks, with air and each block standing in water told apart, take more \
+         than the {limit} palette entries a block array holds. Fix: save it as smaller \
+         structures",
+        limit = PALETTE_CAPACITY
+    )]
+    GridPaletteTooLarge,
     /// A file saved past every shipped target.
     #[error(
         "the file was saved at {}, past every {} target this build ships (the newest is {}), so \
@@ -209,6 +249,7 @@ pub fn decode_structure<R: Read>(
         .unwrap_or(file_name);
     let mut losses = vec![SemanticLoss {
         unit: None,
+        kind: LossKind::Intent,
         what: "an import recovers blocks and their regularity, not what the author meant: every \
                member it writes is a raw block or fill, and none names a wall, a window or a \
                material slot"
@@ -237,7 +278,7 @@ fn decode_nbt<R: Read>(
 ) -> Result<(ImportStamp, Vec<GridUnit>), ImportError> {
     let read = read_structure(reader)?;
     let stamp = java_stamp(read.data_version)?;
-    let name = unit_names([stem]).remove(0);
+    let name = unit_names([(stem, read.volume.dims())]).remove(0);
     lose_block_entities(losses, &name, read.volume.block_entities());
     lose_entities(losses, &name, &read.entities);
     if read.void_cells > 0 {
@@ -246,6 +287,7 @@ fn decode_nbt<R: Read>(
     if read.palettes > 1 {
         losses.push(SemanticLoss {
             unit: Some(name.clone()),
+            kind: LossKind::ExtraPalettes,
             what: format!(
                 "the file holds {} palettes, of which a placement picks one at random; only the \
                  first is written",
@@ -271,7 +313,11 @@ fn decode_litematic<R: Read>(
         return Err(ImportError::NoRegions);
     }
     let stamp = java_stamp(read.data_version)?;
-    let names = unit_names(read.regions.iter().map(|region| region.name.as_str()));
+    let names = unit_names(
+        read.regions
+            .iter()
+            .map(|region| (region.name.as_str(), region.volume.dims())),
+    );
     let units = read
         .regions
         .iter()
@@ -301,7 +347,7 @@ fn decode_schem<R: Read>(
 ) -> Result<(ImportStamp, Vec<GridUnit>), ImportError> {
     let read = read_schem(reader)?;
     let stamp = java_stamp(read.data_version)?;
-    let name = unit_names([stem]).remove(0);
+    let name = unit_names([(stem, read.volume.dims())]).remove(0);
     lose_block_entities(losses, &name, read.volume.block_entities());
     lose_entities(losses, &name, &read.entities);
     let (x, y, z) = read.offset;
@@ -328,9 +374,20 @@ fn decode_mcstructure<R: Read>(
     losses: &mut Vec<SemanticLoss>,
 ) -> Result<(ImportStamp, Vec<GridUnit>), ImportError> {
     let read = read_mcstructure(reader)?;
-    let name = unit_names([stem]).remove(0);
+    let name = unit_names([(stem, read.volume.dims())]).remove(0);
     lose_block_entities(losses, &name, read.volume.block_entities());
     lose_entities(losses, &name, &read.entities);
+    for (key, cells) in &read.other_position_data {
+        losses.push(SemanticLoss {
+            unit: Some(name.clone()),
+            kind: LossKind::PositionData,
+            what: format!(
+                "`block_position_data` holds `{key}` at {}, which no raw member carries; it is \
+                 not written",
+                cells_word(*cells)
+            ),
+        });
+    }
     let (stamp, grid) = bedrock_stamp(&read.volume)?;
     bedrock_losses(losses, &name, &stamp, &grid);
     let (x, y, z) = read.world_origin;
@@ -364,8 +421,8 @@ pub fn import_raw<R: Read>(
 ) -> Result<RawImport, ImportError> {
     let decoded = decode_structure(reader, format, file_name)?;
     let stamp = Stamp {
-        edition: decoded.stamp.edition,
-        mc_version: decoded.stamp.mc_version.clone(),
+        edition: decoded.stamp.edition(),
+        mc_version: decoded.stamp.mc_version().to_owned(),
         comment: decoded.header(),
     };
     let transliteration = transliterate(&decoded.units, &stamp, &decoded.registry())?;
@@ -380,15 +437,15 @@ fn java_stamp(data_version: i32) -> Result<ImportStamp, ImportError> {
     let (versions, fit) =
         stamp::candidates(Edition::Java, data_version, |row| Some(row.data_version))
             .map_err(ImportError::Unshipped)?;
-    Ok(ImportStamp {
-        edition: Edition::Java,
-        mc_version: versions
-            .into_iter()
-            .next()
-            .expect("a candidate list is never empty"),
-        saved: Some(data_version),
+    let version = versions
+        .into_iter()
+        .next()
+        .expect("a candidate list is never empty");
+    let saved = SavedVersion {
+        version: data_version,
         fit,
-    })
+    };
+    Ok(ImportStamp::new(Edition::Java, version, Some(saved)))
 }
 
 /// The Bedrock target `volume` is stamped with, and its grid there: of the shipped targets its
@@ -400,10 +457,14 @@ fn bedrock_stamp(volume: &BedrockVolume) -> Result<(ImportStamp, grid::BedrockGr
         .iter()
         .filter_map(|entry| entry.version)
         .max();
-    let (versions, fit) = match saved {
-        Some(saved) => stamp::candidates(Edition::Bedrock, saved, |row| row.block_version)
-            .map_err(ImportError::Unshipped)?,
-        None => (vec![pack.data_versions().latest.clone()], StampFit::Exact),
+    let (versions, saved) = match saved {
+        Some(version) => {
+            let (versions, fit) =
+                stamp::candidates(Edition::Bedrock, version, |row| row.block_version)
+                    .map_err(ImportError::Unshipped)?;
+            (versions, Some(SavedVersion { version, fit }))
+        }
+        None => (vec![pack.data_versions().latest.clone()], None),
     };
     let mut first = None;
     for version in versions {
@@ -413,13 +474,9 @@ fn bedrock_stamp(volume: &BedrockVolume) -> Result<(ImportStamp, grid::BedrockGr
         let view = pack.view(Some(&version));
         let ids = view.block_ids();
         let declares = |id: &str| ids.is_none_or(|ids| ids.contains(id));
-        let grid = grid::bedrock_grid(volume, &states, &declares);
-        let stamp = ImportStamp {
-            edition: Edition::Bedrock,
-            mc_version: version.clone(),
-            saved,
-            fit,
-        };
+        let grid = grid::bedrock_grid(volume, &states, &declares)
+            .map_err(|grid::GridPaletteTooLarge| ImportError::GridPaletteTooLarge)?;
+        let stamp = ImportStamp::new(Edition::Bedrock, version.clone(), saved);
         if grid.unspelled.is_empty() {
             return Ok((stamp, grid));
         }
@@ -435,42 +492,69 @@ fn bedrock_losses(
     stamp: &ImportStamp,
     grid: &grid::BedrockGrid,
 ) {
-    let mut lose = |what: String| {
+    let mut lose = |kind: LossKind, what: String| {
         losses.push(SemanticLoss {
             unit: Some(name.to_owned()),
+            kind,
             what,
         });
     };
     if grid.void_cells > 0 {
-        lose(void_loss(name, grid.void_cells).what);
+        lose(
+            LossKind::StructureVoids,
+            void_loss(name, grid.void_cells).what,
+        );
     }
     for (block, cells) in &grid.unspelled {
-        lose(format!(
-            "`{block}` ({}) has no canonical state at bedrock {}, so it is written by its id \
+        lose(
+            LossKind::Unspelled,
+            format!(
+                "`{block}` ({}) has no canonical state at bedrock {}, so it is written by its id \
              alone and builds that block's default states",
-            cells_word(*cells),
-            stamp.mc_version
-        ));
+                cells_word(*cells),
+                stamp.mc_version()
+            ),
+        );
     }
     if grid.dried > 0 {
-        lose(format!(
-            "water stands at {} whose block cannot hold it as `waterlogged`; the water is not \
+        lose(
+            LossKind::Dried,
+            format!(
+                "water stands at {} whose block cannot hold it as `waterlogged`; the water is not \
              written",
-            cells_word(grid.dried)
-        ));
+                cells_word(grid.dried)
+            ),
+        );
+    }
+    if grid.void_water > 0 {
+        lose(
+            LossKind::VoidWater,
+            format!(
+                "water stands over a structure void at {}, which the import writes as air; the \
+                 water is not written",
+                cells_word(grid.void_water)
+            ),
+        );
     }
     if grid.flooded > 0 {
-        lose(format!(
-            "the written block stands in water at {} where the file's second layer holds none, \
+        lose(
+            LossKind::Flooded,
+            format!(
+                "the written block stands in water at {} where the file's second layer holds none, \
              since that block always does",
-            cells_word(grid.flooded)
-        ));
+                cells_word(grid.flooded)
+            ),
+        );
     }
     for (block, cells) in &grid.layered {
-        lose(format!(
-            "the second layer holds `{block}` at {}, which no raw member writes; it is not written",
-            cells_word(*cells)
-        ));
+        lose(
+            LossKind::Layered,
+            format!(
+                "the second layer holds `{block}` at {}, which no raw member writes; it is not \
+                 written",
+                cells_word(*cells)
+            ),
+        );
     }
 }
 
@@ -488,6 +572,7 @@ fn void_loss(name: &str, cells: usize) -> SemanticLoss {
     let verb = if cells == 1 { "holds" } else { "hold" };
     SemanticLoss {
         unit: Some(name.to_owned()),
+        kind: LossKind::StructureVoids,
         what: format!(
             "{} {verb} a structure void, which a placement leaves as the world has it, and the \
              import writes air there, which a placement clears",
@@ -507,6 +592,7 @@ fn lose_block_entities(
     }
     losses.push(SemanticLoss {
         unit: Some(name.to_owned()),
+        kind: LossKind::BlockEntities,
         what: format!(
             "{} not written, since a raw member carries no block entity data, such as a chest's \
              contents or a command block's command: {}",
@@ -531,6 +617,7 @@ fn lose_entities(
     }
     losses.push(SemanticLoss {
         unit: Some(name.to_owned()),
+        kind: LossKind::Entities,
         what: format!(
             "{} not written, since an import writes blocks only: {}",
             counted(entities.len(), "entity is", "entities are"),

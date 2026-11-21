@@ -144,8 +144,11 @@ the target builds the same at any value is not compared, and on Bedrock a block 
 canonical block its state map reads it as. A file whose blocks the stamped target does not declare
 is refused with the errors that compile raises, each with the line it would have written, and a note
 that saving the file in that release renames a block an older one spelled otherwise. A cell no raw
-member builds as the file holds it refuses the import rather than writing it wrong. Either refusal,
-or bytes the format's reader refuses, is exit 1, and nothing is written.
+member builds as the file holds it refuses the import rather than writing it wrong. So does a
+structure whose blocks take more palette entries than a block array holds, counting a block that
+stands in water apart from the same block dry, and so does a block whose id or state no `mat=` value
+can spell, such as an id with a `-` in it, which the refusal names. Every refusal, bytes the
+format's reader refuses included, is exit 1, and nothing is written.
 
 The compile → diff → patch loop reports like this:
 
@@ -269,8 +272,10 @@ that the source does not carry, by the body it is in:
 - the palettes of a `.nbt` past its first, of which a placement picks one at random;
 - on Bedrock, a block its state map has no canonical state for, written by its id alone and built
   with its block's default states; water at a block that cannot hold it as `waterlogged`, which is
-  not written; a block that always stands in water where the file's second layer holds none; and a
-  second-layer block other than water, which no raw member writes.
+  not written; water over a structure void, which the import writes as air; a block that always
+  stands in water where the file's second layer holds none; a second-layer block other than water,
+  which no raw member writes; and what `block_position_data` holds other than block entity data,
+  such as a tick queue, by its key and with how many cells hold it, which is not written.
 
 Other rules:
 

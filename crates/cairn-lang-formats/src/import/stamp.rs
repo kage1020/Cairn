@@ -18,60 +18,94 @@ pub enum StampFit {
     Oldest,
 }
 
-/// The `(edition, version)` an import is stamped with, and what the file said.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImportStamp {
-    /// The edition the file's format belongs to.
-    pub edition: Edition,
-    /// The shipped version stamped.
-    pub mc_version: String,
-    /// The version the file was saved at: its `DataVersion` on Java, its newest block-state
-    /// `version` on Bedrock; `None` for a `.mcstructure` whose palette carries none.
-    pub saved: Option<i32>,
-    /// How [`Self::mc_version`] stands to [`Self::saved`].
+/// The version a file was saved at, and how the stamped target stands to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SavedVersion {
+    /// Its `DataVersion` on Java, its newest block-state `version` on Bedrock.
+    pub version: i32,
+    /// How the stamped target stands to it.
     pub fit: StampFit,
 }
 
+/// The shipped `(edition, version)` an import is stamped with, and what the file said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportStamp {
+    edition: Edition,
+    mc_version: String,
+    saved: Option<SavedVersion>,
+}
+
 impl ImportStamp {
+    /// The stamp of `edition`'s shipped `mc_version` for a file saved at `saved`.
+    pub(super) fn new(edition: Edition, mc_version: String, saved: Option<SavedVersion>) -> Self {
+        Self {
+            edition,
+            mc_version,
+            saved,
+        }
+    }
+
+    /// The edition the file's format belongs to.
+    #[must_use]
+    pub fn edition(&self) -> Edition {
+        self.edition
+    }
+
+    /// The shipped version stamped.
+    #[must_use]
+    pub fn mc_version(&self) -> &str {
+        &self.mc_version
+    }
+
+    /// The version the file was saved at, `None` for a `.mcstructure` whose palette carries none,
+    /// which is stamped with the latest shipped target.
+    #[must_use]
+    pub fn saved(&self) -> Option<SavedVersion> {
+        self.saved
+    }
+
     /// The saved version as a reader names it: `DataVersion 3955 (1.21.1)`, or
     /// `block version 1.21.60.33`.
     #[must_use]
     pub fn saved_label(&self) -> String {
-        match (self.edition, self.saved) {
-            (_, None) => "no block version".to_owned(),
-            (Edition::Java, Some(data_version)) => {
-                let release = builtin_pack(Edition::Java)
-                    .data_versions()
-                    .versions
-                    .iter()
-                    .find(|row| row.data_version == data_version);
-                match release {
-                    Some(row) => format!("DataVersion {data_version} ({})", row.mc_version),
-                    None => format!("DataVersion {data_version}"),
-                }
-            }
-            (Edition::Bedrock, Some(version)) => {
-                format!("block version {}", BlockVersion(version))
-            }
-        }
+        saved_label(self.edition, self.saved.map(|saved| saved.version))
     }
 
     /// One line saying why [`Self::mc_version`] was stamped.
     #[must_use]
     pub fn reason(&self) -> &'static str {
-        match (self.fit, self.saved, self.edition) {
-            (_, None, _) => "the latest shipped target, since the file names no version",
-            (StampFit::Exact, Some(_), Edition::Java) => "the shipped target the file was saved at",
-            (StampFit::Exact, Some(_), Edition::Bedrock) => {
-                "a shipped target that saves that block version"
-            }
-            (StampFit::Later, Some(_), _) => {
+        let Some(saved) = self.saved else {
+            return "the latest shipped target, since the file names no version";
+        };
+        match (saved.fit, self.edition) {
+            (StampFit::Exact, Edition::Java) => "the shipped target the file was saved at",
+            (StampFit::Exact, Edition::Bedrock) => "a shipped target that saves that block version",
+            (StampFit::Later, _) => {
                 "the nearest shipped target after the version the file was saved at"
             }
-            (StampFit::Oldest, Some(_), _) => {
+            (StampFit::Oldest, _) => {
                 "the earliest shipped target, since the file was saved before every one"
             }
         }
+    }
+}
+
+/// `edition`'s version `saved` as a reader names it.
+fn saved_label(edition: Edition, saved: Option<i32>) -> String {
+    match (edition, saved) {
+        (_, None) => "no block version".to_owned(),
+        (Edition::Java, Some(data_version)) => {
+            let release = builtin_pack(Edition::Java)
+                .data_versions()
+                .versions
+                .iter()
+                .find(|row| row.data_version == data_version);
+            match release {
+                Some(row) => format!("DataVersion {data_version} ({})", row.mc_version),
+                None => format!("DataVersion {data_version}"),
+            }
+        }
+        (Edition::Bedrock, Some(version)) => format!("block version {}", BlockVersion(version)),
     }
 }
 
@@ -96,8 +130,8 @@ pub struct UnshippedVersion {
     pub newest: String,
 }
 
-/// The shipped targets of `edition` whose key, by `key`, is `saved` or the nearest after it, and
-/// how they fit: those at `saved`, else the oldest after it, else the oldest of all.
+/// The shipped targets of `edition` at `saved` by `key`, else at the nearest key after it, with
+/// how they fit.
 ///
 /// # Errors
 ///
@@ -129,20 +163,13 @@ pub(super) fn candidates(
     if let Some(later) = rows.iter().map(|(k, _)| *k).filter(|k| *k > saved).min() {
         return Ok((at(later), StampFit::Later));
     }
-    let label = ImportStamp {
-        edition,
-        mc_version: String::new(),
-        saved: Some(saved),
-        fit: StampFit::Exact,
-    }
-    .saved_label();
     let newest = rows
         .iter()
         .max_by_key(|(k, _)| *k)
         .map_or_else(String::new, |(_, version)| (*version).to_owned());
     Err(UnshippedVersion {
         edition,
-        saved: label,
+        saved: saved_label(edition, Some(saved)),
         newest,
     })
 }

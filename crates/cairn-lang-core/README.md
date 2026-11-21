@@ -29,7 +29,7 @@ Everything past the block-array IR — the NBT codec, the format backends, redst
 
 ## Not yet here
 
-Entity placement and the L2 and L3 tiers of the reverse direction — lifting a transliterated structure into named, themed Cairn — are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
+Entity placement and L2, the semantic lift of a transliterated structure into named, themed Cairn, are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
 
 ## Versioning
 

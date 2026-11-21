@@ -17,7 +17,7 @@ use std::fmt;
 use indexmap::IndexMap;
 
 use crate::block_array::{BlockState, Dims, PaletteIndex, TargetRegistry};
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition::Edition;
 
 pub use names::unit_names;
@@ -29,13 +29,98 @@ pub const CHUNK_FOOTPRINT: u32 = 48;
 /// The blocks of one structure, as a file stores them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockGrid {
-    /// The grid's extents.
-    pub dims: Dims,
-    /// The blocks the voxels index.
-    pub palette: Vec<GridEntry>,
-    /// One index into [`Self::palette`] per voxel, `x` fastest and `y` slowest.
-    pub voxels: Vec<PaletteIndex>,
+    dims: Dims,
+    palette: Vec<GridEntry>,
+    voxels: Vec<PaletteIndex>,
 }
+
+impl BlockGrid {
+    /// The grid of `dims` whose `voxels`, laid out as [`Dims::index`] lays them, index `palette`.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockGridError`] when the voxels do not fill the extents or one names no palette entry.
+    pub fn new(
+        dims: Dims,
+        palette: Vec<GridEntry>,
+        voxels: Vec<PaletteIndex>,
+    ) -> Result<Self, BlockGridError> {
+        if voxels.len() != dims.volume() {
+            return Err(BlockGridError::VoxelCount {
+                dims,
+                voxels: voxels.len(),
+            });
+        }
+        if let Some(slot) = voxels
+            .iter()
+            .find(|slot| usize::from(slot.0) >= palette.len())
+        {
+            return Err(BlockGridError::PastPalette {
+                index: slot.0,
+                len: palette.len(),
+            });
+        }
+        Ok(Self {
+            dims,
+            palette,
+            voxels,
+        })
+    }
+
+    /// The grid's extents.
+    #[must_use]
+    pub fn dims(&self) -> Dims {
+        self.dims
+    }
+
+    /// The blocks the voxels index.
+    #[must_use]
+    pub fn palette(&self) -> &[GridEntry] {
+        &self.palette
+    }
+
+    /// One index into [`Self::palette`] per voxel.
+    #[must_use]
+    pub fn voxels(&self) -> &[PaletteIndex] {
+        &self.voxels
+    }
+}
+
+/// Why parts make no [`BlockGrid`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockGridError {
+    /// Voxels that do not fill the extents.
+    VoxelCount {
+        /// The extents.
+        dims: Dims,
+        /// How many voxels were given.
+        voxels: usize,
+    },
+    /// A voxel naming an entry past the palette.
+    PastPalette {
+        /// The index it names.
+        index: u16,
+        /// The palette's length.
+        len: usize,
+    },
+}
+
+impl fmt::Display for BlockGridError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::VoxelCount { dims, voxels } => write!(
+                f,
+                "{voxels} voxels are given for {}x{}x{} cells",
+                dims.x, dims.y, dims.z
+            ),
+            Self::PastPalette { index, len } => {
+                write!(f, "a voxel names palette entry {index} of {len}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for BlockGridError {}
 
 /// One block of a [`BlockGrid`], in the vocabulary a raw member's `mat=` writes.
 #[derive(Debug, Clone, PartialEq)]
@@ -135,11 +220,18 @@ pub enum TransliterateError {
         /// The unit's name.
         unit: String,
     },
-    /// A unit's voxels or palette disagree with its extents.
-    Malformed {
+    /// A unit holds a block whose id or state no `mat=` value can spell.
+    Unspellable {
         /// The unit's name.
         unit: String,
-        /// What disagrees.
+        /// The block, as `id[key=value,...]`.
+        block: String,
+        /// The part no `mat=` value can spell.
+        part: UnspellablePart,
+    },
+    /// The written source does not build the bodies it writes, a fault of the writer.
+    Miswritten {
+        /// What it builds otherwise.
         reason: String,
     },
     /// Compiling the written source at the stamped target raises an error, such as a block the
@@ -172,7 +264,19 @@ impl fmt::Display for TransliterateError {
                 f,
                 "`{unit}` holds no block but air, so there is nothing to write"
             ),
-            Self::Malformed { unit, reason } => write!(f, "`{unit}` is malformed: {reason}"),
+            Self::Unspellable { unit, block, part } => write!(
+                f,
+                "`{unit}` holds `{block}`, whose {part} no `mat=` can spell: a block is \
+                 `namespace:path[property=value]`, each name ASCII letters, digits and `_` that \
+                 does not start with a digit, and a value such a name or digits alone. Fix: \
+                 replace the block in the structure with one the target declares, and save the \
+                 file again"
+            ),
+            Self::Miswritten { reason } => write!(
+                f,
+                "the written source {reason}; the transliteration is refused rather than \
+                 written wrong, and the file is worth reporting"
+            ),
             Self::Refused {
                 target,
                 source,
@@ -180,7 +284,7 @@ impl fmt::Display for TransliterateError {
             } => {
                 write!(
                     f,
-                    "the stamped target, {target}, refuses blocks of the file:"
+                    "the written source does not compile at the stamped target, {target}:"
                 )?;
                 for error in errors {
                     let before = source.get(..error.span.start).unwrap_or("");
@@ -193,11 +297,7 @@ impl fmt::Display for TransliterateError {
                         error.primary
                     )?;
                 }
-                write!(
-                    f,
-                    "\nFix: open and save the file in {target}, which renames a block an older \
-                     release spelled otherwise, or replace each block no {target} declares"
-                )
+                refusal_fixes(f, target, errors)
             }
             Self::Unmatched {
                 unit,
@@ -216,6 +316,60 @@ impl fmt::Display for TransliterateError {
 
 impl std::error::Error for TransliterateError {}
 
+/// The part of a block that no `mat=` value can spell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnspellablePart {
+    /// The id.
+    Id,
+    /// The name of a property.
+    Property(String),
+    /// The value of the property it names.
+    Value(String),
+}
+
+impl fmt::Display for UnspellablePart {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Id => f.write_str("id"),
+            Self::Property(key) => write!(f, "property `{key}`"),
+            Self::Value(key) => write!(f, "value of `{key}`"),
+        }
+    }
+}
+
+/// One `Fix:` line per kind of error among `errors` the stamped `target` raises.
+fn refusal_fixes(f: &mut fmt::Formatter<'_>, target: &str, errors: &[Diagnostic]) -> fmt::Result {
+    let raised = |codes: &[DiagnosticCode]| errors.iter().any(|error| codes.contains(&error.code));
+    let blocks = [DiagnosticCode::UnknownId];
+    let states = [DiagnosticCode::StateDomain, DiagnosticCode::StateUnmapped];
+    if raised(&blocks) {
+        write!(
+            f,
+            "\nFix: open and save the file in {target}, which renames a block an older release \
+             spelled otherwise, or replace each block no {target} declares"
+        )?;
+    }
+    if raised(&states) {
+        write!(
+            f,
+            "\nFix: open and save the file in {target}, which rewrites a state an older release \
+             stored otherwise, or replace each state {target} does not build"
+        )?;
+    }
+    if errors
+        .iter()
+        .any(|error| !blocks.contains(&error.code) && !states.contains(&error.code))
+    {
+        write!(
+            f,
+            "\nFix: none; a source the transliteration writes compiles at any target that \
+             builds its blocks, so the file is worth reporting"
+        )?;
+    }
+    Ok(())
+}
+
 /// Rounds of restoring connection states before every one is written.
 const ROUNDS: usize = 8;
 
@@ -224,8 +378,8 @@ const ROUNDS: usize = 8;
 ///
 /// # Errors
 ///
-/// [`TransliterateError`] when a unit holds nothing, the target refuses its blocks, or a cell
-/// cannot be written to build as the grid holds it.
+/// [`TransliterateError`] when a unit holds nothing or a block no `mat=` spells, the target
+/// refuses its blocks, or the written source does not build every cell as the grid holds it.
 pub fn transliterate(
     units: &[GridUnit],
     stamp: &Stamp,

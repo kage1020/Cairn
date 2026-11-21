@@ -3,10 +3,11 @@
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, PaletteIndex};
-use cairn_lang_core::transliterate::WrittenBody;
+use cairn_lang_core::transliterate::{TransliterateError, WrittenBody};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::import::{
-    ImportError, ImportFormat, ImportStamp, RawImport, SemanticLoss, StampFit, import_raw,
+    ImportError, ImportFormat, LossKind, RawImport, SavedVersion, SemanticLoss, StampFit,
+    import_raw,
 };
 use cairn_lang_formats::java_structure::{build_structure_tag, write_compound_gzip};
 use cairn_lang_formats::litematic::{litematic_files, prepare_litematic};
@@ -55,6 +56,7 @@ fn header(file: &str, kind: &str, saved: &str, version: &str, reason: &str) -> S
 fn intent_loss() -> SemanticLoss {
     SemanticLoss {
         unit: None,
+        kind: LossKind::Intent,
         what: "an import recovers blocks and their regularity, not what the author meant: every \
                member it writes is a raw block or fill, and none names a wall, a window or a \
                material slot"
@@ -62,9 +64,10 @@ fn intent_loss() -> SemanticLoss {
     }
 }
 
-fn loss(unit: &str, what: &str) -> SemanticLoss {
+fn loss(unit: &str, kind: LossKind, what: &str) -> SemanticLoss {
     SemanticLoss {
         unit: Some(unit.to_owned()),
+        kind,
         what: what.to_owned(),
     }
 }
@@ -96,6 +99,7 @@ fn a_structure_file_imports_as_one_struct_of_raw_members_with_its_block_entities
             intent_loss(),
             loss(
                 "comparator",
+                LossKind::BlockEntities,
                 "1 block entity is not written, since a raw member carries no block entity \
                  data, such as a chest's contents or a command block's command: 1 \
                  `minecraft:comparator`"
@@ -113,14 +117,17 @@ fn a_file_saved_between_two_shipped_targets_is_stamped_with_the_later() {
         ImportFormat::Nbt,
         "one.nbt",
     );
+    let stamp = &import.decoded.stamp;
     assert_eq!(
-        import.decoded.stamp,
-        ImportStamp {
-            edition: Edition::Java,
-            mc_version: "1.21.4".to_owned(),
-            saved: Some(3955),
-            fit: StampFit::Later,
-        }
+        (stamp.edition(), stamp.mc_version(), stamp.saved()),
+        (
+            Edition::Java,
+            "1.21.4",
+            Some(SavedVersion {
+                version: 3955,
+                fit: StampFit::Later,
+            })
+        )
     );
     assert!(import.transliteration.source.starts_with(&header(
         "one.nbt",
@@ -139,12 +146,16 @@ fn a_file_saved_before_every_shipped_target_is_stamped_with_the_earliest() {
         ImportFormat::Nbt,
         "one.nbt",
     );
+    let stamp = &import.decoded.stamp;
     assert_eq!(
+        (stamp.mc_version(), stamp.saved()),
         (
-            import.decoded.stamp.mc_version.as_str(),
-            import.decoded.stamp.fit
-        ),
-        ("1.20.4", StampFit::Oldest)
+            "1.20.4",
+            Some(SavedVersion {
+                version: 3000,
+                fit: StampFit::Oldest,
+            })
+        )
     );
     assert!(import.transliteration.source.starts_with(&header(
         "one.nbt",
@@ -174,6 +185,26 @@ fn a_file_saved_past_every_shipped_target_is_refused() {
 }
 
 #[test]
+fn a_litematic_with_no_region_is_refused() {
+    let mut root = Compound::new();
+    root.insert("Version", Tag::Int(7));
+    root.insert("MinecraftDataVersion", Tag::Int(4189));
+    root.insert("Metadata", Tag::Compound(Compound::new()));
+    root.insert("Regions", Tag::Compound(Compound::new()));
+    let error = import_raw(
+        gzip(&root).as_slice(),
+        ImportFormat::Litematic,
+        "empty.litematic",
+    )
+    .expect_err("a schematic of no region writes nothing");
+    assert!(matches!(error, ImportError::NoRegions), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        "the schematic holds no region, so there is nothing to write"
+    );
+}
+
+#[test]
 fn a_block_the_stamped_target_does_not_declare_is_refused_with_the_compile_error() {
     let array = array_of(
         "odd",
@@ -187,14 +218,24 @@ fn a_block_the_stamped_target_does_not_declare_is_refused_with_the_compile_error
         "odd.nbt",
     )
     .expect_err("the target refuses the block");
-    assert!(matches!(error, ImportError::Transliterate(_)), "{error:?}");
+    let ImportError::Transliterate(TransliterateError::Refused {
+        target,
+        source,
+        errors,
+    }) = &error
+    else {
+        panic!("expected the compile's refusal, got {error:?}");
+    };
+    let found: Vec<(&str, &str)> = errors
+        .iter()
+        .map(|e| (e.code.as_str(), &source[e.span.clone()]))
+        .collect();
     assert_eq!(
-        error.to_string(),
-        "the stamped target, java 1.21.4, refuses blocks of the file:\n  error[E_UNKNOWN_ID]: \
-         `minecraft:not_a_block` is not a block in `java 1.21.4` (at `raw_block \
-         mat=minecraft:not_a_block at=0,0,0 origin=imported`)\nFix: open and save the file in \
-         java 1.21.4, which renames a block an older release spelled otherwise, or replace \
-         each block no java 1.21.4 declares"
+        (target.as_str(), found),
+        (
+            "java 1.21.4",
+            vec![("E_UNKNOWN_ID", "minecraft:not_a_block")]
+        )
     );
 }
 
@@ -253,15 +294,18 @@ fn a_structure_void_extra_palettes_and_entities_are_reported_lost() {
             intent_loss(),
             loss(
                 "odd_shed",
+                LossKind::Entities,
                 "1 entity is not written, since an import writes blocks only: 1 `minecraft:cow`"
             ),
             loss(
                 "odd_shed",
+                LossKind::StructureVoids,
                 "1 cell holds a structure void, which a placement leaves as the world has it, \
                  and the import writes air there, which a placement clears"
             ),
             loss(
                 "odd_shed",
+                LossKind::ExtraPalettes,
                 "the file holds 2 palettes, of which a placement picks one at random; only the \
                  first is written"
             ),
@@ -282,20 +326,13 @@ fn a_structure_past_the_chunk_footprint_imports_as_a_site_of_chunks_that_builds_
         "long.nbt",
     );
     let source = &import.transliteration.source;
-    let body = &source[source.find("\n\ntheme").expect("a chunked body") + 2..];
     assert_eq!(
-        body,
-        "theme imported\n\
-         \n\
-         def long_x0_z0 size=48x2\n  \
-           raw_fill mat=minecraft:stone from=0,0,0 to=47,0,1 origin=imported\n\
-         \n\
-         def long_x1_z0 size=2x2\n  \
-           raw_fill mat=minecraft:stone from=0,0,0 to=0,0,1 origin=imported\n\
-         \n\
-         site long\n  \
-           place id=long_x0_z0 use=long_x0_z0 theme=imported at=origin\n  \
-           place id=long_x1_z0 use=long_x1_z0 theme=imported east_of=long_x0_z0 gap=0\n"
+        import.transliteration.bodies,
+        [WrittenBody {
+            name: "long".to_owned(),
+            chunks: vec!["long_x0_z0".to_owned(), "long_x1_z0".to_owned()],
+            lines: 2,
+        }]
     );
     let built = compile_source(source, Edition::Java, "1.21.4").expect("the import builds");
     let placed: Vec<(&str, (i32, i32, i32), Dims)> = built
@@ -459,13 +496,14 @@ fn a_comparator_in_each_java_format_reports_its_block_entity_lost() {
             import.decoded.losses[1..],
             [loss(
                 "comparator",
+                LossKind::BlockEntities,
                 "1 block entity is not written, since a raw member carries no block entity \
                  data, such as a chest's contents or a command block's command: 1 \
                  `minecraft:comparator`"
             )],
             "{format:?}"
         );
-        let state: BlockState = import.decoded.units[0].grid.palette[2].state.clone();
+        let state: BlockState = import.decoded.units[0].grid.palette()[2].state.clone();
         assert_eq!(state.id, "minecraft:comparator", "{format:?}");
     }
 }

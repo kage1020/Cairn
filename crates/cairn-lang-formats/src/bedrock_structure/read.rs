@@ -6,6 +6,7 @@ use std::io::Read;
 use cairn_lang_core::block_array::{Dims, MAX_STRUCTURE_VOLUME, PALETTE_CAPACITY, PaletteIndex};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use cairn_lang_nbt::{Event, NbtReadError, NbtReader};
+use indexmap::IndexMap;
 use thiserror::Error;
 
 use crate::dims::{read_extents, saturating_volume};
@@ -23,6 +24,9 @@ pub struct StoredMcStructure {
     pub volume: BedrockVolume,
     /// `structure.entities`, each as stored.
     pub entities: Vec<Compound>,
+    /// Each key of a `block_position_data` entry other than `block_entity_data`, such as
+    /// `tick_queue_data`, with how many voxels carry it.
+    pub other_position_data: Vec<(String, usize)>,
 }
 
 /// The voxels of a `.mcstructure`, in the `(y, z, x)` order [`Dims::index`] lays out, each a slot
@@ -370,8 +374,8 @@ fn decode(fields: Fields) -> Result<StoredMcStructure, McStructureReadError> {
         .map_err(|_| malformed("structure.block_indices", "a list of two lists of ints"))?;
     let blocks = reorder(dims, volume, 0, &blocks, palette.len())?;
     let liquids = reorder(dims, volume, 1, &liquids, palette.len())?;
-    let block_entities = match default.entries.get("block_position_data") {
-        None => Vec::new(),
+    let (block_entities, other_position_data) = match default.entries.get("block_position_data") {
+        None => (Vec::new(), Vec::new()),
         Some(Tag::Compound(data)) => position_data(data, dims)?,
         Some(_) => {
             return Err(malformed(
@@ -385,6 +389,7 @@ fn decode(fields: Fields) -> Result<StoredMcStructure, McStructureReadError> {
         volume: BedrockVolume::new(dims, palette, blocks, liquids, block_entities)
             .expect("each part of the structure is checked as it is decoded"),
         entities: fields.entities,
+        other_position_data,
     })
 }
 
@@ -429,7 +434,7 @@ fn read_palette(default: &Compound) -> Result<Vec<BedrockBlock>, McStructureRead
         .ok_or_else(|| malformed(path, expected))
 }
 
-/// `layer`, stored z fastest, in the `(y, z, x)` order, each `-1` as `None`.
+/// Layer `layer`'s indices, `stored` z fastest, in the `(y, z, x)` order, each `-1` as `None`.
 fn reorder(
     dims: Dims,
     volume: usize,
@@ -471,17 +476,20 @@ fn reorder(
     Ok(out)
 }
 
-/// Each `block_entity_data` of `block_position_data`, at the voxel its key names.
-fn position_data(
-    data: &Compound,
-    dims: Dims,
-) -> Result<Vec<StoredBlockEntity>, McStructureReadError> {
+/// What `block_position_data` holds: block entities, and each other key with its voxel count.
+type PositionData = (Vec<StoredBlockEntity>, Vec<(String, usize)>);
+
+/// Each `block_entity_data` of `block_position_data`, at the voxel its key names, and each other
+/// key its entries hold, with how many hold it.
+fn position_data(data: &Compound, dims: Dims) -> Result<PositionData, McStructureReadError> {
     let path = "structure.palette.default.block_position_data";
     let mut out = Vec::new();
+    let mut others: IndexMap<String, usize> = IndexMap::new();
     for (key, entry) in &data.entries {
         let position = key
             .parse::<u64>()
             .ok()
+            .filter(|index| index.to_string() == *key)
             .and_then(|index| {
                 let (y_count, z_count) = (u64::from(dims.y), u64::from(dims.z));
                 let z = index % z_count.max(1);
@@ -495,10 +503,18 @@ fn position_data(
                 dims.index(cell.0, cell.1, cell.2)?;
                 Some(cell)
             })
-            .ok_or_else(|| malformed(format!("{path}.{key}"), "keyed by a voxel's index"))?;
+            .ok_or_else(|| {
+                malformed(
+                    format!("{path}.{key}"),
+                    "keyed by a voxel's index, in decimal as the game writes it",
+                )
+            })?;
         let Tag::Compound(entry) = entry else {
             return Err(malformed(format!("{path}.{key}"), "a compound"));
         };
+        for other in entry.entries.keys().filter(|k| *k != "block_entity_data") {
+            *others.entry(other.clone()).or_default() += 1;
+        }
         let mut block = match entry.entries.get("block_entity_data") {
             None => continue,
             Some(Tag::Compound(block)) => block.clone(),
@@ -524,5 +540,5 @@ fn position_data(
             data: block,
         });
     }
-    Ok(out)
+    Ok((out, others.into_iter().collect()))
 }

@@ -247,7 +247,7 @@ fn a_field_of_the_wrong_shape_is_refused_by_its_path() {
             ),
             (
                 "structure.palette.default.block_position_data.7".to_owned(),
-                "keyed by a voxel's index"
+                "keyed by a voxel's index, in decimal as the game writes it"
             ),
         ]
     );
@@ -287,5 +287,68 @@ fn input_past_the_root_is_refused() {
     assert!(
         matches!(err, McStructureReadError::Nbt(NbtReadError::TrailingBytes { offset }) if offset == end),
         "got {err:?}"
+    );
+}
+
+/// [`one_stone`] with `block_position_data` holding `entry` under `key`.
+fn one_stone_with_position_data(key: &str, entry: Compound) -> Compound {
+    let mut root = one_stone();
+    if let Some(Tag::Compound(palette)) = structure_mut(&mut root).entries.get_mut("palette")
+        && let Some(Tag::Compound(default)) = palette.entries.get_mut("default")
+    {
+        let mut data = Compound::new();
+        data.insert(key, Tag::Compound(entry));
+        default.insert("block_position_data", Tag::Compound(data));
+    }
+    root
+}
+
+#[test]
+fn a_position_key_the_game_would_not_write_is_refused() {
+    for key in ["00", "+0"] {
+        let root = one_stone_with_position_data(key, Compound::new());
+        match read_mcstructure(bytes(&root).as_slice()) {
+            Err(McStructureReadError::Malformed { path, expected }) => assert_eq!(
+                (path.as_str(), expected),
+                (
+                    format!("structure.palette.default.block_position_data.{key}").as_str(),
+                    "keyed by a voxel's index, in decimal as the game writes it"
+                )
+            ),
+            other => panic!("`{key}` is not refused: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn position_data_other_than_a_block_entity_is_counted_by_its_key() {
+    let mut chest = Compound::new();
+    chest.insert("id", Tag::String("Chest".to_owned()));
+    let mut entry = Compound::new();
+    entry.insert("block_entity_data", Tag::Compound(chest));
+    entry.insert("tick_queue_data", Tag::List(List::of_compounds(Vec::new())));
+    let read = read_mcstructure(bytes(&one_stone_with_position_data("0", entry)).as_slice())
+        .expect("the file reads");
+    assert_eq!(
+        read.volume.block_entities(),
+        [StoredBlockEntity {
+            pos: (0, 0, 0),
+            id: "Chest".to_owned(),
+            data: Compound::new(),
+        }]
+    );
+    assert_eq!(
+        read.other_position_data,
+        [("tick_queue_data".to_owned(), 1)]
+    );
+
+    let mut ticks = Compound::new();
+    ticks.insert("tick_queue_data", Tag::List(List::of_compounds(Vec::new())));
+    let read = read_mcstructure(bytes(&one_stone_with_position_data("0", ticks)).as_slice())
+        .expect("the file reads");
+    assert_eq!(read.volume.block_entities(), []);
+    assert_eq!(
+        read.other_position_data,
+        [("tick_queue_data".to_owned(), 1)]
     );
 }

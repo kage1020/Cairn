@@ -289,8 +289,14 @@ fn push_painted<'a>(
             return;
         }
     };
-    if member.children.members.is_empty() {
+    if !member
+        .children
+        .members
+        .iter()
+        .any(|child| child.role.is_repeatable())
+    {
         diagnostics.push(diag_empty_repeat(member));
+        return;
     }
     // `check` refuses any other line under a `raw_repeat` as `E_UNSUPPORTED_NESTING`.
     for child in member

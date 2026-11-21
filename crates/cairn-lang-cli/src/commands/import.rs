@@ -3,7 +3,7 @@
 //! lifts").
 
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -11,6 +11,7 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_formats::import::{ImportFormat, import_raw};
 
 use crate::report::report_diagnostics;
+use crate::staging::{Kind, StagedSet};
 
 pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     let Some(format) = ImportFormat::from_path(file) else {
@@ -48,7 +49,7 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     };
     let source = &import.transliteration.source;
     if let Err(err) = write(&out, source) {
-        eprintln!("error: writing `{}`: {err}", out.display());
+        eprintln!("error: {err}");
         return ExitCode::from(1);
     }
     for loss in &import.decoded.losses {
@@ -57,14 +58,12 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     let lines = LineStarts::new(source);
     report_diagnostics(&out, source, &lines, &import.transliteration.warnings);
     let stamp = &import.decoded.stamp;
+    let (edition, version) = (stamp.edition(), stamp.mc_version());
     eprintln!(
-        "note: stamped {} {}: {}; `cairn compile {} --edition {} --target {}` builds it",
-        stamp.edition,
-        stamp.mc_version,
+        "note: stamped {edition} {version}: {}; `cairn compile {} --edition {edition} --target \
+         {version}` builds it",
         stamp.reason(),
         out.display(),
-        stamp.edition,
-        stamp.mc_version,
     );
     outln!("wrote {}", out.display());
     ExitCode::SUCCESS
@@ -111,12 +110,20 @@ fn names_one_file(file: &Path, out: &Path) -> bool {
     }
 }
 
-/// Write `source` to `out`, creating the directory it is in.
-fn write(out: &Path, source: &str) -> std::io::Result<()> {
+/// Write `source` to `out` whole or not at all, creating the directory it is in.
+fn write(out: &Path, source: &str) -> Result<(), String> {
+    let failed = |err: std::io::Error| format!("writing source `{}`: {err}", out.display());
     if let Some(parent) = out.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).map_err(failed)?;
     }
-    std::fs::write(out, source)
+    let mut staged = StagedSet::default();
+    staged
+        .stage(out, Kind::Source, |file| file.write_all(source.as_bytes()))
+        .map_err(failed)?;
+    staged
+        .commit()
+        .map(drop)
+        .map_err(|failure| failure.to_string())
 }

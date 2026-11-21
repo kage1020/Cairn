@@ -45,7 +45,8 @@ enum Context {
     GuardWord { replace: Span },
     /// The word after an indented line's `@edition`: an edition.
     EditionName { replace: Span },
-    /// First word of a line indented under an `@edition` guard: a raw member or a Tier 0 part.
+    /// First word of a line indented under an `@edition` guard: a raw member, a `raw_repeat` or a
+    /// Tier 0 part.
     GuardedMemberKeyword { replace: Span },
     /// First word of a line indented under a `raw_repeat`: a raw member it writes again.
     RepeatedMemberKeyword { replace: Span },
