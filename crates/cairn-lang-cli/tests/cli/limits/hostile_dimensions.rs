@@ -512,18 +512,20 @@ fn a_body_past_i32_fails_the_build_it_is_part_of() {
 /// row's warning shows the straight L overlaps a floor, so the first row's silence means a detour.
 #[test]
 fn a_detour_searched_along_the_edge_of_i32_answers_rather_than_panics() {
-    // `a` must have no floor, or its cells stretch the search past the router's area cap.
+    // `a` must stand below the walk plane, or its cells stretch the search past the router's
+    // area cap.
     let detour = |gap: &str| {
         source(&format!(
-            "def shell size=3x3:\n\
-             \x20\x20walls id=walls mat_slot=wall height=3\n\n\
+            "def pad size=3x3:\n\
+             \x20\x20floor id=floor mat_slot=floor\n\n\
              def floored_hut size=3x3:\n\
              \x20\x20floor id=floor mat_slot=floor\n\
-             \x20\x20walls id=walls mat_slot=wall height=3\n\
-             \x20\x20door  id=east side=right at=center\n\
-             \x20\x20door  id=west side=left  at=center\n\n\
+             \x20\x20walls id=walls mat_slot=wall height=4\n\
+             \x20\x20level y=1\n\
+             \x20\x20\x20\x20door id=east side=right at=center\n\
+             \x20\x20\x20\x20door id=west side=left  at=center\n\n\
              site s:\n\
-             \x20\x20place id=a use=shell       theme=t at=origin\n\
+             \x20\x20place id=a use=pad         theme=t at=origin\n\
              \x20\x20place id=b use=floored_hut theme=t east_of=a gap={gap}\n\
              \x20\x20place id=c use=floored_hut theme=t north_of=b gap=2\n\
              \x20\x20connect b.east to c.west path=@gravel\n"

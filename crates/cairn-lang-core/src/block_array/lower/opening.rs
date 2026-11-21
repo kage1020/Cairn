@@ -11,7 +11,7 @@ use crate::block_array::args::{
     diag_invalid_member, ident_or_ignore, nonneg_int_or_refuse, read_or_ignore,
 };
 use crate::block_array::openings::{
-    DOOR_HEIGHT, WallSide, WindowArgs, door_column, read_window_args, wall_length,
+    DOOR_HEIGHT, WallSide, WindowArgs, door_base_row, door_column, read_window_args, wall_length,
 };
 
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
@@ -148,16 +148,18 @@ pub(super) fn plan_door(
         _ => None,
     };
     // Judged against the course holding the door's rows, never the tallest wall row.
-    let base_row = y_offset.saturating_add(1);
-    let in_course = line.is_some() && ctx.wall_column.contains_rows(base_row, DOOR_HEIGHT);
+    let base_row = door_base_row(y_offset);
+    let in_course = line.is_some()
+        && base_row.is_some_and(|row| ctx.wall_column.contains_rows(row, DOOR_HEIGHT));
     if line.is_some() && !in_course {
-        diagnostics.push(door_course_refusal(member, base_row, ctx));
+        diagnostics.push(door_course_refusal(member, base_row, y_offset, ctx));
     }
     let id = door_block_id(member, ctx, diagnostics)
         .map_err(|refusal| diagnostics.push(*refusal))
         .ok()
         .flatten();
-    let (Some((side, at, hinge)), true, Some(id)) = (line, in_course, id) else {
+    let (Some((side, at, hinge)), true, Some(id), Some(base_row)) = (line, in_course, id, base_row)
+    else {
         return None;
     };
     Some(DoorPlan {
@@ -207,11 +209,32 @@ fn door_block_id(
     .map(Some)
 }
 
-/// The finding that refuses a door at `base_row`, whose two rows no wall course holds.
+/// The finding that refuses a door under `level y=y_offset` at `base_row`, whose two rows no
+/// wall course holds, or which opens past the highest row a build can address.
 ///
 /// A row a `walls` member is written to hold and does not paint is that member's to repair.
-fn door_course_refusal(member: &Member, base_row: u32, ctx: &StructCtx<'_>) -> Diagnostic {
+fn door_course_refusal(
+    member: &Member,
+    base_row: Option<u32>,
+    y_offset: u32,
+    ctx: &StructCtx<'_>,
+) -> Diagnostic {
     let written = &ctx.written;
+    let Some(base_row) = base_row else {
+        return diag_invalid_member(
+            member,
+            format!(
+                "door under `level y={y_offset}` opens past the highest row a build can address \
+                 (the walls occupy {})",
+                written.walls,
+            ),
+            vec![
+                "a door opens one row above the base of its `level`; lower the `level` with \
+                  `y=`"
+                    .to_owned(),
+            ],
+        );
+    };
     if written.walls.contains_rows(base_row, DOOR_HEIGHT) {
         let primary = if ctx.wall_column.is_empty() {
             "door has no wall to cut into: no `walls` member on this struct paints".to_owned()
@@ -348,14 +371,14 @@ pub(super) fn plan_window(
         }
     };
     let (offset, sw, sh) = (args.column, args.width, args.height);
-    let y_start = args.row.saturating_add(y_offset);
+    let y_start = args.row_under(y_offset);
     let Some((repeat, step)) = window_series(member, diagnostics) else {
         return WindowPlan::Refused;
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let refusal = window_span_refusal(side, args, (repeat, step), len)
         .map(|(reason, fix)| diag_invalid_member(member, reason, vec![fix]))
-        .or_else(|| window_course_refusal(member, args, y_start, ctx));
+        .or_else(|| window_course_refusal(member, args, (y_start, y_offset), ctx));
     // The window's own line is asked before what the pass does not lower yet.
     let own_fault = refusal
         .as_ref()
@@ -368,6 +391,14 @@ pub(super) fn plan_window(
         diagnostics.push(refusal);
         return WindowPlan::Refused;
     }
+    let Some(y_start) = y_start else {
+        // INVARIANT: `window_course_refusal` refuses a window whose rows start past `u32`.
+        debug_assert!(
+            false,
+            "window rows past `u32` under `level y={y_offset}` were not refused"
+        );
+        return WindowPlan::Refused;
+    };
     // Resolved after the geometry checks, so a refused window names no material.
     let fill = if member.mat_slot.is_some() {
         let resolved = resolve_member_state(
@@ -504,36 +535,44 @@ fn window_span_refusal(
     })
 }
 
-/// The finding that refuses a window, `args` with its lowest row at `y_start`, that no one wall
-/// course holds, or `None`.
+/// The finding that refuses a window, `args` under `level y=y_offset` with its lowest row at
+/// `y_start`, that no one wall course holds, or `None`.
 ///
 /// Rows a `walls` member is written to hold and does not paint are that member's to repair.
 fn window_course_refusal(
     member: &Member,
     args: WindowArgs,
-    y_start: u32,
+    (y_start, y_offset): (Option<u32>, u32),
     ctx: &StructCtx<'_>,
 ) -> Option<Diagnostic> {
     let (sw, sh) = (args.width, args.height);
-    if ctx.wall_column.contains_rows(y_start, sh) {
+    if y_start.is_some_and(|start| ctx.wall_column.contains_rows(start, sh)) {
         return None;
     }
     let at = format!("y={}{}", args.y(), args.anchor_written());
     let written = &ctx.written;
-    let rows = match y_start.checked_add(sh.saturating_sub(1)) {
-        Some(last) => format!("window rows y={y_start}..={last}"),
+    let last = y_start.and_then(|start| start.checked_add(sh.saturating_sub(1)));
+    let (Some(y_start), Some(last)) = (y_start, last) else {
         // Saturating would print a range that ends before it starts.
-        None => {
-            return Some(diag_invalid_member(
-                member,
-                format!(
-                    "window rows from y={y_start} run past the highest row a build can address (size={sw}x{sh}; the walls occupy {})",
-                    written.walls,
-                ),
-                vec!["lower the window with `y=`, or shorten it with `size=`".to_owned()],
-            ));
-        }
+        let (from, lower) = match y_start {
+            Some(start) => (format!("y={start}"), "the window"),
+            None => (
+                format!("y={} under `level y={y_offset}`", args.row),
+                "the window or its `level`",
+            ),
+        };
+        return Some(diag_invalid_member(
+            member,
+            format!(
+                "window rows from {from} run past the highest row a build can address (size={sw}x{sh}; the walls occupy {})",
+                written.walls,
+            ),
+            vec![format!(
+                "lower {lower} with `y=`, or shorten it with `size=`"
+            )],
+        ));
     };
+    let rows = format!("window rows y={y_start}..={last}");
     if written.walls.contains_rows(y_start, sh) {
         let primary = if ctx.wall_column.is_empty() {
             format!(
