@@ -50,10 +50,15 @@ impl WallColumn {
 
     /// The last row of the course that holds `y`, or `None` when no course does.
     pub(super) fn course_top_at(&self, y: u32) -> Option<u32> {
+        self.course_at(y).map(|(_, end)| end)
+    }
+
+    /// The first and last rows of the course that holds `y`, or `None` when no course does.
+    pub(super) fn course_at(&self, y: u32) -> Option<(u32, u32)> {
         self.spans
             .iter()
+            .copied()
             .find(|(start, end)| *start <= y && y <= *end)
-            .map(|(_, end)| *end)
     }
 }
 

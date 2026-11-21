@@ -4,7 +4,7 @@
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::{Member, MemberRole, ValueWithSpan};
+use crate::intent::{BindingKey, Member, MemberRole, ValueWithSpan};
 use crate::resolve::{TokenKind, classify_token};
 use crate::suggest::{candidate_list, did_you_mean_note, nearest_match};
 
@@ -88,13 +88,15 @@ pub(super) enum TokenSite {
     WalkwayPath,
     /// A member's `mat_slot=` binding, with what becomes of the member without it.
     MemberSlot(MemberFallback),
+    /// A theme selector row's binding, naming the block of a part of the member.
+    Binding(BindingKey),
 }
 
 impl TokenSite {
     fn token_noun(self) -> &'static str {
         match self {
             Self::WalkwayPath => "abstract path token",
-            Self::MemberSlot(_) => "abstract token",
+            Self::MemberSlot(_) | Self::Binding(_) => "abstract token",
         }
     }
 
@@ -102,6 +104,8 @@ impl TokenSite {
     fn consequence(self) -> &'static str {
         match self {
             Self::WalkwayPath => "the walkway falls back to air",
+            Self::Binding(BindingKey::Trim) => "no corner posts are laid",
+            Self::Binding(BindingKey::Frame) => "no frame is laid",
             Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
             Self::MemberSlot(MemberFallback::Unpainted) => "the fill paints none of its box",
             Self::MemberSlot(MemberFallback::Absent) => {
@@ -121,6 +125,8 @@ impl TokenSite {
         match self {
             Self::WalkwayPath => "path=@gravel",
             Self::MemberSlot(_) => "@oak_planks",
+            Self::Binding(BindingKey::Trim) => "trim=@spruce_log",
+            Self::Binding(BindingKey::Frame) => "frame=@spruce_wood",
         }
     }
 
@@ -129,7 +135,7 @@ impl TokenSite {
             Self::WalkwayPath => {
                 "abstract path tokens must be declared in the pack's `materials` catalog"
             }
-            Self::MemberSlot(_) => {
+            Self::MemberSlot(_) | Self::Binding(_) => {
                 "abstract material tokens must be declared in the pack's `materials` catalog \
                  (see `spec/materials-themes` \"Canonical vocabulary\")"
             }
@@ -183,7 +189,8 @@ pub(super) fn diag_unknown_abstract_token(
 
 /// Check the state literal `value` carries against the pinned target, reporting each pair outside
 /// its block's states, or the literal as unchecked where the target records none; `false` when a
-/// pair is outside, and the member or walkway binding it is then not built.
+/// pair is outside, and what binds it (a member, a walkway, or a selector binding's part) is then
+/// not built.
 pub(super) fn check_state_literal(
     value: &ValueWithSpan,
     state: &BlockState,
@@ -454,6 +461,8 @@ pub(super) enum NamedBy {
     RawMat,
     /// A walkway's `path=`.
     Path,
+    /// A theme selector row's binding of a part.
+    Part(BindingKey),
 }
 
 /// Report `state`, built at `span`, when the pinned target's state map has no form for it.
@@ -483,9 +492,10 @@ pub(super) fn diag_state_unmapped(
         ),
     };
     let choose = match named_by {
-        NamedBy::Binding => "bind the material to",
-        NamedBy::RawMat => "set `mat=` to",
-        NamedBy::Path => "set `path=` to",
+        NamedBy::Binding => "bind the material to".to_owned(),
+        NamedBy::RawMat => "set `mat=` to".to_owned(),
+        NamedBy::Path => "set `path=` to".to_owned(),
+        NamedBy::Part(key) => format!("bind `{}=` to", key.key()),
     };
     Some(Diagnostic {
         code: DiagnosticCode::StateUnmapped,
@@ -510,7 +520,7 @@ pub(super) fn diag_state_unmapped(
 pub(super) enum IdSite {
     /// A `raw_block` or `raw_fill`'s `mat=`, which names an edition's own block.
     Raw,
-    /// A semantic member's block, or a `connect` row's `path=`.
+    /// A semantic member's block, a selector binding's part, or a `connect` row's `path=`.
     Semantic(TokenSite),
 }
 
@@ -548,6 +558,13 @@ fn diag_parity_unsupported(
              binds no slot and builds nothing under a guard: set `path=` to a block both editions \
              have, or to an abstract token each edition's materials catalog maps"
             .to_owned(),
+        TokenSite::Binding(key) => format!(
+            "the semantic layer is edition-neutral: write this `{}=` row in a `theme NAME_{has}` \
+             and give the same row in `theme NAME_{lacks}` a block {} has, or bind a block both \
+             editions have",
+            key.key(),
+            lacks.title(),
+        ),
     };
     Diagnostic {
         code: DiagnosticCode::ParityUnsupported,

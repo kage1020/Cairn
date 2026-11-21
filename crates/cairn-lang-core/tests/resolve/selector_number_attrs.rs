@@ -24,13 +24,9 @@ fn a_number_attribute_matches_a_member_that_writes_the_same_number() {
         ("[1.5, 2]", "[1.50, 2.0]"),
     ] {
         let source = source(row, member);
-        let binding = source.find("@spruce_wood").expect("the binding");
         assert_eq!(
             code_spans(&diagnose(&source)),
-            [(
-                DiagnosticCode::IgnoredArgument.as_str(),
-                binding..binding + "@spruce_wood".len(),
-            )],
+            [],
             "[tags={row}] against tags={member}",
         );
         assert_eq!(
@@ -55,19 +51,12 @@ fn a_number_attribute_does_not_match_another_number() {
         let source = source(row, member);
         let row_start = source.find("window[").expect("the row");
         let row_end = source[row_start..].find('\n').expect("the row's end") + row_start;
-        let binding = source.find("@spruce_wood").expect("the binding");
         assert_eq!(
             code_spans(&diagnose(&source)),
-            [
-                (
-                    DiagnosticCode::ThemeSelectorUnmatched.as_str(),
-                    row_start..row_end,
-                ),
-                (
-                    DiagnosticCode::IgnoredArgument.as_str(),
-                    binding..binding + "@spruce_wood".len(),
-                ),
-            ],
+            [(
+                DiagnosticCode::ThemeSelectorUnmatched.as_str(),
+                row_start..row_end,
+            )],
             "[tags={row}] against tags={member}",
         );
     }
@@ -84,13 +73,9 @@ fn two_rows_whose_numbers_are_one_value_select_the_same_members() {
         .collect();
     assert_eq!(
         found,
-        [
-            (DiagnosticCode::IgnoredArgument.as_str(), "@stone"),
-            (
-                DiagnosticCode::DuplicateSelector.as_str(),
-                "walls[height=4.0] -> trim=@oak",
-            ),
-            (DiagnosticCode::IgnoredArgument.as_str(), "@oak"),
-        ],
+        [(
+            DiagnosticCode::DuplicateSelector.as_str(),
+            "walls[height=4.0] -> trim=@oak",
+        )],
     );
 }

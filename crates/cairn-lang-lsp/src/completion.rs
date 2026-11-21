@@ -1,5 +1,6 @@
-//! Source text + cursor position → the closed-vocabulary set valid there: whole for a keyword or a
-//! slot name, and for a material token the tokens matching what is typed, bounded.
+//! Source text + cursor position → the closed-vocabulary set valid there: whole for a keyword, a
+//! slot name or a selector row's binding key, and for a material token the tokens matching what is
+//! typed, bounded.
 //!
 //! The context is read from the text, not a parse: a document mid-keystroke rarely parses, and
 //! Cairn is line-oriented (`spec/syntax` "Lexical").
@@ -10,7 +11,7 @@ use std::sync::OnceLock;
 use cairn_lang_core::Edition;
 use cairn_lang_core::Span;
 use cairn_lang_core::ast::ItemKind;
-use cairn_lang_core::intent::{BodyKind, role_of};
+use cairn_lang_core::intent::{BindingKey, BodyKind, MemberRole, role_of};
 use cairn_lang_core::lex::scan_line;
 use cairn_lang_core::parse::{EDIT, SET};
 use cairn_lang_formats::builtin_pack;
@@ -30,6 +31,12 @@ enum Context {
     UnscopedMemberKeyword { replace: Span },
     /// First word of an indented line in a `theme` body: `slot` or a selector's member keyword.
     ThemeBodyKeyword { replace: Span },
+    /// A key position right of a `theme` selector row's arrow: a key that row's keyword binds and
+    /// the row does not bind yet.
+    BindingKey {
+        replace: Span,
+        keys: Vec<BindingKey>,
+    },
     /// Value position of `mat_slot=`: a slot name declared by a theme.
     SlotName { replace: Span },
     /// Right after `@` outside the header position: a material token.
@@ -110,6 +117,9 @@ pub fn completions(
                     .map(|kw| (*kw, "theme selector")),
             ),
         )),
+        Some(Context::BindingKey { replace, keys }) => {
+            whole(binding_key_items(&index, source, &replace, keys))
+        }
         Some(Context::SlotName { replace }) => whole(slot_name_items(&index, source, &replace)),
         Some(Context::MaterialToken { replace }) => {
             material_items(&index, source, &replace, offset)
@@ -219,6 +229,11 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
             _ => None,
         };
     }
+    if enclosing_item_keyword(&outside) == Some("theme")
+        && let Some(keys) = unbound_keys(before_token)
+    {
+        return Some(Context::BindingKey { replace, keys });
+    }
     if let Some(rest) = before_token.strip_prefix(EDIT)
         && rest.starts_with(char::is_whitespace)
     {
@@ -254,6 +269,46 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
         }),
         _ => Some(Context::UnscopedMemberKeyword { replace }),
     }
+}
+
+/// The keys a theme selector row's keyword binds that the row does not, when `before` is the row
+/// up to a key position right of its arrow (`spec/materials-themes` "Selector bindings").
+fn unbound_keys(before: &str) -> Option<Vec<BindingKey>> {
+    let row = before.trim_start();
+    if row.len() == before.len() {
+        return None;
+    }
+    let keyword = line_keyword(row);
+    let role = role_of(keyword);
+    if matches!(role, MemberRole::Other(_)) {
+        return None;
+    }
+    let attrs = row[keyword.len()..].trim_start().strip_prefix('[')?;
+    let (mut depth, mut in_string) = (1_usize, false);
+    let close = attrs.char_indices().find_map(|(i, c)| {
+        match c {
+            '"' => in_string = !in_string,
+            '[' if !in_string => depth += 1,
+            ']' if !in_string => depth -= 1,
+            _ => {}
+        }
+        (depth == 0).then_some(i)
+    })?;
+    let bindings = attrs[close + 1..].trim_start().strip_prefix("->")?;
+    if !(bindings.is_empty() || bindings.ends_with(char::is_whitespace)) {
+        return None;
+    }
+    let written: Vec<&str> = bindings
+        .split_whitespace()
+        .filter_map(|pair| pair.split_once('=').map(|(key, _)| key))
+        .collect();
+    Some(
+        role.binding_keys()
+            .iter()
+            .copied()
+            .filter(|key| !written.contains(&key.key()))
+            .collect(),
+    )
 }
 
 /// What an `edit` line takes at a word boundary, given `rest`, the line after its `edit`: the
@@ -500,6 +555,29 @@ fn keyword_items<'a>(
                 label,
                 lsp_types::CompletionItemKind::KEYWORD,
                 detail.to_owned(),
+                order,
+            )
+        })
+        .collect()
+}
+
+/// An item for each of `keys`, a selector row's binding keys, with the part each one binds.
+fn binding_key_items(
+    index: &LineIndex,
+    source: &str,
+    replace: &Span,
+    keys: Vec<BindingKey>,
+) -> Vec<lsp_types::CompletionItem> {
+    keys.into_iter()
+        .enumerate()
+        .map(|(order, key)| {
+            completion_item(
+                index,
+                source,
+                replace,
+                key.key(),
+                lsp_types::CompletionItemKind::PROPERTY,
+                format!("binds {}", key.part()),
                 order,
             )
         })
