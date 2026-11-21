@@ -1584,13 +1584,7 @@ fn load_pack(
     let (states, states_text, sensitivity_text) = state_maps(source, &manifest, &blocks)?;
     validate_meanings(&meanings, &blocks, states.as_ref())?;
     validate_material_canonicals(&materials, states.as_ref(), expected_edition)?;
-    match &states {
-        Some(states) => validate_states_cover_versions(states, &data_versions)?,
-        None if expected_edition == Edition::Bedrock && !blocks.is_empty() => {
-            return Err(RegistryError::StatesMissing);
-        }
-        None => {}
-    }
+    validate_states(states.as_ref(), &data_versions, &blocks, expected_edition)?;
     let (connections, connections_text) = optional_component(
         source,
         Component::Connections,
@@ -1607,26 +1601,21 @@ fn load_pack(
         PaintingIndex::empty,
     )?;
 
-    let mut components: Vec<(&str, &[u8])> = vec![(
-        manifest.files.data_versions.as_str(),
-        data_versions_text.as_bytes(),
-    )];
-    for (file, text) in [
-        (&manifest.files.materials, &materials_text),
-        (&manifest.files.blocks, &blocks_text),
-        (&manifest.files.aliases, &aliases_text),
-        (&manifest.files.absent, &absent_text),
-        (&manifest.files.meanings, &meanings_text),
-        (&manifest.files.states, &states_text),
-        (&manifest.files.sensitivity, &sensitivity_text),
-        (&manifest.files.connections, &connections_text),
-        (&manifest.files.paintings, &paintings_text),
-    ] {
-        if let (Some(file), Some(text)) = (file, text) {
-            components.push((file.as_str(), text.as_bytes()));
-        }
-    }
-    let bytes_hash = pack_hash(manifest_text.as_bytes(), &components);
+    let bytes_hash = texts_hash(
+        &manifest_text,
+        (&manifest.files.data_versions, &data_versions_text),
+        &[
+            (&manifest.files.materials, &materials_text),
+            (&manifest.files.blocks, &blocks_text),
+            (&manifest.files.aliases, &aliases_text),
+            (&manifest.files.absent, &absent_text),
+            (&manifest.files.meanings, &meanings_text),
+            (&manifest.files.states, &states_text),
+            (&manifest.files.sensitivity, &sensitivity_text),
+            (&manifest.files.connections, &connections_text),
+            (&manifest.files.paintings, &paintings_text),
+        ],
+    );
     Ok(RegistryPack {
         manifest,
         data_versions,
@@ -1645,6 +1634,21 @@ fn load_pack(
 
 /// A component's text, `None` when the manifest names no such component.
 type ComponentText<'s> = Option<Cow<'s, str>>;
+
+/// The pack hash of the manifest's text and of each component text read, under its file name.
+fn texts_hash(
+    manifest_text: &str,
+    (data_versions_file, data_versions_text): (&str, &str),
+    optional: &[(&Option<String>, &ComponentText<'_>)],
+) -> HashHex {
+    let mut components = vec![(data_versions_file, data_versions_text.as_bytes())];
+    for (file, text) in optional {
+        if let (Some(file), Some(text)) = (file, text) {
+            components.push((file.as_str(), text.as_bytes()));
+        }
+    }
+    pack_hash(manifest_text.as_bytes(), &components)
+}
 
 /// The state map index, if the pack names one, and the texts of its two components, which a pack
 /// names both or neither of.
@@ -1805,6 +1809,23 @@ fn validate_meanings(
         }
     }
     Ok(())
+}
+
+/// Refuses a state map that misses a targetable version, or a Bedrock pack with block tables and
+/// no state map.
+fn validate_states(
+    states: Option<&StateMapIndex>,
+    data_versions: &DataVersionTable,
+    blocks: &BlocksIndex,
+    expected_edition: Edition,
+) -> Result<(), RegistryError> {
+    match states {
+        Some(states) => validate_states_cover_versions(states, data_versions),
+        None if expected_edition == Edition::Bedrock && !blocks.is_empty() => {
+            Err(RegistryError::StatesMissing)
+        }
+        None => Ok(()),
+    }
 }
 
 /// Refuses a state map that misses a targetable version, whose build would have none to write by.
