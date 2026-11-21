@@ -101,6 +101,45 @@ fn an_opening_declares_its_cut_against_the_outer_face_of_its_wall() {
 }
 
 #[test]
+fn a_frame_a_theme_binds_holds_past_the_opening_its_line_declares() {
+    let source = format!(
+        "{}\n  \
+         door[class=main] -> frame=@spruce_wood\n  \
+         window[class=small] -> frame=@spruce_wood\n\n\
+         struct s size=7x3\n  \
+         walls mat_slot=wall height=4\n  \
+         door class=main side=front at=center\n  \
+         window class=small side=back offset=1 y=2 size=2x1 mat_slot=glass\n",
+        PRELUDE.trim_end(),
+    );
+    let ir = lowered(&source);
+    assert_eq!(findings(&source, &ir), []);
+    assert_eq!(
+        geometry(&ir)[1..],
+        [
+            (
+                "window",
+                MemberGeometry {
+                    anchor: (5, 2, 0),
+                    declared_bbox: boxed((4, 2, 0), (5, 2, 0)),
+                    actual_bbox: boxed((3, 1, 0), (5, 3, 0)),
+                    host_face: Some(Face::North),
+                },
+            ),
+            (
+                "door",
+                MemberGeometry {
+                    anchor: (3, 1, 2),
+                    declared_bbox: boxed((3, 1, 2), (3, 2, 2)),
+                    actual_bbox: boxed((2, 1, 2), (4, 3, 2)),
+                    host_face: Some(Face::South),
+                },
+            ),
+        ],
+    );
+}
+
+#[test]
 fn an_opening_on_a_side_wall_declares_its_cut_against_that_wall_s_outer_face() {
     let ir = clean(
         "7x5",

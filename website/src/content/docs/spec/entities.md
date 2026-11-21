@@ -148,11 +148,13 @@ under the base plane raises them with the struct ([Redstone
 
 A window's rectangles are each one a `repeat=` series stamps and, with `sym=true`, the mirror, so a
 mirror skipped for overlapping the window stays in the declared bbox, and its cells outside the
-window stay out of the actual one ([Syntax §5.4](/spec/syntax/#54-selectors)). A fixture by a wall
-stands against its outer face from outside the wall (`at=front.outside`) and its inner face from
-inside (`at=inside.front`). A `circuit` holds the cells it lays a block in, not the air it writes
-over the rest of the layers it reserves, and one that lays no block holds every layer it reserves,
-since a bbox holds at least one cell.
+window stay out of the actual one ([Syntax §5.4](/spec/syntax/#54-selectors)). A frame a theme binds
+on a door or window is that member's, so its cells are in the member's actual bbox and out of its
+declared one ([Materials and Themes](/spec/materials-themes/#selector-bindings)). A fixture by a
+wall stands against its outer face from outside the wall (`at=front.outside`) and its inner face
+from inside (`at=inside.front`). A `circuit` holds the cells it lays a block in, not the air it
+writes over the rest of the layers it reserves, and one that lays no block holds every layer it
+reserves, since a bbox holds at least one cell.
 
 **`anchor=` on a window** names the cell of the window that `offset=` and `y=` place, seen from
 outside the wall: one of `bottom_left`, `bottom_center`, `bottom_right`, `middle_left`, `center`,

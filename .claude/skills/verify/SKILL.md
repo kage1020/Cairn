@@ -30,8 +30,8 @@ Add these when the change reaches them:
 - `crates/cairn-lang-tree-sitter/grammar.js` or its corpus: `pnpm install`, `pnpm run generate`
   (the generated files must come out unchanged after you commit them) and `pnpm test`, in that
   crate's directory.
-- `website/`: `pnpm install`, `pnpm run check` and `pnpm run build` in `website/`, then
-  `cargo xtask lint --site website/dist site-parity` from the root.
+- `website/`: `pnpm install`, `pnpm run check`, `pnpm test` and `pnpm run build` in
+  `website/`, then `cargo xtask lint --site website/dist site-parity` from the root.
 - `editors/vscode/`: `pnpm install`, `pnpm run package` and `pnpm test` in `editors/vscode/`.
   `pnpm test` opens VS Code and skips on Windows. CI runs it on Linux only, as
   `xvfb-run -a pnpm test`, which is also how to run it without a display.
