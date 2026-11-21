@@ -13,13 +13,13 @@ use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{declared_version_floors, resolve};
 use cairn_lang_core::{Diagnostic, Edition, Severity, diagnose_parse_failure, lower, parse};
-use cairn_lang_formats::registry::{builtin_pack, builtin_version_tables};
+use cairn_lang_formats::registry::{builtin_pack, builtin_version_tables, builtin_view};
 use cairn_lang_redstone::{Diagnostic as CircuitDiagnostic, build_circuits};
 
 use crate::floors::floor_refusal;
 use crate::inferred::{Conflict, requires_conflicts};
 use crate::report::{FailureReport, report_failure_document};
-use crate::target::{ResolvedTarget, registry_view, resolve_target};
+use crate::target::{ResolvedTarget, resolve_target};
 
 pub(crate) use requested::{RequestedEditions, requested_editions};
 
@@ -84,7 +84,7 @@ pub(crate) fn check_lowering(
     let pinned = resolved.as_ref().ok().map(ResolvedTarget::mc_version);
     // The theme variant decides which id a `mat_slot=` reaches, so resolve for the edition.
     let resolution = resolve(ir, Some(edition));
-    let registry = registry_view(edition, pinned);
+    let registry = builtin_view(edition, pinned);
     let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
     CheckLowering {
         dropped_scopes: dropped_scopes(&resolution, &block_ir),
@@ -319,7 +319,7 @@ pub(crate) fn load_and_lower(
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
     let pack = builtin_pack(edition);
-    let registry = registry_view(edition, mc_version);
+    let registry = builtin_view(edition, mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     let conflicts = if floors.is_empty() {
         Vec::new()

@@ -21,7 +21,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
-pub use constraint::{Constraint, Support};
+pub use constraint::{Constraint, Contents, Support, Vertical};
 pub use geometry::{Bbox, MemberGeometry};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{

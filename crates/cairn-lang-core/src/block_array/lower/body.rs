@@ -25,10 +25,11 @@ use super::circuit::{recognize_actuator_patch, recognize_circuit_region, refused
 use super::connections::derive_connections;
 use super::constraints::constraint_findings;
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
-use super::door::{HungDoor, hang_doors, split_doors};
+use super::door::{hang_doors, split_doors};
 use super::fill::pour_fluids;
+use super::frame::lay_frames;
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
-use super::paint::paint_member;
+use super::paint::{Openings, paint_member};
 use super::phase::Phase;
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
 use super::token_diag::{NamedBy, diag_derived_state_domain, diag_state_unmapped};
@@ -163,10 +164,17 @@ pub(super) fn lower_body_to_block_array<'a>(
     let members = resolved_members(&flattened, &canvas, &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));
-        // A member an error refuses paints nothing, so what it should have held is not judged.
-        if diagnostics[raised..]
-            .iter()
-            .all(|d| d.severity() != Severity::Error)
+        // A member an error refuses may paint nothing, and no block of the body is judged against
+        // the air it leaves.
+        let refused = flattened.iter().any(|(_, member)| {
+            scope
+                .and_then(|scope| scope.members.get(&member.span.start))
+                .is_some_and(|binding| binding.refused)
+        });
+        if !refused
+            && diagnostics[raised..]
+                .iter()
+                .all(|d| d.severity() != Severity::Error)
         {
             diagnostics.extend(constraint_findings(&members, &array, overhang, registry));
         }
@@ -180,9 +188,10 @@ pub(super) fn lower_body_to_block_array<'a>(
     })
 }
 
-/// A `W_PHASE_CONFLICT` for each pair of members of one phase on `canvas` where the later took
-/// cells from the earlier, but where the pack decides whether `stand_in` differs from the block
-/// it met; `split_doors` are the doors left with one of their two cells.
+/// A `W_PHASE_CONFLICT` for each pair of members, and each pair of frames, of one phase on
+/// `canvas` where the later took cells from the earlier, but where the pack decides whether
+/// `stand_in` differs from the block it met; `split_doors` are the doors left with one of their
+/// two cells.
 fn report_phase_conflicts(
     flattened: &[(u32, &Member)],
     canvas: &Canvas,
@@ -208,6 +217,16 @@ fn report_phase_conflicts(
                 blocks_differ: contested.keys().any(|(before, after)| before != after),
                 split: split_doors.contains(overridden) || split_beds.contains(overridden),
             },
+        ));
+    }
+    for ((overridden, overriding), contested) in &canvas.frame_conflicts {
+        if contested.keys().any(pack_decides) {
+            continue;
+        }
+        diagnostics.push(diag_frame_conflict(
+            flattened[*overridden as usize].1,
+            flattened[*overriding as usize].1,
+            contested.values().sum(),
         ));
     }
 }
@@ -371,16 +390,33 @@ fn paint_phases(
         .map(|&(index, _, _)| index)
         .collect();
     let mut canvas = Canvas::new(ctx.dims, phases);
-    let mut hung = Vec::new();
+    let mut openings = Openings::default();
     for (phase, bucket) in Phase::ALL.into_iter().zip(by_phase) {
         match phase {
             Phase::Massing | Phase::Envelope | Phase::Fixtures | Phase::Raw => {
-                run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+                run_phase(
+                    bucket,
+                    ctx,
+                    palette,
+                    &mut canvas,
+                    &mut openings,
+                    diagnostics,
+                );
             }
             Phase::Openings => {
-                run_phase(bucket, ctx, palette, &mut canvas, &mut hung, diagnostics);
+                run_phase(
+                    bucket,
+                    ctx,
+                    palette,
+                    &mut canvas,
+                    &mut openings,
+                    diagnostics,
+                );
                 // A door's hinge reads the wall beside it, which a later opening may cut.
-                hang_doors(&hung, &walls, palette, &mut canvas);
+                hang_doors(&openings.hung, &walls, palette, &mut canvas);
+                // After every cut and hinge, so no frame closes an opening or turns a hinge.
+                let frames = std::mem::take(&mut openings.frames);
+                lay_frames(frames, &walls, ctx, palette, &mut canvas);
             }
             Phase::Fluids => pour_fluids(bucket, ctx, palette, &mut canvas, diagnostics),
         }
@@ -388,7 +424,7 @@ fn paint_phases(
     let derived = ctx.registry.map_or_else(HashMap::new, |registry| {
         derive_connections(&mut canvas, palette, registry)
     });
-    let split = split_doors(&hung, &canvas);
+    let split = split_doors(&openings.hung, &canvas);
     (canvas, split, derived)
 }
 
@@ -449,7 +485,7 @@ fn bucket_members<'a>(
 }
 
 /// Paint one phase's bucket, each member through its own [`MemberCanvas`] so its writes are
-/// filed under it; each door that stands is added to `hung`.
+/// filed under it; each door that stands and each frame left to lay is added to `openings`.
 ///
 /// [`MemberCanvas`]: super::canvas::MemberCanvas
 pub(super) fn run_phase(
@@ -457,7 +493,7 @@ pub(super) fn run_phase(
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut Canvas,
-    hung: &mut Vec<HungDoor>,
+    openings: &mut Openings,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (index, y_offset, member) in bucket {
@@ -468,7 +504,7 @@ pub(super) fn run_phase(
             ctx,
             palette,
             &mut member_canvas,
-            hung,
+            openings,
             diagnostics,
         );
     }
@@ -544,6 +580,35 @@ fn diag_phase_conflict(
             MemberRole::keyword(&overridden.role),
         ),
         notes,
+        data: None,
+    }
+}
+
+/// The frames of two openings met on cells they laid in different blocks (`spec/materials-themes`
+/// "Selector bindings"); anchored at the later.
+fn diag_frame_conflict(overridden: &Member, overriding: &Member, voxels: u32) -> Diagnostic {
+    let cell = if voxels == 1 { "voxel" } else { "voxels" };
+    Diagnostic {
+        code: DiagnosticCode::PhaseConflict,
+        span: overriding.span.clone(),
+        primary: format!(
+            "the `frame=` of this `{}` overwrites {voxels} {cell} of the `frame=` of a `{}`, so \
+             which block the build keeps is decided by the order the two lines are written in",
+            MemberRole::keyword(&overriding.role),
+            MemberRole::keyword(&overridden.role),
+        ),
+        notes: vec![
+            DiagnosticNote {
+                span: Some(overridden.span.clone()),
+                message: "overwritten frame's member declared here".to_owned(),
+            },
+            DiagnosticNote {
+                span: None,
+                message: "if the later frame is not meant to win, bind both `frame=` to one \
+                          block, or move one opening so the frames do not meet"
+                    .to_owned(),
+            },
+        ],
         data: None,
     }
 }

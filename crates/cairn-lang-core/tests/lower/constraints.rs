@@ -2,10 +2,12 @@
 //! that flows out of the build, are reported at the member that built them (`spec/lint`
 //! "Constraint checks").
 
-use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::{
-    BlockIdSet, BlockState, Constraint, Face, StateDomain, Support, TargetRegistry,
+    BlockArrayIr, BlockIdSet, BlockState, Constraint, Face, StateDomain, Support, TargetRegistry,
+    Vertical, lower_to_block_array,
 };
+use cairn_lang_core::resolve::resolve;
+use cairn_lang_core::{DiagnosticCode, lower, parse};
 
 use crate::common::{bin, findings, lowered_with};
 
@@ -75,10 +77,10 @@ impl TargetRegistry for Catalog {
             "lever" => Constraint::Hangs {
                 host: Face::from_name(value("facing")?)?.opposite(),
             },
-            "lantern" if value("hanging") == Some("true") => centre(Face::Up),
-            "torch" | "lantern" => centre(Face::Down),
+            "lantern" if value("hanging") == Some("true") => centre(Vertical::Above),
+            "torch" | "lantern" => centre(Vertical::Below),
             "repeater" => Constraint::Rests {
-                host: Face::Down,
+                host: Vertical::Below,
                 needs: Support::Sturdy,
             },
             "sand" => Constraint::Falls,
@@ -89,7 +91,7 @@ impl TargetRegistry for Catalog {
     fn holds(&self, state: &BlockState, host: &BlockState) -> Option<bool> {
         let (toward, needs) = match self.constraint(state)? {
             Constraint::Hangs { host } => (host, Support::Sturdy),
-            Constraint::Rests { host, needs } => (host, needs),
+            Constraint::Rests { host, needs } => (host.face(), needs),
             Constraint::Falls => return None,
         };
         let face = toward.opposite();
@@ -251,20 +253,89 @@ fn sand_over_air_or_water_falls_and_sand_on_the_floor_stays() {
         ],
         "sand on stone, and sand in the bottom row with nothing of the build below it, stay",
     );
-    let over_water =
-        floored("fill fluid=water from=1,1,1 to=1,1,1\n  raw_block mat=minecraft:sand at=1,2,1");
+    let over_water = floored(
+        "raw_block mat=minecraft:stone at=2,1,1\n  \
+         raw_block mat=minecraft:stone at=1,1,2\n  \
+         fill fluid=water from=1,1,1 to=1,1,1\n  \
+         raw_block mat=minecraft:sand at=1,2,1",
+    );
     let out = lowered_with(&over_water, &Catalog);
     assert_eq!(
-        findings(&over_water, &out)
-            .into_iter()
-            .filter(|(code, ..)| *code == DiagnosticCode::UnsupportedBlock)
-            .map(|(_, _, primary, _)| primary)
-            .collect::<Vec<_>>(),
-        [
+        findings(&over_water, &out),
+        [(
+            DiagnosticCode::UnsupportedBlock,
+            "raw_block mat=minecraft:sand at=1,2,1",
             "`raw_block` builds a block that falls: `minecraft:sand` at 1,2,1 stands on \
-          `minecraft:water[level=0]`"
+             `minecraft:water[level=0]`",
+            vec![FALLS_VALID, FALLS_FIX],
+        )],
+        "the water is walled in, so only the sand is reported",
+    );
+}
+
+#[test]
+fn air_of_every_kind_reads_as_air_in_every_check() {
+    let source = floored(
+        "raw_block mat=minecraft:cave_air at=1,1,1\n  \
+         raw_block mat=minecraft:torch at=1,2,1\n  \
+         raw_block mat=minecraft:void_air at=2,1,2\n  \
+         raw_block mat=minecraft:sand at=2,2,2",
+    );
+    let out = lowered_with(&source, &Catalog);
+    assert_eq!(
+        findings(&source, &out),
+        [
+            (
+                DiagnosticCode::UnsupportedBlock,
+                "raw_block mat=minecraft:torch at=1,2,1",
+                "`raw_block` builds a block the game drops for want of support: \
+                 `minecraft:torch` at 1,2,1 stands on air",
+                vec![CENTRE_BELOW, CENTRE_BELOW_FIX],
+            ),
+            (
+                DiagnosticCode::UnsupportedBlock,
+                "raw_block mat=minecraft:sand at=2,2,2",
+                "`raw_block` builds a block that falls: `minecraft:sand` at 2,2,2 stands on air",
+                vec![FALLS_VALID, FALLS_FIX],
+            ),
         ],
     );
+    let spill = floored(
+        "raw_block mat=minecraft:stone at=1,1,2\n  \
+         raw_block mat=minecraft:cave_air at=2,1,1\n  \
+         fill fluid=water from=1,1,1 to=1,1,1",
+    );
+    let out = lowered_with(&spill, &Catalog);
+    assert_eq!(
+        findings(&spill, &out),
+        [(
+            DiagnosticCode::WaterSpill,
+            "fill fluid=water from=1,1,1 to=1,1,1",
+            "`fill` holds water that flows into the air at 2,1,1 from `minecraft:water[level=0]` \
+             at 1,1,1",
+            vec![SPILL_VALID, SPILL_FIX],
+        )],
+    );
+}
+
+#[test]
+fn water_never_flows_up_and_a_pane_beside_it_keeps_it_out() {
+    let source = floored(
+        "raw_block mat=minecraft:glass_pane at=2,1,1\n  \
+         raw_block mat=minecraft:stone at=1,1,2\n  \
+         fill fluid=water from=1,1,1 to=1,1,1",
+    );
+    assert_eq!(
+        findings(&source, &lowered_with(&source, &Catalog)),
+        [],
+        "the air above the water is not reached, and the pane's cell is not air",
+    );
+}
+
+#[test]
+fn a_waterlogged_block_whose_faces_the_registry_cannot_judge_is_not_judged() {
+    let source = floored("raw_block mat=minecraft:mystery[waterlogged=true] at=2,1,1");
+    assert_eq!(findings(&source, &lowered_with(&source, &Catalog)), []);
 }
 
 #[test]
@@ -356,20 +427,84 @@ impl TargetRegistry for Refusing {
     }
 }
 
+/// `source` lowered against `registry`, with the resolver's diagnostics ahead of the block-array
+/// pass's.
+fn judged(source: &str, registry: &dyn TargetRegistry) -> BlockArrayIr {
+    let module = parse(source).expect("the source parses");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, None);
+    let mut out = lower_to_block_array(&ir, &resolution, Some(registry));
+    let mut combined = resolution.diagnostics;
+    combined.append(&mut out.diagnostics);
+    out.diagnostics = combined;
+    out
+}
+
 #[test]
-fn a_body_with_a_member_an_error_refuses_is_not_judged() {
-    let source = floored(
+fn a_body_with_a_member_an_error_refuses_is_not_judged_and_another_body_is() {
+    let refused = floored(
         "raw_block mat=minecraft:bogus at=2,1,1\n  \
          raw_block mat=minecraft:lever[face=wall, facing=south] at=2,1,2",
+    );
+    let source = format!(
+        "{refused}\nstruct t size=5x4\n  \
+         walls mat_slot=wall height=2\n  \
+         raw_block mat=minecraft:lever[face=wall, facing=north] at=2,1,1\n"
     );
     let target = Refusing(
         ["cobblestone", "lever", "stone"]
             .map(|id| format!("minecraft:{id}"))
             .to_vec(),
     );
-    let codes: Vec<DiagnosticCode> = findings(&source, &lowered_with(&source, &target))
-        .into_iter()
-        .map(|(code, ..)| code)
+    let out = judged(&source, &target);
+    let found = findings(&source, &out);
+    let codes: Vec<(DiagnosticCode, &str)> = found
+        .iter()
+        .map(|(code, span, ..)| (*code, *span))
         .collect();
-    assert_eq!(codes, [DiagnosticCode::UnknownId]);
+    assert_eq!(
+        codes,
+        [
+            (DiagnosticCode::UnknownId, "minecraft:bogus"),
+            (
+                DiagnosticCode::NoAttachmentFace,
+                "raw_block mat=minecraft:lever[face=wall, facing=north] at=2,1,1",
+            ),
+        ],
+    );
+    assert_eq!(
+        found[1].2,
+        "`raw_block` builds a block the game drops for want of a whole face to hang on: \
+         `minecraft:lever[face=wall,facing=north]` at 2,1,1 hangs on air",
+    );
+}
+
+#[test]
+fn a_member_the_resolver_refuses_leaves_its_body_unjudged() {
+    let unresolved =
+        floored("fill mat_slot=nope from=2,1,1 to=2,1,1\n  raw_block mat=minecraft:torch at=2,2,1");
+    let out = judged(&unresolved, &Catalog);
+    let codes: Vec<(DiagnosticCode, &str)> = findings(&unresolved, &out)
+        .into_iter()
+        .map(|(code, span, ..)| (code, span))
+        .collect();
+    assert_eq!(
+        codes,
+        [(
+            DiagnosticCode::UnresolvedSlot,
+            "fill mat_slot=nope from=2,1,1 to=2,1,1"
+        )],
+    );
+    let unbound = "theme t:\n  slot wall -> @cobblestone\n  slot stone -> @stone\n  slot junk -> 5\n\n\
+                   struct s size=5x4\n  \
+                   walls mat_slot=wall height=2\n  \
+                   fill mat_slot=stone from=1,0,1 to=3,0,2\n  \
+                   fill mat_slot=junk from=2,1,1 to=2,1,1\n  \
+                   raw_block mat=minecraft:torch at=2,2,1\n";
+    let out = judged(unbound, &Catalog);
+    let codes: Vec<(DiagnosticCode, &str)> = findings(unbound, &out)
+        .into_iter()
+        .map(|(code, span, ..)| (code, span))
+        .collect();
+    assert_eq!(codes, [(DiagnosticCode::UnknownSlotTarget, "5")]);
 }

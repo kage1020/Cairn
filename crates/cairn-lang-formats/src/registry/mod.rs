@@ -28,15 +28,15 @@ pub use connections::{
 };
 pub use constraints::{
     AttachmentRow, Boundary, CenterRow, ConstraintIndex, ConstraintsCatalog, ConstraintsError,
-    EntityAabbRow, EntityBox, GravityRow, HangsBy, Needs, SUPPORTED_CONSTRAINTS_SCHEMA,
-    SensitivityRow, Side, SupportRow,
+    EntityAabbRow, EntityBox, GravityRow, HangsBy, SUPPORTED_CONSTRAINTS_SCHEMA, SensitivityRow,
+    SupportRow,
 };
 pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
 pub use load::{
     PackSource, PackView, RegistryError, RegistryPack, Respelling, SUPPORTED_DATA_VERSIONS_SCHEMA,
     SUPPORTED_MANIFEST_SCHEMA, builtin_constraints, builtin_pack, builtin_version_tables,
-    load_builtin_constraints, load_builtin_pack, load_from_dir, parse_constraints,
+    builtin_view, load_builtin_constraints, load_builtin_pack, load_from_dir, parse_constraints,
 };
 pub use manifest::{PackFiles, PackManifest};
 pub use states::{

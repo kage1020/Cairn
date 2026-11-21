@@ -240,7 +240,7 @@ pub struct EditionRespellings {
 pub struct RespelledToken {
     /// The id the token spells.
     pub id: String,
-    /// Where a theme slot or `path=` binds it.
+    /// Where a theme slot, a selector row or a `path=` binds it.
     #[serde(flatten)]
     pub position: Position,
     /// Each version that writes another id, in ascending release order.
@@ -365,7 +365,7 @@ pub struct RecommendedTestTargets {
 pub struct SemanticSensitiveFinding {
     /// The edition whose versions the boundary is one of.
     pub edition: Edition,
-    /// The member's `id=`, or its keyword when it carries none (`yard_water`, `walls`).
+    /// The member's `id=`, or its address when it carries none (`yard_water`, `walls[0]`).
     pub member: String,
     /// What changes at the boundary, as the catalog words it (`"cauldron split"`).
     pub reason: String,

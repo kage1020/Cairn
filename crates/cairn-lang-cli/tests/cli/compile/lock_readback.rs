@@ -201,6 +201,71 @@ fn a_verified_version_the_table_does_not_know_names_every_sensitive_member() {
 }
 
 #[test]
+fn a_retarget_from_the_other_edition_names_no_sensitive_member() {
+    // A Bedrock version says nothing about where a Java boundary lies.
+    let fixture = Fixture::new(STORE);
+    let built = Run::from(compile_as(&fixture, "bedrock", "1.21.60"));
+    assert_eq!(built.code, Some(0), "stderr={}", built.stderr);
+    let second = Run::from(compile_as(&fixture, "java", "1.21.4"));
+    assert_eq!(second.code, Some(0), "stderr={}", second.stderr);
+    assert_eq!(
+        warning_lines(&second.stderr),
+        [
+            "W_PREVIOUSLY_VERIFIED_TARGET: verified for bedrock 1.21.60/block version 18168865, \
+             now java 1.21.4/4189."
+        ],
+    );
+}
+
+/// A shed of two unnamed chests, placed once.
+const YARD: &str = "theme t:\n  slot wall -> @cobblestone\n\n\
+                    def shed size=5x5:\n  \
+                    floor mat_slot=wall\n  \
+                    walls mat_slot=wall height=3\n  \
+                    raw_block mat=minecraft:chest at=1,1,1\n  \
+                    raw_block mat=minecraft:chest at=3,1,1\n\n\
+                    site yard:\n  \
+                    place id=home use=shed theme=t at=origin\n";
+
+#[test]
+fn a_lock_recording_a_refused_id_still_names_the_members_a_retarget_moves() {
+    let fixture = Fixture::new(YARD);
+    let lock = fixture.lock();
+    let built = Run::from(compile_as(&fixture, "java", "1.20.4"));
+    assert_eq!(built.code, Some(0), "stderr={}", built.stderr);
+    let written = fs::read_to_string(&lock).expect("read lock");
+    assert!(
+        written.contains(
+            "member_version_sensitivity:\n- id: raw_block[0]\n  reason: item format at 1.20.5\n\
+             - id: raw_block[1]\n  reason: item format at 1.20.5\n"
+        ),
+        "each unnamed chest is recorded by its address: {written}",
+    );
+    fs::write(
+        &lock,
+        with_line(&written, "  id: home\n", "  id: sub/home\n"),
+    )
+    .expect("write");
+    let second = Run::from(compile_as(&fixture, "java", "1.21.4"));
+    assert_eq!(second.code, Some(0), "stderr={}", second.stderr);
+    let path = lock.display();
+    assert_eq!(
+        warning_lines(&second.stderr),
+        [
+            format!(
+                "warning: {path}: the existing lockfile records an identifier this build refuses \
+                 (identifier `sub/home` contains forbidden character `/`) but is otherwise valid, \
+                 as one an earlier Cairn wrote would be; it is being replaced"
+            )
+            .as_str(),
+            PREVIOUS_TARGET,
+            "W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: raw_block[0] (item format \
+             at 1.20.5), raw_block[1] (item format at 1.20.5)",
+        ],
+    );
+}
+
+#[test]
 fn the_members_the_lock_recorded_are_not_what_the_warning_reads() {
     // The cottage has no sensitive member, so a list doctored into its lock names nothing now.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");

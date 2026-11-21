@@ -66,11 +66,12 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `registry::RegistryPack` | A loaded and validated pack. Its fields are private and read through accessors, so a pack cannot be built without passing the validators or changed after. |
 | `registry::RegistryError` | Everything reading or validating a pack can refuse: a missing or unreadable component, a schema version past what this build understands, a failed validator. |
 | `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a reader can tell which directory was read. |
-| `registry::builtin_constraints` | The built-in constraint catalog, checked against the built-in packs and parsed once per process. `PackView::with_constraints` hands it to a view, whose lowering then runs the catalog's checks. |
+| `registry::builtin_constraints` | The built-in constraint catalog, checked against the built-in packs and parsed once per process. `PackView::with_constraints` hands it to a view, whose lowering then runs the catalog's checks at a pinned version, and `PackView::semantic_sensitive` reads its boundaries for the members of a build. |
+| `registry::builtin_view` | The built-in pack's view of an edition at a version, or at none, with the built-in catalog attached, so its lowering runs the catalog's checks once a version is pinned. |
 | `registry::load_builtin_constraints` | The same catalog as a `Result`, for a caller that wants the error rather than the panic. |
 | `registry::parse_constraints` | A catalog from its JSON text, checked against a Java and a Bedrock pack and hashed from that text, as the lockfile's `constraint_catalog_hash` records it. |
 | `registry::ConstraintIndex` | A loaded and checked catalog: each block's rule, the faces that give a centre, the boundaries at which a block's meaning changes, each entity's box, and the hash. Its fields are private, so an index cannot be built without passing the checks. |
-| `registry::ConstraintsError` | Everything reading or checking a catalog can refuse: a parse failure, a schema version past what this build understands, a row that names nothing, an id no Java version declares, a malformed row, two rules one state meets, a boundary its edition's version table cannot place. |
+| `registry::ConstraintsError` | Everything reading or checking a catalog can refuse: a parse failure, a schema version past what this build understands, a row that names nothing, an id no Java version declares, a malformed row, two rows of a block that give one state different defaults, two rules one state meets, a boundary its edition's version table cannot place. |
 | `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. An unknown edition, such as `"BEDROCK"`, is refused. |
 | `registry::PackFiles` | The component references inside a manifest. New components arrive as `Option` fields, so an older pack stays loadable. |
 
