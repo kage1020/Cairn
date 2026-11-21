@@ -5,15 +5,19 @@ use std::process::ExitCode;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
+use cairn_lang_formats::build::artifact::{PreparedArtifact, prepare_artifact};
+use cairn_lang_formats::build::run_level::{RunLevelNote, artifact_collision, backend_refusal};
+use cairn_lang_formats::data_version::{JavaTarget, ResolvedTarget};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
 use cairn_lang_formats::schem::{SchemError, prepare_schem, schem_files};
+use cairn_lang_formats::target::PreparedStructure;
 
+use crate::cli::StructureFormat;
 use crate::lockfile::build_lockfile;
 use crate::name_case::NameCase;
-use crate::report::degraded_warning;
+use crate::report::report_structure_message;
 use crate::staging;
-use crate::target::{Backend, PreparedStructure, ResolvedTarget, prepare};
 
 pub(crate) fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, ExitCode> {
     let Some(out_dir) = resolve_out_dir(file, requested) else {
@@ -46,6 +50,32 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
+/// What a build's artifacts are checked against and written by: its target with, on Java, the
+/// file format.
+#[derive(Clone, Copy)]
+pub(crate) enum Backend<'t> {
+    /// A structure file per array, in the target's edition's own format.
+    PerArray(&'t ResolvedTarget),
+    /// A `.litematic` per struct and per site.
+    Litematic(&'t JavaTarget),
+    /// A `.schem` per array.
+    Schem(&'t JavaTarget),
+}
+
+impl<'t> Backend<'t> {
+    /// The backend `target` writes through, `format` picking Java's; Bedrock has one format, and
+    /// `cairn compile` refuses `--structure-format` beside it.
+    pub(crate) fn new(target: &'t ResolvedTarget, format: StructureFormat) -> Self {
+        match (target, format) {
+            (ResolvedTarget::Java(java), StructureFormat::Litematic) => Self::Litematic(java),
+            (ResolvedTarget::Java(java), StructureFormat::Schem) => Self::Schem(java),
+            (ResolvedTarget::Java(_), StructureFormat::Nbt) | (ResolvedTarget::Bedrock(_), _) => {
+                Self::PerArray(target)
+            }
+        }
+    }
+}
+
 /// Check every artifact against its backend before any I/O, so only I/O can fail a write.
 pub(crate) fn prepare_artifacts<'a>(
     block_ir: &'a BlockArrayIr,
@@ -66,10 +96,11 @@ pub(crate) fn prepare_artifacts<'a>(
             for file in litematic_files(block_ir) {
                 let (scope, stem) = (file.scope.clone(), file.stem.clone());
                 let schematic = prepare_litematic(file, java).map_err(|err| {
-                    eprintln!("error: checking `{scope}`: {err}");
+                    let mut refusal = backend_refusal(&scope, &err);
                     if let Some(fix) = litematic_fix(&err) {
-                        eprintln!("  note: {fix}");
+                        refusal.notes.push(RunLevelNote::note(fix));
                     }
+                    report_structure_message(&refusal);
                     ExitCode::from(1)
                 })?;
                 let path = claims.claim(&scope, &output_filename(&stem, OutputExt::Litematic))?;
@@ -82,10 +113,11 @@ pub(crate) fn prepare_artifacts<'a>(
                 let scope = file.scope;
                 let file_name = output_filename(&file.stem, OutputExt::Schem);
                 let schematic = prepare_schem(file, java).map_err(|err| {
-                    eprintln!("error: checking `{scope}`: {err}");
+                    let mut refusal = backend_refusal(scope, &err);
                     if let Some(fix) = schem_fix(&err) {
-                        eprintln!("  note: {fix}");
+                        refusal.notes.push(RunLevelNote::note(fix));
                     }
+                    report_structure_message(&refusal);
                     ExitCode::from(1)
                 })?;
                 prepared.push((
@@ -97,14 +129,17 @@ pub(crate) fn prepare_artifacts<'a>(
         }
     };
     for (scope, array) in &block_ir.structures {
-        let (structure, degraded) = prepare(target, array).map_err(|err| {
-            eprintln!("error: checking `{scope}`: {err}");
+        let PreparedArtifact {
+            file_name,
+            structure,
+            degraded,
+        } = prepare_artifact(block_ir, scope, array, target).map_err(|refusal| {
+            report_structure_message(&refusal);
             ExitCode::from(1)
         })?;
-        for note in &degraded {
-            eprintln!("{}", degraded_warning(scope, note));
+        for warning in &degraded {
+            report_structure_message(warning);
         }
-        let file_name = output_filename(&block_ir.artifact_stem(scope), target.output_ext());
         prepared.push((claims.claim(scope, &file_name)?, structure));
     }
     Ok(prepared)
@@ -212,26 +247,24 @@ impl ArtifactCollision {
             path,
             litematic,
         } = self;
-        eprintln!(
-            "error: output filename `{}` collides between scopes `{first}` and `{scope}`",
-            path.display(),
-        );
+        let mut refusal = artifact_collision(&path.display().to_string(), first, scope);
         // Only a site written as one `.litematic` takes a name a struct can also have.
         let site = first.starts_with("site::") || scope.starts_with("site::");
         if *litematic && site && first_path == path {
-            eprintln!(
-                "  note: rename the site or the struct, or compile with `--structure-format nbt`, \
-                 which writes the site as a file per placement",
-            );
+            refusal.notes.push(RunLevelNote::note(
+                "rename the site or the struct, or compile with `--structure-format nbt`, which \
+                 writes the site as a file per placement",
+            ));
         }
         if first_path != path {
-            eprintln!(
-                "  note: `{}` and `{}` name one file on this file system; rename one of \
-                 the scopes so their names differ by more than case",
+            refusal.notes.push(RunLevelNote::note(format!(
+                "`{}` and `{}` name one file on this file system; rename one of the scopes so \
+                 their names differ by more than case",
                 first_path.display(),
                 path.display(),
-            );
+            )));
         }
+        report_structure_message(&refusal);
     }
 }
 

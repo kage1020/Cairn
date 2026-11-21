@@ -42,7 +42,7 @@ See [Purpose and Scope](/spec/overview/) for the normative wording.
 | [Tutorial](/tutorial/) | A walk from one cottage to a village, through the worked [examples](/examples/). |
 | [Specification](/spec/) | Fifteen chapters, plus the compatibility tiers and a cross-cutting glossary. |
 | [Developer Guide](/development/) | The Rust workspace, how the crates split, and how to land changes. |
-| [Playground](/playground/) | A placeholder for the browser-hosted compiler. Tracks `cairn-lang-wasm`. |
+| [Playground](/playground/) | Write Cairn in the browser and see what it builds, with no install. |
 
 Every page of this site except the home page and the playground also ships inside `cairn`, as it
 stood in the release you installed. `cairn docs` lists the pages, and `cairn docs spec/syntax`

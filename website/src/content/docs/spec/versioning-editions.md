@@ -1201,6 +1201,38 @@ what this release's do ([§10.6](#106-provenance-and-lock)).
 | `unreadable` | `kind`, `io` for a file that cannot be read as UTF-8 text and `invalid` for a document the schema refuses, and `error`, the cause as the note words it |
 | `missing` | nothing more |
 
+### The report in an editor
+
+The language server gives the same answer for a document the editor has open, as the
+`workspace/executeCommand` command `cairn.info`. Its one argument is an object: `uri`, the open
+document's `file:` URI, and optionally `editions`, the list `--editions` takes, which defaults to
+`["java", "bedrock"]` as the flag does. The result is the document `cairn info --format json`
+prints for the file at that path: the report, or the `{"diagnostics": [ ... ]}` document where a
+finding refuses the run ([Lint §11.2](/spec/lint/#112-machine-readable-payload)). Two inputs come
+from the editor rather than a command line:
+
+- The source is the text the editor holds, saved or not, so `source_unchanged` compares the lock
+  with that text.
+- The lock is `<source>.lock` beside the file, the path `cairn info` reads without `--lock`.
+
+What `cairn info` writes on stderr is not sent: a response has no place for it, and the stderr of a
+JSON run is prose outside the contract. Arguments other than that one object, an object the command
+cannot read, a document the editor does not have open, a URI that names no file path, or an
+`editions` list `--editions` would refuse is answered with an `InvalidParams` error that says which.
+A `file:` URI with a host names a UNC path on Windows and no path elsewhere. A run a palette alone
+refuses has a document with no element ([Lint §11.2](/spec/lint/#112-machine-readable-payload)),
+and no exit code to say it was refused, so it is answered with a `RequestFailed` error carrying the
+lines `cairn info` writes on stderr about the palette instead.
+
+### The report in a browser
+
+The [playground](/playground/)'s module gives the same answer for a source held in memory, as the
+JavaScript function `info(source, editions)`, where `editions` is the list `--editions` takes. The
+source has no path, so no lock lies beside it: `verified_target` is
+`{"status": "missing", "path": ""}`, the `(no lock)` of a path that names no file. As in an editor,
+what `cairn info` writes on stderr is not answered. An `editions` list `--editions` would refuse,
+or an empty one, throws an `Error` that says which.
+
 ## 10.6 Provenance and lock
 
 The `.crn` carries the language version it is written against (`@cairn`) and, about targets, only

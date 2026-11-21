@@ -394,6 +394,21 @@ fn a_lock_flag_naming_no_file_reports_no_lock() {
 }
 
 #[test]
+fn a_lock_flag_naming_the_default_path_still_says_to_compile_with_the_flag() {
+    let fixture = Fixture::new(HUT);
+    let lock = display(&fixture.lock());
+    let run = info(&fixture, &["--lock", &lock]);
+    assert_eq!(verified_row(&run), "(no lock)");
+    assert_eq!(
+        run.stderr,
+        format!(
+            "note: no lockfile at {lock}, so no target is verified; `cairn compile --lock {lock}` \
+             writes one\n"
+        ),
+    );
+}
+
+#[test]
 fn a_lock_flag_through_no_directory_says_no_compile_can_write_there() {
     let fixture = Fixture::new(HUT);
     for (dir, label) in [

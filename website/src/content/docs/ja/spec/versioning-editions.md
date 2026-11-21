@@ -557,6 +557,19 @@ note が約束するのは、コンパイルが実際にすることだけです
 | `unreadable` | UTF-8 のテキストとして読み込めないファイルなら `io`、スキーマが拒否する文書なら `invalid` となる `kind` と、原因を note と同じ文言で示す `error` |
 | `missing` | なし |
 
+### エディタでのレポート
+
+言語サーバーは、エディタが開いている文書について同じ答えを `workspace/executeCommand` のコマンド `cairn.info` として返します。引数は 1 つのオブジェクトで、開いている文書の `file:` URI である `uri` と、省略できる `editions` を持ちます。`editions` は `--editions` が受け取るリストで、フラグと同じく省略時は `["java", "bedrock"]` です。結果は、そのパスのファイルに対して `cairn info --format json` が出力する文書です。つまりレポートか、指摘が実行を拒否した場合は `{"diagnostics": [ ... ]}` の文書です ([Lint §11.2](/ja/spec/lint/#112-機械可読ペイロード))。入力のうち 2 つは、コマンドラインではなくエディタから来ます。
+
+- ソースは、保存したかどうかにかかわらずエディタが保持しているテキストです。そのため `source_unchanged` はロックをそのテキストと比べます。
+- ロックはファイルの隣の `<source>.lock` で、`--lock` なしの `cairn info` が読むパスです。
+
+`cairn info` が stderr に書く内容は送りません。応答にはそれを入れる場所がなく、JSON での実行の stderr は契約の外の文章だからです。そのオブジェクト 1 つ以外の引数、コマンドが読めないオブジェクト、エディタが開いていない文書、ファイルのパスを指さない URI、`--editions` なら拒否する `editions` のリストには、どれに当たるかを述べる `InvalidParams` エラーで答えます。ホストを持つ `file:` URI は、Windows では UNC パスを指し、ほかではパスを指しません。パレットだけが拒否した実行の文書には要素がなく ([Lint §11.2](/ja/spec/lint/#112-機械可読ペイロード))、拒否されたことを示す終了コードもありません。そのため、代わりに `cairn info` がそのパレットについて stderr に書く行を載せた `RequestFailed` エラーで答えます。
+
+### ブラウザでのレポート
+
+[プレイグラウンド](/ja/playground/)のモジュールは、メモリ上のソースについて同じ答えを JavaScript の関数 `info(source, editions)` として返します。`editions` は `--editions` が受け取るリストです。ソースにはパスがないので、隣にロックもありません。`verified_target` は `{"status": "missing", "path": ""}` で、ファイルを指さないパスと同じ `(no lock)` にあたります。エディタと同じく、`cairn info` が stderr に書く内容は返しません。`--editions` なら拒否する `editions` のリストや空のリストには、どれに当たるかを述べる `Error` を投げます。
+
 ## 10.6 来歴 (provenance) とロック
 
 `.crn` が持つのは、書かれた言語のバージョン (`@cairn`) と、ターゲットについてはヒントである `@intended_targets` だけです。`verified: true`、DataVersion、各種ハッシュはロックにだけ存在し、ビルドが成功したときにコンパイラが書き込みます。手で書くことはありません。
