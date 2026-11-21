@@ -30,8 +30,8 @@ pub(crate) use selector::select_the_same_members;
 pub use version_axes::{
     BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, DroppedIntent,
     EditionPortability, EditionReport, EditionRespellings, FloorDeclarer, FloorOrigin, FloorPart,
-    InferredRange, LastDeclaredId, PaintedId, RefusedTarget, RegistryRange, RequiresConflict,
-    RespelledToken, SemanticSensitiveFinding, SpellingTable, TargetRefusal, UnsupportedEntry,
-    UnsupportedReason, VersionAxes, VersionFloor, WrittenSpelling, compute_axes,
+    InferredRange, LastDeclaredId, PaintedId, RecommendedTestTargets, RefusedTarget, RegistryRange,
+    RequiresConflict, RespelledToken, SemanticSensitiveFinding, SpellingTable, TargetRefusal,
+    UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor, WrittenSpelling, compute_axes,
     declared_version_floors, unscoped_version_floors, versions_satisfying,
 };

@@ -8,7 +8,7 @@ use cairn_lang_core::{
     Diagnostic as CoreDiagnostic, Edition, Module, Severity, diagnose_parse_failure, lower, parse,
     resolve,
 };
-use cairn_lang_formats::{builtin_pack, builtin_version_tables};
+use cairn_lang_formats::{builtin_pack, builtin_version_tables, builtin_view};
 
 use crate::line_index::LineIndex;
 use crate::pin::Pin;
@@ -66,8 +66,7 @@ fn findings(module: &Module, pin: &Pin) -> Vec<CoreDiagnostic> {
     let pinned = refusal.is_none().then_some(target.version());
     let resolution = resolve(&ir, Some(edition));
     found.extend(
-        lower_to_block_array(&ir, &resolution, Some(&builtin_pack(edition).view(pinned)))
-            .diagnostics,
+        lower_to_block_array(&ir, &resolution, Some(&builtin_view(edition, pinned))).diagnostics,
     );
     found.extend(refusal);
     found

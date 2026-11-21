@@ -45,7 +45,11 @@ fn info_json_at(path: &std::path::Path, editions: &str) -> Value {
             distinct.push(name);
         }
     }
-    for axis in ["edition_portability", "buildable_targets"] {
+    for axis in [
+        "edition_portability",
+        "buildable_targets",
+        "recommended_test_targets",
+    ] {
         assert_eq!(
             axes[axis].as_array().map(Vec::len),
             Some(distinct.len()),
@@ -377,7 +381,7 @@ fn a_source_no_supported_version_can_build_says_so() {
     );
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
+            "buildable targets:         Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "the row must carry the same answer the JSON does, got: {stdout}",
     );
@@ -877,7 +881,7 @@ fn a_state_the_writer_cannot_carry_names_the_palette_entry() {
     assert_eq!(code, Some(0), "info reports; the build refuses: {stderr}");
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
+            "buildable targets:         Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "{stdout}",
     );
@@ -997,7 +1001,7 @@ fn naming_the_reason_does_not_move_the_exit_code_or_the_text_row() {
     assert_eq!(code, Some(0), "info reports; the build refuses: {stderr}");
     assert!(
         stdout.contains(
-            "buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
+            "buildable targets:         Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)"
         ),
         "the text row is unchanged: {stdout}",
     );
@@ -1205,6 +1209,7 @@ fn naming_the_entry_does_not_move_the_rows() {
             "buildable targets",
             "intended targets",
             "semantic-sensitive",
+            "recommended test targets",
             "verified target",
         ],
         "premise: these are the rows, got: {clean_out}",
@@ -1518,7 +1523,7 @@ fn an_unsupported_entry_is_a_figure_not_a_gate() {
         "the text row must carry the same figure the JSON does, got: {stdout}",
     );
     assert!(
-        stdout.contains("buildable targets:       Bedrock: none"),
+        stdout.contains("buildable targets:         Bedrock: none"),
         "the buildable row reports too, got: {stdout}",
     );
 }

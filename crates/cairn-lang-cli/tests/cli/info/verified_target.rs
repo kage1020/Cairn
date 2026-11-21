@@ -29,7 +29,7 @@ fn verified_row(run: &Run) -> &str {
     let rows: Vec<&str> = run
         .stdout
         .lines()
-        .filter_map(|line| line.strip_prefix("verified target:         "))
+        .filter_map(|line| line.strip_prefix("verified target:           "))
         .collect();
     let [row] = rows.as_slice() else {
         panic!("one `verified target` row expected, got: {}", run.stdout);
@@ -478,14 +478,15 @@ fn a_lock_value_that_would_break_its_row_adds_no_row_to_the_report() {
     assert_eq!(run.code, Some(0), "{}", run.stderr);
     assert_eq!(
         run.stdout,
-        "registry compatibility:  0.0 .. latest\n\
-         inferred range:          Java: 0.0 .. latest\n\
-         edition portability:     Java: portable: 1  degraded: 0  unsupported: 0\n\
-         respelled:               Java: none\n\
-         buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3\n\
-         intended targets:        (none declared)\n\
-         semantic-sensitive:      (none)\n\
-         verified target:         (unreadable lock)\n",
+        "registry compatibility:    0.0 .. latest\n\
+         inferred range:            Java: 0.0 .. latest\n\
+         edition portability:       Java: portable: 1  degraded: 0  unsupported: 0\n\
+         respelled:                 Java: none\n\
+         buildable targets:         Java: 1.20.4, 1.21, 1.21.4, 26.3\n\
+         intended targets:          (none declared)\n\
+         semantic-sensitive:        Java: (none)\n\
+         recommended test targets:  Java: 1.20.4, 26.3\n\
+         verified target:           (unreadable lock)\n",
     );
     assert_eq!(
         run.stderr,

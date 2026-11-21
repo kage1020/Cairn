@@ -41,7 +41,11 @@ Some residue is unsolvable and is stated rather than hidden:
 - Visual consistency (colour-temperature drift).
 - Physics rule changes (1.21 wind charges breaking old traps).
 
-Geometrically correct NBT is emitted; the gameplay experience is not guaranteed.
+Geometrically correct NBT is emitted; the gameplay experience is not guaranteed. Where the
+constraint catalog knows the game will drop a block, let it fall or let water run out, a pinned
+build warns ([Lint](/spec/lint/#constraint-checks)), and where it knows a member's meaning changes at
+a version, `cairn info` and the lock name the member ([§10.5](#the-semantic-sensitive-row)). Neither
+is a guarantee: the catalog lists what it knows.
 
 ## 10.3 Backend = data tables
 
@@ -56,24 +60,22 @@ table. The block tables are extracted: Java's from the server jar's `--reports`,
 release's block palette, every block state the game accepts. Each `pack.json` names the file every
 table was extracted from and that file's hash, and rerunning the extraction against them is a check.
 
-**Hand-written, version-tagged constraint catalog** for what the data does not carry: attachment (a
-frame cannot go on glass), gravity and support (gravel, hanging lanterns), fluid behaviour, entity
-AABB, redstone. Defined once per new version, and every user benefits. No constraint catalog ships
-yet, so a lock records its `constraint_catalog_hash` as zeros and no member is reported
-semantic-sensitive ([§10.5](#105-which-version-is-it-for-has-three-answers)).
+**Hand-written constraint catalog** for what the data does not carry: attachment (a lever cannot
+hang on a glass pane), gravity and support (gravel, hanging lanterns), fluid behaviour, entity AABB,
+redstone, and the versions at which a block's meaning changes. Defined once, and every user
+benefits. The built-in catalog ships beside the packs, one file for both editions in canonical IDs.
+Its rules hold at every version that declares their blocks, and read each version's faces from the
+pack; a meaning that changes at a version is tagged with that version. Its tables, and the checks
+that read them, are [Lint §11.4](/spec/lint/#114-constraint-catalog)'s. A lock records the sha256 of
+its text ([§10.6](#106-provenance-and-lock)).
 
-```yaml
-constraints:
-  minecraft:item_frame:
-    type: entity_attachment
-    since: "1.13"
-    targets: { solid_full_face: true, glass_pane: false }
-    error: "item_frame requires a solid attachable face"
-  minecraft:lantern:
-    type: support
-    states:
-      hanging=true:  { requires_above: solid_or_chain }
-      hanging=false: { requires_below: solid_top }
+```json
+"support": [
+  {"ids": ["lantern"], "when": {"hanging": "false"}, "defaults": {"hanging": "false"},
+   "on": "below", "needs": "center"},
+  {"ids": ["lantern"], "when": {"hanging": "true"}, "defaults": {"hanging": "false"},
+   "on": "above", "needs": "center"}
+]
 ```
 
 ### Folding the `(edition, version)` matrix
@@ -685,9 +687,8 @@ There is no single "for-version". `cairn info` reports three axes:
    disappear, so deciding Vmax from the registry alone is dangerous. The constraint catalog carries
    a `semantic_sensitivity` (boundary version + reason) separate from `since`/`until`, and a compile
    crossing one warns. Examples: the cauldron split at 1.17, wall connections going bool →
-   `none/low/tall` at 1.16, the item format at 1.20.5. No constraint catalog ships yet
-   ([§10.3](#103-backend--data-tables)), so the `semantic-sensitive` row is always `(none)` and no
-   compile warns.
+   `none/low/tall` at 1.16, the item format at 1.20.5, the three the built-in catalog ships. See
+   [the `semantic-sensitive` row](#the-semantic-sensitive-row).
 3. **The verified lock target** ([§10.6](#106-provenance-and-lock)): the `(edition, version,
    data_version)` the source's lockfile records, whether the source still hashes to that lock's
    `source_hash`, and the Cairn release that wrote it. See [the `verified target`
@@ -696,14 +697,15 @@ There is no single "for-version". `cairn info` reports three axes:
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  1.21.40 .. latest
-inferred range:          Java: 0.0 .. latest   Bedrock: 1.21.40 .. latest
-edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
-respelled:               Java: none   Bedrock: minecraft:oak_sign
-buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
-intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      yard_water(cauldron split @1.17), fence(wall conn @1.16)
-verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
+registry compatibility:    1.21.40 .. latest
+inferred range:            Java: 0.0 .. latest   Bedrock: 1.21.40 .. latest
+edition portability:       Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+respelled:                 Java: none   Bedrock: minecraft:oak_sign
+buildable targets:         Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
+intended targets:          1.21.40, 1.21.60
+semantic-sensitive:        Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
+recommended test targets:  Java: (none)   Bedrock: 1.21.40, 1.26.60
+verified target:           bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
 Every version named, other than the open edge `0.0`, is one the built-in packs declare. The file
@@ -712,7 +714,9 @@ the floor, and Bedrock 1.21.0 with them, and its last compile built it for Bedro
 Bedrock build paints a block Bedrock's table first declares at 1.21.40, which is why the floor was
 declared and where Bedrock's inferred range starts; nothing the Java build paints bounds Java's.
 Bedrock writes the `@oak_sign` it paints as `standing_sign`, which the `respelled` row names. The
-`semantic-sensitive` row shows what a constraint catalog would add; today it reads `(none)`.
+`semantic-sensitive` row names Java members alone, since the built-in catalog's boundaries are all
+Java's. The `recommended test targets` row names no Java version, since none builds, and the oldest
+and newest Bedrock versions that do, since no Bedrock boundary lies between them.
 
 `intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
 declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
@@ -768,14 +772,15 @@ struct hut size=5x5
   walls mat_slot=wall height=3
 
 $ cairn info hut.crn --editions java
-registry compatibility:  1.20.4 .. latest
-inferred range:          Java: 1.21.4 .. latest
-edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
-respelled:               Java: none
-buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
-intended targets:        (none declared)
-semantic-sensitive:      (none)
-verified target:         (no lock)
+registry compatibility:    1.20.4 .. latest
+inferred range:            Java: 1.21.4 .. latest
+edition portability:       Java: portable: 2  degraded: 0  unsupported: 0
+respelled:                 Java: none
+buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)
+recommended test targets:  Java: 1.21.4, 26.3
+verified target:           (no lock)
 ```
 
 `1.20.4 .. latest` reads as an answer, and the row below disproves it: Java's table first declares
@@ -808,7 +813,7 @@ hut above paints `@pale_moss_block`, which Java first declares at 1.21.4 and Bed
 with `--editions java,bedrock` the row reads:
 
 ```text
-inferred range:          Java: 1.21.4 .. latest   Bedrock: 1.21.60 .. latest
+inferred range:            Java: 1.21.4 .. latest   Bedrock: 1.21.60 .. latest
 ```
 
 It is read off two lowerings, pinned to the oldest and the newest version the pack carries, the same
@@ -979,7 +984,7 @@ token picks. Each ID is listed once, in source order, or the edition reads `none
 theme binds `@chain`, `@oak_sign` and `@cauldron[fluid=water]` reads:
 
 ```text
-respelled:               Java: minecraft:chain, minecraft:cauldron   Bedrock: minecraft:chain, minecraft:oak_sign
+respelled:                 Java: minecraft:chain, minecraft:cauldron   Bedrock: minecraft:chain, minecraft:oak_sign
 ```
 
 Each token is named on stderr where a theme slot, a selector row or a `path=` binds it, once per ID
@@ -1085,8 +1090,54 @@ cannot carry prints a `note:` naming the entry, and a refused lowering prints th
 themselves under the version, each with its own position. Only the JSON lacks them, and `reason`
 fills that gap.
 
-A further row, `recommended test targets`, belongs to this axis and answers a different question
-again: which versions are worth testing against. No code path emits it yet.
+### The `semantic-sensitive` row
+
+The row answers the second axis per requested edition, as `Java: <members>   Bedrock: <members>`:
+each member as `name(reason @boundary)`, or `(none)` where the edition has none. A member is listed
+when a block it builds is one a `semantic_sensitivity` row of that edition names ([Lint
+§11.4](/spec/lint/#114-constraint-catalog)), once for each such row, in the order of the members.
+Its name is its `id=`, or its address ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)) where
+it carries none, so two members that build one block are two entries. The blocks are the ones the
+range-wide lowering builds, which the `edition portability` row reads too, so a Bedrock block is
+read as every canonical block a version's state map makes of it. `--format json` carries the row as
+`semantic_sensitive`, one `{edition, member, reason, boundary_version}` per entry, edition by
+edition in the order requested.
+
+The row lists what may change, not where it does. A member is listed whichever side of its boundary
+the versions it builds for lie: the row reads the source, and which versions that source is built
+for is the other rows' answer. The boundaries are the edition's own versions, so a member is never
+listed under an edition for another's boundary; the built-in catalog's are all Java's.
+
+A compile records its target's own answer in the lock's `member_version_sensitivity`, reading the
+blocks as that version does, and warns on a recompile for another version of the edition whose
+boundary lies between the two ([§10.6](#106-provenance-and-lock)).
+
+### The `recommended test targets` row
+
+The row answers which versions are worth loading a build in to test it, per requested edition, as
+`Java: <versions>   Bedrock: <versions>`. It picks from the edition's [buildable
+targets](#the-buildable-targets-row), the supported versions whose pinned lowering raises no error:
+
+- the oldest and the newest of them;
+- for each boundary of the edition's [`semantic-sensitive`](#the-semantic-sensitive-row) entries,
+  the newest of them before the boundary and the oldest at or after it, where some lie on each side.
+
+Each version is listed once, oldest first, in the order of the edition's version table. A source
+with no semantic-sensitive member gets its oldest and newest buildable versions alone, and so does
+one whose buildable versions lie on one side of every boundary. An edition no version builds gets
+`(none)`. `--format json` carries the row as `recommended_test_targets`, one `{edition, versions}`
+per requested edition, in the order requested.
+
+The oldest and newest buildable versions are the ends of what the build claims. A boundary between
+them is where one source is read two ways, so the row adds the two buildable versions nearest it,
+one on each side: the closest pair that shows both readings. A boundary outside them changes nothing
+a build of this source meets, and the row leaves it out though the `semantic-sensitive` row lists
+the member. A source that builds at every supported version and holds a chest, whose item format
+changes at Java 1.20.5, gets `Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60`: 1.20.4 and 1.21
+lie either side of 1.20.5, and 1.21.4 shows nothing that 1.21 and 26.3 do not.
+
+Like the other rows, it reports and refuses nothing. A buildable version it leaves out builds all the
+same.
 
 ### The `verified target` row
 
@@ -1099,7 +1150,7 @@ A lock the schema accepts prints its target, whether the source still hashes to 
 and its `cairn_version`:
 
 ```text
-verified target:         java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
+verified target:           java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
 ```
 
 The target is spelled as `W_PREVIOUSLY_VERIFIED_TARGET` spells its verified side, always led by the
@@ -1189,24 +1240,26 @@ The `.crn` carries the language version it is written against (`@cairn`) and, ab
 lock, written by the compiler on a successful build. They are never hand-written.
 
 ```yaml
-# build.crn.lock (compiler-generated)
+# yard.crn.lock (compiler-generated)
 lock_schema_version: 1        # revision of this document's own schema
 source_hash: sha256:...
 cairn_version: 2026.11.0      # the Cairn release that wrote it, as `cairn --version` prints it
-target: { edition: bedrock, mc_version: 1.21.60, data_version: 18168865 }
+target: { edition: java, mc_version: 1.20.4, data_version: 3700 }
 inputs: { registry_pack_hash: sha256:..., constraint_catalog_hash: sha256:... }
 resolved_ir_hash: sha256:...
 verified: true
 member_version_sensitivity:
   - { id: yard_water, reason: "cauldron split at 1.17" }
-  - { id: fence, reason: "wall conn at 1.16" }
+  - { id: pantry, reason: "item format at 1.20.5" }
 ```
 
 A compile writes the lock next to its source as `<source>.lock` unless `--lock` names another
 path, and `cairn info` reads the same path back as its [`verified target`
-row](#the-verified-target-row). No constraint catalog ships yet
-([§10.3](#103-backend--data-tables)), so today `constraint_catalog_hash` is all zeros and
-`member_version_sensitivity` is `[]`.
+row](#the-verified-target-row). `constraint_catalog_hash` is the sha256 of the constraint
+catalog's text ([§10.3](#103-backend--data-tables)). `member_version_sensitivity` lists what [the
+`semantic-sensitive` row](#the-semantic-sensitive-row) finds for the target's edition, reading the
+blocks as the target does, and each `reason` is the row's reason and boundary as `<reason> at
+<boundary>`.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and address assignment. The `members` record of each member that built a cell, a struct's
@@ -1234,13 +1287,18 @@ let the lock add a row of its own.
 Recompiling for a different target shows the difference from the verified one loudly:
 
 ```text
-$ cairn compile build.crn --edition bedrock --target 1.21.40 --lock build.crn.lock
-W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.21.60/block version 18168865, now 1.21.40/18163713.
-W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
+$ cairn compile yard.crn --edition java --target 1.21.4 --lock yard.crn.lock
+W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.
+W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: pantry (item format at 1.20.5)
 ```
 
-The second warning reads the members the previous lock lists, so no lock a compile writes today
-produces it.
+The second warning names the members of this build whose boundary lies between the version the lock
+verified and the target, each with the boundaries it crosses. 1.20.4 and 1.21.4 lie either side of
+1.20.5 alone, so `yard_water`'s 1.17 is not named. It reads this build rather than the list the lock
+recorded: that list carries no boundary to weigh, and may name members the source no longer builds.
+Across editions it names no member, since two editions' versions are not ordered against each
+other. A lock whose version the edition's table cannot place has every sensitive member named, since
+where it stood cannot be told.
 
 ## 10.7 Java / Bedrock portability
 

@@ -116,7 +116,9 @@ pub(crate) enum Command {
                 findings that need a target join the report — `E_UNKNOWN_ID` above all, which \
                 exists only where a target is pinned: `stone_bricks` is a block on Bedrock \
                 1.21.40 and not on Bedrock 1.21.0, so with no version chosen there is no question \
-                to answer. A version the edition does not ship \
+                to answer. The constraint catalog's checks run there too (`W_NO_ATTACHMENT_FACE`, \
+                `W_UNSUPPORTED_BLOCK`, `W_WATER_SPILL`), since what holds a block is the pinned \
+                version's answer. A version the edition does not ship \
                 still lowers, against the same unpinned view `cairn lower` uses, so every finding \
                 that needs no id table is reported before the target is refused. Leaving the flag \
                 off still lowers, with no target, and reports only the findings every target that \
@@ -128,20 +130,23 @@ pub(crate) enum Command {
         format: CheckFormat,
     },
     /// Report a .crn source file's declared and inferred version ranges, edition portability,
-    /// respelled tokens, semantic-sensitive members and verified lock target.
+    /// respelled tokens, semantic-sensitive members, the versions worth testing it in and its
+    /// verified lock target.
     #[command(
-        long_about = "Report the three version axes (the registry range the file declares and \
-            the one the blocks it paints imply per edition, semantic-sensitive members, verified \
-            lock target) for a .crn source file, with each requested edition's portability, the \
-            canonical tokens its versions write under another id, and its buildable targets \
-            beside them. A floor above an edition's inferred range is printed \
-            as `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. \
-            Exits 0 on success, including when the lockfile is missing or cannot be read; 1 on a \
-            parse failure, on any `Error`-severity diagnostic (the check passes run here, as does \
-            each requested edition's lowering with its circuits laid, and a range derived from a \
-            file `cairn check` rejects is a confident wrong answer), or on any other I/O error \
-            reading the source (permission denied, non-UTF-8 contents); 2 when the source file \
-            cannot be located, and rejects an empty `--editions` value with exit 2"
+        long_about = "Report the three version axes (the registry range the file declares and the \
+            one the blocks it paints imply per edition, semantic-sensitive members, verified lock \
+            target) for a .crn source file, with each requested edition's portability, the \
+            canonical tokens its versions write under another id, and its buildable targets beside \
+            them, and the `recommended test targets` among the buildable ones: the oldest and the \
+            newest, and the pair either side of each semantic-sensitivity boundary that falls \
+            between them. A floor above an edition's inferred range is printed as \
+            `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. Exits 0 \
+            on success, including when the lockfile is missing or cannot be read; 1 on a parse \
+            failure, on any `Error`-severity diagnostic (the check passes run here, as does each \
+            requested edition's lowering with its circuits laid, and a range derived from a file \
+            `cairn check` rejects is a confident wrong answer), or on any other I/O error reading \
+            the source (permission denied, non-UTF-8 contents); 2 when the source file cannot be \
+            located, and rejects an empty `--editions` value with exit 2"
     )]
     Info {
         /// Path to the .crn file to inspect.
@@ -153,7 +158,8 @@ pub(crate) enum Command {
             default_values_t = vec!["java".to_owned(), "bedrock".to_owned()],
             long_help = "Comma-separated editions to evaluate portability against. Each distinct \
                 edition produces one entry in the output's `inferred range`, `edition \
-                portability` and `buildable targets` sections; a repeated name is reported once",
+                portability`, `buildable targets` and `recommended test targets` sections; a \
+                repeated name is reported once",
         )]
         editions: Vec<String>,
         /// Lockfile to report the verified target of; defaults to `<source>.lock` next to the
@@ -216,17 +222,20 @@ pub(crate) enum Command {
             1.26.60) is dropped with a `W_INTENT_DEGRADED` warning rather than silently. \
             `--target` pins the one version a block id and its states have an answer for, which \
             is what lets the compile check them (`E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, \
-            `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`); `cairn check --edition E --target V` pins the \
-            same pair to reach those findings without building anything. \
-            `--structure-format litematic` writes Java's artifacts as Litematica `.litematic` \
-            schematics instead: a struct to a file of its own and a site to one file with a \
-            region per placement and walkway (`spec/ecosystem-interop` \"Litematica\"); \
-            `--structure-format schem` writes them as Sponge Schematic version 3 `.schem` files, \
-            one per struct, placement and walkway, each offset by where it sits in its site \
-            (`spec/ecosystem-interop` \"Sponge Schematic\"). Exits 0 on success, 1 on parse, \
-            lowering, or I/O failure (including an unsupported `--target` or a state literal \
-            outside its block's states), and 2 when the source file cannot be located or \
-            `--structure-format` is given with `--edition bedrock`"
+            `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`) and run the constraint catalog's checks on \
+            what it builds; `cairn check --edition E --target V` pins the same pair to reach \
+            those findings without building anything. The lockfile records the catalog's hash \
+            and the members whose meaning changes at a boundary version of the edition, and a \
+            recompile for another version names those whose boundary it crosses \
+            (`W_SEMANTIC_SENSITIVITY`). `--structure-format litematic` writes Java's artifacts \
+            as Litematica `.litematic` schematics instead: a struct to a file of its own and a \
+            site to one file with a region per placement and walkway (`spec/ecosystem-interop` \
+            \"Litematica\"); `--structure-format schem` writes them as Sponge Schematic version \
+            3 `.schem` files, one per struct, placement and walkway, each offset by where it \
+            sits in its site (`spec/ecosystem-interop` \"Sponge Schematic\"). Exits 0 on \
+            success, 1 on parse, lowering, or I/O failure (including an unsupported `--target` \
+            or a state literal outside its block's states), and 2 when the source file cannot \
+            be located or `--structure-format` is given with `--edition bedrock`"
     )]
     Compile {
         /// Path to the .crn file to compile.

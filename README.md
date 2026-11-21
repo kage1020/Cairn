@@ -78,14 +78,15 @@ Diagnostics name what is wrong and what a valid value looks like, so a failed bu
 
 ```
 $ cairn info cottage.crn
-registry compatibility:  1.20 .. latest
-inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
-edition portability:     Java: portable: 12  degraded: 0  unsupported: 0   Bedrock: portable: 12  degraded: 0  unsupported: 0
-respelled:               Java: none   Bedrock: none
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
-intended targets:        (none declared)
-semantic-sensitive:      (none)
-verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
+registry compatibility:    1.20 .. latest
+inferred range:            Java: 0.0 .. latest   Bedrock: 0.0 .. latest
+edition portability:       Java: portable: 12  degraded: 0  unsupported: 0   Bedrock: portable: 12  degraded: 0  unsupported: 0
+respelled:                 Java: none   Bedrock: none
+buildable targets:         Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)   Bedrock: (none)
+recommended test targets:  Java: 1.20.4, 26.3   Bedrock: 1.21.0, 1.26.60
+verified target:           bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
 ## What works today
@@ -96,6 +97,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - Themes with slots, per-edition variants, and selector rows that bind the block of a part: the corner posts of `walls` and the frame round each door and window.
 - `edit` patches that change the members a selector or an address selects, without rewriting their lines.
 - A per-source lockfile, and registry packs carrying per-version block IDs, rename aliases and meaning tokens, so a canonical token is written the way each target spells it.
+- A constraint catalog beside the packs: a build pinned to a target warns on a lever or torch with nothing to hold it, sand over air, and water that runs out of the structure, and `cairn info` and the lockfile name the members whose meaning changes at a Java version.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
 - `cairn-lsp` with diagnostics against the target the editor pins, completion, hover, quick-fixes and the `cairn info` report, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
