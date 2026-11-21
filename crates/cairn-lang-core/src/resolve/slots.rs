@@ -51,9 +51,16 @@ pub(super) fn unresolved_slot_diag(
             format!("add `slot {slot} -> @...` to theme `{theme_name}` or correct the slot name")
         },
     });
+    // A slot an edit wrote is reported at the edit's value, once however many members it reaches.
+    let span = member
+        .mat_slot
+        .as_ref()
+        .map(|written| &written.span)
+        .filter(|value| value.start < member.span.start || member.span.end < value.end)
+        .unwrap_or(&member.span);
     Diagnostic {
         code: DiagnosticCode::UnresolvedSlot,
-        span: member.span.clone(),
+        span: span.clone(),
         primary: format!("`mat_slot={slot}` is not declared in theme `{theme_name}`"),
         notes,
         data: None,
