@@ -8,7 +8,7 @@ Write commands flat and in any order. The compiler assigns each one to a phase a
 phases in this fixed order:
 
 ```
-massing     floor / walls / volume / fill
+massing     floor / walls / fill
 envelope    roof / stair / beam
 openings    door / window
 fixtures    sign / painting / frame / bed / chest / trapdoor / note_block / sensors / actuators /
@@ -27,8 +27,8 @@ member's phase ([Materials and Themes](/spec/materials-themes/#selector-bindings
 member's corner posts in `massing`, and a `door` or `window` frame in `openings`, once every
 opening is cut.
 
-Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `water` are not keywords
-yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`, `envelope`,
+Not every row runs today. `sign`, `painting`, `frame`, `bed` and `water` are not keywords yet and
+are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`, `envelope`,
 `openings`, `fixtures` (whose members are `chest`, `trapdoor`, `note_block`, every sensor and
 actuator but `door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts))),
 `fluids` and `raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). The three
