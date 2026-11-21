@@ -4,16 +4,14 @@ title: "9. コンポーネント・編集・複数建築"
 
 ## 9.1 コンポーネントを定義する `def`
 
-**変更の余地あり。** ヘッダの `class=` は受け付けますが、まだどのパスも読みません ([互換性ティア](/ja/spec/compatibility/#変更の余地あり))。
-
 `def` は、スロットを持つコンポーネントを定義します。`theme` や `site` と同じ仕組みで統一されているので、編集、テーマの適用、複数の建物の配置のどこでも、参照の仕方がばらばらになりません。
 
 パラメータ化 (可変のサイズなど) は許し、再帰は禁止します。`def` は `requires version>=X` を宣言でき、部品を組み合わせたものの最低バージョンは、部品の最低バージョンのうち最大のものになります ([バージョンとエディション](/ja/spec/versioning-editions/))。
 
-パラメータの仕組みが決まるまで、ヘッダに書けるキーは限られています。`def` のヘッダに書けるのは、lowering が読む `size=` と、まだどのパスも読まない `class=` の 2 つで、`struct` のヘッダも同じです。どちらでも、それ以外のキーは `E_UNKNOWN_ARGUMENT` として拒否します。ヘッダの `class=` は `W_IGNORED_ARGUMENT` として報告するので ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))、下の例にはこの警告が出ます。
+パラメータの仕組みが決まるまで、ヘッダに書けるキーは限られています。`def` のヘッダに書けるのは、lowering が読む `size=` だけで、`struct` のヘッダも同じです。どちらでも、それ以外のキーは `E_UNKNOWN_ARGUMENT` として拒否します。すべてのメンバーが受け付けるキー `id=`、`class=`、`mat_slot=` もこれにあたります。これらはメンバーのキーなので、下の例の `walls` の `class=outer` のように、本体の行に書きます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
 
 ```
-def cottage class=house size=9x7:
+def cottage size=9x7:
   floor  id=floor mat_slot=floor
   walls  id=walls class=outer mat_slot=wall height=4
   door   id=door  class=entry side=front at=center
