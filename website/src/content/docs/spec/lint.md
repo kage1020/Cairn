@@ -439,9 +439,11 @@ row, with a note at the earlier one, and names both boxes and the box they share
 placed relative to it too, or for an `at=origin` row, which no `gap=` moves, a relative selector.
 A walkway is compared by the cells it lays rather than by its box, against every placement of its
 site but its two ends, and the finding is on the `connect` row with a note at the placement. The
-router keeps a strip off placement floors only, so a strip routed under the eaves of a third
-placement is one. Each site is a layout of its own whose first row stands at the world origin, so
-rows of two sites are not compared, and a walkway routes around the floors of its own site only.
+router keeps a strip off the cells placements take up on its row, which leave out the overhang under
+their eaves ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)), so a strip routed
+under the eaves of a third placement is one. Each site is a layout of its own whose first row stands
+at the world origin, so rows of two sites are not compared, and a walkway routes around the
+placements of its own site only.
 Inside one body, overlapping members merge by phase; between two structure files there is nothing
 to merge. Each writes air in every cell its body does not fill, so which of two overlapping files
 holds a shared cell depends on the order they are placed in, and the source names no order. That
@@ -486,7 +488,7 @@ something for the name would build a site the source did not describe.
 
 | Code | Meaning |
 |---|---|
-| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
+| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member of the referenced def's body, or of a `level` directly in it, carries. A member under a `level` inside a `level` builds nothing, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
 | `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, or a `path=` that is not a material token (`path=gravel` for `path=@gravel`), so the walkway has no material to lay. |
 | `W_DUPLICATE_WALKWAY` | A `connect` joins the same two ports, in either order, as an earlier row in the same site that already laid them. |
@@ -495,9 +497,9 @@ something for the name would build a site the source did not describe.
 | `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped, or the straight L alone is past the router's 4,000,000-cell search-area cap and the walkway was not laid. |
 
 `E_UNRESOLVED_PORT` is the port half of the `place.port` shape alone; the place half is
-`E_UNRESOLVED_PLACE_REF`. `E_AMBIGUOUS_PORT` takes the first match for lowering and reports the
-collision, since the repair is to rename one of the colliding members rather than to pick for the
-author.
+`E_UNRESOLVED_PLACE_REF`. `E_AMBIGUOUS_PORT` drops the row, which lays no walkway, rather than lower
+it with one of the matches, since the repair is to rename one of the colliding members rather than
+to pick for the author.
 
 `E_MISSING_PATH_MATERIAL` is an error, as `E_MISSING_MATERIAL` is, where `W_NO_THEME_BOUND` and
 `W_ABSTRACT_TOKEN_DEFERRED`, a material named with nothing to resolve it against, are warnings: a
