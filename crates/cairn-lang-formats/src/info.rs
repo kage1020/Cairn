@@ -20,10 +20,10 @@ use serde::Serialize;
 
 use crate::registry::builtin_pack;
 
-pub use circuits::{kept_findings, lay_circuits, raised_by_each, same_place};
+pub use circuits::{kept_findings, lay_circuits};
 pub use gate::build_diagnostics;
 pub use inferred::{Conflict, report_conflicts, requires_conflicts};
-pub use requested::{RequestedEditions, requested_editions};
+pub use requested::{EditionsRefused, RequestedEditions, requested_editions};
 pub use scopes::{built_scopes, dropped_scopes};
 
 /// A finding of the core passes or of the circuit a struct is built with, for a list holding both.
@@ -64,18 +64,18 @@ impl Found {
 pub trait InfoSink {
     /// A finding the run reports and carries on past.
     fn finding(&mut self, finding: &Found);
-    /// A `note:` line, or a line continuing the finding or note before it.
+    /// A line as `cairn info` writes it on stderr, other than a finding's.
     fn line(&mut self, line: &str);
 }
 
 /// The source a run reads, and the sink it reports to.
 pub struct Reporter<'a> {
     /// The path the notes name the source by.
-    pub file: &'a Path,
+    pub(crate) file: &'a Path,
     /// The source text.
-    pub source: &'a str,
+    pub(crate) source: &'a str,
     /// The line starts of `source`.
-    pub lines: &'a LineStarts,
+    pub(crate) lines: &'a LineStarts,
     sink: &'a mut dyn InfoSink,
 }
 
@@ -121,15 +121,58 @@ pub struct InfoRequest<'a> {
     pub source: &'a str,
     /// The editions to report on.
     pub editions: &'a RequestedEditions,
-    /// The lockfile the `verified target` row reads, which its notes have `cairn compile --lock`
-    /// write unless it is [`default_lock_path`] of `file`.
-    pub lock: &'a Path,
-    /// Hold each error for the failure document, leaving the sink the warnings and notes.
-    pub errors_in_document: bool,
+    /// The lockfile `--lock` names, or `None` for [`default_lock_path`] of `file`.
+    pub lock: Option<&'a Path>,
+    /// The format the run reports in.
+    pub format: ReportFormat,
+}
+
+/// The `--format` a run reports in, which decides where an edition's errors go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportFormat {
+    /// The text report: each error goes to the sink as it is found.
+    Text,
+    /// The JSON document: each error is held for the failure document.
+    Json,
+}
+
+/// Why a run gave no report.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Refusal {
+    /// The findings the sink was not sent: every edition-neutral finding when one is an error,
+    /// else, in a JSON run, the errors an edition's lowering found.
+    pub findings: Vec<Found>,
+    /// The lines refusing each palette that carries blockstates a registry pack is expected to
+    /// refuse, which no finding stands for (`spec/lint` "Machine-readable payload"); the sink was
+    /// sent them too.
+    pub palettes: Vec<String>,
+}
+
+impl Refusal {
+    fn findings(findings: Vec<Found>) -> Self {
+        Self {
+            findings,
+            palettes: Vec::new(),
+        }
+    }
+
+    /// The failure document `--format json` prints for this refusal of `source`.
+    #[must_use]
+    pub fn document(&self, source: &str) -> FailureDocument {
+        let lines = LineStarts::new(source);
+        FailureDocument::new(
+            self.findings
+                .iter()
+                .map(|d| d.render(source, &lines))
+                .collect(),
+        )
+    }
 }
 
 /// The document `cairn info --format json` prints for a source it reports on.
 #[derive(Debug, Serialize)]
+#[non_exhaustive]
 pub struct InfoDocument {
     /// The version axes, one row per field.
     #[serde(flatten)]
@@ -140,8 +183,9 @@ pub struct InfoDocument {
 
 /// The lockfile the `verified target` row read, and what it says.
 #[derive(Debug, Serialize)]
+#[non_exhaustive]
 pub struct VerifiedTarget {
-    /// The lockfile's path, as the request named it.
+    /// The lockfile's path, as `--lock` named it or as [`default_lock_path`] gives it.
     pub path: String,
     /// What the lockfile says.
     #[serde(flatten)]
@@ -151,19 +195,17 @@ pub struct VerifiedTarget {
 /// The document a `--format json` command prints in place of its product (`spec/lint`
 /// "Machine-readable payload").
 #[derive(Debug, Serialize)]
+#[non_exhaustive]
 pub struct FailureDocument {
     /// The findings that refused the command.
     pub diagnostics: Vec<RenderedDiagnostic>,
 }
 
 impl FailureDocument {
-    /// The document refusing `source` for `found`.
+    /// The document carrying `diagnostics`.
     #[must_use]
-    pub fn new(source: &str, found: &[Found]) -> Self {
-        let lines = LineStarts::new(source);
-        Self {
-            diagnostics: found.iter().map(|d| d.render(source, &lines)).collect(),
-        }
+    pub fn new(diagnostics: Vec<RenderedDiagnostic>) -> Self {
+        Self { diagnostics }
     }
 }
 
@@ -179,17 +221,15 @@ pub fn default_lock_path(source: &Path) -> PathBuf {
 ///
 /// # Errors
 ///
-/// The findings that refuse the run: every gate finding when one is an error, or the errors an
-/// edition's lowering found, which is empty when they went to `sink` or a palette refused the
-/// run.
-pub fn info(
-    request: &InfoRequest<'_>,
-    sink: &mut dyn InfoSink,
-) -> Result<InfoDocument, Vec<Found>> {
+/// A [`Refusal`] when the source does not parse, a finding is an error, or a palette is refused.
+pub fn info(request: &InfoRequest<'_>, sink: &mut dyn InfoSink) -> Result<InfoDocument, Refusal> {
     let source = request.source;
     let lines = LineStarts::new(source);
-    let module = parse(source)
-        .map_err(|err| vec![Found::Core(diagnose_parse_failure(source, &lines, &err))])?;
+    let module = parse(source).map_err(|err| {
+        Refusal::findings(vec![Found::Core(diagnose_parse_failure(
+            source, &lines, &err,
+        ))])
+    })?;
     let ir = lower(&module);
     let asked = request.editions.as_slice();
 
@@ -210,7 +250,9 @@ pub fn info(
         std::mem::take(&mut block_ir.diagnostics),
     );
     if combined.iter().any(|d| d.severity() == Severity::Error) {
-        return Err(combined.into_iter().map(Found::Core).collect());
+        return Err(Refusal::findings(
+            combined.into_iter().map(Found::Core).collect(),
+        ));
     }
 
     let mut out = Reporter::new(request.file, source, &lines, sink);
@@ -218,24 +260,21 @@ pub fn info(
         out.finding(&Found::Core(d.clone()));
     }
     floors::report_floors_left_out_of_the_neutral_row(&mut out, &module);
-    let rows = rows::edition_rows(
-        &mut out,
-        &module,
-        &ir,
-        asked,
-        &combined,
-        request.errors_in_document,
-    )?;
+    let rows = rows::edition_rows(&mut out, &module, &ir, asked, &combined, request.format)?;
 
     let axes = compute_axes(&module, rows);
-    let reading = LockReading::of(request.lock, source);
-    for note in verified_target_notes(request.file, request.lock, &reading) {
+    let lock = request
+        .lock
+        .map_or_else(|| default_lock_path(request.file), Path::to_path_buf);
+    let reading = LockReading::of(&lock, source);
+    let named = request.lock.is_some();
+    for note in verified_target_notes(request.file, &lock, named, &reading) {
         out.line(&note);
     }
     Ok(InfoDocument {
         axes,
         verified_target: VerifiedTarget {
-            path: request.lock.display().to_string(),
+            path: lock.display().to_string(),
             reading,
         },
     })
@@ -244,13 +283,18 @@ pub fn info(
 /// The `note:` lines saying what the row alone does not: why there is no target, why the one it
 /// names does not certify this source, and which identifier the lock records that this Cairn
 /// refuses.
-fn verified_target_notes(file: &Path, lock: &Path, reading: &LockReading) -> Vec<String> {
+fn verified_target_notes(
+    file: &Path,
+    lock: &Path,
+    named: bool,
+    reading: &LockReading,
+) -> Vec<String> {
     let path = lock.display();
-    // A plain compile writes `<source>.lock` and leaves any other path alone.
-    let compile = if lock == default_lock_path(file) {
-        "`cairn compile`".to_owned()
-    } else {
+    // A plain compile writes `<source>.lock` and leaves the path `--lock` named alone.
+    let compile = if named {
         format!("`cairn compile --lock {path}`")
+    } else {
+        "`cairn compile`".to_owned()
     };
     match reading {
         LockReading::Missing => {
@@ -321,7 +365,7 @@ pub fn palette_entry_name(id: &str, states: &str) -> String {
 
 /// Its own module, so [`requested_editions`] is the only way to build a [`RequestedEditions`].
 mod requested {
-    use cairn_lang_core::Edition;
+    use cairn_lang_core::{Edition, UnknownEdition};
 
     /// The distinct editions an `--editions` list names, in the order it first names them.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -335,19 +379,39 @@ mod requested {
         }
     }
 
-    /// Read an `--editions` list as the distinct editions it asks about.
+    /// Both editions, Java first, as `--editions` defaults to.
+    impl Default for RequestedEditions {
+        fn default() -> Self {
+            Self(vec![Edition::Java, Edition::Bedrock])
+        }
+    }
+
+    /// Why an editions list names nothing to report on.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum EditionsRefused {
+        /// The list has no entry.
+        Empty,
+        /// An entry is empty or blank.
+        EmptyEntry,
+        /// An entry names no edition.
+        Unknown(UnknownEdition),
+    }
+
+    /// Read an editions list as the distinct editions it asks about.
     ///
     /// # Errors
     ///
-    /// The message refusing an empty entry or a name that is not an edition.
-    pub fn requested_editions(editions: &[String]) -> Result<RequestedEditions, String> {
-        // clap's comma delimiter turns `java,,bedrock` into an empty entry.
+    /// An [`EditionsRefused`] for an empty list, an empty entry, or a name that is not an edition.
+    pub fn requested_editions(editions: &[String]) -> Result<RequestedEditions, EditionsRefused> {
+        if editions.is_empty() {
+            return Err(EditionsRefused::Empty);
+        }
         if editions.iter().any(|e| e.trim().is_empty()) {
-            return Err("--editions value must not contain empty entries".to_owned());
+            return Err(EditionsRefused::EmptyEntry);
         }
         let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
         for name in editions {
-            let edition: Edition = name.parse().map_err(|err| format!("{err}"))?;
+            let edition: Edition = name.parse().map_err(EditionsRefused::Unknown)?;
             if !asked.contains(&edition) {
                 asked.push(edition);
             }

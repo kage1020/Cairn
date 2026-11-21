@@ -44,11 +44,17 @@ function handle(message: Message): void {
       record({ id, received: message.method });
       send({ jsonrpc: "2.0", id: message.id, result: null });
       break;
-    case "workspace/executeCommand":
-      // Echoed, so a test reads the request back from what the editor shows.
+    case "workspace/executeCommand": {
       record({ id, received: message.method });
-      send({ jsonrpc: "2.0", id: message.id, result: message.params });
+      // Echoed unless the test sets an answer, so it reads the request back
+      // from what the editor shows.
+      const answer = process.env.CAIRN_TEST_INFO_ANSWER;
+      const reply = answer
+        ? (JSON.parse(answer) as object)
+        : { result: message.params };
+      send({ jsonrpc: "2.0", id: message.id, ...reply });
       break;
+    }
     case "workspace/didChangeConfiguration": {
       const cairn = message.params?.settings?.cairn;
       record({ id, pin: { edition: cairn?.edition, target: cairn?.target } });

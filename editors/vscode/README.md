@@ -17,7 +17,7 @@ Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside 
 
 | Command | Purpose |
 | ------- | ------- |
-| **Cairn: Show Info** (`cairn.showInfo`) | Asks `cairn-lsp` for the active `.crn` file's `cairn info` report and opens it beside the editor, as the JSON `cairn info --format json` prints. It reads the text in the editor, saved or not, and the `<source>.lock` beside the file. |
+| **Cairn: Show Info** (`cairn.showInfo`) | Asks `cairn-lsp` for the active `.crn` file's `cairn info` report and opens it beside the editor, as the JSON `cairn info --format json` prints. It reads the text in the editor, unsaved changes included, of a document saved to a file, and the `<source>.lock` beside that file. |
 
 ## Settings
 

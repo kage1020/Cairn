@@ -39,6 +39,9 @@ Stable surfaces:
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
   output schemas, and process exit codes, apart from a flag or flag value in its first three
   monthly minors.
+- The language server's commands, such as `cairn.info`: their names and argument shapes, apart
+  from a command in its first three monthly minors. What one returns takes the tier of the CLI
+  output it carries.
 - The tier-1 material vocabulary: the abstract tokens the built-in `materials` catalogs declare,
   listed in [§7.2](/spec/materials-themes/#tier-1-tokens). Adding one is not a break.
 - The error and warning codes (`E_*`, `W_*`) [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists,
@@ -118,6 +121,7 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 | `.crn` syntax (chapters 5-9, §10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Lockfile format | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` flags | Evolving | Evolving | **Stable** | Stable | Stable |
+| Language server commands (`cairn.info`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Diagnostic codes (`E_*`, `W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Tier-1 material vocabulary | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP wire protocol (LSP std) | — | — | — | **Stable** | Stable |

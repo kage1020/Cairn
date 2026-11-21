@@ -65,7 +65,7 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
             },
         )),
         execute_command_provider: Some(lsp_types::ExecuteCommandOptions {
-            commands: COMMANDS.map(str::to_owned).to_vec(),
+            commands: COMMANDS.iter().map(|&command| command.to_owned()).collect(),
             ..lsp_types::ExecuteCommandOptions::default()
         }),
         ..lsp_types::ServerCapabilities::default()
