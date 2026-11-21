@@ -121,6 +121,8 @@ pub enum SensitivityKind {
     MissingState,
     /// Bedrock works it out itself, so nothing is lost.
     Derived,
+    /// Bedrock keeps it in the block's block entity, which the writer fills from it.
+    BlockEntity,
 }
 
 /// The validated state maps of a Bedrock pack.
@@ -771,6 +773,18 @@ pub struct BedrockForm {
     /// Each state the entry names that Bedrock does not carry because it works the state out
     /// itself, which is lost where a member wrote it.
     pub rederived: Vec<DroppedState>,
+    /// What Bedrock keeps of the entry in the block's block entity, `None` when the entry asks for
+    /// nothing there other than the Java default.
+    pub in_entity: Option<EntityStates>,
+}
+
+/// The states a [`BedrockForm`] keeps in its block's block entity, which the writer fills.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityStates {
+    /// Each `(key, value)` Bedrock keeps there, at a value other than the Java default.
+    pub kept: Vec<(String, String)>,
+    /// Every Java state of the entry, each default filled in, which the entity's other fields read.
+    pub states: IndexMap<String, String>,
 }
 
 /// One Java state value a [`BedrockForm`] does not carry.
@@ -1238,6 +1252,7 @@ impl VersionStates<'_> {
             .collect();
         let mut dropped = Vec::new();
         let mut rederived = Vec::new();
+        let mut kept = Vec::new();
         for key in &family.dropped {
             // INVARIANT(dropped-classified): the loader refuses a dropped key without a row.
             let Some((kind, reason)) = self.index.sensitivity.get(key).and_then(|k| k.row(java))
@@ -1254,7 +1269,12 @@ impl VersionStates<'_> {
                     dropped.push(state());
                 }
                 SensitivityKind::Derived if given.contains_key(key) => rederived.push(state()),
-                SensitivityKind::MissingState | SensitivityKind::Derived => {}
+                SensitivityKind::BlockEntity if full[key] != family.defaults[key] => {
+                    kept.push((key.clone(), full[key].clone()));
+                }
+                SensitivityKind::MissingState
+                | SensitivityKind::Derived
+                | SensitivityKind::BlockEntity => {}
             }
         }
         BedrockForm {
@@ -1264,6 +1284,10 @@ impl VersionStates<'_> {
                 || self.index.in_water.contains(java),
             dropped,
             rederived,
+            in_entity: (!kept.is_empty()).then(|| EntityStates {
+                kept,
+                states: full.clone(),
+            }),
         }
     }
 }
@@ -1320,6 +1344,7 @@ fn bare_or(
             waterlogged: false,
             dropped: Vec::new(),
             rederived: Vec::new(),
+            in_entity: None,
         })
     } else {
         Err(StateRefusal::Unmapped { reason })

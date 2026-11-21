@@ -12,7 +12,7 @@ use thiserror::Error;
 use super::{AIR_IDS, SUB_VERSION, bits_per_entry, long_count, schematic_version};
 use crate::data_version::JavaTarget;
 use crate::java_structure::{
-    JavaStructureError, entity_nbt, palette_entry, placed_block_entities, prepare_structure,
+    JavaStructureError, palette_entry, placed_block_entities, prepare_structure,
 };
 use crate::site_frame::site_origin;
 
@@ -256,7 +256,9 @@ impl Litematic<'_> {
         root.compound_tag("Metadata", &self.metadata())?;
         root.compound("Regions", |regions| {
             for region in &self.file.regions {
-                regions.compound(&region.name, |body| write_region(body, region))?;
+                regions.compound(&region.name, |body| {
+                    write_region(body, region, self.data_version)
+                })?;
             }
             Ok(())
         })
@@ -276,10 +278,11 @@ impl Litematic<'_> {
     }
 }
 
-/// One region's entries.
+/// One region's entries, its block entities as `data_version` saves them.
 fn write_region<W: Write>(
     body: &mut CompoundStream<'_, W>,
     region: &LitematicRegion<'_>,
+    data_version: i32,
 ) -> Result<(), NbtIoError> {
     let block_array = region.block_array;
     let entries = &block_array.palette.entries;
@@ -295,11 +298,9 @@ fn write_region<W: Write>(
         long_count(block_array.voxels.len(), bits),
         pack(indices, bits),
     )?;
-    let tile_entities: Vec<Compound> = placed_block_entities(block_array)
+    let tile_entities: Vec<Compound> = placed_block_entities(block_array, data_version)
         .into_iter()
-        .map(|entity| {
-            let mut nbt = entity_nbt(entity);
-            let (x, y, z) = entity.pos;
+        .map(|((x, y, z), mut nbt)| {
             for (axis, value) in [("x", x), ("y", y), ("z", z)] {
                 let value = i32::try_from(value).expect("dims checked to fit i32");
                 nbt.insert(axis, Tag::Int(value));

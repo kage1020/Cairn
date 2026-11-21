@@ -135,6 +135,13 @@ pub trait TargetRegistry {
     fn may_write_token(&self, id: &str) -> bool {
         self.may_declare(id)
     }
+
+    /// The canonical block `token` stands for where the target spells several canonical blocks
+    /// as the one it resolves to, as Bedrock's `bed` is every dyed bed; `None` otherwise.
+    fn canonical_block(&self, token: &str) -> Option<String> {
+        let _ = token;
+        None
+    }
 }
 
 /// What the versions of an edition make of a block id, as a lowering with no target weighs it,

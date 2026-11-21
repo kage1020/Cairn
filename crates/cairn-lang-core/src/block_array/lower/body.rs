@@ -18,6 +18,7 @@ use crate::block_array::{
     ResolvedBlock, ResolvedMember,
 };
 
+use super::bed::split_beds;
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::cell_box::Cell;
 use super::circuit::{recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector};
@@ -145,22 +146,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         Err(Overflow::StandIn) => return None,
     };
 
-    // A stand-in differs from air at every target, but from another block only as the pack says.
-    let pack_decides = |&(before, after): &(PaletteIndex, PaletteIndex)| {
-        (Some(before) == stand_in && after != PaletteIndex::AIR)
-            || (Some(after) == stand_in && before != PaletteIndex::AIR)
-    };
-    for ((overridden, overriding), contested) in &canvas.conflicts {
-        if contested.keys().any(pack_decides) {
-            continue;
-        }
-        diagnostics.push(diag_phase_conflict(
-            flattened[*overridden as usize].1,
-            flattened[*overriding as usize].1,
-            contested.values().sum(),
-            split_doors.contains(overridden),
-        ));
-    }
+    report_phase_conflicts(&flattened, &canvas, stand_in, &split_doors, diagnostics);
     let cut = cut_openings(&flattened, &canvas.wrote);
     let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
     debug_assert!(
@@ -170,7 +156,8 @@ pub(super) fn lower_body_to_block_array<'a>(
         body.scope_label,
     );
 
-    let array = finished_array(dims, palette, voxels, body.source_scope, &derived);
+    let mut array = finished_array(dims, palette, voxels, body.source_scope, &derived);
+    array.block_entities = canvas.block_entities();
     let members = resolved_members(&flattened, &canvas, &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));
@@ -182,6 +169,38 @@ pub(super) fn lower_body_to_block_array<'a>(
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// A `W_PHASE_CONFLICT` for each pair of members of one phase on `canvas` where the later took
+/// cells from the earlier, but where the pack decides whether `stand_in` differs from the block
+/// it met; `split_doors` are the doors left with one of their two cells.
+fn report_phase_conflicts(
+    flattened: &[(u32, &Member)],
+    canvas: &Canvas,
+    stand_in: Option<PaletteIndex>,
+    split_doors: &[u32],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // A stand-in differs from air at every target, but from another block only as the pack says.
+    let pack_decides = |&(before, after): &(PaletteIndex, PaletteIndex)| {
+        (Some(before) == stand_in && after != PaletteIndex::AIR)
+            || (Some(after) == stand_in && before != PaletteIndex::AIR)
+    };
+    let split_beds = split_beds(flattened, canvas);
+    for ((overridden, overriding), contested) in &canvas.conflicts {
+        if contested.keys().any(pack_decides) {
+            continue;
+        }
+        diagnostics.push(diag_phase_conflict(
+            flattened[*overridden as usize].1,
+            flattened[*overriding as usize].1,
+            Contested {
+                voxels: contested.values().sum(),
+                blocks_differ: contested.keys().any(|(before, after)| before != after),
+                split: split_doors.contains(overridden) || split_beds.contains(overridden),
+            },
+        ));
+    }
 }
 
 /// The body's array over the pruned `voxels`, its palette put in canonical order, with the keys
@@ -446,25 +465,47 @@ pub(super) fn run_phase(
     }
 }
 
-/// Two members of one phase wrote the same cell to different blocks (`spec/compilation` "Phase
-/// evaluation"); anchored at the later.
+/// What one member of a phase took from another.
+#[derive(Debug, Clone, Copy)]
+struct Contested {
+    /// How many voxels it took.
+    voxels: u32,
+    /// Whether any of them now holds another block, not only another block entity.
+    blocks_differ: bool,
+    /// Whether the overwritten member, a door or a bed, is left with one of its two blocks.
+    split: bool,
+}
+
+/// Two members of one phase wrote the same cell to different blocks, or to one block with
+/// different block entities (`spec/compilation` "Phase evaluation"); anchored at the later.
 fn diag_phase_conflict(
     overridden: &Member,
     overriding: &Member,
-    voxels: u32,
-    splits_a_door: bool,
+    contested: Contested,
 ) -> Diagnostic {
+    let Contested {
+        voxels,
+        blocks_differ,
+        split,
+    } = contested;
     let cell = if voxels == 1 { "voxel" } else { "voxels" };
+    let kept = if blocks_differ {
+        "block"
+    } else {
+        "block entity"
+    };
     let mut notes = vec![DiagnosticNote {
         span: Some(overridden.span.clone()),
         message: "overwritten member declared here".to_owned(),
     }];
-    if splits_a_door {
+    if split {
+        let keyword = MemberRole::keyword(&overridden.role);
         notes.push(DiagnosticNote {
             span: None,
-            message: "the `door` is left with one of its two blocks, and the game removes a door \
-                      block whose other half is missing"
-                .to_owned(),
+            message: format!(
+                "the `{keyword}` is left with one of its two blocks, and the game removes a \
+                 {keyword} block whose other half is missing"
+            ),
         });
     }
     notes.extend([
@@ -489,7 +530,7 @@ fn diag_phase_conflict(
         span: overriding.span.clone(),
         primary: format!(
             "`{}` overwrites {voxels} {cell} that `{}` painted in the same phase, so which \
-             block the build keeps is decided by the order the two lines are written in",
+             {kept} the build keeps is decided by the order the two lines are written in",
             MemberRole::keyword(&overriding.role),
             MemberRole::keyword(&overridden.role),
         ),

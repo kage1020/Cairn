@@ -173,7 +173,7 @@ to compare.
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since the pinned target's pack records no states for its block to check it against ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
-| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned version has no form for, such as a stair's `shape` on Bedrock before 1.26.60, or a state a member wrote that the version works out itself, such as a dust's `connect=` there, in the words of the pack's `sensitivity`; one line per intent lost ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
+| `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned version has no form for, such as a stair's `shape` on Bedrock before 1.26.60, or a state a member wrote that the version works out itself, such as a dust's `connect=` there, in the words of the pack's `sensitivity`, or a Bedrock chest half's `type` where its other half does not stand beside it ([Entities §8.1](/spec/entities/#81-two-tiers)); one line per intent lost ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
 | `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members the previous lock's `member_version_sensitivity` lists, as ones that may resolve differently at the new target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). No lock the compiler writes lists any yet, since no constraint catalog ships, so a build over one does not raise it today. |
 
@@ -251,8 +251,9 @@ family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules))
 outside the door family ([Syntax §5.4](/spec/syntax/#54-selectors)), a `chest` bound outside the
 chest family ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)),
 a `button` bound outside the button family ([Redstone §14.2](/spec/redstone/#142-signal-binding)),
-or a `trapdoor` bound outside the trapdoor family or a `beam` bound to a block whose `axis` does not
-take `x`, `y` and `z` ([Blockstate Model
+or a `trapdoor` bound outside the trapdoor family, a `beam` bound to a block whose `axis` does not
+take `x`, `y` and `z`, a `sign` bound to a block that is no standing sign with a wall sign at the
+target, or a `bed` bound outside the bed family ([Blockstate Model
 §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
@@ -276,10 +277,11 @@ something other than a material token resolves. A `floor` that names it is left 
 names it paints none of its box; a `walls` that names it is not built and takes up no rows, so a
 `door` or `window` cut into it, or a `beam` laid on it, is deferred; a `window` that names it is not
 cut, so its wall stays; and a `roof`, eave `stair`, `beam`, `door`, `pressure_plate`, `button`,
-`chest` or `trapdoor` that names it is built from its default block. Were it a warning, a theme
-whose slots are all mistyped would still build at exit 0 every scope that keeps something to draw,
-such as a `roof`: shorter than asked, with no floor and no walls, and only default blocks, less any
-eave `stair`, `chest`, `trapdoor`, sensor or actuator set higher than the shorter structure reaches.
+`chest`, `trapdoor`, `sign` or `bed` that names it is built from its default block. Were it a
+warning, a theme whose slots are all mistyped would still build at exit 0 every scope that keeps
+something to draw, such as a `roof`: shorter than asked, with no floor and no walls, and only
+default blocks, less any eave `stair`, `chest`, `trapdoor`, `sign`, `bed`, sensor or actuator set
+higher than the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member earns
 both: the key is absent for the first and present-but-unusable for the second. They have different
@@ -294,10 +296,10 @@ and a `fill` with no `fluid=` reach the palette through the applied theme's slot
 default block, so a bare one contributes no voxel. A `fill` with a `fluid=` pours that fluid and is
 not reported. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
 reported; that is how a narrow slit is punched through a wall without choosing a species for it. A
-`roof`, `stair`, `beam`, `door`, `pressure_plate`, `button`, `chest` or `trapdoor` paints a default
-block and is not reported either, and a `raw_block` or `raw_fill` names its block with `mat=`, whose
-absence is `E_INVALID_MEMBER`. `cairn check` raises it, before any lowering, and it needs no theme:
-a module that declares none is still told which of its members name no material.
+`roof`, `stair`, `beam`, `door`, `pressure_plate`, `button`, `chest`, `trapdoor`, `sign` or `bed`
+paints a default block and is not reported either, and a `raw_block` or `raw_fill` names its block
+with `mat=`, whose absence is `E_INVALID_MEMBER`. `cairn check` raises it, before any lowering, and
+it needs no theme: a module that declares none is still told which of its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
 resolved once as its own scope and once again for every `place` that instantiates it, and each of
@@ -331,10 +333,10 @@ with no `--target`) raises neither, and leaves the token to the pack of the targ
 ([§11.3](#113-error-vs-warning)).
 
 The warning says how the member degrades. A `floor` leaves its cells air, a `fill` paints none of
-its box, and a `roof`, eave `stair`, `beam`, `door`, `pressure_plate`, `button`, `chest` or
-`trapdoor` is built from its default block. A `walls` is not built and takes up no rows, so a `door`
-or `window` cut into it, or a `beam` laid on it, is deferred. A `window` is not cut, so its wall
-stays, and a port on it is refused with it
+its box, and a `roof`, eave `stair`, `beam`, `door`, `pressure_plate`, `button`, `chest`,
+`trapdoor`, `sign` or `bed` is built from its default block. A `walls` is not built and takes up no
+rows, so a `door` or `window` cut into it, or a `beam` laid on it, is deferred. A `window` is not
+cut, so its wall stays, and a port on it is refused with it
 ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
@@ -342,12 +344,12 @@ all has no slot map to read, so the member degrades the same way. With no theme 
 or takes up rows, so no `door` or `window` is cut, no `beam` is laid, and the structure is shorter
 than asked. A `floor` leaves its cells air, a `fill` with a `mat_slot=` paints none of its box, and
 a `roof` is still built from its default block, as is an eave `stair`, `pressure_plate`, `button`,
-`chest` or `trapdoor` that still fits the shorter structure. Any other sensor or actuator, a
-`note_block`, a `raw_block` and a `raw_fill` need no theme and are built where the shorter structure
-still holds them. Any of these set higher than it reaches is deferred. It is judged per scope: a
-scope with no theme bound that reads no `mat_slot=` is not reported, whatever the rest of the module
-reads. A `mat_slot=` on a keyword that reads none, such as a `level`'s, is not a read. Nor, for this
-warning, is one on a member a `level` drops ([Compilation Model
+`chest`, `trapdoor`, `sign` or `bed` that still fits the shorter structure. Any other sensor or
+actuator, a `note_block`, a `raw_block` and a `raw_fill` need no theme and are built where the
+shorter structure still holds them. Any of these set higher than it reaches is deferred. It is
+judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported, whatever
+the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a `level`'s, is
+not a read. Nor, for this warning, is one on a member a `level` drops ([Compilation Model
 §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints nothing whatever
 the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body is
 `E_UNSUPPORTED_NESTING`.
@@ -566,7 +568,7 @@ the author to a line that is correct.
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
 | `W_PALETTE_TOO_LARGE` | A scope paints more than 65,535 distinct block states besides air, past what one palette can index. |
-| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). |
+| `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks, or to one block with different block entities ([§4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). |
 | `E_PARTIAL_BUILD` | At least one requested scope, or a walkway a `connect` row asked for, did not lower, so the run produced less than was asked for. |
 
 `W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
@@ -745,18 +747,19 @@ bodies it holds only in part: two `place` rows of a site whose boxes share a cel
 lays a cell inside a placement it does not join, are `E_PLACEMENT_OVERLAP`, while the air a
 walkway's file writes beyond its strip, a strip under the eaves of a placement it joins, and two
 walkways against each other are not compared yet ([Sites and placements](#sites-and-placements)).
-Geometry holds only in part: a door, window, eave stair, chest, trapdoor, note block, sensor or
-actuator its own line puts outside its struct is not drawn and is reported as `E_INVALID_MEMBER`,
-and one that only a member left unbuilt keeps out as `W_DEFERRED_MEMBER`. version_caps / parity runs
-only in part, through codes of its own: `E_VERSION_CAP` holds `--target` to the `@requires` floors,
-`E_REQUIRES_CONFLICT` holds the floors to the blocks the build paints, `E_UNKNOWN_ID` refuses a
-block id the pinned target does not declare, `E_PARITY_UNSUPPORTED` a semantic member's block only
-the other edition has, `E_STATE_DOMAIN` a state its block does not take there, `E_STATE_UNMAPPED` a
-block state its state map has no form for, and `W_INTENT_DEGRADED` names what a version cannot
-carry, while no entity schema is checked. The redstone row runs through codes of its own: the
-truth-table codes check a table against itself, and the codes of [Redstone](#redstone) check a truth
-table, a temporal assertion and a latency bound against the circuit, and check its routing and its
-dependence on update order. edit_stability runs through `W_EDIT_RIPPLE` ([Edits](#edits)).
+Geometry holds only in part: a door, window, eave stair, chest, trapdoor, note block, sign, bed,
+sensor or actuator its own line puts outside its struct is not drawn and is reported as
+`E_INVALID_MEMBER`, and one that only a member left unbuilt keeps out as `W_DEFERRED_MEMBER`.
+version_caps / parity runs only in part, through codes of its own: `E_VERSION_CAP` holds `--target`
+to the `@requires` floors, `E_REQUIRES_CONFLICT` holds the floors to the blocks the build paints,
+`E_UNKNOWN_ID` refuses a block id the pinned target does not declare, `E_PARITY_UNSUPPORTED` a
+semantic member's block only the other edition has, `E_STATE_DOMAIN` a state its block does not take
+there, `E_STATE_UNMAPPED` a block state its state map has no form for, and `W_INTENT_DEGRADED` names
+what a version cannot carry, while no entity schema is checked. The redstone row runs through codes
+of its own: the truth-table codes check a table against itself, and the codes of
+[Redstone](#redstone) check a truth table, a temporal assertion and a latency bound against the
+circuit, and check its routing and its dependence on update order. edit_stability runs through
+`W_EDIT_RIPPLE` ([Edits](#edits)).
 
 ### "did you mean"
 
@@ -917,8 +920,8 @@ versions of the edition whose tables take the pair, oldest first; each is absent
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
 mapping is what to correct rather than the source line. `required` is `stair`, `door`, `chest`,
-`button`, `trapdoor` or `pillar`, named rather than implied so that a further family is a new value
-here, not a new code.
+`button`, `trapdoor`, `pillar`, `sign` or `bed`, named rather than implied so that a further family
+is a new value here, not a new code.
 
 `W_TRUTH_TABLE_PARTIAL.missing` is a **sample** rather than the set: twenty inputs have a million
 combinations. Take the count from `2^inputs - covered`, never from `missing.len()`. `inputs` is
@@ -977,13 +980,13 @@ block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no `W_PHASE_CONF
 another block, and no `W_PALETTE_TOO_LARGE` that only it could cause, since the palette is counted
 without it. A stand-in overwritten by air, or air by a stand-in,
 is still a `W_PHASE_CONFLICT`, since no pack names air. A `beam`, `door`, `chest`, `trapdoor`,
-`note_block`, sensor or actuator built from its default block takes the block the pack names for it,
-so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a block" where a pinned check would
-name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`, `E_PARITY_UNSUPPORTED` and
-`E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, nor are
-`W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, and `E_PARTIAL_BUILD`, which
-counts what a build at a target loses. `--edition` alone picks that edition's theme variants and
-keeps its `@edition` guards. With neither flag, each edition's variants are lowered, with that
+`note_block`, `sign`, `bed`, sensor or actuator built from its default block takes the block the
+pack names for it, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a block" where a
+pinned check would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`,
+`E_PARITY_UNSUPPORTED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised,
+nor are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, and `E_PARTIAL_BUILD`,
+which counts what a build at a target loses. `--edition` alone picks that edition's theme variants
+and keeps its `@edition` guards. With neither flag, each edition's variants are lowered, with that
 edition's guards: a finding whose span is on a line only one edition's variant reads, or whose span
 or one of whose notes' spans is on a line under that edition's guard, is that edition's verdict and
 is reported, and any other finding is reported when every edition raises it with the same code at

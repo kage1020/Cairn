@@ -294,6 +294,35 @@ fn a_fixture_declares_its_one_cell_against_the_face_it_stands_by() {
 }
 
 #[test]
+fn a_sign_and_a_bed_declare_their_cells_against_the_face_they_stand_by() {
+    let ir = clean(
+        "7x5",
+        "  floor mat_slot=wall\n  \
+         walls mat_slot=wall height=3\n  \
+         sign at=inside.front offset=2 y=1\n  \
+         sign at=3,1,2\n  \
+         bed at=inside.back offset=4 y=1\n  \
+         bed at=5,1,2 facing=east\n",
+    );
+    let cell = |at: (u32, u32, u32), host_face: Option<Face>| whole(at, Bbox::cell(at), host_face);
+    assert_eq!(
+        geometry(&ir)
+            .into_iter()
+            .filter(|(role, _)| matches!(*role, "sign" | "bed"))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "bed",
+                whole((2, 1, 1), boxed((2, 1, 1), (2, 1, 2)), Some(Face::South)),
+            ),
+            ("sign", cell((3, 1, 2), None)),
+            ("bed", whole((5, 1, 2), boxed((4, 1, 2), (5, 1, 2)), None)),
+            ("sign", cell((2, 1, 3), Some(Face::North))),
+        ],
+    );
+}
+
+#[test]
 fn a_box_member_declares_its_corners_and_holds_what_later_phases_leave_it() {
     let ir = clean(
         "5x5",
