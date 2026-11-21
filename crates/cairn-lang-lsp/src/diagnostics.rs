@@ -39,7 +39,7 @@ pub fn compute_diagnostics(
 /// What `cairn check` reports on `module` with `pin`'s edition, or, for a target, what
 /// `cairn compile` refuses on before it writes anything, circuits aside.
 fn findings(module: &Module, pin: &Pin) -> Vec<CoreDiagnostic> {
-    let declared = |edition: Edition, id: &str| builtin_pack(edition).may_declare(id);
+    let standing = |edition: Edition, id: &str| builtin_pack(edition).id_standing(id);
     let tables = builtin_version_tables();
     let ir = lower(module);
     let edition = match pin {
@@ -50,7 +50,7 @@ fn findings(module: &Module, pin: &Pin) -> Vec<CoreDiagnostic> {
     let mut found =
         check_with_intended_targets(module, &ir, edition, &Edition::weighed(edition), &tables);
     let Pin::Target(target) = pin else {
-        found.extend(findings_without_target(&ir, edition, &declared));
+        found.extend(findings_without_target(&ir, edition, &standing));
         return found;
     };
     let edition = target.edition();
