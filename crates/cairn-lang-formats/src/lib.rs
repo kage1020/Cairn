@@ -4,7 +4,8 @@
 //!
 //! Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers for the block-array
 //! IR, `.litematic` and `.schem` readers, the registry packs and portability reports the writers
-//! rely on, the build a front end runs over a source, and the `cairn info` report built on it.
+//! rely on, the build a front end runs over a source, the `cairn info` report built on it, and the
+//! Java world a structure file is installed into.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
@@ -22,6 +23,7 @@ pub mod schem;
 mod site_frame;
 pub mod target;
 pub mod volume;
+pub mod world;
 
 pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};
 pub use bedrock_structure::{
@@ -54,3 +56,8 @@ pub use schem::{
     schem_files,
 };
 pub use volume::{BlockVolume, StoredBlockEntity, VolumeError};
+pub use world::{
+    CrossVersion, DEFAULT_NAMESPACE, IdPart, LEVEL_DAT, LevelDatError, MissingLists, Namespace,
+    StructureFileError, StructureId, StructureIdError, StructureList, WorldVersion, read_level_dat,
+    read_structure_data_version, recompile_target, worlds_in,
+};
