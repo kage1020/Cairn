@@ -80,6 +80,7 @@ jobs:
 
       # The build does not type-check, and `astro check` neither renders pages nor validates links.
       - run: pnpm run check
+      - run: pnpm test
       - run: pnpm run build
 
       - name: Install Rust toolchain
