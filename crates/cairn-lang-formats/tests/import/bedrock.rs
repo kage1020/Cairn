@@ -9,9 +9,10 @@ use cairn_lang_formats::bedrock_structure::{
 };
 use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::import::{
-    ImportError, ImportFormat, ImportStamp, RawImport, SemanticLoss, StampFit, import_raw,
+    ImportError, ImportFormat, LossKind, RawImport, SavedVersion, SemanticLoss, StampFit,
+    import_raw,
 };
-use cairn_lang_nbt::tag::{Compound, Tag};
+use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use crate::common::{BedrockCell, bedrock_cells, compile_source, states_for};
 
@@ -120,9 +121,10 @@ fn header(file: &str, saved: &str, version: &str, reason: &str) -> String {
     )
 }
 
-fn loss(unit: &str, what: &str) -> SemanticLoss {
+fn loss(unit: &str, kind: LossKind, what: &str) -> SemanticLoss {
     SemanticLoss {
         unit: Some(unit.to_owned()),
+        kind,
         what: what.to_owned(),
     }
 }
@@ -166,12 +168,8 @@ fn a_bedrock_structure_imports_in_the_canonical_vocabulary_and_builds_the_same_f
             )
         )
     );
-    assert_eq!(
-        import.decoded.losses.len(),
-        1,
-        "{:?}",
-        import.decoded.losses
-    );
+    let kinds: Vec<LossKind> = import.decoded.losses.iter().map(|loss| loss.kind).collect();
+    assert_eq!(kinds, [LossKind::Intent]);
     let compiled = compile_source(&import.transliteration.source, Edition::Bedrock, "1.21.60")
         .expect("the import builds");
     let again = self::root(&compiled.structures["struct::stoop"], "1.21.60");
@@ -190,7 +188,8 @@ fn a_shared_block_version_is_stamped_with_the_oldest_target_whose_map_spells_eve
         imported(&root(array, "1.26.60"), "a.mcstructure")
             .decoded
             .stamp
-            .mc_version
+            .mc_version()
+            .to_owned()
     };
     assert_eq!(
         (stamped(&corner), stamped(&plain)),
@@ -211,14 +210,17 @@ fn a_block_version_between_shipped_targets_is_stamped_with_the_next() {
         entry.insert("version", Tag::Int(18_160_000));
     }
     let import = imported(&root, "one.mcstructure");
+    let stamp = &import.decoded.stamp;
     assert_eq!(
-        import.decoded.stamp,
-        ImportStamp {
-            edition: Edition::Bedrock,
-            mc_version: "1.21.40".to_owned(),
-            saved: Some(18_160_000),
-            fit: StampFit::Later,
-        }
+        (stamp.edition(), stamp.mc_version(), stamp.saved()),
+        (
+            Edition::Bedrock,
+            "1.21.40",
+            Some(SavedVersion {
+                version: 18_160_000,
+                fit: StampFit::Later,
+            })
+        )
     );
     assert!(import.transliteration.source.starts_with(&header(
         "one.mcstructure",
@@ -331,21 +333,25 @@ fn what_no_raw_member_writes_is_reported_lost() {
         [
             loss(
                 "shed",
+                LossKind::StructureVoids,
                 "1 cell holds a structure void, which a placement leaves as the world has it, \
                  and the import writes air there, which a placement clears"
             ),
             loss(
                 "shed",
+                LossKind::Unspelled,
                 "`minecraft:dirt[bogus=1]` (2 cells) has no canonical state at bedrock 1.21.60, \
                  so it is written by its id alone and builds that block's default states"
             ),
             loss(
                 "shed",
+                LossKind::Dried,
                 "water stands at 1 cell whose block cannot hold it as `waterlogged`; the water \
                  is not written"
             ),
             loss(
                 "shed",
+                LossKind::Layered,
                 "the second layer holds `minecraft:snow_layer` at 1 cell, which no raw member \
                  writes; it is not written"
             ),
@@ -365,8 +371,174 @@ fn a_block_that_always_stands_in_water_is_reported_where_the_file_holds_none() {
         import.decoded.losses[1..],
         [loss(
             "bed",
+            LossKind::Flooded,
             "the written block stands in water at 1 cell where the file's second layer holds \
              none, since that block always does"
         )]
+    );
+}
+
+/// A `minecraft:water` palette entry at `version`'s block version.
+fn water_entry(version: &str) -> Tag {
+    let mut water = Compound::new();
+    water.insert("name", Tag::String("minecraft:water".to_owned()));
+    let mut states = Compound::new();
+    states.insert("liquid_depth", Tag::Int(0));
+    water.insert("states", Tag::Compound(states));
+    water.insert("version", Tag::Int(target(version).block_version));
+    Tag::Compound(water)
+}
+
+#[test]
+fn water_over_a_structure_void_is_reported_lost() {
+    let mut root = root(
+        &array(
+            "pool",
+            Dims { x: 2, y: 1, z: 1 },
+            &["minecraft:stone", "minecraft:stone"],
+        ),
+        "1.21.60",
+    );
+    let palette = block_palette(&mut root);
+    palette.push(water_entry("1.21.60"));
+    let water = i32::try_from(palette.len() - 1).expect("a small palette");
+    layer(&mut root, 0)[1] = Tag::Int(-1);
+    layer(&mut root, 1)[1] = Tag::Int(water);
+    let import = imported(&root, "pool.mcstructure");
+    assert_eq!(
+        import.decoded.losses[1..],
+        [
+            loss(
+                "pool",
+                LossKind::StructureVoids,
+                "1 cell holds a structure void, which a placement leaves as the world has it, \
+                 and the import writes air there, which a placement clears"
+            ),
+            loss(
+                "pool",
+                LossKind::VoidWater,
+                "water stands over a structure void at 1 cell, which the import writes as air; \
+                 the water is not written"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_block_written_alike_in_water_and_out_of_it_takes_one_palette_slot() {
+    let mut root = root(
+        &array(
+            "wet",
+            Dims { x: 2, y: 1, z: 1 },
+            &["minecraft:stone", "minecraft:stone"],
+        ),
+        "1.21.60",
+    );
+    let palette = block_palette(&mut root);
+    palette.push(water_entry("1.21.60"));
+    let water = i32::try_from(palette.len() - 1).expect("a small palette");
+    layer(&mut root, 1)[0] = Tag::Int(water);
+    let import = imported(&root, "wet.mcstructure");
+    let grid = &import.decoded.units[0].grid;
+    let ids: Vec<&str> = grid
+        .palette()
+        .iter()
+        .map(|entry| entry.state.id.as_str())
+        .collect();
+    assert_eq!(ids, ["minecraft:air", "minecraft:stone"]);
+    assert_eq!(grid.voxels(), [PaletteIndex(1), PaletteIndex(1)]);
+    let kinds: Vec<LossKind> = import.decoded.losses.iter().map(|loss| loss.kind).collect();
+    assert_eq!(kinds, [LossKind::Intent, LossKind::Dried]);
+}
+
+#[test]
+fn position_data_other_than_a_block_entity_is_reported_lost() {
+    let mut root = root(
+        &array("tick", Dims { x: 1, y: 1, z: 1 }, &["minecraft:stone"]),
+        "1.21.60",
+    );
+    let mut ticks = Compound::new();
+    ticks.insert("tick_queue_data", Tag::List(List::of_compounds(Vec::new())));
+    let mut data = Compound::new();
+    data.insert("0", Tag::Compound(ticks));
+    default_palette(&mut root).insert("block_position_data", Tag::Compound(data));
+    let import = imported(&root, "tick.mcstructure");
+    assert_eq!(
+        import.decoded.losses[1..],
+        [loss(
+            "tick",
+            LossKind::PositionData,
+            "`block_position_data` holds `tick_queue_data` at 1 cell, which no raw member \
+             carries; it is not written"
+        )]
+    );
+}
+
+#[test]
+fn an_entity_is_named_by_its_identifier_or_its_id_in_either_case() {
+    let mut root = root(
+        &array("pen", Dims { x: 1, y: 1, z: 1 }, &["minecraft:stone"]),
+        "1.21.60",
+    );
+    let entity = |key: &str, id: &str| {
+        let mut entity = Compound::new();
+        entity.insert(key, Tag::String(id.to_owned()));
+        entity
+    };
+    let entities = vec![
+        entity("identifier", "minecraft:cow"),
+        entity("Id", "minecraft:pig"),
+        entity("id", "minecraft:sheep"),
+    ];
+    let Some(Tag::Compound(structure)) = root.entries.get_mut("structure") else {
+        panic!("a structure");
+    };
+    structure.insert("entities", Tag::List(List::of_compounds(entities)));
+    let import = imported(&root, "pen.mcstructure");
+    assert_eq!(
+        import.decoded.losses[1..],
+        [loss(
+            "pen",
+            LossKind::Entities,
+            "3 entities are not written, since an import writes blocks only: 1 `minecraft:cow`, \
+             1 `minecraft:pig`, 1 `minecraft:sheep`"
+        )]
+    );
+}
+
+#[test]
+fn blocks_past_what_a_palette_holds_once_air_is_added_are_refused() {
+    let version = target("1.21.60").block_version;
+    let mut root = root(
+        &array("many", Dims { x: 1, y: 1, z: 1 }, &["minecraft:stone"]),
+        "1.21.60",
+    );
+    root.insert("size", Tag::List(List::of_ints([256, 1, 256])));
+    let entries: Vec<Compound> = (0..65_536)
+        .map(|i| {
+            let mut entry = Compound::new();
+            entry.insert("name", Tag::String(format!("test:block_{i}")));
+            entry.insert("states", Tag::Compound(Compound::new()));
+            entry.insert("version", Tag::Int(version));
+            entry
+        })
+        .collect();
+    default_palette(&mut root).insert("block_palette", Tag::List(List::of_compounds(entries)));
+    *layer(&mut root, 0) = (0..65_536).map(Tag::Int).collect();
+    *layer(&mut root, 1) = vec![Tag::Int(-1); 65_536];
+    let error = import_raw(
+        bytes(&root).as_slice(),
+        ImportFormat::Mcstructure,
+        "many.mcstructure",
+    )
+    .expect_err("air takes one slot past the palette");
+    assert!(
+        matches!(error, ImportError::GridPaletteTooLarge),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "the structure's blocks, with air and each block standing in water told apart, take more \
+         than the 65536 palette entries a block array holds. Fix: save it as smaller structures"
     );
 }

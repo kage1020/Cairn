@@ -2,9 +2,9 @@
 //! a raw member that sizes the volume (`spec/materials-themes` "Raw blocks").
 
 use cairn_lang_core::DiagnosticCode;
-use cairn_lang_core::block_array::{BlockArrayIr, Dims};
+use cairn_lang_core::block_array::{BlockArrayIr, BlockState, Dims};
 
-use crate::common::{findings, lowered, only_structure};
+use crate::common::{codes, findings, lowered, only_structure};
 
 /// A block id a member resolved to, and its cells.
 type Built = (String, Vec<(u32, u32, u32)>);
@@ -17,6 +17,24 @@ fn built_by(out: &BlockArrayIr, role: &str) -> Vec<Built> {
         .flat_map(|member| &member.resolved_state)
         .map(|block| (block.state.id.clone(), block.cells().collect()))
         .collect()
+}
+
+/// Each block id the struct holds, with its cells, in palette order.
+fn state_cells(out: &BlockArrayIr) -> Vec<Built> {
+    let array = only_structure(out);
+    let mut cells: Vec<Built> = Vec::new();
+    for (i, slot) in array.voxels.iter().enumerate() {
+        let id = &array.palette.entries[usize::from(slot.0)].id;
+        if id == BlockState::AIR_ID {
+            continue;
+        }
+        let cell = array.dims.position(i).expect("an index of the array");
+        match cells.iter_mut().find(|(seen, _)| seen == id) {
+            Some((_, at)) => at.push(cell),
+            None => cells.push((id.clone(), vec![cell])),
+        }
+    }
+    cells
 }
 
 /// The note every refusal of a `raw_repeat`'s `count=` or `step=` carries.
@@ -54,7 +72,7 @@ fn a_raw_repeat_writes_each_raw_member_under_it_once_per_copy_a_step_apart() {
 }
 
 #[test]
-fn copies_of_one_raw_member_that_overlap_are_no_phase_conflict() {
+fn copies_of_one_raw_member_may_overlap() {
     let src = "struct s size=5x3\n  raw_repeat count=3 step=1,0,0\n    \
                raw_fill mat=minecraft:stone from=0,0,0 to=1,0,0\n";
     let out = lowered(src);
@@ -65,6 +83,66 @@ fn copies_of_one_raw_member_that_overlap_are_no_phase_conflict() {
             "minecraft:stone".to_owned(),
             vec![(0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)],
         )],
+    );
+}
+
+#[test]
+fn a_copy_and_another_line_that_build_one_cell_otherwise_conflict() {
+    let src = "struct s size=5x3\n  raw_repeat count=2 step=1,0,0\n    \
+               raw_block mat=minecraft:stone at=0,0,0\n  \
+               raw_block mat=minecraft:glass at=1,0,0\n";
+    let out = lowered(src);
+    assert_eq!(
+        findings(src, &out),
+        [(
+            DiagnosticCode::PhaseConflict,
+            "raw_block mat=minecraft:glass at=1,0,0",
+            "`raw_block` overwrites 1 voxel that `raw_block` painted in the same phase, so which \
+             block the build keeps is decided by the order the two lines are written in",
+            vec![
+                "overwritten member declared here",
+                "If the override is deliberate this is the local-override rule of \
+                 spec/compilation \"Phase evaluation\" and the later line wins as written. If it \
+                 is not, move one of the two so their footprints do not meet.",
+                "Members in different phases may overlap freely — a `door` cut through a `walls` \
+                 is the evaluation model working — so this is only reported for two members the \
+                 same phase evaluates.",
+            ],
+        )],
+    );
+    assert_eq!(
+        state_cells(&out),
+        [
+            ("minecraft:stone".to_owned(), vec![(0, 0, 0)]),
+            ("minecraft:glass".to_owned(), vec![(1, 0, 0)]),
+        ],
+    );
+}
+
+#[test]
+fn a_last_copy_in_a_row_the_struct_reaches_but_does_not_build_waits() {
+    let src = "struct s size=5x5\n  walls height=3 mat_slot=w\n  \
+               raw_block mat=minecraft:stone at=0,0,0\n  raw_repeat count=2 step=0,1,0\n    \
+               raw_block mat=minecraft:glass at=1,0,1\n";
+    let out = lowered(src);
+    let mut found = findings(src, &out);
+    assert_eq!(found.remove(0).0, DiagnosticCode::NoThemeBound);
+    assert_eq!(
+        found,
+        [(
+            DiagnosticCode::DeferredMember,
+            "raw_block mat=minecraft:glass at=1,0,1",
+            "raw_block `at=1,0,1`, whose last of 2 `raw_repeat` copies lands at 1,1,1, does not \
+             fit in the struct (dims.y=1)",
+            vec![
+                "a `walls` member that would reach this row paints nothing; the block is placed \
+                 once that member's material resolves to a block",
+            ],
+        )],
+    );
+    assert_eq!(
+        built_by(&out, "raw_block"),
+        [("minecraft:stone".to_owned(), vec![(0, 0, 0)])],
     );
 }
 
@@ -166,6 +244,7 @@ fn a_raw_repeat_that_does_not_say_how_to_repeat_writes_nothing() {
             [(DiagnosticCode::InvalidMember, line, primary, vec![note])],
             "the `raw_block` under a refused `raw_repeat` is not lowered at all",
         );
+        assert_eq!(built_by(&out, "raw_block"), [], "for `{line}`");
     }
 }
 
@@ -181,6 +260,39 @@ fn a_raw_repeat_with_nothing_under_it_is_refused() {
             "raw_repeat has no `raw_block` or `raw_fill` indented under it, so it writes nothing",
             vec!["indent the `raw_block` and `raw_fill` lines to repeat under the `raw_repeat`"],
         )],
+    );
+}
+
+#[test]
+fn a_raw_repeat_holding_only_lines_it_does_not_write_again_is_refused() {
+    let repeat = "raw_repeat count=2 step=1,0,0";
+    let src = format!(
+        "theme plain:\n  slot wall -> @cobblestone\n\nstruct s size=5x3\n  {repeat}\n    \
+         walls mat_slot=wall height=1\n"
+    );
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::InvalidMember,
+            repeat,
+            "raw_repeat has no `raw_block` or `raw_fill` indented under it, so it writes nothing",
+            vec!["indent the `raw_block` and `raw_fill` lines to repeat under the `raw_repeat`"],
+        )],
+    );
+    assert_eq!(codes(&src), ["E_UNSUPPORTED_NESTING"]);
+    assert_eq!(built_by(&out, "walls"), []);
+}
+
+#[test]
+fn a_single_copy_at_no_step_is_the_raw_member_written_once() {
+    let src = "struct s size=5x3\n  raw_repeat count=1 step=0,0,0\n    \
+               raw_block mat=minecraft:stone at=1,0,1\n";
+    let out = lowered(src);
+    assert_eq!(findings(src, &out), []);
+    assert_eq!(
+        built_by(&out, "raw_block"),
+        [("minecraft:stone".to_owned(), vec![(1, 0, 1)])],
     );
 }
 

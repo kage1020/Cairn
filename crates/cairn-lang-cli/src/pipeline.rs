@@ -1,24 +1,15 @@
-//! The front half the subcommands share: reading, parsing, checking and lowering a source.
+//! The front half the subcommands share: reading and parsing a source, and lowering it for a
+//! build.
 
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::block_array::{findings_without_target, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
-use cairn_lang_core::error::Span;
-use cairn_lang_core::intent::IntentModule;
-use cairn_lang_core::resolve::resolve;
-use cairn_lang_core::{Diagnostic, Edition, diagnose_parse_failure, parse};
-use cairn_lang_formats::build::{Build, lower_for_build};
-use cairn_lang_formats::info::kept_findings;
-pub(crate) use cairn_lang_formats::info::{
-    build_diagnostics, built_scopes, dropped_scopes, lay_circuits,
-};
-use cairn_lang_formats::registry::builtin_pack;
-use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
+use cairn_lang_core::{Edition, diagnose_parse_failure, parse};
+use cairn_lang_formats::build::lowering::{Lowered, lower_for_target};
+use cairn_lang_formats::data_version::{ResolvedTarget, UnsupportedTarget};
 
 use crate::report::{FailureReport, report_failure_document};
-use crate::target::{ResolvedTarget, resolve_target};
 
 /// Read a source, or report why not: exit 2 for a path that names nothing, 1 for anything else.
 pub(crate) fn read_source(file: &Path) -> Result<String, ExitCode> {
@@ -45,112 +36,27 @@ pub(crate) fn load_module(
     Ok((source, module))
 }
 
-/// What [`check_lowering`] found, and what the run owes a refusal for.
-pub(crate) struct CheckLowering {
-    /// The block-array pass's findings; without a target, those every target reading their line
-    /// raises.
-    pub(crate) diagnostics: Vec<Diagnostic>,
-    /// Scopes that produced no voxels at the pinned target, empty without one.
-    pub(crate) dropped_scopes: Vec<String>,
-    /// How many scopes lowered at the pinned target, so the refusal can say "1 of 2"; 0 without
-    /// one.
-    pub(crate) built_scopes: usize,
-    /// Why a `--target` did not resolve.
-    pub(crate) unsupported: Option<cairn_lang_formats::data_version::UnsupportedTarget>,
-}
-
-/// Lower against `cairn check --target`'s id table, or with no target when none is given; an
-/// unresolved target lowers unpinned, so every finding that needs no version is still reported.
-pub(crate) fn check_lowering(
-    ir: &cairn_lang_core::intent::IntentModule,
-    edition: Option<Edition>,
-    target: Option<&str>,
-) -> CheckLowering {
-    // clap refuses `--target` without `--edition` (`spec/compilation` "Target axes").
-    let (Some(edition), Some(target)) = (edition, target) else {
-        return CheckLowering {
-            diagnostics: findings_without_target(ir, edition, &|edition, id| {
-                builtin_pack(edition).id_standing(id)
-            }),
-            dropped_scopes: Vec::new(),
-            built_scopes: 0,
-            unsupported: None,
-        };
-    };
-    let resolved = resolve_target(edition, target);
-    let pinned = resolved.as_ref().ok().map(ResolvedTarget::mc_version);
-    // The theme variant decides which id a `mat_slot=` reaches, so resolve for the edition.
-    let resolution = resolve(ir, Some(edition));
-    let registry = builtin_pack(edition).view(pinned);
-    let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
-    CheckLowering {
-        dropped_scopes: dropped_scopes(&resolution, &block_ir),
-        built_scopes: built_scopes(&block_ir),
-        diagnostics: block_ir.diagnostics,
-        unsupported: resolved.err(),
-    }
-}
-
-/// Report the scopes a lowering lost, as `E_PARTIAL_BUILD`, ending the line with `because`.
-pub(crate) fn report_partial_build(file: &Path, dropped: &[String], built: usize, because: &str) {
-    eprintln!(
-        "error[E_PARTIAL_BUILD]: {}: {} of {} requested scopes did not lower; {because}",
-        file.display(),
-        dropped.len(),
-        dropped.len() + built,
-    );
-    for scope in dropped {
-        eprintln!("  note: `{scope}` produced no voxels");
-    }
-}
-
-/// The circuit findings `cairn check` reports: the pinned edition's, at the pinned version when
-/// `target` names one it ships, or without a pin those each edition raises at the same span and
-/// each edition's own, which touch a line under its guards (`spec/lint` "Error vs warning").
-pub(crate) fn check_circuits(
-    ir: &IntentModule,
-    edition: Option<Edition>,
-    target: Option<&str>,
-) -> Vec<CircuitDiagnostic> {
-    let resolved = edition
-        .zip(target)
-        .and_then(|(edition, target)| resolve_target(edition, target).ok());
-    let pinned = resolved.as_ref().map(ResolvedTarget::mc_version);
-    let editions = Edition::weighed(edition);
-    let runs: Vec<Vec<CircuitDiagnostic>> = editions
-        .iter()
-        .map(|&edition| {
-            let registry = builtin_pack(edition).view(pinned);
-            let mut built = lower_to_block_array(ir, &resolve(ir, Some(edition)), Some(&registry));
-            lay_circuits(ir, &mut built, edition, &registry)
-        })
-        .collect();
-    let guarded: Vec<Vec<&Span>> = editions
-        .iter()
-        .map(|&edition| ir.lines_guarded_for(edition))
-        .collect();
-    kept_findings(&runs, |run, finding| finding.touches(&guarded[run]))
-}
-
-/// Read, parse, resolve and lower `file` for `edition`'s build, with its source.
-///
-/// Ids are checked against `target` unless it is `None` or the source's floors refuse it: the
-/// floor refusal then explains the failed build, not an `E_UNKNOWN_ID`.
+/// Read, parse, resolve and lower `file` for `edition`'s build at `target`, returning the source
+/// beside it.
 pub(crate) fn load_and_lower(
     file: &Path,
     edition: Edition,
-    target: Option<&ResolvedTarget>,
-) -> Result<(String, Build), ExitCode> {
+    target: Result<ResolvedTarget, UnsupportedTarget>,
+) -> Result<(String, Lowered), ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
-    let (_, build) = lower_for_build(&module, edition, target.map(ResolvedTarget::mc_version));
-    Ok((source, build))
+    let lowered = lower_for_target(&module, edition, target);
+    Ok((source, lowered))
 }
 
 /// A walled three-by-three `struct probe` lowered unpinned, for unit tests to rekey or corrupt.
 #[cfg(test)]
 pub(crate) fn lowered_probe(edition: Edition) -> cairn_lang_core::block_array::BlockArrayIr {
+    use cairn_lang_core::block_array::lower_to_block_array;
+    use cairn_lang_core::{lower, resolve::resolve};
+    use cairn_lang_formats::registry::builtin_pack;
+
     let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
-    let ir = cairn_lang_core::lower(&module);
+    let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
     lower_to_block_array(&ir, &resolution, Some(&builtin_pack(edition).view(None)))
 }

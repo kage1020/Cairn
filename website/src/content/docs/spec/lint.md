@@ -610,9 +610,9 @@ Multi-building](/spec/components-editing-sites/).
 `E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
 ([§11.3](#113-error-vs-warning)): the member is dropped with nothing in its place, and the
 incomplete side is its own line rather than the compiler. A line does that with an argument the
-member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose
-`y=` is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=`
-is no block id, a `raw_repeat` with no `count=` or `step=` or with nothing under it), a value
+member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose `y=`
+is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=` is no
+block id, a `raw_repeat` with no `count=` or `step=` or with no raw member under it), a value
 outside the ones its key takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair`
 whose `half=` is an identifier other than `top` or `bottom`, a `raw_repeat` `count=` below 1 or a
 `step=0,0,0` over more than one copy, a raw member's `origin=` other than `imported`), or arguments
@@ -736,7 +736,8 @@ wording the editions give it, and an edition's own by the rule for its guards
 ([§12.2.1](/spec/ecosystem-interop/#1221-diffing-a-lift)), and no other command raises either. Each
 is about a structure file rather than a line of a source, so it carries no span and prints on stderr:
 `warning[W_SEMANTIC_LOSS]: …` with the body it concerns first when it concerns one, and
-`error[E_DECOMPILE_DIFF]: …` with each metric that misses its threshold.
+`error[E_DECOMPILE_DIFF]: …` with each metric that misses its threshold. Under `--format json`,
+`E_DECOMPILE_DIFF` is the report's `code` instead, and stderr does not carry it.
 
 | Code | Meaning |
 |---|---|
@@ -854,9 +855,10 @@ dumping. Under every other `--format` the findings read as prose on stderr.
 
 `diff-blocks`'s product is the report of [Ecosystem
 Interop §12.2.4](/spec/ecosystem-interop/#1224-the-report). A source that does not build at the
-structure's stamp writes the `{"diagnostics": [ ... ]}` document `lower` does, and a refusal at the
-run level, a dropped scope or a `@requires` floor the stamp falls short of, writes
-`{"diagnostics": []}` and says the rest on stderr. A lift that does not converge is not a failure of
+structure's stamp writes the `{"diagnostics": [ ... ]}` document `lower` does. A refusal at the run
+level (a dropped scope, a `@requires` floor the stamp falls short of, or a structure the target's
+backend refuses) and a structure file that cannot be read as its format write `{"diagnostics": []}`
+and say the rest on stderr. A lift that does not converge is not a failure of
 this kind: its report is written, and carries `E_DECOMPILE_DIFF` as its `code`.
 
 `--format json` renders one object per finding:

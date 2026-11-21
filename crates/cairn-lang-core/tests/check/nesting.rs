@@ -5,6 +5,12 @@ use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
 use crate::common::{PRELUDE, diagnose, of_code, one_of_code, slice};
 
+/// The note every finding of the pass ends with.
+const NOT_GONE: &str = "these members are not gone: they still take a theme binding, and any \
+                        `-> sig.NAME` tail, `logic` line, or binding under `opened_by=`, \
+                        `powered_by=`, `lit_by=`, or `fired_by=` still reaches redstone \
+                        synthesis. What they do not produce is blocks";
+
 /// The advice note, the one without a span; the `declared here` note quotes the same keyword.
 fn advice(diag: &Diagnostic) -> &str {
     diag.notes.iter().find(|n| n.span.is_none()).map_or_else(
@@ -79,13 +85,7 @@ fn a_member_nested_under_a_geometry_member_is_reported() {
                 "only `level y=N` groups members inside a `struct` or `def` body — move these out \
                  to the enclosing body, or into a `level`",
             ),
-            (
-                None,
-                "these members are not gone: they still take a theme binding, and any \
-                 `-> sig.NAME` tail, `logic` line, or binding under `opened_by=`, `powered_by=`, \
-                 `lit_by=`, or `fired_by=` still reaches redstone synthesis. What they do not \
-                 produce is blocks",
-            ),
+            (None, NOT_GONE),
         ],
     );
 }
@@ -433,36 +433,40 @@ mod lowering {
     }
 }
 
-/// A finding as the text it points at, its primary, and its first two notes with their spans.
-type Nested<'a> = (&'a str, &'a str, Vec<(Option<&'a str>, &'a str)>);
+/// A finding as its code, the text it points at, its primary, and its notes with their spans.
+type Nested<'a> = (
+    &'static str,
+    &'a str,
+    &'a str,
+    Vec<(Option<&'a str>, &'a str)>,
+);
 
 #[test]
 fn a_raw_repeat_reads_the_raw_members_under_it_and_reports_any_other_line() {
-    let src = format!(
-        "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
-         raw_repeat count=2 step=1,0,0\n    raw_block mat=minecraft:stone at=0,1,0\n    \
-         walls mat_slot=wall height=3\n    raw_repeat count=2 step=0,1,0\n      \
-         raw_block mat=minecraft:stone at=1,1,1\n    \
-         raw_fill mat=minecraft:stone from=0,1,1 to=0,1,2\n      \
-         raw_block mat=minecraft:stone at=2,1,2\n"
-    );
-    let diags = of_code(&src, DiagnosticCode::UnsupportedNesting);
+    let src = "theme plain:\n  slot floor -> @oak_planks\n  slot wall -> @cobblestone\n\n\
+               struct s size=5x5\n  floor mat_slot=floor\n  \
+               raw_repeat count=2 step=1,0,0\n    raw_block mat=minecraft:stone at=0,1,0\n    \
+               walls mat_slot=wall height=3\n    raw_repeat count=2 step=0,1,0\n      \
+               raw_block mat=minecraft:stone at=1,1,1\n    \
+               raw_fill mat=minecraft:stone from=0,1,1 to=0,1,2\n      \
+               raw_block mat=minecraft:stone at=2,1,2\n";
+    let diags = diagnose(src);
     let found: Vec<Nested<'_>> = diags
         .iter()
         .map(|d| {
             let notes = d
                 .notes
                 .iter()
-                .take(2)
                 .map(|n| (n.span.clone().map(|span| &src[span]), n.message.as_str()))
                 .collect();
-            (slice(&src, d), d.primary.as_str(), notes)
+            (d.code.as_str(), slice(src, d), d.primary.as_str(), notes)
         })
         .collect();
     assert_eq!(
         found,
         [
             (
+                "E_UNSUPPORTED_NESTING",
                 "walls mat_slot=wall height=3",
                 "`raw_repeat` writes again only the `raw_block` and `raw_fill` lines under it, \
                  not a `walls`: the 1 member indented under it produces no blocks",
@@ -476,9 +480,11 @@ fn a_raw_repeat_reads_the_raw_members_under_it_and_reports_any_other_line() {
                         "move the `walls` out of the `raw_repeat`, to the body that holds the \
                          `raw_repeat`",
                     ),
+                    (None, NOT_GONE),
                 ],
             ),
             (
+                "E_UNSUPPORTED_NESTING",
                 "raw_repeat count=2 step=0,1,0\n      raw_block mat=minecraft:stone at=1,1,1",
                 "`raw_repeat` writes again only the `raw_block` and `raw_fill` lines under it, \
                  not a `raw_repeat`: the 1 member indented under it produces no blocks",
@@ -492,9 +498,11 @@ fn a_raw_repeat_reads_the_raw_members_under_it_and_reports_any_other_line() {
                         "move the `raw_repeat` out of the `raw_repeat`, to the body that holds \
                          the `raw_repeat`",
                     ),
+                    (None, NOT_GONE),
                 ],
             ),
             (
+                "E_UNSUPPORTED_NESTING",
                 "raw_block mat=minecraft:stone at=2,1,2",
                 "`raw_fill` does not group members: the 1 member indented under it produces no \
                  blocks",
@@ -508,6 +516,7 @@ fn a_raw_repeat_reads_the_raw_members_under_it_and_reports_any_other_line() {
                         "only `level y=N` groups members inside a `struct` or `def` body — move \
                          these out to the enclosing body, or into a `level`",
                     ),
+                    (None, NOT_GONE),
                 ],
             ),
         ],

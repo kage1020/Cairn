@@ -1,13 +1,10 @@
-//! What `cairn info` reports on a source, computed once for the CLI and the language server
-//! (`spec/versioning-editions` "The report in an editor").
+//! What `cairn info` reports on a source, built on the [`build`](crate::build) passes and computed
+//! once for every front end (`spec/versioning-editions` "The report in an editor").
 
-mod circuits;
 mod floors;
-mod gate;
 mod inferred;
 mod respelled;
 mod rows;
-mod scopes;
 
 use std::path::{Path, PathBuf};
 
@@ -15,49 +12,15 @@ use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{LineStarts, RenderedDiagnostic};
 use cairn_lang_core::lock::{LockReading, UnreadableKind};
 use cairn_lang_core::resolve::{VersionAxes, compute_axes, resolve};
-use cairn_lang_core::{Diagnostic, Edition, Severity, diagnose_parse_failure, lower, parse};
+use cairn_lang_core::{Edition, Severity, diagnose_parse_failure, lower, parse};
 use serde::Serialize;
 
+use crate::build::finding::{Finding, Found};
+use crate::build::gate::build_diagnostics;
+use crate::build::run_level::RunLevelMessage;
 use crate::registry::builtin_pack;
 
-pub use circuits::{kept_findings, lay_circuits};
-pub use gate::build_diagnostics;
-pub use inferred::{Conflict, report_conflicts, requires_conflicts};
 pub use requested::{EditionsRefused, RequestedEditions, requested_editions};
-pub use scopes::{built_scopes, dropped_scopes};
-
-/// A finding of the core passes or of the circuit a struct is built with, for a list holding both.
-#[derive(Debug, Clone)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "a run reports a handful of findings, most of them core's"
-)]
-pub enum Found {
-    /// A finding of the core passes.
-    Core(Diagnostic),
-    /// A finding of laying a struct's circuit.
-    Circuit(cairn_lang_redstone::Diagnostic),
-}
-
-impl Found {
-    /// The finding's severity.
-    #[must_use]
-    pub fn severity(&self) -> Severity {
-        match self {
-            Self::Core(d) => d.severity(),
-            Self::Circuit(d) => d.severity(),
-        }
-    }
-
-    /// The finding as `--format json` writes it.
-    #[must_use]
-    pub fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
-        match self {
-            Self::Core(d) => d.render(source, lines),
-            Self::Circuit(d) => d.render(source, lines),
-        }
-    }
-}
 
 /// Where an info run sends what its document does not carry, in the order `cairn info` prints it
 /// on stderr.
@@ -101,6 +64,14 @@ impl<'a> Reporter<'a> {
 
     fn line(&mut self, line: &str) {
         self.sink.line(line);
+    }
+
+    /// Send `message` as its gcc-style lines.
+    fn message(&mut self, message: &RunLevelMessage) {
+        let file = self.file.display().to_string();
+        for line in message.lines(&file, self.source, self.lines) {
+            self.sink.line(&line);
+        }
     }
 
     /// `file:line:col` for the byte offset `at`.
@@ -355,12 +326,6 @@ fn verified_target_notes(
             "note: {path}: the lockfile could not be read ({error})"
         )],
     }
-}
-
-/// A palette entry's name, `id[key=value,...]`.
-#[must_use]
-pub fn palette_entry_name(id: &str, states: &str) -> String {
-    format!("{id}[{states}]")
 }
 
 /// Its own module, so [`requested_editions`] is the only way to build a [`RequestedEditions`].

@@ -143,8 +143,11 @@ the target builds the same at any value is not compared, and on Bedrock a block 
 canonical block its state map reads it as. A file whose blocks the stamped target does not declare
 is refused with the errors that compile raises, each with the line it would have written, and a note
 that saving the file in that release renames a block an older one spelled otherwise. A cell no raw
-member builds as the file holds it refuses the import rather than writing it wrong. Either refusal,
-or bytes the format's reader refuses, is exit 1, and nothing is written.
+member builds as the file holds it refuses the import rather than writing it wrong. So does a
+structure whose blocks take more palette entries than a block array holds, counting a block that
+stands in water apart from the same block dry, and so does a block whose id or state no `mat=` value
+can spell, such as an id with a `-` in it, which the refusal names. Every refusal, bytes the
+format's reader refuses included, is exit 1, and nothing is written.
 
 The last step closes the loop. `cairn diff-blocks` builds the lift at the target the structure file
 is stamped with and compares the two cell by cell ([§12.2.1](#1221-diffing-a-lift)), names each
@@ -186,8 +189,10 @@ nothing. Two paired bodies are compared cell by cell from their `(0, 0, 0)` cell
 holds both.
 
 A cell holds a block unless it lies outside its body or holds `minecraft:air`, `minecraft:cave_air`
-or `minecraft:void_air`. Two blocks match when their ids are the same, and their states agree when
-every property agrees as the stamped target builds it:
+or `minecraft:void_air`. Only blocks are compared: the block entity data and entities STRUCTURE
+holds, which an import reports lost ([§12.3.1](#1231-what-an-import-writes)), are not. Two blocks
+match when their ids are the same, and their states agree when every property agrees as the stamped
+target builds it:
 
 - A property both write agrees when the two values are the same.
 - A property one side leaves out is read at the default the target builds for it: on Bedrock the
@@ -243,7 +248,8 @@ owns the most of them, the one written first of those that own as many:
 - **cleared_by.** A missing region whose cells a member owns names that member, which left them
   air.
 - **short_of.** A missing region no member owns names the member nearest it, within two cells, of
-  those that build its block: a wall a row short, a fill a column narrow.
+  those that build its block, the one written first of those as near: a wall a row short, a fill a
+  column narrow.
 - **walkway.** A walkway of the site laid the region's block.
 - **no_member.** No member builds the block there, or none within two cells of a missing region.
 - **unpaired.** The region's body has no body on the other side to pair with.
@@ -271,8 +277,8 @@ by inference alone:
    axes and lies at one end of the third.
 3. Each candidate is appended as a line of its own to FILE, after the lines already kept, and the
    text is built at the stamp with every pass `cairn compile` runs. A candidate that does not parse,
-   raises an error or drops a scope is discarded, and the build of every other is compared with
-   STRUCTURE.
+   raises an error, drops a scope or builds a structure the target's backend refuses is discarded,
+   and the build of every other is compared with STRUCTURE.
 4. The candidate that leaves the fewest cells differing is kept, when that is fewer than the lines
    kept so far leave; of two that leave as many, the earlier. The cells counted are those only one
    side holds a block at, those where the two hold different ids, and the matched cells whose states
@@ -287,11 +293,15 @@ FILE reaches with all of them appended. When no candidate helps, there is no pat
 
 ### 12.2.4 The report
 
-FILE is built first, and its findings print on stderr as `cairn compile` prints them. An error, a
-`@requires` floor no target declaring the blocks the build paints clears (`E_REQUIRES_CONFLICT`), a
-scope the build drops ([Lint §11.1](/spec/lint/#lowering)), or a floor the stamp falls short of
-([Versioning and Editions](/spec/versioning-editions/)) refuses the comparison, in that order. The
-last refusal ends with a note naming the stamp, since the command takes no `--target`.
+FILE is built first, each structure it builds is checked by the target's backend as `cairn compile`
+checks it before writing, and its findings print on stderr as `cairn compile` prints them,
+`W_INTENT_DEGRADED` among them. An error, a `@requires` floor no target declaring the blocks the
+build paints clears (`E_REQUIRES_CONFLICT`), a scope the build drops ([Lint
+§11.1](/spec/lint/#lowering)), a floor the stamp falls short of ([Versioning and
+Editions](/spec/versioning-editions/)), or a structure the backend refuses refuses the comparison,
+in that order. The refusal on the stamp's floor ends with a note naming the stamp, since the command
+takes no `--target`. When STRUCTURE holds block entity data or entities, a note on stderr says they
+are not compared, in either format.
 
 The text report prints on stdout:
 
@@ -305,10 +315,10 @@ The text report prints on stdout:
   many more there are;
 - the patch, after the metrics it reaches.
 
-When the lift does not converge, stderr carries `error[E_DECOMPILE_DIFF]:` with each metric that
-misses its threshold, a note giving the thresholds, and a note on what to do next: append the patch,
-edit what the regions name, or, when every cell matches and only residual raw falls short, name what
-the raw members build.
+When the lift does not converge, stderr under `--format text` carries `error[E_DECOMPILE_DIFF]:`
+with each metric that misses its threshold, a note giving the thresholds, and a note on what to do
+next: append the patch, edit what the regions name, or, when every cell matches and only residual
+raw falls short, name what the raw members build.
 
 `--format json` writes one document to stdout ([Lint §11.2](/spec/lint/#112-machine-readable-payload)):
 
@@ -327,13 +337,15 @@ the raw members build.
 | `patch` | Present when lines are kept: `edits` in order, the metrics reached, and their `counts`. |
 
 Where FILE does not build at the stamp, the document is `{"diagnostics": [ ... ]}` with the
-findings, as `cairn lower` writes it, and a refusal at the run level, a conflicting floor, a dropped
-scope or a floor the stamp falls short of, writes `{"diagnostics": []}` and says the rest on stderr.
+findings, as `cairn lower` writes it. A refusal at the run level (a conflicting floor, a dropped
+scope, a floor the stamp falls short of, or a structure the backend refuses) and a STRUCTURE that
+cannot be read as its format write `{"diagnostics": []}` and say the rest on stderr. Stderr carries
+no `E_DECOMPILE_DIFF` under `--format json`: the report's `code` is where it reads.
 
 The exit code is 0 when the lift converges; 1 when it does not, when FILE does not parse, raises an
-error, drops a scope or needs a later target than the stamp, or when STRUCTURE cannot be read as its
-format or was saved past every shipped target; and 2 when either file cannot be located or
-STRUCTURE's extension names no format the command reads.
+error, drops a scope, needs a later target than the stamp or builds a structure the backend refuses,
+or when STRUCTURE cannot be read as its format or was saved past every shipped target; and 2 when
+either file cannot be located or STRUCTURE's extension names no format the command reads.
 
 ### 12.2.5 The report in an editor
 
@@ -461,8 +473,10 @@ that the source does not carry, by the body it is in:
 - the palettes of a `.nbt` past its first, of which a placement picks one at random;
 - on Bedrock, a block its state map has no canonical state for, written by its id alone and built
   with its block's default states; water at a block that cannot hold it as `waterlogged`, which is
-  not written; a block that always stands in water where the file's second layer holds none; and a
-  second-layer block other than water, which no raw member writes.
+  not written; water over a structure void, which the import writes as air; a block that always
+  stands in water where the file's second layer holds none; a second-layer block other than water,
+  which no raw member writes; and what `block_position_data` holds other than block entity data,
+  such as a tick queue, by its key and with how many cells hold it, which is not written.
 
 Other rules:
 

@@ -2,7 +2,7 @@ use cairn_lang_core::block_array::BlockState;
 use cairn_lang_core::voxel_diff::{Counts, compare};
 
 use crate::common::{only_structure, read_example, solid_cells};
-use crate::{THEME, build, hut, report, unit_of, units};
+use crate::{THEME, build, hut, region_lines, report, unit_edited, unit_of, units};
 
 /// Counts of `blocks` cells that agree in every way, `residual` of them built by raw members.
 fn agreeing(blocks: u64, residual: u64) -> Counts {
@@ -47,21 +47,21 @@ fn every_cell_a_raw_member_builds_is_residual() {
 fn a_state_the_build_leaves_out_counts_as_the_default_the_entry_gives_and_is_otherwise_unread() {
     let source = format!("{THEME}struct s size=3x3\n  raw_block mat=minecraft:stone at=1,0,1\n");
     let built = build(&source).expect("it builds");
-    let mut unit = unit_of("s", only_structure(&built));
-    let stone = unit
-        .grid
-        .palette
-        .iter_mut()
-        .find(|entry| entry.state.id == "minecraft:stone")
-        .expect("a stone entry");
-    stone.state = BlockState {
-        id: "minecraft:stone".into(),
-        properties: [("powered", "false"), ("lit", "true")]
-            .map(|(k, v)| (k.to_owned(), v.to_owned()))
-            .into_iter()
-            .collect(),
-    };
-    stone.defaults.insert("lit".into(), "false".into());
+    let mut stones = 0;
+    let unit = unit_edited("s", only_structure(&built), |entry| {
+        if entry.state.id == "minecraft:stone" {
+            entry.state = BlockState {
+                id: "minecraft:stone".into(),
+                properties: [("powered", "false"), ("lit", "true")]
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                    .into_iter()
+                    .collect(),
+            };
+            entry.defaults.insert("lit".into(), "false".into());
+            stones += 1;
+        }
+    });
+    assert_eq!(stones, 1);
     let units = [unit];
     let report = report(&units, &source);
     assert_eq!(
@@ -83,16 +83,14 @@ fn a_waterlogged_either_side_leaves_out_counts_as_dry() {
     );
     let built = build(&source).expect("it builds");
     let with_water = |value: &str| {
-        let mut unit = unit_of("s", only_structure(&built));
-        for entry in &mut unit.grid.palette {
+        [unit_edited("s", only_structure(&built), |entry| {
             if entry.state.id == "minecraft:oak_stairs" {
                 entry
                     .state
                     .properties
                     .insert("waterlogged".into(), value.into());
             }
-        }
-        [unit]
+        })]
     };
     let dry = report(&with_water("false"), &source);
     assert_eq!(dry.counts, agreeing(1, 1));
@@ -197,5 +195,37 @@ fn bodies_pair_by_name_and_an_unpaired_body_counts_every_cell() {
             states_matched: 9,
             residual: 0,
         }
+    );
+}
+
+#[test]
+fn a_site_spread_far_apart_is_compared_without_filling_the_space_between() {
+    let lift = format!(
+        "{THEME}def hut size=3x3:\n  raw_block mat=minecraft:stone at=1,0,1\n\n\
+         site far:\n  place id=a use=hut theme=t at=origin\n  \
+         place id=b use=hut theme=t east_of=a gap=1000000\n  \
+         place id=c use=hut theme=t north_of=a gap=1000000\n"
+    );
+    let structure = format!("{THEME}struct s size=3x3\n  raw_block mat=minecraft:stone at=1,0,1\n");
+    let report = report(&units(&structure), &lift);
+    assert_eq!(
+        report.counts,
+        Counts {
+            structure_blocks: 1,
+            built_blocks: 3,
+            both_blocks: 1,
+            matched: 1,
+            states_matched: 1,
+            residual: 3,
+        }
+    );
+    assert_eq!(
+        region_lines(&report),
+        [
+            "extra far (1,0,1000004)..(1,0,1000004): 1 cell of minecraft:stone → built by \
+             `raw_block[0]` (line 8)",
+            "extra far (1000004,0,1000004)..(1000004,0,1000004): 1 cell of minecraft:stone → \
+             built by `raw_block[0]` (line 8)",
+        ]
     );
 }

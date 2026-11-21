@@ -4,12 +4,17 @@
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::voxel_diff::{DiffInput, DiffReport, diff};
-use cairn_lang_core::{Diagnostic, Edition, Severity, diagnose_parse_failure, parse};
+use cairn_lang_core::{Edition, diagnose_parse_failure, parse};
 use serde::Serialize;
 
-use crate::build::{Build, lower_for_build};
+use crate::build::artifact::prepare_artifact;
+use crate::build::finding::{Finding, Found};
+use crate::build::lowering::{BuildRefusal, Lowered, lower_for_target};
+use crate::build::run_level::{RunLevelMessage, floor_refusal_message, partial_build};
+use crate::build::scopes::built_scopes;
+use crate::data_version::{ResolvedTarget, resolve_target};
 use crate::import::DecodedStructure;
-use crate::info::{Conflict, FailureDocument, Found, built_scopes};
+use crate::info::FailureDocument;
 
 /// The document `cairn diff-blocks --format json` prints for a lift it compares.
 #[derive(Debug, Serialize)]
@@ -34,22 +39,19 @@ pub struct StampedTarget {
     pub version: String,
 }
 
-/// Why a run compares nothing.
+/// Why a run compares nothing, in the order `cairn diff-blocks` checks.
 #[derive(Debug)]
 pub enum DiffBlocksRefusal {
     /// The source does not parse, or a pass raises an error.
     Findings,
-    /// A `@requires` floor conflicts with the blocks the build paints.
+    /// A `@requires` floor admits no target declaring every id the build paints.
     Conflicts,
-    /// Scopes produced no voxels at the stamp.
-    PartialBuild {
-        /// The scopes that produced none.
-        dropped: Vec<String>,
-        /// How many scopes did.
-        built: usize,
-    },
-    /// A version floor refuses the stamp, with the finding that says so.
-    Floor(Box<Diagnostic>),
+    /// A refusal no finding makes: a scope the build dropped, or a stamp the edition does not ship.
+    RunLevel(RunLevelMessage),
+    /// The finding by which a version floor refuses the stamp.
+    Floor(RunLevelMessage),
+    /// A structure the stamp's backend refuses to write.
+    Backend(RunLevelMessage),
 }
 
 /// A run of `cairn diff-blocks`: what the build found, and the document or why there is none.
@@ -57,9 +59,11 @@ pub enum DiffBlocksRefusal {
 pub struct DiffBlocksRun {
     /// Every finding of building the source, in the order the passes raised them.
     pub findings: Vec<Found>,
-    /// The floors no version declaring every id the build paints clears, as
-    /// `E_REQUIRES_CONFLICT` reports them.
-    pub conflicts: Vec<Conflict>,
+    /// `E_REQUIRES_CONFLICT` for each floor above the last version that declares some id the
+    /// build paints.
+    pub conflicts: Vec<RunLevelMessage>,
+    /// The `W_INTENT_DEGRADED` warnings of the stamp's backend on what the source builds.
+    pub degraded: Vec<RunLevelMessage>,
     /// The document, or why the run compares nothing.
     pub outcome: Result<DiffBlocksDocument, DiffBlocksRefusal>,
 }
@@ -84,96 +88,119 @@ impl DiffBlocksRun {
 
 /// Build `source` at the target `structure` is stamped with and compare the two, as
 /// `spec/ecosystem-interop` "Diffing a lift" specifies.
-///
-/// # Panics
-///
-/// When the stamp names no row of its edition's version table, which no import stamps.
 #[must_use]
 pub fn diff_blocks(source: &str, structure: &DecodedStructure) -> DiffBlocksRun {
     let module = match parse(source) {
         Ok(module) => module,
         Err(err) => {
             let lines = LineStarts::new(source);
-            return DiffBlocksRun {
-                findings: vec![Found::Core(diagnose_parse_failure(source, &lines, &err))],
-                conflicts: Vec::new(),
-                outcome: Err(DiffBlocksRefusal::Findings),
-            };
+            return refused(
+                vec![Found::Core(diagnose_parse_failure(source, &lines, &err))],
+                Vec::new(),
+                DiffBlocksRefusal::Findings,
+            );
         }
     };
-    let stamp = &structure.stamp;
-    let target = stamp.mc_version.as_str();
-    let (ir, build) = lower_for_build(&module, stamp.edition, Some(target));
-    let Build {
-        block_ir,
-        circuits,
-        dropped_scopes,
-        floor_refusal,
-        conflicts,
-    } = build;
-    let findings: Vec<Found> = block_ir
+    let edition = structure.stamp.edition();
+    let lowered = lower_for_target(
+        &module,
+        edition,
+        resolve_target(edition, structure.stamp.mc_version()),
+    );
+    let findings: Vec<Found> = lowered
+        .block_ir
         .diagnostics
         .iter()
         .cloned()
         .map(Found::Core)
-        .chain(circuits.into_iter().map(Found::Circuit))
+        .chain(lowered.circuits.iter().cloned().map(Found::Circuit))
         .collect();
-    let refusal = if findings.iter().any(|d| d.severity() == Severity::Error) {
-        Some(DiffBlocksRefusal::Findings)
-    } else if !conflicts.is_empty() {
-        Some(DiffBlocksRefusal::Conflicts)
-    } else if !dropped_scopes.is_empty() {
-        Some(DiffBlocksRefusal::PartialBuild {
-            dropped: dropped_scopes,
-            built: built_scopes(&block_ir),
-        })
-    } else {
-        floor_refusal.map(|refusal| DiffBlocksRefusal::Floor(Box::new(refusal)))
+    let conflicts = lowered.conflicts.clone();
+    let target = match compared_target(&lowered) {
+        Ok(target) => target,
+        Err(refusal) => return refused(findings, conflicts, refusal),
     };
-    if let Some(refusal) = refusal {
-        return DiffBlocksRun {
-            findings,
-            conflicts,
-            outcome: Err(refusal),
-        };
-    }
-    let build = |text: &str| build_candidate(text, stamp.edition, target);
+    let degraded = match checked_by_backend(&lowered.block_ir, target) {
+        Ok(degraded) => degraded,
+        Err(refusal) => return refused(findings, conflicts, DiffBlocksRefusal::Backend(refusal)),
+    };
+    let build = |text: &str| build_candidate(text, edition, target);
     let report = diff(&DiffInput {
         units: &structure.units,
         source,
-        module: &ir,
-        built: &block_ir,
+        module: &lowered.ir,
+        built: &lowered.block_ir,
         build: &build,
     });
     DiffBlocksRun {
         findings,
         conflicts,
+        degraded,
         outcome: Ok(DiffBlocksDocument {
             structure: structure.file_name.clone(),
             target: StampedTarget {
-                edition: stamp.edition,
-                version: stamp.mc_version.clone(),
+                edition,
+                version: target.mc_version().to_owned(),
             },
-            saved: stamp.saved_label(),
+            saved: structure.stamp.saved_label(),
             report,
         }),
     }
 }
 
-/// What `text` builds at `target`, `None` when it does not parse, a pass raises an error or a
-/// scope is dropped.
-fn build_candidate(text: &str, edition: Edition, target: &str) -> Option<BlockArrayIr> {
+/// A run that compares nothing, for `refusal`.
+fn refused(
+    findings: Vec<Found>,
+    conflicts: Vec<RunLevelMessage>,
+    refusal: DiffBlocksRefusal,
+) -> DiffBlocksRun {
+    DiffBlocksRun {
+        findings,
+        conflicts,
+        degraded: Vec::new(),
+        outcome: Err(refusal),
+    }
+}
+
+/// The target `lowered` is compared at, or the refusal `cairn compile` would make first.
+fn compared_target(lowered: &Lowered) -> Result<&ResolvedTarget, DiffBlocksRefusal> {
+    match lowered.verdict() {
+        Ok(target) => Ok(target),
+        Err(BuildRefusal::Findings) => Err(DiffBlocksRefusal::Findings),
+        Err(BuildRefusal::Conflicts) => Err(DiffBlocksRefusal::Conflicts),
+        Err(BuildRefusal::RunLevel(_)) if !lowered.dropped_scopes.is_empty() => {
+            Err(DiffBlocksRefusal::RunLevel(partial_build(
+                &lowered.dropped_scopes,
+                built_scopes(&lowered.block_ir),
+                "refusing to compare a partial build",
+            )))
+        }
+        Err(BuildRefusal::RunLevel(message)) => Err(DiffBlocksRefusal::RunLevel(message)),
+        Err(BuildRefusal::Floor(refusal)) => {
+            Err(DiffBlocksRefusal::Floor(floor_refusal_message(refusal)))
+        }
+    }
+}
+
+/// Each structure of `block_ir` checked by `target`'s backend as `cairn compile` checks it before
+/// writing: the `W_INTENT_DEGRADED` warnings, or the first refusal.
+fn checked_by_backend(
+    block_ir: &BlockArrayIr,
+    target: &ResolvedTarget,
+) -> Result<Vec<RunLevelMessage>, RunLevelMessage> {
+    let mut degraded = Vec::new();
+    for (scope, array) in &block_ir.structures {
+        degraded.extend(prepare_artifact(block_ir, scope, array, target)?.degraded);
+    }
+    Ok(degraded)
+}
+
+/// What `text` builds at `target`, `None` when the build or the backend refuses it.
+fn build_candidate(text: &str, edition: Edition, target: &ResolvedTarget) -> Option<BlockArrayIr> {
     let module = parse(text).ok()?;
-    let (_, build) = lower_for_build(&module, edition, Some(target));
-    let refused = build
-        .block_ir
-        .diagnostics
-        .iter()
-        .any(|d| d.severity() == Severity::Error)
-        || build
-            .circuits
-            .iter()
-            .any(|d| d.severity() == Severity::Error)
-        || !build.dropped_scopes.is_empty();
-    (!refused).then_some(build.block_ir)
+    let lowered = lower_for_target(&module, edition, Ok(target.clone()));
+    if lowered.verdict().is_err() || checked_by_backend(&lowered.block_ir, target).is_err() {
+        return None;
+    }
+    Some(lowered.block_ir)
 }

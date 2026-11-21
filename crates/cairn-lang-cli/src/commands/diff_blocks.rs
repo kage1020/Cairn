@@ -6,20 +6,20 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use cairn_lang_core::check::LineStarts;
-use cairn_lang_core::voxel_diff::{CONVERGENCE, DiffReport, Metrics, floor3, percent};
+use cairn_lang_core::voxel_diff::{DiffReport, Metrics, Thresholds, floor3, percent};
+use cairn_lang_formats::build::finding::Found;
 use cairn_lang_formats::diff_blocks::{
     DiffBlocksDocument, DiffBlocksRefusal, DiffBlocksRun, diff_blocks,
 };
-use cairn_lang_formats::import::{ImportFormat, ImportStamp, decode_structure};
-use cairn_lang_formats::info::{Reporter, report_conflicts};
+use cairn_lang_formats::import::{DecodedStructure, ImportFormat, LossKind, decode_structure};
 
 use crate::cli::DiffFormat;
-use crate::commands::import::{file_name, open_structure, refuse_extension};
-use crate::floors::report_floor_refusal;
-use crate::pipeline::{read_source, report_partial_build};
+use crate::pipeline::read_source;
 use crate::report::{
-    FailureReport, Found, Stderr, print_json, report_diagnostics, report_failure_document,
+    print_json, report_diagnostics, report_failure_document, report_run_level,
+    report_structure_message,
 };
+use crate::structure_file::{file_name, open_structure, refuse_extension};
 
 /// How many regions the text report lists before it counts the rest.
 const LISTED_REGIONS: usize = 10;
@@ -41,17 +41,22 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
         Ok(decoded) => decoded,
         Err(err) => {
             eprintln!("error: cannot compare `{}`: {err}", structure.display());
-            return ExitCode::from(1);
+            return refused(file, &source, format);
         }
     };
     let run = diff_blocks(&source, &decoded);
-    let report = format.failure_report();
-    let document = match report_run(structure, file, &source, report, &decoded.stamp, run) {
+    let document = match report_run(structure, file, &source, format, &decoded, run) {
         Ok(document) => document,
         Err(code) => return code,
     };
+    if let Some(unread) = uncompared(&decoded) {
+        eprintln!(
+            "note: only blocks are compared, not the {unread} `{}` holds",
+            structure.display()
+        );
+    }
     match format {
-        DiffFormat::Text => print_text(structure, file, &decoded.stamp, &document.report),
+        DiffFormat::Text => print_text(structure, file, &decoded, &document.report),
         DiffFormat::Json => {
             if let Err(code) = print_json("the diff", &document) {
                 return code;
@@ -73,81 +78,95 @@ fn report_run(
     structure: &Path,
     file: &Path,
     source: &str,
-    report: FailureReport,
-    stamp: &ImportStamp,
+    format: DiffFormat,
+    decoded: &DecodedStructure,
     run: DiffBlocksRun,
 ) -> Result<DiffBlocksDocument, ExitCode> {
     let DiffBlocksRun {
         findings,
         conflicts,
+        degraded,
         outcome,
     } = run;
     let lines = LineStarts::new(source);
-    let refused_by_findings = matches!(outcome, Err(DiffBlocksRefusal::Findings));
-    let failure = if refused_by_findings {
-        Some(report_failure_document(file, source, report, &findings))
-    } else {
-        report_diagnostics(file, source, &lines, &findings);
-        None
+    // As in `compile`, every conflict is reported, beside the error findings too.
+    let report_conflicts = || {
+        for conflict in &conflicts {
+            report_run_level(file, source, &lines, conflict);
+        }
     };
-    let mut stderr = Stderr {
-        file,
-        source,
-        lines: &lines,
-    };
-    report_conflicts(
-        &mut Reporter::new(file, source, &lines, &mut stderr),
-        stamp.edition,
-        &conflicts,
-    );
     let refusal = match outcome {
-        Ok(document) => return Ok(document),
+        Ok(document) => {
+            report_diagnostics(file, source, &lines, &findings);
+            degraded.iter().for_each(report_structure_message);
+            return Ok(document);
+        }
+        Err(DiffBlocksRefusal::Findings) => {
+            let code = report_failure_document(file, source, format.failure_report(), &findings);
+            report_conflicts();
+            return Err(code);
+        }
         Err(refusal) => refusal,
     };
-    if let Some(code) = failure {
-        return Err(code);
-    }
+    report_diagnostics(file, source, &lines, &findings);
+    report_conflicts();
     match refusal {
         DiffBlocksRefusal::Findings | DiffBlocksRefusal::Conflicts => {}
-        DiffBlocksRefusal::PartialBuild { dropped, built } => {
-            report_partial_build(file, &dropped, built, "refusing to compare a partial build");
-        }
-        DiffBlocksRefusal::Floor(refusal) => {
-            report_floor_refusal(file, source, &refusal);
+        DiffBlocksRefusal::RunLevel(message) => report_run_level(file, source, &lines, &message),
+        DiffBlocksRefusal::Floor(message) => {
+            report_run_level(file, source, &lines, &message);
             eprintln!(
-                "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {} {}, so \
-                 its `@requires` must admit that target",
+                "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {} {}, so its \
+                 `@requires` must admit that target",
                 structure.display(),
-                stamp.edition,
-                stamp.mc_version,
+                decoded.stamp.edition(),
+                decoded.stamp.mc_version(),
             );
         }
+        DiffBlocksRefusal::Backend(message) => report_structure_message(&message),
     }
-    // One document per input under `--format json`: the refusal is stderr's, the warnings too.
-    let none: [Found; 0] = [];
-    Err(match report {
-        FailureReport::Json => report_failure_document(file, source, report, &none),
-        FailureReport::Text => ExitCode::from(1),
-    })
+    Err(refused(file, source, format))
 }
 
-/// The metrics as three report lines.
-fn metric_lines(metrics: &Metrics) -> [String; 3] {
+/// The exit of a refusal reported on stderr; under `--format json`, one document per input
+/// still, `{"diagnostics": []}`.
+fn refused(file: &Path, source: &str, format: DiffFormat) -> ExitCode {
+    let none: [Found; 0] = [];
+    match format {
+        DiffFormat::Json => report_failure_document(file, source, format.failure_report(), &none),
+        DiffFormat::Text => ExitCode::from(1),
+    }
+}
+
+/// What `decoded` holds besides blocks, which the comparison leaves out, `None` when nothing.
+fn uncompared(decoded: &DecodedStructure) -> Option<&'static str> {
+    let holds = |kinds: &[LossKind]| decoded.losses.iter().any(|loss| kinds.contains(&loss.kind));
+    let data = holds(&[LossKind::BlockEntities, LossKind::PositionData]);
+    match (data, holds(&[LossKind::Entities])) {
+        (true, true) => Some("block entity data and entities"),
+        (true, false) => Some("block entity data"),
+        (false, true) => Some("entities"),
+        (false, false) => None,
+    }
+}
+
+/// The metrics as three report lines, each with the threshold it converges at.
+fn metric_lines(metrics: &Metrics, at: &Thresholds) -> [String; 3] {
     [
         format!(
             "block IoU       {:<6} converges at >= {}",
             floor3(metrics.block_iou),
-            CONVERGENCE.block_iou
+            at.block_iou
         ),
         format!(
             "state_accuracy  {:<6} converges at >= {}",
             floor3(metrics.state_accuracy),
-            CONVERGENCE.state_accuracy
+            at.state_accuracy
         ),
         format!(
             "residual raw    {:<6} converges at <= {}",
             percent(metrics.residual_ratio),
-            percent(CONVERGENCE.residual_ratio)
+            percent(at.residual_ratio)
         ),
     ]
 }
@@ -163,16 +182,16 @@ fn metric_summary(metrics: &Metrics) -> String {
 }
 
 /// The text report on stdout.
-fn print_text(structure: &Path, file: &Path, stamp: &ImportStamp, verdict: &DiffReport) {
+fn print_text(structure: &Path, file: &Path, decoded: &DecodedStructure, verdict: &DiffReport) {
     outln!(
         "{} against {} at {} {}, {}",
         structure.display(),
         file.display(),
-        stamp.edition,
-        stamp.mc_version,
-        stamp.reason()
+        decoded.stamp.edition(),
+        decoded.stamp.mc_version(),
+        decoded.stamp.reason()
     );
-    for line in metric_lines(&verdict.metrics) {
+    for line in metric_lines(&verdict.metrics, &verdict.thresholds) {
         outln!("{line}");
     }
     if verdict.bodies.len() > 1 {
@@ -214,15 +233,16 @@ fn print_text(structure: &Path, file: &Path, stamp: &ImportStamp, verdict: &Diff
 
 /// `E_DECOMPILE_DIFF` on stderr, with what would converge and how to get there.
 fn report_unconverged(file: &Path, verdict: &DiffReport) {
+    let at = &verdict.thresholds;
     eprintln!(
         "error[E_DECOMPILE_DIFF]: {}",
-        verdict.metrics.shortfalls(&CONVERGENCE).join(", ")
+        verdict.metrics.shortfalls(at).join(", ")
     );
     eprintln!(
         "  note: a lift converges at block IoU >= {}, state_accuracy >= {} and residual raw <= {}",
-        CONVERGENCE.block_iou,
-        CONVERGENCE.state_accuracy,
-        percent(CONVERGENCE.residual_ratio)
+        at.block_iou,
+        at.state_accuracy,
+        percent(at.residual_ratio)
     );
     let file = file.display();
     if verdict.patch.is_some() {

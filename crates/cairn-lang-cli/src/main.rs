@@ -13,13 +13,12 @@ macro_rules! outln {
 mod artifacts;
 mod cli;
 mod commands;
-mod floors;
 mod lockfile;
 mod name_case;
 mod pipeline;
 mod report;
 mod staging;
-mod target;
+mod structure_file;
 
 use std::process::ExitCode;
 

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
-use crate::common::{Run, cairn_argv, compile, example_in_tempdir, nbt_body};
+use crate::common::{Run, cairn_argv, compile, example_in_tempdir, nbt_body, write_source};
 
 /// The warning every import prints first.
 const INTENT_LOSS: &str = "warning[W_SEMANTIC_LOSS]: an import recovers blocks and their \
@@ -230,4 +230,58 @@ fn with_data_version(path: &Path, data_version: i32) -> Vec<u8> {
     let mut gz = GzEncoder::new(Vec::new(), Compression::default());
     gz.write_all(&body).expect("the body gzips");
     gz.finish().expect("the gzip finishes")
+}
+
+#[test]
+fn a_cell_no_raw_member_writes_is_refused_with_nothing_written() {
+    let tmp = tempfile::tempdir().expect("a temp dir");
+    let src = write_source(
+        tmp.path(),
+        "pane.crn",
+        "@cairn 2026.11.0\nstruct pane size=2x1\n  raw_block mat=minecraft:glass_pane at=0,0,0\n  \
+         raw_block mat=minecraft:stone at=1,0,0\n",
+    );
+    let out = tmp.path().join("built");
+    let run = Run::from(compile(&src, "java", "1.21.4", &out, None));
+    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    let artifact = out.join("pane.nbt");
+    let before = entries(&out);
+
+    let run = import(&[&artifact]);
+    assert_eq!(
+        (run.code, run.stdout.as_str(), run.stderr.as_str()),
+        (
+            Some(1),
+            "",
+            format!(
+                "error: cannot import `{}`: `pane` cell 0,0,0 holds `minecraft:glass_pane`, and \
+                 the written raw members build \
+                 `minecraft:glass_pane[east=true,north=false,south=false,west=false]` there, so \
+                 no raw member writes it; the transliteration is refused rather than written \
+                 wrong, and the file is worth reporting\n",
+                artifact.display()
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(entries(&out), before);
+}
+
+#[test]
+fn a_structure_file_is_named_by_its_extension_in_any_case() {
+    let (tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
+    let upper = tmp.path().join("COTTAGE.NBT");
+    fs::copy(&artifact, &upper).expect("copy the artifact");
+    let run = import(&[&upper]);
+    let written = tmp.path().join("COTTAGE.raw.crn");
+    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    assert_eq!(run.stdout, format!("wrote {}\n", written.display()));
+    let source = fs::read_to_string(&written).expect("the import is written");
+    assert_eq!(
+        source.lines().next(),
+        Some(
+            "# imported from `COTTAGE.NBT`, a Java structure file saved at DataVersion 4189 \
+             (1.21.4)"
+        )
+    );
 }

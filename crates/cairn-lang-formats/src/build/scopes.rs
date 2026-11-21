@@ -1,4 +1,4 @@
-//! The scopes a lowering built, and those it lost.
+//! Which of the scopes a source asks for a lowering built, and which it lost.
 
 use std::collections::HashSet;
 
@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
 /// Scopes the source asked for that hold no block after lowering, all-air arrays included: the
 /// resolver's scopes, then one `site::SITE::FROM ↔ TO` per `connect` pair that laid none.
 #[must_use]
-pub fn dropped_scopes(resolution: &Resolution, block_ir: &BlockArrayIr) -> Vec<String> {
+pub(crate) fn dropped_scopes(resolution: &Resolution, block_ir: &BlockArrayIr) -> Vec<String> {
     let built = |key: &str| block_ir.structures.get(key).is_some_and(holds_a_block);
     let mut dropped: Vec<String> = resolution
         .scopes

@@ -1173,6 +1173,15 @@ refuses has a document with no element ([Lint §11.2](/spec/lint/#112-machine-re
 and no exit code to say it was refused, so it is answered with a `RequestFailed` error carrying the
 lines `cairn info` writes on stderr about the palette instead.
 
+### The report in a browser
+
+The [playground](/playground/)'s module gives the same answer for a source held in memory, as the
+JavaScript function `info(source, editions)`, where `editions` is the list `--editions` takes. The
+source has no path, so no lock lies beside it: `verified_target` is
+`{"status": "missing", "path": ""}`, the `(no lock)` of a path that names no file. As in an editor,
+what `cairn info` writes on stderr is not answered. An `editions` list `--editions` would refuse,
+or an empty one, throws an `Error` that says which.
+
 ## 10.6 Provenance and lock
 
 The `.crn` carries the language version it is written against (`@cairn`) and, about targets, only

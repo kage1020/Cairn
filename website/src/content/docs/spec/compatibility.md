@@ -77,6 +77,13 @@ Evolving surfaces:
 - The CLI's human-readable diagnostic format and prose (the *codes* are Stable; the *prose*
   is not).
 - The `--features` set on `cairn-lang-cli` (cargo features) and `[features]` on workspace crates.
+- The JavaScript API of the module `cairn-lang-wasm` builds for the [playground](/playground/):
+  the names and arguments of `cairn_version`, `compile`, `info` and `targets`, and the fields of
+  what `compile` and `targets` answer. A finding in it takes the shape
+  [Lint §11.2](/spec/lint/#112-machine-readable-payload) gives, and the `ir` `compile` carries is
+  the block-array IR, which is Internal. What `info` answers is `cairn info`'s JSON document for a
+  source with no lock beside it ([§10.5](/spec/versioning-editions/#the-report-in-a-browser)), at
+  that document's tier.
 
 #### Subject to change
 
@@ -181,7 +188,7 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 
 **Reserved codes.** The codes a stable command raises are the ones [Lint
 §11.1](/spec/lint/#111-diagnostic-codes) lists, the redstone pipeline's among them. Any other code
-the spec names, such as `E_DECOMPILE_DIFF`, is a reserved code: no command raises it yet. A
+the spec names, such as `W_DEPRECATED`, is a reserved code: no command raises it yet. A
 reserved code lands with the meaning the spec states for it, where it states one, and its row
 landing is adding a code.
 

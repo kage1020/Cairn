@@ -1,5 +1,5 @@
-//! The per-version verdicts the `buildable targets` row reports, and how the version floors behind
-//! them are named.
+//! The per-version verdicts the `buildable targets` row reports, and the notes on the version
+//! floors behind them.
 
 use std::collections::HashSet;
 
@@ -13,7 +13,8 @@ use cairn_lang_core::resolve::{
 };
 use cairn_lang_core::{Edition, Module, Resolution, Severity};
 
-use super::{Found, Reporter};
+use super::Reporter;
+use crate::build::finding::Found;
 use crate::registry::RegistryPack;
 
 /// How each supported version of one edition answered.

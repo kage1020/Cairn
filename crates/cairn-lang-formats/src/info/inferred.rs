@@ -1,36 +1,19 @@
-//! The range of versions an edition's packs imply for a build, and the `@requires` floors that
-//! contradict it (`spec/versioning-editions` "The `inferred range` row", "A floor is weighed
-//! against the registry").
+//! The range of versions an edition's packs imply for a build, with the notes on its edges and the
+//! `@requires` floors that contradict it (`spec/versioning-editions` "The `inferred range` row",
+//! "A floor is weighed against the registry").
 
-use std::borrow::Cow;
-
-use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::check::{DiagnosticData, LineStarts};
+use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{
-    FloorVerdict, InferredRange, LastDeclaredId, PaintedId, RequiresConflict, VersionFloor,
-    VersionOrder,
+    InferredRange, LastDeclaredId, PaintedId, RequiresConflict, VersionFloor,
 };
-use cairn_lang_core::{Diagnostic, Edition, Resolution, Span};
+use cairn_lang_core::{Diagnostic, Edition, Resolution};
 
 use super::Reporter;
 use super::floors::declared_floors;
+use crate::build::conflicts::{Bound, Conflict, Painted, bounds, conflicts, first_of_each, pinned};
+use crate::build::run_level::requires_conflict;
 use crate::registry::{RegistryPack, builtin_pack};
-
-/// An id a build paints, at the first place the source names it.
-#[derive(Debug, Clone)]
-struct Painted {
-    id: String,
-    span: Span,
-}
-
-/// A painted id with the carried version that bounds it.
-#[derive(Debug, Clone)]
-pub(super) struct Bound {
-    painted: Painted,
-    version: String,
-    key: i64,
-}
 
 /// What one edition's oldest and newest carried versions say about the ids a build paints.
 struct Inference {
@@ -41,22 +24,6 @@ struct Inference {
     last_declared: Vec<Bound>,
     /// Ids no carried version declares.
     undeclared: Vec<Painted>,
-}
-
-/// A floor above the last version that declares some id the build paints, with the ids last
-/// declared below it.
-#[derive(Debug, Clone)]
-pub struct Conflict {
-    floor: VersionFloor,
-    /// The earliest `version` first, then in source order; never empty.
-    ids: Vec<Bound>,
-}
-
-/// One id a pinned lowering found its version lacks.
-struct Lacked {
-    painted: Painted,
-    since: Option<String>,
-    until: Option<String>,
 }
 
 impl Inference {
@@ -225,177 +192,11 @@ pub(super) fn report_inferred_range<'a>(
     inference.range(out.source, out.lines, &conflicts)
 }
 
-/// The floors among `floors` above the last version declaring an id the newest of `considered`
-/// lacks, while that newest meets them. `at_newest` holds the findings of a lowering already pinned
-/// there, if the caller ran one.
-#[must_use]
-pub fn requires_conflicts(
-    ir: &IntentModule,
-    resolution: &Resolution,
-    pack: &RegistryPack,
-    considered: &[String],
-    floors: &[VersionFloor],
-    order: &VersionOrder,
-    at_newest: Option<&[Diagnostic]>,
-) -> Vec<Conflict> {
-    let Some(newest) = considered.last() else {
-        return Vec::new();
-    };
-    let findings = pinned(ir, resolution, pack, newest, at_newest);
-    let (last_declared, _) = bounds(&findings, order, |l| l.until.clone());
-    conflicts(&last_declared, floors, order, newest)
-}
-
-/// The floors among `floors` above the last version that declares some id the build paints, while
-/// `newest`, the newest carried version, meets them.
-fn conflicts(
-    last_declared: &[Bound],
-    floors: &[VersionFloor],
-    order: &VersionOrder,
-    newest: &str,
-) -> Vec<Conflict> {
-    let newest = order
-        .key_of(newest)
-        .expect("a carried version is one the pack's table holds");
-    floors
-        .iter()
-        // One no carried version meets is `E_VERSION_CAP`'s, whatever the build paints.
-        .filter(|floor| order.verdict(&floor.version, newest) != FloorVerdict::Below)
-        .filter_map(|floor| {
-            // An unplaceable floor is `E_REQUIRES_UNORDERABLE`'s, and its verdict is never `Below`.
-            let mut ids: Vec<Bound> = last_declared
-                .iter()
-                .filter(|b| order.verdict(&floor.version, b.key) == FloorVerdict::Below)
-                .cloned()
-                .collect();
-            ids.sort_by_key(|b| (b.key, b.painted.span.start));
-            (!ids.is_empty()).then(|| Conflict {
-                floor: floor.clone(),
-                ids,
-            })
-        })
-        .collect()
-}
-
-/// Report each conflict as `E_REQUIRES_CONFLICT`; whether there was one.
-pub fn report_conflicts(out: &mut Reporter<'_>, edition: Edition, conflicts: &[Conflict]) -> bool {
-    let edition = edition.as_str();
-    for Conflict { floor, ids } in conflicts {
-        let bounding = &ids[0];
-        let line = format!(
-            "error[E_REQUIRES_CONFLICT]: {}: {} requires {}, but no {edition} target it admits \
-             declares `{}`, which this build paints.",
-            out.at(floor.span.start),
-            floor.declarer(),
-            floor.rendered(),
-            bounding.painted.id,
-        );
-        out.line(&line);
-        if let Some(note) = floor.inheritance() {
-            out.line(&format!("  {note}"));
-        }
-        for b in ids {
-            let line = format!(
-                "  note: {}: `{}` is last declared at {edition} {}",
-                out.at(b.painted.span.start),
-                b.painted.id,
-                b.version,
-            );
-            out.line(&line);
-        }
-        let replaced: Vec<String> = ids.iter().map(|b| format!("`{}`", b.painted.id)).collect();
-        let line = format!(
-            "  fix: lower the {} floor to {} or below, or replace {} with {} a {edition} target at \
-             or above {} declares",
-            floor.keyword(),
-            bounding.version,
-            replaced.join(", "),
-            if ids.len() == 1 { "a block" } else { "blocks" },
-            floor.version,
-        );
-        out.line(&line);
+/// Report each conflict as `E_REQUIRES_CONFLICT`.
+fn report_conflicts(out: &mut Reporter<'_>, edition: Edition, conflicts: &[Conflict]) {
+    for conflict in conflicts {
+        out.message(&requires_conflict(edition, conflict));
     }
-    !conflicts.is_empty()
-}
-
-/// The findings of `ir` lowered pinned at `version`: `known`, or a fresh lowering's.
-fn pinned<'a>(
-    ir: &IntentModule,
-    resolution: &Resolution,
-    pack: &RegistryPack,
-    version: &str,
-    known: Option<&'a [Diagnostic]>,
-) -> Cow<'a, [Diagnostic]> {
-    known.map_or_else(
-        || {
-            let lowered = lower_to_block_array(ir, resolution, Some(&pack.view(Some(version))));
-            Cow::Owned(lowered.diagnostics)
-        },
-        Cow::Borrowed,
-    )
-}
-
-/// The ids a pinned lowering's `findings` refuse as undeclared: those `side` finds another version
-/// declaring, each bounded there and once, then those no version declares.
-fn bounds(
-    findings: &[Diagnostic],
-    order: &VersionOrder,
-    side: impl Fn(&Lacked) -> Option<String>,
-) -> (Vec<Bound>, Vec<Painted>) {
-    let mut bounds = Vec::new();
-    let mut undeclared = Vec::new();
-    for lacked in findings.iter().filter_map(lacked) {
-        match side(&lacked) {
-            Some(declaring) => bounds.push(bound(order, lacked.painted, declaring)),
-            None => undeclared.push(lacked.painted),
-        }
-    }
-    (first_of_each(bounds, |b| &b.painted), undeclared)
-}
-
-/// The id `d` refuses as undeclared at its pin, with the versions nearest it that declare it.
-fn lacked(d: &Diagnostic) -> Option<Lacked> {
-    let (id, since, until) = match d.data.as_ref()? {
-        DiagnosticData::UnknownId {
-            id, since, until, ..
-        } => (id, since.clone(), until.clone()),
-        DiagnosticData::ParityUnsupported { id, .. } => (id, None, None),
-        _ => return None,
-    };
-    Some(Lacked {
-        painted: Painted {
-            id: id.clone(),
-            span: d.span.clone(),
-        },
-        since,
-        until,
-    })
-}
-
-fn bound(order: &VersionOrder, painted: Painted, version: String) -> Bound {
-    let key = order
-        .key_of(&version)
-        .expect("a declaring version is one the pack carries");
-    Bound {
-        painted,
-        version,
-        key,
-    }
-}
-
-/// Each id once, at the first place the source names it, in source order.
-fn first_of_each<T>(mut items: Vec<T>, painted: impl Fn(&T) -> &Painted) -> Vec<T> {
-    items.sort_by_key(|item| painted(item).span.start);
-    let mut seen: Vec<String> = Vec::new();
-    items.retain(|item| {
-        let id = &painted(item).id;
-        if seen.contains(id) {
-            return false;
-        }
-        seen.push(id.clone());
-        true
-    });
-    items
 }
 
 /// The version at `key` and the bounds that sit there.

@@ -5,6 +5,6 @@
   editor holds, saved or not.
 - *(vscode)* **Cairn: Diff Blocks** asks for a structure file, then asks the server for that report
   on the active `.crn` file and opens it beside the editor.
-- *(formats)* `diff_blocks::diff_blocks` builds a lift at its structure file's stamp and compares
-  the two, once for the CLI and the language server, on `build::lower_for_build`, which lowers a
-  source for one edition's build as `cairn compile` does.
+- *(formats)* `diff_blocks::diff_blocks` builds a lift at its structure file's stamp, checks it
+  with that stamp's backend as `cairn compile` does, and compares the two, once for the CLI and the
+  language server.

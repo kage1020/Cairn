@@ -3,9 +3,9 @@
 //! promise: any release may change it.
 //!
 //! Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers for the block-array
-//! IR, a reader of each, the import that writes what a reader read as raw members, and the
-//! registry packs and portability reports they rely on, with the lowering a build shares and the
-//! `cairn info` and `cairn diff-blocks` reports built from them.
+//! IR, a reader of each, the import that writes what a reader read as raw members, the registry
+//! packs and portability reports they rely on, the build a front end runs over a source, and the
+//! `cairn info` report and `cairn diff-blocks` run built on it.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
@@ -23,6 +23,7 @@ mod read_stream;
 pub mod registry;
 pub mod schem;
 mod site_frame;
+pub mod target;
 pub mod volume;
 
 pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};
@@ -36,8 +37,8 @@ pub use data_version::{
     resolve_java_target, resolve_target,
 };
 pub use import::{
-    DecodedStructure, ImportError, ImportFormat, ImportStamp, RawImport, SemanticLoss, StampFit,
-    UnshippedVersion, decode_structure, import_raw,
+    DecodedStructure, ImportError, ImportFormat, ImportStamp, LossKind, RawImport, SavedVersion,
+    SemanticLoss, StampFit, UnshippedVersion, decode_structure, import_raw,
 };
 pub use java_structure::{
     Compound, JavaStructure, JavaStructureError, OutputExt, StoredStructure, StructureReadError,

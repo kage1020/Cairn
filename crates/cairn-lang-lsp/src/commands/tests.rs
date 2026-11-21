@@ -5,10 +5,10 @@ use cairn_lang_core::lock::{
     HashHex, LOCK_SCHEMA_VERSION, LockInputs, LockTarget, Lockfile, hash_source,
 };
 use cairn_lang_core::{CAIRN_VERSION, Edition, parse};
-use cairn_lang_formats::build::lower_for_build;
-use cairn_lang_formats::data_version::resolve_java_target;
+use cairn_lang_formats::build::artifact::prepare_artifact;
+use cairn_lang_formats::build::lowering::lower_for_target;
+use cairn_lang_formats::data_version::resolve_target;
 use cairn_lang_formats::info::{InfoDocument, default_lock_path};
-use cairn_lang_formats::java_structure::write_structure_gzip;
 use serde_json::json;
 
 use super::*;
@@ -379,18 +379,18 @@ struct s size=2x2
 /// A directory holding `name`, the `.nbt` that `source` compiles to at Java 1.21.4.
 fn structure_file(source: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
     let module = parse(source).expect("the source parses");
-    let target = resolve_java_target("1.21.4").expect("a shipped target");
-    let (_, build) = lower_for_build(&module, Edition::Java, Some(&target.mc_version));
-    let array = build
-        .block_ir
-        .structures
-        .values()
-        .next()
-        .expect("one struct");
+    let target = resolve_target(Edition::Java, "1.21.4").expect("a shipped target");
+    let lowered = lower_for_target(&module, Edition::Java, Ok(target.clone()));
+    let (scope, array) = lowered.block_ir.structures.first().expect("one struct");
+    let prepared =
+        prepare_artifact(&lowered.block_ir, scope, array, &target).expect("the array prepares");
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = dir.path().join(name);
     let mut file = std::fs::File::create(&path).expect("the structure file is created");
-    write_structure_gzip(&mut file, array, &target).expect("the structure file is written");
+    prepared
+        .structure
+        .write(&mut file)
+        .expect("the structure file is written");
     (dir, path)
 }
 

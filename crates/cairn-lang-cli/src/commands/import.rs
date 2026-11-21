@@ -2,8 +2,7 @@
 //! compiles for (`spec/ecosystem-interop` "Reverse direction: the compiler transliterates, an LLM
 //! lifts").
 
-use std::fs::File;
-use std::io::BufReader;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -11,6 +10,8 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_formats::import::{ImportFormat, import_raw};
 
 use crate::report::report_diagnostics;
+use crate::staging::{Kind, StagedSet};
+use crate::structure_file::{file_name, open_structure, refuse_extension};
 
 pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     let Some(format) = ImportFormat::from_path(file) else {
@@ -40,7 +41,7 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     };
     let source = &import.transliteration.source;
     if let Err(err) = write(&out, source) {
-        eprintln!("error: writing `{}`: {err}", out.display());
+        eprintln!("error: {err}");
         return ExitCode::from(1);
     }
     for loss in &import.decoded.losses {
@@ -49,55 +50,15 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     let lines = LineStarts::new(source);
     report_diagnostics(&out, source, &lines, &import.transliteration.warnings);
     let stamp = &import.decoded.stamp;
+    let (edition, version) = (stamp.edition(), stamp.mc_version());
     eprintln!(
-        "note: stamped {} {}: {}; `cairn compile {} --edition {} --target {}` builds it",
-        stamp.edition,
-        stamp.mc_version,
+        "note: stamped {edition} {version}: {}; `cairn compile {} --edition {edition} --target \
+         {version}` builds it",
         stamp.reason(),
         out.display(),
-        stamp.edition,
-        stamp.mc_version,
     );
     outln!("wrote {}", out.display());
     ExitCode::SUCCESS
-}
-
-/// Open a structure file, or report why not: exit 2 for a path that names nothing, 1 for anything
-/// else.
-pub(crate) fn open_structure(file: &Path) -> Result<BufReader<File>, ExitCode> {
-    File::open(file).map(BufReader::new).map_err(|err| {
-        eprintln!("error: cannot read `{}`: {err}", file.display());
-        match err.kind() {
-            std::io::ErrorKind::NotFound => ExitCode::from(2),
-            _ => ExitCode::from(1),
-        }
-    })
-}
-
-/// The name of `file`, without its directory.
-pub(crate) fn file_name(file: &Path) -> String {
-    file.file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
-}
-
-/// The refusal of a path whose extension names no format `cairn <command>` reads.
-pub(crate) fn refuse_extension(file: &Path, command: &str) {
-    eprintln!(
-        "error: `{}` is not a structure file `cairn {command}` reads",
-        file.display()
-    );
-    let legacy = file
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("schematic"));
-    if legacy {
-        eprintln!(
-            "  note: a `.schematic` stores the numeric block ids of the releases before 1.13, \
-             which this version does not read; save it as a `.schem` from WorldEdit 7 or later \
-             and name that"
-        );
-    }
-    eprintln!("  note: name a {} file", ImportFormat::choices());
 }
 
 /// `<stem>.raw.crn` beside `file`.
@@ -116,12 +77,20 @@ fn names_one_file(file: &Path, out: &Path) -> bool {
     }
 }
 
-/// Write `source` to `out`, creating the directory it is in.
-fn write(out: &Path, source: &str) -> std::io::Result<()> {
+/// Write `source` to `out` whole or not at all, creating the directory it is in.
+fn write(out: &Path, source: &str) -> Result<(), String> {
+    let failed = |err: std::io::Error| format!("writing source `{}`: {err}", out.display());
     if let Some(parent) = out.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).map_err(failed)?;
     }
-    std::fs::write(out, source)
+    let mut staged = StagedSet::default();
+    staged
+        .stage(out, Kind::Source, |file| file.write_all(source.as_bytes()))
+        .map_err(failed)?;
+    staged
+        .commit()
+        .map(drop)
+        .map_err(|failure| failure.to_string())
 }

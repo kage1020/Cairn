@@ -2,51 +2,49 @@
 //! gives, and which refusal ends a run that compares nothing.
 
 use cairn_lang_core::{DiagnosticCode, Edition};
+use cairn_lang_formats::build::artifact::prepare_artifact;
+use cairn_lang_formats::build::finding::Found;
+use cairn_lang_formats::build::run_level::{RunLevelAt, RunLevelKind, RunLevelMessage};
+use cairn_lang_formats::data_version::resolve_target;
 use cairn_lang_formats::diff_blocks::{DiffBlocksRefusal, DiffBlocksRun, diff_blocks};
-use cairn_lang_formats::import::{
-    DecodedStructure, ImportFormat, ImportStamp, StampFit, decode_structure,
-};
-use cairn_lang_formats::info::Found;
-use cairn_lang_formats::java_structure::prepare_structure;
-use cairn_lang_formats::registry::builtin_pack;
+use cairn_lang_formats::import::{DecodedStructure, ImportFormat, decode_structure};
 
-use crate::common::lower_source;
+use crate::common::{examples_dir, lower_source};
 
 /// A struct of stone, which every Java target declares.
 const STONE: &str = "theme t:\n  slot wall -> @stone\n\nstruct s size=2x2\n  floor mat_slot=wall\n  walls \
      height=2 mat_slot=wall\n";
 
-/// `source` written as a Java 1.21.4 `.nbt` named `s.nbt`, and decoded as an import reads it.
-fn java_structure(source: &str) -> DecodedStructure {
-    let ir = lower_source(source, Edition::Java, Some("1.21.4"));
-    let target = builtin_pack(Edition::Java)
-        .resolve_java_target("1.21.4")
-        .expect("a shipped target");
+/// `source` written at `edition` `mc_version` as `cairn compile` writes it, and decoded as an
+/// import reads it.
+fn written(source: &str, edition: Edition, mc_version: &str) -> DecodedStructure {
+    let ir = lower_source(source, edition, Some(mc_version));
+    let target = resolve_target(edition, mc_version).expect("a shipped target");
+    let (scope, array) = ir
+        .structures
+        .first()
+        .expect("the source builds a structure");
+    let prepared = prepare_artifact(&ir, scope, array, &target).expect("the array prepares");
     let mut bytes = Vec::new();
-    prepare_structure(&ir.structures[0], &target)
-        .expect("the array prepares")
-        .write_gzip(&mut bytes)
+    prepared
+        .structure
+        .write(&mut bytes)
         .expect("the file writes");
-    decode_structure(bytes.as_slice(), ImportFormat::Nbt, "s.nbt").expect("the file decodes")
+    let format = match edition {
+        Edition::Java => ImportFormat::Nbt,
+        Edition::Bedrock => ImportFormat::Mcstructure,
+    };
+    decode_structure(bytes.as_slice(), format, &prepared.file_name).expect("the file decodes")
 }
 
-/// A structure of no block stamped `edition` `mc_version`, for a run refused before comparing.
-fn stamped(edition: Edition, mc_version: &str) -> DecodedStructure {
-    DecodedStructure {
-        format: match edition {
-            Edition::Java => ImportFormat::Nbt,
-            Edition::Bedrock => ImportFormat::Mcstructure,
-        },
-        file_name: "s".to_owned(),
-        stamp: ImportStamp {
-            edition,
-            mc_version: mc_version.to_owned(),
-            saved: None,
-            fit: StampFit::Exact,
-        },
-        units: Vec::new(),
-        losses: Vec::new(),
-    }
+/// `source` written as a Java 1.21.4 `.nbt` named `s.nbt`, and decoded as an import reads it.
+fn java_structure(source: &str) -> DecodedStructure {
+    written(source, Edition::Java, "1.21.4")
+}
+
+/// What `message` reports and where, without its notes.
+fn summary(message: &RunLevelMessage) -> (RunLevelKind, RunLevelAt, &str) {
+    (message.kind, message.at, message.primary.as_str())
 }
 
 /// The codes of a run's findings, in order.
@@ -130,7 +128,7 @@ fn each_refusal_of_the_whole_run_comes_after_the_findings_in_the_order_compile_g
     // Bedrock declares `minecraft:stonebrick` last at 1.21.0, below the floor and at the stamp.
     let conflict = "@requires bedrock version>=1.21.40\ntheme t:\n  slot wall -> \
                     @stonebrick\n\nstruct s size=2x2\n  floor mat_slot=wall\n";
-    let run = diff_blocks(conflict, &stamped(Edition::Bedrock, "1.21.0"));
+    let run = diff_blocks(conflict, &written(STONE, Edition::Bedrock, "1.21.0"));
     assert!(
         matches!(run.outcome, Err(DiffBlocksRefusal::Conflicts)),
         "{:?}",
@@ -140,13 +138,17 @@ fn each_refusal_of_the_whole_run_comes_after_the_findings_in_the_order_compile_g
 
     let partial = "theme t:\n  slot floor -> @oak_planks\n\nstruct good size=2x2\n  floor \
                    mat_slot=floor\n\nstruct bad\n  floor mat_slot=floor\n";
-    let run = diff_blocks(partial, &stamped(Edition::Java, "1.21.4"));
-    let Err(DiffBlocksRefusal::PartialBuild { dropped, built }) = &run.outcome else {
+    let run = diff_blocks(partial, &java_structure(STONE));
+    let Err(DiffBlocksRefusal::RunLevel(refusal)) = &run.outcome else {
         panic!("a dropped scope refuses the run: {:?}", run.outcome);
     };
     assert_eq!(
-        (dropped.as_slice(), *built),
-        (["struct::bad".to_owned()].as_slice(), 1)
+        summary(refusal),
+        (
+            RunLevelKind::PartialBuild,
+            RunLevelAt::Source,
+            "1 of 2 requested scopes did not lower; refusing to compare a partial build",
+        ),
     );
 
     let floor = format!("@requires version>=26.3\n{STONE}");
@@ -155,15 +157,57 @@ fn each_refusal_of_the_whole_run_comes_after_the_findings_in_the_order_compile_g
         panic!("a floor past the stamp refuses the run: {:?}", run.outcome);
     };
     assert_eq!(
-        (refusal.code, refusal.span.clone(), refusal.primary.as_str()),
+        summary(refusal),
         (
-            DiagnosticCode::VersionCap,
-            0..23,
-            "this file requires version>=26.3 (target 1.21.4)",
+            RunLevelKind::FloorRefusal(DiagnosticCode::VersionCap),
+            RunLevelAt::Offset(0),
+            "this file requires version>=26.3 (target 1.21.4).",
         ),
     );
     assert_eq!(
         serde_json::to_value(run.failure_document(&floor)).expect("serialises"),
         serde_json::json!({ "diagnostics": [] }),
+    );
+}
+
+#[test]
+fn what_the_stamp_cannot_write_refuses_the_run_and_what_it_degrades_is_warned_of() {
+    let sign = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=wall \
+                height=3\n  sign at=inside.front offset=2 y=1 back=\"Caf\u{e9}\"\n";
+    let run = diff_blocks(sign, &java_structure(STONE));
+    let Err(DiffBlocksRefusal::Backend(refusal)) = &run.outcome else {
+        panic!(
+            "a sign the stamp cannot write refuses the run: {:?}",
+            run.outcome
+        );
+    };
+    assert_eq!(
+        (summary(refusal), refusal.notes.as_slice()),
+        (
+            (
+                RunLevelKind::BackendRefusal,
+                RunLevelAt::Nothing,
+                "checking `struct::s`: the sign at (2, 1, 3) has the line `Caf\u{e9}`, which cannot \
+                 be written as NBT: nbt: string contains byte 0xc3 at index 4, not encodable here. \
+                 Fix: write the sign's text in printable ASCII",
+            ),
+            &[][..],
+        )
+    );
+
+    let tower = std::fs::read_to_string(examples_dir().join("themed-tower.crn"))
+        .expect("the example reads");
+    let run = diff_blocks(&tower, &written(&tower, Edition::Bedrock, "1.21.60"));
+    assert!(run.outcome.is_ok(), "{:?}", run.outcome);
+    let degraded: Vec<_> = run.degraded.iter().map(summary).collect();
+    assert_eq!(
+        degraded,
+        [(
+            RunLevelKind::IntentDegraded,
+            RunLevelAt::Nothing,
+            "struct::keep: minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]: this \
+             Bedrock version has no stair `shape` state; its stairs render straight, so corners \
+             show visual gaps",
+        )]
     );
 }

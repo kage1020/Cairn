@@ -30,19 +30,23 @@ pub fn build(source: &str) -> Option<BlockArrayIr> {
 
 /// `array` as a structure file of it decodes, under `name`, every entry built as it is written.
 pub fn unit_of(name: &str, array: &BlockArray) -> GridUnit {
+    unit_edited(name, array, |_| {})
+}
+
+/// [`unit_of`], with each grid entry passed through `edit`.
+fn unit_edited(name: &str, array: &BlockArray, edit: impl FnMut(&mut GridEntry)) -> GridUnit {
+    let mut palette: Vec<GridEntry> = array
+        .palette
+        .entries
+        .iter()
+        .cloned()
+        .map(GridEntry::exact)
+        .collect();
+    palette.iter_mut().for_each(edit);
     GridUnit {
         name: name.to_owned(),
-        grid: BlockGrid {
-            dims: array.dims,
-            palette: array
-                .palette
-                .entries
-                .iter()
-                .cloned()
-                .map(GridEntry::exact)
-                .collect(),
-            voxels: array.voxels.clone(),
-        },
+        grid: BlockGrid::new(array.dims, palette, array.voxels.clone())
+            .expect("a block array's voxels fill its extents and index its palette"),
         comment: Vec::new(),
     }
 }

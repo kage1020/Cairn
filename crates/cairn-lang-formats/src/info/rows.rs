@@ -13,13 +13,14 @@ use cairn_lang_core::suggest::{candidate_list, did_you_mean};
 use cairn_lang_core::{Diagnostic, Edition, Module, Resolution, Severity};
 use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
-use super::circuits::{raised_by_each, same_place};
 use super::floors::{buildable_refusal, report_version_notes, weigh_versions};
 use super::inferred::report_inferred_range;
 use super::respelled::{report_respelled_notes, respelled_tokens};
-use super::{
-    Found, Refusal, ReportFormat, Reporter, dropped_scopes, lay_circuits, palette_entry_name,
-};
+use super::{Refusal, ReportFormat, Reporter};
+use crate::build::circuits::{lay_circuits, raised_by_each, same_place};
+use crate::build::finding::{Finding, Found};
+use crate::build::run_level::palette_entry_name;
+use crate::build::scopes::dropped_scopes;
 use crate::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
 };

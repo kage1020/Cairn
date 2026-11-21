@@ -7,7 +7,7 @@ use cairn_lang_core::block_array::{BlockArray, BlockState, Dims};
 use cairn_lang_core::transliterate::{CHUNK_FOOTPRINT, WrittenBody};
 use cairn_lang_core::voxel_diff::{Metrics, compare};
 use cairn_lang_formats::bedrock_structure::{prepare_mcstructure, read_mcstructure};
-use cairn_lang_formats::import::{ImportFormat, RawImport, import_raw};
+use cairn_lang_formats::import::{ImportFormat, LossKind, RawImport, import_raw};
 use cairn_lang_formats::java_structure::{prepare_structure, read_structure};
 use cairn_lang_formats::litematic::{litematic_files, prepare_litematic, read_litematic};
 use cairn_lang_formats::registry::builtin_pack;
@@ -242,7 +242,7 @@ fn block_entities_reported(import: &RawImport, file: &Written<'_>, format: Impor
         .decoded
         .losses
         .iter()
-        .any(|loss| loss.what.contains("block entit"));
+        .any(|loss| loss.kind == LossKind::BlockEntities);
     held == reported
 }
 
@@ -272,7 +272,7 @@ fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
                     let import = imported(&file, format);
                     let label = format!("{name} as {} at {edition} {version}", file.name);
                     assert_eq!(
-                        stamp_key(edition, &import.decoded.stamp.mc_version),
+                        stamp_key(edition, import.decoded.stamp.mc_version()),
                         stamp_key(edition, &version),
                         "{label}"
                     );

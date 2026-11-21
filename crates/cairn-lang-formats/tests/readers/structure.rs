@@ -307,3 +307,106 @@ fn input_past_the_root_is_refused_in_the_stream_and_after_the_gzip_member() {
     garbage.extend(b"not a gzip member");
     assert_eq!(gzip_error(&garbage), std::io::ErrorKind::InvalidInput);
 }
+
+/// `root`'s bytes with each entry of `again` stored a second time after its own.
+fn stored_twice(root: &Compound, again: &Compound) -> Vec<u8> {
+    let mut first = Vec::new();
+    write_java_uncompressed(&mut first, "", root).expect("the root writes");
+    let mut second = Vec::new();
+    write_java_uncompressed(&mut second, "", again).expect("the entries write");
+    // Each is a root compound: a type byte and an empty name, its entries, then its end tag.
+    first.pop();
+    first.extend_from_slice(&second[3..]);
+    gzip(&first)
+}
+
+#[test]
+fn a_field_of_the_root_stored_twice_is_refused() {
+    let base = || {
+        structure(
+            [2, 1, 1],
+            vec![named("minecraft:chest")],
+            vec![block(0, [0, 0, 0])],
+        )
+    };
+    let mut chest = block(0, [1, 0, 0]);
+    chest.insert(
+        "nbt",
+        Tag::Compound(compound([(
+            "id",
+            Tag::String("minecraft:chest".to_owned()),
+        )])),
+    );
+    let mut listed = base();
+    listed.insert(
+        "blocks",
+        Tag::List(List::of_compounds(vec![block(0, [0, 0, 0]), chest])),
+    );
+    let mut palettes = base();
+    palettes.entries.shift_remove("palette");
+    let palette = || Tag::List(List::of_compounds(vec![named("minecraft:stone")]));
+    palettes.insert(
+        "palettes",
+        Tag::List(List::of_tags(9, vec![palette(), palette()])),
+    );
+    let cases = [
+        (base(), "DataVersion", Tag::Int(3955)),
+        (base(), "size", Tag::List(List::of_ints([1, 1, 1]))),
+        (base(), "palette", palette()),
+        (
+            palettes,
+            "palettes",
+            Tag::List(List::of_tags(9, vec![palette()])),
+        ),
+        (listed, "blocks", Tag::List(List::empty())),
+        (base(), "entities", Tag::List(List::empty())),
+    ];
+    for (root, name, tag) in cases {
+        let bytes = stored_twice(&root, &compound([(name, tag)]));
+        match read_structure(bytes.as_slice()) {
+            Err(StructureReadError::StoredTwice { path }) => assert_eq!(path, name),
+            other => panic!("`{name}` stored twice is not refused: {other:?}"),
+        }
+    }
+    let message = StructureReadError::StoredTwice {
+        path: "blocks".to_owned(),
+    }
+    .to_string();
+    assert_eq!(
+        message,
+        "`blocks` is stored twice, where a compound holds each name once"
+    );
+}
+
+#[test]
+fn palettes_is_read_over_palette_in_either_order_as_the_game_reads_it() {
+    let palette = |id: &str| Tag::List(List::of_compounds(vec![named(id)]));
+    let palettes = || {
+        Tag::List(List::of_tags(
+            9,
+            vec![
+                palette("minecraft:white_wool"),
+                palette("minecraft:red_wool"),
+            ],
+        ))
+    };
+    let mut after = structure(
+        [1, 1, 1],
+        vec![named("minecraft:stone")],
+        vec![block(0, [0, 0, 0])],
+    );
+    after.insert("palettes", palettes());
+    let mut before = structure([1, 1, 1], vec![], vec![block(0, [0, 0, 0])]);
+    before.entries.shift_remove("palette");
+    before
+        .entries
+        .shift_insert(0, "palettes".to_owned(), palettes());
+    before.insert("palette", palette("minecraft:stone"));
+    for root in [after, before] {
+        let read = read(&root);
+        assert_eq!(
+            (read.volume.palette(), read.palettes),
+            ([BlockState::bare("minecraft:white_wool")].as_slice(), 2)
+        );
+    }
+}

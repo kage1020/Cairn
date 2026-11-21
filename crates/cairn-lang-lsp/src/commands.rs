@@ -4,10 +4,11 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
+use cairn_lang_formats::build::finding::Found;
 use cairn_lang_formats::diff_blocks::diff_blocks;
 use cairn_lang_formats::import::{DecodedStructure, ImportFormat, decode_structure};
 use cairn_lang_formats::info::{
-    EditionsRefused, Found, InfoRequest, InfoSink, ReportFormat, RequestedEditions, info,
+    EditionsRefused, InfoRequest, InfoSink, ReportFormat, RequestedEditions, info,
     requested_editions,
 };
 use lsp_server::ErrorCode;
