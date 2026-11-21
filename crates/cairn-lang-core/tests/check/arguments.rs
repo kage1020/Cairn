@@ -329,8 +329,18 @@ fn a_level_attribute_names_a_level_and_widens_no_vocabulary() {
                window[level=floor2] -> frame=@spruce_wood\n\n\
                struct s size=9x7\n  level id=floor2 y=0\n    \
                window level=floor2 side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "E_UNKNOWN_ARGUMENT"]);
-    assert_eq!(ignored_at(src), ["@spruce_wood"]);
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 1);
+    let value = src.find("window level=").expect("the window line") + "window level=".len();
+    assert_eq!(
+        d.span,
+        value..value + "floor2".len(),
+        "anchored at the window line's value"
+    );
+    assert_eq!(
+        codes(src),
+        ["E_UNKNOWN_ARGUMENT"],
+        "the row's `frame=` is read"
+    );
 }
 
 #[test]
