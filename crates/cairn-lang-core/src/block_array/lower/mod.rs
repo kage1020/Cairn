@@ -55,7 +55,8 @@ use super::args::diag_deferred_member_reason;
 use super::material::TargetRegistry;
 use super::roof::{FLAT_BASE_ID, STAIR_BASE_ID};
 use super::{
-    BlockArray, BlockArrayIr, BlockState, PALETTE_CAPACITY, Placement, ResolvedMember, Walkway,
+    BlockArray, BlockArrayIr, BlockState, Footprint, PALETTE_CAPACITY, Placement, ResolvedMember,
+    Walkway,
 };
 
 use anchor::{GapOutcome, report_unread_gap, resolve_place_anchor};
@@ -63,7 +64,7 @@ use body::{BodyDescriptor, BodyInputs, LoweredBody, lower_body_to_block_array};
 use connect::{ConnectInputs, lower_connects};
 use diag::{VoxelSource, diag_def_no_size, diag_struct_no_size};
 use overlap::report_placement_overlaps;
-use site_floor::{PlacedBody, collect_floor_cells};
+use site_floor::PlacedBody;
 
 pub use without_target::{findings_under_guards, findings_without_target};
 
@@ -128,14 +129,12 @@ fn lower_to_block_array_within(
         members,
     } = built;
     report_placement_overlaps(&placed, &mut diagnostics);
-    let floors = collect_floor_cells(&structures, &placed);
     lower_connects(
         &ConnectInputs {
             resolution,
             defs: &intent.defs,
             registry,
             placed: &placed,
-            floors: &floors,
         },
         &mut structures,
         &mut walkways,
@@ -292,6 +291,7 @@ fn lower_site<'a>(
                 anchor,
                 walls: lowered.walls,
                 cut: lowered.cut,
+                footprint: Footprint::of_size(def_size),
                 placement: Placement {
                     site: placement_site,
                     place_id: placement_id,
