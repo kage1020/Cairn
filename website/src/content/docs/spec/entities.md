@@ -4,7 +4,7 @@ title: "8. Entities"
 
 ## 8.1 Two tiers
 
-**Subject to change.** Nothing in this section is built yet
+**Subject to change.** Of the members below, `sign` and `bed` are built, and the others are not yet
 ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
 
 Opening up `nbt={}` for everything would destroy theming, editing, linting, and version tolerance.
@@ -17,16 +17,11 @@ version differences, is structured. Only one-off special NBT escapes through `nb
   `trade`), `display` (text / block / item), and `bed` (treated as a block).
 - **Generic fallback**: `spawn id=.. type=<entity> at=<selector> [nbt={...}]` for other mobs.
 
-None of these is a keyword yet, `spawn` included: each is `E_UNKNOWN_KEYWORD`, so no build places an
-entity. The one block entity a build writes is a circuit comparator's, which keeps the strength it
-outputs ([Redstone §14.5](/spec/redstone/#145-place-and-route)), and only a Java circuit lays a
-comparator. Every other block that has a block entity, such as the one a `chest`, a `dispenser` or a
-`daylight` sets ([Blockstate Model
-§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override), [Redstone
-§14.2](/spec/redstone/#142-signal-binding)), is placed with no data. The example below parses:
-a decimal (`scale=1.5`) and an `nbt={...}` compound are values
-([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)), and each keyword in it is
-`E_UNKNOWN_KEYWORD`.
+Of these, `sign` and `bed` are keywords, set as [Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override) says, and the rest, `spawn`
+included, are not yet: each is `E_UNKNOWN_KEYWORD`, so no build places an entity. The example below
+parses: a decimal (`scale=1.5`) and an `nbt={...}` compound are values ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)), and each keyword in it is `E_UNKNOWN_KEYWORD`.
 
 ```
 villager id=trader at=stall[0] profession=librarian level=master
@@ -57,6 +52,55 @@ Sending them to `nbt={}` would cost generation quality and edit stability, so th
 
 Block entities (signs) and true entities (paintings) are different things in NBT but share one
 selector grammar in the DSL. Telling them apart is the compiler's job.
+
+### Block entities
+
+A build writes a block entity for each block that keeps there something the build sets: a sign's
+text, a bed's colour, and the strength a circuit comparator outputs ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)), which only a Java circuit lays. The block array holds
+each beside its block's cell: a sign's text and a bed's colour in no edition's shape, and a
+comparator's strength under the id and field Java gives it, which the Bedrock writer maps to
+Bedrock's. Each writer saves them in its own edition's shape: Java as the `nbt` of the block's entry
+in the `blocks` of its `.nbt`, and Bedrock under the `block_position_data` of its `.mcstructure`,
+keyed by the block's place in `block_indices`. A block entity is kept only while the member that set
+it holds its block's cell, so a member that builds over a sign later takes the sign's text with it.
+A member of the same phase that builds the same block over it with another block entity, such as a
+sign of the same wood with other text, is a contest as one that builds another block is
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). Every
+other block that has a block entity, such as the one a `chest`, a `dispenser` or a `daylight` sets
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override), [Redstone
+§14.2](/spec/redstone/#142-signal-binding)), is placed with no data, and the game gives it an empty
+one.
+
+```
+sign id=menu at=front.outside offset=1 y=2 text=["The Inn", "rooms"] glowing=true
+sign id=shut at=2,1,2 facing=north back="Closed"
+bed  id=cot  at=inside.back offset=1 y=1 mat_slot=quilt
+```
+
+A sign's `text=` writes its front, the face toward the way the sign faces, and `back=` its back.
+Each is a string, one line, or a list of up to four strings, its lines from the top. A face its line
+does not write is blank, and `glowing=true` lights the text of both. A face of more than four lines
+is `E_INVALID_MEMBER`, whatever its lines hold, and no sign is built; a value of another kind, an
+item of a list included, is `W_IGNORED_ARGUMENT`, which leaves that face blank or its text unlit.
+Text is black. Java saves each face as four messages with `has_glowing_text`, each message a JSON
+string before 1.21.5 and a plain string from it, as each release reads one. Bedrock saves each face
+as one `Text`, its lines joined by line breaks, with `IgnoreLighting` for glowing. A writer refuses
+a sign whose text the NBT it writes cannot carry, a character outside ASCII or text longer than an
+NBT string holds, and names the sign's cell.
+
+Java names a bed's colour in its block, as `blue_bed`, and keeps nothing for it in a block entity.
+Bedrock has one bed block, `bed`, and keeps the colour in the block entity of each half, as the
+number the game gives the dye. Bedrock's `@bed.default` and `@bed.<colour>` tokens resolve to `bed`
+and record the Java bed each stands for ([Versioning and Editions
+§10.3](/spec/versioning-editions/#103-backend--data-tables)), whose colour the writer saves. A
+Bedrock bed no such token names is saved white, as the game saves one that names no colour.
+
+A Bedrock writer also fills the block entity of a block whose Java states Bedrock keeps there rather
+than in the block's own. Each half of a chest pair names its other half's cell, in the structure's
+coordinates as its own position is, and the right half leads the pair. A half whose other half, the
+same block facing the same way, does not stand beside it stands single, and `W_INTENT_DEGRADED` says
+that its `type` is lost. A note block keeps its `note` there, where it is not 0.
 
 ## 8.2 Anchor conventions
 
@@ -95,8 +139,10 @@ under the base plane raises them with the struct ([Redstone
 | `door` | its lower half | both halves | the outer face of its wall |
 | `window` | the cell `offset=` and `y=` place | every rectangle its line places | the outer face of its wall |
 | eave `stair` | the band's cell at the wall's left end | the band | the outer face of its wall |
-| `chest`, sensor, actuator, Tier 0 part by a wall | its one cell | its one cell | the face of its wall it stands by |
-| Tier 0 part at a coordinate triple, `raw_block` | its one cell | its one cell | none |
+| `beam` | the run's cell at the wall's left end | the run | the outer face of its wall |
+| `chest`, `trapdoor`, `sign`, sensor, actuator, Tier 0 part by a wall | its one cell | its one cell | the face of its wall it stands by |
+| `bed` | its head | both halves | the face of its wall its head is against, none at a coordinate triple |
+| `trapdoor`, `sign`, `note_block`, Tier 0 part at a coordinate triple, `raw_block` | its one cell | its one cell | none |
 | `fill`, `raw_fill` | the low corner of its box | the box `from=` and `to=` span | none |
 | `circuit` | the low corner of its box | every layer it reserves | none |
 

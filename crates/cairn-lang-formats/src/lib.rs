@@ -21,7 +21,7 @@ mod site_frame;
 pub mod volume;
 pub mod world;
 
-pub use bedrock_state::{BedrockStateError, StateTranslation, translate_states};
+pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};
 pub use bedrock_structure::{
     BedrockStructureError, McStructure, ParityNote, build_mcstructure_tag, prepare_mcstructure,
     write_mcstructure,

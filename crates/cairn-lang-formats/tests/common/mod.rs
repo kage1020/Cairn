@@ -3,13 +3,14 @@
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockEntity, BlockState, Dims, Palette, PaletteIndex,
-    lower_to_block_array,
+    BlockArray, BlockArrayIr, BlockEntity, BlockEntityData, BlockState, Dims, Palette,
+    PaletteIndex, lower_to_block_array,
 };
 use cairn_lang_core::resolve::{DroppedIntent, declared_version_floors, versions_satisfying};
 use cairn_lang_core::{Edition, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::ParityNote;
-use cairn_lang_formats::data_version::BedrockTarget;
+use cairn_lang_formats::data_version::{BedrockTarget, JavaTarget};
+use cairn_lang_formats::java_structure::build_structure_tag;
 use cairn_lang_formats::registry::{RegistryPack, VersionStates, builtin_pack};
 use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
 use cairn_lang_nbt::tag::{Compound, Tag};
@@ -171,6 +172,50 @@ pub fn block_palette(root: &Compound) -> &[Tag] {
     match default_palette(root).entries.get("block_palette") {
         Some(Tag::List(l)) => &l.items,
         other => panic!("block_palette is not a List: {other:?}"),
+    }
+}
+
+/// `tag` in SNBT, its compounds' entries in the order the writer inserted them.
+pub fn snbt(tag: &Tag) -> String {
+    let joined = |items: Vec<String>| items.join(",");
+    match tag {
+        Tag::Byte(value) => format!("{value}b"),
+        Tag::Short(value) => format!("{value}s"),
+        Tag::Int(value) => value.to_string(),
+        Tag::Long(value) => format!("{value}L"),
+        Tag::Float(value) => format!("{value}f"),
+        Tag::Double(value) => format!("{value}d"),
+        Tag::String(value) => format!("{value:?}"),
+        Tag::List(list) => format!("[{}]", joined(list.items.iter().map(snbt).collect())),
+        Tag::Compound(compound) => format!(
+            "{{{}}}",
+            joined(
+                compound
+                    .entries
+                    .iter()
+                    .map(|(name, value)| format!("{name}:{}", snbt(value)))
+                    .collect()
+            )
+        ),
+        Tag::ByteArray(values) => format!("[B;{values:?}]"),
+        Tag::IntArray(values) => format!("[I;{values:?}]"),
+        Tag::LongArray(values) => format!("[L;{values:?}]"),
+    }
+}
+
+/// Each `block_position_data` entry of a `.mcstructure` root, its key and its block entity in SNBT.
+///
+/// # Panics
+///
+/// When the root holds no `block_position_data` compound.
+pub fn position_data(root: &Compound) -> Vec<(String, String)> {
+    match default_palette(root).entries.get("block_position_data") {
+        Some(Tag::Compound(data)) => data
+            .entries
+            .iter()
+            .map(|(index, block)| (index.clone(), snbt(block)))
+            .collect(),
+        other => panic!("block_position_data is not a Compound: {other:?}"),
     }
 }
 
@@ -362,8 +407,10 @@ pub fn comparator_array(id: &str) -> BlockArray {
         voxels,
         block_entities: vec![BlockEntity {
             pos: (1, 1, 1),
-            id: "minecraft:comparator".to_owned(),
-            fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+            data: BlockEntityData::Fields {
+                id: "minecraft:comparator".to_owned(),
+                fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+            },
         }],
         entities: vec![],
         source_scope: "struct::comparator".to_owned(),
@@ -395,36 +442,46 @@ pub fn wide_array(len: usize, slots: &[u16]) -> BlockArray {
     }
 }
 
-/// `array` as a reader returns it: its palette, its grid, and the block entities a structure
-/// holds, the last at each voxel in `(y, z, x)` order, with their fields.
+/// `array` as a reader returns it at `target`: its palette, its grid, and the block entities its
+/// `.nbt` keeps, which a `.litematic` and a `.schem` keep as well.
 ///
 /// # Panics
 ///
-/// When a block entity of `array` lies off its grid, which no written array holds.
-pub fn volume_of(array: &BlockArray) -> BlockVolume {
-    let mut placed: Vec<(usize, &BlockEntity)> = Vec::new();
-    for entity in &array.block_entities {
-        let (x, y, z) = entity.pos;
-        let index = array
-            .dims
-            .index(x, y, z)
-            .expect("a written array holds no block entity off its grid");
-        placed.retain(|&(at, _)| at != index);
-        placed.push((index, entity));
-    }
-    placed.sort_by_key(|&(index, _)| index);
-    let block_entities = placed
-        .into_iter()
-        .map(|(_, entity)| {
-            let mut data = Compound::new();
-            for (field, value) in &entity.fields {
-                data.insert(field.clone(), Tag::Int(*value));
-            }
-            StoredBlockEntity {
-                pos: entity.pos,
-                id: entity.id.clone(),
+/// When `array` does not build as a structure, which no written array fails to.
+pub fn volume_of(array: &BlockArray, target: &JavaTarget) -> BlockVolume {
+    let root = build_structure_tag(array, target).expect("a written array builds");
+    let Some(Tag::List(blocks)) = root.entries.get("blocks") else {
+        panic!("blocks is a list");
+    };
+    let block_entities = blocks
+        .items
+        .iter()
+        .filter_map(|block| {
+            let Tag::Compound(block) = block else {
+                panic!("a block entry is a compound");
+            };
+            let Some(Tag::Compound(nbt)) = block.entries.get("nbt") else {
+                return None;
+            };
+            let Some(Tag::List(pos)) = block.entries.get("pos") else {
+                panic!("a block entry has a pos");
+            };
+            let [x, y, z] = &pos.items[..] else {
+                panic!("a pos has three axes");
+            };
+            let axis = |tag: &Tag| match tag {
+                Tag::Int(value) => u32::try_from(*value).expect("a voxel of the grid"),
+                other => panic!("an axis is an int: {other:?}"),
+            };
+            let mut data = nbt.clone();
+            let Some(Tag::String(id)) = data.entries.shift_remove("id") else {
+                panic!("a block entity has an id");
+            };
+            Some(StoredBlockEntity {
+                pos: (axis(x), axis(y), axis(z)),
+                id,
                 data,
-            }
+            })
         })
         .collect();
     BlockVolume::new(

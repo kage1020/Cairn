@@ -1889,3 +1889,100 @@ fn two_reads_agree_on_what_they_share_and_on_nothing_else() {
     };
     assert_eq!(agreed(pane, Joins::default()), None);
 }
+
+/// A Bedrock pack whose state map holds `oak_log` and whose one material is `material`.
+fn bedrock_material(material: &str) -> Result<RegistryPack, RegistryError> {
+    bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            BOTH_STATE_FILES,
+            &log_states(r#"["1.21.50", "1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+        std::fs::write(dir.join("materials.json"), one_material(material))
+            .expect("write materials");
+    })
+}
+
+#[test]
+fn a_bedrock_canonical_its_state_map_maps_onto_the_block_loads() {
+    let pack =
+        bedrock_material(r#"{ "token": "a.b", "block": "oak_log", "canonical": "oak_log" }"#)
+            .expect("pack");
+    assert_eq!(
+        pack.materials().canonical_id("a.b"),
+        Some("minecraft:oak_log")
+    );
+}
+
+#[test]
+fn a_bedrock_canonical_its_state_map_does_not_map_onto_the_block_is_refused() {
+    let err = bedrock_material(r#"{ "token": "a.b", "block": "oak_log", "canonical": "oak_lgo" }"#)
+        .expect_err("a canonical no map reaches");
+    assert_eq!(
+        err.to_string(),
+        "registry pack materials token `a.b` names `canonical` `minecraft:oak_lgo`, which `states` \
+         does not map onto `minecraft:oak_log` at `1.21.50`",
+    );
+    let RegistryError::CanonicalUnmapped {
+        token,
+        canonical,
+        block,
+        mc_version,
+    } = &err
+    else {
+        panic!("expected CanonicalUnmapped, got {err:?}");
+    };
+    assert_eq!(
+        [token, canonical, block, mc_version].map(String::as_str),
+        ["a.b", "minecraft:oak_lgo", "minecraft:oak_log", "1.21.50"],
+    );
+}
+
+#[test]
+fn a_bedrock_canonical_without_a_state_map_is_refused() {
+    let err = bedrock_dir(|dir| {
+        write_pack_with_materials(
+            dir,
+            r#"{
+                "schema_version": 1,
+                "edition": "bedrock",
+                "name": "test",
+                "description": "test",
+                "files": { "data_versions": "data_versions.json", "materials": "materials.json" }
+            }"#,
+            r#"{
+                "schema_version": 3,
+                "latest": "1.21.60",
+                "versions": [
+                    { "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168832 }
+                ]
+            }"#,
+            &one_material(r#"{ "token": "a.b", "block": "bed", "canonical": "red_bed" }"#),
+        );
+    })
+    .expect_err("a canonical with nothing to check it against");
+    let RegistryError::CanonicalWithoutStates { token } = err else {
+        panic!("expected CanonicalWithoutStates, got {err:?}");
+    };
+    assert_eq!(token, "a.b");
+}
+
+#[test]
+fn a_java_material_naming_a_canonical_is_refused() {
+    let err = load_from_dir_err("java-canonical", |dir| {
+        write_full_pack(
+            dir,
+            manifest_with_blocks(),
+            good_data_versions(),
+            &one_material(
+                r#"{ "token": "a.b", "block": "oak_planks", "canonical": "oak_planks" }"#,
+            ),
+            good_blocks(),
+        );
+    });
+    let RegistryError::CanonicalOnJava { token } = err else {
+        panic!("expected CanonicalOnJava, got {err:?}");
+    };
+    assert_eq!(token, "a.b");
+}

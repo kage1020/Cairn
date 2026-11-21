@@ -1,6 +1,6 @@
 //! The `.litematic` writer: the files an IR splits into and the tag tree each holds.
 
-use cairn_lang_core::block_array::{BlockArrayIr, BlockEntity, Dims, Placement};
+use cairn_lang_core::block_array::{BlockArrayIr, BlockEntityData, Dims, Placement};
 use cairn_lang_core::{Edition, PlaceId, SiteName, WalkwayScopeKey};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::java_structure::JavaStructureError;
@@ -358,10 +358,15 @@ fn one_region(array: &cairn_lang_core::block_array::BlockArray) -> LitematicFile
 fn only_the_last_block_entity_at_each_voxel_of_the_grid_is_written() {
     let mut array = comparator_array("minecraft:comparator");
     let base = array.block_entities[0].clone();
-    let at = |pos, id: &str| BlockEntity {
-        pos,
-        id: id.to_owned(),
-        ..base.clone()
+    let at = |pos, id: &str| {
+        let mut entity = base.clone();
+        entity.pos = pos;
+        let BlockEntityData::Fields { id: named, .. } = &mut entity.data else {
+            unreachable!("a comparator's block entity holds fields");
+        };
+        named.clear();
+        named.push_str(id);
+        entity
     };
     array.block_entities = vec![
         at((1, 1, 1), "minecraft:first"),
