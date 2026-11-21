@@ -923,10 +923,10 @@ fn a_block_entity_without_a_bedrock_form_is_refused() {
         fields: IndexMap::new(),
     };
     match build(&array) {
-        Err(BedrockStructureError::UnmappedBlockEntity { id, known }) => {
+        Err(BedrockStructureError::UnmappedBlockEntity { id, pos, known }) => {
             assert_eq!(
-                (id.as_str(), known.as_str()),
-                ("minecraft:chest", "minecraft:comparator")
+                (id.as_str(), pos, known.as_str()),
+                ("minecraft:chest", (1, 1, 1), "minecraft:comparator")
             );
         }
         other => panic!("expected UnmappedBlockEntity, got {other:?}"),

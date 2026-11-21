@@ -3,7 +3,7 @@
 //! override").
 
 use cairn_lang_core::block_array::{
-    BlockEntity, BlockEntityData, BlockIdSet, BlockState, TargetRegistry,
+    BlockEntity, BlockEntityData, BlockIdSet, BlockState, DyeColor, SignText, TargetRegistry,
 };
 use cairn_lang_core::{BlockArrayIr, DiagnosticCode};
 
@@ -20,11 +20,25 @@ fn room(members: &str) -> String {
     )
 }
 
+/// The note naming the ways a bed at a triple takes.
+const COMPASS: &str = "`facing=` takes one of north, south, east, west, the way the bed's head \
+                       points: north toward the `back` wall and east toward the `right` one";
+
+/// The notes of a `W_PHASE_CONFLICT` after the ones naming the two members.
+const PHASE_NOTES: [&str; 2] = [
+    "If the override is deliberate this is the local-override rule of spec/compilation \
+     \"Phase evaluation\" and the later line wins as written. If it is not, move one of the two \
+     so their footprints do not meet.",
+    "Members in different phases may overlap freely — a `door` cut through a `walls` is the \
+     evaluation model working — so this is only reported for two members the same phase \
+     evaluates.",
+];
+
 /// A block as `id[properties]`, with its cell.
 type Placed = ((u32, u32, u32), String);
 
 /// A bed half's block entity as its cell and the colour it keeps.
-type Colored = ((u32, u32, u32), Option<String>);
+type Colored = ((u32, u32, u32), Option<DyeColor>);
 
 /// The beds `out` holds.
 fn beds(out: &BlockArrayIr) -> Vec<Placed> {
@@ -37,7 +51,7 @@ fn colors(out: &BlockArrayIr) -> Vec<Colored> {
         .block_entities
         .iter()
         .map(|entity| match &entity.data {
-            BlockEntityData::Bed { color } => (entity.pos, color.clone()),
+            BlockEntityData::Bed { color } => (entity.pos, *color),
             other => panic!("a bed's block entity, not {other:?}"),
         })
         .collect()
@@ -63,11 +77,8 @@ fn bed(id: &str, facing: &str, head: (u32, u32, u32), foot: (u32, u32, u32)) -> 
 }
 
 /// Both halves' block entities, each keeping `color`, head first.
-fn kept(color: &str, head: (u32, u32, u32), foot: (u32, u32, u32)) -> Vec<Colored> {
-    vec![
-        (head, Some(color.to_owned())),
-        (foot, Some(color.to_owned())),
-    ]
+fn kept(color: DyeColor, head: (u32, u32, u32), foot: (u32, u32, u32)) -> Vec<Colored> {
+    vec![(head, Some(color)), (foot, Some(color))]
 }
 
 #[test]
@@ -76,14 +87,14 @@ fn a_bed_by_a_wall_lies_with_its_head_to_the_wall() {
         laid("bed at=inside.back offset=4 y=1"),
         (
             bed("minecraft:red_bed", "north", (2, 1, 1), (2, 1, 2)),
-            kept("red", (2, 1, 1), (2, 1, 2)),
+            kept(DyeColor::Red, (2, 1, 1), (2, 1, 2)),
         ),
     );
     assert_eq!(
         laid("bed at=inside.left offset=2 y=1"),
         (
             bed("minecraft:red_bed", "west", (1, 1, 2), (2, 1, 2)),
-            kept("red", (1, 1, 2), (2, 1, 2)),
+            kept(DyeColor::Red, (1, 1, 2), (2, 1, 2)),
         ),
     );
 }
@@ -95,14 +106,14 @@ fn a_bed_line_turns_it_along_the_wall() {
         laid("bed at=inside.front offset=3 y=1 facing=right"),
         (
             bed("minecraft:red_bed", "east", (3, 1, 3), (2, 1, 3)),
-            kept("red", (3, 1, 3), (2, 1, 3)),
+            kept(DyeColor::Red, (3, 1, 3), (2, 1, 3)),
         ),
     );
     assert_eq!(
         laid("bed at=inside.front offset=3 y=1 facing=out"),
         (
             bed("minecraft:red_bed", "south", (3, 1, 3), (3, 1, 2)),
-            kept("red", (3, 1, 3), (3, 1, 2)),
+            kept(DyeColor::Red, (3, 1, 3), (3, 1, 2)),
         ),
     );
 }
@@ -113,7 +124,7 @@ fn a_bed_at_a_triple_points_its_head_the_compass_way_its_line_writes() {
         laid("bed at=3,1,2 facing=east"),
         (
             bed("minecraft:red_bed", "east", (3, 1, 2), (2, 1, 2)),
-            kept("red", (3, 1, 2), (2, 1, 2)),
+            kept(DyeColor::Red, (3, 1, 2), (2, 1, 2)),
         ),
     );
 }
@@ -124,7 +135,7 @@ fn a_bed_takes_its_block_and_colour_from_its_slot() {
         laid("bed at=inside.back offset=2 y=1 mat_slot=sheet"),
         (
             bed("minecraft:blue_bed", "north", (4, 1, 1), (4, 1, 2)),
-            kept("blue", (4, 1, 1), (4, 1, 2)),
+            kept(DyeColor::Blue, (4, 1, 1), (4, 1, 2)),
         ),
     );
 }
@@ -148,19 +159,34 @@ fn a_bed_bound_to_no_bed_is_built_from_the_default_one() {
         )],
     );
     assert_eq!(
-        beds(&out),
-        bed("minecraft:red_bed", "north", (2, 1, 1), (2, 1, 2)),
+        serde_json::to_value(&out.diagnostics[0].data).expect("serialises")["required"],
+        "bed",
+    );
+    assert_eq!(
+        (beds(&out), colors(&out)),
+        (
+            bed("minecraft:red_bed", "north", (2, 1, 1), (2, 1, 2)),
+            kept(DyeColor::Red, (2, 1, 1), (2, 1, 2)),
+        ),
     );
 }
 
 #[test]
 fn a_bed_whose_foot_has_no_cell_is_refused_and_not_built() {
-    const COMPASS: &str = "`facing=` takes one of north, south, east, west, the way the bed's \
-                           head points: north toward the `back` wall and east toward the `right` \
-                           one";
     for (line, primary, notes) in [
         (
             "bed at=inside.front offset=1 y=1 facing=right",
+            "bed `facing=right` puts its foot, the cell behind its head, in the struct's walls",
+            vec!["turn the bed with `facing=`, or move it, so the cell behind its head is free"],
+        ),
+        // By the left wall `right` points the head south, and by the right wall north.
+        (
+            "bed at=inside.left offset=1 y=1 facing=right",
+            "bed `facing=right` puts its foot, the cell behind its head, in the struct's walls",
+            vec!["turn the bed with `facing=`, or move it, so the cell behind its head is free"],
+        ),
+        (
+            "bed at=inside.right offset=1 y=1 facing=right",
             "bed `facing=right` puts its foot, the cell behind its head, in the struct's walls",
             vec!["turn the bed with `facing=`, or move it, so the cell behind its head is free"],
         ),
@@ -258,8 +284,123 @@ fn a_facing_of_the_wrong_kind_is_ignored_and_the_bed_laid_to_the_wall() {
         )],
     );
     assert_eq!(
+        (beds(&out), colors(&out)),
+        (
+            bed("minecraft:red_bed", "north", (2, 1, 1), (2, 1, 2)),
+            kept(DyeColor::Red, (2, 1, 1), (2, 1, 2)),
+        ),
+    );
+}
+
+#[test]
+fn a_facing_of_the_wrong_kind_at_a_triple_leaves_the_bed_unbuilt() {
+    let line = "bed at=3,1,2 facing=3";
+    let src = room(line);
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [
+            (
+                DiagnosticCode::InvalidMember,
+                line,
+                "bed at a coordinate triple has a `facing=` that is no compass word, so nothing \
+                 says which way it lies",
+                vec![
+                    COMPASS,
+                    "no wall stands by a bed at a triple for its head to lie against",
+                ],
+            ),
+            (
+                DiagnosticCode::IgnoredArgument,
+                "3",
+                "`facing=` must be the way the bed's head points, `in`, `out`, `left` or `right` \
+                 by a wall and `north`, `south`, `east` or `west` at a triple, not integer `3`; \
+                 the value was ignored",
+                vec!["this bed is not built either way — see the finding on the same line"],
+            ),
+        ],
+    );
+    assert_eq!((beds(&out), colors(&out)), (vec![], vec![]));
+}
+
+#[test]
+fn a_fixture_over_one_half_of_a_bed_leaves_the_other_half_split_off() {
+    let src = room("bed at=3,1,2 facing=east\n  sign at=2,1,2");
+    let out = lowered(&src);
+    let mut notes = vec![
+        "overwritten member declared here",
+        "the `bed` is left with one of its two blocks, and the game removes a bed block whose \
+         other half is missing",
+    ];
+    notes.extend(PHASE_NOTES);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::PhaseConflict,
+            "sign at=2,1,2",
+            "`sign` overwrites 1 voxel that `bed` painted in the same phase, so which block the \
+             build keeps is decided by the order the two lines are written in",
+            notes,
+        )],
+    );
+    assert_eq!(
         beds(&out),
-        bed("minecraft:red_bed", "north", (2, 1, 1), (2, 1, 2)),
+        [(
+            (3, 1, 2),
+            "minecraft:red_bed[facing=east,part=head]".to_owned()
+        )],
+    );
+    let blank = SignText::new(Vec::new(), false).expect("no lines");
+    assert_eq!(
+        only_structure(&out).block_entities,
+        [
+            BlockEntity {
+                pos: (3, 1, 2),
+                data: BlockEntityData::Bed {
+                    color: Some(DyeColor::Red),
+                },
+            },
+            BlockEntity {
+                pos: (2, 1, 2),
+                data: BlockEntityData::Sign {
+                    front: blank.clone(),
+                    back: blank,
+                },
+            },
+        ],
+    );
+}
+
+#[test]
+fn a_bed_laid_over_both_halves_of_another_splits_neither() {
+    let src = room("bed at=3,1,2 facing=east\n  bed at=2,1,2 facing=west");
+    let out = lowered(&src);
+    let mut notes = vec!["overwritten member declared here"];
+    notes.extend(PHASE_NOTES);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::PhaseConflict,
+            "bed at=2,1,2 facing=west",
+            "`bed` overwrites 2 voxels that `bed` painted in the same phase, so which block the \
+             build keeps is decided by the order the two lines are written in",
+            notes,
+        )],
+    );
+    assert_eq!(
+        (beds(&out), colors(&out)),
+        (
+            bed("minecraft:red_bed", "west", (2, 1, 2), (3, 1, 2)),
+            kept(DyeColor::Red, (2, 1, 2), (3, 1, 2)),
+        ),
+    );
+    // The same bed laid twice writes the same blocks and block entities, which is no contest.
+    assert_eq!(
+        laid("bed at=3,1,2 facing=east\n  bed at=3,1,2 facing=east"),
+        (
+            bed("minecraft:red_bed", "east", (3, 1, 2), (2, 1, 2)),
+            kept(DyeColor::Red, (3, 1, 2), (2, 1, 2)),
+        ),
     );
 }
 
@@ -306,16 +447,18 @@ fn a_bed_the_target_spells_as_every_dyed_bed_keeps_the_colour_its_token_names() 
     let at = |x: u32| [(x, 1, 1), (x, 1, 2)];
     assert_eq!(
         only_structure(&out).block_entities,
-        [(at(1), Some("red")), (at(3), Some("blue")), (at(5), None),]
-            .into_iter()
-            .flat_map(|(cells, color)| {
-                cells.map(|pos| BlockEntity {
-                    pos,
-                    data: BlockEntityData::Bed {
-                        color: color.map(str::to_owned),
-                    },
-                })
+        [
+            (at(1), Some(DyeColor::Red)),
+            (at(3), Some(DyeColor::Blue)),
+            (at(5), None),
+        ]
+        .into_iter()
+        .flat_map(|(cells, color)| {
+            cells.map(|pos| BlockEntity {
+                pos,
+                data: BlockEntityData::Bed { color },
             })
-            .collect::<Vec<_>>(),
+        })
+        .collect::<Vec<_>>(),
     );
 }

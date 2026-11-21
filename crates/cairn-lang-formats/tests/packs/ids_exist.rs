@@ -1,7 +1,7 @@
 //! Every id a built-in pack can produce exists in its target, on every supported version.
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BUILTIN_BLOCK_IDS, DYE_COLORS};
+use cairn_lang_core::block_array::{BUILTIN_BLOCK_IDS, DyeColor};
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 use indexmap::IndexMap;
@@ -166,7 +166,7 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
 fn each_bed_token_stands_for_the_java_bed_its_java_token_names_which_bedrock_writes_as_its_block() {
     let (java, bedrock) = (builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock));
     let mut tokens = vec!["bed.default".to_owned()];
-    tokens.extend(DYE_COLORS.map(|dye| format!("bed.{dye}")));
+    tokens.extend(DyeColor::ALL.map(|dye| format!("bed.{}", dye.name())));
     let canonical: Vec<(&str, Option<&str>)> = bedrock
         .materials()
         .tokens()

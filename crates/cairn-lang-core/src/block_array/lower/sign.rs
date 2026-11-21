@@ -1,5 +1,5 @@
 //! Setting a `sign` member's sign on the wall it hangs on or the block it stands on, with the text
-//! its line writes (`spec/entities` "Two tiers").
+//! its line writes (`spec/entities` "Block entities").
 
 use indexmap::IndexMap;
 
@@ -14,7 +14,7 @@ use crate::block_array::args::{
 use crate::block_array::geometry::Declared;
 use crate::block_array::joins::Face;
 use crate::block_array::material::is_stand_in;
-use crate::block_array::{BlockEntityData, BlockState, SignText};
+use crate::block_array::{BlockEntityData, BlockState, SIGN_FACE_LINES, SignText};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Fixture, Refusal, Toward, fixture_cell, outside_the_array};
@@ -42,9 +42,6 @@ const SIGN: Fixture = Fixture {
     noun: "sign",
 };
 
-/// The most lines a face of a sign holds.
-const FACE_LINES: usize = 4;
-
 /// What `text=` and `back=` take, completing "`key=` must be …".
 const LINES: &str = "a string, or a list of up to four strings";
 
@@ -68,7 +65,7 @@ pub(super) fn fill_sign(
 ) {
     let mut unread: Vec<UnreadArgument> = Vec::new();
     let written = read_written(member, &mut unread);
-    let stand = match place_sign(
+    let stand = place_sign(
         member,
         &written,
         y_offset,
@@ -76,13 +73,11 @@ pub(super) fn fill_sign(
         palette,
         canvas,
         diagnostics,
-    ) {
-        Ok(stand) => Some(stand),
-        Err(refusal) => {
-            diagnostics.push(*refusal);
-            None
-        }
-    };
+    )
+    .unwrap_or_else(|refusal| {
+        diagnostics.push(*refusal);
+        None
+    });
     for argument in unread {
         let consequence = match (argument.key, stand) {
             (_, None) => "this sign is not built either way — see the finding on the same line",
@@ -137,7 +132,8 @@ fn keep<T>(unread: &mut Vec<UnreadArgument>, read: Result<Option<T>, UnreadArgum
     })
 }
 
-/// [`fill_sign`], answering how the sign's `at=` named its cell, or the finding that refuses it.
+/// [`fill_sign`], answering how the sign's `at=` named its cell, `None` for a sign its binding's
+/// refused state literal leaves unbuilt, or the finding that refuses it.
 fn place_sign(
     member: &Member,
     written: &Written<'_>,
@@ -146,15 +142,17 @@ fn place_sign(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<Stand, Refusal> {
-    for (key, lines) in [("text", &written.front), ("back", &written.back)] {
-        if let Some(lines) = lines.as_ref().filter(|lines| lines.len() > FACE_LINES) {
+) -> Result<Option<Stand>, Refusal> {
+    for key in ["text", "back"] {
+        // Counted before any line's kind is judged, so a list too long is refused whatever it holds.
+        let lines = member.written(key).map_or(0, |raw| match &raw.value.kind {
+            ValueKind::List(items) => items.len(),
+            _ => 1,
+        });
+        if lines > SIGN_FACE_LINES {
             return Err(Box::new(diag_invalid_member(
                 member,
-                format!(
-                    "sign `{key}=` writes {} lines, more than a face of a sign holds",
-                    lines.len()
-                ),
+                format!("sign `{key}=` writes {lines} lines, more than a face of a sign holds"),
                 vec![format!(
                     "a face holds at most four lines; write `{key}=` as a list of up to four \
                      strings"
@@ -177,7 +175,7 @@ fn place_sign(
         }
     };
     let Some(id) = sign_block_id(member, ctx, facing.is_some(), diagnostics)? else {
-        return Ok(stand);
+        return Ok(None);
     };
     let mut properties = IndexMap::new();
     match facing {
@@ -187,22 +185,22 @@ fn place_sign(
     };
     let state = BlockState { id, properties };
     canvas.declare(Declared::cell(cell, host_face));
+    let face = |lines: &Option<Vec<String>>| {
+        SignText::new(
+            lines.clone().unwrap_or_default(),
+            written.glowing.unwrap_or(false),
+        )
+        .expect("a face of more lines than a sign holds is refused above")
+    };
+    let entity = BlockEntityData::Sign {
+        front: face(&written.front),
+        back: face(&written.back),
+    };
     // Interned only once the cell exists, so a refusal leaves no palette entry.
-    if !canvas.try_paint(cell, || palette.intern(state)) {
+    if !canvas.try_paint_with_entity(cell, || palette.intern(state), entity) {
         return Err(Box::new(outside_the_array(SIGN, member)));
     }
-    let face = |lines: &Option<Vec<String>>| SignText {
-        lines: lines.clone().unwrap_or_default(),
-        glowing: written.glowing.unwrap_or(false),
-    };
-    canvas.set_block_entity(
-        cell,
-        BlockEntityData::Sign {
-            front: face(&written.front),
-            back: face(&written.back),
-        },
-    );
-    Ok(stand)
+    Ok(Some(stand))
 }
 
 /// The way a sign at a triple hangs on the block behind it, `None` for one that stands on the
@@ -250,9 +248,9 @@ fn hung_facing(
     )))
 }
 
-/// The block a sign is built from: the standing sign its `mat_slot=` binds or the pack's default,
-/// as the wall sign of that standing sign where it hangs; `None` for a binding whose state literal
-/// the target refused, which builds no sign.
+/// The block a sign is built from: the standing sign its `mat_slot=` binds, as its wall sign where
+/// the sign hangs, or the pack's default standing or wall sign; `None` for a binding whose state
+/// literal the target refused, which builds no sign.
 fn sign_block_id(
     member: &Member,
     ctx: &StructCtx<'_>,
@@ -271,14 +269,18 @@ fn sign_block_id(
         MemberState::Refused => return Ok(None),
     };
     let mut fell_back = false;
-    let standing = geometry_material_id(
+    let id = geometry_material_id(
         member,
         ctx.scope,
         ctx.registry,
         resolved.as_ref(),
         || {
             fell_back = true;
-            default_block_id(member, ctx.registry, STANDING_TOKEN, STANDING_BASE_ID)
+            if hangs {
+                default_block_id(member, ctx.registry, WALL_TOKEN, WALL_BASE_ID)
+            } else {
+                default_block_id(member, ctx.registry, STANDING_TOKEN, STANDING_BASE_ID)
+            }
         },
         &GeometryMemberDescription {
             subject: "sign".to_owned(),
@@ -287,11 +289,8 @@ fn sign_block_id(
         },
         diagnostics,
     )?;
-    if !hangs || is_stand_in(&BlockState::bare(&standing)) {
-        return Ok(Some(standing));
+    if fell_back || !hangs || is_stand_in(&BlockState::bare(&id)) {
+        return Ok(Some(id));
     }
-    if fell_back {
-        return default_block_id(member, ctx.registry, WALL_TOKEN, WALL_BASE_ID).map(Some);
-    }
-    Ok(Some(wall_sign_of(&standing)))
+    Ok(Some(wall_sign_of(&id)))
 }

@@ -6,7 +6,9 @@ mod entities;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use cairn_lang_core::block_array::{BlockArray, BlockEntityData, BlockState, Dims, SignText};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockEntityData, BlockState, Dims, SIGN_FACE_LINES, SignText,
+};
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
@@ -97,7 +99,8 @@ pub enum JavaStructureError {
     /// A line of sign text the NBT encoder cannot write.
     #[error(
         "the sign at {pos:?} has the line `{text}`, which cannot be written as NBT: {source}. \
-         Fix: write the sign's text in printable ASCII"
+         Fix: {}",
+        sign_text_fix(source)
     )]
     UnencodableSignText {
         /// The sign's voxel.
@@ -223,7 +226,7 @@ pub fn prepare_structure<'a>(
         let BlockEntityData::Sign { front, back } = &entity.data else {
             continue;
         };
-        for line in front.lines.iter().chain(&back.lines) {
+        for line in front.lines().iter().chain(back.lines()) {
             check_string(&text_component(line, target.data_version)).map_err(|source| {
                 JavaStructureError::UnencodableSignText {
                     pos: entity.pos,
@@ -525,6 +528,16 @@ pub(crate) fn java_entity_id(data: &BlockEntityData) -> &str {
     }
 }
 
+/// How to fix sign text the NBT encoder refused with `source`.
+pub(crate) fn sign_text_fix(source: &NbtIoError) -> String {
+    match source {
+        NbtIoError::LengthOverflow { limit, .. } => {
+            format!("shorten the sign's text, which NBT holds to {limit} bytes as written")
+        }
+        _ => "write the sign's text in printable ASCII".to_owned(),
+    }
+}
+
 /// The first `DataVersion` that saves text, a sign's messages among it, as text components,
 /// 1.21.5's.
 const TEXT_COMPONENTS_FROM: i32 = 4325;
@@ -571,9 +584,9 @@ fn entity_nbt(
 
 /// One face of a sign: its four messages, black and glowing or not.
 fn sign_text(text: &SignText, data_version: i32) -> Compound {
-    let messages: Vec<Tag> = (0..4)
+    let messages: Vec<Tag> = (0..SIGN_FACE_LINES)
         .map(|line| {
-            let line = text.lines.get(line).map_or("", String::as_str);
+            let line = text.lines().get(line).map_or("", String::as_str);
             Tag::String(text_component(line, data_version))
         })
         .collect();

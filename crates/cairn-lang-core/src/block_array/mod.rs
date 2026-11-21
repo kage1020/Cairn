@@ -550,18 +550,18 @@ pub enum BlockEntityData {
         #[serde(skip_serializing_if = "IndexMap::is_empty")]
         fields: IndexMap<String, i32>,
     },
-    /// A sign's two faces (`spec/entities` "Two tiers").
+    /// A sign's two faces (`spec/entities` "Block entities").
     Sign {
         /// The face toward the way the sign faces, which its `text=` writes.
         front: SignText,
         /// The face its `back=` writes.
         back: SignText,
     },
-    /// One half of a bed, with the dye colour its block names.
+    /// One half of a bed, with the dye of the dyed bed its block is or its token stands for.
     Bed {
-        /// The dye's name, such as `red`; `None` for a block that names no colour.
+        /// The dye; `None` for a bed whose block names none and no dyed token names.
         #[serde(skip_serializing_if = "Option::is_none")]
-        color: Option<String>,
+        color: Option<DyeColor>,
     },
     /// The `nbt={...}` compound a `raw_block` writes, as written, which a writer saves as given.
     Nbt {
@@ -570,33 +570,119 @@ pub enum BlockEntityData {
     },
 }
 
-/// The sixteen dye colours, in the order the game numbers them.
-pub const DYE_COLORS: [&str; 16] = [
-    "white",
-    "orange",
-    "magenta",
-    "light_blue",
-    "yellow",
-    "lime",
-    "pink",
-    "gray",
-    "light_gray",
-    "cyan",
-    "purple",
-    "blue",
-    "brown",
-    "green",
-    "red",
-    "black",
-];
+/// One of the sixteen dye colours, serialized as its name, such as `light_blue`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DyeColor {
+    /// White, the game's dye 0.
+    White,
+    /// Orange, the game's dye 1.
+    Orange,
+    /// Magenta, the game's dye 2.
+    Magenta,
+    /// Light blue, the game's dye 3.
+    LightBlue,
+    /// Yellow, the game's dye 4.
+    Yellow,
+    /// Lime, the game's dye 5.
+    Lime,
+    /// Pink, the game's dye 6.
+    Pink,
+    /// Gray, the game's dye 7.
+    Gray,
+    /// Light gray, the game's dye 8.
+    LightGray,
+    /// Cyan, the game's dye 9.
+    Cyan,
+    /// Purple, the game's dye 10.
+    Purple,
+    /// Blue, the game's dye 11.
+    Blue,
+    /// Brown, the game's dye 12.
+    Brown,
+    /// Green, the game's dye 13.
+    Green,
+    /// Red, the game's dye 14.
+    Red,
+    /// Black, the game's dye 15.
+    Black,
+}
+
+impl DyeColor {
+    /// Every dye colour, in the order the game numbers them.
+    pub const ALL: [Self; 16] = [
+        Self::White,
+        Self::Orange,
+        Self::Magenta,
+        Self::LightBlue,
+        Self::Yellow,
+        Self::Lime,
+        Self::Pink,
+        Self::Gray,
+        Self::LightGray,
+        Self::Cyan,
+        Self::Purple,
+        Self::Blue,
+        Self::Brown,
+        Self::Green,
+        Self::Red,
+        Self::Black,
+    ];
+
+    /// Its name, such as `light_blue`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::White => "white",
+            Self::Orange => "orange",
+            Self::Magenta => "magenta",
+            Self::LightBlue => "light_blue",
+            Self::Yellow => "yellow",
+            Self::Lime => "lime",
+            Self::Pink => "pink",
+            Self::Gray => "gray",
+            Self::LightGray => "light_gray",
+            Self::Cyan => "cyan",
+            Self::Purple => "purple",
+            Self::Blue => "blue",
+            Self::Brown => "brown",
+            Self::Green => "green",
+            Self::Red => "red",
+            Self::Black => "black",
+        }
+    }
+
+    /// The dye named `name`, such as `light_blue`.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|dye| dye.name() == name)
+    }
+}
+
+/// The most lines a face of a sign holds.
+pub const SIGN_FACE_LINES: usize = 4;
 
 /// One face of a sign.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SignText {
-    /// Its lines, top first, at most four.
-    pub lines: Vec<String>,
+    /// Its lines, top first.
+    lines: Vec<String>,
     /// Whether the text glows.
     pub glowing: bool,
+}
+
+impl SignText {
+    /// A face of `lines`, top first; `None` for more than [`SIGN_FACE_LINES`].
+    #[must_use]
+    pub fn new(lines: Vec<String>, glowing: bool) -> Option<Self> {
+        (lines.len() <= SIGN_FACE_LINES).then_some(Self { lines, glowing })
+    }
+
+    /// Its lines, top first, at most [`SIGN_FACE_LINES`].
+    #[must_use]
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
 }
 
 #[cfg(test)]

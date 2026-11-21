@@ -280,12 +280,16 @@ Two cases are not conflicts:
 - A cell whose value does not change, as when two `walls` of one material meet over shared rows.
 - A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
 
+A cell's value is its block and what the block keeps in its block entity ([Entities
+§8.1](/spec/entities/#81-two-tiers)), so two signs of one wood on one cell whose text differs
+conflict, and the finding says the block entity changed hands.
+
 A `door` whose `hinge` is derived is judged by the hinge it is built with, which is settled once
 every opening is cut ([Blockstate Model
 §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)): two doors in one opening
 conflict when the blocks they would build differ, whichever line comes first. An opening that
-takes one of a door's two cells leaves half a door, which the game removes, and the finding says
-so.
+takes one of a door's two cells, or a fixture that takes one of a bed's, leaves half a door or half
+a bed, which the game removes, and the finding says so.
 
 **The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
 is a *set with a canonical rendering*, not a log of the writes that filled it. It lists the blocks

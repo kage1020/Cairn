@@ -10,7 +10,7 @@ mod entities;
 use std::collections::HashMap;
 
 use cairn_lang_core::block_array::{
-    BlockArray, BlockEntityData, BlockState, DYE_COLORS, PaletteIndex, SignText,
+    BlockArray, BlockEntityData, BlockState, DyeColor, PaletteIndex, SignText,
 };
 use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
@@ -25,7 +25,7 @@ use crate::bedrock_state::{BedrockStateError, StateEntity, translate_states};
 use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
-use crate::java_structure::java_entity_id;
+use crate::java_structure::{java_entity_id, sign_text_fix};
 use crate::nbt_text::{compound_of, first_unencodable};
 use crate::registry::VersionStates;
 
@@ -112,29 +112,22 @@ pub enum BedrockStructureError {
     },
     /// A block entity Bedrock has no counterpart for in this writer.
     #[error(
-        "block entity `{id}` has no Bedrock form this writer knows; it writes `{known}` only. Fix: \
-         compile with `--edition java`"
+        "block entity `{id}` at {pos:?} has no Bedrock form this writer knows; it writes `{known}` \
+         only. Fix: compile with `--edition java`"
     )]
     UnmappedBlockEntity {
         /// The block entity's id.
         id: String,
+        /// Its voxel.
+        pos: (u32, u32, u32),
         /// The ids it maps, comma-joined.
         known: String,
-    },
-    /// A bed whose colour is no dye's.
-    #[error("the bed at {pos:?} is `{color}`, which is not a dye's colour. Valid: {valid}")]
-    UnknownBedColor {
-        /// The bed's voxel.
-        pos: (u32, u32, u32),
-        /// The colour.
-        color: String,
-        /// The dyes' colours, comma-joined.
-        valid: String,
     },
     /// A sign's text the NBT encoder cannot write.
     #[error(
         "the sign at {pos:?} has the text `{text}`, which cannot be written as NBT: {source}. \
-         Fix: write the sign's text in printable ASCII"
+         Fix: {}",
+        sign_text_fix(source)
     )]
     UnencodableSignText {
         /// The sign's voxel.
@@ -279,8 +272,8 @@ impl std::fmt::Debug for McStructure<'_> {
     }
 }
 
-/// Checks that `block_array` writes as a `.mcstructure` for `target`, its palette translated
-/// through `states`, with the [`ParityNote`]s the translation raised, in palette order.
+/// Checks that `block_array` writes as a `.mcstructure` for `target`, with the [`ParityNote`]s
+/// translating its palette through `states` raised, then one for each single chest half's entry.
 ///
 /// # Errors
 ///
@@ -368,7 +361,13 @@ pub fn prepare_mcstructure<'a>(
             dims: (dims.x, dims.y, dims.z),
         });
     }
-    let position_data = position_data(block_array, &held, frame_entities)?;
+    let (position_data, single) = position_data(
+        block_array,
+        &held,
+        frame_entities,
+        target.mc_version.as_str(),
+    )?;
+    notes.extend(single);
 
     let prepared = McStructure {
         block_array,
@@ -444,12 +443,14 @@ const SIGN_TEXT_BLACK: i32 = 0xFF00_0000_u32.cast_signed();
 
 /// `block_position_data`: each block entity's `block_entity_data`, keyed by its voxel's index in
 /// `block_indices`, its position the voxel's own; `held` is what each palette entry's block entity
-/// holds of its states, with its Bedrock id, and `frames` each item frame's.
+/// holds of its states, with its Bedrock id, and `frames` each item frame's. With it, a
+/// [`ParityNote`] for each palette entry a chest half stands single in, at `mc_version`.
 fn position_data(
     block_array: &BlockArray,
     held: &[Option<(String, StateEntity)>],
     frames: Vec<((u32, u32, u32), Compound)>,
-) -> Result<Compound, BedrockStructureError> {
+    mc_version: &str,
+) -> Result<(Compound, Vec<ParityNote>), BedrockStructureError> {
     let dims = block_array.dims;
     let index = |(x, y, z): (u32, u32, u32)| {
         (u64::from(x) * u64::from(dims.y) + u64::from(y)) * u64::from(dims.z) + u64::from(z)
@@ -463,17 +464,18 @@ fn position_data(
         data.insert(index(pos).to_string(), placed(nbt, pos)?);
     }
     if held.iter().all(Option::is_none) {
-        return Ok(data);
+        return Ok((data, Vec::new()));
     }
     let held_at = |x: i64, y: u32, z: i64| {
         let (x, z) = (u32::try_from(x).ok()?, u32::try_from(z).ok()?);
-        let voxel = block_array.voxels[dims.index(x, y, z)?];
-        held.get(usize::from(voxel.0))?.as_ref()
+        let slot = usize::from(block_array.voxels[dims.index(x, y, z)?].0);
+        Some((slot, held.get(slot)?.as_ref()?))
     };
+    let mut single = vec![false; held.len()];
     for x in 0..dims.x {
         for y in 0..dims.y {
             for z in 0..dims.z {
-                let Some((id, entity)) = held_at(i64::from(x), y, i64::from(z)) else {
+                let Some((slot, (id, entity))) = held_at(i64::from(x), y, i64::from(z)) else {
                     continue;
                 };
                 let nbt = match *entity {
@@ -482,8 +484,7 @@ fn position_data(
                             i64::from(x) + i64::from(toward.0),
                             i64::from(z) + i64::from(toward.1),
                         );
-                        // A half whose other half is not beside it stands single.
-                        let paired = held_at(px, y, pz).is_some_and(|(other, half)| {
+                        let paired = held_at(px, y, pz).is_some_and(|(_, (other, half))| {
                             other == id
                                 && *half
                                     == StateEntity::ChestHalf {
@@ -492,6 +493,7 @@ fn position_data(
                                     }
                         });
                         if !paired {
+                            single[slot] = true;
                             continue;
                         }
                         let mut nbt = Compound::new();
@@ -515,7 +517,26 @@ fn position_data(
             }
         }
     }
-    Ok(data)
+    let entries = &block_array.palette.entries;
+    let notes = single
+        .iter()
+        .zip(entries)
+        .filter(|(single, _)| **single)
+        .map(|(_, entry)| ParityNote {
+            id: entry.id.clone(),
+            states: entry.properties_text(),
+            dropped: DroppedIntent {
+                key: "type".to_owned(),
+                value: entry.properties.get("type").cloned().unwrap_or_default(),
+                mc_versions: vec![mc_version.to_owned()],
+                reason: "Bedrock pairs a chest half only with its other half beside it, the same \
+                         block facing the same way, and none stands there, so this half stands \
+                         single"
+                    .to_owned(),
+            },
+        })
+        .collect();
+    Ok((data, notes))
 }
 
 /// One of the IR's block entities as Bedrock saves it, without its position.
@@ -529,6 +550,7 @@ fn member_entity(
             let Some(&(_, id)) = BLOCK_ENTITY_IDS.iter().find(|(known, _)| known == java) else {
                 return Err(BedrockStructureError::UnmappedBlockEntity {
                     id: java.clone(),
+                    pos,
                     known: BLOCK_ENTITY_IDS.map(|(known, _)| known).join(", "),
                 });
             };
@@ -545,14 +567,11 @@ fn member_entity(
         }
         BlockEntityData::Bed { color } => {
             // A bed of no colour is saved as the game saves one, white.
-            let color = color.as_deref().unwrap_or(DYE_COLORS[0]);
-            let Some(number) = DYE_COLORS.iter().position(|dye| *dye == color) else {
-                return Err(BedrockStructureError::UnknownBedColor {
-                    pos,
-                    color: color.to_owned(),
-                    valid: DYE_COLORS.join(", "),
-                });
-            };
+            let color = color.unwrap_or(DyeColor::White);
+            let number = DyeColor::ALL
+                .iter()
+                .position(|&dye| dye == color)
+                .expect("every dye is one of the sixteen");
             nbt.insert("id", Tag::String("Bed".to_owned()));
             nbt.insert(
                 "color",
@@ -579,7 +598,7 @@ fn member_entity(
 
 /// One face of a sign as Bedrock saves it: its lines as one text, black and glowing or not.
 fn sign_face(text: &SignText, pos: (u32, u32, u32)) -> Result<Compound, BedrockStructureError> {
-    let joined = text.lines.join("\n");
+    let joined = text.lines().join("\n");
     check_string(&joined).map_err(|source| BedrockStructureError::UnencodableSignText {
         pos,
         text: joined.clone(),

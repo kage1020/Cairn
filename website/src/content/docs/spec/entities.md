@@ -215,13 +215,17 @@ build is a `hologram`.
 A build writes a block entity for each block that keeps there something the build sets: a sign's
 text, a bed's colour, and the strength a circuit comparator outputs ([Redstone
 §14.5](/spec/redstone/#145-place-and-route)), which only a Java circuit lays. The block array holds
-each beside its block's cell, in no edition's shape, and each writer saves it in its own: Java as
-the `nbt` of the block's entry in the `blocks` of its `.nbt`, and Bedrock under the
-`block_position_data` of its `.mcstructure`, keyed by the block's place in `block_indices`. A block
-entity is kept only while the member that set it holds its block's cell, so a member that builds
-over a sign later takes the sign's text with it. Every other block that has a block entity, such as
-the one a `chest`, a `dispenser` or a `daylight` sets ([Blockstate Model
-§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override), [Redstone
+each beside its block's cell: a sign's text and a bed's colour in no edition's shape, and a
+comparator's strength under the id and field Java gives it, which the Bedrock writer maps to
+Bedrock's. Each writer saves them in its own edition's shape: Java as the `nbt` of the block's entry
+in the `blocks` of its `.nbt`, and Bedrock under the `block_position_data` of its `.mcstructure`,
+keyed by the block's place in `block_indices`. A block entity is kept only while the member that set
+it holds its block's cell, so a member that builds over a sign later takes the sign's text with it.
+A member of the same phase that builds the same block over it with another block entity, such as a
+sign of the same wood with other text, is a contest as one that builds another block is
+([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). Every
+other block that has a block entity, such as the one a `chest`, a `dispenser` or a `daylight` sets
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override), [Redstone
 §14.2](/spec/redstone/#142-signal-binding)), is placed with no data, and the game gives it an empty
 one, unless a `raw_block` that places it writes its `nbt=`.
 
@@ -234,12 +238,13 @@ bed  id=cot  at=inside.back offset=1 y=1 mat_slot=quilt
 A sign's `text=` writes its front, the face toward the way the sign faces, and `back=` its back.
 Each is a string, one line, or a list of up to four strings, its lines from the top. A face its line
 does not write is blank, and `glowing=true` lights the text of both. A face of more than four lines
-is `E_INVALID_MEMBER`, and no sign is built; a value of another kind, an item of a list included, is
-`W_IGNORED_ARGUMENT`, which leaves that face blank or its text unlit. Text is black. Java saves each
-face as four messages with `has_glowing_text`, each message a JSON string before 1.21.5 and a plain
-string from it, as each release reads one. Bedrock saves each face as one `Text`, its lines joined
-by line breaks, with `IgnoreLighting` for glowing. A writer refuses a sign whose text holds a
-character outside ASCII, which the NBT it writes does not carry, and names the sign's cell.
+is `E_INVALID_MEMBER`, whatever its lines hold, and no sign is built; a value of another kind, an
+item of a list included, is `W_IGNORED_ARGUMENT`, which leaves that face blank or its text unlit.
+Text is black. Java saves each face as four messages with `has_glowing_text`, each message a JSON
+string before 1.21.5 and a plain string from it, as each release reads one. Bedrock saves each face
+as one `Text`, its lines joined by line breaks, with `IgnoreLighting` for glowing. A writer refuses
+a sign whose text the NBT it writes cannot carry, a character outside ASCII or text longer than an
+NBT string holds, and names the sign's cell.
 
 Java names a bed's colour in its block, as `blue_bed`, and keeps nothing for it in a block entity.
 Bedrock has one bed block, `bed`, and keeps the colour in the block entity of each half, as the
@@ -248,11 +253,11 @@ and record the Java bed each stands for ([Versioning and Editions
 §10.3](/spec/versioning-editions/#103-backend--data-tables)), whose colour the writer saves. A
 Bedrock bed no such token names is saved white, as the game saves one that names no colour.
 
-A Bedrock writer also fills the block entity of a block whose Java states Bedrock keeps there
-rather than in the block's own. Each half of a chest pair names its other half's cell, in the
-structure's coordinates as its own position is, and the left half leads the pair; a half whose other
-half, the same block facing the same way, does not stand beside it stands single. A note block
-keeps its `note` there, where it is not 0.
+A Bedrock writer also fills the block entity of a block whose Java states Bedrock keeps there rather
+than in the block's own. Each half of a chest pair names its other half's cell, in the structure's
+coordinates as its own position is, and the right half leads the pair. A half whose other half, the
+same block facing the same way, does not stand beside it stands single, and `W_INTENT_DEGRADED` says
+that its `type` is lost. A note block keeps its `note` there, where it is not 0.
 
 ## 8.2 Anchor conventions
 
