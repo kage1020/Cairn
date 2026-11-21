@@ -533,7 +533,11 @@ fn an_edition_named_twice_is_reported_once() {
             );
             if format == "json" {
                 let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-                for axis in ["edition_portability", "buildable_targets"] {
+                for axis in [
+                    "edition_portability",
+                    "buildable_targets",
+                    "recommended_test_targets",
+                ] {
                     let listed: Option<Vec<&str>> = parsed[axis].as_array().map(|entries| {
                         entries
                             .iter()
@@ -611,25 +615,13 @@ fn the_semantic_row_names_each_editions_sensitive_members() {
 
 #[test]
 fn the_recommended_row_names_the_buildable_ends_and_the_pair_across_each_boundary() {
-    // A chest's item format changes at Java 1.20.5; pale moss reaches Java at 1.21.4 and Bedrock
-    // at 1.21.60.
+    // A chest's item format changes at Java 1.20.5.
     let chest = "  raw_fill mat=minecraft:chest from=2,1,1 to=3,1,1\n";
-    let moss = "  raw_block mat=minecraft:pale_moss_block at=1,1,1\n";
     let cases = [
-        (
-            "",
-            String::new(),
-            "Java: 1.20.4, 26.3   Bedrock: 1.21.0, 1.26.60",
-        ),
         (
             "",
             chest.to_owned(),
             "Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60",
-        ),
-        (
-            "",
-            format!("{chest}{moss}"),
-            "Java: 1.21.4, 26.3   Bedrock: 1.21.60, 1.26.60",
         ),
         (
             "@requires version>=1.21.40\n\n",

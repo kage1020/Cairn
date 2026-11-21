@@ -45,7 +45,11 @@ fn info_json_at(path: &std::path::Path, editions: &str) -> Value {
             distinct.push(name);
         }
     }
-    for axis in ["edition_portability", "buildable_targets"] {
+    for axis in [
+        "edition_portability",
+        "buildable_targets",
+        "recommended_test_targets",
+    ] {
         assert_eq!(
             axes[axis].as_array().map(Vec::len),
             Some(distinct.len()),

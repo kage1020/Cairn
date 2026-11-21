@@ -1,6 +1,6 @@
 //! What `cairn info` reports (`spec/versioning-editions`): the declared and inferred registry
 //! ranges, per-edition portability, semantic-sensitive members, the buildable targets, and the
-//! versions worth testing against.
+//! versions worth testing a build in.
 
 use std::collections::HashSet;
 
@@ -35,8 +35,7 @@ pub struct VersionAxes {
     pub buildable_targets: Vec<BuildableTargets>,
     /// The versions `@intended_targets` names, verbatim and in source order.
     pub intended_targets: Vec<String>,
-    /// Per edition, in `edition_portability` order, the buildable versions worth testing a build
-    /// in.
+    /// Per edition in `edition_portability` order, the buildable versions worth testing a build in.
     pub recommended_test_targets: Vec<RecommendedTestTargets>,
 }
 
@@ -424,8 +423,8 @@ pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxe
     }
 }
 
-/// The versions of `buildable`, ascending, worth testing a build in: the oldest and the newest,
-/// and either side of each boundary of `sensitive` some of them lie before and some at or after.
+/// The versions of `buildable`, which is ascending, worth testing a build in: the oldest, the
+/// newest, and the nearest on each side of every boundary of `sensitive`.
 fn worth_testing(buildable: &[String], sensitive: &[SemanticSensitiveFinding]) -> Vec<String> {
     let Some(newest) = buildable.len().checked_sub(1) else {
         return Vec::new();
@@ -435,12 +434,13 @@ fn worth_testing(buildable: &[String], sensitive: &[SemanticSensitiveFinding]) -
         // A boundary is a row of the edition's version table, whose labels sort as its keys do.
         let before =
             |version: &String| compare_versions(version, &finding.boundary_version).is_lt();
-        if let (Some(last_before), Some(first_after)) = (
-            buildable.iter().rposition(before),
-            buildable.iter().position(|version| !before(version)),
-        ) {
-            picked.extend([last_before, first_after]);
-        }
+        picked.extend(
+            buildable
+                .iter()
+                .rposition(before)
+                .into_iter()
+                .chain(buildable.iter().position(|version| !before(version))),
+        );
     }
     buildable
         .iter()

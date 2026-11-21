@@ -1132,9 +1132,9 @@ The oldest and newest buildable versions are the ends of what the build claims. 
 them is where one source is read two ways, so the row adds the two buildable versions nearest it,
 one on each side: the closest pair that shows both readings. A boundary outside them changes nothing
 a build of this source meets, and the row leaves it out though the `semantic-sensitive` row lists
-the member. A source with a chest, whose item format changes at Java 1.20.5, that builds at every
-supported version gets `Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60`: 1.20.4 and 1.21 lie
-either side of 1.20.5, and 1.21.4 shows nothing that 1.21 and 26.3 do not.
+the member. A source that builds at every supported version and holds a chest, whose item format
+changes at Java 1.20.5, gets `Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60`: 1.20.4 and 1.21
+lie either side of 1.20.5, and 1.21.4 shows nothing that 1.21 and 26.3 do not.
 
 Like the other rows, it reports and refuses nothing. A buildable version it leaves out builds all the
 same.

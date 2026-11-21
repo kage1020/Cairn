@@ -388,28 +388,33 @@ fn a_range_no_version_lies_in_still_gives_its_edges_ids_and_the_floors_above_the
     );
 }
 
-/// The `recommended test targets` row of one Java report building `buildable`, whose members
-/// cross `boundaries`.
-fn recommended(buildable: &[&str], boundaries: &[&str]) -> Vec<String> {
-    let mut reports = synthetic_portability(&[(Edition::Java, 0)]);
-    reports[0].buildable = buildable
-        .iter()
-        .map(|&version| version.to_owned())
-        .collect();
-    reports[0].semantic_sensitive = boundaries
+/// Findings of a member `box` of `edition` crossing each of `boundaries`.
+fn crossing(edition: Edition, boundaries: &[&str]) -> Vec<SemanticSensitiveFinding> {
+    boundaries
         .iter()
         .map(|&boundary| SemanticSensitiveFinding {
-            edition: Edition::Java,
+            edition,
             member: "box".to_owned(),
             reason: "item format".to_owned(),
             boundary_version: boundary.to_owned(),
         })
+        .collect()
+}
+
+/// The `recommended test targets` row of one `edition` report building `buildable`, whose members
+/// cross `boundaries`.
+fn recommended(edition: Edition, buildable: &[&str], boundaries: &[&str]) -> Vec<String> {
+    let mut reports = synthetic_portability(&[(edition, 0)]);
+    reports[0].buildable = buildable
+        .iter()
+        .map(|&version| version.to_owned())
         .collect();
+    reports[0].semantic_sensitive = crossing(edition, boundaries);
     let m = parse("struct s size=4x4\n  walls height=3\n").expect("parse");
     let [row] =
         <[RecommendedTestTargets; 1]>::try_from(compute_axes(&m, reports).recommended_test_targets)
             .expect("one row per report");
-    assert_eq!(row.edition, Edition::Java);
+    assert_eq!(row.edition, edition);
     row.versions
 }
 
@@ -434,7 +439,7 @@ fn the_recommended_targets_are_the_buildable_ends_and_either_side_of_each_bounda
     ];
     for (buildable, boundaries, expected) in cases {
         assert_eq!(
-            recommended(buildable, boundaries),
+            recommended(Edition::Java, buildable, boundaries),
             expected,
             "{buildable:?} across {boundaries:?}",
         );
@@ -442,15 +447,51 @@ fn the_recommended_targets_are_the_buildable_ends_and_either_side_of_each_bounda
 }
 
 #[test]
+fn the_recommended_targets_order_versions_as_versions_not_as_text() {
+    assert_eq!(
+        recommended(
+            Edition::Bedrock,
+            &["1.21.0", "1.21.60", "1.21.80", "1.21.100"],
+            &["1.21.90"],
+        ),
+        ["1.21.0", "1.21.80", "1.21.100"],
+    );
+}
+
+#[test]
+fn one_editions_boundaries_stay_out_of_another_editions_row() {
+    let mut reports = synthetic_portability(&[(Edition::Java, 0), (Edition::Bedrock, 0)]);
+    reports[0].buildable = ["1.20.4", "1.21", "1.21.4", "26.3"]
+        .map(str::to_owned)
+        .to_vec();
+    reports[0].semantic_sensitive = crossing(Edition::Java, &["1.21.50"]);
+    reports[1].buildable = ["1.21.0", "1.21.40", "1.21.60", "1.26.60"]
+        .map(str::to_owned)
+        .to_vec();
+    let m = parse("struct s size=4x4\n  walls height=3\n").expect("parse");
+    let rows = compute_axes(&m, reports).recommended_test_targets;
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.edition, row.versions.as_slice()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                Edition::Java,
+                ["1.20.4", "1.21.4", "26.3"].map(str::to_owned).as_slice()
+            ),
+            (
+                Edition::Bedrock,
+                ["1.21.0", "1.26.60"].map(str::to_owned).as_slice()
+            ),
+        ],
+    );
+}
+
+#[test]
 fn the_recommended_targets_are_one_row_per_edition_in_report_order() {
     let mut reports = synthetic_portability(&[(Edition::Bedrock, 0), (Edition::Java, 0)]);
     reports[0].buildable = vec!["1.21.0".to_owned(), "1.21.40".to_owned()];
-    reports[1].semantic_sensitive = vec![SemanticSensitiveFinding {
-        edition: Edition::Java,
-        member: "box".to_owned(),
-        reason: "item format".to_owned(),
-        boundary_version: "1.20.5".to_owned(),
-    }];
+    reports[1].semantic_sensitive = crossing(Edition::Java, &["1.20.5"]);
     let m = parse("struct s size=4x4\n  walls height=3\n").expect("parse");
     let axes = compute_axes(&m, reports);
     assert_eq!(

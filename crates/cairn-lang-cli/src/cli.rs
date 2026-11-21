@@ -158,8 +158,8 @@ pub(crate) enum Command {
             default_values_t = vec!["java".to_owned(), "bedrock".to_owned()],
             long_help = "Comma-separated editions to evaluate portability against. Each distinct \
                 edition produces one entry in the output's `inferred range`, `edition \
-                portability`, `buildable targets`, `semantic-sensitive` and `recommended test \
-                targets` sections; a repeated name is reported once",
+                portability`, `buildable targets` and `recommended test targets` sections; a \
+                repeated name is reported once",
         )]
         editions: Vec<String>,
         /// Lockfile to report the verified target of; defaults to `<source>.lock` next to the
