@@ -3,27 +3,22 @@
 //! reported as ignored whatever its key. A theme selector's attribute (`window[tags=...]`) widens
 //! a role's vocabulary for its keyword only.
 
-use std::collections::{BTreeSet, HashMap};
-
 use indexmap::IndexMap;
 
 use crate::ast::{Item, Module, ThemeRule, ValueKind};
-use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::intent::{
-    Actuator, IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS, Unread,
-    ValueWithSpan, role_of,
+    Actuator, IntentModule, Member, MemberRole, SelectorKeys, SelectorValue, UNIVERSAL_ARGUMENTS,
+    Unread, ValueWithSpan, role_of, selector_keys,
 };
 use crate::prose::or_list;
 use crate::suggest::{did_you_mean_note, nearest_match, one_edit_match};
 
 use super::DiagnosticSink;
 
-/// Keys the theme selectors match on, per keyword; ordered for a stable closed-set note.
-type SelectorKeys<'a> = HashMap<&'a str, BTreeSet<&'a str>>;
-
 pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink) {
     check_selector_bindings(module, sink);
-    let selected = selector_keys(ir);
+    let selected = selector_keys(&ir.themes);
     for s in &ir.structs {
         check_header("struct", &s.args, sink);
         walk(&s.members, &selected, sink);
@@ -67,41 +62,26 @@ fn check_selector_bindings(module: &Module, sink: &mut DiagnosticSink) {
 }
 
 /// Keys a `struct` / `def` header may carry, in the closed-set note's order.
-///
-/// `class=` is from `spec/components-editing-sites` "`def`, the component construct".
-const HEADER_ARGUMENTS: &[&str] = &["size", "class"];
-
-/// Keys in [`HEADER_ARGUMENTS`] that no pass reads yet.
-const UNREAD_HEADER_ARGUMENTS: &[&str] = &["class"];
+pub(super) const HEADER_ARGUMENTS: &[&str] = &["size"];
 
 /// A `size=` left in `args` is not `WxH`, which `check::type_mismatch` reports instead.
 fn check_header(keyword: &str, args: &IndexMap<String, ValueWithSpan>, sink: &mut DiagnosticSink) {
     for (key, value) in args {
-        if !HEADER_ARGUMENTS.contains(&key.as_str()) {
-            sink.push(unknown_key(
-                Field::Header,
-                keyword,
-                key,
-                &value.span,
-                HEADER_ARGUMENTS,
-            ));
-        } else if UNREAD_HEADER_ARGUMENTS.contains(&key.as_str()) {
-            sink.push(unread_header_argument(keyword, key, &value.span));
+        if HEADER_ARGUMENTS.contains(&key.as_str()) {
+            continue;
         }
-    }
-}
-
-fn selector_keys(ir: &IntentModule) -> SelectorKeys<'_> {
-    let mut keys: SelectorKeys<'_> = HashMap::new();
-    for theme in &ir.themes {
-        for rule in &theme.selectors {
-            let entry = keys.entry(rule.keyword.as_str()).or_default();
-            for key in rule.attrs.keys() {
-                entry.insert(key.as_str());
-            }
+        let mut finding = unknown_key(Field::Header, keyword, key, &value.span, HEADER_ARGUMENTS);
+        if UNIVERSAL_ARGUMENTS.contains(&key.as_str()) {
+            finding.notes.push(DiagnosticNote {
+                span: None,
+                message: format!(
+                    "`{key}=` is a member's key, written on a line in the body; remove it from \
+                     the `{keyword}` header"
+                ),
+            });
         }
+        sink.push(finding);
     }
-    keys
 }
 
 fn walk(members: &[Member], selected: &SelectorKeys<'_>, sink: &mut DiagnosticSink) {
@@ -335,8 +315,9 @@ fn unknown_key(
     span: &crate::error::Span,
     accepted: &[&str],
 ) -> Diagnostic {
+    let suggestion = nearest_match(key, accepted.iter().copied());
     let mut notes = Vec::with_capacity(2);
-    notes.extend(nearest_match(key, accepted.iter().copied()).map(did_you_mean_note));
+    notes.extend(suggestion.map(did_you_mean_note));
     notes.push(DiagnosticNote {
         span: None,
         message: format!("expected one of: {}", accepted.join(", ")),
@@ -347,7 +328,7 @@ fn unknown_key(
         span: span.clone(),
         primary: field.nothing_reads(keyword, key),
         notes,
-        data: None,
+        data: Some(unknown_argument_data(key, suggestion)),
     }
 }
 
@@ -387,7 +368,14 @@ fn coined_near_miss(
                 message: format!("expected one of: {}", own.join(", ")),
             },
         ],
-        data: None,
+        data: Some(unknown_argument_data(key, Some(suggested))),
+    }
+}
+
+fn unknown_argument_data(key: &str, suggestion: Option<&str>) -> DiagnosticData {
+    DiagnosticData::UnknownArgument {
+        key: key.to_owned(),
+        suggestion: suggestion.map(str::to_owned),
     }
 }
 
@@ -422,39 +410,5 @@ fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span, why: Unr
             message: note,
         }],
         data: None,
-    }
-}
-
-fn unread_header_argument(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
-    Diagnostic {
-        code: DiagnosticCode::IgnoredArgument,
-        span: span.clone(),
-        primary: format!(
-            "`{key}=` is an argument a `{keyword}` header takes and no pass reads yet; the value \
-             was ignored",
-        ),
-        notes: vec![DiagnosticNote {
-            span: None,
-            message: format!(
-                "the `{keyword}` is built without it — remove the argument, or keep it and \
-                 expect no effect until a pass reads it"
-            ),
-        }],
-        data: None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{HEADER_ARGUMENTS, UNREAD_HEADER_ARGUMENTS};
-
-    #[test]
-    fn every_unread_header_argument_is_in_the_header_vocabulary() {
-        for key in UNREAD_HEADER_ARGUMENTS {
-            assert!(
-                HEADER_ARGUMENTS.contains(key),
-                "`{key}` is called unread but the header vocabulary does not list it",
-            );
-        }
     }
 }

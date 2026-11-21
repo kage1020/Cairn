@@ -37,7 +37,8 @@ Stable surfaces:
 - The lockfile format (`<source>.lock`: fields, hash inputs, the `verified` semantics defined in
   [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
-  output schemas, and process exit codes.
+  output schemas, and process exit codes, apart from a flag or flag value in its first three
+  monthly minors.
 - The tier-1 material vocabulary: the abstract tokens the built-in `materials` catalogs declare,
   listed in [§7.2](/spec/materials-themes/#tier-1-tokens). Adding one is not a break.
 - The error and warning codes (`E_*`, `W_*`) [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists,
@@ -57,7 +58,8 @@ Evolving surfaces:
 
 - Spec chapters or sections explicitly marked as draft (the [Open Issues](/spec/open-issues/)
   list), and the syntax a section flags [subject to change](#subject-to-change).
-- New `cairn` subcommands during their first three monthly minors after introduction.
+- New `cairn` subcommands, and new flags and flag values of `cairn compile`, `cairn check` and
+  `cairn info`, during their first three monthly minors after introduction.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.
@@ -88,11 +90,13 @@ surfaces are responsible for their own pinning.**
 
 Internal surfaces:
 
-- The Rust API of every workspace crate (`cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats`,
-  `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`, `cairn-lang-tree-sitter`,
-  `cairn-lang-docs`). These crates are published to crates.io from the first monthly minor that
-  contains them, but every item that is not the CLI's transitive public dependency is marked
-  `#[doc(hidden)]`. No item is marked yet.
+- The Rust API of every workspace crate with a library: `cairn-lang-core`, `cairn-lang-nbt`,
+  `cairn-lang-formats`, `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`,
+  `cairn-lang-tree-sitter` and `cairn-lang-docs`. `cairn-lang-cli` has none, only the `cairn`
+  binary. These crates are published to crates.io from the first monthly minor that contains them.
+  Each published one opens its crate-level `//!` doc, which docs.rs shows first, and its README,
+  which crates.io shows, with the same sentence: that its Rust API is in the Internal tier and
+  carries no promise, linked to this definition.
 - `cairn synth`, which runs only behind `--experimental-logic-synth`, and the JSON it prints.
 - The compiler's intermediate representation (Intent IR, Semantic IR, block-array pivot
   layouts).
@@ -169,7 +173,7 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 
 **Reserved codes.** The codes a stable command raises are the ones [Lint
 §11.1](/spec/lint/#111-diagnostic-codes) lists, the redstone pipeline's among them. Any other code
-the spec names, such as `E_REQUIRES_CONFLICT`, is a reserved code: no command raises it yet. A
+the spec names, such as `E_DECOMPILE_DIFF`, is a reserved code: no command raises it yet. A
 reserved code lands with the meaning the spec states for it, where it states one, and its row
 landing is adding a code.
 
@@ -187,14 +191,10 @@ placeholder's code still means what it meant. A placeholder stands in only for w
 build yet, or what the spec reserves for a later extension. Source the spec itself refuses keeps its
 code. The placeholders today include:
 
-- `E_PARSE`, on syntax the spec specifies that does not parse yet, such as decimals,
-  `nbt={...}` values and `edit`;
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
-  `spawn`, `bed`, `sign` and `raw_repeat`;
+  `spawn`, `painting` and `raw_repeat`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists, a theme selector's bindings among them;
-- `E_UNRESOLVED_PORT`, on a port of a member under a `level`, which
-  [§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) reserves for a later extension;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet
   ([Lint](/spec/lint/#lowering)), such as a member whose keyword lowering does not handle yet, a
   `floor` or `roof` under a raised `level`, and a `window` with `repeat=` above 1 and `sym=true`.
@@ -210,8 +210,6 @@ Two classes of change sit outside this matrix:
 - **Bug fixes** that align behaviour with the spec are never breaking, even if a consumer was
   depending on the buggy behaviour. The spec, not the implementation, defines the contract.
 - **Output bit-equality** of emitted `.nbt` / `.litematic` / `.schem` / `.mcstructure` is not
-  promised at any tier. Only the `.nbt` and `.mcstructure` writers exist today
-  ([§12.1](/spec/ecosystem-interop/#121-forward-direction)). Two releases may produce
-  structurally-different files for the same source; what matters is that the result is valid for
-  the target `(edition, version)` and matches the lockfile's `resolved_ir_hash`. See
-  [§10.6](/spec/versioning-editions/#106-provenance-and-lock).
+  promised at any tier. Two releases may produce structurally-different files for the same source;
+  what matters is that the result is valid for the target `(edition, version)` and matches the
+  lockfile's `resolved_ir_hash`. See [§10.6](/spec/versioning-editions/#106-provenance-and-lock).

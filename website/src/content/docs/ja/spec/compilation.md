@@ -7,10 +7,11 @@ title: "4. コンパイルモデル"
 コマンドは、順番を気にせず並べて書けます。コンパイラが各コマンドをフェーズに振り分け、フェーズを次の決まった順番で評価します。
 
 ```
-massing     floor / walls / volume / fill
-envelope    roof / stair
+massing     floor / walls / fill
+envelope    roof / stair / beam
 openings    door / window
-fixtures    sign / painting / frame / bed / chest / センサー / アクチュエーター / Tier 0 の部品
+fixtures    sign / painting / frame / bed / chest / trapdoor / note_block / センサー / アクチュエーター /
+            Tier 0 の部品
 fluids      fill fluid= / water
 logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
 logic_place 床下へのパッド、ライザー、セルの配置 → Placement IR
@@ -20,7 +21,7 @@ raw         raw_block / raw_fill (エスケープハッチ)
 
 水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。
 
-ただし、今のところすべての行が動くわけではありません。`volume`、`sign`、`painting`、`frame`、`bed`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `chest`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
+ただし、今のところすべての行が動くわけではありません。`painting`、`frame`、`water` はまだキーワードではなく、どれも `E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `sign`、`bed`、`chest`、`trapdoor`、`note_block`、`door` 以外のすべてのセンサーとアクチュエーター、そして Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 
@@ -54,6 +55,8 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 
 `--edition` は必須で、`--target` だけを指定すると拒否されます。同じ「1.21」でも、Java と Bedrock では意味が違います。Java の DataVersion と Bedrock の block_version にも関係はありません。
 
+ファイル形式はターゲットに含まれません。`--structure-format` は Java の形式のどれかを選び、書き出すファイルを変えますが、block array とロックファイルは変えません ([§12.1](/ja/spec/ecosystem-interop/#121-順方向の変換))。
+
 ## 4.3 切妻屋根のボクセル規則
 
 `roof kind=gable [overhang=N] mat_slot=...` は、棟で向かい合わせに出会う 2 つの階段の斜面になります。
@@ -64,7 +67,7 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 
 階段の系統でも、独自のブロックステートを持つ割り当ての場合は、id はそのまま使い、ステートは屋根の形状が決めた値で置き換えて、`W_DEFERRED_MEMBER` を出します。軒に置く `stair kind=stairs` も同じ材質の規則に従いますが、ステートは自分の引数から取ります。
 
-その引数は `facing=out | in`、`half=top | bottom`、`shape=straight | outer_left | outer_right` で、どれも裸の識別子です。既定値はそれぞれ `out`、`top`、`straight` です。一覧にない識別子は `E_INVALID_MEMBER` になり、その階段は作られません。識別子ではない形の値 (`half="bottom"`、`facing=1`) は読み取れない値として扱います。階段はそのキーの既定値で作られ、その値は `W_IGNORED_ARGUMENT` として報告されます。階段が別の理由で拒否された場合も、この値は報告されます。その際は、どちらにしても階段は作られないという注記が付きます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
+その引数は `facing=out | in`、`half=top | bottom`、`shape=straight | inner_left | inner_right | outer_left | outer_right` で、どれも裸の識別子です。既定値はそれぞれ `out`、`top`、`straight` です。`shape=` の値は階段の 5 つの形で、Java には書いたとおりに書き出します。階段の `shape` ステートを持たない Bedrock のバージョンでは `straight` 以外の形は落ち、その階段はまっすぐに描かれ、`W_INTENT_DEGRADED` が報告されます ([§10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。一覧にない識別子は `E_INVALID_MEMBER` になり、その階段は作られません。識別子ではない形の値 (`half="bottom"`、`facing=1`) は読み取れない値として扱います。階段はそのキーの既定値で作られ、その値は `W_IGNORED_ARGUMENT` として報告されます。階段が別の理由で拒否された場合も、この値は報告されます。その際は、どちらにしても階段は作られないという注記が付きます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
 
 **棟の向き。** 棟は、敷地 (footprint) の長いほうの水平軸に沿って走ります。正方形の敷地 (`size=WxW`) では `x` 軸を選び、東西方向の棟になります。
 
@@ -143,9 +146,9 @@ Dims.y = void + 1 + wall_top + roof_extra
 
 `level` の中のメンバーも、この 3 つの項すべてに、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 
-**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `chest` / すべてのセンサーとアクチュエーター / `fill` / `raw_block` / `raw_fill` は、`N` を自分の形状を測る基準として読みます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
+**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `beam` / `chest` / `trapdoor` / `note_block` / `sign` / `bed` / すべてのセンサーとアクチュエーター / Tier 0 の部品 / `fill` / `raw_block` / `raw_fill` は、`N` を自分の形状を測る基準として読みます。ただし開口の上に渡す `beam` は、その開口の `level` が決める位置に置きます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
 
-**ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof` や `slope_to=` のない `shed` は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
+**ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof`、`slope_to=` のない `shed`、`footprint=` か `bounds=` が取る 1 つの値以外を書いた `roof` ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約)) は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
 
 ただし、材質による脱落が起きるのは `walls` だけで、`roof` には起きません。`mat_slot=` が解決できない屋根は、自分の既定の材質を代わりに使って描かれるからです。テーマのない struct を見ると、この違いがよく分かります。壁は作られず、高さも占めませんが、その上の `roof kind=gable` は描かれ、壁がまったくない場合と同じ位置に載ります。
 
@@ -162,7 +165,9 @@ Dims.y = void + 1 + wall_top + roof_extra
 - 値が変わらないセル。たとえば、同じ材質の `walls` 2 つが共通の行で重なる場合です。
 - メンバーが自分自身の上に書く場合。たとえば、`window` の `repeat=` / `step=` で複製した窓同士が重なる場合です。
 
-`hinge` を導出する `door` は、組み上げる蝶番の側で判定します。蝶番の側は、すべての開口を切り抜いたあとで決まります ([ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する))。1 つの開口に立つ 2 つの `door` は、どちらの行が先でも、組み上げるブロックが異なるときに衝突します。ドアの 2 つのセルのうち 1 つを開口が占めると半分だけのドアが残り、ゲームはそれを取り除きます。警告はそのことも伝えます。
+セルの値は、そのブロックと、ブロックがブロックエンティティに持つものです ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階))。そのため、同じ木の看板 2 つが 1 つのセルで異なる文字を持てば衝突し、警告はブロックエンティティが入れ替わったことを伝えます。
+
+`hinge` を導出する `door` は、組み上げる蝶番の側で判定します。蝶番の側は、すべての開口を切り抜いたあとで決まります ([ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する))。1 つの開口に立つ 2 つの `door` は、どちらの行が先でも、組み上げるブロックが異なるときに衝突します。ドアの 2 つのセルのうち 1 つを開口が占めると、またはベッドの 2 つのセルのうち 1 つを設備が占めると、半分だけのドアやベッドが残り、ゲームはそれを取り除きます。警告はそのことも伝えます。
 
 **パレット** は、評価する本体 (`struct`、`def`、それらを実体化する各 `place`) ごとにあり、書き込みの履歴ではなく、*決まった並べ方を持つ集合* です。パレットにはその本体に含まれるブロックを並べ、並び順は 1 通りに固定されます。スロット `0` は空気で、それ以外は `(id, properties)` の昇順に並べます。
 

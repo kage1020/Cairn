@@ -4,16 +4,15 @@
 use cairn_lang_core::BlockArrayIr;
 use cairn_lang_core::intent::{Unread, known_keywords, role_of};
 
-use crate::common::{lowered, solid_cells};
+use crate::common::{lowered, same_build, solid_cells};
 
 /// Where a fixture's argument goes.
 const MARKER: &str = "%ARGUMENT%";
 
-const PROLOGUE: &str = "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @spruce_stairs\n  slot glass -> @glass_pane\n\nstruct s size=9x9\n";
+const PROLOGUE: &str =
+    "theme t:\n  slot wall -> @cobblestone\n  slot glass -> @glass_pane\n\nstruct s size=9x9\n";
 
 const WINDOW: &str = "  walls mat_slot=wall height=4\n  window side=front y=1 offset=2 size=2x2 mat_slot=glass %ARGUMENT%\n";
-
-const ROOF: &str = "  walls mat_slot=wall height=3\n  roof kind=gable mat_slot=roof %ARGUMENT%\n";
 
 /// One fixture per unreached key, other than `mat_slot`, which `unread_mat_slot.rs` covers.
 struct Fixture {
@@ -26,32 +25,12 @@ struct Fixture {
     body: &'static str,
 }
 
-const FIXTURES: &[Fixture] = &[
-    Fixture {
-        keyword: "window",
-        unreached: "shape=arch",
-        read: "sym=true",
-        body: WINDOW,
-    },
-    Fixture {
-        keyword: "window",
-        unreached: "anchor=bottom_center",
-        read: "sym=true",
-        body: WINDOW,
-    },
-    Fixture {
-        keyword: "roof",
-        unreached: "footprint=struct",
-        read: "overhang=1",
-        body: ROOF,
-    },
-    Fixture {
-        keyword: "roof",
-        unreached: "bounds=expand",
-        read: "overhang=1",
-        body: ROOF,
-    },
-];
+const FIXTURES: &[Fixture] = &[Fixture {
+    keyword: "window",
+    unreached: "shape=arch",
+    read: "sym=true",
+    body: WINDOW,
+}];
 
 /// The fixture's body lowered with `argument` in place of the marker.
 fn build(fixture: &Fixture, argument: &str) -> BlockArrayIr {
@@ -68,13 +47,6 @@ fn build(fixture: &Fixture, argument: &str) -> BlockArrayIr {
     let painted: usize = ir.structures.values().map(solid_cells).sum();
     assert!(painted > 0, "the fixture paints nothing:\n{source}");
     ir
-}
-
-/// Whether two builds match in blocks, placements and walkways; diagnostics carry spans.
-fn same_build(left: &BlockArrayIr, right: &BlockArrayIr) -> bool {
-    left.structures == right.structures
-        && left.placements == right.placements
-        && left.walkways == right.walkways
 }
 
 #[test]

@@ -16,22 +16,25 @@ title: "用語集"
 
 ## メンバーとブロックステート
 
-- **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。現時点では、メンバーが持つのはキーワードから分類した `role` だけで、型は持ちません。ブロックエンティティやエンティティを置くキーワードも、まだありません。`type` は `role` の隣に並べます。
+- **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。現時点では、メンバーが持つのはキーワードから分類した `role` だけで、型は持ちません。`sign` と `bed` は、ブロックがブロックエンティティを持つブロックのメンバーです ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階))。エンティティを置くキーワードはまだありません。`type` は `role` の隣に並べます。
 - **`id` / `class` / `role`**: メンバーに付ける、同一性、グループ、建築上の役割のタグです。セレクタと安定したアドレスに使います。
+- **アドレス (Address)**: `struct` や `def` の本体のメンバーすべてに、コンパイラが、メンバーの立つ位置から与える名前です。段ごとに `ROLE@SIDE[N]` で、`level[1].window@front[0]` のようになります。行の順番で決まるのは、数え方のどの段でも差がつかないメンバーどうしの間だけです。それ以外では、行を並べ替えても、別の場所にメンバーを足しても動きません。[構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス) を参照してください。
+- **`edit`**: トップレベルの行 `edit TARGET set key=value …` で、セレクタ (`window[class=vent]`) やアドレス (`window@front[0]`) が選ぶメンバーを、行に書かれたままのものから選んで、その行を書き換えずに変えます。選ばなかったメンバーの `resolved_state` を変えると `W_EDIT_RIPPLE` になります。[コンポーネント・編集・複数建築 §9.2](/ja/spec/components-editing-sites/#92-編集モデル) を参照してください。
 - **`mat_slot`**: メンバー上のマテリアルの注入ポイントです。`theme` が値を割り当てます。構造はスロットだけを持ち、どのブロックを使うかはテーマが持ちます。[マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット) を参照してください。
 - **`intent_state`**: 書き手が意図したブロックステートです。メンバーのキーワードが名前を挙げるブロックステートのキー (`stair` の `facing` など) が入ります。行のそれ以外のキーは、メンバーの引数です。編集の差分が比べるのは、行に書いたもの、つまりこれと引数 **だけ** で、導出したものは比べません。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
 - **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。lowering が各メンバーの分を、組み上げる block-array の隣に記録します。ブロック ID はターゲットが解決したもので、ステート名は正規の語彙のものです。`cairn lower --format json` はそれを `members` の下に出力します。
 - **上書きによる昇格 (Override-promotion)**: 意図になりうるブロックステートを書くと、そのブロックステートは `resolved_state` から `intent_state` に昇格します。仕様上のルールは「既定では導出し、意図になりうるブロックステートはどれも上書きできる」です。[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) を参照してください。
-- **アンカーと bbox (Anchor / bbox)**: どのプリミティブも、IR の中に `anchor` (基準点)、宣言上の bbox、実際の bbox、取り付ける面の 4 つを持ちます。絵画、額縁、アーチ窓のように、宣言したサイズと実際に占める AABB が食い違うプリミティブを、この 4 つで扱います。現時点では、IR はこの 4 つのどれも持っていません。[エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約) を参照してください。
+- **アンカーと bbox (Anchor / bbox)**: どのプリミティブも、IR の中に `anchor` (基準点)、宣言上の bbox、実際の bbox、取り付ける面の 4 つを持ちます。絵画、額縁、アーチ窓のように、宣言したサイズと実際に占める AABB が食い違うプリミティブを、この 4 つで扱います。lowering は、セルを 1 つでも組み上げるすべてのメンバーについて、この 4 つを `resolved_state` の隣に記録します。[エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約) を参照してください。
 
 ## マテリアルとテーマ
 
-- **正規トークン (Canonical token)**: スロットやテーマのセレクタに割り当てる値です。生のブロック ID ではなく、**意味** を表すトークンです。`(edition, version)` ごとの ID や状態名は、バックエンドが解決します。[マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン) を参照してください。
-- **正規ブロックトークン (Canonical block token)**: 特定のブロックの意味を表すトークンです (`@oak_planks`、`@water_cauldron`、`@oak_log[axis=x]`)。意味を壊すダウングレード (`@water_cauldron` を `cauldron` にするなど) を黙って行うことは禁止です。
+- **正規トークン (Canonical token)**: スロットやテーマのセレクタに割り当てる値です。生のブロック ID ではなく、**意味** を表すトークンです。`(edition, version)` ごとの ID や状態名は、改名、分割、統合をまたいでバックエンドが解決します。[マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン) を参照してください。
+- **正規ブロックトークン (Canonical block token)**: 特定のブロックの意味を表すトークンです (`@oak_planks`、`@water_cauldron`、`@oak_log[axis=x]`)。意味を壊すダウングレード (`@water_cauldron` を空の `cauldron` にするなど) を黙って行うことは禁止です。
+- **意味トークン (Meaning token)**: 正規ブロックトークンが持ち、そのブロックは持たないプロパティで、その値がブロックの分かれた先の 1 つを選びます (`@cauldron[fluid=water]` の `fluid`)。レジストリパックの `meanings` 表がこれを挙げます。[マテリアルとテーマ §7.3](/ja/spec/materials-themes/#73-バージョンとエディションをまたぐ対応付け) を参照してください。
 - **抽象マテリアルトークン (Abstract material token)**: 見た目の好みを表すトークンです (`@floor.wood.broadleaf`、`@roof.dark_wood`)。テーマのポリシーでダウングレードしてかまいません (MAY) (オークをシラカバにするなど)。
 - **tier-1 のトークン (Tier-1 token)**: 組み込みの `materials` カタログが宣言する抽象マテリアルトークンで、仕様がドラフトを外れると Stable になります。それが解決するブロックは tier-2 で、Evolving です。[マテリアルとテーマ §7.2](/ja/spec/materials-themes/#tier-1-のトークン) を参照してください。
 - **`theme`**: スロットやセレクタの値を正規トークンに割り当てる、CSS のような仕組みです。**構造** (どこに壁があるか) と **スタイル** (どのブロックを使うか) を分けます。
-- **`def`**: スロットを持つコンポーネントの定義 (再利用できる struct) です。再帰は禁止で、パラメータ化は許されます。ただし、その仕組みが決まるまで、ヘッダに書けるのは `size=` と `class=` だけです。組み合わせたものの最小バージョンは、構成要素の最小バージョンのうち最も新しいものになります。[コンポーネント・編集・複数建築 §9.1](/ja/spec/components-editing-sites/#91-コンポーネントを定義する-def) を参照してください。
+- **`def`**: スロットを持つコンポーネントの定義 (再利用できる struct) です。再帰は禁止で、パラメータ化は許されます。ただし、その仕組みが決まるまで、ヘッダに書けるのは `size=` だけです。組み合わせたものの最小バージョンは、構成要素の最小バージョンのうち最も新しいものになります。[コンポーネント・編集・複数建築 §9.1](/ja/spec/components-editing-sites/#91-コンポーネントを定義する-def) を参照してください。
 - **`site`**: 複数の建物をまとめるコンテナです。`def` から作った構造物を、絶対座標ではなく位置関係 (`east_of`、`gap=`、`connect`) で配置します。[コンポーネント・編集・複数建築 §9.3](/ja/spec/components-editing-sites/#93-site-による複数建築) を参照してください。
 
 ## コンパイル
@@ -45,9 +48,9 @@ title: "用語集"
 ## ヘッダと来歴
 
 - **`@cairn`**: そのファイルが前提とする **Cairn 言語のバージョン** (CalVer `YYYY.M[.PATCH]`) を宣言するヘッダです。来歴を記録するためだけのもので、省略できます。
-- **`@requires`**: Minecraft のターゲットに求める機能の下限です (例: `version>=1.20`)。推定した値と矛盾すると、ハードエラーになります。このエラー `E_REQUIRES_CONFLICT` は予約済みで、推定範囲はまだ導出していません。`cairn compile --target` に下限より古いバージョンを指定すると、`E_VERSION_CAP` になります。[バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定) を参照してください。
+- **`@requires`**: Minecraft のターゲットに求める機能の下限です (例: `version>=1.20`)。推定範囲と矛盾すると、ハードエラーになります。ビルドが塗るブロックのどれかを宣言する最後のバージョンより上にあり、パックが持つ最新のバージョン以下にある下限は `E_REQUIRES_CONFLICT` です。`cairn compile --target` に下限より古いバージョンを指定すると、`E_VERSION_CAP` になります。[バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定) を参照してください。
 - **`@intended_targets`**: どの Minecraft バージョン向けに作ったかを示すヒントです。検証の記録ではありません (記録はロックに残ります)。それでもファイル自身の下限とは突き合わせるので、下限が拒否するバージョンを挙げていれば、コンパイルするまで気づかないままにはならず、その場で報告されます。
-- **ロック (`*.crn.lock`)**: コンパイラが生成する、再現性のための記録です。`--lock` で別のパスを指定しなければ、ソースの隣に `<source>.lock` (`cottage.crn.lock` など) として書き出します。`lock_schema_version`、`source_hash`、`cairn_version`、`target` (`edition`、`mc_version`、`data_version`)、`inputs` (`registry_pack_hash`、`constraint_catalog_hash`)、`resolved_ir_hash`、`verified: true`、`member_version_sensitivity` を持ち、`site` を含むソースではさらに `placements` と `walkways` を持ちます。[バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
+- **ロック (`*.crn.lock`)**: コンパイラが生成する、再現性のための記録です。`--lock` で別のパスを指定しなければ、ソースの隣に `<source>.lock` (`cottage.crn.lock` など) として書き出します。`lock_schema_version`、`source_hash`、`cairn_version`、`target` (`edition`、`mc_version`、`data_version`)、`inputs` (`registry_pack_hash`、`constraint_catalog_hash`)、`resolved_ir_hash`、`verified: true`、`member_version_sensitivity` を持ち、`site` を含むソースではさらに `placements` と `walkways` を持ちます。`cairn info` は、ロックが記録しているターゲットを `verified target` の行として報告します。[バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) を参照してください。
 - **来歴の記録 (Provenance stamp)**: 取り込むときに block-array IR に記録する `(edition, version)` です。値はファイル形式から決まります (`.litematic` → java、`.mcstructure` → bedrock、`.schem` → java)。[エコシステム連携 §12.4](/ja/spec/ecosystem-interop/#124-取り込み時の記録と落とし穴) を参照してください。
 
 ## レッドストーン

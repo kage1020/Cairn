@@ -28,6 +28,8 @@ fn every_code_renders_its_documented_string() {
             "E_DUPLICATE_SELECTOR",
             "E_DUPLICATE_SIZE",
             "E_DUPLICATE_SLOT",
+            "E_EDIT_UNKNOWN_KEY",
+            "E_EDIT_UNMATCHED",
             "E_INCOMPATIBLE_MATERIAL",
             "E_INCOMPLETE_PLACE",
             "E_INTENDED_TARGET_CAP",
@@ -35,6 +37,7 @@ fn every_code_renders_its_documented_string() {
             "E_INVALID_PLACE_ID",
             "E_INVALID_PLACE_ORIGIN",
             "E_INVALID_REQUIRES",
+            "E_INVALID_SITE_NAME",
             "E_INVALID_STRUCT_NAME",
             "E_MISPLACED_BINDING",
             "E_MISPLACED_MEMBER",
@@ -43,6 +46,8 @@ fn every_code_renders_its_documented_string() {
             "E_OUTPUT_NAME_COLLISION",
             "E_PARITY_UNSUPPORTED",
             "E_PARSE",
+            "E_PLACEMENT_OVERLAP",
+            "E_REQUIRES_UNORDERABLE",
             "E_SEMANTIC_IN_EDITION_GUARD",
             "E_STATE_DOMAIN",
             "E_STATE_UNMAPPED",
@@ -64,12 +69,14 @@ fn every_code_renders_its_documented_string() {
             "E_UNRESOLVED_SLOT",
             "E_UNRESOLVED_THEME_REF",
             "E_UNSUPPORTED_NESTING",
+            "E_VERSION_CAP",
             "W_ABSTRACT_TOKEN_DEFERRED",
             "W_DEFERRED_CONNECT",
             "W_DEFERRED_MEMBER",
             "W_DEFERRED_PLACE",
             "W_DEF_NO_SIZE",
             "W_DUPLICATE_WALKWAY",
+            "W_EDIT_RIPPLE",
             "W_FUTURE_CAIRN_VERSION",
             "W_IGNORED_ARGUMENT",
             "W_INTENDED_TARGET_CAP",
@@ -107,6 +114,8 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "E_DUPLICATE_SELECTOR",
             "E_DUPLICATE_SIZE",
             "E_DUPLICATE_SLOT",
+            "E_EDIT_UNKNOWN_KEY",
+            "E_EDIT_UNMATCHED",
             "E_INCOMPATIBLE_MATERIAL",
             "E_INCOMPLETE_PLACE",
             "E_INTENDED_TARGET_CAP",
@@ -114,6 +123,7 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "E_INVALID_PLACE_ID",
             "E_INVALID_PLACE_ORIGIN",
             "E_INVALID_REQUIRES",
+            "E_INVALID_SITE_NAME",
             "E_INVALID_STRUCT_NAME",
             "E_MISPLACED_BINDING",
             "E_MISPLACED_MEMBER",
@@ -122,6 +132,8 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "E_OUTPUT_NAME_COLLISION",
             "E_PARITY_UNSUPPORTED",
             "E_PARSE",
+            "E_PLACEMENT_OVERLAP",
+            "E_REQUIRES_UNORDERABLE",
             "E_SEMANTIC_IN_EDITION_GUARD",
             "E_STATE_DOMAIN",
             "E_STATE_UNMAPPED",
@@ -142,6 +154,7 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "E_UNRESOLVED_SLOT",
             "E_UNRESOLVED_THEME_REF",
             "E_UNSUPPORTED_NESTING",
+            "E_VERSION_CAP",
         ],
     );
     assert_eq!(
@@ -154,6 +167,7 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "W_DEFERRED_PLACE",
             "W_DEF_NO_SIZE",
             "W_DUPLICATE_WALKWAY",
+            "W_EDIT_RIPPLE",
             "W_FUTURE_CAIRN_VERSION",
             "W_IGNORED_ARGUMENT",
             "W_INTENDED_TARGET_CAP",
@@ -239,6 +253,53 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
             "since": "1.21.40",
         }),
     );
+}
+
+#[test]
+fn a_payload_reads_back_as_the_payload_it_was_written_as_with_its_absent_fields() {
+    let payloads = [
+        DiagnosticData::UnknownId {
+            id: "minecraft:light".to_owned(),
+            registry: "bedrock 1.21.60".to_owned(),
+            origin: "authored".to_owned(),
+            token: None,
+            suggestion: None,
+            aliases: Vec::new(),
+            since: None,
+            until: None,
+            declared_by: None,
+        },
+        DiagnosticData::StateDomain {
+            id: "minecraft:oak_stairs".to_owned(),
+            key: "facing".to_owned(),
+            value: "up".to_owned(),
+            registry: "java 1.21.4".to_owned(),
+            reason: "value_outside".to_owned(),
+            valid: vec!["north".to_owned(), "south".to_owned()],
+            origin: "literal".to_owned(),
+            suggestion: None,
+            valid_at: Vec::new(),
+        },
+        DiagnosticData::UnknownKeyword {
+            keyword: "qqzx".to_owned(),
+            suggestion: None,
+        },
+        DiagnosticData::UnknownArgument {
+            key: "hieght".to_owned(),
+            suggestion: Some("height".to_owned()),
+        },
+        DiagnosticData::VersionCap {
+            edition: "java".to_owned(),
+            target: "1.21".to_owned(),
+            floor: "version>=1.21.4".to_owned(),
+            valid: Vec::new(),
+        },
+    ];
+    for payload in payloads {
+        let written = serde_json::to_value(&payload).expect("serialise payload");
+        let read = serde_json::from_value::<DiagnosticData>(written.clone());
+        assert_eq!(read.ok().as_ref(), Some(&payload), "{written}");
+    }
 }
 
 #[test]

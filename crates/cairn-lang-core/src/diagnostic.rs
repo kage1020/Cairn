@@ -3,7 +3,9 @@
 mod agreement;
 pub(crate) use agreement::{EditionFindings, agreed};
 
-use serde::{Serialize, Serializer};
+use std::collections::HashSet;
+
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::error::{Position, Span};
 use crate::lines::{LineStarts, position_at};
@@ -87,6 +89,12 @@ pub enum DiagnosticCode {
     UnknownSlotTarget,
     /// A `theme` selector rule that matches no member; a warning despite its `E_` prefix.
     ThemeSelectorUnmatched,
+    /// An `edit` line that selects no member of a `struct` or `def` body.
+    EditUnmatched,
+    /// A key an `edit` line sets that the keyword it selects does not take, or its `id=`.
+    EditUnknownKey,
+    /// A member no `edit` selected whose resolved state the edits change.
+    EditRipple,
     /// A member, or part of one, the block-array pass leaves out because another member did not
     /// build or because the pass does not lower what its line writes yet.
     DeferredMember,
@@ -137,6 +145,8 @@ pub enum DiagnosticCode {
     InvalidPlaceId,
     /// A `struct` named after a device Windows reserves.
     InvalidStructName,
+    /// A `site` named after a device Windows reserves.
+    InvalidSiteName,
     /// Two `place` rows in the same site share an `id=`; the first wins.
     DuplicatePlaceId,
     /// Two scopes a build writes share a file name, ignoring case.
@@ -144,6 +154,9 @@ pub enum DiagnosticCode {
     /// A `place` with no origin selector or more than one, an `at=` other than `origin`, or an
     /// `east_of=` / `north_of=` that is not a label.
     InvalidPlaceOrigin,
+    /// Two `place` rows of one site whose boxes share a cell, or a walkway laid inside a
+    /// placement it does not join.
+    PlacementOverlap,
     /// A `def NAME` that no `place use=NAME` references.
     UnusedDef,
     /// A `connect` row names a port no member of the referenced def's own body carries.
@@ -184,6 +197,10 @@ pub enum DiagnosticCode {
     IntendedTargetCapPartial,
     /// `@intended_targets` names a version no `--target` of the pinned edition can build.
     IntendedTargetUnsupported,
+    /// The pinned target is below a version floor the build is held to.
+    VersionCap,
+    /// A version floor names no release of the pinned target's edition, so no target meets it.
+    RequiresUnorderable,
 }
 
 impl DiagnosticCode {
@@ -216,6 +233,9 @@ impl DiagnosticCode {
             Self::UnresolvedSlot => "E_UNRESOLVED_SLOT",
             Self::UnknownSlotTarget => "E_UNKNOWN_SLOT_TARGET",
             Self::ThemeSelectorUnmatched => "E_THEME_SELECTOR_UNMATCHED",
+            Self::EditUnmatched => "E_EDIT_UNMATCHED",
+            Self::EditUnknownKey => "E_EDIT_UNKNOWN_KEY",
+            Self::EditRipple => "W_EDIT_RIPPLE",
             Self::DeferredMember => "W_DEFERRED_MEMBER",
             Self::InvalidMember => "E_INVALID_MEMBER",
             Self::IgnoredArgument => "W_IGNORED_ARGUMENT",
@@ -239,9 +259,11 @@ impl DiagnosticCode {
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::InvalidStructName => "E_INVALID_STRUCT_NAME",
+            Self::InvalidSiteName => "E_INVALID_SITE_NAME",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
+            Self::PlacementOverlap => "E_PLACEMENT_OVERLAP",
             Self::UnusedDef => "W_UNUSED_DEF",
             Self::UnresolvedPort => "E_UNRESOLVED_PORT",
             Self::AmbiguousPort => "E_AMBIGUOUS_PORT",
@@ -261,6 +283,8 @@ impl DiagnosticCode {
             Self::IntendedTargetCap => "E_INTENDED_TARGET_CAP",
             Self::IntendedTargetCapPartial => "W_INTENDED_TARGET_CAP",
             Self::IntendedTargetUnsupported => "W_INTENDED_TARGET_UNSUPPORTED",
+            Self::VersionCap => "E_VERSION_CAP",
+            Self::RequiresUnorderable => "E_REQUIRES_UNORDERABLE",
         }
     }
 
@@ -302,7 +326,9 @@ impl DiagnosticCode {
             | Self::IncompletePlace
             | Self::InvalidPlaceId
             | Self::InvalidStructName
+            | Self::InvalidSiteName
             | Self::InvalidPlaceOrigin
+            | Self::PlacementOverlap
             | Self::UnresolvedPort
             | Self::AmbiguousPort
             | Self::MissingPathMaterial
@@ -313,6 +339,10 @@ impl DiagnosticCode {
             | Self::TruthTableEmpty
             | Self::TruthTableDuplicateInput
             | Self::IntendedTargetCap
+            | Self::EditUnmatched
+            | Self::EditUnknownKey
+            | Self::VersionCap
+            | Self::RequiresUnorderable
             | Self::TruthTableConflict => Severity::Error,
             Self::InvalidCairnVersion
             | Self::FutureCairnVersion
@@ -337,6 +367,7 @@ impl DiagnosticCode {
             | Self::TruthTableDuplicateRow
             | Self::IntendedTargetCapPartial
             | Self::IntendedTargetUnsupported
+            | Self::EditRipple
             | Self::TruthTablePartial => Severity::Warning,
         }
     }
@@ -350,7 +381,7 @@ impl Serialize for DiagnosticCode {
 
 /// Machine-readable payload attached to a [`Diagnostic`], tagged by `kind` (`spec/lint`
 /// "Machine-readable payload").
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DiagnosticData {
@@ -390,6 +421,22 @@ pub enum DiagnosticData {
         /// Keys this row rebinds from an earlier one (`frame`, `sill`); never empty.
         rebound: Vec<String>,
     },
+    /// Companion payload for [`DiagnosticCode::UnknownKeyword`].
+    UnknownKeyword {
+        /// The keyword as written.
+        keyword: String,
+        /// The nearest keyword the line's body takes, when one is within the suggestion cap.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggestion: Option<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::UnknownArgument`].
+    UnknownArgument {
+        /// The key as written, without the trailing `=`.
+        key: String,
+        /// The nearest key the line accepts, when one is within the suggestion cap.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggestion: Option<String>,
+    },
     /// Companion payload for [`DiagnosticCode::UnknownId`].
     UnknownId {
         /// The fully namespaced id the target does not declare.
@@ -407,7 +454,7 @@ pub enum DiagnosticData {
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
         /// Ids the pack's alias table declares for the same block: facts, unlike `suggestion`.
-        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         aliases: Vec<String>,
         /// The first version of the edition after the target that declares the id.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -460,14 +507,15 @@ pub enum DiagnosticData {
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
         /// The edition's other versions whose tables take the pair, oldest first.
-        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         valid_at: Vec<String>,
     },
     /// Companion payload for [`DiagnosticCode::IncompatibleMaterial`].
     IncompatibleMaterial {
         /// The fully namespaced id the member was bound to.
         id: String,
-        /// Family the member's geometry needs, as a bare noun (`stair` or `door`).
+        /// Family the member's geometry needs, as a bare noun: `stair`, `door`, `chest`, `button`,
+        /// `trapdoor` or `pillar`.
         required: String,
         /// `mat_slot=` name the member read, when it has one.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -494,6 +542,18 @@ pub enum DiagnosticData {
         /// The floor that refuses the first of them, as written, when a floor is involved.
         #[serde(skip_serializing_if = "Option::is_none")]
         floor: Option<String>,
+    },
+    /// Companion payload for [`DiagnosticCode::VersionCap`].
+    VersionCap {
+        /// The target's edition, as [`crate::edition::Edition::as_str`] spells it.
+        edition: String,
+        /// The target's version.
+        target: String,
+        /// The floor that refuses it as its line renders it after the keyword, such as
+        /// `java version>=1.21.4`, ending in `>=` and the version.
+        floor: String,
+        /// The edition's targetable versions every floor admits, oldest first; may be empty.
+        valid: Vec<String>,
     },
 }
 
@@ -567,6 +627,37 @@ impl Diagnostic {
                 source,
                 lines,
             )
+        }
+    }
+}
+
+/// Drop each finding within one of `lines` that repeats an earlier one exactly, as a value an
+/// `edit` line sets does when it is judged on each member the edit selected.
+pub(crate) fn drop_repeats_within(diagnostics: &mut Vec<Diagnostic>, lines: &[Span]) {
+    if lines.is_empty() {
+        return;
+    }
+    let mut seen = HashSet::new();
+    diagnostics.retain(|d| {
+        let within = lines
+            .iter()
+            .any(|line| line.start <= d.span.start && d.span.end <= line.end);
+        !within || seen.insert(d.clone())
+    });
+}
+
+/// Point each finding on a member line an `edit` selected at the edits that changed the member,
+/// since what the finding quotes may be an edit's and not the line's; `edited` pairs each such
+/// line with its edit's.
+pub(crate) fn note_edits(diagnostics: &mut [Diagnostic], edited: &[(Span, Span)]) {
+    for d in diagnostics {
+        for (line, edit) in edited {
+            if *line == d.span {
+                d.notes.push(DiagnosticNote {
+                    span: Some(edit.clone()),
+                    message: "this edit changes this member".to_owned(),
+                });
+            }
         }
     }
 }

@@ -1,7 +1,10 @@
 use indexmap::IndexMap;
 
 use super::*;
-use crate::block_array::{BlockArray, CellRun, Dims, Entity, PALETTE_CAPACITY, Palette};
+use crate::block_array::{
+    BlockArray, BlockEntityData, CellRun, Dims, Entity, PALETTE_CAPACITY, Palette,
+};
+use crate::intent::AddressSegment;
 
 const KEY: &str = "struct::hut";
 
@@ -19,8 +22,10 @@ fn hut() -> BlockArrayIr {
         voxels: vec![PaletteIndex(1); 4],
         block_entities: vec![BlockEntity {
             pos: (1, 0, 1),
-            id: "minecraft:chest".to_owned(),
-            fields: IndexMap::new(),
+            data: BlockEntityData::Fields {
+                id: "minecraft:chest".to_owned(),
+                fields: IndexMap::new(),
+            },
         }],
         entities: vec![Entity {
             pos: (0.5, 1.0, 0.5),
@@ -32,6 +37,7 @@ fn hut() -> BlockArrayIr {
     let floor = ResolvedMember {
         role: "floor".to_owned(),
         id: None,
+        address: None,
         resolved_state: vec![ResolvedBlock {
             state: stone(),
             runs: vec![
@@ -45,6 +51,12 @@ fn hut() -> BlockArrayIr {
                 },
             ],
         }],
+        geometry: MemberGeometry {
+            anchor: (0, 0, 0),
+            declared_bbox: Bbox::spanning((0, 0, 0), (1, 0, 1)),
+            actual_bbox: Bbox::spanning((0, 0, 0), (1, 0, 1)),
+            host_face: None,
+        },
         span: 0..5,
     };
     BlockArrayIr {
@@ -93,7 +105,7 @@ type Blocks<'a> = Vec<(&'a str, Vec<CellRun>)>;
 #[test]
 fn a_circuit_lays_under_the_structure_which_rises_over_it() {
     let mut ir = hut();
-    assert_eq!(ir.attach_circuit(KEY, 2, &circuit(), 10..20), Ok(()));
+    assert_eq!(ir.attach_circuit(KEY, 2, &circuit(), 10..20, None), Ok(()));
 
     let array = &ir.structures[KEY];
     assert_eq!(array.dims, Dims { x: 2, y: 3, z: 2 });
@@ -108,13 +120,17 @@ fn a_circuit_lays_under_the_structure_which_rises_over_it() {
         [
             BlockEntity {
                 pos: (1, 2, 1),
-                id: "minecraft:chest".to_owned(),
-                fields: IndexMap::new(),
+                data: BlockEntityData::Fields {
+                    id: "minecraft:chest".to_owned(),
+                    fields: IndexMap::new(),
+                },
             },
             BlockEntity {
                 pos: (0, 1, 1),
-                id: "minecraft:comparator".to_owned(),
-                fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+                data: BlockEntityData::Fields {
+                    id: "minecraft:comparator".to_owned(),
+                    fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+                },
             },
         ],
     );
@@ -189,6 +205,84 @@ fn a_circuit_lays_under_the_structure_which_rises_over_it() {
 }
 
 #[test]
+fn a_circuit_raises_every_member_geometry_over_the_layers_it_reserves() {
+    let mut ir = hut();
+    assert_eq!(ir.attach_circuit(KEY, 2, &circuit(), 10..20, None), Ok(()));
+    let geometry: Vec<MemberGeometry> = ir.members[KEY]
+        .iter()
+        .map(|member| member.geometry)
+        .collect();
+    assert_eq!(
+        geometry,
+        [
+            MemberGeometry {
+                anchor: (0, 0, 0),
+                declared_bbox: Bbox::spanning((0, 0, 0), (1, 1, 1)),
+                actual_bbox: Bbox::spanning((0, 0, 0), (1, 1, 1)),
+                host_face: None,
+            },
+            MemberGeometry {
+                anchor: (0, 2, 0),
+                declared_bbox: Bbox::spanning((0, 2, 0), (1, 2, 1)),
+                actual_bbox: Bbox::spanning((0, 2, 0), (1, 2, 1)),
+                host_face: None,
+            },
+        ],
+    );
+}
+
+#[test]
+fn a_circuit_declares_every_layer_it_reserves_and_holds_the_box_around_its_blocks() {
+    let mut ir = hut();
+    let lone = [LaidBlock {
+        at: (1, 0, 0),
+        state: wire(),
+        entity: None,
+    }];
+    assert_eq!(ir.attach_circuit(KEY, 2, &lone, 10..20, None), Ok(()));
+    assert_eq!(
+        ir.members[KEY][0].geometry,
+        MemberGeometry {
+            anchor: (0, 0, 0),
+            declared_bbox: Bbox::spanning((0, 0, 0), (1, 1, 1)),
+            actual_bbox: Bbox::cell((1, 0, 0)),
+            host_face: None,
+        },
+    );
+}
+
+#[test]
+fn a_circuit_that_lays_no_block_holds_every_layer_it_reserves() {
+    let mut ir = hut();
+    assert_eq!(ir.attach_circuit(KEY, 2, &[], 10..20, None), Ok(()));
+    let reserved = Bbox::spanning((0, 0, 0), (1, 1, 1));
+    assert_eq!(
+        ir.members[KEY][0].geometry,
+        MemberGeometry {
+            anchor: (0, 0, 0),
+            declared_bbox: reserved,
+            actual_bbox: reserved,
+            host_face: None,
+        },
+    );
+}
+
+#[test]
+fn the_circuit_is_recorded_under_the_address_of_its_line() {
+    let mut ir = hut();
+    let line = MemberAddress::new(AddressSegment::new("circuit".to_owned(), None, 0));
+    assert_eq!(
+        ir.attach_circuit(KEY, 2, &circuit(), 10..20, Some(line.clone())),
+        Ok(())
+    );
+    let addresses: Vec<Option<MemberAddress>> = ir.members[KEY]
+        .iter()
+        .map(|member| member.address.clone())
+        .collect();
+    assert_eq!(addresses, [Some(line), None]);
+}
+
+#[test]
 fn a_refused_circuit_leaves_the_structure_as_it_was() {
     let mut full = hut();
     full.structures[KEY]
@@ -215,6 +309,7 @@ fn a_refused_circuit_leaves_the_structure_as_it_was() {
             circuit(),
             AttachError::NoStructure,
         ),
+        (hut(), KEY, 0, Vec::new(), AttachError::NoLayers),
         (hut(), KEY, u32::MAX, circuit(), AttachError::TooLarge),
         (hut(), KEY, 1 << 22, circuit(), AttachError::TooLarge),
         (
@@ -259,7 +354,10 @@ fn a_refused_circuit_leaves_the_structure_as_it_was() {
         ),
     ] {
         let before = ir.clone();
-        assert_eq!(ir.attach_circuit(key, void, &blocks, 0..0), Err(refusal));
+        assert_eq!(
+            ir.attach_circuit(key, void, &blocks, 0..0, None),
+            Err(refusal)
+        );
         assert_eq!(ir, before, "{key} void={void}");
     }
 }
@@ -286,7 +384,7 @@ fn a_slot_only_the_circuit_holds_records_every_key_of_its_state_as_derived() {
             entity: None,
         },
     ];
-    assert_eq!(ir.attach_circuit(KEY, 1, &blocks, 10..20), Ok(()));
+    assert_eq!(ir.attach_circuit(KEY, 1, &blocks, 10..20, None), Ok(()));
     let keys = ["east", "north", "power", "south", "west"].map(str::to_owned);
     assert_eq!(
         ir.structures[KEY].derived,

@@ -12,26 +12,18 @@ use crate::block_array::BlockState;
 use crate::block_array::args::{
     UnreadArgument, diag_invalid_member, ident_or_ignore, read_or_ignore,
 };
+use crate::block_array::geometry::Declared;
 use crate::block_array::joins::Face;
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::cell_box::{Cell, Shape, written_cells};
 use super::fixture::{
     Anchor, Fixture, Refusal, Toward, fixture_cell, outside_the_array, written_facing,
 };
 use super::members::{StructCtx, default_block_id};
+use super::stand::{COMPASS, COMPASS_FACES, Stand, stand_of, triple_cell, word};
 
-/// The note on an `at=` that is missing or neither form, saying what the two are.
-const STANDS: &str = "write `at=` as the coordinate triple `x,y,z` of the cell the part stands in, \
-                      as in `at=1,1,1`, or as a wall anchor, `at=<side>.outside` or \
-                      `at=inside.<side>`";
-
-/// The note on a compass `facing=`, saying which way each word looks.
-const COMPASS: &str = "`facing=` takes one of north, south, east, west: north toward the `back` \
-                       wall and east toward the `right` one";
-
-/// The four compass faces, in the order a finding lists them.
-const COMPASS_FACES: [Face; 4] = [Face::North, Face::South, Face::East, Face::West];
+/// The word a note on any of the four parts calls it.
+const PART: &str = "part";
 
 /// A part's catalog token, and the Java id used without a pack.
 #[derive(Debug, Clone, Copy)]
@@ -98,15 +90,6 @@ struct Written<'m> {
     delay: Option<i64>,
     mode: Option<&'m str>,
     connect: Option<&'m str>,
-}
-
-/// How a part's `at=` names its cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Stand {
-    /// A coordinate triple.
-    Triple,
-    /// A wall anchor.
-    ByWall,
 }
 
 /// Place a Tier 0 part in its cell, its blockstate derived from where it stands.
@@ -226,16 +209,16 @@ fn place(
 ) -> Result<Stand, Refusal> {
     let fixture = part.fixture();
     let mut properties = states(part, member, written)?;
-    let stand = stand_of(fixture, member)?;
+    let stand = stand_of(fixture, PART, member)?;
     let (block, facing) = turn(part, member, written.facing, stand)?;
-    let cell = match stand {
-        Stand::Triple => triple_cell(fixture, member, y_offset, ctx)?,
+    let (cell, host_face) = match stand {
+        Stand::Triple => (triple_cell(fixture, PART, member, y_offset, ctx)?, None),
         Stand::ByWall => {
             let (anchor, cell) = fixture_cell(fixture, member, y_offset, ctx)?;
             if let Some(facing) = by_the_wall(part, anchor, facing) {
                 properties.insert("facing".to_owned(), facing.as_str().to_owned());
             }
-            cell
+            (cell, Some(anchor.host_face()))
         }
     };
     if let Some(Look::Compass(face)) = facing {
@@ -245,6 +228,7 @@ fn place(
     properties.sort_keys();
     let id = default_block_id(member, ctx.registry, block.token, block.base_id)?;
     let state = BlockState { id, properties };
+    canvas.declare(Declared::cell(cell, host_face));
     // Interned only once the cell exists, so a refusal leaves no palette entry.
     if canvas.try_paint(cell, || palette.intern(state)) {
         Ok(stand)
@@ -290,57 +274,6 @@ fn states(
         Part::Torch => {}
     }
     Ok(properties)
-}
-
-/// `written` when it is one of `words`, `None` when the line writes none, or the refusal of any
-/// other word.
-fn word<'m>(
-    member: &Member,
-    key: &str,
-    written: Option<&'m str>,
-    words: &[&'static str],
-) -> Result<Option<&'m str>, Refusal> {
-    let Some(name) = written else {
-        return Ok(None);
-    };
-    if words.contains(&name) {
-        return Ok(Some(name));
-    }
-    let mut notes = vec![format!("`{key}=` takes {}", words.join(" or "))];
-    notes.extend(
-        nearest_match(name, words.iter().copied())
-            .map(|near| did_you_mean(&format!("{key}={near}"))),
-    );
-    Err(Box::new(diag_invalid_member(
-        member,
-        format!("unknown {} `{key}={name}`", member.role.keyword()),
-        notes,
-    )))
-}
-
-/// How the part's `at=` names its cell, or the refusal of an `at=` that is missing or neither form.
-fn stand_of(fixture: Fixture, member: &Member) -> Result<Stand, Refusal> {
-    let keyword = fixture.keyword;
-    let refuse = |primary: String| {
-        Box::new(diag_invalid_member(
-            member,
-            primary,
-            vec![STANDS.to_owned()],
-        ))
-    };
-    let Some(raw) = member.arguments.get("at") else {
-        return Err(refuse(format!(
-            "{keyword} has no `at=`, so nothing says where it stands"
-        )));
-    };
-    match raw.value.kind {
-        ValueKind::Coord { .. } => Ok(Stand::Triple),
-        ValueKind::DotRef(_) => Ok(Stand::ByWall),
-        _ => Err(refuse(format!(
-            "{keyword} `at=` must be a coordinate triple or a wall anchor, not {}",
-            raw.value.describe(),
-        ))),
-    }
 }
 
 /// Which way a part's `facing=` turns it.
@@ -449,38 +382,4 @@ fn by_the_wall(part: Part, anchor: Anchor, look: Option<Look>) -> Option<Face> {
         (_, Some(Look::FromTheWall(toward))) => Some(toward.unwrap_or(away).face(side).opposite()),
         _ => None,
     }
-}
-
-/// The cell a part's coordinate triple names, or the refusal of an `offset=` or `y=` beside it.
-fn triple_cell(
-    fixture: Fixture,
-    member: &Member,
-    y_offset: u32,
-    ctx: &StructCtx<'_>,
-) -> Result<Cell, Refusal> {
-    let beside: Vec<String> = ["offset", "y"]
-        .into_iter()
-        .filter(|key| member.arguments.contains_key(*key))
-        .map(|key| format!("`{key}=`"))
-        .collect();
-    if !beside.is_empty() {
-        return Err(Box::new(diag_invalid_member(
-            member,
-            format!(
-                "{} {} beside a coordinate triple, which names the cell whole",
-                fixture.keyword,
-                beside.join(" and "),
-            ),
-            vec![format!(
-                "drop {}, or set the part by a wall with `at=<side>.outside` or \
-                 `at=inside.<side>`, which reads them",
-                beside.join(" and "),
-            )],
-        )));
-    }
-    let cells = written_cells(member, Shape::Cell, y_offset, ctx)?;
-    Ok(cells
-        .cells()
-        .next()
-        .expect("a cell box holds at least one cell"))
 }

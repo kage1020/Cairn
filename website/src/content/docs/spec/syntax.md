@@ -25,22 +25,82 @@ The parser puts anything that is not `key=`, `-> binding`, or `[selector]` into 
 so a dropped `=` lands there too. `walls mat_slot=wall height 3` is not a `walls` with a shortened
 height. It is not built at all.
 
-Only a member line (a line of a `struct`, `def` or `site` body) keeps a positional list so far. The
-header line of a `struct`, `def`, `site` or `theme`, a `theme` rule, and a `logic` or `assert` line
-do not yet, so the same slip there is `E_PARSE`, which ends the parse: `struct s size 3x3` is refused
-with "expected `=`".
+A header, a `theme` rule and an `assert` line keep a positional list too, so a bare value there
+does not end the parse. A header's list holds the bare values after its name and before its `:`. A
+bare value after the `:`, as in `struct s size=3x3: tall`, is `E_PARSE`. So is a block id among the
+values before it, refused at the block id's own `:`, since a block id is a `key=` value ([Literals
+and separators](#511-literals-and-separators)). A `struct` or `def` header and a `theme` selector
+rule keep their bare values beside their `key=value` arguments, so `struct s size 3x3` is
+`E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as `size=3x3`. A `site` or `theme` header reads
+nothing after its name, a `slot` row nothing after the value it binds, and an `assert` line nothing
+after the end of its form: a bare value there is the same finding, and a `key=value` there is
+`E_PARSE`. A `logic` line whose `=` is dropped, `logic sig.a sig.b or sig.c`, still reads the
+expression after its name, binds nothing, and is `E_UNEXPECTED_POSITIONAL` on the whole line. No
+expression starts with an infix primitive, so `logic sig.a or sig.b` is `E_PARSE` at the `or`, for
+its missing `=`. An `edit` line keeps no positional list yet, so a bare value after its `set` is
+`E_PARSE`, which ends the parse: `edit window[0] set shape arch` is refused with "expected `=`".
 
 ### 5.1.1 Literals and separators
 
-**Subject to change.** Decimals (`scale=1.5`) and `nbt={...}` values, which other chapters write,
-do not parse yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)).
-
-No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` is `E_PARSE`. The
-parser reads a number only as a run of decimal digits so far, up to 2^63 − 1, or 2^32 − 1 for the
+No `key=` value starts with `-`, so a negative number does not parse: `offset=-1` and `scale=-1.5`
+are `E_PARSE`. An **integer** is a run of decimal digits, up to 2^63 − 1, or 2^32 − 1 for the
 `within` bound of an `assert always`, the `<=` bound of an `assert latency` and the stage count of
 a macro such as `pulse(sig.ring, 4)`, which is at least 1 ([Redstone
-§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)). A decimal such as `scale=1.5`
-([Entities](/spec/entities/)) is therefore `E_PARSE` too until the parser reads one.
+§14.1](/spec/redstone/#141-two-tiers-and-the-v1-boundary)).
+
+A **decimal** is two runs of decimal digits joined by `.`, as in `scale=1.5`. It has no exponent
+and no type suffix, so a run that continues past its digits, such as `1.5e3`, `1.5f` or `1.5.2`, is
+refused at the literal, as a size's is. A `.` with no digit after it, `1.`, or none before it, `.5`,
+is refused too, and the finding names `1.0` and `0.5`. A decimal stands where an integer stands as
+a value: after a key's `=`, in a value list and as a bare value. It is not an integer, so a
+coordinate triple's component, a size's extent, a stage count, an assertion's bound and a value in
+a block-state literal each refuse one at the literal. The parser keeps it as written, digit for
+digit, and refuses one past a double's range, about 1.8 × 10^308, as `E_PARSE` at the literal. The
+key that reads one says whether the writer stores it as a float or a double, and the writer rounds
+the written value to the nearest one of that type. Such a key reads an integer as the same number,
+so `scale=2` and `scale=2.0` are one value.
+
+Wherever two values are compared, a number compares by the number it writes: `1.5` and `1.50` are
+one value, and so are `2` and `2.0`. A theme selector's attribute matches a member's value that way
+([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), and an
+address spells each number one way ([§5.5](#55-ids-classes-addresses)).
+
+No key reads a decimal yet: the keys that will, such as the `scale=` of a display entity
+([Entities §8.1](/spec/entities/#81-two-tiers)), belong to keywords the compiler does not know. A
+key that reads another kind of value treats a decimal as it treats a coordinate triple (below): a
+label or size key refuses it as a type mismatch, a member key such as `height=` or `offset=` refuses
+its member as `E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or
+`overhang=`, says so with `W_IGNORED_ARGUMENT`.
+
+An **NBT compound** is raw NBT written as SNBT in braces, as in `nbt={variant:"black"}`. It is what
+a key reads when a `{` follows its `=`, with a space between them or none. Anywhere else a `{` keeps
+its own meaning, so a bare `{a:1}` and a compound in a value list are `E_PARSE`. A compound closes
+on the line it opens on, since only a truth table's braces run onto the lines below, and one left
+open at the end of its line is `E_PARSE` there. What it holds is the part of Java's SNBT that every
+version Cairn targets reads alike:
+
+- A compound is `{}`, or entries `key:value` with exactly one `,` between two of them. A key is
+  quoted, or a run of letters, digits, `_`, `-`, `.` and `+`, and a compound names each key once.
+- A list is `[]`, or values with exactly one `,` between two of them, all of one type. An array
+  opens with `[B;`, `[I;` or `[L;`, nothing between the three characters, and holds bytes, ints or
+  longs, each written as a number with its suffix.
+- A number is an optional sign, digits, an optional `.` and digits, and an optional suffix, in
+  either case: `b`, `s` and `l` for a byte, a short and a long, `f` and `d` for a float and a
+  double. With no suffix it is an int, or a double when it has a `.`. A byte, a short, an int or a
+  long has no `.` and no leading zero, and every number is inside its type's range.
+- A string is quoted with `"` or `'`, and escapes only `\` and its own quote. `true` and `false` are
+  the bytes `1b` and `0b`, and any other unquoted word is refused, so a value is a string only
+  where it is quoted: `variant:black` is written `variant:"black"`.
+- Compounds, lists and arrays nest at most 64 deep, the outermost compound included.
+
+Anything else is `E_PARSE` where it starts, an exponent, a hexadecimal or binary number, a `_`
+between digits, an escape such as `\n`, a function such as `bool(...)` and a comment among them. The
+parser keeps the compound as written, braces included, and checks no field in it against the
+target: what its fields mean, and the `@edition` guard a line that writes one stands under, are
+[Entities §8.1](/spec/entities/#81-two-tiers)'s. No keyword reads `nbt=` yet, so it is a key like
+any other that its line does not read: `E_UNKNOWN_ARGUMENT` on a header or a member, and
+`W_IGNORED_ARGUMENT` as a theme selector's binding. A key that reads another kind of value treats a
+compound as it treats a decimal.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
@@ -70,12 +130,14 @@ space on either side of a `,` inside the triple, two components alone, a fourth 
 A cell outside the footprint, or above the top row the scope as written reaches ([Compilation Model
 §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), is outside the scope. The member
 that reads the triple refuses it as `E_INVALID_MEMBER`, as one refuses an `offset=` at or past its
-wall's length. The `from=` and `to=` of a `fill`
-([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and a `raw_block`'s
-`at=` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), read a triple, and no
-other key does yet: `note_block` and the entities that take one are not keywords. A key that reads
-another kind of value treats a triple as any value of the wrong kind. A label or size key refuses
-it as a type mismatch, a member key such as `side=` or `height=` refuses its member as
+wall's length. The `from=` and `to=` of a `fill` ([Blockstate Model
+§6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and the `at=` of a `raw_block`
+([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), a Tier 0 part ([Redstone
+§14.1](/spec/redstone/#tier-0-parts)), a `trapdoor`, a `note_block`, a `sign` and a `bed`
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), read a
+triple, and no other key does yet: the entities that take one are not keywords. A key that reads
+another kind of value treats a triple as any value of the wrong kind. A label or size key refuses it
+as a type mismatch, a member key such as `side=` or `height=` refuses its member as
 `E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says
 so with `W_IGNORED_ARGUMENT`.
 
@@ -189,14 +251,18 @@ and Monaco use the same rule, so a diagnostic's line number and the line under t
 same row. A position always points at the text that is wrong, so an error at the end of a line is
 reported there and never at the first column of the next one.
 
-The tree-sitter grammar is a known exception in two ways. Its runtime advances the row on `\n`
+The tree-sitter grammar is a known exception in three ways. Its runtime advances the row on `\n`
 alone, so a file terminated only by lone `\r` highlights as one long line even though it parses
-correctly. It also accepts nine forms the parser refuses, because tree-sitter cannot express their
-rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word (`2x2y`), an
-integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within` or `<=` bound
-or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last component runs
-into a size (`1,2,3x4`), a truth row whose width differs from the input count, and a block-state
-literal naming one property twice.
+correctly. It also accepts fifteen forms the parser refuses, because tree-sitter cannot express
+their rules: a size with a zero extent (`0x3`), a third extent (`2x2x9`) or a trailing word
+(`2x2y`), an integer past 2^63 − 1, alone or as a coordinate's component, an assertion's `within`
+or `<=` bound or a macro's stage count past 2^32 − 1, a stage count of 0, a coordinate whose last
+component runs into a size (`1,2,3x4`), a truth row whose width differs from the input count, a
+block-state literal naming one property twice, a decimal that runs into a word (`1.5e3`) or is past
+a double's range, and an NBT compound that names one key twice, holds a list of mixed types or a
+number past its type's range, or nests past 64. And it refuses a bare value after the name on a
+`site` or `theme` header, which the parser reads and reports as `E_UNEXPECTED_POSITIONAL`, because
+taking one there would let error recovery read an over-indented first body line into the header.
 
 ## 5.2 Nesting
 
@@ -222,15 +288,16 @@ Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-ha
 `y=N` means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
-building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `level`,
+building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `beam`, `level`,
 `pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
-`repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A
-`site` body describes a layout: `place`, `connect`. The keyword table is global, so writing one in
-the other body parses and classifies and then reaches nothing. That is `E_MISPLACED_MEMBER`,
-reported once at the offending row, taking anything indented under it along. A `level` groups the
-other members of a `struct` / `def` body, but not a `circuit` line, whose reservation spans the
-whole scope: a `circuit` line under a `level` reaches nothing either, and is `E_MISPLACED_MEMBER` on
-that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+`trapdoor`, `note_block`, `sign`, `bed`, `repeater`, `comparator`, `redstone_torch`,
+`redstone_dust`, `circuit`, `raw_block`, `raw_fill`. A `site` body describes a layout: `place`,
+`connect`. The keyword table is global, so writing one in the other body parses and classifies and
+then reaches nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking
+anything indented under it along. A `level` groups the other members of a `struct` / `def` body,
+but not a `circuit` line, whose reservation spans the whole scope: a `circuit` line under a `level`
+reaches nothing either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
@@ -317,6 +384,25 @@ entities, and entities all use one selector grammar.
 x so a `sym=true` opening looks symmetric from either side. The `left` and `right` walls anchor at
 low `z` and mirror the same way.
 
+**`anchor=` window anchors.** `offset=` and `y=` place one cell of a window, and `anchor=` names
+which, seen from outside the wall:
+
+| Anchor | Column from the window's first | Row from its lowest |
+|---|---|---|
+| `bottom_left`, `middle_left`, `top_left` | `0` | `0`, `size_h / 2`, `size_h - 1` |
+| `bottom_center`, `center`, `top_center` | `size_w / 2` | `0`, `size_h / 2`, `size_h - 1` |
+| `bottom_right`, `middle_right`, `top_right` | `size_w - 1` | `0`, `size_h / 2`, `size_h - 1` |
+
+The three rows are the anchors in the order the first column lists them, so `top_center` is the
+column `size_w / 2` and the row `size_h - 1`. Division rounds down, so on an even span the middle is
+the later of the two middle cells, as `at=center` picks on an even wall. A window without `anchor=`
+is placed by `bottom_left`, its first column and lowest row. `anchor=bottom_center offset=4
+size=3x3` cuts the columns `3` to `5`, as `offset=3` does without it. Any other value is
+`E_INVALID_MEMBER`, and so is an anchor that puts the window's first column before the left end of
+its wall or its lowest row below the base row of its struct or `level`. In what follows, `offset`
+is the window's first column, which is `offset=` itself unless `anchor=` names a later one, and a
+`repeat=` series steps from it ([Entities §8.2](/spec/entities/#82-anchor-conventions)).
+
 `sym=true` mirrors the opening across the wall's midpoint
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle
 is rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. That includes the
@@ -333,7 +419,8 @@ greater than 1 is the exception. Mirroring a series is reserved for a later exte
 not read as `false` there: that window is not cut either, and is reported as `W_DEFERRED_MEMBER`
 beside the `W_IGNORED_ARGUMENT`.
 
-**`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
+**Which column a door stands in.** A door's wall-local column comes from an `at=` anchor or from
+`offset=N`. The anchors are:
 
 | Anchor | Column |
 |---|---|
@@ -341,10 +428,18 @@ beside the `W_IGNORED_ARGUMENT`.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the door and any `connect` walkway anchored to it
-([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)). Numeric offsets (`at=N`) are
-reserved for a future extension. A door with no `at=`, or one that names no anchor, is
-`E_INVALID_MEMBER` and cuts nothing.
+`offset=N` counts as a window's `offset=` does: from 0 at the wall's left end as seen from outside.
+A number names a column between the wall's corners, `1 … wall_length - 2`. A corner column is where
+the wall meets the one beside it, and `at=left` and `at=right` are how a door stands there, so an
+`offset=` of 0 or `wall_length - 1` is refused, and so is one of `wall_length` or more. A wall
+shorter than 3 has no column between its corners. `at=` takes an anchor and nothing else, so `at=3`
+is refused. Its finding names `offset=3` when column 3 lies between the corners, `at=left` or
+`at=right` when it is a corner, and the columns `offset=` takes otherwise.
+
+A door names its column once. A door with neither key, with both, with an `at=` that names no
+anchor, or with an `offset=` that is not a column between the corners is `E_INVALID_MEMBER` and
+cuts nothing. The same column resolves both the door and any `connect` walkway anchored to it
+([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
 level's base plane, and stands two rows tall: its door block takes that row and the one above it
@@ -366,17 +461,325 @@ error.
 
 ## 5.5 IDs, classes, addresses
 
-**Subject to change.** The address the compiler gives a member without `id=`, and the `edit` patch
-DSL that would use it, are not built yet
-([Compatibility Tiers](/spec/compatibility/#subject-to-change)). Today such a member has no address,
-and a top-level `edit` is `E_PARSE`.
-
-Important members MAY declare `id=`, and `class=` groups members. Members without an `id=` get a
-stable, meaning-based address assigned by the compiler, derived from parent / role / side / level /
-offset. See
+Important members MAY declare `id=`, and `class=` groups members. Every member of a `struct` or
+`def` body also gets an **address**, which the compiler derives from where the member stands
+(parent, role, side, level and offset) and from what its line writes, not from the order lines are
+written in. See
 [Components, Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model).
 
-A `place` row is the exception: its `id=` is required, and omitting it is `E_INCOMPLETE_PLACE`. An
-auto-address names nothing outside the body it sits in. A `place`'s `id=` is what `east_of=` and
-`connect` refer to, and what its `.nbt` is written under, so an invented one would be a name the
-author never wrote and cannot point at.
+An address is one segment for each step from the body down to the member, joined by `.`, outermost
+first: `window@front[0]`, or `level[1].window@front[0]` for a window under a `level`. A segment is
+`ROLE@SIDE[N]`:
+
+- `ROLE` is the member's keyword.
+- `@SIDE` is the wall the line names, as written: its `side=` (`door@front[0]`), or else a dotted
+  `at=` (`chest@inside.back[0]`, `button@front.outside[0]`). A `beam` over an opening writes its
+  `at=` too, the opening's `id=` in place of a wall (`beam@entry.top[0]`). A line that names no wall
+  writes no `@SIDE`: `walls[0]`, `level[1]`.
+- `N` counts from 0 among the members of the same parent with the same `ROLE` and `@SIDE`, in the
+  order of where they stand:
+  1. along the wall: `offset=`, or else the column a door anchor in `at=` names
+     ([§5.4](#54-selectors)) on the wall the line names, which runs the `W` of `size=` for `front`
+     and `back` and its `H` for `left` and `right`. A line that writes neither, or whose `at=`
+     names a wall or a cell, stands at 0. A window counts by its `offset=` as written, which with
+     `anchor=` is the column of the cell the anchor names, not its first column;
+  2. then up: `y=`, 0 when absent, so `level`s count from the lowest; a window's `y=` counts as
+     written too;
+  3. then the cell a coordinate `at=X,Y,Z` names, or else the box `from=` and `to=` span, whichever
+     end is written first: its low corner, then its high corner, each compared by `y`, then `z`,
+     then `x`. A line that writes none of them stands at `0,0,0`.
+
+  A value these steps cannot read as a whole number sorts after every number: an `offset=`, `y=`,
+  `from=` or `to=` of another kind, an `at=` that is no door anchor, wall or cell, such as the
+  number [§5.4](#54-selectors) reserves, and `center` or `right` where the wall has no length to
+  measure, on a line that names no `front`, `back`, `left` or `right` or in a `def` with no
+  `size=`.
+
+  Members that stand in the same place are ordered by what their lines write other than `id=`,
+  `class=` and a `[selector]`. Their `key=value` pairs come first, sorted by key and compared pair
+  by pair, key then value. Then come their bare values in the order written, the value after `->`,
+  the edition of the `@edition` guard they stand under, and last the members nested under them
+  that take an address: each body sorted by keyword, then by `@SIDE` with a line that names no wall
+  first, then as this list orders members, and compared member by member. At each of these, the
+  line that runs out first, or has no `->` or no guard, sorts first. Keys, values and editions
+  compare as text, by Unicode code point, each value spelled one way: an integer in decimal digits,
+  a decimal with no zero leading its whole part or ending its fraction and no `.` left with nothing
+  after it, a string between its double quotes, a token with its `@` and any state literal without
+  spaces, a list as its items joined by `, ` between `[` and `]`, a `mat_slot=` as the name of its
+  slot, and anything else as written. So `height=10` sorts before `height=9`, `frame="oak"` before
+  `frame=oak`, and `scale=02.50` and `scale=2.5` tie, as `scale=2.0` and `scale=2` do. Members
+  that tie at every step keep the order their lines are written in.
+
+A member carries its address whether or not it has an `id=`, so adding an `id=`, a `class=` or a
+`[selector]` to a line renumbers nothing. A member under an `@edition` guard counts among the
+members the guard stands in. An actuator patch (`door[id=front] opened_by=sig.x`) has no address
+and takes no place in the count, and neither does a line nested under one: a patch stands nowhere,
+and acts on the member its selector picks. A `[selector]` on a line of any other keyword makes no
+patch, and the line is counted as any other is.
+
+Reordering lines moves no address, except between members that tie at every step, which trade
+theirs when their lines trade places. Adding a member of another role, on another wall, under
+another parent, or further along the wall moves none either. A member added ahead of others of its
+role on its wall renumbers those after it, so a member an edit must keep naming across such a
+change carries an `id=`.
+
+An `edit` line names a member by its address, `edit window@front[0] set y=2`, and selects the
+member whose line gives it that address as written. An edit that moves a member, by setting its
+`side=` or `offset=`, keeps its address, so the next edit names it the same way ([Components,
+Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
+
+`cairn parse --format json` prints each member line's address, and the ASCII dump of `cairn lower`
+lists those of the members that built a cell. The `resolved_state` record of each member that
+built a cell, a struct's `circuit` included, carries its address
+([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), so those
+addresses feed `resolved_ir_hash`
+([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
+
+A `site` body's rows take no address. A `place` row's `id=` is required instead, and omitting it is
+`E_INCOMPLETE_PLACE`. An address names nothing outside the body it sits in. A `place`'s `id=` is
+what `east_of=` and `connect` refer to, and what its `.nbt` is written under, so an invented one
+would be a name the author never wrote and cannot point at.
+
+## 5.6 Keyword reference
+
+Each item and member keyword, and each `key=` a member's line accepts, in one line with the
+section that specifies it. That section is normative, and this list is its index:
+``cairn docs spec/syntax "`door`"`` prints one entry with the keys nested under it, and the
+language server shows the entry's own line on hover.
+
+**Items.**
+
+- **`struct`.** One building, built from its body over the `size=WxH` footprint its line declares.
+  See [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
+- **`def`.** A reusable building with slots, which the `place` rows of a `site` put down. See
+  [Components, Editing, and Multi-building
+  §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
+- **`theme`.** Binds each slot name to a material token. See
+  [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
+- **`site`.** Places `def`s beside one another and lays walkways between them. See
+  [Components, Editing, and Multi-building
+  §9.3](/spec/components-editing-sites/#93-multi-building-with-site).
+
+**Keys every member accepts.**
+
+- **`id=`.** The member's name, which selectors, ports and `connect` rows refer to. See
+  [§5.5](#55-ids-classes-addresses).
+- **`class=`.** A group the member belongs to, which a theme's selector rows can match. See
+  [§5.5](#55-ids-classes-addresses).
+- **`mat_slot=`.** The slot whose material the member is built from. See [Materials and Themes
+  §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
+
+**Members.**
+
+- **`floor`.** One layer of its material over the whole footprint, on the base plane. See
+  [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
+- **`walls`.** The footprint's outer ring in its material, from the row above the floor. See
+  [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
+  - **`height=`.** How many rows the walls rise.
+- **`fill`.** A box of its material, or of water poured once the blocks it may hold are placed.
+  See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+  - **`from=`.** One corner of the box, a coordinate triple.
+  - **`to=`.** The opposite corner of the box, a coordinate triple.
+  - **`fluid=`.** The fluid it pours in place of a material: `water`.
+  - **`kind=`.** The kind of water it pours: `source`.
+- **`door`.** A door cut into a wall, two rows tall. See [§5.4](#54-selectors).
+  - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
+  - **`at=`.** Where along the wall it is cut: `center`, `left` or `right`.
+  - **`offset=`.** In place of `at=`, the column it is cut in, between the wall's corners, counted
+    from the wall's left end as seen from outside.
+  - **`opened_by=`.** The signal that opens it. See
+    [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`hinge=`.** The side its hinge is on, `left` or `right`, in place of the derived side.
+  - **`open=`.** Whether it is built open, `true`, or closed, `false`.
+- **`window`.** An opening cut into a wall and filled with its `mat_slot=` material, or left open
+  without one. See [§5.4](#54-selectors).
+  - **`side=`.** The wall it is cut in: `front`, `back`, `left` or `right`.
+  - **`y=`.** The row of the cell its `anchor=` names, counted from the floor: its lowest row
+    without one.
+  - **`offset=`.** The column of the cell its `anchor=` names, counted from the wall's left end as
+    seen from outside: its first column without one.
+  - **`size=`.** Its width and height, `WxH`.
+  - **`sym=`.** With `true`, a mirrored copy across the wall's midpoint is cut too.
+  - **`repeat=`.** How many windows the series cuts along the wall, the first included.
+  - **`step=`.** How many columns each window starts after the one before it.
+  - **`shape=`.** The opening's outline, read by nothing yet. See
+    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+  - **`anchor=`.** The cell of the window `offset=` and `y=` place, `bottom_left` when absent. See
+    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+- **`roof`.** A roof over the walls, in the shape its `kind=` names. See [Compilation Model
+  §4.3](/spec/compilation/#43-gable-roof-voxel-rules).
+  - **`kind=`.** Its shape: `gable`, `shed`, `hip` or `flat`.
+  - **`overhang=`.** How many columns it reaches past the walls on every side.
+  - **`slope_to=`.** The wall a `shed` roof rises toward.
+  - **`footprint=`.** The cells it covers: only `struct`, the struct's `size=` footprint. See
+    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+  - **`bounds=`.** What its overhang does to the body: only `expand`, which widens the block array.
+    See [Entities §8.2](/spec/entities/#82-anchor-conventions).
+- **`stair`.** An eave: a band of stairs in the overhang outside one wall. See [Compilation Model
+  §4.3](/spec/compilation/#43-gable-roof-voxel-rules).
+  - **`kind=`.** The kind of stair: `stairs`.
+  - **`side=`.** The wall the band runs outside.
+  - **`half=`.** The half of the cell the stairs sit in: `top` or `bottom`.
+  - **`facing=`.** Which way the stairs face: `out` from the wall or `in` toward it.
+  - **`shape=`.** The stairs' shape: `straight`, `inner_left`, `inner_right`, `outer_left` or
+    `outer_right`.
+  - **`y=`.** The row the band is on.
+  - **`waterlogged=`.** `true` or `false` written into the stairs' state, or `auto` to let a water
+    `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`beam`.** A run of pillar blocks laid along a wall's top row or over an opening. See
+  [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`kind=`.** The kind of beam: `pillar`.
+  - **`at=`.** Where it is laid: `<side>.top` along that wall's top row, or `<id>.top` over the
+    `door` or `window` with that `id=`.
+  - **`axis=`.** The axis its blocks lie along, `x`, `y` or `z`, in place of along its wall.
+- **`level`.** Groups the members under it, lifting each of them `y=` rows above the base plane.
+  See [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
+  - **`y=`.** How many rows above the base plane its members stand.
+- **`pressure_plate`.** A pressure plate by a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+- **`lever`.** A lever on a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+- **`button`.** A button on a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+- **`daylight`.** A daylight detector by a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+- **`observer`.** An observer by a wall, a sensor. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`facing=`.** The way it faces, in place of away from the wall: `in`, `out`, `left`,
+    `right`, `up` or `down`. See
+    [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+- **`lamp`.** A redstone lamp by a wall, an actuator. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`lit_by=`.** The signal that lights it.
+- **`piston`.** A piston by a wall, an actuator. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`powered_by=`.** The signal that powers it.
+  - **`facing=`.** The way it pushes, in place of away from the wall: `in`, `out`, `left`,
+    `right`, `up` or `down`.
+  - **`sticky=`.** With `true`, a sticky piston.
+- **`dispenser`.** A dispenser by a wall, an actuator. See
+  [Redstone §14.2](/spec/redstone/#142-signal-binding).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`fired_by=`.** The signal that fires it.
+  - **`facing=`.** The way it fires, in place of away from the wall: `in`, `out`, `left`,
+    `right`, `up` or `down`.
+- **`chest`.** A chest by a wall, which pairs with a chest beside it. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** The wall and the face of it: `inside.<side>` or `<side>.outside`.
+  - **`offset=`.** The wall column it is beside.
+  - **`y=`.** The row it is on.
+  - **`facing=`.** The way it faces, in place of away from the wall: `in`, `out`, `left` or
+    `right`.
+  - **`size=`.** With `single`, the chest is not paired.
+  - **`waterlogged=`.** `true` or `false` written into the chest's state, or `auto` to let a water
+    `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`trapdoor`.** A trapdoor by a wall or at a coordinate triple. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it faces: by a wall `in`, `out`, `left` or `right`, in place of away
+    from the wall, and at a triple a compass word.
+  - **`half=`.** The half of the cell it sits in: `top` or `bottom`.
+  - **`open=`.** Whether it is built open, `true`, or closed, `false`.
+  - **`waterlogged=`.** `true` or `false` written into the trapdoor's state, or `auto` to let a
+    water `fill` decide. See [Blockstate Model §6.3](/spec/blockstate/#63-waterlogged).
+- **`note_block`.** A note block at a coordinate triple. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its cell, a coordinate triple.
+  - **`note=`.** Its note, a whole number from 0 to 24.
+  - **`instrument=`.** The name of the instrument it plays.
+- **`sign`.** A sign by a wall or at a coordinate triple, holding the text its line writes. See
+  [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the compass word it looks toward, hung on the block behind it, in
+    place of standing on the block under it.
+  - **`text=`.** Its front's text, a string or a list of up to four lines. See [Entities
+    §8.1](/spec/entities/#81-two-tiers).
+  - **`back=`.** Its back's text, a string or a list of up to four lines.
+  - **`glowing=`.** With `true`, the text on both faces is lit.
+- **`bed`.** A bed's head and foot, by a wall or at a coordinate triple. See [Blockstate Model
+  §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** Its head's cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column its head is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way its head points: by a wall `left` or `right`, in place of toward the
+    wall, and at a triple a compass word, which a bed there must write.
+- **`repeater`.** A redstone repeater placed by hand, a Tier 0 part. See
+  [Redstone §14.1](/spec/redstone/#tier-0-parts).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it drives: `in`, `out`, `left` or `right` by a wall, a compass word at
+    a triple.
+  - **`delay=`.** Its delay, a whole number from 1 to 4.
+- **`comparator`.** A redstone comparator placed by hand, a Tier 0 part. See
+  [Redstone §14.1](/spec/redstone/#tier-0-parts).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it drives: `in`, `out`, `left` or `right` by a wall, a compass word at
+    a triple.
+  - **`mode=`.** Its mode: `compare` or `subtract`.
+- **`redstone_torch`.** A redstone torch placed by hand, a Tier 0 part. See
+  [Redstone §14.1](/spec/redstone/#tier-0-parts).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the compass word naming the way it points from the side of the
+    block it hangs on.
+- **`redstone_dust`.** Redstone dust placed by hand, a Tier 0 part. See
+  [Redstone §14.1](/spec/redstone/#tier-0-parts).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`connect=`.** `none` for a dot or `all` for a cross, in place of the derived sides.
+- **`circuit`.** Reserves the layers under the base plane that the scope's logic is laid in. See
+  [Redstone §14.5](/spec/redstone/#145-place-and-route).
+  - **`region=`.** The label naming the reservation.
+  - **`void=`.** How many layers it reserves, at least 1.
+- **`raw_block`.** One block named by its id, in one cell. See [Materials and Themes
+  §7.4](/spec/materials-themes/#74-raw-blocks).
+  - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
+  - **`at=`.** The cell, a coordinate triple.
+- **`raw_fill`.** One block named by its id, in every cell of a box. See [Materials and Themes
+  §7.4](/spec/materials-themes/#74-raw-blocks).
+  - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
+  - **`from=`.** One corner of the box, a coordinate triple.
+  - **`to=`.** The opposite corner of the box, a coordinate triple.
+- **`place`.** Places a `def` in a `site`. See [Components, Editing, and Multi-building
+  §9.3.2](/spec/components-editing-sites/#932-origin-selectors).
+  - **`use=`.** The `def` it places.
+  - **`theme=`.** The theme the `def` is built with.
+  - **`at=`.** `origin`, which anchors it at world `(0, 0, 0)`.
+  - **`east_of=`.** The earlier place it stands east of.
+  - **`north_of=`.** The earlier place it stands north of.
+  - **`gap=`.** How many cells it leaves between itself and the place it stands beside.
+- **`connect`.** A walkway between two ports, `FROM.PORT to TO.PORT`. See [Components, Editing,
+  and Multi-building §9.3.5](/spec/components-editing-sites/#935-ports-and-connect).
+  - **`path=`.** The material token the walkway is laid with.

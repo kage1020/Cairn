@@ -91,11 +91,12 @@ fn a_themeless_scope_is_told_how_each_role_degrades() {
         notes(&out.diagnostics[0]),
         [
             "a `floor` is left air and a `fill` with a `mat_slot=` paints none of its box; no \
-             `walls` is built or takes up rows, so no `door` or `window` is cut; a `roof` is \
-             built from its default block, and so is an eave `stair`, `pressure_plate`, `button` \
-             or `chest` that still fits the shorter structure; any other sensor or actuator, a \
-             `raw_block` and a `raw_fill` need no theme and are built where the shorter structure \
-             still holds them",
+             `walls` is built or takes up rows, so no `door` or `window` is cut and no `beam` \
+             laid; a `roof` is built from its default block, and so is an eave `stair`, \
+             `pressure_plate`, `button`, `chest`, `trapdoor`, `sign` or `bed` that still fits \
+             the shorter structure; any other sensor or actuator, a `note_block`, a `raw_block` \
+             and a `raw_fill` need no theme and are built where the shorter structure still holds \
+             them",
             "a scope binds a theme when the module declares exactly one logical theme, or the \
              `place` names one with `theme=`; under a `--edition` pin that theme must also have \
              a variant for that edition",

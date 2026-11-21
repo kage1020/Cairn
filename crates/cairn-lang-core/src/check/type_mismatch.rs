@@ -2,11 +2,12 @@
 //! non-`WxH` one. It walks the surface AST, where a value lowering hoisted still has its type and
 //! span.
 
-use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
+use crate::ast::{Arg, EditTarget, Item, Module, Statement, ThemeRule, Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{guarded_lines, role_of};
 
 use super::DiagnosticSink;
+use super::arguments::HEADER_ARGUMENTS;
 
 /// Label keys whose mistyping is otherwise silent. `region=`, `east_of=` and `north_of=` are
 /// left out because another code already reports them.
@@ -26,6 +27,20 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
             }
             Item::Site { body, .. } => check_body(body, sink),
         }
+    }
+    for edit in &module.edits {
+        let keyword = edit.target.keyword();
+        if let EditTarget::Selector { attrs, .. } = &edit.target {
+            check_args(Some(keyword), attrs, sink);
+        }
+        // `check::edit` refuses an edit's `id=` whatever its value.
+        let set: Vec<Arg> = edit
+            .set
+            .iter()
+            .filter(|arg| arg.key != "id")
+            .cloned()
+            .collect();
+        check_args(Some(keyword), &set, sink);
     }
 }
 
@@ -70,7 +85,10 @@ fn check_args(keyword: Option<&str>, args: &[Arg], sink: &mut DiagnosticSink) {
             if !size_is_a_state {
                 check_size(&arg.value, sink);
             }
-        } else if LABEL_KEYS.contains(&arg.key.as_str()) {
+        // A key a header does not read is `E_UNKNOWN_ARGUMENT`'s alone.
+        } else if LABEL_KEYS.contains(&arg.key.as_str())
+            && (keyword.is_some() || HEADER_ARGUMENTS.contains(&arg.key.as_str()))
+        {
             check_label(&arg.key, &arg.value, sink);
         }
     }

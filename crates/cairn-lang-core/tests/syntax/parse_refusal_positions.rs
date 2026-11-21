@@ -91,16 +91,12 @@ fn a_latency_bound_is_a_whole_number_of_ticks() {
         "2:29: expected integer literal, got `-`",
     );
     assert_eq!(
-        refusal("struct s size=3x3\n  assert latency(a -> b) <= 4 ticks\n"),
-        "2:31: expected end of line, got identifier `ticks`",
-    );
-    assert_eq!(
         refusal("struct s size=3x3\n  assert latency(a -> b) <=\n"),
         "2:28: expected integer literal, got end of line",
     );
     assert_eq!(
         refusal("struct s size=3x3\n  assert latency(a -> b) <= 1.5\n"),
-        "2:30: expected end of line, got `.`",
+        "2:29: expected integer literal, got decimal `1.5`",
     );
 }
 
@@ -237,6 +233,23 @@ fn an_intended_targets_refusal_quotes_and_points_at_the_offending_value() {
             "@cairn 2026.06\n@intended_targets  [\"1.21\",   1]\n",
             "2:31: @intended_targets expects a string such as `\"1.21.4\"`, got `1`",
         ),
+        (
+            "@intended_targets [1.21]\n",
+            "1:20: @intended_targets expects a string such as `\"1.21.4\"`, got `1.21`",
+        ),
+        (
+            "@intended_targets [1.20.4, 1.21.4]\n",
+            "1:20: @intended_targets expects a string such as `\"1.21.4\"`, got `1.20.4`",
+        ),
+        (
+            "@intended_targets [\"1.21\", 1.21.4]\n",
+            "1:28: @intended_targets expects a string such as `\"1.21.4\"`, got `1.21.4`",
+        ),
+        (
+            "@intended_targets 1.20.4\n",
+            "1:19: @intended_targets expects a list of strings such as `[\"1.21.4\"]`, got \
+             `1.20.4`",
+        ),
     ] {
         assert_eq!(refusal(source), expected, "{source:?}");
     }
@@ -347,15 +360,13 @@ fn a_requires_member_with_a_body_still_parses_where_no_floor_may_stand() {
 
 // -- size literals ----------------------------------------------------------
 
-/// Every form whose arguments all need their `=` is listed, so a check in only one of them fails.
+/// A selector is the one list whose arguments all need their `=`, so both kinds are listed.
 #[test]
 fn a_size_with_no_height_is_named_as_one() {
     for (source, at) in [
-        ("struct s size=9x\n", "1:15"),
-        ("struct s size=9x 7\n", "1:15"),
-        ("def d size=9x\n", "1:12"),
         ("struct s size=3x3\n  floor[size=9x] mat=f\n", "2:14"),
-        ("theme t:\n  block[a=1] -> size=9x\n", "2:22"),
+        ("struct s size=3x3\n  floor[size=9x 7]\n", "2:14"),
+        ("theme t:\n  block[size=9x] -> a=1\n", "2:14"),
     ] {
         assert_eq!(
             refusal(source),
@@ -368,9 +379,48 @@ fn a_size_with_no_height_is_named_as_one() {
 #[test]
 fn a_size_with_no_height_is_named_under_any_key() {
     assert_eq!(
-        refusal("struct s a=9x\n"),
-        "1:12: size literal `9x` has no height; a size is two extents, as in `9x7`",
+        refusal("struct s size=3x3\n  floor[a=9x]\n"),
+        "2:11: size literal `9x` has no height; a size is two extents, as in `9x7`",
     );
+}
+
+/// A bare value on these lines is `E_UNEXPECTED_POSITIONAL`, so only a key has nowhere to go.
+#[test]
+fn a_key_on_a_line_that_takes_none_is_refused_at_the_key() {
+    for (source, expected) in [
+        (
+            "site s size=3x3\n",
+            "1:8: a `site` header takes no `key=value` argument, got `size=`; delete it: a `site` \
+             header is its name, with an optional `:` after it",
+        ),
+        (
+            "theme t dark=1:\n",
+            "1:9: a `theme` header takes no `key=value` argument, got `dark=`; delete it: a \
+             `theme` header is its name, with an optional `:` after it",
+        ),
+        (
+            "theme t:\n  slot a -> @b c=1\n",
+            "2:16: a `slot` row takes no `key=value` argument, got `c=`; delete it: a `slot` row \
+             binds one value",
+        ),
+        (
+            "struct s size=3x3\n  assert truth(a -> b) { 0 -> 1 } strict=1\n",
+            "2:35: an `assert truth` line takes no `key=value` argument, got `strict=`; delete it: \
+             an `assert truth` line ends at the `}` of its table",
+        ),
+        (
+            "struct s size=3x3\n  assert always(a -> eventually b within 4) twice=1\n",
+            "2:45: an `assert always` line takes no `key=value` argument, got `twice=`; delete \
+             it: an `assert always` line ends at its `)`",
+        ),
+        (
+            "struct s size=3x3\n  assert latency(a -> b) <= 4 ticks=2\n",
+            "2:31: an `assert latency` line takes no `key=value` argument, got `ticks=`; delete \
+             it: an `assert latency` line ends at its bound",
+        ),
+    ] {
+        assert_eq!(refusal(source), expected, "{source:?}");
+    }
 }
 
 /// `size=9x=2` is `size=9` and `x=2`; `codes` panics if the source does not parse.
@@ -383,16 +433,84 @@ fn a_glued_x_with_its_own_value_is_an_argument() {
 #[test]
 fn an_x_key_apart_from_a_size_is_an_ordinary_key() {
     assert_eq!(
-        refusal("struct s size=9 x\n"),
-        "1:18: expected `=`, got end of line",
+        refusal("struct s size=3x3\n  floor[size=9 x]\n"),
+        "2:17: expected `=`, got `]`",
     );
     assert_eq!(
-        refusal("struct s size=9y\n"),
-        "1:17: expected `=`, got end of line",
+        refusal("struct s size=3x3\n  floor[size=9y]\n"),
+        "2:16: expected `=`, got `]`",
     );
 }
 
+#[test]
+fn a_block_id_on_a_header_is_refused_at_its_colon() {
+    for (source, expected) in [
+        (
+            "struct s size=3x3 minecraft:stone\n",
+            "1:28: this `:` makes `minecraft:stone` a block id, which a `struct` header never \
+             reads: delete the block id",
+        ),
+        (
+            "def d size=3x3 minecraft:oak_log[axis=x]:\n",
+            "1:25: this `:` makes `minecraft:oak_log` a block id, which a `def` header never \
+             reads: delete the block id",
+        ),
+        (
+            "site s minecraft:stone\n",
+            "1:17: this `:` makes `minecraft:stone` a block id, which a `site` header never reads: \
+             delete the block id",
+        ),
+        (
+            "theme t minecraft:stone:\n",
+            "1:18: this `:` makes `minecraft:stone` a block id, which a `theme` header never \
+             reads: delete the block id",
+        ),
+    ] {
+        assert_eq!(refusal(source), expected, "{source:?}");
+    }
+}
+
+/// A header's bare values stand before its `:`, so a word after the `:` is refused where it stands.
+#[test]
+fn a_word_after_a_headers_colon_is_refused_at_the_word() {
+    for (source, expected) in [
+        (
+            "struct s:stone\n",
+            "1:10: expected end of line, got identifier `stone`",
+        ),
+        (
+            "struct s size=3x3:stone\n",
+            "1:19: expected end of line, got identifier `stone`",
+        ),
+        (
+            "struct s size=3x3: tall\n",
+            "1:20: expected end of line, got identifier `tall`",
+        ),
+    ] {
+        assert_eq!(refusal(source), expected, "{source:?}");
+    }
+}
+
 // -- logic expressions ------------------------------------------------------
+
+/// An infix primitive starts no expression, so after the name it is the `=` that is missing.
+#[test]
+fn a_logic_line_with_no_expression_after_its_name_needs_its_equals_sign() {
+    for (line, expected) in [
+        ("logic sig.a", "2:14: expected `=`, got end of line"),
+        (
+            "logic sig.a or sig.b",
+            "2:15: expected `=`, got identifier `or`",
+        ),
+        ("logic sig.a 3", "2:15: expected `=`, got integer `3`"),
+    ] {
+        assert_eq!(
+            refusal(&format!("struct s\n  {line}\n")),
+            expected,
+            "{line:?}"
+        );
+    }
+}
 
 #[test]
 fn an_infix_primitive_is_not_read_as_a_signal() {
@@ -633,7 +751,13 @@ fn a_stage_count_is_refused_where_it_is_wrong() {
         ),
         (
             "delay(sig.x, 1.5)",
-            "2:31: expected `)`, got `.`: a stage count is a whole number of stages, as in \
+            "2:30: expected a stage count, a whole number of at least 1, got decimal `1.5`: \
+             `delay` is applied to its operand and a stage count, as in `delay(…, N)`"
+                .to_owned(),
+        ),
+        (
+            "delay(sig.x, 1 .)",
+            "2:32: expected `)`, got `.`: a stage count is a whole number of stages, as in \
              `delay(…, N)`"
                 .to_owned(),
         ),

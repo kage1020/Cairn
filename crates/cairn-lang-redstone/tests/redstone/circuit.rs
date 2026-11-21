@@ -2,7 +2,9 @@
 //! struct, which rises over them (`spec/redstone` "Connection to the IR and phases").
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArrayIr, Dims, PaletteIndex, ResolvedMember};
+use cairn_lang_core::block_array::{
+    Bbox, BlockArrayIr, BlockEntityData, Dims, PaletteIndex, ResolvedMember,
+};
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
     CircuitEntity, CircuitLayout, Diagnostic, build_circuits, compile_legalize,
@@ -25,15 +27,23 @@ fn circuit(source: &str, edition: Edition) -> CircuitLayout {
     out.scoped.scopes[0].ir.clone()
 }
 
-/// `members` with every run `void` higher.
+/// `members` with every run and every geometry `void` higher.
 fn risen(members: &[ResolvedMember], void: u32) -> Vec<ResolvedMember> {
+    let up = |(x, y, z): (u32, u32, u32)| (x, y + void, z);
+    let lift = |bbox: Bbox| Bbox::spanning(up(bbox.min()), up(bbox.max()));
     let mut members = members.to_vec();
-    for run in members
-        .iter_mut()
-        .flat_map(|member| &mut member.resolved_state)
-        .flat_map(|block| &mut block.runs)
-    {
-        run.from.1 += void;
+    for member in &mut members {
+        let geometry = &mut member.geometry;
+        geometry.anchor = up(geometry.anchor);
+        geometry.declared_bbox = lift(geometry.declared_bbox);
+        geometry.actual_bbox = lift(geometry.actual_bbox);
+        for run in member
+            .resolved_state
+            .iter_mut()
+            .flat_map(|block| &mut block.runs)
+        {
+            run.from.1 += void;
+        }
     }
     members
 }
@@ -93,12 +103,22 @@ fn each_example_lays_its_circuit_under_its_struct_which_rises_whole() {
                 &source[members[0].span.clone()],
                 format!("circuit region=floor void={void}"),
             );
+            assert_eq!(
+                members[0].address.as_ref().map(ToString::to_string),
+                Some("circuit[0]".to_owned()),
+                "{name}"
+            );
             let cells: usize = members[0]
                 .resolved_state
                 .iter()
                 .map(|block| block.cells().count())
                 .sum();
             assert_eq!(cells, laid, "{name}");
+            assert_eq!(
+                members[0].geometry.declared_bbox,
+                Bbox::spanning((0, 0, 0), (now.dims.x - 1, void - 1, now.dims.z - 1)),
+                "{name}: the circuit declares the layers it reserves",
+            );
             assert_eq!(
                 members[1..],
                 risen(&before.members[&key], void)[..],
@@ -108,9 +128,11 @@ fn each_example_lays_its_circuit_under_its_struct_which_rises_whole() {
             let mut entities: Vec<((u32, u32, u32), i32)> = now
                 .block_entities
                 .iter()
-                .map(|entity| {
-                    assert_eq!(entity.id, "minecraft:comparator", "{name}");
-                    (entity.pos, entity.fields["OutputSignal"])
+                .map(|entity| match &entity.data {
+                    BlockEntityData::Fields { id, fields } if id == "minecraft:comparator" => {
+                        (entity.pos, fields["OutputSignal"])
+                    }
+                    other => panic!("{name}: expected a comparator's, got {other:?}"),
                 })
                 .collect();
             entities.sort_unstable();

@@ -2,7 +2,7 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
+    BlockArray, BlockEntityData, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
 };
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_state::BedrockStateError;
@@ -13,6 +13,7 @@ use cairn_lang_formats::bedrock_structure::{
 use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_nbt::tag::{Compound, Tag};
+use indexmap::IndexMap;
 
 use crate::common::{
     block_palette, comparator_array, default_palette, dropped_shape, note_fields, states_for,
@@ -512,6 +513,24 @@ fn write_mcstructure_is_uncompressed_little_endian() {
 }
 
 #[test]
+fn a_block_entity_on_no_voxel_of_the_grid_is_refused() {
+    let mut ba = comparator_array("minecraft:powered_comparator");
+    ba.block_entities[0].pos = (1, 2, 1);
+    let err = build(&ba).expect_err("off the grid");
+    assert!(
+        matches!(
+            &err,
+            BedrockStructureError::BlockEntityOutsideGrid {
+                id,
+                pos: (1, 2, 1),
+                dims: (2, 2, 3),
+            } if id == "minecraft:comparator"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
     let (mut ba, _) = asymmetric_array();
     assert_eq!(ba.palette.entries.len(), 2, "fixture palette");
@@ -899,12 +918,15 @@ fn a_block_entity_is_written_in_block_position_data_under_its_voxels_index() {
 #[test]
 fn a_block_entity_without_a_bedrock_form_is_refused() {
     let mut array = comparator_array("minecraft:powered_comparator");
-    array.block_entities[0].id = "minecraft:chest".to_owned();
+    array.block_entities[0].data = BlockEntityData::Fields {
+        id: "minecraft:chest".to_owned(),
+        fields: IndexMap::new(),
+    };
     match build(&array) {
-        Err(BedrockStructureError::UnmappedBlockEntity { id, known }) => {
+        Err(BedrockStructureError::UnmappedBlockEntity { id, pos, known }) => {
             assert_eq!(
-                (id.as_str(), known.as_str()),
-                ("minecraft:chest", "minecraft:comparator")
+                (id.as_str(), pos, known.as_str()),
+                ("minecraft:chest", (1, 1, 1), "minecraft:comparator")
             );
         }
         other => panic!("expected UnmappedBlockEntity, got {other:?}"),

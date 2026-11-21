@@ -53,7 +53,9 @@ pub(crate) enum Command {
             on `cairn check` and see every lowering-stage finding `cairn compile` would refuse \
             on, plus the `E_PARTIAL_BUILD` a lost scope earns. Nothing is written either way — \
             `compile` remains the command that produces artifacts and the lockfile, and the only \
-            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`).\n\n\
+            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`) and \
+            refuses a floor the blocks the build paints contradict (`E_REQUIRES_CONFLICT`, which \
+            `cairn info` reports without refusing).\n\n\
             When nothing else is an error, each struct's `logic` is built into its circuit as \
             `cairn compile` builds it (`spec/redstone` \"Place-and-route\"), and the circuit's \
             findings follow the lowering's: the pinned edition's, at the `--target` version when \
@@ -125,16 +127,21 @@ pub(crate) enum Command {
         #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
         format: CheckFormat,
     },
-    /// Report a .crn source file's version range, edition portability and semantic-sensitive
-    /// members.
+    /// Report a .crn source file's declared and inferred version ranges, edition portability,
+    /// respelled tokens, semantic-sensitive members and verified lock target.
     #[command(
-        long_about = "Report the three version axes (declared registry range, edition portability, \
-            semantic-sensitive members) for a .crn source file. Exits 0 on success; 1 on a parse \
-            failure, on any `Error`-severity diagnostic (the check passes run here, as does each \
-            requested edition's lowering with its circuits laid, and a range derived from a file \
-            `cairn check` rejects is a confident wrong answer), or on any \
-            other I/O error (permission denied, non-UTF-8 contents); 2 when the file cannot be \
-            located, and rejects an empty `--editions` value with exit 2"
+        long_about = "Report the three version axes (the registry range the file declares and \
+            the one the blocks it paints imply per edition, semantic-sensitive members, verified \
+            lock target) for a .crn source file, with each requested edition's portability, the \
+            canonical tokens its versions write under another id, and its buildable targets \
+            beside them. A floor above an edition's inferred range is printed \
+            as `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. \
+            Exits 0 on success, including when the lockfile is missing or cannot be read; 1 on a \
+            parse failure, on any `Error`-severity diagnostic (the check passes run here, as does \
+            each requested edition's lowering with its circuits laid, and a range derived from a \
+            file `cairn check` rejects is a confident wrong answer), or on any other I/O error \
+            reading the source (permission denied, non-UTF-8 contents); 2 when the source file \
+            cannot be located, and rejects an empty `--editions` value with exit 2"
     )]
     Info {
         /// Path to the .crn file to inspect.
@@ -145,10 +152,19 @@ pub(crate) enum Command {
             value_delimiter = ',',
             default_values_t = vec!["java".to_owned(), "bedrock".to_owned()],
             long_help = "Comma-separated editions to evaluate portability against. Each distinct \
-                edition produces one entry in the output's `edition portability` and `buildable \
-                targets` sections; a repeated name is reported once",
+                edition produces one entry in the output's `inferred range`, `edition \
+                portability` and `buildable targets` sections; a repeated name is reported once",
         )]
         editions: Vec<String>,
+        /// Lockfile to report the verified target of; defaults to `<source>.lock` next to the
+        /// source.
+        #[arg(
+            long,
+            long_help = "Lockfile whose target the `verified target` row reports. Defaults to \
+                `<source>.lock` next to the source, the path `cairn compile` writes. A path with \
+                no file reports `(no lock)` rather than refusing the command"
+        )]
+        lock: Option<PathBuf>,
         /// Output format for the report.
         #[arg(long, value_enum, default_value_t = InfoFormat::Text)]
         format: InfoFormat,
@@ -201,9 +217,16 @@ pub(crate) enum Command {
             `--target` pins the one version a block id and its states have an answer for, which \
             is what lets the compile check them (`E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, \
             `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`); `cairn check --edition E --target V` pins the \
-            same pair to reach those findings without building anything. Exits 0 on success, 1 \
-            on parse, lowering, or I/O failure (including an unsupported `--target` or a state \
-            literal outside its block's states), and 2 when the source file cannot be located"
+            same pair to reach those findings without building anything. \
+            `--structure-format litematic` writes Java's artifacts as Litematica `.litematic` \
+            schematics instead: a struct to a file of its own and a site to one file with a \
+            region per placement and walkway (`spec/ecosystem-interop` \"Litematica\"); \
+            `--structure-format schem` writes them as Sponge Schematic version 3 `.schem` files, \
+            one per struct, placement and walkway, each offset by where it sits in its site \
+            (`spec/ecosystem-interop` \"Sponge Schematic\"). Exits 0 on success, 1 on parse, \
+            lowering, or I/O failure (including an unsupported `--target` or a state literal \
+            outside its block's states), and 2 when the source file cannot be located or \
+            `--structure-format` is given with `--edition bedrock`"
     )]
     Compile {
         /// Path to the .crn file to compile.
@@ -228,12 +251,26 @@ pub(crate) enum Command {
                 `DataVersionTable::latest`)"
         )]
         target: String,
+        /// Java structure file format; defaults to `nbt`.
+        #[arg(
+            long,
+            value_enum,
+            long_help = "The file format Java's structures are written in: `nbt` (the default), \
+                one vanilla structure file per struct, placement and walkway; `litematic`, one \
+                Litematica schematic per struct and per site; or `schem`, one Sponge Schematic \
+                per struct, placement and walkway (`spec/ecosystem-interop` \"Forward \
+                direction\"). Whichever is written, the artifacts share one naming rule, the \
+                same collision guards and the same lockfile. Bedrock writes only `.mcstructure`, \
+                so the flag with `--edition bedrock` is refused with exit 2 before the file is \
+                read"
+        )]
+        structure_format: Option<StructureFormat>,
         /// Output directory for the structure files; defaults to the source file's directory.
         #[arg(
             long,
-            long_help = "Output directory for the generated structure files (`.nbt` for Java, \
-                `.mcstructure` for Bedrock). Created if missing. Defaults to the source file's \
-                parent directory"
+            long_help = "Output directory for the generated structure files (`.nbt`, \
+                `.litematic` or `.schem` for Java, `.mcstructure` for Bedrock). Created if \
+                missing. Defaults to the source file's parent directory"
         )]
         out: Option<PathBuf>,
         /// Lockfile path; defaults to `<source>.lock` next to the source.
@@ -410,9 +447,22 @@ pub(crate) enum SynthStage {
     Legalize,
 }
 
+/// The file format `cairn compile` writes Java's structures in.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum StructureFormat {
+    /// Vanilla structure files (`.nbt`), one per struct, placement and walkway (default).
+    #[default]
+    Nbt,
+    /// Litematica schematics (`.litematic`), one per struct and per site.
+    Litematic,
+    /// Sponge Schematic version 3 (`.schem`), one per struct, placement and walkway.
+    Schem,
+}
+
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum ParseFormat {
-    /// Pretty JSON (default).
+    /// Pretty JSON (default), each member line of a `struct` or `def` body carrying its address,
+    /// and each `edit` line its target and the keys it sets.
     Json,
     /// Rust `{:#?}` debug formatting (developer-facing).
     Debug,
@@ -430,14 +480,14 @@ pub(crate) enum CheckFormat {
 pub(crate) enum InfoFormat {
     /// Multi-line human report mirroring the three-answers section of `spec/versioning-editions`.
     Text,
-    /// Pretty JSON serialisation of `VersionAxes`, for tools.
+    /// Pretty JSON serialisation of `VersionAxes` and the verified lock target, for tools.
     Json,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum LowerFormat {
-    /// Per-structure ASCII Y-slice plus a palette listing (default; easiest way to eyeball
-    /// whether the walls came out right).
+    /// Per-structure ASCII Y-slice plus a palette listing and the address of each member that
+    /// built a cell (default; easiest way to eyeball whether the walls came out right).
     Ascii,
     /// Pretty JSON serialisation of `BlockArrayIr`, for tools.
     Json,

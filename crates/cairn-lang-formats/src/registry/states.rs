@@ -121,6 +121,8 @@ pub enum SensitivityKind {
     MissingState,
     /// Bedrock works it out itself, so nothing is lost.
     Derived,
+    /// Bedrock keeps it in the block's block entity, which the writer fills from it.
+    BlockEntity,
 }
 
 /// The validated state maps of a Bedrock pack.
@@ -459,12 +461,12 @@ impl StateMapIndex {
     /// The versions whose map writes `state` as a form of a block it maps, oldest first.
     pub fn versions_writing<'a>(&'a self, state: &'a BlockState) -> impl Iterator<Item = &'a str> {
         self.by_version.iter().filter_map(move |(version, map)| {
-            let names = map.onto.contains_key(&state.id) || map.from.contains_key(&state.id);
             let states = VersionStates {
                 index: self,
                 mc_version: version,
                 map,
             };
+            let names = map.onto.contains_key(&state.id) || states.writes_apart(&state.id);
             (names && states.resolve(state).is_ok()).then_some(version.as_str())
         })
     }
@@ -771,6 +773,18 @@ pub struct BedrockForm {
     /// Each state the entry names that Bedrock does not carry because it works the state out
     /// itself, which is lost where a member wrote it.
     pub rederived: Vec<DroppedState>,
+    /// What Bedrock keeps of the entry in the block's block entity, `None` when the entry asks for
+    /// nothing there other than the Java default.
+    pub in_entity: Option<EntityStates>,
+}
+
+/// The states a [`BedrockForm`] keeps in its block's block entity, which the writer fills.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityStates {
+    /// Each `(key, value)` Bedrock keeps there, at a value other than the Java default.
+    pub kept: Vec<(String, String)>,
+    /// Every Java state of the entry, each default filled in, which the entity's other fields read.
+    pub states: IndexMap<String, String>,
 }
 
 /// One Java state value a [`BedrockForm`] does not carry.
@@ -828,6 +842,34 @@ impl<'a> VersionStates<'a> {
             }
         }
         ids
+    }
+
+    /// Whether this version writes the Java block `java` as Bedrock blocks of its own: `java` is
+    /// no Bedrock spelling here, the palette refuses none of its pairs, and no other Java block
+    /// mapped onto the ids it is written as takes any of its forms, so what is written still says
+    /// which block it was (`spec/materials-themes` "Mappings across version and edition").
+    #[must_use]
+    pub fn writes_apart(&self, java: &str) -> bool {
+        let map: &VersionMap = self.map;
+        if map.onto.contains_key(java) || map.refused_from.contains(java) {
+            return false;
+        }
+        let Some(forms) = map.from.get(java) else {
+            return false;
+        };
+        let mut theirs: HashSet<String> = HashSet::new();
+        for (bedrock, _) in forms {
+            for (other, at) in map.onto.get(bedrock).map_or(&[][..], Vec::as_slice) {
+                if other != java {
+                    theirs.extend(self.form_keys(bedrock, other, *at));
+                }
+            }
+        }
+        forms.iter().all(|(bedrock, at)| {
+            self.form_keys(bedrock, java, *at)
+                .iter()
+                .all(|key| !theirs.contains(key))
+        })
     }
 
     /// The Bedrock id that writes `state` here when no family of its own id holds its states but
@@ -889,8 +931,9 @@ impl VersionStates<'_> {
     }
 
     /// Every canonical property `id` takes here with the values it holds, those of each block
-    /// [`Self::resolve`] may read the id as, or `None` when no Java block maps onto it or the
-    /// palette refuses some of its states, so the map cannot tell which states it takes.
+    /// [`Self::resolve`] may read the id as, or `None` when the map has no form for it, as a Java
+    /// block or a Bedrock spelling, or the palette refuses some of its states, so the map cannot
+    /// tell which states it takes.
     #[must_use]
     pub fn canonical_domain(&self, id: &str) -> Option<IndexMap<String, Vec<String>>> {
         let own = self.reads_as_java(id);
@@ -930,6 +973,35 @@ impl VersionStates<'_> {
                 .onto
                 .get(id)
                 .is_some_and(|forms| forms.iter().any(|(java, _)| java == id))
+            || (!self.map.onto.contains_key(id) && self.map.from.contains_key(id))
+    }
+
+    /// Every form the Java block `java` takes as `bedrock` through family `at`, as keys equal for
+    /// one form whatever order a family keeps its states in.
+    fn form_keys(&self, bedrock: &str, java: &str, at: usize) -> Vec<String> {
+        let family = self.family(at);
+        let mut states: Vec<IndexMap<String, String>> = vec![IndexMap::new()];
+        for (key, held) in &family.java {
+            states = states
+                .into_iter()
+                .flat_map(|state| {
+                    held.iter().map(move |value| {
+                        let mut next = state.clone();
+                        next.insert(key.clone(), value.clone());
+                        next
+                    })
+                })
+                .collect();
+        }
+        states
+            .iter()
+            .map(|full| {
+                let form = self.form(bedrock, java, family, full, full);
+                let mut states = form.states;
+                states.sort_by(|(a, _), (b, _)| a.cmp(b));
+                format!("{}|{states:?}|{}", form.id, form.waterlogged)
+            })
+            .collect()
     }
 
     /// Whether an entry of `id` with the states `given` reads as `id`'s own Java block: `id` names
@@ -1180,6 +1252,7 @@ impl VersionStates<'_> {
             .collect();
         let mut dropped = Vec::new();
         let mut rederived = Vec::new();
+        let mut kept = Vec::new();
         for key in &family.dropped {
             // INVARIANT(dropped-classified): the loader refuses a dropped key without a row.
             let Some((kind, reason)) = self.index.sensitivity.get(key).and_then(|k| k.row(java))
@@ -1196,7 +1269,12 @@ impl VersionStates<'_> {
                     dropped.push(state());
                 }
                 SensitivityKind::Derived if given.contains_key(key) => rederived.push(state()),
-                SensitivityKind::MissingState | SensitivityKind::Derived => {}
+                SensitivityKind::BlockEntity if full[key] != family.defaults[key] => {
+                    kept.push((key.clone(), full[key].clone()));
+                }
+                SensitivityKind::MissingState
+                | SensitivityKind::Derived
+                | SensitivityKind::BlockEntity => {}
             }
         }
         BedrockForm {
@@ -1206,6 +1284,10 @@ impl VersionStates<'_> {
                 || self.index.in_water.contains(java),
             dropped,
             rederived,
+            in_entity: (!kept.is_empty()).then(|| EntityStates {
+                kept,
+                states: full.clone(),
+            }),
         }
     }
 }
@@ -1262,6 +1344,7 @@ fn bare_or(
             waterlogged: false,
             dropped: Vec::new(),
             rederived: Vec::new(),
+            in_entity: None,
         })
     } else {
         Err(StateRefusal::Unmapped { reason })

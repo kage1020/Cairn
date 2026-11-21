@@ -13,7 +13,7 @@ use cairn_lang_core::{Edition, Severity, lower};
 use cairn_lang_formats::registry::builtin_pack;
 
 use crate::cli::LowerFormat;
-use crate::pipeline::{build_diagnostics, lay_circuits, load_module, weighed_editions};
+use crate::pipeline::{build_diagnostics, lay_circuits, load_module};
 use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
 
 pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerFormat) -> ExitCode {
@@ -29,17 +29,17 @@ pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerForm
     // With no edition pinned the guarded lines are left out, but an error on one still fails the
     // command.
     if edition.is_none() {
-        let declared = |edition, id: &str| builtin_pack(edition).may_declare(id);
+        let standing = |edition, id: &str| builtin_pack(edition).id_standing(id);
         block_ir
             .diagnostics
-            .extend(findings_under_guards(&ir, &declared));
+            .extend(findings_under_guards(&ir, &standing));
     }
     // Check findings lead, ahead of the lowering deferrals they cascade into.
     block_ir.diagnostics = build_diagnostics(
         &module,
         &ir,
         edition,
-        &weighed_editions(edition),
+        &Edition::weighed(edition),
         std::mem::take(&mut block_ir.diagnostics),
     );
     let circuits = edition.map_or_else(Vec::new, |edition| {
@@ -129,6 +129,20 @@ fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
                     state.id,
                     state.properties_text()
                 );
+            }
+        }
+        let members = block_ir.members.get(key).map_or(&[][..], Vec::as_slice);
+        if !members.is_empty() {
+            outln!("  members:");
+        }
+        for member in members {
+            let address = member.address.as_ref().map_or_else(
+                || format!("{} (no address)", member.role),
+                ToString::to_string,
+            );
+            match &member.id {
+                Some(id) => outln!("    {address}  id={id}"),
+                None => outln!("    {address}"),
             }
         }
         for y in 0..array.dims.y {

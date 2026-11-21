@@ -117,12 +117,9 @@ fn the_corpus_reaches_the_header_vocabulary_prose() {
             "`siz=` is not an argument a `struct` header reads",
         ),
         (
-            "W_IGNORED_ARGUMENT primary",
-            "`class=` is an argument a `def` header takes and no pass reads yet",
-        ),
-        (
-            "W_IGNORED_ARGUMENT note 0",
-            "the `def` is built without it — remove the argument",
+            "E_UNKNOWN_ARGUMENT note 1",
+            "`class=` is a member's key, written on a line in the body; remove it from the `def` \
+             header",
         ),
     ] {
         assert!(
@@ -172,6 +169,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_INCOMPLETE_PLACE",
         "E_INVALID_MEMBER",
         "E_INVALID_PLACE_ID",
+        "E_INVALID_SITE_NAME",
         "E_INVALID_STRUCT_NAME",
         "E_MISPLACED_MEMBER",
         "E_THEME_SELECTOR_UNMATCHED",
@@ -360,7 +358,7 @@ fn circuit_under_level_sources() -> Vec<String> {
     ]
 }
 
-/// The sources for a misspelled header `size=` and the unread `class=`.
+/// The sources for a misspelled header `size=` and a member's `class=` on a header.
 fn header_sources() -> Vec<String> {
     vec![
         format!("{THEME}struct s siz=7x7\n  floor mat_slot=floor\n"),
@@ -447,13 +445,16 @@ fn unreadable_value_sources() -> Vec<String> {
     ]
 }
 
-/// The source for names Windows reserves for a device, and rows naming a place refused for one.
+/// The sources for names Windows reserves for a device, and rows naming a place refused for one.
 fn device_name_sources() -> Vec<String> {
-    vec![format!(
-        "{THEME}{HUT}struct con size=3x3\n  floor mat_slot=floor\n\nsite s:\n  \
-         place id=a use=hut theme=t at=origin\n  place id=nul use=hut theme=t east_of=a gap=4\n  \
-         place id=b use=hut theme=t north_of=nul gap=4\n  connect a.entry to nul.entry path=@path\n"
-    )]
+    vec![
+        format!(
+            "{THEME}{HUT}struct con size=3x3\n  floor mat_slot=floor\n\nsite s:\n  \
+             place id=a use=hut theme=t at=origin\n  place id=nul use=hut theme=t east_of=a gap=4\n  \
+             place id=b use=hut theme=t north_of=nul gap=4\n  connect a.entry to nul.entry path=@path\n"
+        ),
+        format!("{THEME}{HUT}site prn:\n  place id=a use=hut theme=t at=origin\n"),
+    ]
 }
 
 /// Every finding `check` and the block-array pass raise over `source`.

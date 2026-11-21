@@ -94,6 +94,20 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        "E_EDIT_UNKNOWN_KEY",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \nedit floor[0] set height=3\n",
+        ),
+    ),
+    (
+        "E_EDIT_UNMATCHED",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \nedit floor[1] set mat_slot=wall\n",
+        ),
+    ),
+    (
         "E_INVALID_REQUIRES",
         Source::Whole(
             "@requires version<1.20\n\
@@ -104,6 +118,13 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     (
         "E_INVALID_STRUCT_NAME",
         Source::WithPrologue("struct nul size=3x3\n  floor mat_slot=floor\n"),
+    ),
+    (
+        "E_INVALID_SITE_NAME",
+        Source::WithPrologue(
+            "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\n\
+             site aux:\n  place id=a use=hut theme=t at=origin\n",
+        ),
     ),
     (
         "E_MISSING_MATERIAL",

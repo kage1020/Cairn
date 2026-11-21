@@ -36,8 +36,9 @@ to read when one is at hand, since this site follows the latest release:
 
 Reach for Cairn when a task asks for a Minecraft build as a file someone loads into the game:
 
-- Design a house, tower, wall or other structure and hand it over as a Java \`.nbt\` structure file
-  or a Bedrock \`.mcstructure\`, for a structure block, a datapack or an add-on.
+- Design a house, tower, wall or other structure and hand it over as a Java \`.nbt\` structure
+  file, a Litematica \`.litematic\` or Sponge \`.schem\` schematic, or a Bedrock \`.mcstructure\`,
+  for a structure block, a schematic mod, a datapack or an add-on.
 - Edit a build as text: change a material across the whole build with a theme, move an opening, or
   resize a wall, and recompile instead of editing every block.
 - Ship one build to both editions, or to several Minecraft versions, from one source.
@@ -53,7 +54,8 @@ following the tutorial and the specification below, and iterate:
 1. \`cairn check FILE --format json\` until it reports no errors.
 2. \`cairn lower FILE\` to see each layer of the build as ASCII and confirm the shape.
 3. \`cairn compile FILE --edition java --target 1.21.4\` (or \`--edition bedrock\` with a Bedrock
-   version) to write the structure file and its lockfile.
+   version) to write the structure files and their lockfile. \`--structure-format litematic\` or
+   \`schem\` writes Java's as schematics instead.
 
 ${sections.join("\n\n")}
 `;

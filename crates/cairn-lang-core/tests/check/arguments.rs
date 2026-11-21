@@ -5,6 +5,7 @@ use cairn_lang_core::intent::{
     MemberRole, UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
 };
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Edition, check, lower, parse};
+use serde_json::json;
 
 use crate::common::{codes, diagnose, exactly_one, of_code};
 
@@ -48,6 +49,43 @@ fn a_key_the_role_does_not_read_is_refused() {
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert!(d.primary.contains("`hieght=`"), "got: {}", d.primary);
     assert!(d.primary.contains("`walls`"), "got: {}", d.primary);
+}
+
+/// No keyword reads `nbt=` yet, so it is a key like any other a role does not take.
+#[test]
+fn a_compound_on_a_key_no_role_reads_is_refused_as_that_key() {
+    let src = "struct s size=5x5\n  walls mat_slot=wall height=3 nbt={CustomName:\"x\"}\n";
+    let d = exactly_one(diagnose(src));
+    assert_eq!(
+        (d.code.as_str(), d.primary.as_str(), &src[d.span.clone()]),
+        (
+            "E_UNKNOWN_ARGUMENT",
+            "`nbt=` is not an argument `walls` reads",
+            "{CustomName:\"x\"}",
+        ),
+    );
+}
+
+#[test]
+fn a_compound_on_a_header_or_a_theme_selector_binding_is_a_key_no_pass_reads() {
+    let header = "struct s size=5x5 nbt={a:1}\n  floor mat_slot=wall\n\ntheme t:\n  \
+                  slot wall -> @stone\n";
+    let d = exactly_one(diagnose(header));
+    assert_eq!(
+        (d.code.as_str(), d.primary.as_str(), &header[d.span.clone()]),
+        (
+            "E_UNKNOWN_ARGUMENT",
+            "`nbt=` is not an argument a `struct` header reads",
+            "{a:1}",
+        ),
+    );
+    let binding = "theme t:\n  slot wall -> @stone\n  walls[class=outer] -> nbt={a:1}\n\n\
+                   struct s size=5x5\n  walls class=outer mat_slot=wall\n";
+    let d = exactly_one(diagnose(binding));
+    assert_eq!(
+        (d.code.as_str(), &binding[d.span.clone()]),
+        ("W_IGNORED_ARGUMENT", "{a:1}"),
+    );
 }
 
 #[test]
@@ -97,6 +135,53 @@ fn a_key_nothing_resembles_is_named_with_the_closed_set_and_no_suggestion() {
 }
 
 #[test]
+fn the_payload_names_the_key_and_the_suggestion_its_note_offers() {
+    for (src, key, suggestion) in [
+        (
+            "struct s size=5x5\n  walls mat_slot=wall hieght=3\n",
+            "hieght",
+            "height",
+        ),
+        ("struct s siz=7x7\n  floor mat_slot=m\n", "siz", "size"),
+        (
+            "struct s size=9x7\n  window[clas=outer] side=front offset=2 y=2 size=2x2\n",
+            "clas",
+            "class",
+        ),
+    ] {
+        let d = exactly_one(diagnose(src));
+        assert_eq!(
+            serde_json::to_value(&d.data).expect("serialises"),
+            json!({"kind": "unknown_argument", "key": key, "suggestion": suggestion}),
+            "source:\n{src}",
+        );
+    }
+}
+
+#[test]
+fn a_key_nothing_resembles_carries_no_suggestion() {
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  floor totally_unrelated=1 mat_slot=m\n",
+    ));
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({"kind": "unknown_argument", "key": "totally_unrelated"}),
+    );
+}
+
+#[test]
+fn a_typo_written_twice_carries_the_suggestion_its_note_offers() {
+    let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  \
+               walls[hieght=3] -> frame=@spruce_wood\n\n\
+               struct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({"kind": "unknown_argument", "key": "hieght", "suggestion": "height"}),
+    );
+}
+
+#[test]
 fn an_unknown_keyword_answers_for_its_own_arguments() {
     assert_eq!(
         codes("struct s size=5x5\n  torch brightness=15\n"),
@@ -124,23 +209,37 @@ fn a_member_inside_a_def_is_checked_like_any_other() {
 
 #[test]
 fn a_struct_header_key_outside_its_vocabulary_is_refused_with_the_closed_set() {
-    // `height` is a member's key, not the header's, so nothing is suggested.
-    let src = "struct s size=5x5 hieght=3\n  floor mat_slot=m\n";
-    let d = exactly_one(diagnose(src));
-    assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
-    assert_eq!(&src[d.span.clone()], "3");
-    assert!(
-        d.primary
-            .contains("`hieght=` is not an argument a `struct` header reads"),
-        "got: {}",
-        d.primary,
-    );
-    let notes = notes(&d);
-    assert!(!notes.contains("did you mean"), "got: {notes}");
-    assert!(
-        notes.contains("expected one of: size, class"),
-        "got: {notes}"
-    );
+    // None of these is near `size`, and none is a key every member takes, so the closed set is
+    // the only note; `use=1` is a label key and still draws no `E_TYPE_MISMATCH_LABEL`.
+    for (src, key, value) in [
+        (
+            "struct s size=5x5 hieght=3\n  floor mat_slot=m\n",
+            "hieght",
+            "3",
+        ),
+        (
+            "struct s size=5x5 clas=house\n  floor mat_slot=m\n",
+            "clas",
+            "house",
+        ),
+        ("struct s size=5x5 use=1\n  floor mat_slot=m\n", "use", "1"),
+    ] {
+        let d = exactly_one(diagnose(src));
+        assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT", "source:\n{src}");
+        assert_eq!(&src[d.span.clone()], value, "source:\n{src}");
+        assert_eq!(
+            d.primary,
+            format!("`{key}=` is not an argument a `struct` header reads"),
+        );
+        assert_eq!(
+            d.notes
+                .iter()
+                .map(|note| note.message.as_str())
+                .collect::<Vec<_>>(),
+            ["expected one of: size"],
+            "source:\n{src}",
+        );
+    }
 }
 
 #[test]
@@ -152,60 +251,89 @@ fn a_misspelled_size_on_a_header_is_told_it_is_misspelled() {
     ] {
         let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", total);
         assert_eq!(&src[d.span.clone()], "7x7", "source:\n{src}");
-        assert!(
-            d.primary.contains(&format!(
-                "`siz=` is not an argument a `{keyword}` header reads"
-            )),
-            "got: {}",
+        assert_eq!(
             d.primary,
+            format!("`siz=` is not an argument a `{keyword}` header reads"),
         );
-        assert!(
-            notes(&d).contains("did you mean `size`?"),
-            "got: {}",
-            notes(&d),
+        assert_eq!(
+            d.notes
+                .iter()
+                .map(|note| note.message.as_str())
+                .collect::<Vec<_>>(),
+            ["did you mean `size`?", "expected one of: size"],
+            "source:\n{src}",
         );
     }
 }
 
 #[test]
-fn a_header_class_is_accepted_and_reported_as_ignored() {
-    // `spec/components-editing-sites` "`def`, the component construct" writes `class=` on a header.
+fn a_member_key_on_a_header_is_refused_and_sent_to_the_body() {
     // The unplaced `def` also earns `W_UNUSED_DEF`.
-    for (src, keyword, total) in [
+    for (src, keyword, key, value, total) in [
         (
             "def cottage class=house size=9x7:\n  floor mat_slot=m\n",
             "def",
+            "class",
+            "house",
             2,
         ),
         (
             "struct cottage class=house size=9x7\n  floor mat_slot=m\n",
             "struct",
+            "class",
+            "house",
+            1,
+        ),
+        (
+            "struct cottage size=9x7 id=main\n  floor mat_slot=m\n",
+            "struct",
+            "id",
+            "main",
+            1,
+        ),
+        (
+            "struct cottage size=9x7 class=1\n  floor mat_slot=m\n",
+            "struct",
+            "class",
+            "1",
+            1,
+        ),
+        (
+            "def cottage size=9x7 id=1:\n  floor mat_slot=m\n",
+            "def",
+            "id",
+            "1",
+            2,
+        ),
+        (
+            "struct cottage size=9x7 mat_slot=m\n  floor mat_slot=m\n",
+            "struct",
+            "mat_slot",
+            "m",
             1,
         ),
     ] {
-        let d = only_with_code(src, "W_IGNORED_ARGUMENT", total);
-        assert_eq!(&src[d.span.clone()], "house", "source:\n{src}");
-        assert!(
-            d.primary.contains(&format!(
-                "`class=` is an argument a `{keyword}` header takes and no pass reads yet"
-            )),
-            "got: {}",
+        let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", total);
+        assert_eq!(&src[d.span.clone()], value, "source:\n{src}");
+        assert_eq!(
             d.primary,
+            format!("`{key}=` is not an argument a `{keyword}` header reads"),
+        );
+        assert_eq!(
+            d.notes
+                .iter()
+                .map(|note| note.message.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "expected one of: size".to_owned(),
+                format!(
+                    "`{key}=` is a member's key, written on a line in the body; remove it from \
+                     the `{keyword}` header"
+                ),
+            ],
+            "source:\n{src}",
         );
     }
-}
-
-#[test]
-fn a_near_miss_on_a_header_class_is_offered_the_unread_key() {
-    let src = "struct s size=5x5 clas=house\n  floor mat_slot=m\n";
-    let d = exactly_one(diagnose(src));
-    assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
-    assert_eq!(&src[d.span.clone()], "house");
-    assert!(
-        notes(&d).contains("did you mean `class`?"),
-        "got: {}",
-        notes(&d),
-    );
 }
 
 #[test]
@@ -229,6 +357,16 @@ fn a_theme_selector_widens_the_vocabulary_of_the_keyword_it_names() {
                       struct s size=9x7\n  \
                       window tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
     assert_eq!(codes(unselected), ["E_UNKNOWN_ARGUMENT"]);
+}
+
+#[test]
+fn a_level_attribute_names_a_level_and_widens_no_vocabulary() {
+    let src = "theme t:\n  slot glass -> @glass_pane\n  \
+               window[level=floor2] -> frame=@spruce_wood\n\n\
+               struct s size=9x7\n  level id=floor2 y=0\n    \
+               window level=floor2 side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "E_UNKNOWN_ARGUMENT"]);
+    assert_eq!(ignored_at(src), ["@spruce_wood"]);
 }
 
 #[test]
@@ -349,19 +487,23 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "door",
-        "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a hinge=left open=false\n",
+        "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a hinge=left open=false\n  door id=e side=back offset=1\n",
     ),
     (
         "window",
-        "  window id=n class=c mat_slot=m side=front y=2 offset=1 size=1x1 sym=false repeat=1 step=1\n",
+        "  window id=n class=c mat_slot=m side=front y=2 offset=1 size=1x1 sym=false repeat=1 step=1 anchor=bottom_left\n",
     ),
     (
         "roof",
-        "  roof id=r class=c mat_slot=m kind=shed overhang=1 slope_to=front\n",
+        "  roof id=r class=c mat_slot=m kind=shed overhang=1 slope_to=front footprint=struct bounds=expand\n",
     ),
     (
         "stair",
         "  stair id=s class=c mat_slot=m kind=stairs side=front half=top facing=out shape=straight y=0 waterlogged=false\n",
+    ),
+    (
+        "beam",
+        "  beam id=b class=c mat_slot=m kind=pillar at=front.top axis=x\n",
     ),
     ("level", "  level id=l class=c y=0\n"),
     (
@@ -399,6 +541,22 @@ const SWEEP: &[(&str, &str)] = &[
     (
         "chest",
         "  chest id=k class=c mat_slot=m at=inside.front offset=1 y=0 facing=left size=single waterlogged=false\n",
+    ),
+    (
+        "trapdoor",
+        "  trapdoor id=td class=c mat_slot=m at=inside.front offset=2 y=1 facing=in half=top open=true waterlogged=false\n",
+    ),
+    (
+        "note_block",
+        "  note_block id=nb class=c at=1,0,1 note=12 instrument=bit\n",
+    ),
+    (
+        "sign",
+        "  sign id=sg class=c mat_slot=m at=inside.front offset=1 y=1 text=\"A\" back=[\"B\"] glowing=true\n  sign at=1,0,1 facing=east\n",
+    ),
+    (
+        "bed",
+        "  bed id=bd class=c mat_slot=m at=inside.front offset=1 y=0\n  bed at=1,0,1 facing=east\n",
     ),
     (
         "repeater",
@@ -550,18 +708,9 @@ fn a_stair_reads_the_height_it_is_written_at() {
 }
 
 #[test]
-fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // Each is written on a known keyword in `spec/entities` "Anchor conventions".
-    let rows = [
-        ("window side=front y=2 offset=4 size=3x3", "shape", "arch"),
-        (
-            "window side=front y=2 offset=4 size=3x3",
-            "anchor",
-            "bottom_center",
-        ),
-        ("roof kind=gable", "footprint", "struct"),
-        ("roof kind=gable", "bounds", "expand"),
-    ];
+fn an_unreached_argument_the_spec_writes_is_accepted_and_reported() {
+    // Written on a known keyword in `spec/entities` "Anchor conventions".
+    let rows = [("window side=front y=2 offset=4 size=3x3", "shape", "arch")];
     for (line, key, value) in rows {
         let keyword = keyword_of(line);
         let src = format!("struct s size=9x9\n  {line} {key}={value}\n");
@@ -995,6 +1144,11 @@ impl UnreadSlot {
 }
 
 const UNREAD_SLOTS: &[UnreadSlot] = &[
+    UnreadSlot {
+        keyword: "note_block",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  note_block at=2,1,2 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
     UnreadSlot {
         keyword: "lever",
         body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  lever at=inside.front offset=1 y=1 mat_slot=%SLOT%\n",

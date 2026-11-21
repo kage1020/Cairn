@@ -6,6 +6,7 @@
 
 mod args;
 mod attach;
+mod geometry;
 mod joins;
 mod lower;
 mod material;
@@ -19,13 +20,15 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
+pub use geometry::{Bbox, MemberGeometry};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{
     BUILTIN_BLOCK_IDS, findings_under_guards, findings_without_target, lower_to_block_array,
 };
 pub use material::{
-    AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, MaterialDeferred,
-    OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState, resolve_block_state,
+    AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, IdStanding,
+    MaterialDeferred, OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState,
+    bound_canonical_tokens, resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.
@@ -35,6 +38,7 @@ use crate::error::Span;
 use crate::ids::{
     PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem, walkway_artifact_stem,
 };
+use crate::intent::{MemberAddress, MemberRole, Size, role_of};
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -71,6 +75,9 @@ pub struct Walkway {
     pub footprint: Footprint,
     /// Canonical id of the path material, e.g. `minecraft:gravel`.
     pub path_material: String,
+    /// Byte range of the `connect` row that laid it.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 impl BlockArrayIr {
@@ -118,7 +125,8 @@ pub struct BlockArray {
     pub palette: Palette,
     /// Palette indices in `(y, z, x)` order, as [`Dims::index`] lays them out.
     pub voxels: Vec<PaletteIndex>,
-    /// Block entities on the grid: a circuit's comparators, as no member lowers to one.
+    /// Block entities on the grid: a sign's text, a bed's colour and a circuit comparator's
+    /// strength.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
     /// Free entities; always empty, as no member lowers to one.
@@ -132,8 +140,8 @@ pub struct BlockArray {
     pub derived: Vec<Vec<String>>,
 }
 
-/// One member's `resolved_state`: each block state its cells hold, with those cells, as the
-/// lowering's target resolved them (`spec/blockstate` "`intent_state` and `resolved_state`").
+/// One member's `resolved_state`, each block state its cells hold as the lowering's target
+/// resolved them (`spec/blockstate` "`intent_state` and `resolved_state`"), and its geometry.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResolvedMember {
     /// The keyword the member was written with.
@@ -141,11 +149,28 @@ pub struct ResolvedMember {
     /// The member's `id=`, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The member's address in the body it was written in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<MemberAddress>,
     /// Each block state the member resolved to, in the order its first cell is laid out.
     pub resolved_state: Vec<ResolvedBlock>,
+    /// Where the member sits and what it occupies (`spec/entities` "Anchor conventions").
+    pub geometry: MemberGeometry,
     /// Byte range of the member's own line.
     #[serde(skip)]
     pub span: Span,
+}
+
+impl ResolvedMember {
+    /// Whether the member is a `raw_block` or `raw_fill`, whose block id is written as given
+    /// (`spec/materials-themes` "Raw blocks").
+    #[must_use]
+    pub fn is_raw(&self) -> bool {
+        matches!(
+            role_of(&self.role),
+            MemberRole::RawBlock | MemberRole::RawFill
+        )
+    }
 }
 
 /// One block state a member resolved to, and the cells that hold it.
@@ -208,6 +233,14 @@ pub struct Footprint {
 }
 
 impl Footprint {
+    /// The footprint a `size=WxH` covers, `W` east to west and `H` north to south.
+    pub(crate) const fn of_size(size: &Size) -> Self {
+        Self {
+            x: size.w.get(),
+            z: size.h.get(),
+        }
+    }
+
     /// The [`Dims`] of this footprint, one block high.
     #[must_use]
     pub fn to_dims_y1(self) -> Dims {
@@ -322,6 +355,16 @@ impl BlockArray {
             .map(|index| index.0)
             .find(|index| usize::from(*index) >= len)
             .map(|index| (index, len))
+    }
+
+    /// The first block entity on no voxel of [`Self::dims`].
+    #[must_use]
+    pub fn first_block_entity_outside(&self) -> Option<&BlockEntity> {
+        self.block_entities.iter().find(|entity| {
+            self.dims
+                .index(entity.pos.0, entity.pos.1, entity.pos.2)
+                .is_none()
+        })
     }
 }
 
@@ -496,16 +539,158 @@ impl BlockState {
     }
 }
 
-/// A block entity on the grid, with the integer fields of its NBT payload.
+/// A block entity on the grid: what its block keeps beside its state, which each writer saves in
+/// its own edition's shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockEntity {
     /// Voxel coordinate the block entity sits at.
     pub pos: (u32, u32, u32),
-    /// Block entity id, e.g. `minecraft:comparator`.
-    pub id: String,
-    /// Integer fields of its payload, such as a comparator's `OutputSignal`.
-    #[serde(skip_serializing_if = "IndexMap::is_empty")]
-    pub fields: IndexMap<String, i32>,
+    /// What the block entity holds.
+    #[serde(flatten)]
+    pub data: BlockEntityData,
+}
+
+/// What a [`BlockEntity`] holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BlockEntityData {
+    /// Integer fields under a Java block entity id, as a circuit comparator keeps its
+    /// `OutputSignal` under `minecraft:comparator`.
+    Fields {
+        /// Block entity id, e.g. `minecraft:comparator`.
+        id: String,
+        /// Integer fields of its payload.
+        #[serde(skip_serializing_if = "IndexMap::is_empty")]
+        fields: IndexMap<String, i32>,
+    },
+    /// A sign's two faces (`spec/entities` "Block entities").
+    Sign {
+        /// The face toward the way the sign faces, which its `text=` writes.
+        front: SignText,
+        /// The face its `back=` writes.
+        back: SignText,
+    },
+    /// One half of a bed, with the dye of the dyed bed its block is or its token stands for.
+    Bed {
+        /// The dye; `None` for a bed whose block names none and no dyed token names.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        color: Option<DyeColor>,
+    },
+}
+
+/// One of the sixteen dye colours, serialized as its name, such as `light_blue`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DyeColor {
+    /// White, the game's dye 0.
+    White,
+    /// Orange, the game's dye 1.
+    Orange,
+    /// Magenta, the game's dye 2.
+    Magenta,
+    /// Light blue, the game's dye 3.
+    LightBlue,
+    /// Yellow, the game's dye 4.
+    Yellow,
+    /// Lime, the game's dye 5.
+    Lime,
+    /// Pink, the game's dye 6.
+    Pink,
+    /// Gray, the game's dye 7.
+    Gray,
+    /// Light gray, the game's dye 8.
+    LightGray,
+    /// Cyan, the game's dye 9.
+    Cyan,
+    /// Purple, the game's dye 10.
+    Purple,
+    /// Blue, the game's dye 11.
+    Blue,
+    /// Brown, the game's dye 12.
+    Brown,
+    /// Green, the game's dye 13.
+    Green,
+    /// Red, the game's dye 14.
+    Red,
+    /// Black, the game's dye 15.
+    Black,
+}
+
+impl DyeColor {
+    /// Every dye colour, in the order the game numbers them.
+    pub const ALL: [Self; 16] = [
+        Self::White,
+        Self::Orange,
+        Self::Magenta,
+        Self::LightBlue,
+        Self::Yellow,
+        Self::Lime,
+        Self::Pink,
+        Self::Gray,
+        Self::LightGray,
+        Self::Cyan,
+        Self::Purple,
+        Self::Blue,
+        Self::Brown,
+        Self::Green,
+        Self::Red,
+        Self::Black,
+    ];
+
+    /// Its name, such as `light_blue`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::White => "white",
+            Self::Orange => "orange",
+            Self::Magenta => "magenta",
+            Self::LightBlue => "light_blue",
+            Self::Yellow => "yellow",
+            Self::Lime => "lime",
+            Self::Pink => "pink",
+            Self::Gray => "gray",
+            Self::LightGray => "light_gray",
+            Self::Cyan => "cyan",
+            Self::Purple => "purple",
+            Self::Blue => "blue",
+            Self::Brown => "brown",
+            Self::Green => "green",
+            Self::Red => "red",
+            Self::Black => "black",
+        }
+    }
+
+    /// The dye named `name`, such as `light_blue`.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|dye| dye.name() == name)
+    }
+}
+
+/// The most lines a face of a sign holds.
+pub const SIGN_FACE_LINES: usize = 4;
+
+/// One face of a sign.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SignText {
+    /// Its lines, top first.
+    lines: Vec<String>,
+    /// Whether the text glows.
+    pub glowing: bool,
+}
+
+impl SignText {
+    /// A face of `lines`, top first; `None` for more than [`SIGN_FACE_LINES`].
+    #[must_use]
+    pub fn new(lines: Vec<String>, glowing: bool) -> Option<Self> {
+        (lines.len() <= SIGN_FACE_LINES).then_some(Self { lines, glowing })
+    }
+
+    /// Its lines, top first, at most [`SIGN_FACE_LINES`].
+    #[must_use]
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
 }
 
 /// An entity (frames, paintings, item displays, ...), without its payload.

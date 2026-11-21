@@ -1,5 +1,6 @@
-//! The `cairn-lsp` binary over stdio: how each way a session ends exits and logs, and the line each
-//! dropped notification logs. What the dispatch loop answers is tested beside `server.rs`.
+//! The `cairn-lsp` binary over stdio: how each way a session ends exits and logs, the line each
+//! dropped notification logs, and the diagnostics route and client commands `initialize` settles.
+//! What the dispatch loop answers is tested beside `server.rs`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -23,6 +24,14 @@ struct s size=2x2
   floor mat_slot=wall
   walls height=4 mat_slot=wall
 ";
+/// A floor above Java 1.21, for a session that pins it.
+const FLOOR: &str = "\
+@requires version>=1.21.4
+theme t:
+  slot wall -> @oak_planks
+struct s size=3x3
+  walls mat_slot=wall height=2
+";
 const TEST_URI: &str = "file:///test.crn";
 
 /// How long a test waits for a message, so one that never arrives fails rather than hangs.
@@ -44,6 +53,15 @@ impl Server {
 
     /// [`Server::start`] with `args` on the command line.
     fn start_with_args(args: &[&str]) -> (Self, serde_json::Value) {
+        Self::start_with(args, &serde_json::json!({}))
+    }
+
+    /// [`Server::start`] for a client that declares `capabilities`.
+    fn start_declaring(capabilities: &serde_json::Value) -> (Self, serde_json::Value) {
+        Self::start_with(&[], capabilities)
+    }
+
+    fn start_with(args: &[&str], capabilities: &serde_json::Value) -> (Self, serde_json::Value) {
         let mut child = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
             .args(args)
             .stdin(Stdio::piped())
@@ -83,7 +101,7 @@ impl Server {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "initialize",
-            "params": { "capabilities": {} },
+            "params": { "capabilities": capabilities },
         }));
         let response = server.read_message();
         server.send(&serde_json::json!({
@@ -220,6 +238,16 @@ impl Server {
         self.request_shutdown();
         self.exit_expecting(0);
     }
+
+    /// Send `shutdown` and `exit` without reading, assert the process exits 0, and return every
+    /// message it wrote that the test had not read, `shutdown`'s answer among them.
+    fn end(mut self) -> Vec<serde_json::Value> {
+        self.send(&serde_json::json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }));
+        self.send(&serde_json::json!({ "jsonrpc": "2.0", "method": "exit" }));
+        let status = self.child.wait().expect("wait for server exit");
+        assert_eq!(status.code(), Some(0), "unexpected exit code");
+        self.messages.iter().collect()
+    }
 }
 
 /// Read one Content-Length framed message, or `None` at end of stream.
@@ -255,8 +283,17 @@ fn diagnostics_of(message: &serde_json::Value) -> &Vec<serde_json::Value> {
         .expect("diagnostics array")
 }
 
+/// What a message is: its method, or the id it answers.
+fn label(message: &serde_json::Value) -> String {
+    match message.get("method").and_then(serde_json::Value::as_str) {
+        Some(method) => method.to_owned(),
+        None => format!("answer to {}", message["id"]),
+    }
+}
+
 #[test]
-fn initialize_advertises_full_sync_and_completion_and_shuts_down_clean() {
+fn initialize_advertises_sync_completion_hover_quick_fixes_and_pulled_diagnostics_and_shuts_down_clean()
+ {
     let (server, response) = Server::start();
     assert_eq!(response.get("id"), Some(&serde_json::json!(1)));
     let capabilities = &response["result"]["capabilities"];
@@ -267,7 +304,75 @@ fn initialize_advertises_full_sync_and_completion_and_shuts_down_clean() {
         capabilities["completionProvider"]["triggerCharacters"],
         serde_json::json!(["@", "=", "."]),
     );
+    assert_eq!(
+        capabilities["diagnosticProvider"]["identifier"],
+        serde_json::json!("cairn"),
+    );
+    assert_eq!(capabilities["hoverProvider"], serde_json::json!(true));
+    assert_eq!(
+        capabilities["codeActionProvider"],
+        serde_json::json!({ "codeActionKinds": ["quickfix"] }),
+    );
     server.shutdown();
+}
+
+#[test]
+fn a_client_that_declares_it_runs_set_target_is_offered_it() {
+    for (commands, offered) in [
+        (
+            serde_json::json!(["cairn.setTarget"]),
+            vec!["cairn.setTarget"],
+        ),
+        (serde_json::json!([]), vec![]),
+    ] {
+        let (mut server, _) = Server::start_declaring(&serde_json::json!({
+            "experimental": { "commands": { "commands": commands } },
+        }));
+        server.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": { "settings": { "cairn": { "edition": "java", "target": "1.21" } } },
+        }));
+        server.did_open(FLOOR, 1);
+        let published = server.read_until_method("textDocument/publishDiagnostics");
+        server.send(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "textDocument/codeAction",
+            "params": {
+                "textDocument": { "uri": TEST_URI },
+                "range": published["params"]["diagnostics"][0]["range"],
+                "context": { "diagnostics": published["params"]["diagnostics"] },
+            },
+        }));
+        let actions = server.read_response(2)["result"].take();
+        let run: Vec<_> = actions
+            .as_array()
+            .expect("a list of actions")
+            .iter()
+            .filter_map(|action| action["command"]["command"].as_str())
+            .collect();
+        assert_eq!(run, offered, "{actions}");
+        server.shutdown();
+    }
+}
+
+#[test]
+fn a_client_that_declares_pulled_diagnostics_is_answered_and_not_published_to() {
+    let (mut server, _) = Server::start_declaring(&serde_json::json!({
+        "textDocument": { "diagnostic": { "dynamicRegistration": false } },
+    }));
+    server.did_open(DUPLICATE, 1);
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "textDocument/diagnostic",
+        "params": { "textDocument": { "uri": TEST_URI } },
+    }));
+    // Another thread answers the pull, so `shutdown` waits until that answer is in.
+    let mut sequence = vec![label(&server.read_message())];
+    sequence.extend(server.end().iter().map(label));
+    assert_eq!(sequence, ["answer to 2", "answer to 99"]);
 }
 
 #[test]

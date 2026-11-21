@@ -1,5 +1,56 @@
 [
   {
+    "type": "address_side",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "address_step",
+    "named": true,
+    "fields": {
+      "index": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
+      "role": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "side": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "address_side",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "apply_expression",
     "named": true,
     "fields": {
@@ -52,7 +103,18 @@
   {
     "type": "assert_stmt",
     "named": true,
-    "fields": {},
+    "fields": {
+      "positional": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "positional_list",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": false,
       "required": true,
@@ -103,6 +165,10 @@
             "named": true
           },
           {
+            "type": "decimal",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -112,6 +178,10 @@
           },
           {
             "type": "material_ref",
+            "named": true
+          },
+          {
+            "type": "nbt_compound",
             "named": true
           },
           {
@@ -144,6 +214,42 @@
       "types": [
         {
           "type": "attribute",
+          "named": true
+        },
+        {
+          "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "decimal",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "material_ref",
+          "named": true
+        },
+        {
+          "type": "signal_ref",
+          "named": true
+        },
+        {
+          "type": "size_literal",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "value_list",
           "named": true
         }
       ]
@@ -272,6 +378,10 @@
         },
         {
           "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "decimal",
           "named": true
         },
         {
@@ -425,6 +535,36 @@
     "type": "directive_name",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "edit_stmt",
+    "named": true,
+    "fields": {
+      "set": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "attribute_list",
+            "named": true
+          }
+        ]
+      },
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "member_address",
+            "named": true
+          },
+          {
+            "type": "selector",
+            "named": true
+          }
+        ]
+      }
+    }
   },
   {
     "type": "edition_guard",
@@ -622,6 +762,21 @@
     }
   },
   {
+    "type": "member_address",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "address_step",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "member_stmt",
     "named": true,
     "fields": {
@@ -651,6 +806,10 @@
         "types": [
           {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "decimal",
             "named": true
           },
           {
@@ -735,6 +894,10 @@
         "types": [
           {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "decimal",
             "named": true
           },
           {
@@ -830,6 +993,121 @@
     }
   },
   {
+    "type": "nbt_array",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "nbt_number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "nbt_compound",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "nbt_entry",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "nbt_entry",
+    "named": true,
+    "fields": {
+      "key": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "nbt_key",
+            "named": true
+          },
+          {
+            "type": "nbt_string",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "nbt_array",
+            "named": true
+          },
+          {
+            "type": "nbt_compound",
+            "named": true
+          },
+          {
+            "type": "nbt_list",
+            "named": true
+          },
+          {
+            "type": "nbt_number",
+            "named": true
+          },
+          {
+            "type": "nbt_string",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "nbt_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "nbt_array",
+          "named": true
+        },
+        {
+          "type": "nbt_compound",
+          "named": true
+        },
+        {
+          "type": "nbt_list",
+          "named": true
+        },
+        {
+          "type": "nbt_number",
+          "named": true
+        },
+        {
+          "type": "nbt_string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "parenthesized_expression",
     "named": true,
     "fields": {},
@@ -869,6 +1147,53 @@
     }
   },
   {
+    "type": "positional_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "boolean",
+          "named": true
+        },
+        {
+          "type": "decimal",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "integer",
+          "named": true
+        },
+        {
+          "type": "material_ref",
+          "named": true
+        },
+        {
+          "type": "signal_ref",
+          "named": true
+        },
+        {
+          "type": "size_literal",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "value_list",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "requires_stmt",
     "named": true,
     "fields": {
@@ -889,7 +1214,7 @@
     "named": true,
     "fields": {
       "filter": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1050,12 +1375,26 @@
           }
         ]
       },
+      "positional": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "positional_list",
+            "named": true
+          }
+        ]
+      },
       "target": {
         "multiple": false,
         "required": true,
         "types": [
           {
             "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "decimal",
             "named": true
           },
           {
@@ -1105,6 +1444,10 @@
         },
         {
           "type": "directive",
+          "named": true
+        },
+        {
+          "type": "edit_stmt",
           "named": true
         },
         {
@@ -1484,6 +1827,10 @@
           "named": true
         },
         {
+          "type": "decimal",
+          "named": true
+        },
+        {
           "type": "identifier",
           "named": true
         },
@@ -1559,6 +1906,18 @@
     "named": false
   },
   {
+    "type": "[B;",
+    "named": false
+  },
+  {
+    "type": "[I;",
+    "named": false
+  },
+  {
+    "type": "[L;",
+    "named": false
+  },
+  {
     "type": "]",
     "named": false
   },
@@ -1604,6 +1963,10 @@
     "named": false
   },
   {
+    "type": "decimal",
+    "named": true
+  },
+  {
     "type": "def",
     "named": false
   },
@@ -1625,6 +1988,10 @@
   },
   {
     "type": "edge_rising",
+    "named": false
+  },
+  {
+    "type": "edit",
     "named": false
   },
   {
@@ -1676,6 +2043,18 @@
     "named": false
   },
   {
+    "type": "nbt_key",
+    "named": true
+  },
+  {
+    "type": "nbt_number",
+    "named": true
+  },
+  {
+    "type": "nbt_string",
+    "named": true
+  },
+  {
     "type": "nor",
     "named": false
   },
@@ -1697,6 +2076,10 @@
   },
   {
     "type": "requires",
+    "named": false
+  },
+  {
+    "type": "set",
     "named": false
   },
   {

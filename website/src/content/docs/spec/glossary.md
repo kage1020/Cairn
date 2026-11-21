@@ -38,9 +38,20 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Member.** A named element of the Intent IR. Types: `block`, `block_entity`, `entity`. The
   IR carries the type, but the author writes one selector grammar across all of them
   ([principles P4](/spec/principles/)). Today a member carries the `role` its keyword classifies to
-  and no type, and no keyword places a block entity or an entity yet; `type` will sit beside `role`.
+  and no type. A `sign` and a `bed` are block members whose blocks keep block entities
+  ([entities §8.1](/spec/entities/#81-two-tiers)), no keyword places an entity yet, and `type` will
+  sit beside `role`.
 - **`id` / `class` / `role`.** Identity, group, and architectural function tags on a member. Used
   for selectors and stable addresses.
+- **Address.** The name the compiler gives every member of a `struct` or `def` body from where it
+  stands, `ROLE@SIDE[N]` per step, such as `level[1].window@front[0]`. Line order decides one only
+  between members that tie at every step of the count, so otherwise reordering lines or appending a
+  member elsewhere moves none. See [syntax §5.5](/spec/syntax/#55-ids-classes-addresses).
+- **`edit`.** A top-level line, `edit TARGET set key=value …`, that changes the members a selector
+  (`window[class=vent]`) or an address (`window@front[0]`) selects, as their lines write them,
+  without rewriting those lines. A member it does not select whose `resolved_state` it changes is
+  `W_EDIT_RIPPLE`. See
+  [components-editing-sites §9.2](/spec/components-editing-sites/#92-editing-model).
 - **`mat_slot`.** A material injection point on a member; bound by a `theme`. Structure carries
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
@@ -58,17 +69,22 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   [blockstate §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
 - **Anchor / bbox.** Every primitive carries an `anchor` (reference point), a declared bbox, an
   actual bbox, and a host face in the IR. Primitives like paintings, item frames, and arch windows
-  have a declared size that differs from the occupied AABB, and these four resolve it. The IR
-  carries none of them yet. See [entities §8.2](/spec/entities/#82-anchor-conventions).
+  have a declared size that differs from the occupied AABB, and these four resolve it. Lowering
+  records the four for every member that builds a cell, beside its `resolved_state`. See
+  [entities §8.2](/spec/entities/#82-anchor-conventions).
 
 ## Materials and themes
 
 - **Canonical token.** The value bound to a slot or theme selector: a *meaning* token, not a raw
-  block ID. The backend resolves the per-`(edition, version)` ID and state names. See
-  [materials-themes §7.2](/spec/materials-themes/#72-canonical-vocabulary).
+  block ID. The backend resolves the per-`(edition, version)` ID and state names, across a rename,
+  a split and a merge. See [materials-themes §7.2](/spec/materials-themes/#72-canonical-vocabulary).
 - **Canonical block token.** A specific block meaning: `@oak_planks`, `@water_cauldron`,
-  `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → `cauldron`) are
-  forbidden.
+  `@oak_log[axis=x]`. Silent meaning-breaking downgrades (`@water_cauldron` → an empty `cauldron`)
+  are forbidden.
+- **Meaning token.** A property a canonical block token carries that its block does not have, whose
+  value picks one of the blocks the block split into: `fluid` in `@cauldron[fluid=water]`. The
+  registry pack's `meanings` table lists them. See [materials-themes
+  §7.3](/spec/materials-themes/#73-mappings-across-version-and-edition).
 - **Abstract material token.** An aesthetic choice: `@floor.wood.broadleaf`, `@roof.dark_wood`.
   Theme policy MAY downgrade these (e.g. oak↔birch).
 - **Tier-1 token.** An abstract material token the built-in `materials` catalogs declare, Stable
@@ -78,7 +94,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   *structure* (where the walls are) from *style* (which blocks).
 - **`def`.** A slot-bearing Component definition (a reusable struct). Recursion forbidden;
   parameterization allowed, though until a mechanism for it is specified the header takes only
-  `size=` and `class=`. The minimum version of a composite is the max of its parts. See
+  `size=`. The minimum version of a composite is the max of its parts. See
   [components-editing-sites §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
 - **`site`.** A multi-building container that places `def`-derived structures by topological
   relations (`east_of`, `gap=`, `connect`), not absolute coordinates. See
@@ -109,8 +125,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`@cairn`.** Header declaring the **Cairn language version** the file was written against
   (CalVer `YYYY.M[.PATCH]`). Provenance only; optional.
 - **`@requires`.** A capability floor on the Minecraft target (e.g. `version>=1.20`). Hard error
-  on conflict with the inferred value. That error, `E_REQUIRES_CONFLICT`, is reserved: no inferred
-  range is derived yet. A `cairn compile --target` below the floor is `E_VERSION_CAP`. See
+  on conflict with the inferred range: a floor above the last version that declares a block the
+  build paints, and at or below the newest version the pack carries, is `E_REQUIRES_CONFLICT`. A
+  `cairn compile --target` below the floor is `E_VERSION_CAP`. See
   [versioning-editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 - **`@intended_targets`.** A hint about which Minecraft versions the file was designed for. Not a
   verification record, since the record lives in the lock. Still weighed against the file's own
@@ -120,7 +137,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   `lock_schema_version`, `source_hash`, `cairn_version`, `target` (`edition`, `mc_version`,
   `data_version`), `inputs` (`registry_pack_hash`, `constraint_catalog_hash`), `resolved_ir_hash`,
   `verified: true` and `member_version_sensitivity`, plus `placements` and `walkways` for a source
-  with a `site`. See
+  with a `site`. `cairn info` reports the target a lock records as its `verified target` row. See
   [versioning-editions §10.6](/spec/versioning-editions/#106-provenance-and-lock).
 - **Provenance stamp.** `(edition, version)` recorded onto the block-array IR on import, mapped from
   the format itself (`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java). See

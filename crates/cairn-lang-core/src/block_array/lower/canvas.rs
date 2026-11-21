@@ -2,8 +2,12 @@
 
 use indexmap::IndexMap;
 
+use crate::block_array::geometry::Declared;
 use crate::block_array::material::is_stand_in;
-use crate::block_array::{BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull, PaletteIndex};
+use crate::block_array::{
+    BlockEntity, BlockEntityData, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull,
+    PaletteIndex,
+};
 
 use super::phase::Phase;
 
@@ -149,6 +153,8 @@ pub(super) struct Canvas {
     painted: Vec<bool>,
     /// Indexed like [`Self::phases`]: `true` once that member has written a cell.
     pub(super) wrote: Vec<bool>,
+    /// Indexed like [`Self::phases`]: what that member's line declares, once its painter read it.
+    declared: Vec<Option<Declared>>,
     /// `(overridden, overriding)` member pairs, in the order they are judged, to how many voxels
     /// the second took from each `(before, after)` pair of palette slots.
     pub(super) conflicts: IndexMap<(u32, u32), IndexMap<(PaletteIndex, PaletteIndex), u32>>,
@@ -157,6 +163,8 @@ pub(super) struct Canvas {
     held: Vec<bool>,
     /// The contests a held member took part in, in the order they happened.
     deferred: Vec<Contest>,
+    /// Each block entity a member set beside a block it painted, with that member.
+    block_entities: Vec<(u32, BlockEntity)>,
 }
 
 /// One cell a member wrote over another member's in the same phase.
@@ -175,12 +183,23 @@ impl Canvas {
             voxels: vec![PaletteIndex::AIR; dims.volume()],
             owners: vec![0; dims.volume()],
             wrote: vec![false; phases.len()],
+            declared: vec![None; phases.len()],
             held: vec![false; phases.len()],
             phases,
             painted: vec![false; 1],
             conflicts: IndexMap::new(),
             deferred: Vec::new(),
+            block_entities: Vec::new(),
         }
+    }
+
+    /// Each block entity whose member still holds its cell, in the order they were set.
+    pub(super) fn block_entities(&self) -> Vec<BlockEntity> {
+        self.block_entities
+            .iter()
+            .filter(|(member, entity)| self.owner_at(entity.pos) == Some(*member))
+            .map(|(_, entity)| entity.clone())
+            .collect()
     }
 
     /// Record that a write named `slot`, for a state a member settled on in a cell it no longer
@@ -247,6 +266,11 @@ impl Canvas {
             .filter_map(|(i, (slot, _))| Some((self.dims.position(i)?, *slot)))
     }
 
+    /// What member `index` of the flattened paint list declared, or `None` if it declared nothing.
+    pub(super) fn declared(&self, index: u32) -> Option<Declared> {
+        self.declared.get(index as usize).copied().flatten()
+    }
+
     /// The member of the flattened paint list that wrote `pos` last, or `None` for a cell no member
     /// wrote or one outside the grid.
     pub(super) fn owner_at(&self, pos: (u32, u32, u32)) -> Option<u32> {
@@ -295,6 +319,17 @@ impl MemberCanvas<'_> {
         self.member
     }
 
+    /// Record what this member's line declares.
+    pub(super) fn declare(&mut self, declared: Declared) {
+        let member = self.member;
+        let Some(slot) = self.canvas.declared.get_mut(member as usize) else {
+            debug_assert!(false, "member {member} is not in the flattened paint list");
+            return;
+        };
+        debug_assert!(slot.is_none(), "member {member} declares twice");
+        *slot = Some(declared);
+    }
+
     /// Hold every contest this member's writes take part in until
     /// [`Canvas::settle_contests`], for a member whose states are settled after it paints.
     pub(super) fn hold_contests(&mut self) {
@@ -314,11 +349,49 @@ impl MemberCanvas<'_> {
         }
     }
 
+    /// [`Self::paint`] for a block that keeps `data` beside it, as its block entity, while this
+    /// member holds the cell.
+    pub(super) fn paint_with_entity(
+        &mut self,
+        pos: (u32, u32, u32),
+        claim: impl FnOnce() -> PaletteIndex,
+        data: BlockEntityData,
+    ) {
+        if !self.write(pos, claim, Some(data)) {
+            debug_assert!(
+                false,
+                "voxel {pos:?} lies outside {:?}; the dim math and the generator disagree",
+                self.canvas.dims,
+            );
+        }
+    }
+
+    /// [`Self::paint_with_entity`] without the assertion, for a cell the author placed; whether it
+    /// existed.
+    pub(super) fn try_paint_with_entity(
+        &mut self,
+        pos: (u32, u32, u32),
+        claim: impl FnOnce() -> PaletteIndex,
+        data: BlockEntityData,
+    ) -> bool {
+        self.write(pos, claim, Some(data))
+    }
+
     /// [`Self::paint`] without the assertion, for a cell the author placed; whether it existed.
     pub(super) fn try_paint(
         &mut self,
         pos: (u32, u32, u32),
         claim: impl FnOnce() -> PaletteIndex,
+    ) -> bool {
+        self.write(pos, claim, None)
+    }
+
+    /// Paint one voxel with the block entity its block keeps, if any; whether the cell existed.
+    fn write(
+        &mut self,
+        pos: (u32, u32, u32),
+        claim: impl FnOnce() -> PaletteIndex,
+        entity: Option<BlockEntityData>,
     ) -> bool {
         let member = self.member;
         let canvas = &mut *self.canvas;
@@ -333,15 +406,31 @@ impl MemberCanvas<'_> {
         let before = canvas.voxels[i];
         canvas.voxels[i] = after;
         let previous = std::mem::replace(&mut canvas.owners[i], member + 1);
+        let overridden = previous.checked_sub(1);
+        let entity_changes = overridden.is_some_and(|overridden| {
+            canvas
+                .block_entities
+                .iter()
+                .rev()
+                .find(|(owner, kept)| *owner == overridden && kept.pos == pos)
+                .map(|(_, kept)| &kept.data)
+                != entity.as_ref()
+        });
+        if let Some(data) = entity {
+            canvas
+                .block_entities
+                .push((member, BlockEntity { pos, data }));
+        }
         // A first write is not a contest, and a same-member overwrite is a generator fault no
         // author can move, so never a finding.
-        let Some(overridden) = previous.checked_sub(1) else {
+        let Some(overridden) = overridden else {
             return true;
         };
         if overridden == member || !canvas.same_phase(overridden, member) {
             return true;
         }
-        // A held slot may settle on another state, so even an unchanged one is judged later.
+        // A held slot may settle on another state, so even an unchanged one is judged later; a
+        // held member is a door, which keeps no block entity.
         if canvas.holds(overridden) || canvas.holds(member) {
             canvas.deferred.push(Contest {
                 overridden,
@@ -349,7 +438,7 @@ impl MemberCanvas<'_> {
                 before,
                 after,
             });
-        } else if before != after {
+        } else if before != after || entity_changes {
             canvas.count(overridden, member, before, after);
         }
         true

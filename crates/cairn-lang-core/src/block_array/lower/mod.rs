@@ -6,6 +6,8 @@
 //! [`flatten_members`]: members::flatten_members
 
 mod anchor;
+mod beam;
+mod bed;
 mod body;
 mod canvas;
 mod cell_box;
@@ -20,17 +22,24 @@ mod fill;
 mod fixture;
 mod geometry_material;
 mod members;
+mod note_block;
+mod opening;
+mod overlap;
 mod paint;
 mod part;
 mod phase;
 mod plate;
 mod raw;
+mod ripple;
 mod roof_fill;
 mod roof_kind;
+mod sign;
 mod site_floor;
 mod sizing;
 mod stair;
+mod stand;
 mod token_diag;
+mod trapdoor;
 mod waterlogged;
 mod window;
 mod without_target;
@@ -40,23 +49,25 @@ use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
-use crate::diagnostic::{Diagnostic, sort_by_position};
+use crate::diagnostic::{Diagnostic, note_edits, sort_by_position};
 use crate::ids::{PlaceId, SiteName, WalkwayScopeKey};
 use crate::intent::{DefIr, IntentModule, MemberRole, SiteIr, StructIr};
-use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
+use crate::resolve::{Resolution, ScopeResolution, place_scope_key, resolve};
 
 use super::args::diag_deferred_member_reason;
 use super::material::TargetRegistry;
 use super::roof::{FLAT_BASE_ID, STAIR_BASE_ID};
 use super::{
-    BlockArray, BlockArrayIr, BlockState, PALETTE_CAPACITY, Placement, ResolvedMember, Walkway,
+    BlockArray, BlockArrayIr, BlockState, Footprint, PALETTE_CAPACITY, Placement, ResolvedMember,
+    Walkway,
 };
 
 use anchor::{GapOutcome, report_unread_gap, resolve_place_anchor};
 use body::{BodyDescriptor, BodyInputs, LoweredBody, lower_body_to_block_array};
 use connect::{ConnectInputs, lower_connects};
 use diag::{VoxelSource, diag_def_no_size, diag_struct_no_size};
-use site_floor::{PlacedBody, collect_floor_cells};
+use overlap::report_placement_overlaps;
+use site_floor::PlacedBody;
 
 pub use without_target::{findings_under_guards, findings_without_target};
 
@@ -120,15 +131,13 @@ fn lower_to_block_array_within(
         mut structures,
         members,
     } = built;
-    // After every site, so the collision set covers every floor tile a strip might cross.
-    let floor = collect_floor_cells(&structures, &placed);
+    report_placement_overlaps(&placed, &mut diagnostics);
     lower_connects(
         &ConnectInputs {
             resolution,
             defs: &intent.defs,
             registry,
             placed: &placed,
-            floor: &floor,
         },
         &mut structures,
         &mut walkways,
@@ -141,8 +150,9 @@ fn lower_to_block_array_within(
     // Findings that are not repeats must differ in their text, as `geometry_material_id`'s do.
     let mut said: HashSet<Diagnostic> = HashSet::new();
     diagnostics.retain(|d| said.insert(d.clone()));
+    note_edits(&mut diagnostics, &intent.edited_members());
 
-    BlockArrayIr {
+    let mut lowered = BlockArrayIr {
         structures,
         placements: placed
             .into_iter()
@@ -151,7 +161,21 @@ fn lower_to_block_array_within(
         walkways,
         members,
         diagnostics,
+    };
+    if let Some(as_written) = intent.as_written.as_deref()
+        && intent.edits.iter().any(|edit| !edit.selected.is_empty())
+    {
+        let written = lower_to_block_array_within(
+            as_written,
+            &resolve(as_written, resolution.edition),
+            registry,
+            palette_capacity,
+        );
+        let ripples = ripple::edit_ripples(&intent.edits, as_written, &lowered, &written);
+        lowered.diagnostics.extend(ripples);
+        sort_by_position(&mut lowered.diagnostics);
     }
+    lowered
 }
 
 fn lower_struct<'a>(
@@ -191,9 +215,6 @@ fn lower_site<'a>(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for member in &site.placements {
-        if matches!(member.role, MemberRole::Connect) {
-            continue;
-        }
         if !matches!(member.role, MemberRole::Place) {
             continue;
         }
@@ -239,7 +260,8 @@ fn lower_site<'a>(
         };
 
         // Resolved before this place is inserted: the anchor looks only at prior places.
-        let (anchor, gap_unread) = resolve_place_anchor(member, placed, &site.name);
+        let prior = |key: &str| placed.get(key).map(|b| &b.placement);
+        let (anchor, gap_unread) = resolve_place_anchor(member, prior, &site.name);
 
         // Lowered even without an anchor: the body's findings stand wherever the row lands.
         let body = lower_body_to_block_array(
@@ -283,8 +305,11 @@ fn lower_site<'a>(
         placed
             .entry(lowered.array.source_scope.clone())
             .or_insert(PlacedBody {
+                row: member.span.clone(),
+                anchor,
                 walls: lowered.walls,
                 cut: lowered.cut,
+                footprint: Footprint::of_size(def_size),
                 placement: Placement {
                     site: placement_site,
                     place_id: placement_id,

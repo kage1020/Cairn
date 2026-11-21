@@ -8,10 +8,11 @@ Write commands flat and in any order. The compiler assigns each one to a phase a
 phases in this fixed order:
 
 ```
-massing     floor / walls / volume / fill
-envelope    roof / stair
+massing     floor / walls / fill
+envelope    roof / stair / beam
 openings    door / window
-fixtures    sign / painting / frame / bed / chest / sensors / actuators / Tier 0 parts
+fixtures    sign / painting / frame / bed / chest / trapdoor / note_block / sensors / actuators /
+            Tier 0 parts
 fluids      fill fluid= / water
 logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
 logic_place pads, risers and cells laid under the floor → Placement IR
@@ -23,14 +24,14 @@ A `fill` is `massing` with a `mat_slot=` and `fluids` with a `fluid=`
 ([Blockstate Model §6.3](/spec/blockstate/#63-waterlogged)), so its water is poured once the blocks
 it may hold are placed.
 
-Not every row runs today. `volume`, `sign`, `painting`, `frame`, `bed` and `water` are not keywords
-yet and are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`,
-`envelope`, `openings`, `fixtures` (whose members are `chest`, every sensor and actuator but
-`door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts))), `fluids` and `raw`
-([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)).
-The three `logic_*` phases lay each struct's circuit in the layers its `circuit` line reserves under
-the base plane, where no other phase paints, so they read the struct as every other phase leaves
-it, `raw` included, and contest no voxel with any of them.
+Not every row runs today. `painting`, `frame` and `water` are not keywords yet and are each refused
+as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`, `envelope`, `openings`, `fixtures`
+(whose members are `sign`, `bed`, `chest`, `trapdoor`, `note_block`, every sensor and actuator but
+`door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts))),
+`fluids` and `raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). The three
+`logic_*` phases lay each struct's circuit in the layers its `circuit` line reserves under the base
+plane, where no other phase paints, so they read the struct as every other phase leaves it, `raw`
+included, and contest no voxel with any of them.
 
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
 what a member means. Nor does it decide what the artifact is
@@ -75,6 +76,10 @@ cairn compile build.crn --edition bedrock --target 1.21.40
 `--edition` is required and `--target` alone is refused. "1.21" means different things on Java and
 Bedrock, and Java's DataVersion has nothing to do with Bedrock's block_version.
 
+The file format is not part of the target. `--structure-format` picks one of Java's formats, which
+changes the files written and never the block array or the lockfile
+([§12.1](/spec/ecosystem-interop/#121-forward-direction)).
+
 ## 4.3 Gable roof voxel rules
 
 `roof kind=gable [overhang=N] mat_slot=...` lowers to two opposite stair slopes meeting at a ridge.
@@ -96,12 +101,16 @@ to the geometry, with `W_DEFERRED_MEMBER`. An eave `stair kind=stairs` follows t
 rule, but takes its states from its own arguments.
 
 Those arguments are `facing=out | in`, `half=top | bottom` and
-`shape=straight | outer_left | outer_right`, each a bare identifier, defaulting to `out`, `top` and
-`straight`. An identifier outside the list is `E_INVALID_MEMBER`, and the stair is not built. A
-value of another shape (`half="bottom"`, `facing=1`) is an unreadable value: the stair is built
-with that key's default, and the value is reported as `W_IGNORED_ARGUMENT`.
-The value is reported even when the stair is refused for another reason, with a note saying the
-stair is not built either way ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+`shape=straight | inner_left | inner_right | outer_left | outer_right`, each a bare identifier,
+defaulting to `out`, `top` and `straight`. The `shape=` values are a stair's five shapes, written
+on Java as named. A Bedrock version with no stair `shape` state drops any but `straight`, and the
+stair renders straight, with `W_INTENT_DEGRADED`
+([§10.7](/spec/versioning-editions/#107-java--bedrock-portability)). An identifier outside the
+list is `E_INVALID_MEMBER`, and the stair is not built. A value of another shape (`half="bottom"`,
+`facing=1`) is an unreadable value: the stair is built with that key's default, and the value is
+reported as `W_IGNORED_ARGUMENT`. The value is reported even when the stair is refused for another
+reason, with a note saying the stair is not built either way
+([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **Ridge axis.** The ridge runs along the long horizontal axis of the footprint. A square footprint
 (`size=WxW`) ties to `x`, giving an east-west ridge.
@@ -228,17 +237,20 @@ Each term counts only the members that will paint:
 Members inside a `level` count in all three, at their offset: `walls height=3` written directly
 gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
-**Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, `chest`, every
-sensor and actuator, `fill`, `raw_block` and `raw_fill` read `N` as the base their geometry is
-measured from. A `floor` and a `roof` are planes a struct has one of, and what one under a raised
-`level` builds is reserved for a later extension: under `level y=N` with `N > 0` each fires
-`W_DEFERRED_MEMBER` and lowers to nothing.
+**Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, `beam`, `chest`,
+`trapdoor`, `note_block`, `sign`, `bed`, every sensor and actuator, the Tier 0 parts, `fill`,
+`raw_block` and `raw_fill` read `N` as the base their geometry is measured from, except that a
+`beam` over an opening lies where its opening's `level` puts it. A `floor` and a `roof` are planes a
+struct has one of, and what one under a raised `level` builds is reserved for a later extension:
+under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to nothing.
 
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under
 `level y=0` the roof draws, and widens and raises the volume as one in the body does. The same
-holds for every way a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=`
-does not widen the footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
+holds for every way a member drops out: a `roof` with no `kind=`, a `shed` with no `slope_to=`
+and a `roof` whose `footprint=` or `bounds=` takes a value other than its one
+([Entities §8.2](/spec/entities/#82-anchor-conventions)) do not widen the footprint, and `walls`
+whose material does not resolve do not raise `Dims.y`.
 
 The material half applies to `walls` and not to `roof`, because a roof whose `mat_slot=` does not
 resolve falls back to a material of its own and still draws. A themeless struct shows the asymmetry:
@@ -266,12 +278,16 @@ Two cases are not conflicts:
 - A cell whose value does not change, as when two `walls` of one material meet over shared rows.
 - A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
 
+A cell's value is its block and what the block keeps in its block entity ([Entities
+§8.1](/spec/entities/#81-two-tiers)), so two signs of one wood on one cell whose text differs
+conflict, and the finding says the block entity changed hands.
+
 A `door` whose `hinge` is derived is judged by the hinge it is built with, which is settled once
 every opening is cut ([Blockstate Model
 §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)): two doors in one opening
 conflict when the blocks they would build differ, whichever line comes first. An opening that
-takes one of a door's two cells leaves half a door, which the game removes, and the finding says
-so.
+takes one of a door's two cells, or a fixture that takes one of a bed's, leaves half a door or half
+a bed, which the game removes, and the finding says so.
 
 **The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
 is a *set with a canonical rendering*, not a log of the writes that filled it. It lists the blocks

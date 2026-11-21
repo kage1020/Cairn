@@ -14,7 +14,7 @@ pub fn cargo_bin() -> PathBuf {
 }
 
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
-pub const SHIPPED_EXAMPLES: usize = 15;
+pub const SHIPPED_EXAMPLES: usize = 16;
 
 /// A lever too high on the wall for the circuit under the floor to read, on either edition: line
 /// 8 is the lever's.
@@ -45,6 +45,23 @@ pub const QUASI_CONNECTED_DISPENSER: &str = concat!(
     "  lever id=sw at=inside.back offset=2 y=3 -> sig.a\n",
     "  logic sig.p = not sig.a\n",
     "  circuit region=floor void=4\n",
+);
+
+/// A build that paints `@stonebrick`, last declared at Bedrock 1.21.0, under three floors: line 1's
+/// at that version, and line 2's and the line 8 `def cottage` floor above it.
+pub const STONEBRICK_UNDER_THREE_FLOORS: &str = concat!(
+    "@requires version>=1.21.0\n",
+    "@requires bedrock version>=1.21.40\n",
+    "\n",
+    "theme t:\n",
+    "  slot wall -> @stonebrick\n",
+    "\n",
+    "def cottage size=2x2:\n",
+    "  requires bedrock version>=1.21.40\n",
+    "  floor mat_slot=wall\n",
+    "\n",
+    "site hamlet:\n",
+    "  place id=a use=cottage theme=t at=origin\n",
 );
 
 /// The repository's `examples/` directory.

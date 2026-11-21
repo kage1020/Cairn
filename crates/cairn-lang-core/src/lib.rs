@@ -1,6 +1,11 @@
+//! This crate's Rust API is in the
+//! [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no
+//! promise: any release may change it.
+//!
 //! Core of the Cairn language: lexer, parser, AST, Intent IR, `check`, and the passes that
 //! resolve intent down to the block-array IR.
 
+pub(crate) mod address;
 pub mod ast;
 pub mod block_array;
 pub mod calver;
@@ -22,8 +27,8 @@ pub(crate) mod version;
 
 pub use ast::{DottedRef, Module, Statement};
 pub use block_array::{
-    BlockArray, BlockArrayIr, BlockEntity, BlockState, Dims, Entity, Palette, PaletteIndex,
-    lower_to_block_array,
+    BlockArray, BlockArrayIr, BlockEntity, BlockEntityData, BlockState, Dims, Entity, Palette,
+    PaletteIndex, lower_to_block_array,
 };
 pub use check::{Diagnostic, DiagnosticCode, Severity, check};
 pub use edition::{Edition, UnknownEdition};
@@ -36,7 +41,7 @@ pub use intent::{
     CircuitRegion, CircuitRegionDefect, IntentModule, Member, MemberRole, RejectedCircuitRegion,
     ScopeKind, SemanticLevel, circuit_lines, circuit_regions, lower,
 };
-pub use lex::{Token, TokenKind, lex};
+pub use lex::{MAX_NBT_DEPTH, Token, TokenKind, lex};
 pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, diagnose_parse_failure, parse};
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 

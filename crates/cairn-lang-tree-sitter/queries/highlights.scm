@@ -1,6 +1,6 @@
 ; keywords
 [
-  "theme" "struct" "def" "site" "slot" "logic" "assert"
+  "theme" "struct" "def" "site" "slot" "logic" "assert" "edit" "set"
 ] @keyword
 
 ; Captured through its statement: the bare literal would split the `@requires` directive name.
@@ -10,6 +10,8 @@
 (member_keyword) @keyword
 
 (selector keyword: (identifier) @keyword)
+(address_step role: (identifier) @keyword)
+(address_side) @variable.member
 
 "truth" @keyword.operator
 "always" @keyword.operator
@@ -41,12 +43,15 @@
 ["->" "=" "<="] @operator
 
 ; punctuation
-["[" "]" "(" ")" "{" "}"] @punctuation.bracket
+["[" "]" "(" ")" "{" "}" "[B;" "[I;" "[L;"] @punctuation.bracket
 ["," ";" "." ":"] @punctuation.delimiter
 
 ; literals
 (string) @string
 (integer) @number
+(decimal) @number.float
+(nbt_number) @number
+(nbt_string) @string
 (bit) @number
 (size_literal) @number.special
 (coordinate) @number.special
@@ -56,6 +61,7 @@
 (material_ref) @type
 (block_id) @type
 (attribute key: (identifier) @variable.parameter)
+(nbt_key) @property
 (operand_name) @variable.parameter
 ; Every segment after the first is a member; the first keeps the generic @variable.
 (signal_ref . (identifier) (identifier) @variable.member)

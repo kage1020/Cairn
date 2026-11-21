@@ -6,6 +6,7 @@ use std::num::NonZeroU32;
 
 use serde::Serialize;
 
+use crate::address::{AddressSegment, MemberAddress};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::logic_library::{LogicPrimitive, StageCount};
@@ -68,13 +69,105 @@ impl MemberRequires {
     }
 }
 
-/// A whole `.crn` source file: leading directives, then top-level items, in source order.
+/// A whole `.crn` source file: leading directives, then top-level items and `edit` lines.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Module {
     /// Leading `@cairn` / `@requires` / `@intended_targets` directives.
     pub headers: Vec<Header>,
     /// Top-level items in source order.
     pub items: Vec<Item>,
+    /// Top-level `edit` lines in source order, wherever they stand among the items.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<Edit>,
+}
+
+/// A top-level `edit TARGET set key=value …` line (`spec/components-editing-sites` "Editing
+/// model").
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct Edit {
+    /// The members it selects.
+    pub target: EditTarget,
+    /// The `key=value` pairs after `set`, in source order; never empty.
+    pub set: Vec<Arg>,
+    /// Byte range of the whole line.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+/// What an [`Edit`] selects: by a selector, or by an address.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind")]
+#[non_exhaustive]
+pub enum EditTarget {
+    /// `KEYWORD[attr=value]…`, the members of the keyword whose lines every attribute matches.
+    Selector {
+        /// The member keyword.
+        keyword: String,
+        /// Every bracket's attributes, the brackets' in turn.
+        attrs: Vec<Arg>,
+        /// Byte range of the keyword alone.
+        #[serde(skip)]
+        keyword_span: Span,
+        /// Byte range of the whole selector.
+        #[serde(skip)]
+        span: Span,
+    },
+    /// `ROLE@SIDE[N]`, steps joined by `.`, the member the address names in each body.
+    Address {
+        /// The address as written.
+        address: MemberAddress,
+        /// Byte range of each step's keyword, outermost first.
+        #[serde(skip)]
+        keyword_spans: Vec<Span>,
+        /// Byte range of the whole address.
+        #[serde(skip)]
+        span: Span,
+    },
+}
+
+impl EditTarget {
+    /// The keyword of the members it selects: the selector's, or the address's last step's.
+    #[must_use]
+    pub fn keyword(&self) -> &str {
+        match self {
+            Self::Selector { keyword, .. } => keyword,
+            Self::Address { address, .. } => {
+                address.segments().last().map_or("", AddressSegment::role)
+            }
+        }
+    }
+
+    /// Each keyword the target names, with its byte range: the selector's, or each address
+    /// step's, outermost first.
+    #[must_use]
+    pub fn keywords(&self) -> Vec<(&str, &Span)> {
+        match self {
+            Self::Selector {
+                keyword,
+                keyword_span,
+                ..
+            } => vec![(keyword.as_str(), keyword_span)],
+            Self::Address {
+                address,
+                keyword_spans,
+                ..
+            } => address
+                .segments()
+                .iter()
+                .map(AddressSegment::role)
+                .zip(keyword_spans)
+                .collect(),
+        }
+    }
+
+    /// Byte range of the whole target.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Selector { span, .. } | Self::Address { span, .. } => span,
+        }
+    }
 }
 
 /// A leading directive line introduced by `@`, its value captured verbatim.
@@ -133,6 +226,9 @@ pub enum Item {
         /// Byte range of the name token alone.
         #[serde(skip)]
         name_span: Span,
+        /// Bare values after the name, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// `requires version>=X` lines the body declares, in source order.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         requires: Vec<MemberRequires>,
@@ -152,6 +248,9 @@ pub enum Item {
         name_span: Span,
         /// Inline `key=value` arguments on the definition header.
         args: Vec<Arg>,
+        /// Bare values on the definition header, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// `requires version>=X` lines the body declares, in source order.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         requires: Vec<MemberRequires>,
@@ -162,12 +261,16 @@ pub enum Item {
         span: Span,
     },
     /// `site NAME[:]` block — multi-building placement.
+    #[non_exhaustive]
     Site {
         /// Site name following the `site` keyword.
         name: String,
         /// Byte range of the name token alone.
         #[serde(skip)]
         name_span: Span,
+        /// Bare values after the name, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range of the whole block, indented body included.
@@ -175,6 +278,7 @@ pub enum Item {
         span: Span,
     },
     /// `struct NAME[ ARGS]` block — single building / structural composition.
+    #[non_exhaustive]
     Struct {
         /// Struct name following the `struct` keyword.
         name: String,
@@ -183,6 +287,9 @@ pub enum Item {
         name_span: Span,
         /// Inline `key=value` arguments on the struct header.
         args: Vec<Arg>,
+        /// Bare values on the struct header, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
         /// Byte range of the whole block, indented body included.
@@ -281,16 +388,21 @@ impl Item {
 #[non_exhaustive]
 pub enum ThemeRule {
     /// `slot NAME -> VALUE` mapping.
+    #[non_exhaustive]
     Slot {
         /// Slot name on the LHS.
         slot: String,
         /// Token or value bound to the slot.
         value: Value,
+        /// Bare values after the bound one, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the entire `slot NAME -> VALUE` line.
         #[serde(skip)]
         span: Span,
     },
     /// `KEYWORD[ATTRS] -> KEY=VALUE [KEY=VALUE...]` selector binding.
+    #[non_exhaustive]
     Selector {
         /// Member keyword on the LHS (`window`, `door`, ...).
         keyword: String,
@@ -298,6 +410,9 @@ pub enum ThemeRule {
         attrs: Vec<Arg>,
         /// `key=value` bindings on the RHS of the arrow.
         bindings: Vec<Arg>,
+        /// Bare values among the bindings, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the entire selector rule line.
         #[serde(skip)]
         span: Span,
@@ -352,7 +467,18 @@ pub enum Statement {
         #[serde(skip)]
         span: Span,
     },
+    /// `logic LHS EXPR` line, its `=` dropped — binds nothing (`spec/syntax` "Lexical").
+    UnboundLogic {
+        /// LHS reference, which the line leaves unbound.
+        lhs: DottedRef,
+        /// Boolean expression read after the name.
+        rhs: Expr,
+        /// Byte range of the whole `logic ...` line.
+        #[serde(skip)]
+        span: Span,
+    },
     /// `assert truth(INPUTS -> OUTPUT) { ROWS }` — a truth table over input signals.
+    #[non_exhaustive]
     AssertTruth {
         /// Input signal references inside `truth(...)`.
         inputs: Vec<DottedRef>,
@@ -360,11 +486,15 @@ pub enum Statement {
         output: DottedRef,
         /// One `bits -> result` per row.
         rows: Vec<TruthRow>,
+        /// Bare values after the closing `}`, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert truth(...) { ... }` form.
         #[serde(skip)]
         span: Span,
     },
     /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` — bounded liveness.
+    #[non_exhaustive]
     AssertAlways {
         /// Antecedent reference on the LHS of `->`.
         antecedent: DottedRef,
@@ -372,11 +502,15 @@ pub enum Statement {
         consequent: DottedRef,
         /// `within N` bound in ticks.
         within: u32,
+        /// Bare values after the closing `)`, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert always(...)` form.
         #[serde(skip)]
         span: Span,
     },
     /// `assert latency(FROM -> TO) <= N` — an upper bound on the ticks from one signal to another.
+    #[non_exhaustive]
     AssertLatency {
         /// Signal reference the path starts at, before `->`.
         from: DottedRef,
@@ -384,6 +518,9 @@ pub enum Statement {
         to: DottedRef,
         /// `<= N` bound in ticks.
         bound: u32,
+        /// Bare values after the bound, in source order.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        positional: Vec<Value>,
         /// Byte range of the whole `assert latency(...) <= N` form.
         #[serde(skip)]
         span: Span,
@@ -408,6 +545,7 @@ impl Statement {
         match self {
             Self::Generic { span, .. }
             | Self::Logic { span, .. }
+            | Self::UnboundLogic { span, .. }
             | Self::AssertTruth { span, .. }
             | Self::AssertAlways { span, .. }
             | Self::AssertLatency { span, .. }
@@ -439,6 +577,8 @@ pub enum ValueKind {
     Bool(bool),
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
+    /// Decimal literal as written (`1.5`): the key that reads one picks a float or a double.
+    Decimal(String),
     /// Size literal `WxH` (`9x7`), in blocks.
     Size {
         /// Width in blocks.
@@ -459,6 +599,8 @@ pub enum ValueKind {
     Token(String),
     /// Block id as Minecraft spells it, with its state literal if any: `minecraft:light[level=15]`.
     BlockId(String),
+    /// SNBT compound as written, braces included, which a `{` after any key's `=` opens.
+    Nbt(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(DottedRef),
     /// Double-quoted string literal.
@@ -510,16 +652,49 @@ impl Value {
     /// Source text that parses back to this value (strings have no escapes), or `None` for a list.
     fn surface_form(&self) -> Option<String> {
         match &self.kind {
-            ValueKind::Ident(s) => Some(s.clone()),
-            ValueKind::Str(s) => Some(format!("\"{s}\"")),
-            ValueKind::Bool(b) => Some(b.to_string()),
-            ValueKind::Int(i) => Some(i.to_string()),
-            ValueKind::Size { w, h } => Some(format!("{w}x{h}")),
-            ValueKind::Coord { x, y, z } => Some(format!("{x},{y},{z}")),
-            ValueKind::Token(t) => Some(format!("@{t}")),
-            ValueKind::BlockId(id) => Some(id.clone()),
-            ValueKind::DotRef(d) => Some(d.to_string()),
             ValueKind::List(_) => None,
+            ValueKind::Decimal(text) => Some(text.clone()),
+            _ => Some(self.spelling()),
+        }
+    }
+
+    /// Whether `self` and `other` are one value: a number by the number it writes, so `2`,
+    /// `2.0` and `2.00` are one, and a list item by item.
+    pub(crate) fn same_value(&self, other: &Self) -> bool {
+        match (&self.kind, &other.kind) {
+            (ValueKind::List(left), ValueKind::List(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| left.same_value(right))
+            }
+            (
+                ValueKind::Int(_) | ValueKind::Decimal(_),
+                ValueKind::Int(_) | ValueKind::Decimal(_),
+            ) => self.spelling() == other.spelling(),
+            (left, right) => left == right,
+        }
+    }
+
+    /// The one spelling of this value that `spec/syntax` "IDs, classes, addresses" compares by:
+    /// source text that means it, a list's items joined by `, ` between `[` and `]`.
+    pub(crate) fn spelling(&self) -> String {
+        match &self.kind {
+            ValueKind::Ident(s) | ValueKind::BlockId(s) => s.clone(),
+            ValueKind::Str(s) => format!("\"{s}\""),
+            ValueKind::Bool(b) => b.to_string(),
+            ValueKind::Int(i) => i.to_string(),
+            ValueKind::Decimal(text) => decimal_spelling(text),
+            ValueKind::Nbt(text) => text.clone(),
+            ValueKind::Size { w, h } => format!("{w}x{h}"),
+            ValueKind::Coord { x, y, z } => format!("{x},{y},{z}"),
+            ValueKind::Token(t) => format!("@{t}"),
+            ValueKind::DotRef(d) => d.to_string(),
+            ValueKind::List(items) => {
+                let items: Vec<String> = items.iter().map(Self::spelling).collect();
+                format!("[{}]", items.join(", "))
+            }
         }
     }
 
@@ -539,14 +714,28 @@ impl Value {
             ValueKind::Ident(..) => "identifier",
             ValueKind::Bool(..) => "boolean",
             ValueKind::Int(..) => "integer",
+            ValueKind::Decimal(..) => "decimal",
             ValueKind::Size { .. } => "size",
             ValueKind::Coord { .. } => "coordinate",
             ValueKind::Token(..) => "token",
             ValueKind::BlockId(..) => "block id",
+            ValueKind::Nbt(..) => "NBT compound",
             ValueKind::DotRef(..) => "reference",
             ValueKind::Str(..) => "string",
             ValueKind::List(..) => "list",
         }
+    }
+}
+
+/// A decimal as `spec/syntax` "IDs, classes, addresses" spells it: no zero leads its whole part or
+/// ends its fraction, and no `.` stands with nothing after it, so `02.50` is `2.5` and `2.0` is `2`.
+fn decimal_spelling(text: &str) -> String {
+    let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+    let whole = whole.trim_start_matches('0');
+    let whole = if whole.is_empty() { "0" } else { whole };
+    match fraction.trim_end_matches('0') {
+        "" => whole.to_owned(),
+        fraction => format!("{whole}.{fraction}"),
     }
 }
 

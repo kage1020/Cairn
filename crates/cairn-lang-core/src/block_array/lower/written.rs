@@ -6,7 +6,7 @@ use crate::intent::{Member, MemberRole};
 
 use crate::block_array::wall_column::WallColumn;
 
-use super::roof_kind::{roof_rise, tallest_rise};
+use super::roof_kind::{shape_rise, tallest_rise};
 
 /// Every member a body writes, each with its level's `y` offset, or `None` under a `level` that is
 /// not placed: one with no readable `y=`, or one inside another `level`.
@@ -42,6 +42,8 @@ fn under_level<'a>(
 pub(super) struct Written {
     /// Every row the placed `walls` members are written to.
     pub(super) walls: WallColumn,
+    /// The `(level y, height)` of each placed `walls` member written with a positive `height=`.
+    pub(super) placed_walls: Vec<(u32, u32)>,
     /// The highest of those rows, `0` with none.
     pub(super) wall_top: u32,
     /// The tallest rise of a roof whose line says its shape.
@@ -90,7 +92,7 @@ impl Written {
             .unwrap_or(0);
         let roof_w = interior_w.saturating_add(overhang.saturating_mul(2));
         let roof_h = interior_h.saturating_add(overhang.saturating_mul(2));
-        let rises: Vec<Option<u32>> = roofs().map(|m| roof_rise(m, roof_w, roof_h)).collect();
+        let rises: Vec<Option<u32>> = roofs().map(|m| shape_rise(m, roof_w, roof_h)).collect();
         let rise = rises.iter().flatten().copied().max().unwrap_or(0);
         let reach_rise = if rises.contains(&None) {
             rise.max(tallest_rise(roof_w, roof_h))
@@ -99,7 +101,8 @@ impl Written {
         };
         let height_with = |rise: u32| 1u32.saturating_add(wall_top).saturating_add(rise);
         Self {
-            walls: WallColumn::from_walls(placed),
+            walls: WallColumn::from_walls(placed.iter().copied()),
+            placed_walls: placed,
             wall_top,
             rise,
             height: height_with(rise),

@@ -9,7 +9,7 @@ title: "7. マテリアルとテーマ"
 構造の側には、具体的なブロック名を書きません。構造が持つのは `mat_slot` という注入ポイントだけで、そこにスロットやセレクタを通じて値を割り当てるのが `theme` です。CSS や依存性注入と同じ考え方です。これにより、構造 (壁がどこにあるか) とスタイル (どのブロックを使い、どう飾るか) が分かれます。
 
 ```
-def cottage class=house size=9x7:
+def cottage size=9x7:
   floor  id=floor  mat_slot=floor
   walls  id=walls  class=outer mat_slot=wall height=4
   roof   id=roof   kind=gable  mat_slot=roof
@@ -24,11 +24,13 @@ theme medieval:
   window[class=small] -> frame=@spruce_wood
 ```
 
+**行が選ぶもの。** セレクタはメンバーのキーワードと、角括弧に入れた属性で、そのキーワードのメンバーのうち、どの属性にも合うものを選びます。`level=NAME` は、`id=` が `NAME` の `level` の下に立つメンバーに合い、それ以外の属性は、メンバーの行でそのキーが持つ値に合います。角括弧は続けて書けて、`window[class=small][side=front]` は `window[class=small,side=front]` と同じです。`edit` の行も同じ文法で選びます ([コンポーネント・編集・複数建築 §9.2](/ja/spec/components-editing-sites/#92-編集モデル))。
+
 **カスケード。** メンバーは、自分にマッチするすべてのセレクタ行の割り当てを、ソース上の順番に集めるので、2 つの行が同じキーに値を割り当てていれば、メンバーには後の値が残ります。CSS で同じ詳細度の 2 つのルールに適用される規則と同じです。ただし割り当ては予約中 (後述) なので、今のところカスケードが決めるのはメンバーが何を集めるかだけで、作られるものには影響しません。
 
 属性が部分的に重なる行は、この性質を利用します。`window[class=small,side=front]` は、自分が選ぶメンバーについて `window[class=small]` の値を上書きします。広いほうの行だけが選ぶメンバーには、広いほうの行の割り当てが残ります。
 
-一方、*同じ* メンバーを選ぶ 2 つの行は事情が違います。キーワードも属性も同じなら、2 つの行はメンバー単位で完全に一致するので、両方の行が割り当てるキーについて、前の行の値が残るメンバーは 1 つもありません。割り当てが今後どんな意味を持つことになっても、その値は効かない記述です。これが `E_DUPLICATE_SELECTOR` です ([Lint §11.1](/ja/spec/lint/#111-診断コード))。割り当てが予約中の今もエラーにするのは、1 つの行の中で 2 回書いたキーを `E_DUPLICATE_ARG` が拒否するのと同じ理由です ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。同じかどうかは意味で判断します。属性の順番は問わず、`class=` / `id=` / `mat_slot=` の値はラベルの文字列として比べるので、`window[class=small]` と `window[class="small"]` は同じセレクタです。セレクタが同じでも、別々のキーを割り当てる行は報告しません。それらは合成されるので、長い割り当ての並びを 2 行に分けて書いてもかまいません。
+一方、*同じ* メンバーを選ぶ 2 つの行は事情が違います。キーワードも属性も同じなら、2 つの行はメンバー単位で完全に一致するので、両方の行が割り当てるキーについて、前の行の値が残るメンバーは 1 つもありません。割り当てが今後どんな意味を持つことになっても、その値は効かない記述です。これが `E_DUPLICATE_SELECTOR` です ([Lint §11.1](/ja/spec/lint/#111-診断コード))。割り当てが予約中の今もエラーにするのは、1 つの行の中で 2 回書いたキーを `E_DUPLICATE_ARG` が拒否するのと同じ理由です ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。同じかどうかは意味で判断します。属性の順番は問わず、`class=` / `id=` / `mat_slot=` / `level=` の値はラベルの文字列として、数値はその数値が表す数として比べるので ([構文 §5.1.1](/ja/spec/syntax/#511-リテラルと区切り))、`window[class=small]` と `window[class="small"]` は同じセレクタで、`walls[height=4]` と `walls[height=4.0]` も同じセレクタです。セレクタが同じでも、別々のキーを割り当てる行は報告しません。それらは合成されるので、長い割り当ての並びを 2 行に分けて書いてもかまいません。
 
 **セレクタによる割り当ては予約中です。** 行がキーワードごとにどのキーを割り当てられるか、それぞれのキーが何を塗るかは、まだ定めていません。割り当てを読む lowering もありません。上の例の 2 つのセレクタ行があってもなくても、作られる cottage は同じで、どのメンバーのブロックもこれらの行に左右されません。
 
@@ -42,13 +44,13 @@ theme medieval:
 
 テーマが割り当てるのは、生のブロック ID ではなく **正規トークン** です。`(edition, version)` ごとに ID、ステート名、ステートの値、シリアライズの形式を解決するのはバックエンドです ([バージョンとエディション](/ja/spec/versioning-editions/))。LLM は、`pillar_axis` も、リトルエンディアンの NBT も、Bedrock の `weirdo_direction` も知る必要がありません。正規の語彙は、ステート名とステートの値を Java と同じに綴ります。`@oak_stairs[facing=east]` は Java の `facing` を書き、Bedrock のバックエンドがそれを自分の `weirdo_direction` に写します。
 
-現時点のバックエンドが解決する範囲は、これより狭くなっています。正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせるだけなので ([§7.3](#73-バージョンとエディションをまたぐ対応付け))、`@water_cauldron` はどの Bedrock のバージョンでも `E_UNKNOWN_ID` になります。ステートはそのトークンの Java ブロックが取るもので、Bedrock のライターはターゲットのバージョンに対するパックのステートマップでそれを写します。`@oak_log[axis=x]` はどの Bedrock のバージョンでも `pillar_axis=x` として書き出しますが、`@cherry_wood[axis=x]` は、マップにその形がない 1.21.40 では `E_STATE_UNMAPPED` になります。
+正規トークンは、固定したターゲットがその ID を宣言していれば `minecraft:<token>` として、宣言していなければそのターゲットの表を通して書き出すので ([§7.3](#73-バージョンとエディションをまたぐ対応付け))、`@water_cauldron` は Bedrock では水の入った `cauldron` として書き出します。ステートはそのトークンの Java ブロックが取るもので、Bedrock のライターはターゲットのバージョンに対するパックのステートマップでそれを写します。`@oak_log[axis=x]` はどの Bedrock のバージョンでも `pillar_axis=x` として書き出しますが、`@cherry_wood[axis=x]` は、マップにその形がない 1.21.40 では `E_STATE_UNMAPPED` になります。
 
 トークンには 2 つの種類があります。
 
 | 種類 | 例 | 意味 |
 |---|---|---|
-| **正規ブロックトークン** | `@oak_planks` / `@water_cauldron` / `@oak_log[axis=x]` | Minecraft の特定のブロックを意味します。意味が変わってしまうようなダウングレードを黙って行うことは **禁止** で、`@water_cauldron` が `cauldron` になることはありません。 |
+| **正規ブロックトークン** | `@oak_planks` / `@water_cauldron` / `@oak_log[axis=x]` | Minecraft の特定のブロックを意味します。意味が変わってしまうようなダウングレードを黙って行うことは **禁止** で、`@water_cauldron` が空の `cauldron` になることはありません。 |
 | **抽象マテリアルトークン** | `@floor.wood.broadleaf` / `@roof.dark_wood` | 見た目の好みを表します。テーマのポリシーによってダウングレードしてもかまいません (MAY) (オーク ↔ シラカバ)。 |
 
 ```
@@ -70,9 +72,14 @@ theme exact_oak:
 | `@wall.wood.broadleaf`、`@wall.wood.conifer`、`@wall.stone.cobble`、`@wall.stone.smooth` | 壁 |
 | `@wood.dark`、`@wood.light`、`@wood.warm`、`@wood.cool` | 色味で選ぶ板材 |
 | `@roof.dark_wood`、`@roof.light_wood`、`@roof.warm_wood`、`@roof.cool_wood` | 色味で選ぶ屋根の階段 |
-| `@sign.oak`、`@sign.oak_wall` | 立てた看板と壁の看板 |
+| `@beam.default` | `mat_slot=` で割り当てていない `beam` が敷く柱状のブロック |
+| `@sign.oak`、`@sign.oak_wall` | `mat_slot=` で割り当てていない `sign` が立てる看板と、掛ける壁の看板 |
+| `@bed.default` | `mat_slot=` で割り当てていない `bed` が置くベッド。赤いベッド |
+| `@bed.white`、`@bed.orange`、`@bed.magenta`、`@bed.light_blue`、`@bed.yellow`、`@bed.lime`、`@bed.pink`、`@bed.gray`、`@bed.light_gray`、`@bed.cyan`、`@bed.purple`、`@bed.blue`、`@bed.brown`、`@bed.green`、`@bed.red`、`@bed.black` | それぞれの染料の色のベッド |
 | `@door.default` | `mat_slot=` で割り当てていない `door` が置くドアのブロック |
 | `@chest.default` | `mat_slot=` で割り当てていない `chest` が置くチェストのブロック |
+| `@trapdoor.default` | `mat_slot=` で割り当てていない `trapdoor` が置くトラップドア |
+| `@note_block.default` | `note_block` が置く音符ブロック |
 | `@pressure_plate.default` | `mat_slot=` で割り当てていない `pressure_plate` が置くブロック |
 | `@lever.default` | `lever` が壁に掛けるレバー |
 | `@button.default` | `mat_slot=` で割り当てていない `button` が壁に掛けるボタン |
@@ -96,13 +103,21 @@ tier-1 のトークンが解決するブロックは **tier-2** で、Evolving �
 
 | パターン | 例 | 扱い |
 |---|---|---|
-| 1 対 1 の改名 | `@dirt_path` (旧 `grass_path`) | 自動で解決します。 |
+| 1 対 1 の改名 | `@chain` (Java 26.3 での `iron_chain`) | ターゲットごとに自動で解決します。 |
 | 1 対 N の分割 | `@cauldron[fluid=water]` → `water_cauldron` | 意味を表すトークンで区別します。 |
-| N 対 1 の統合 | `@oak_slab` (旧 `wooden_slab{variant}`) | ターゲットごとに解決します。 |
-| 新規追加 | `@cherry_planks` | `requires >=` で下限を指定する必要があります。 |
+| N 対 1 の統合 | `@stone_bricks` (Bedrock 1.21.0 での `stonebrick[stone_brick_type=default]`) | ターゲットごとに解決します。 |
+| 新規追加 | `@pale_oak_planks` | それを宣言する最初のターゲットより下では拒否します。 |
 | 削除 | ターゲットのバージョンに存在しない | ハードエラーにして、代わりの候補を示します。 |
 
-現時点で書いたとおりに動くのは、最後の行だけです。 正規トークンは `minecraft:<token>` としてそのまま書き出し、指定したターゲットと照らし合わせます ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。改名は自動では解決されず `E_UNKNOWN_ID` になり、そのターゲットでの綴りをレジストリパックの `aliases` から注記で示します (Bedrock で `@dirt_path` と書くと `minecraft:grass_path` を示します)。改名をまたいで解決できるのは抽象トークンだけで、カタログのエントリの `overrides` を通じて解決します ([§7.2](#72-正規トークン))。分割も区別しません。`@cauldron[fluid=water]` は `minecraft:cauldron` にないステートを名指すので、固定したターゲットは `water_cauldron` として読まずに `E_STATE_DOMAIN` として拒否します。統合された id も、ほかの id と同じくターゲットごとに照らし合わせるだけです。新しいブロックから下限を推定することもありません。`@requires` のない `@pale_oak_planks` は Java 1.21.4 では問題なく通り、このブロックを持たないターゲットでは `E_UNKNOWN_ID` になって、それを宣言する最初のターゲットとして 1.21.4 を示します。削除された id は `E_UNKNOWN_ID` になり、それを宣言する最後のターゲットを示します。どのバージョンも宣言していない id なら、近いブロックがそのターゲットにあれば、それを示します。
+正規トークンは `minecraft:<token>` として書き出し、固定したターゲットと照らし合わせます ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。その前に、ターゲットのレジストリパックの 3 つの表が、次の順にトークンに答えます。
+
+1. **意味トークン**。分割に対するものです。パックの `meanings` 表は、ブロックが複数に分かれたトークンごとに、その意味トークン (ブロックが持たないプロパティで、その値が分かれた先の 1 つを選ぶもの) と、各値が指すブロックを挙げます。`@cauldron[fluid=water]` は `water_cauldron` になり、`fluid` を落として、ほかのステートはすべて残します。行が挙げない値は `E_STATE_DOMAIN` になり、行が挙げる値を示します。
+2. **改名**。固定したターゲットがトークンの ID を宣言していない場合です。エディションのどこかのバージョンがそれを宣言し、その `aliases` のグループが、エディションの範囲の中で改名された 1 つのブロックで、どのバージョンもその綴りを 2 つは宣言しないなら、トークンはターゲットが宣言するただ 1 つの綴りで書き出します。Java 26.3 は `@chain` を `iron_chain` として、Java 1.21.4 は `@iron_chain` を `chain` として書き出します。
+3. **ステートマップ**。Bedrock で、固定したバージョンがその ID を宣言していない場合です。そのバージョンのステートマップが Bedrock のブロックとして書き出す Java のブロックは、そこに写るほかの Java のブロックが同じ形を 1 つも取らなければ、そのブロックとして書き出します。こうすれば、書き出したものからどのブロックだったかがわかります。`@oak_sign` は `standing_sign` として、1.21.0 での `@stone_bricks` は `stonebrick[stone_brick_type=default]` として書き出し、後者はターゲットごとに解決する統合です。パレットには Java のブロックとそのステートを残し、ライターはほかのブロックと同じようにそれを写します。ベッドはこのようには書き出しません。Bedrock はベッドの色も植木鉢の植物もブロックエンティティに持つので、そのブロックでは区別できず、`@black_bed` はそこでは `E_UNKNOWN_ID` のままです。
+
+どの表も答えないトークンは `E_UNKNOWN_ID` になり、パックの `aliases` にそのターゲットでの綴りがあれば注記で示します。Bedrock 1.21.60 での `@stonebrick` には、1.21.40 がそれを分割した 4 つのブロックを返します。1 つを選べば [バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定) が禁じるサイレント置換になるからです。ターゲットを固定しない場合、ターゲットにできるいずれかのバージョンが別の綴りで書き出すトークンは、そのトークン自身として lowering します。そのため `cairn check` と `cairn info` の範囲全体のパスと言語サーバーは、固定したビルドが書き出すものを拒否せず、固定したどのビルドもそれに出す指摘を落としもしません。`@oak_sign` を割り当てた `shed` の屋根は、そこでも `E_INCOMPATIBLE_MATERIAL` になります。生のブロックは自分が書き出す ID を名指し、これらの表を通しては読みません ([§7.4](#74-生のブロック))。そのため意味トークンは生のブロックのステートにはならず、`raw_block mat=minecraft:cauldron[fluid=water]` は、`cauldron` が `fluid` を持たないので `E_STATE_DOMAIN` になります。抽象トークンは、カタログのエントリとそのエントリの `overrides` を通じて解決します ([§7.2](#72-正規トークン))。`cairn info` は、あるバージョンが別の ID で書き出す各トークンを、書き出す ID とともに示します ([バージョンとエディション](/ja/spec/versioning-editions/#respelled-の行))。
+
+新しいブロックから下限を推定することはありません。`@requires` のない `@pale_oak_planks` は Java 1.21.4 では問題なく通り、このブロックを持たないターゲットでは `E_UNKNOWN_ID` になって、それを宣言する最初のターゲットとして 1.21.4 を示します。`cairn info` は Java の推定範囲をそこから始めます ([バージョンとエディション](/ja/spec/versioning-editions/#inferred-range-の行))。削除された id は `E_UNKNOWN_ID` になり、それを宣言する最後のターゲットを示します。推定範囲もそこで終わるので、そのターゲットより上にあり、満たすターゲットがある下限は `E_REQUIRES_CONFLICT` になります。どのバージョンも宣言していない id なら、近いブロックがそのターゲットにあれば、それを示します。
 
 **吸収できるのは、ID、ステート、シリアライズの違いだけです。** 概念そのものがない場合や、ゲームの挙動の違いは吸収しません。
 

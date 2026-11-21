@@ -14,10 +14,10 @@ to keep in mind while editing.
 |---|---|---|
 | `cairn-lang-core` | lex, parse, AST, Intent IR, check, resolve, block-array lowering | — |
 | `cairn-lang-nbt` | NBT codec | — |
-| `cairn-lang-formats` | `.nbt` and `.mcstructure` writers, registry packs, portability | core, nbt |
+| `cairn-lang-formats` | `.nbt`, `.mcstructure`, `.litematic` and `.schem` writers, `.litematic` and `.schem` readers, registry packs, portability | core, nbt |
 | `cairn-lang-redstone` | logic IR, netlist, place-and-route | core |
 | `cairn-lang-cli` | the `cairn` binary | core, docs, formats, redstone |
-| `cairn-lang-lsp` | the `cairn-lsp` server | core, formats |
+| `cairn-lang-lsp` | the `cairn-lsp` server | core, docs, formats |
 | `cairn-lang-wasm` | browser bindings, a placeholder | core |
 | `cairn-lang-tree-sitter` | editor grammar, separate from core's parser | — |
 | `cairn-lang-docs` | the site's Markdown pages, embedded; its manifest is `website/Cargo.toml` | — |

@@ -104,21 +104,17 @@ fn duplicate_selector_attribute_is_reported() {
 
 #[test]
 fn duplicate_header_arg_other_than_size_is_arg_not_size() {
-    // The surviving `class=` is also `W_IGNORED_ARGUMENT`, since no pass reads it.
+    // The surviving `class=` is also `E_UNKNOWN_ARGUMENT`, since a header takes only `size=`.
     let src = "struct s size=1x1 class=house class=hut\n  floor mat_slot=m\n";
     let diags = diagnose(src);
-    assert_eq!(diags.len(), 2, "got {diags:#?}");
-    let dup: Vec<_> = diags
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DuplicateArg)
-        .collect();
-    assert_eq!(dup.len(), 1, "got {diags:#?}");
-    assert_eq!(slice(src, dup[0]), "class=hut");
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.code == DiagnosticCode::IgnoredArgument && slice(src, d) == "hut"),
-        "got {diags:#?}",
+    let found: Vec<(DiagnosticCode, &str)> =
+        diags.iter().map(|d| (d.code, slice(src, d))).collect();
+    assert_eq!(
+        found,
+        [
+            (DiagnosticCode::DuplicateArg, "class=hut"),
+            (DiagnosticCode::UnknownArgument, "hut"),
+        ],
     );
 }
 
@@ -1057,6 +1053,16 @@ mod selector {
                 "a quoted `{attr}` selects nothing the bare one selects, so the rows are not a pair",
             );
         }
+    }
+
+    #[test]
+    fn a_level_attribute_compares_as_label_text_and_chained_brackets_as_one() {
+        let src = "theme medieval:\n  slot glass -> @glass_pane\n  \
+                   window[level=upper][side=front] -> frame=@spruce_wood\n  \
+                   window[side=front,level=\"upper\"] -> frame=@dark_oak_wood\n\n\
+                   struct cottage size=9x7\n  level id=upper y=3\n    \
+                   window side=front offset=2 y=1 size=2x2 mat_slot=glass\n";
+        assert_eq!(row_codes(src), vec!["E_DUPLICATE_SELECTOR"]);
     }
 
     /// Two rows binding one key, filtering on `attr` bare and quoted.

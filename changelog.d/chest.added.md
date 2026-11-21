@@ -12,6 +12,4 @@
   beside the error. Where the pack cannot say, a block whose id is `chest` or ends in `_chest` is
   taken as a chest.
 - *(formats)* Both built-in packs declare the tier-1 token `chest.default`, and their `connections`
-  tables give chests the kind `chest`. A Bedrock build writes each half of a pair as a single
-  chest with `W_INTENT_DEGRADED`, since Bedrock pairs chests through block entities no writer
-  fills yet.
+  tables give chests the kind `chest`.

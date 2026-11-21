@@ -1,14 +1,16 @@
+use std::collections::HashMap;
+
 use super::anchor::{PlaceAnchor, PlacementCorner, PlacementOutOfRange};
 use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::connect::edge_pushers;
-use super::door::{DOOR_BASE_ID, DOOR_TOKEN};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
+use super::opening::{DOOR_BASE_ID, DOOR_TOKEN};
 use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
-use super::site_floor::FloorExtent;
+use super::site_floor::{FloorExtent, FloorOwner, collect_floor_cells};
 use super::*;
 use crate::ast::ValueKind;
-use crate::block_array::material::{NoTarget, resolve_block_state, stand_in};
+use crate::block_array::material::{IdStanding, NoTarget, resolve_block_state, stand_in};
 use crate::block_array::roof::is_stair;
 use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
 use crate::block_array::wall_column::WallColumn;
@@ -100,8 +102,11 @@ fn one_placed_row(
                 origin,
                 dims,
             },
+            row: 0..0,
+            anchor: PlaceAnchor::WorldOrigin,
             walls: WallColumn::default(),
             cut: HashSet::new(),
+            footprint: Footprint { x: width, z: 1 },
         },
     );
     (structures, placed)
@@ -110,7 +115,12 @@ fn one_placed_row(
 #[test]
 fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
     let (structures, placed) = one_placed_row((i32::MAX - 2, 0, 0), 3);
-    let plan = collect_floor_cells(&structures, &placed);
+    let plan = collect_floor_cells(
+        &structures,
+        &placed,
+        &SiteName::new("s").expect("a site name"),
+        0,
+    );
     assert_eq!(
         plan.cells,
         HashSet::from([(i32::MAX - 2, 0, 0), (i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
@@ -123,12 +133,58 @@ fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
     assert_eq!(plan.extents["site::s::b"].max_x, i32::MAX);
 }
 
+#[test]
+fn a_body_takes_up_its_footprint_and_its_blocks_on_its_rows_alone() {
+    // A 3x3 body standing on row 3: air but for one block in the ring round its 1x1 footprint.
+    let (mut structures, mut placed) = one_placed_row((0, 3, 0), 9);
+    let dims = Dims { x: 3, y: 1, z: 3 };
+    let ba = &mut structures["site::s::b"];
+    let stone = ba.voxels[0];
+    ba.dims = dims;
+    ba.voxels = vec![PaletteIndex::AIR; 9];
+    ba.voxels[0] = stone;
+    let body = &mut placed["site::s::b"];
+    body.placement.dims = dims;
+    body.footprint = Footprint { x: 1, z: 1 };
+    let site = SiteName::new("s").expect("a site name");
+    let plan = collect_floor_cells(&structures, &placed, &site, 3);
+    assert_eq!(plan.cells, HashSet::from([(0, 3, 0), (1, 3, 1)]));
+    assert_eq!(
+        plan.owners,
+        HashMap::from([
+            (
+                (0, 3, 0),
+                vec![FloorOwner {
+                    placement: 0,
+                    voxel: Some(stone),
+                }],
+            ),
+            (
+                (1, 3, 1),
+                vec![FloorOwner {
+                    placement: 0,
+                    voxel: None,
+                }],
+            ),
+        ]),
+    );
+    for plane in [0, 2, 4] {
+        let plan = collect_floor_cells(&structures, &placed, &site, plane);
+        assert_eq!(plan.cells, HashSet::new(), "plane {plane}");
+    }
+}
+
 // No source reaches this: the far-edge refusal stops the row first.
 #[test]
 #[cfg_attr(debug_assertions, should_panic(expected = "has no world coordinate"))]
 fn a_body_past_the_i32_edge_folds_nothing_onto_it() {
     let (structures, placed) = one_placed_row((i32::MAX - 1, 0, 0), 3);
-    let plan = collect_floor_cells(&structures, &placed);
+    let plan = collect_floor_cells(
+        &structures,
+        &placed,
+        &SiteName::new("s").expect("a site name"),
+        0,
+    );
     assert_eq!(
         plan.cells,
         HashSet::from([(i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
@@ -147,7 +203,12 @@ fn a_body_past_the_i32_edge_folds_nothing_onto_it() {
 #[should_panic(expected = "has no structure")]
 fn a_placement_with_no_structure_is_not_a_silent_skip() {
     let (_, placed) = one_placed_row((0, 0, 0), 3);
-    let _ = collect_floor_cells(&IndexMap::new(), &placed);
+    let _ = collect_floor_cells(
+        &IndexMap::new(),
+        &placed,
+        &SiteName::new("s").expect("a site name"),
+        0,
+    );
 }
 
 #[test]
@@ -156,7 +217,12 @@ fn a_placement_with_no_structure_is_not_a_silent_skip() {
 fn a_body_with_no_row_0_is_not_a_silent_skip() {
     let (mut structures, placed) = one_placed_row((0, 0, 0), 3);
     structures["site::s::b"].dims.y = 0;
-    let _ = collect_floor_cells(&structures, &placed);
+    let _ = collect_floor_cells(
+        &structures,
+        &placed,
+        &SiteName::new("s").expect("a site name"),
+        0,
+    );
 }
 
 #[test]
@@ -456,7 +522,7 @@ fn without_a_target_the_palette_counts_no_stand_in() {
     fn without_target(source: &str) -> Vec<(&'static str, &str)> {
         let ir = lower(&parse(source).expect("parse"));
         let registry = NoTarget {
-            declared: &|_| true,
+            standing: &|_| IdStanding::Declared,
         };
         let out = lower_to_block_array_within(&ir, &resolve(&ir, None), Some(&registry), 4);
         out.diagnostics
@@ -1315,11 +1381,28 @@ const SLOT_READERS: &[(&str, &str)] = &[
         "chest",
         "struct s size=3x3\n  chest at=inside.front offset=1 mat_slot=c\n",
     ),
+    (
+        "beam",
+        "struct s size=3x3\n  walls height=2\n  beam kind=pillar at=front.top mat_slot=b\n",
+    ),
+    (
+        "trapdoor",
+        "struct s size=3x3\n  trapdoor at=inside.front offset=1 mat_slot=t\n",
+    ),
+    ("sign", "struct s size=3x3\n  sign at=1,0,1 mat_slot=s\n"),
+    (
+        "bed",
+        "struct s size=3x3\n  bed at=1,0,1 facing=north mat_slot=b\n",
+    ),
 ];
 
 /// A themeless struct per keyword whose role reads no `mat_slot=`, `mat_slot=d` on its member;
 /// a misplaced `place` or `connect` still reaches the list the gate reads.
 const SLOT_IGNORERS: &[(&str, &str)] = &[
+    (
+        "note_block",
+        "struct s size=3x3\n  note_block at=1,0,1 mat_slot=d\n",
+    ),
     (
         "lever",
         "struct s size=3x3\n  lever at=inside.front offset=1 mat_slot=d\n",
@@ -1631,7 +1714,7 @@ fn abstract_token_deferral_says_what_each_member_does_instead() {
                       window side=front offset=1 y=1 size=1x2 mat_slot=wall",
             consequence: Some(
                 "the walls are not built and take up no rows, so a door or window cut into \
-                 them is refused",
+                 them, or a beam laid on them, is deferred",
             ),
             voxels: |out| {
                 assert_eq!(struct_s(out).dims.y, 1);
@@ -2214,8 +2297,7 @@ fn door_at_unknown_value_is_refused_naming_the_anchors() {
         invalid_lines(src, &out),
         [(
             "door side=front at=middle",
-            "door has `at=middle`, which is not one of center, left, right — use \
-             `at=center | left | right`",
+            "door has `at=middle`, which is not one of center, left, right",
         )],
     );
     assert_eq!(deferred_count(&out), 0);
@@ -2424,9 +2506,11 @@ fn a_side_typo_is_refused_with_what_was_written() {
 #[test]
 fn a_window_missing_or_misreading_an_argument_it_needs_is_refused_with_its_form() {
     let offset = "write `offset=N`, where `N` is a non-negative integer: the window's first column \
-                  along the wall, counted from 0 at its left end seen from outside";
+                  along the wall, counted from 0 at its left end seen from outside, or the column \
+                  of the cell its `anchor=` names";
     let y = "write `y=N`, where `N` is a non-negative integer: the window's lowest row, counted up \
-             from 0, the base row of the struct or of the window's `level`";
+             from 0, the base row of the struct or of the window's `level`, or the row of the cell \
+             its `anchor=` names";
     let size = "write `size=WxH`, where `W` and `H` are positive integers: the window's width \
                 along the wall and its height in rows";
     for (window, primary, note) in [
@@ -2455,9 +2539,75 @@ fn a_window_missing_or_misreading_an_argument_it_needs_is_refused_with_its_form(
             "window has a `size=` that is not a `WxH` of two positive integers",
             size,
         ),
+        (
+            "window side=front offset=1 y=1 size=3 anchor=middle",
+            "window has a `size=` that is not a `WxH` of two positive integers",
+            size,
+        ),
     ] {
         assert_refused_alone(&walled_6x5_source(window), window, primary, &[note]);
     }
+}
+
+#[test]
+fn a_window_anchor_that_names_no_cell_or_leaves_the_wall_is_refused_with_its_form() {
+    const NAMES: &str = "bottom_left, bottom_center, bottom_right, middle_left, center, \
+                         middle_right, top_left, top_center, top_right";
+    let unknown = format!(
+        "write `anchor=` as one of {NAMES}: the cell of the window, seen from outside, that \
+         `offset=` and `y=` place; without `anchor=` they place its bottom-left cell"
+    );
+    for (window, primary, note) in [
+        (
+            "window side=front offset=1 y=1 size=1x1 anchor=middle",
+            format!("window has `anchor=middle`, which is not one of {NAMES}"),
+            unknown.clone(),
+        ),
+        (
+            "window side=front offset=1 y=1 size=1x1 anchor=3",
+            format!("window has `anchor=3`, which is not one of {NAMES}"),
+            unknown.clone(),
+        ),
+        (
+            "window side=front offset=1 y=1 size=1x1 anchor=\"center\"",
+            format!("window has an `anchor=` that is string `\"center\"`, not one of {NAMES}"),
+            unknown,
+        ),
+        (
+            "window side=front offset=1 y=1 size=3x1 anchor=bottom_right",
+            "window has `offset=1` at `anchor=bottom_right`, which puts its first column at \
+             `offset - 2` = -1, before the left end of its wall"
+                .to_owned(),
+            "`anchor=bottom_right` names the cell 2 along from the window's first column, so \
+             `offset=` must be at least 2; raise `offset=`, or choose an `anchor=` further left"
+                .to_owned(),
+        ),
+        (
+            "window side=front offset=1 y=1 size=1x3 anchor=top_left",
+            "window has `y=1` at `anchor=top_left`, which puts its lowest row at `y - 2` = -1, \
+             below the base row"
+                .to_owned(),
+            "`anchor=top_left` names the cell 2 up from the window's lowest row, so `y=` must be \
+             at least 2; raise `y=`, or choose an `anchor=` further down"
+                .to_owned(),
+        ),
+    ] {
+        assert_refused_alone(&walled_6x5_source(window), window, &primary, &[&note]);
+    }
+}
+
+#[test]
+fn an_anchored_window_past_its_wall_is_refused_by_its_first_column() {
+    let window = "window side=front anchor=bottom_center offset=5 y=1 size=3x1";
+    assert_refused_alone(
+        &walled_6x5_source(window),
+        window,
+        "window extends beyond the `front` wall (offset=5 anchor=bottom_center size=3x1 repeat=1 step=0, wall length=6)",
+        &[
+            "the window ends at `offset - 1 + size.w`, which must be at most 6; lower `offset=` or \
+           narrow `size=`",
+        ],
+    );
 }
 
 #[test]
@@ -2525,6 +2675,38 @@ fn a_sym_window_that_coincides_with_its_mirror_is_reported() {
             assert_eq!(block_id(ba, x, 1, 4), "minecraft:glass_pane", "x={x}");
         }
     }
+}
+
+#[test]
+fn an_anchored_sym_window_mirrors_the_rectangle_its_anchor_places() {
+    let src = |anchor: &str, offset: u32| {
+        format!(
+            "{}  slot g -> @glass_pane\n\n\
+             struct s size=6x5\n  walls mat_slot=w height=3\n  \
+             window side=front{anchor} offset={offset} y=1 size=3x1 sym=true mat_slot=g\n",
+            theme_t!("w", ""),
+        )
+    };
+    let anchored = lowered(&src(" anchor=bottom_center", 3));
+    assert_eq!(
+        anchored
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.primary.as_str(), d.notes[0].message.as_str()))
+            .collect::<Vec<_>>(),
+        [(
+            DiagnosticCode::DeferredMember,
+            "`sym=true` window at offset=3 anchor=bottom_center size=3x1 on the `front` wall \
+             would overlap its mirror (wall length=6); the mirror was skipped",
+            "a `sym=true` window and its mirror are a pair only when the window lies in one half \
+             of the wall (here `offset - 1 + size.w <= 3` or `offset - 1 >= 3`); move or narrow \
+             the window to cut a pair, or drop `sym=true` to keep the one opening that was cut",
+        )],
+    );
+    assert_eq!(
+        lowered(&src(" anchor=bottom_center", 1)).structures,
+        lowered(&src("", 0)).structures,
+    );
 }
 
 #[test]
@@ -3164,10 +3346,10 @@ fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
         blocked[0].data,
         blocked[0].primary,
     );
-    let note = &blocked[0].notes[0].message;
-    assert!(
-        note.contains("port `a.back` is buried"),
-        "note must point at the buried port, got {note}",
+    assert_eq!(
+        blocked[0].notes[0].message,
+        "port `a.back` stands on a cell placement `c` takes up on that row; move that \
+         door/window to an unobstructed wall or pull the placements apart",
     );
     assert!(
         blocked[0].primary.contains("skipped 5 cells"),
@@ -3258,8 +3440,8 @@ fn a_port_on_its_own_placements_pressure_plate_is_not_blamed_on_another_floor() 
 }
 
 #[test]
-fn a_port_buried_by_another_sites_placement_names_that_site() {
-    // `c` buries `a`'s back port from another site, so its bare id names nothing in `s`.
+fn a_floor_of_another_site_on_a_port_leaves_the_walkway_whole() {
+    // `c` floors over `a`'s back port from site `u`, which lays its walkways around its own floors.
     let source = walkway_with_unroutable_port_source()
         .replace("  place id=c use=front_home theme=t north_of=a gap=0\n", "")
         + concat!(
@@ -3268,12 +3450,15 @@ fn a_port_buried_by_another_sites_placement_names_that_site() {
             "  place id=o use=front_home theme=t at=origin\n",
             "  place id=c use=front_home theme=t north_of=o gap=0\n",
         );
-    let note = walkway_blocked_note_of(&source);
-    assert_eq!(
-        note,
-        "port `a.back` is buried inside the floor of placement `c` in site `u`; move that \
-         door/window to an unobstructed wall or pull the placements apart",
+    let alone = lowered(
+        &walkway_with_unroutable_port_source()
+            .replace("  place id=c use=front_home theme=t north_of=a gap=0\n", ""),
     );
+    let beside = lowered(&source);
+    assert_eq!(beside.diagnostics, Vec::<Diagnostic>::new());
+    assert_eq!(beside.walkways, alone.walkways);
+    let key = "walkway::s::a.back__b.front";
+    assert_eq!(beside.structures[key], alone.structures[key]);
 }
 
 #[test]
@@ -3302,11 +3487,48 @@ fn a_router_past_the_area_cap_names_the_placements_that_stretch_its_box() {
     assert_eq!(
         note,
         format!(
-            "the router searches the box spanning both ports and every placement floor on \
-             the walk plane, here 4238888 cells, past its cap of {ROUTE_AREA_CAP} cells; \
-             the two ports span only 42 of those cells, and the floors of placements `a`, \
-             `b`, `c`, `d`, `e1`, and `e3` stretch the box past them, so bring those \
-             placements closer to the two ports",
+            "the router searches the box spanning both ports and every cell the placements of \
+             site `s` take up on the walk plane, here 4238888 cells, past its cap of \
+             {ROUTE_AREA_CAP} cells; the two ports span only 42 of those cells, and what \
+             placements `a`, `b`, `c`, `d`, `e1`, and `e3` take up stretches the box past them, \
+             so bring those placements closer to the two ports",
+        ),
+    );
+}
+
+#[test]
+fn a_router_past_the_area_cap_on_a_raised_row_names_only_the_placements_on_that_row() {
+    // `p` is a floor below the walk plane, so it sets no edge however far it lies.
+    let note = walkway_blocked_note_of(concat!(
+        "def hut size=3x3:\n",
+        "  floor id=f mat_slot=wall\n",
+        "  walls id=w mat_slot=wall height=5\n",
+        "  level y=2\n",
+        "    door id=front side=front at=center\n",
+        "    door id=back  side=back  at=center\n",
+        "\n",
+        "def pad size=3x3:\n",
+        "  floor id=f mat_slot=wall\n",
+        "\n",
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "site s:\n",
+        "  place id=a use=hut theme=t at=origin\n",
+        "  place id=b use=hut theme=t north_of=a gap=2000\n",
+        "  place id=c use=hut theme=t east_of=b gap=2000\n",
+        "  place id=d use=hut theme=t north_of=c gap=4\n",
+        "  place id=p use=pad theme=t east_of=d gap=3000\n",
+        "  connect c.front to d.back path=@gravel\n",
+    ));
+    assert_eq!(
+        note,
+        format!(
+            "the router searches the box spanning both ports and every cell the placements of \
+             site `s` take up on the walk plane, here 4048128 cells, past its cap of \
+             {ROUTE_AREA_CAP} cells; the two ports span only 42 of those cells, and what \
+             placements `a`, `b`, `c`, and `d` take up stretches the box past them, so bring \
+             those placements closer to the two ports",
         ),
     );
 }
@@ -3383,10 +3605,10 @@ fn a_router_past_the_area_cap_on_distant_ports_blames_the_ports() {
     assert_eq!(
         note,
         format!(
-            "the router searches the box spanning both ports and every placement floor on \
-             the walk plane, here 4010006 cells, past its cap of {ROUTE_AREA_CAP} cells; \
-             the two ports alone span 4008004 of those cells, so place the two structures \
-             closer together",
+            "the router searches the box spanning both ports and every cell the placements of \
+             site `s` take up on the walk plane, here 4012008 cells, past its cap of \
+             {ROUTE_AREA_CAP} cells; the two ports alone span 4008004 of those cells, so place \
+             the two structures closer together",
         ),
     );
 }
@@ -3437,7 +3659,7 @@ fn a_straight_l_past_the_area_cap_is_not_laid_and_says_why() {
 
 #[test]
 fn a_port_on_its_own_plate_and_another_floor_names_both() {
-    // `o`, from another site, floors over the cell where `a`'s own plate sits.
+    // `o` floors over the cell where `a`'s own plate sits.
     let note = walkway_blocked_note_of(concat!(
         "def hut size=5x5:\n",
         "  floor id=f mat_slot=wall\n",
@@ -3455,14 +3677,12 @@ fn a_port_on_its_own_plate_and_another_floor_names_both() {
         "site s:\n",
         "  place id=a use=hut theme=t at=origin\n",
         "  place id=b use=hut theme=t east_of=a gap=4\n",
-        "  connect a.e to b.e path=@gravel\n",
-        "\n",
-        "site u:\n",
         "  place id=o use=slab theme=t at=origin\n",
+        "  connect a.e to b.e path=@gravel\n",
     ));
     assert_eq!(
         note,
-        "port `a.e` is buried inside the floor of placement `o` in site `u` and sits on the \
+        "port `a.e` stands on a cell placement `o` takes up on that row and sits on the \
          `minecraft:oak_pressure_plate` its own placement `a` lays on that cell; move that \
          block, and move that door/window to an unobstructed wall or pull the placements \
          apart; port `b.e` sits on the `minecraft:oak_pressure_plate` its own placement `b` \
@@ -3865,9 +4085,11 @@ fn a_stair_with_an_unknown_state_is_refused_with_the_values_it_takes() {
             vec!["`facing=` takes one of out, in"],
         ),
         (
-            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left",
-            "unknown stair `shape=inner_left`",
-            vec!["`shape=` takes one of straight, outer_left, outer_right"],
+            "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner",
+            "unknown stair `shape=inner`",
+            vec![
+                "`shape=` takes one of straight, inner_left, inner_right, outer_left, outer_right",
+            ],
         ),
     ] {
         assert_eq!(

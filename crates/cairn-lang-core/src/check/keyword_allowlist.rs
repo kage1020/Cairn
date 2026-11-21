@@ -1,7 +1,8 @@
-//! The `keyword_allowlist` pass: a member or theme selector whose keyword is unknown. A member's
-//! suggestions come from its own body's keywords, so `plce` in a `struct` is not offered `place`.
+//! The `keyword_allowlist` pass: a member, theme selector or `edit` whose keyword is unknown. A
+//! member's suggestions come from its own body's keywords, so `plce` in a `struct` is not offered
+//! `place`, and an edit's from those of `struct` and `def` bodies, the only ones it reaches.
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::intent::{BodyKind, IntentModule, Member, MemberRole, known_keywords, role_of};
 use crate::suggest::{did_you_mean_note, nearest_match};
 
@@ -15,6 +16,13 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
         for rule in &theme.selectors {
             if matches!(role_of(&rule.keyword), MemberRole::Other(_)) && !rule.keyword.is_empty() {
                 push_unknown_keyword(&rule.keyword, &rule.span, known_keywords(), sink);
+            }
+        }
+    }
+    for edit in &ir.edits {
+        for (keyword, span) in edit.target.keywords() {
+            if matches!(role_of(keyword), MemberRole::Other(_)) {
+                push_unknown_keyword(keyword, span, &BodyKind::Geometry.allowed_keywords(), sink);
             }
         }
     }
@@ -48,8 +56,9 @@ fn push_unknown_keyword(
     candidates: &[&'static str],
     sink: &mut DiagnosticSink,
 ) {
+    let suggestion = nearest_match(keyword, candidates.iter().copied());
     let mut notes = Vec::with_capacity(2);
-    notes.extend(nearest_match(keyword, candidates.iter().copied()).map(did_you_mean_note));
+    notes.extend(suggestion.map(did_you_mean_note));
     notes.push(DiagnosticNote {
         span: None,
         message: if candidates.is_empty() {
@@ -65,6 +74,9 @@ fn push_unknown_keyword(
         span: span.clone(),
         primary: format!("unknown keyword `{keyword}`"),
         notes,
-        data: None,
+        data: Some(DiagnosticData::UnknownKeyword {
+            keyword: keyword.to_owned(),
+            suggestion: suggestion.map(str::to_owned),
+        }),
     });
 }

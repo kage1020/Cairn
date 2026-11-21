@@ -12,7 +12,7 @@ The structure never writes a concrete block name. It carries `mat_slot` injectio
 separates structure (where the walls are) from style (which blocks, what detailing).
 
 ```
-def cottage class=house size=9x7:
+def cottage size=9x7:
   floor  id=floor  mat_slot=floor
   walls  id=walls  class=outer mat_slot=wall height=4
   roof   id=roof   kind=gable  mat_slot=roof
@@ -26,6 +26,13 @@ theme medieval:
   walls[class=outer]  -> trim=@spruce_log     # part detailing, via a selector (reserved)
   window[class=small] -> frame=@spruce_wood
 ```
+
+**What a row selects.** A selector is a member keyword and its attributes in brackets, and it
+selects the members of that keyword that match each attribute. `level=NAME` matches a member that
+stands under a `level` whose `id=` is `NAME`, and any other attribute matches the value its key
+holds on the member's line. Brackets may follow one another: `window[class=small][side=front]` is
+`window[class=small,side=front]`. An `edit` line selects by the same grammar ([Components, Editing,
+and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
 
 **The cascade.** A member collects the bindings of every selector row it matches, in source order,
 so when two rows bind the same key the member keeps the later value. CSS applies the same rule to
@@ -42,10 +49,12 @@ value is dead text whatever a binding comes to mean. That is
 `E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error even while
 bindings are reserved, for the reason `E_DUPLICATE_ARG` refuses one key written twice inside one row
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). Sameness is by meaning: attribute
-order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
-`window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
-different keys are not reported. They compose, and splitting a long binding list over two lines is
-allowed.
+order does not count, `class=` / `id=` / `mat_slot=` / `level=` values compare as label text, and
+numbers compare by the number they write ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)), so `window[class=small]` and
+`window[class="small"]` are one selector, and so are `walls[height=4]` and `walls[height=4.0]`. Rows
+that coincide but bind different keys are not reported. They compose, and splitting a long binding
+list over two lines is allowed.
 
 **Selector bindings are reserved.** Which keys a row may bind on each keyword, and what each one
 paints, is not specified yet, and no lowering reads a binding. The two selector rows above build the
@@ -76,18 +85,18 @@ little-endian NBT, or Bedrock's `weirdo_direction`. The canonical vocabulary spe
 state values as Java does: `@oak_stairs[facing=east]` writes Java's `facing`, and the Bedrock backend
 maps it to its own `weirdo_direction`.
 
-The backend resolves less than that today. A canonical token is written as `minecraft:<token>` and
-checked against the pinned target ([§7.3](#73-mappings-across-version-and-edition)), so
-`@water_cauldron` is `E_UNKNOWN_ID` on every Bedrock version. Its states are the ones the token's
-Java block takes, and the Bedrock writer maps them through the pack's state map for the target
-version: `@oak_log[axis=x]` is written as `pillar_axis=x` on every Bedrock version, while
+A canonical token is written as `minecraft:<token>` where the pinned target declares that ID, and
+through the target's tables where it does not ([§7.3](#73-mappings-across-version-and-edition)), so
+`@water_cauldron` is written on Bedrock as its `cauldron` holding water. Its states are the ones the
+token's Java block takes, and the Bedrock writer maps them through the pack's state map for the
+target version: `@oak_log[axis=x]` is written as `pillar_axis=x` on every Bedrock version, while
 `@cherry_wood[axis=x]` is `E_STATE_UNMAPPED` at 1.21.40, whose map has no form for it.
 
 Tokens come in two kinds:
 
 | Kind | Example | What it means |
 |---|---|---|
-| **Canonical block token** | `@oak_planks`, `@water_cauldron`, `@oak_log[axis=x]` | A specific meaning in Minecraft. Silent meaning-breaking downgrades are **forbidden**, so `@water_cauldron` may never become `cauldron`. |
+| **Canonical block token** | `@oak_planks`, `@water_cauldron`, `@oak_log[axis=x]` | A specific meaning in Minecraft. Silent meaning-breaking downgrades are **forbidden**, so `@water_cauldron` may never become an empty `cauldron`. |
 | **Abstract material token** | `@floor.wood.broadleaf`, `@roof.dark_wood` | An aesthetic choice. Theme policy MAY downgrade these (oak ↔ birch). |
 
 ```
@@ -115,9 +124,14 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@wall.wood.broadleaf`, `@wall.wood.conifer`, `@wall.stone.cobble`, `@wall.stone.smooth` | Walls |
 | `@wood.dark`, `@wood.light`, `@wood.warm`, `@wood.cool` | Planks, by tone |
 | `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
-| `@sign.oak`, `@sign.oak_wall` | A standing sign and a wall sign |
+| `@beam.default` | The pillar block a `beam` lays when no `mat_slot=` binds one |
+| `@sign.oak`, `@sign.oak_wall` | The standing sign a `sign` stands, and the wall sign it hangs, when no `mat_slot=` binds one |
+| `@bed.default` | The bed a `bed` lays when no `mat_slot=` binds one, a red one |
+| `@bed.white`, `@bed.orange`, `@bed.magenta`, `@bed.light_blue`, `@bed.yellow`, `@bed.lime`, `@bed.pink`, `@bed.gray`, `@bed.light_gray`, `@bed.cyan`, `@bed.purple`, `@bed.blue`, `@bed.brown`, `@bed.green`, `@bed.red`, `@bed.black` | The bed of each dye's colour |
 | `@door.default` | The door block a `door` places when no `mat_slot=` binds one |
 | `@chest.default` | The chest block a `chest` places when no `mat_slot=` binds one |
+| `@trapdoor.default` | The trapdoor a `trapdoor` sets when no `mat_slot=` binds one |
+| `@note_block.default` | The note block a `note_block` sets |
 | `@pressure_plate.default` | The block a `pressure_plate` places when no `mat_slot=` binds one |
 | `@lever.default` | The lever a `lever` hangs on its wall |
 | `@button.default` | The button a `button` hangs on its wall when no `mat_slot=` binds one |
@@ -148,25 +162,57 @@ A canonical token absorbs five patterns. The resolution table's structure is in
 
 | Pattern | Example | Policy |
 |---|---|---|
-| Rename 1:1 | `@dirt_path` (was `grass_path`) | Auto-resolve. |
+| Rename 1:1 | `@chain` (Java 26.3's `iron_chain`) | Auto-resolve per target. |
 | Split 1:N | `@cauldron[fluid=water]` → `water_cauldron` | Separate by meaning token. |
-| Merge N:1 | `@oak_slab` (was `wooden_slab{variant}`) | Resolve per target. |
-| New | `@cherry_planks` | Needs a `requires >=` floor. |
+| Merge N:1 | `@stone_bricks` (Bedrock 1.21.0's `stonebrick[stone_brick_type=default]`) | Resolve per target. |
+| New | `@pale_oak_planks` | Refused below the first target that declares it. |
 | Deleted | Absent in the target version | Hard error plus alternatives. |
 
-Today only the last row holds as written. A canonical token is written as `minecraft:<token>` and
-checked against the pinned target ([Versioning and Editions
-§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)). A rename is
-`E_UNKNOWN_ID`, with a note naming the target's spelling from the registry pack's `aliases`
-(`@dirt_path` on Bedrock is answered with `minecraft:grass_path`); only an abstract token resolves
-across a rename, through its catalog entry's `overrides` ([§7.2](#72-canonical-vocabulary)). A split
-is not separated: `@cauldron[fluid=water]` names a state `minecraft:cauldron` does not have, so a
-pinned target refuses it as `E_STATE_DOMAIN` rather than reading it as `water_cauldron`. A merged id
-is checked per target like any other. No floor is inferred for a new block: `@pale_oak_planks` with
-no `@requires` checks clean on Java 1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it, naming
-1.21.4 as the first target that declares it. A deleted id is `E_UNKNOWN_ID`, naming the last target
-that declares it; an id no version declares names the nearest block the target has when one is near
-enough.
+A canonical token is written as `minecraft:<token>` and checked against the pinned target
+([Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference)). Three of the
+target's registry pack tables answer the token first, in this order:
+
+1. **Meaning token**, for a split. The pack's `meanings` table lists each token whose block split
+   into several, with its meaning token, a property the block does not have whose value picks one of
+   them, and the block each value names. `@cauldron[fluid=water]` is `water_cauldron`, with `fluid`
+   dropped and every other state kept. A value the row does not list is `E_STATE_DOMAIN`, which
+   names the values it does list.
+2. **Rename**, where the pinned target does not declare the token's ID. When some version of the
+   edition declares it and its `aliases` group is one block renamed across the edition's range, so
+   that no version declares two of its spellings, the token is written under the one spelling the
+   target declares: Java 26.3 writes `@chain` as `iron_chain`, and Java 1.21.4 writes `@iron_chain`
+   as `chain`.
+3. **State map**, on Bedrock, where the pinned version does not declare the ID. A Java block the
+   version's state map writes as a Bedrock block is written as that block when no other Java block
+   mapped onto it takes any of the same forms there, so what is written still says which block it
+   was. `@oak_sign` is written as `standing_sign`, and `@stone_bricks` at 1.21.0 as
+   `stonebrick[stone_brick_type=default]`, a merge resolved per target. The palette keeps the Java
+   block and its states, which the writer maps as it maps any other's. A bed is not written so:
+   Bedrock keeps every bed's colour, and every flower pot's plant, in the block entity, so its
+   blocks cannot tell them apart and `@black_bed` stays `E_UNKNOWN_ID` there.
+
+A token none of them answers is `E_UNKNOWN_ID`, with a note naming the target's spelling from the
+pack's `aliases` where it has one: `@stonebrick` on Bedrock 1.21.60 is answered with the four blocks
+1.21.40 split it into, since choosing one would be the silent substitution [Versioning and Editions
+§10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference) forbids. With no
+target pinned, a token some targetable version writes under another spelling lowers as itself, so
+the range-wide passes of `cairn check` and `cairn info`, and the language server, neither refuse
+what a pinned build writes nor miss what every pinned build raises on it: a `shed` roof bound to
+`@oak_sign` is `E_INCOMPATIBLE_MATERIAL` there too. A raw block names the ID it writes and is not
+read through these tables ([§7.4](#74-raw-blocks)), so a meaning token is no state of it and
+`raw_block mat=minecraft:cauldron[fluid=water]` is `E_STATE_DOMAIN`, since `cauldron` has no
+`fluid`. An abstract token resolves through its catalog entry and that entry's `overrides`
+([§7.2](#72-canonical-vocabulary)). `cairn info` names each token a version writes under another ID,
+with the ID it writes ([Versioning and Editions](/spec/versioning-editions/#the-respelled-row)).
+
+No floor is inferred for a new block: `@pale_oak_planks` with no `@requires` checks clean on Java
+1.21.4 and is `E_UNKNOWN_ID` on a target that lacks it, naming 1.21.4 as the first target that
+declares it, and `cairn info` starts Java's inferred range there ([Versioning and
+Editions](/spec/versioning-editions/#the-inferred-range-row)). A deleted id is `E_UNKNOWN_ID`,
+naming the last target that declares it, and ends the inferred range there, so a floor above that
+target that some target meets is `E_REQUIRES_CONFLICT`; an id no version declares names the nearest
+block the target has when one is near enough.
 
 **Only ID, state, and serialization differences may be absorbed.** Concept absence and
 game-behaviour differences are not.

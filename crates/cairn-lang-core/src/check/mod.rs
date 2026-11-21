@@ -1,12 +1,14 @@
 //! Validation passes over a parsed [`Module`] and its [`IntentModule`], collected by [`check`].
-//! Block-array lowering and [`weigh_intended_targets`] raise codes [`check`] never sees; a caller
-//! that runs them merges their findings itself.
+//! Block-array lowering and [`weigh_intended_targets`] raise codes [`check`] never sees:
+//! [`check_with_intended_targets`] merges the latter in, and a caller merges lowering's itself.
 
 mod arguments;
 mod binding;
 mod cairn_version;
 mod connect_arity;
+mod device_name;
 mod duplicate;
+mod edit;
 mod edition_guard;
 mod intended_targets;
 mod keyword_allowlist;
@@ -16,7 +18,7 @@ mod nesting;
 mod positional;
 mod requires;
 mod sink;
-mod struct_name;
+mod target_floors;
 mod truth;
 mod type_mismatch;
 
@@ -25,13 +27,26 @@ pub use crate::diagnostic::{
     Severity,
 };
 pub use crate::lines::{LineStarts, position_at};
-pub use intended_targets::weigh_intended_targets;
+pub use intended_targets::{
+    check_with_intended_targets, intended_target_findings, weigh_intended_targets,
+};
 pub use sink::DiagnosticSink;
+pub use target_floors::weigh_target;
 
 use crate::ast::Module;
-use crate::diagnostic::{EditionFindings, agreed};
+use crate::diagnostic::{EditionFindings, agreed, drop_repeats_within, note_edits};
 use crate::edition::Edition;
 use crate::intent::IntentModule;
+use crate::version::VersionOrder;
+
+/// Each edition's version table and the versions its pack builds, as a front end's packs give
+/// them, for the passes that weigh a version.
+pub struct VersionTables<'a> {
+    /// The edition's version order.
+    pub order_of: &'a dyn Fn(Edition) -> VersionOrder,
+    /// The versions the edition's pack builds, ascending.
+    pub targetable_of: &'a dyn Fn(Edition) -> Vec<String>,
+}
 
 /// Every pass's findings, [`crate::resolve::resolve`]'s included, sorted by span.
 ///
@@ -45,20 +60,24 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     edition_guard::run(module, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(module, ir, &mut sink);
+    edit::run(ir, &mut sink);
     binding::run(ir, &mut sink);
     material::run(ir, &mut sink);
     member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
     nesting::run(ir, &mut sink);
-    positional::run(ir, &mut sink);
+    positional::run(module, ir, &mut sink);
     requires::run(module, &mut sink);
-    struct_name::run(module, &mut sink);
+    device_name::run(module, &mut sink);
     truth::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
     for d in resolver_findings(ir, edition) {
         sink.push(d);
     }
-    sink.into_sorted()
+    let mut found = sink.into_sorted();
+    drop_repeats_within(&mut found, &ir.edit_lines());
+    note_edits(&mut found, &ir.edited_members());
+    found
 }
 
 /// The resolver's findings on `ir` under `edition`, or with none pinned and some line under an
@@ -95,6 +114,7 @@ mod tests {
         ResolverAndLowering,
         LoweringOnly,
         NeedsVersionTable,
+        NeedsTarget,
     }
 
     /// No wildcard arm, so a new code must say which pass raises it.
@@ -123,11 +143,14 @@ mod tests {
             | C::TypeMismatchSize
             | C::ConnectArity
             | C::InvalidStructName
+            | C::InvalidSiteName
             | C::TruthTableEmpty
             | C::TruthTableDuplicateInput
             | C::TruthTableConflict
             | C::TruthTableDuplicateRow
             | C::TruthTablePartial
+            | C::EditUnmatched
+            | C::EditUnknownKey
             | C::MissingMaterial => RaisedBy::Syntactic,
             C::UnresolvedSlot
             | C::ThemeSelectorUnmatched
@@ -166,10 +189,13 @@ mod tests {
             | C::StructureTooLarge
             | C::PaletteTooLarge
             | C::InvalidWalkwayIdent
+            | C::EditRipple
+            | C::PlacementOverlap
             | C::PhaseConflict => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
             }
+            C::VersionCap | C::RequiresUnorderable => RaisedBy::NeedsTarget,
         }
     }
 
@@ -196,6 +222,15 @@ mod tests {
     }
 
     #[test]
+    fn the_floor_refusals_are_the_codes_only_a_pinned_target_reaches() {
+        assert_eq!(
+            codes_where(|c| raised_by(c) == RaisedBy::NeedsTarget),
+            ["E_REQUIRES_UNORDERABLE", "E_VERSION_CAP"],
+            "`weigh_target` raises these, for a front end that pins a target",
+        );
+    }
+
+    #[test]
     fn the_syntactic_error_codes_are_the_ones_the_cli_parity_table_lists() {
         assert_eq!(
             codes_where(|c| raised_by(c) == RaisedBy::Syntactic && c.severity() == Severity::Error),
@@ -209,7 +244,10 @@ mod tests {
                 "E_DUPLICATE_SELECTOR",
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
+                "E_EDIT_UNKNOWN_KEY",
+                "E_EDIT_UNMATCHED",
                 "E_INVALID_REQUIRES",
+                "E_INVALID_SITE_NAME",
                 "E_INVALID_STRUCT_NAME",
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
@@ -249,6 +287,7 @@ mod tests {
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_INVALID_MEMBER",
                 "E_PARITY_UNSUPPORTED",
+                "E_PLACEMENT_OVERLAP",
                 "E_STATE_DOMAIN",
                 "E_STATE_UNMAPPED",
                 "E_UNKNOWN_ABSTRACT_TOKEN",

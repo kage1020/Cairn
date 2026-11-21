@@ -15,7 +15,7 @@ use cairn_lang_redstone::{
 use clap::ValueEnum;
 
 use crate::cli::SynthStage;
-use crate::pipeline::{build_diagnostics, load_module, weighed_editions};
+use crate::pipeline::{build_diagnostics, load_module};
 use crate::report::{FailureReport, report_diagnostics};
 
 pub(crate) fn run_synth(
@@ -45,7 +45,7 @@ pub(crate) fn run_synth(
     let ir = lower(&module);
     let lines = LineStarts::new(&source);
 
-    let diagnostics = build_diagnostics(&module, &ir, None, &weighed_editions(None), Vec::new());
+    let diagnostics = build_diagnostics(&module, &ir, None, &Edition::weighed(None), Vec::new());
     if report_diagnostics(file, &source, &lines, &diagnostics) {
         return ExitCode::from(1);
     }
