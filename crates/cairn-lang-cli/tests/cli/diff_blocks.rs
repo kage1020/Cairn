@@ -1,6 +1,7 @@
 //! `cairn diff-blocks`: a structure file compared with what a source builds at the file's stamp,
 //! the report in each format, and what it refuses before comparing.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -138,13 +139,10 @@ fn the_json_report_is_one_document_naming_the_target_and_every_region() {
     );
     let run = diff_blocks(&[&artifact, &lift, Path::new("--format"), Path::new("json")]);
     assert_eq!((run.code, run.stderr.as_str()), (Some(1), ""));
-    let report: serde_json::Value = serde_json::from_str(&run.stdout).expect("one JSON document");
-    let keys: Vec<&str> = report
-        .as_object()
-        .expect("an object")
-        .keys()
-        .map(String::as_str)
-        .collect();
+    // A `serde_json::Map` keeps document order when a workspace member enables `preserve_order`.
+    let report: BTreeMap<String, serde_json::Value> =
+        serde_json::from_str(&run.stdout).expect("one JSON document");
+    let keys: Vec<&str> = report.keys().map(String::as_str).collect();
     assert_eq!(
         keys,
         [
