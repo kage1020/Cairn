@@ -1,29 +1,29 @@
-//! The version floors a source declares: the compile's refusal of a target a floor rules out, and
-//! the per-version verdicts `cairn info` reports.
+//! The per-version verdicts the `buildable targets` row reports, and the notes on the version
+//! floors behind them.
 
 use std::collections::HashSet;
-use std::path::Path;
 
 use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::check::{LineStarts, weigh_target};
+use cairn_lang_core::check::LineStarts;
+use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{
     BuildableRefusal, DeclaredFloor, FloorDeclarer, FloorOrigin, FloorPart, FloorPlacement,
     FloorVerdict, RefusedTarget, TargetRefusal, VersionFloor, declared_version_floors,
     unscoped_version_floors,
 };
-use cairn_lang_core::{Diagnostic, Edition, Module, Severity};
-use cairn_lang_formats::registry::{RegistryPack, builtin_version_tables};
+use cairn_lang_core::{Edition, Module, Resolution, Severity};
 
-use crate::report::{render_diagnostics, report_diagnostics};
-use crate::target::ResolvedTarget;
+use super::Reporter;
+use crate::build::finding::Found;
+use crate::registry::RegistryPack;
 
 /// How each supported version of one edition answered.
 #[derive(Debug, Default)]
-pub(crate) struct VersionVerdicts<'a> {
+pub(super) struct VersionVerdicts<'a> {
     /// Versions a build would accept.
-    pub(crate) buildable: Vec<String>,
+    pub(super) buildable: Vec<String>,
     /// Versions whose pinned lowering raised errors, with those errors.
-    pub(crate) refused: Vec<(String, Vec<cairn_lang_core::check::Diagnostic>)>,
+    refused: Vec<(String, Vec<cairn_lang_core::Diagnostic>)>,
     /// Versions below a `@requires` floor, each with the floors refusing it.
     below_floor: Vec<BelowFloor<'a>>,
     /// The floors that refuse any version, in source order and without repeats.
@@ -34,10 +34,7 @@ pub(crate) struct VersionVerdicts<'a> {
 
 impl VersionVerdicts<'_> {
     /// The errors of the lowering pinned at `version`, if [`weigh_versions`] ran one.
-    pub(crate) fn pinned_errors(
-        &self,
-        version: &str,
-    ) -> Option<&[cairn_lang_core::check::Diagnostic]> {
+    pub(super) fn pinned_errors(&self, version: &str) -> Option<&[cairn_lang_core::Diagnostic]> {
         if self.buildable.iter().any(|built| built == version) {
             return Some(&[]);
         }
@@ -55,13 +52,13 @@ struct BelowFloor<'a> {
     floors: Vec<&'a VersionFloor>,
 }
 
-/// Weigh each supported version against the gates `run_compile` applies to the source.
+/// Weigh each supported version against the gates `cairn compile` applies to the source.
 ///
 /// `refused_edition_wide` holds what refuses every version the floors let through: scopes that
 /// produced no voxels, and palette entries this edition's writer cannot carry.
-pub(crate) fn weigh_versions<'a>(
-    ir: &cairn_lang_core::intent::IntentModule,
-    resolution: &cairn_lang_core::Resolution,
+pub(super) fn weigh_versions<'a>(
+    ir: &IntentModule,
+    resolution: &Resolution,
     pack: &RegistryPack,
     floors: &'a [VersionFloor],
     considered: &[String],
@@ -126,7 +123,7 @@ pub(crate) fn weigh_versions<'a>(
 }
 
 /// Why this edition's `buildable` list is empty, every cause at once, or `None` when it is not.
-pub(crate) fn buildable_refusal(
+pub(super) fn buildable_refusal(
     source: &str,
     lines: &LineStarts,
     verdicts: &VersionVerdicts<'_>,
@@ -155,7 +152,7 @@ pub(crate) fn buildable_refusal(
                     .iter()
                     .find(|(refused, _)| refused == version)?;
                 TargetRefusal::LoweringRefused {
-                    findings: render_diagnostics(source, lines, refusals),
+                    findings: refusals.iter().map(|d| d.render(source, lines)).collect(),
                 }
             };
             Some(RefusedTarget {
@@ -186,7 +183,7 @@ pub(crate) fn buildable_refusal(
 }
 
 /// Floors as the wire spells them: what they say, and where.
-pub(crate) fn declared_floors(
+pub(super) fn declared_floors(
     source: &str,
     lines: &LineStarts,
     floors: &[&VersionFloor],
@@ -211,45 +208,9 @@ pub(crate) fn declared_floors(
         .collect()
 }
 
-/// The finding that refuses `target` for `floors`, the floors `edition`'s build is held to, or
-/// `None` when every floor admits it.
-pub(crate) fn floor_refusal(
-    floors: &[VersionFloor],
-    edition: Edition,
-    target: &ResolvedTarget,
-) -> Option<Diagnostic> {
-    weigh_target(
-        floors,
-        edition,
-        target.mc_version(),
-        &builtin_version_tables(),
-        &|version| format!("--target {version}"),
-    )
-}
-
-/// Report a floor's refusal of `--target` on stderr, the way a run-level refusal reads.
-pub(crate) fn report_floor_refusal(file: &Path, source: &str, refusal: &Diagnostic) {
-    eprintln!(
-        "{}[{}]: {}:{}: {}.",
-        refusal.severity().as_str(),
-        refusal.code.as_str(),
-        file.display(),
-        LineStarts::new(source).position(source, refusal.span.start),
-        refusal.primary,
-    );
-    for note in &refusal.notes {
-        eprintln!("  {}", note.message);
-    }
-}
-
 /// Name the floors the edition-neutral `registry compatibility` row does not read, which beside a
 /// refusing `buildable targets` row would otherwise read as a contradiction.
-pub(crate) fn report_floors_left_out_of_the_neutral_row(
-    file: &Path,
-    source: &str,
-    lines: &LineStarts,
-    module: &Module,
-) {
+pub(super) fn report_floors_left_out_of_the_neutral_row(out: &mut Reporter<'_>, module: &Module) {
     let neutral = unscoped_version_floors(module);
     let read_by_the_row = |floor: &VersionFloor| {
         neutral
@@ -270,52 +231,54 @@ pub(crate) fn report_floors_left_out_of_the_neutral_row(
                     floor.declarer(),
                 )
             };
-            eprintln!(
-                "note: {}:{}: `{}` {}, so it is not part of the \
-                 `registry compatibility` row, which is edition-neutral; `buildable targets` is \
-                 where it is weighed",
-                file.display(),
-                lines.position(source, floor.span.start),
+            let line = format!(
+                "note: {}: `{}` {}, so it is not part of the `registry compatibility` row, which \
+                 is edition-neutral; `buildable targets` is where it is weighed",
+                out.at(floor.span.start),
                 floor.rendered(),
                 reason,
             );
+            out.line(&line);
         }
     }
 }
 
-/// What stderr says under one edition's `buildable targets` entry: each refused version's
+/// What the sink is sent under one edition's `buildable targets` entry: each refused version's
 /// findings, then the `note:` lines on the floors.
-pub(crate) fn report_version_notes(
-    file: &Path,
-    source: &str,
-    lines: &LineStarts,
+pub(super) fn report_version_notes(
+    out: &mut Reporter<'_>,
     edition: Edition,
     verdicts: &VersionVerdicts<'_>,
     considered: &[String],
 ) {
     for (version, refusals) in &verdicts.refused {
-        eprintln!("note: {} {version} refuses this source", edition.as_str());
-        report_diagnostics(file, source, lines, refusals);
+        out.line(&format!(
+            "note: {} {version} refuses this source",
+            edition.as_str()
+        ));
+        for d in refusals {
+            out.finding(&Found::Core(d.clone()));
+        }
     }
     for floor in &verdicts.unplaceable_floors {
-        eprintln!(
-            "note: {}:{}: no {} target can build this source: `{}` names no {} release, \
-             so no {} version can be weighed against it",
-            file.display(),
-            lines.position(source, floor.span.start),
+        let line = format!(
+            "note: {}: no {} target can build this source: `{}` names no {} release, so no {} \
+             version can be weighed against it",
+            out.at(floor.span.start),
             edition.as_str(),
             floor.rendered(),
             edition.as_str(),
             edition.as_str(),
         );
+        out.line(&line);
         if let Some(note) = floor.inheritance() {
-            eprintln!("  {note}");
+            out.line(&format!("  {note}"));
         }
-        eprintln!(
+        out.line(&format!(
             "  note: {} builds against {}",
             edition.as_str(),
             considered.join(", "),
-        );
+        ));
     }
     for floor in &verdicts.refusing_floors {
         let below: Vec<&str> = verdicts
@@ -324,15 +287,15 @@ pub(crate) fn report_version_notes(
             .filter(|below| below.floors.iter().any(|kept| kept.span == floor.span))
             .map(|below| below.version.as_str())
             .collect();
-        eprintln!(
-            "note: {}:{}: {} {} {} below the `{}` {} declares",
-            file.display(),
-            lines.position(source, floor.span.start),
+        let line = format!(
+            "note: {}: {} {} {} below the `{}` {} declares",
+            out.at(floor.span.start),
             edition.as_str(),
             below.join(", "),
             if below.len() == 1 { "is" } else { "are" },
             floor.rendered(),
             floor.declarer(),
         );
+        out.line(&line);
     }
 }

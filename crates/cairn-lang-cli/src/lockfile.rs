@@ -1,6 +1,6 @@
 //! The lockfile a compile writes, and what it says about the one it replaces.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::lock::{
@@ -8,8 +8,7 @@ use cairn_lang_core::lock::{
     Lockfile, LockfileRead, MemberSensitivity, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::{CAIRN_VERSION, Edition};
-
-use crate::target::ResolvedTarget;
+use cairn_lang_formats::data_version::ResolvedTarget;
 
 /// Warn where the lockfile at `lock_path` records another target, as `spec/versioning-editions`
 /// "Provenance and lock" does, or cannot be read; an absent one is silent.
@@ -123,13 +122,6 @@ fn edition_prefix(target: &LockTarget, show_edition: bool) -> String {
     } else {
         String::new()
     }
-}
-
-/// `<source>.lock`, keeping `.crn` so no two sources share a lock.
-pub(crate) fn default_lock_path(source: &Path) -> PathBuf {
-    let mut p = source.as_os_str().to_owned();
-    p.push(".lock");
-    PathBuf::from(p)
 }
 
 pub(crate) fn build_lockfile(

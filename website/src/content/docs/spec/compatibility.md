@@ -39,6 +39,9 @@ Stable surfaces:
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
   output schemas, and process exit codes, apart from a flag or flag value in its first three
   monthly minors.
+- The language server's commands, such as `cairn.info`: their names and argument shapes, apart
+  from a command in its first three monthly minors. What one returns takes the tier of the CLI
+  output it carries.
 - The tier-1 material vocabulary: the abstract tokens the built-in `materials` catalogs declare,
   listed in [§7.2](/spec/materials-themes/#tier-1-tokens). Adding one is not a break.
 - The error and warning codes (`E_*`, `W_*`) [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists,
@@ -59,10 +62,13 @@ Evolving surfaces:
 
 - Spec chapters or sections explicitly marked as draft (the [Open Issues](/spec/open-issues/)
   list), and the syntax a section flags [subject to change](#subject-to-change).
-- New `cairn` subcommands, and new flags and flag values of `cairn compile`, `cairn check` and
-  `cairn info`, during their first three monthly minors after introduction. A new subcommand's
-  flags, output and exit codes are Evolving with it, and so are the codes
-  [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists that only such a subcommand raises.
+- New `cairn` subcommands, new flags and flag values of `cairn compile`, `cairn check` and
+  `cairn info`, and new language server commands such as `cairn.info`
+  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)), during their first three monthly
+  minors after introduction. A new subcommand's flags, output and exit codes are Evolving with it,
+  and so are the codes [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists that only such a
+  subcommand raises. What `cairn.info` returns is `cairn info`'s JSON document, at that document's
+  tier.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.
@@ -73,6 +79,13 @@ Evolving surfaces:
 - The CLI's human-readable diagnostic format and prose (the *codes* are Stable; the *prose*
   is not).
 - The `--features` set on `cairn-lang-cli` (cargo features) and `[features]` on workspace crates.
+- The JavaScript API of the module `cairn-lang-wasm` builds for the [playground](/playground/):
+  the names and arguments of `cairn_version`, `compile`, `info` and `targets`, and the fields of
+  what `compile` and `targets` answer. A finding in it takes the shape
+  [Lint §11.2](/spec/lint/#112-machine-readable-payload) gives, and the `ir` `compile` carries is
+  the block-array IR, which is Internal. What `info` answers is `cairn info`'s JSON document for a
+  source with no lock beside it ([§10.5](/spec/versioning-editions/#the-report-in-a-browser)), at
+  that document's tier.
 
 #### Subject to change
 
@@ -118,6 +131,7 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 | `.crn` syntax (chapters 5-9, §10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Lockfile format | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` flags | Evolving | Evolving | **Stable** | Stable | Stable |
+| Language server commands (`cairn.info`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Diagnostic codes (`E_*`, `W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Tier-1 material vocabulary | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP wire protocol (LSP std) | — | — | — | **Stable** | Stable |

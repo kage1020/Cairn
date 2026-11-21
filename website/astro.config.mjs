@@ -10,6 +10,12 @@ const site = "https://cairn.kage1020.com";
 
 export default defineConfig({
   site,
+  vite: {
+    // The playground reads the VS Code grammar and the examples from outside `website/`.
+    server: { fs: { allow: [".", "../editors/vscode/syntaxes", "../examples"] } },
+    // The playground's worker loads the compiler module through a dynamic import.
+    worker: { format: "es" },
+  },
   integrations: [
     starlight({
       title: "Cairn",
