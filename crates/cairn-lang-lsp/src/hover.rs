@@ -4,7 +4,7 @@
 
 use cairn_lang_core::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 use cairn_lang_core::block_array::resolve_block_state;
-use cairn_lang_core::intent::ValueWithSpan;
+use cairn_lang_core::intent::{ValueWithSpan, role_of};
 use cairn_lang_core::resolve::{TokenKind, classify_token};
 use cairn_lang_core::{
     BlockArray, BlockArrayIr, BlockState, Diagnostic, Edition, IntentModule, Member, MemberRole,
@@ -84,6 +84,7 @@ enum Binder<'a> {
     /// such as `walls[class=outer]`.
     Selector {
         theme: &'a str,
+        keyword: &'a str,
         row: &'a str,
         key: &'a str,
     },
@@ -152,6 +153,7 @@ fn in_theme<'a>(
                         value: &arg.value,
                         binder: Binder::Selector {
                             theme,
+                            keyword,
                             row,
                             key: &arg.key,
                         },
@@ -502,18 +504,23 @@ fn describe_token(value: &Value, binder: &Binder<'_>) -> String {
     };
     let bound = match binder {
         Binder::Slot { theme, slot } => format!("bound to slot `{slot}` by theme `{theme}`"),
-        Binder::Selector { theme, row, key } => {
-            format!("bound to `{key}=` by the `{row}` row of theme `{theme}`")
+        Binder::Selector {
+            theme,
+            keyword,
+            row,
+            key,
+        } => {
+            let bound = format!("bound to `{key}=` by the `{row}` row of theme `{theme}`");
+            if role_of(keyword).binding_key(key).is_none() {
+                return format!(
+                    "`@{inner}`, {bound}\n\n`{key}=` is not a key a theme binds on `{keyword}`, \
+                     so this value lays nothing"
+                );
+            }
+            bound
         }
         Binder::Path => "the `path=` of this `connect` row".to_owned(),
     };
-    if matches!(binder, Binder::Selector { .. }) {
-        let link = section_link("spec/materials-themes", "Slots as dependency injection");
-        return format!(
-            "`@{inner}`, {bound}\n\nSelector bindings are reserved, so no block is resolved for \
-             this value. See [`spec/materials-themes` \"Slots as dependency injection\"]({link})."
-        );
-    }
     let editions: Vec<String> = EDITIONS
         .into_iter()
         .map(|edition| {
@@ -522,21 +529,6 @@ fn describe_token(value: &Value, binder: &Binder<'_>) -> String {
         })
         .collect();
     format!("`@{inner}`, {bound}\n\n{}", editions.join("\n"))
-}
-
-/// The site's link to the section titled `title` of the page at `path`, or to the page when no
-/// section has that title.
-fn section_link(path: &str, title: &str) -> String {
-    let slug = cairn_lang_docs::page(path).and_then(|page| {
-        page.cited(title).into_iter().find_map(|part| match part {
-            Part::Section(heading) => Some(heading.slug),
-            Part::Page | Part::Term { .. } => None,
-        })
-    });
-    match slug {
-        Some(slug) => format!("{SITE}/{path}/#{slug}"),
-        None => format!("{SITE}/{path}/"),
-    }
 }
 
 /// The block `@inner` names on `edition` with no version pinned, with an abstract token's

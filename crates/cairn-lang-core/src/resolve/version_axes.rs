@@ -232,7 +232,7 @@ pub struct EditionRespellings {
 pub struct RespelledToken {
     /// The id the token spells.
     pub id: String,
-    /// Where a theme slot or `path=` binds it.
+    /// Where a theme slot, a selector row or a `path=` binds it.
     #[serde(flatten)]
     pub position: Position,
     /// Each version that writes another id, in ascending release order.
