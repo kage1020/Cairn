@@ -1,7 +1,7 @@
 //! Lowering the `connect` rows of every `site` to walkway strips.
 
-use std::collections::HashSet;
-use std::hash::RandomState;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::hash::BuildHasher;
 
 use indexmap::IndexMap;
 
@@ -9,7 +9,7 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNo
 use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::DefIr;
 use crate::prose::and_list;
-use crate::resolve::{Resolution, place_scope_key};
+use crate::resolve::{Resolution, ValidatedConnect, place_scope_key};
 
 use crate::block_array::material::{
     MaterialDeferred, TargetRegistry, is_stand_in, resolve_block_state,
@@ -22,7 +22,7 @@ use crate::block_array::walkway::{
 use crate::block_array::{BlockArray, BlockState, Dims, Footprint, Placement, Walkway};
 
 use super::overlap::report_strip_overlaps;
-use super::site_floor::{Cell, FloorExtent, FloorPlan, PlacedBody};
+use super::site_floor::{Cell, FloorExtent, FloorPlan, PlacedBody, collect_floor_cells};
 use super::token_diag::{
     IdSite, NamedBy, TokenSite, check_state_literal, diag_abstract_token, diag_state_unmapped,
     diag_undeclared_id, diag_unknown_abstract_token,
@@ -35,8 +35,6 @@ pub(super) struct ConnectInputs<'a> {
     pub(super) registry: Option<&'a dyn TargetRegistry>,
     /// Every `place` row that lowered, under its `site::SITE::PLACE_ID` key.
     pub(super) placed: &'a IndexMap<String, PlacedBody>,
-    /// Each site's placement floors on the walk plane, and each placement's floor extent.
-    pub(super) floors: &'a IndexMap<SiteName, FloorPlan>,
 }
 
 /// Lower every resolved `connect` row into a walkway array and its [`Walkway`] record.
@@ -49,30 +47,28 @@ pub(super) fn lower_connects(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let &ConnectInputs {
-        resolution,
-        registry,
-        placed,
-        floors,
-        ..
+        registry, placed, ..
     } = inputs;
-    let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
-    let no_floor = FloorPlan::default();
-    // Indexed once for every site, so many colliding rows cannot multiply a linear scan.
-    let routers: IndexMap<&SiteName, SiteRouter<'_>> = floors
+    let ported = place_every_port(inputs, diagnostics);
+    let floors = walk_planes(&ported, structures, placed);
+    // Indexed once for every row on a plane, so many colliding rows cannot multiply a linear scan.
+    let indexes: BTreeMap<(&SiteName, i32), BlockedIndex<'_, _>> = floors
         .iter()
-        .map(|(site, floor)| (site, SiteRouter::new(floor)))
+        .map(|(plane, floor)| (*plane, BlockedIndex::new(&floor.cells)))
         .collect();
-    let no_router = SiteRouter::new(&no_floor);
+    let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
 
-    for connect in &resolution.connects {
-        let router = routers.get(&connect.site).unwrap_or(&no_router);
-        let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
-        let to_key = place_scope_key(connect.site.as_str(), connect.to.place.as_str());
-        let Some((from_pos, to_pos)) =
-            place_ports(connect, (&from_key, &to_key), inputs, diagnostics)
-        else {
+    for (connect, from_key, to_key, ports) in ported {
+        let Some((from_pos, to_pos)) = ports else {
             continue;
         };
+        let plane = (&connect.site, from_pos.1);
+        let (Some(floor), Some(blocked_index)) = (floors.get(&plane), indexes.get(&plane)) else {
+            // INVARIANT: `floors` and `indexes` hold the plane of every pair `place_ports` placed.
+            debug_assert!(false, "no floor plan for the site and row {plane:?}");
+            continue;
+        };
+        let blocked = &floor.cells;
 
         // A pair is recorded only once its strip is laid, so a refused earlier row is no duplicate.
         let dedup_key = connect.walkway_pair();
@@ -85,11 +81,16 @@ pub(super) fn lower_connects(
             continue;
         };
         let material_id = material.id.clone();
-        let Some((path, route_failure)) =
-            walkway_path(connect, (from_pos, to_pos), router, diagnostics)
-        else {
+        let Some((path, route_failure)) = walkway_path(
+            connect,
+            (from_pos, to_pos),
+            blocked,
+            blocked_index,
+            diagnostics,
+        ) else {
             continue;
         };
+        let routed = route_failure.is_none();
         let Some((from_endpoint, to_endpoint, scope_key)) = walkway_ends(connect, diagnostics)
         else {
             continue;
@@ -98,20 +99,18 @@ pub(super) fn lower_connects(
             array,
             origin,
             blocked_count: skipped,
-        } = build_walkway_array(&path, material, &router.floor.cells, &scope_key);
-        report_laid_overlaps(
-            connect,
-            &path,
-            router,
-            (&from_key, &to_key),
-            inputs,
-            diagnostics,
+        } = build_walkway_array(&path, material, blocked, &scope_key);
+        let strip: Vec<Cell> = path
+            .iter()
+            .copied()
+            .filter(|cell| !blocked.contains(cell))
+            .collect();
+        report_strip_overlaps(connect, &strip, (&from_key, &to_key), placed, diagnostics);
+        debug_assert!(
+            !routed || skipped == 0,
+            "walkway `{scope_key}` laid a routed path with {skipped} collisions",
         );
         if skipped > 0 {
-            debug_assert!(
-                route_failure.is_some(),
-                "walkway `{scope_key}` laid a routed path with {skipped} collisions",
-            );
             let note = walkway_blocked_note(
                 connect,
                 route_failure,
@@ -122,7 +121,7 @@ pub(super) fn lower_connects(
                 &SiteFloor {
                     structures,
                     placed,
-                    floor: router.floor,
+                    floor,
                 },
             );
             diagnostics.push(diag_walkway_blocked(connect, skipped, note));
@@ -154,37 +153,45 @@ pub(super) fn lower_connects(
     }
 }
 
-/// One site's floor plan, with its cells indexed for the router.
-struct SiteRouter<'a> {
-    floor: &'a FloorPlan,
-    index: BlockedIndex<'a, RandomState>,
-}
+/// A `connect` row, the scope keys of its two placements, and its two ports' world cells, or
+/// `None` after the finding that refused them.
+type Ported<'c> = (&'c ValidatedConnect, String, String, Option<(Cell, Cell)>);
 
-impl<'a> SiteRouter<'a> {
-    fn new(floor: &'a FloorPlan) -> Self {
-        Self {
-            floor,
-            index: BlockedIndex::new(&floor.cells),
-        }
-    }
-}
-
-/// Report the placements the strip lays a cell inside: the cells of `path` that
-/// `build_walkway_array` lays, which are those off the site's floors.
-fn report_laid_overlaps(
-    connect: &crate::resolve::ValidatedConnect,
-    path: &[Cell],
-    router: &SiteRouter<'_>,
-    ends: (&str, &str),
-    inputs: &ConnectInputs<'_>,
+/// Every resolved `connect` row with its ports placed.
+fn place_every_port<'c>(
+    inputs: &ConnectInputs<'c>,
     diagnostics: &mut Vec<Diagnostic>,
-) {
-    let strip: Vec<Cell> = path
+) -> Vec<Ported<'c>> {
+    inputs
+        .resolution
+        .connects
         .iter()
-        .copied()
-        .filter(|cell| !router.floor.cells.contains(cell))
-        .collect();
-    report_strip_overlaps(connect, &strip, ends, inputs.placed, diagnostics);
+        .map(|connect| {
+            let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
+            let to_key = place_scope_key(connect.site.as_str(), connect.to.place.as_str());
+            let ports = place_ports(connect, (&from_key, &to_key), inputs, diagnostics);
+            (connect, from_key, to_key, ports)
+        })
+        .collect()
+}
+
+/// The [`FloorPlan`] of each site on each row a pair of its `ported` ports shares, collected once
+/// for all its rows.
+fn walk_planes<'c>(
+    ported: &[Ported<'c>],
+    structures: &IndexMap<String, BlockArray>,
+    placed: &IndexMap<String, PlacedBody>,
+) -> BTreeMap<(&'c SiteName, i32), FloorPlan> {
+    ported
+        .iter()
+        .filter_map(|(connect, .., ports)| ports.map(|(from, _)| (&connect.site, from.1)))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|(site, plane)| {
+            let floor = collect_floor_cells(structures, placed, site, plane);
+            ((site, plane), floor)
+        })
+        .collect()
 }
 
 /// The world cells of a `connect` row's two ports, or `None` after a `W_DEFERRED_MEMBER`.
@@ -238,7 +245,11 @@ fn place_ports(
         &to_body.cut,
     );
     let (notes, noun, (from_refused, to_refused)) = match (from_pos, to_pos) {
-        (Ok(from_pos), Ok(to_pos)) => return Some((from_pos, to_pos)),
+        (Ok(from_pos), Ok(to_pos)) if from_pos.1 == to_pos.1 => return Some((from_pos, to_pos)),
+        (Ok(from_pos), Ok(to_pos)) => {
+            diagnostics.push(diag_ports_on_two_rows(connect, from_pos.1, to_pos.1));
+            return None;
+        }
         (Err(from_err), Err(to_err)) => (
             vec![
                 from_err.note(&connect.from.to_string()),
@@ -271,6 +282,32 @@ fn place_ports(
         data: None,
     });
     None
+}
+
+/// A row whose two ports stand on different rows, which no flat strip joins.
+fn diag_ports_on_two_rows(
+    connect: &crate::resolve::ValidatedConnect,
+    from_y: i32,
+    to_y: i32,
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::DeferredMember,
+        span: connect.span.clone(),
+        primary: format!(
+            "walkway `{from} ↔ {to}` was skipped because its ports stand on two rows, `{from}` at \
+             y={from_y} and `{to}` at y={to_y}",
+            from = connect.from,
+            to = connect.to,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "a walkway is a flat strip on the row its two ports share and does not \
+                      climb; join two openings whose `level`s have one `y=`, a member of the \
+                      body counting as `y=0`"
+                .to_owned(),
+        }],
+        data: None,
+    }
 }
 
 /// A `connect` row's two ends and scope key, or `None` after a `W_INVALID_WALKWAY_IDENT`.
@@ -391,10 +428,11 @@ fn walkway_material(
 
 /// The cells a `connect` row's strip runs through, and the router's error if it fell back to
 /// the blocked L; `None` after a `W_WALKWAY_BLOCKED` past the router's cap.
-fn walkway_path(
+fn walkway_path<S: BuildHasher>(
     connect: &crate::resolve::ValidatedConnect,
     (from_pos, to_pos): (Cell, Cell),
-    router: &SiteRouter<'_>,
+    blocked: &HashSet<Cell, S>,
+    blocked_index: &BlockedIndex<'_, S>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<Cell>, Option<RoutePathError>)> {
     // Measured before it is built: an unobstructed L never reaches the router's own cap check.
@@ -421,19 +459,14 @@ fn walkway_path(
         return None;
     }
     let straight = l_path(from_pos, to_pos);
-    Some(
-        if straight
-            .iter()
-            .any(|cell| router.floor.cells.contains(cell))
-        {
-            match route_path(from_pos, to_pos, &router.index) {
-                Ok(detour) => (detour, None),
-                Err(e) => (straight, Some(e)),
-            }
-        } else {
-            (straight, None)
-        },
-    )
+    Some(if straight.iter().any(|cell| blocked.contains(cell)) {
+        match route_path(from_pos, to_pos, blocked_index) {
+            Ok(detour) => (detour, None),
+            Err(e) => (straight, Some(e)),
+        }
+    } else {
+        (straight, None)
+    })
 }
 
 /// A strip laid with `skipped` cells dropped where they overlapped a placement.
@@ -491,8 +524,8 @@ struct BlockedEndpoints<'a> {
     to: ((i32, i32, i32), &'a str),
 }
 
-/// The finished floor plan of a row's site, which a `W_WALKWAY_BLOCKED` note reads to name what is
-/// in the way.
+/// The finished floor plan of a row's site and plane, which a `W_WALKWAY_BLOCKED` note reads to
+/// name what is in the way.
 struct SiteFloor<'a> {
     structures: &'a IndexMap<String, BlockArray>,
     placed: &'a IndexMap<String, PlacedBody>,
@@ -548,8 +581,8 @@ fn area_cap_note(
 ) -> String {
     let (from, to) = (ends.from.0, ends.to.0);
     let head = format!(
-        "the router searches the box spanning both ports and every placement floor of site \
-         `{site}` on the walk plane, here {area} cells, past its cap of {cap} cells",
+        "the router searches the box spanning both ports and every cell the placements of site \
+         `{site}` take up on the walk plane, here {area} cells, past its cap of {cap} cells",
         site = connect.site,
     );
     let ports_area = margin_box_area(from, to);
@@ -567,19 +600,19 @@ fn area_cap_note(
     if labels.is_empty() {
         debug_assert!(
             false,
-            "the search rectangle {rect:?} passed the cap, but no floor stretches it past the \
-             ports {from:?} and {to:?}",
+            "the search rectangle {rect:?} passed the cap, but no placement stretches it past \
+             the ports {from:?} and {to:?}",
         );
         return format!("{head}; bring the outlying placements closer together");
     }
-    let (floors, verb, pronoun) = if labels.len() == 1 {
-        ("the floor of placement", "stretches", "that placement")
+    let (placements, take, pronoun) = if labels.len() == 1 {
+        ("placement", "takes", "that placement")
     } else {
-        ("the floors of placements", "stretch", "those placements")
+        ("placements", "take", "those placements")
     };
     format!(
-        "{head}; the two ports span only {ports_area} of those cells, and {floors} {list} \
-         {verb} the box past them, so bring {pronoun} closer to the two ports",
+        "{head}; the two ports span only {ports_area} of those cells, and what {placements} \
+         {list} {take} up stretches the box past them, so bring {pronoun} closer to the two ports",
         list = and_list(&labels).unwrap_or_default(),
     )
 }
@@ -590,7 +623,7 @@ fn margin_box_area(from: (i32, i32, i32), to: (i32, i32, i32)) -> u64 {
     span(from.0, to.0).saturating_mul(span(from.2, to.2))
 }
 
-/// The keys of the placements whose floor sets an edge of `rect` beyond both ports.
+/// The keys of the placements whose taken cells set an edge of `rect` beyond both ports.
 pub(super) fn edge_pushers(
     rect: SearchRect,
     from: (i32, i32, i32),
@@ -619,7 +652,7 @@ fn placement_label(placement: &Placement) -> String {
     format!("`{}`", placement.place_id)
 }
 
-/// One clause of a buried-endpoint note: what covers the port cell, and the remedy for each.
+/// One clause of a buried-endpoint note: what takes up the port cell, and the remedy for each.
 fn buried_port_clause(
     port: &crate::resolve::PortRef,
     (cell, own_key): ((i32, i32, i32), &str),
@@ -635,17 +668,17 @@ fn buried_port_clause(
             continue;
         };
         if key == own_key {
-            let block = site
-                .structures
-                .get(key)
-                .and_then(|ba| ba.palette.entries.get(usize::from(owner.voxel.0)));
-            if block.is_none() {
-                // INVARIANT: the voxel was read from this placement's own array and palette.
-                debug_assert!(
-                    false,
-                    "voxel {owner:?} of `{key}` names no entry of its palette",
-                );
-            }
+            let block = owner.voxel.and_then(|voxel| {
+                site.structures
+                    .get(key)
+                    .and_then(|ba| ba.palette.entries.get(usize::from(voxel.0)))
+            });
+            // INVARIANT: a port stands outside its own footprint, so its own placement takes up
+            // the port cell only with a block, read from its own array and palette.
+            debug_assert!(
+                block.is_some(),
+                "cell {cell:?} of `{key}` is {owner:?}, which names no block of its palette",
+            );
             // Only a target's pack names the block a stand-in becomes.
             own_block = Some(
                 block
@@ -662,13 +695,13 @@ fn buried_port_clause(
         None => format!("a block its own placement {own} lays on that cell"),
     });
     let others = (!others.is_empty()).then(|| {
-        let noun = if others.len() == 1 {
-            "placement"
+        let (placements, take) = if others.len() == 1 {
+            ("placement", "takes")
         } else {
-            "placements"
+            ("placements", "take")
         };
         format!(
-            "the floor of {noun} {}",
+            "a cell {placements} {} {take} up on that row",
             and_list(&others).unwrap_or_default()
         )
     });
@@ -677,12 +710,12 @@ fn buried_port_clause(
             format!("port `{port}` sits on {own}; move that block or the door/window")
         }
         (None, Some(others)) => format!(
-            "port `{port}` is buried inside {others}; move that door/window to an \
-             unobstructed wall or pull the placements apart"
+            "port `{port}` stands on {others}; move that door/window to an unobstructed wall or \
+             pull the placements apart"
         ),
         (Some(own), Some(others)) => format!(
-            "port `{port}` is buried inside {others} and sits on {own}; move that block, and \
-             move that door/window to an unobstructed wall or pull the placements apart"
+            "port `{port}` stands on {others} and sits on {own}; move that block, and move that \
+             door/window to an unobstructed wall or pull the placements apart"
         ),
         (None, None) => {
             // INVARIANT: every cell the router reports blocked was recorded with its owners.
@@ -691,8 +724,8 @@ fn buried_port_clause(
                 "port `{port}` at {cell:?} is blocked but has no owner"
             );
             format!(
-                "port `{port}` is buried inside another placement's floor; move that \
-                 door/window to an unobstructed wall or pull the placements apart"
+                "port `{port}` stands on a cell another placement takes up on that row; move \
+                 that door/window to an unobstructed wall or pull the placements apart"
             )
         }
     }
