@@ -1,6 +1,6 @@
-//! The `edition_guard` pass: a known member other than a raw member or a Tier 0 part, or a `logic`
-//! or `assert` line, under an `@edition` guard, since the semantic layer is edition-neutral
-//! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
+//! The `edition_guard` pass: a known member other than a raw member, a `raw_repeat` or a Tier 0
+//! part, or a `logic` or `assert` line, under an `@edition` guard, since the semantic layer is
+//! edition-neutral (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
 use crate::ast::{Item, Module, Statement};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -52,7 +52,7 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
             // `keyword_allowlist` reports an unknown keyword, offering the ones a guard holds.
             MemberRole::Other(_) => return,
             role if role.is_escape_hatch() => {
-                // `nesting` refuses a member under one; a nested guard's lines answer to that guard.
+                // `nesting` judges a member under one; a nested guard's lines answer to that guard.
                 for child in children {
                     match child {
                         Statement::Generic { .. } => {}
@@ -95,8 +95,9 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
                 span: None,
                 message: "dedent the line out of the guard so that every edition builds it, and \
                           bind what differs per edition from a `theme NAME_java` and a `theme \
-                          NAME_bedrock`; the guard is for `raw_block`, `raw_fill` and the Tier 0 \
-                          parts `repeater`, `comparator`, `redstone_torch` and `redstone_dust`"
+                          NAME_bedrock`; the guard is for `raw_block`, `raw_fill`, `raw_repeat` \
+                          and the Tier 0 parts `repeater`, `comparator`, `redstone_torch` and \
+                          `redstone_dust`"
                     .into(),
             },
         ],

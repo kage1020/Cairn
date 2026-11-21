@@ -7,6 +7,7 @@ pub mod common;
 mod absent;
 mod aliases;
 mod blockstate_members;
+mod canonical_spelling;
 mod connections;
 mod declared_elsewhere;
 mod eave_stair_shapes;

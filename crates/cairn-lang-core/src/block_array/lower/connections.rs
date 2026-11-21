@@ -10,7 +10,6 @@ use crate::block_array::{BlockState, PaletteIndex};
 
 use super::canvas::{Canvas, ScopePalette};
 use super::cell_box::Cell;
-use super::phase::Phase;
 
 /// How high a wall's side stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,8 +88,8 @@ struct Joiner {
     cell: Cell,
     kind: JoinKind,
     state: BlockState,
-    /// Per [`Face::SIDES`], whether it joins the block on that side; for a raw block, whether its
-    /// state says so.
+    /// Per [`Face::SIDES`], whether it joins the block on that side; for a block that keeps its
+    /// state, whether its state says so.
     joined: [bool; 4],
     /// A wall's side heights per [`Face::SIDES`], once settled.
     heights: [Height; 4],
@@ -100,8 +99,8 @@ struct Joiner {
     pair: Option<ChestType>,
     /// A dust's sides per [`Face::SIDES`], once settled.
     wires: [Wire; 4],
-    /// Whether a raw member placed it, so it keeps its state and its neighbours read only that.
-    raw: bool,
+    /// Whether the member that placed it keeps its state, so its neighbours read only that.
+    keeps_state: bool,
 }
 
 /// What the rules read of a body: its cells' states and each palette slot's [`Joins`].
@@ -109,6 +108,8 @@ struct Grid<'a> {
     canvas: &'a Canvas,
     palette: &'a ScopePalette,
     joins: Vec<Joins>,
+    /// Per member of the flattened paint list, whether the blocks it placed keep their state.
+    keeps_state: &'a [bool],
 }
 
 /// The cell `face` steps `cell` into, or `None` past the grid's low edge.
@@ -151,12 +152,13 @@ impl Grid<'_> {
 
 /// Set the connection states of every pane, fence, wall, fence gate, chest and dust on `canvas`
 /// that its state does not write, each repainted under the member that painted it, and answer
-/// the keys set at each cell; a block a raw member placed keeps its state (`spec/materials-themes`
-/// "Raw blocks").
+/// the keys set at each cell; a block placed by a member `keeps_state` marks, a raw member's
+/// without `origin=imported`, keeps its state (`spec/materials-themes` "Raw blocks").
 pub(super) fn derive_connections(
     canvas: &mut Canvas,
     palette: &mut ScopePalette,
     registry: &dyn TargetRegistry,
+    keeps_state: &[bool],
 ) -> HashMap<Cell, Vec<String>> {
     let joins: Vec<Joins> = (0..palette.len())
         .map(|slot| {
@@ -168,6 +170,7 @@ pub(super) fn derive_connections(
         canvas,
         palette,
         joins,
+        keeps_state,
     };
     let mut joiners = gather(&grid);
     if joiners.is_empty() {
@@ -199,7 +202,7 @@ pub(super) fn derive_connections(
     }
     let derived: Vec<(Cell, BlockState, Vec<String>)> = joiners
         .iter()
-        .filter(|joiner| !joiner.raw)
+        .filter(|joiner| !joiner.keeps_state)
         .filter_map(|joiner| {
             let state = derived_state(&grid, joiner);
             let keys: Vec<String> = state
@@ -208,6 +211,11 @@ pub(super) fn derive_connections(
                 .filter(|key| !joiner.state.properties.contains_key(*key))
                 .cloned()
                 .collect();
+            debug_assert!(
+                keys.iter()
+                    .all(|key| joiner.kind.connection_keys().contains(&key.as_str())),
+                "{keys:?} reach past `JoinKind::connection_keys`",
+            );
             (!keys.is_empty()).then_some((joiner.cell, state, keys))
         })
         .collect();
@@ -232,15 +240,16 @@ fn gather(grid: &Grid<'_>) -> Vec<Joiner> {
             continue;
         };
         let state = grid.palette.state(usize::from(slot.0)).clone();
-        let raw = grid
+        let keeps_state = grid
             .canvas
             .owner_at(cell)
-            .and_then(|owner| grid.canvas.phase_of(owner))
-            == Some(Phase::Raw);
-        // A side a raw block's state leaves out stands as the block's default, which joins nothing.
+            .and_then(|owner| grid.keeps_state.get(owner as usize).copied())
+            .unwrap_or(false);
+        // A side the state of a block that keeps it leaves out stands as the block's default,
+        // which joins nothing.
         let joined = Face::SIDES.map(|side| match written_side(&state, kind, side) {
             Some(written) => written,
-            None => !raw && joins_toward(grid, cell, kind, side),
+            None => !keeps_state && joins_toward(grid, cell, kind, side),
         });
         joiners.push(Joiner {
             cell,
@@ -251,7 +260,7 @@ fn gather(grid: &Grid<'_>) -> Vec<Joiner> {
             up: None,
             pair: None,
             wires: [Wire::None; 4],
-            raw,
+            keeps_state,
         });
     }
     joiners
@@ -410,8 +419,9 @@ fn raises_post(
     if let Some(written) = wall.state.properties.get("up").and_then(|v| v.parse().ok()) {
         return written;
     }
-    // A raw wall that leaves `up` out stands with the block's default, a raised post.
-    if wall.raw {
+    // A wall that keeps its state and leaves `up` out stands with the block's default, a raised
+    // post.
+    if wall.keeps_state {
         return true;
     }
     let (above, joins) = grid.joins_beside(wall.cell, Face::Up);
@@ -432,13 +442,13 @@ fn raises_post(
     joins.raises_post || covered(grid, joiners, at, wall.cell, Under::Post)
 }
 
-/// Settle the `type` of every chest whose state writes none and that no raw member placed: a row
-/// of chests of one block and `facing`, side by side, pairs two by two from its end on the chests'
-/// own left.
+/// Settle the `type` of every chest whose state writes none and whose member does not keep its
+/// state: a row of chests of one block and `facing`, side by side, pairs two by two from its end
+/// on the chests' own left.
 fn pair_chests(joiners: &mut [Joiner], at: &HashMap<Cell, usize>) {
     let pairs = |joiner: &Joiner| {
         matches!(joiner.kind, JoinKind::Chest { .. })
-            && !joiner.raw
+            && !joiner.keeps_state
             && !joiner.state.properties.contains_key("type")
     };
     // The chest beside `i` toward its `turn`ed facing that pairs with it, if any.

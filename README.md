@@ -92,7 +92,8 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt`, Litematica `.litematic` or Sponge Schematic `.schem`, and Bedrock `.mcstructure`, output from one source.
-- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, signs with their text, beds, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
+- `cairn import`, which reads any of those four files back as a `.crn` of raw members that compiles back to the same blocks. It recovers blocks and their regularity, not intent, and says so with `W_SEMANTIC_LOSS`.
+- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, signs with their text, beds, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`, `raw_repeat`), and `level` grouping.
 - Themes with slots, per-edition variants, and selector rows that bind the block of a part: the corner posts of `walls` and the frame round each door and window.
 - `edit` patches that change the members a selector or an address selects, without rewriting their lines.
 - A per-source lockfile, and registry packs carrying per-version block IDs, rename aliases and meaning tokens, so a canonical token is written the way each target spells it.
@@ -106,7 +107,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 **Not yet.**
 
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
-- Importing existing schematics.
+- `cairn diff-blocks`, and the loop that lifts an import into walls, windows and themes.
 
 ## Key ideas
 

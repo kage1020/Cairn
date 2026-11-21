@@ -31,6 +31,7 @@ mod part;
 mod phase;
 mod plate;
 mod raw;
+mod repeat;
 mod ripple;
 mod roof_fill;
 mod roof_kind;
