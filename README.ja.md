@@ -99,8 +99,9 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - ソースごとのロックファイルと、バージョン別のブロック ID、改名前の旧名、意味トークンを収めたレジストリパック。正規トークンはターゲットごとの綴りで書き出されます
 - パックの隣に置く制約カタログ。ターゲットを固定したビルドは、支えるもののないレバーや松明、空気の上の砂、構造物から流れ出す水、ブロック・ドア・ほかのエンティティにめり込むエンティティを警告し、`cairn info` とロックファイルは、Java のあるバージョンで意味が変わるメンバーを示します
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
-- エディタで固定したターゲットに対する診断と、補完、ホバー、クイックフィックスを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
+- エディタで固定したターゲットに対する診断と、補完、ホバー、クイックフィックス、`cairn info` のレポートを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)
+- ドキュメントサイトの[プレイグラウンド](https://cairn.kage1020.com/ja/playground/)。`cairn-lang-wasm` が入力に合わせてソースをブラウザ内でコンパイルし、構造物ファイルをダウンロードできます。
 
 **実験的な機能。** `cairn synth --experimental-logic-synth` は、レッドストーンのパイプラインの各ステージ (合成、ネットリスト構築、エディション選択、配置、配線、遅延挿入、合法化) を JSON で出力します。出力の形式は今後変わる可能性があります。
 
@@ -108,7 +109,6 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
 - 既存の schematic の読み込み
-- ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
 ## 基本の考え方
 

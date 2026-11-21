@@ -148,7 +148,12 @@ impl LockfileRead {
     ///
     /// The failure reading `path` as UTF-8 text, a directory at `path` among them.
     pub fn from_path(path: &Path) -> Result<Option<Self>, io::Error> {
-        // Checked first, since Windows answers a directory with `PermissionDenied`.
+        // An empty path names no file, but reading one fails as the platform words it: a browser,
+        // which has no file system, answers `Unsupported`, not `NotFound`.
+        if path.as_os_str().is_empty() {
+            return Ok(None);
+        }
+        // Checked before the read, since Windows answers a directory with `PermissionDenied`.
         if path.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::IsADirectory,

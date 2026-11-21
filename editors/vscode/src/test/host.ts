@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { commands, extensions, workspace } from "vscode";
-import type { ServerEvent } from "./server-event";
+import { commands, extensions, window, workspace } from "vscode";
+import type { InfoShown } from "../extension";
+import type { ServerEvent, ShowInfo } from "./server-event";
 
 const EXTENSION_ID = "kage1020.cairn-lang";
 const ACTIVATION_TIMEOUT_MS = 30_000;
@@ -11,8 +12,9 @@ const PIN_TIMEOUT_MS = 30_000;
 /**
  * Waits for the `.crn` document the window opened with to activate the
  * extension, runs `cairn.setTarget` with the edition and version
- * `CAIRN_TEST_SET_TARGET` holds as JSON, then stops its language client
- * through `deactivate`.
+ * `CAIRN_TEST_SET_TARGET` holds as JSON, runs `Cairn: Show Info` as the
+ * `ShowInfo` `CAIRN_TEST_SHOW_INFO` holds as JSON says, then stops its
+ * language client through `deactivate`.
  */
 export async function run(): Promise<void> {
   const extension = extensions.getExtension(EXTENSION_ID);
@@ -36,6 +38,21 @@ export async function run(): Promise<void> {
     if (workspace.getConfiguration("cairn").get("target") === version) {
       await pinReached(version);
     }
+  }
+  const showInfo = process.env.CAIRN_TEST_SHOW_INFO;
+  if (showInfo) {
+    const { to, editor } = JSON.parse(showInfo) as ShowInfo;
+    if (editor) {
+      const language = editor === "untitled" ? "cairn" : "plaintext";
+      await window.showTextDocument(
+        await workspace.openTextDocument({ language, content: "" }),
+      );
+    }
+    const shown = await commands.executeCommand<InfoShown>("cairn.showInfo");
+    writeFileSync(
+      to,
+      JSON.stringify({ opened: shown.opened?.getText(), message: shown.message }),
+    );
   }
   const main = join(extension.extensionPath, extension.packageJSON.main);
   const loaded = require.cache[require.resolve(main)];

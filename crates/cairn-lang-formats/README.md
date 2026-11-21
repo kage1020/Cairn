@@ -2,13 +2,15 @@
 
 This crate's Rust API is in the [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no promise: any release may change it.
 
-Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has.
+Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has, and the build every front end runs over a source to reach them.
 
 Each format is a serializer or deserializer around the **block-array IR**, which the specification names as the universal pivot ([architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/)). Adding a format means adding a backend here — the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
 
 ## Status
 
 Java vanilla `.nbt`, Litematica `.litematic`, Sponge Schematic `.schem` and Bedrock `.mcstructure` writers ship, and so do the built-in registry packs behind `cairn info` and every id check. The Bedrock writer translates each palette entry's canonical blockstate, which is Java's, into the target version's Bedrock block and `states` through the built-in pack's state map ([`bedrock_state`](src/bedrock_state.rs)). A state the map has no form for, or one the Java block does not have, is a hard error (`BedrockStructureError::State`); intent a version can only approximate (stair `shape` before 1.26.60) is dropped with a `W_INTENT_DEGRADED` parity note rather than in silence; and `waterlogged` becomes the structure's water layer. Each writer saves the block array's block entities, a sign's text, a Bedrock bed's colour and a circuit comparator's output, in its own edition's shape, and the Bedrock writer also fills the block entities that keep a state Java keeps in the block, a chest's pairing and a note block's note. A chest half with no other half beside it stands single on Bedrock, with a `W_INTENT_DEGRADED` parity note. Each also writes the entities the block array's members place into its format's `entities` list, with each one's point and fields in its edition's shape and the `nbt={...}` its line writes over them: the Java writer spells an item and a display's text and block state as the target's `DataVersion` reads them, and the Bedrock writer builds an item frame as the frame block and its block entity, and refuses a display, which Bedrock has no counterpart for (`BedrockStructureError::UnmappedEntity`).
+
+The [`info`](src/info.rs) module builds the `cairn info` report, its JSON document and the `note:` lines behind its rows, once for every front end: the CLI prints it, the language server's `cairn.info` command returns it, and [`cairn-lang-wasm`](../cairn-lang-wasm/README.md) answers it in the browser.
 
 The `.litematic` writer puts each struct in a file of its own and each site in one file, a region per placement and walkway at its site origin ([ecosystem-interop "Litematica"](https://cairn.kage1020.com/spec/ecosystem-interop/)), and streams each region's packed `BlockStates` from the grid. The `.schem` writer writes version 3, one file per struct, placement and walkway like `.nbt`, each with its site origin as its `Offset` ([ecosystem-interop "Sponge Schematic"](https://cairn.kage1020.com/spec/ecosystem-interop/)), and streams the varint `Blocks.Data` from the grid. Every Java writer takes its block entities from the same encoding and placement as `.nbt`'s, so a block entity the IR carries is written by all three, but for a bed's, whose colour Java keeps in its block. Of the Java writers only `.nbt` writes entities: each `.litematic` region's `Entities` is empty, and a `.schem` has none. A `.litematic` reader and a `.schem` reader ship too, the first reading one region at a time and the second versions 2 and 3, each into a `BlockVolume`; they are what the reverse direction will build on, but nothing turns their result into the IR yet.
 
@@ -90,6 +92,10 @@ python3 .github/scripts/extract_registry.py bedrock --java <a Java 25 or later>
 
 Because the tables are closed, a suggestion cannot name a block that does not exist in the target — the "valid candidates" half of a diagnostic is looked up, never generated ([principles P3](https://cairn.kage1020.com/spec/principles/)).
 
+## The build a front end runs
+
+The `build` module holds the passes [`cairn`](../cairn-lang-cli/README.md) and [`cairn-lang-wasm`](../cairn-lang-wasm/README.md) both run over a source, so the CLI and the playground report the same findings and refusals in the same words: the gate `cairn check` applies (`build::gate`), the lowering at a pinned target with each struct's circuit laid (`build::lowering`, `build::circuits`), the run-level refusals and the warnings that name no span, which [lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/) keeps apart from the findings (`build::run_level`), each structure checked for its writer (`build::artifact`), and the refusal of a target a version floor rules out (`build::floors`), with the floors the registry contradicts (`build::conflicts`). The `info` report is built on the same passes. The `target` module checks a structure against the backend a resolved target selects. The crate root re-exports none of `build`, `info` and `target`, so the table above does not list them.
+
 ## Planned backends
 
 | Format | Edition | Direction | Spec reference |
@@ -113,6 +119,7 @@ Because the tables are closed, a suggestion cannot name a block that does not ex
 
 - [`cairn-lang-core`](../cairn-lang-core/README.md) for the block-array IR types.
 - [`cairn-lang-nbt`](../cairn-lang-nbt/README.md) for the byte-level codec.
+- [`cairn-lang-redstone`](../cairn-lang-redstone/README.md) for the circuit the build lays under each struct, whose findings the `cairn info` report weighs per edition.
 
 ## License
 
