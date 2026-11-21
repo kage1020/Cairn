@@ -255,6 +255,10 @@ impl Footprint {
 /// Largest voxel volume the lowering pass builds for one scope: a 256-cube.
 pub const MAX_STRUCTURE_VOLUME: usize = 256 * 256 * 256;
 
+/// The `origin=` value that marks a raw member `cairn import` wrote (`spec/materials-themes` "Raw
+/// blocks").
+pub const IMPORTED_ORIGIN: &str = "imported";
+
 const _: () = assert!(
     crate::block_array::walkway::ROUTE_AREA_CAP <= MAX_STRUCTURE_VOLUME as u64,
     "a walkway inside the router's area cap must also be inside the structure volume bound",
@@ -498,6 +502,10 @@ pub struct BlockState {
 impl BlockState {
     /// Canonical Minecraft id for the air block.
     pub const AIR_ID: &'static str = "minecraft:air";
+
+    /// The ids a cell holds no block at: [`Self::AIR_ID`], cave air and void air.
+    pub const AIR_IDS: [&'static str; 3] =
+        ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];
 
     /// The [`Self::AIR_ID`] state, with no properties.
     #[must_use]

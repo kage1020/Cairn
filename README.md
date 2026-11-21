@@ -92,12 +92,14 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt`, Litematica `.litematic` or Sponge Schematic `.schem`, and Bedrock `.mcstructure`, output from one source.
-- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, signs with their text, beds, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`), and `level` grouping.
+- `cairn import`, which reads any of those four files back as a `.crn` of raw members that compiles back to the same blocks. It recovers blocks and their regularity, not intent, and says so with `W_SEMANTIC_LOSS`.
+- `cairn diff-blocks`, which compares a structure file with what a `.crn` builds at the file's target: the block IoU, the regions that differ with their likely causes, and `edit` lines that close them, until a lift converges.
+- Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, signs with their text, beds, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`, `raw_repeat`), and `level` grouping.
 - Themes with slots, per-edition variants, and selector rows that bind the block of a part: the corner posts of `walls` and the frame round each door and window.
 - `edit` patches that change the members a selector or an address selects, without rewriting their lines.
 - A per-source lockfile, and registry packs carrying per-version block IDs, rename aliases and meaning tokens, so a canonical token is written the way each target spells it.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
-- `cairn-lsp` with diagnostics against the target the editor pins, completion, hover, quick-fixes and the `cairn info` report, plus a [VS Code extension](editors/vscode/).
+- `cairn-lsp` with diagnostics against the target the editor pins, completion, hover, quick-fixes, and the `cairn info` and `cairn diff-blocks` reports, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
 - A [playground](https://cairn.kage1020.com/playground/) on the documentation site, where `cairn-lang-wasm` compiles a source in the browser as it is typed and offers its structure files to download.
 
@@ -106,7 +108,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 **Not yet.**
 
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
-- Importing existing schematics.
+- Lifting an import into walls, windows and themes, which the reverse direction leaves to an LLM and `cairn diff-blocks` checks.
 
 ## Key ideas
 

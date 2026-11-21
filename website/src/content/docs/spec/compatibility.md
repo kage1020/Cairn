@@ -63,9 +63,10 @@ Evolving surfaces:
   list), and the syntax a section flags [subject to change](#subject-to-change).
 - New `cairn` subcommands, new flags and flag values of `cairn compile`, `cairn check` and
   `cairn info`, and new language server commands such as `cairn.info`
-  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)), during their first three monthly
-  minors after introduction. What `cairn.info` returns is `cairn info`'s JSON document, at that
-  document's tier.
+  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)) and `cairn.diffBlocks`
+  ([§12.2.5](/spec/ecosystem-interop/#1225-the-report-in-an-editor)), during their first three
+  monthly minors after introduction. What such a command returns is the JSON document of the
+  subcommand it runs, at that document's tier.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.
@@ -128,7 +129,7 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 | `.crn` syntax (chapters 5-9, §10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Lockfile format | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` flags | Evolving | Evolving | **Stable** | Stable | Stable |
-| Language server commands (`cairn.info`) | Evolving | Evolving | **Stable** | Stable | Stable |
+| Language server commands (`cairn.info`, `cairn.diffBlocks`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Diagnostic codes (`E_*`, `W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Tier-1 material vocabulary | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP wire protocol (LSP std) | — | — | — | **Stable** | Stable |
@@ -187,7 +188,7 @@ spelling it earns, and the CHANGELOG entry names the replacement.
 
 **Reserved codes.** The codes a stable command raises are the ones [Lint
 §11.1](/spec/lint/#111-diagnostic-codes) lists, the redstone pipeline's among them. Any other code
-the spec names, such as `E_DECOMPILE_DIFF`, is a reserved code: no command raises it yet. A
+the spec names, such as `W_DEPRECATED`, is a reserved code: no command raises it yet. A
 reserved code lands with the meaning the spec states for it, where it states one, and its row
 landing is adding a code.
 
@@ -206,7 +207,7 @@ build yet, or what the spec reserves for a later extension. Source the spec itse
 code. The placeholders today include:
 
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
-  `spawn`, `painting` and `raw_repeat`;
+  `spawn` and `painting`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet

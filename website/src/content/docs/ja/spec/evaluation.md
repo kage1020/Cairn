@@ -11,7 +11,7 @@ title: "13. 評価フレームワーク"
   → 行番号付きエラーを返し、最大 3 ターン自己修正する
 ```
 
-この章は、プロジェクトが従う評価の方法を定めたもので、リポジトリではまだどれも自動化されていません。テストプロンプト集も、ハーネスも、指標の計測も、ジオメトリシミュレータもありません。上のループのうち存在するのは lint の段階だけで、それが `cairn check` です。
+この章は、プロジェクトが従う評価の方法を定めたもので、リポジトリではまだほとんど自動化されていません。テストプロンプト集も、ハーネスも、ジオメトリシミュレータもなく、指標のうち計算するのは `block_iou`、`state_accuracy`、`residual_ratio` だけで、`cairn diff-blocks` が計算します ([§13.2](#132-逆変換の補助指標))。上のループのうち存在するのは lint の段階だけで、それが `cairn check` です。
 
 ## 13.1 主要な指標
 
@@ -26,8 +26,8 @@ title: "13. 評価フレームワーク"
 
 逆変換の品質 ([エコシステム連携](/ja/spec/ecosystem-interop/)) は主要な評価から外し、補助的な指標として扱います。情報の欠落を許容する方針と合わせるためです。測るのは「形を再現できたか」ではなく、**「編集しやすい DSL になったか」** です。
 
-- `block_iou`、`state_accuracy` (facing / shape / waterlogged の一致)、`entity_accuracy` (額縁 / 看板 / 村人 / display の保持)。
-- `residual_ratio`: リフト後に残った raw の体積。`compression_ratio`: ボクセル数 ÷ トークン数。
+- `block_iou` と `state_accuracy` (facing / shape / waterlogged の一致)。定義は [エコシステム連携 §12.2.1](/ja/spec/ecosystem-interop/#1221-リフトの差分) のとおりです。`entity_accuracy` (額縁 / 看板 / 村人 / display の保持)。
+- `residual_ratio`: リフトのブロックのうち、まだ raw のメンバーが組む割合。定義は §12.2.1 のとおりです。`compression_ratio`: ボクセル数 ÷ トークン数。
 - `editability_score`: 名前付きメンバーの数、スロット化の割合、安定したアドレスの割合。
 - `theme_extraction_score`: 具体的なブロックがインラインで書かれず、スロットとテーマに分離されているか。
 - `symmetry_score`: `repeat` / `mirror` / `def` に畳み込まれた割合。`version_portability`: 正規トークンの割合。

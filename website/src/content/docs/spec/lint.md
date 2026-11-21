@@ -10,7 +10,7 @@ shape is what feeds the loop in [Evaluation Framework](/spec/evaluation/).
 
 This section is the catalog: every code a stable command can raise has a row here, and a code a
 stable command raises with no row is a bug in this section rather than a code outside it. A code
-another chapter names that no command raises yet, such as `E_DECOMPILE_DIFF`, is a reserved code
+another chapter names that no command raises yet, such as `W_DEPRECATED`, is a reserved code
 ([Compatibility Tiers §C.3](/spec/compatibility/#c3-how-a-break-is-communicated)). Where a code's
 rule belongs to another chapter, the row states what the code means and links there for the rule.
 The row is what a reader with a code in hand needs to find, and the chapter is where the behaviour
@@ -85,15 +85,17 @@ report that line as well. A `level` that groups nothing, such as one inside anot
 `E_UNSUPPORTED_NESTING` as well: that finding is about the blocks its members lose, and a `circuit`
 line writes none.
 
-`E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, and a `site`
-body is a flat list. Reported once per dropped subtree, at its root.
+`E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, a `raw_repeat`
+holds only the `raw_block` and `raw_fill` lines it writes again, and a `site` body is a flat list. A
+line under a `raw_repeat` that is neither is reported on its own, with a note at the `raw_repeat`.
+Reported once per dropped subtree, at its root.
 
 `E_SEMANTIC_IN_EDITION_GUARD`: the semantic layer is edition-neutral, so a guard holds only the
 escape hatch. Reported once at the outermost refused line, with a note at the guard, and anything
 indented under that line goes with it. No other check reads the refused line or what goes with it,
 so it draws no other finding. An unknown keyword under a guard is `E_UNKNOWN_KEYWORD` instead,
-offered `raw_block`, `raw_fill`, `repeater`, `comparator`, `redstone_torch` and `redstone_dust`, or
-nothing in a `site` body, where none of them builds.
+offered `raw_block`, `raw_fill`, `raw_repeat`, `repeater`, `comparator`, `redstone_torch` and
+`redstone_dust`, or nothing in a `site` body, where none of them builds.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
 `theme=`. A `struct` / `def` header takes none of them, so one written there is `E_UNKNOWN_ARGUMENT`
@@ -608,25 +610,28 @@ Multi-building](/spec/components-editing-sites/).
 `E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
 ([§11.3](#113-error-vs-warning)): the member is dropped with nothing in its place, and the
 incomplete side is its own line rather than the compiler. A line does that with an argument the
-member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose
-`y=` is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=`
-is no block id), a value outside the ones its key takes (a `roof kind=` that names no kind,
-`side=middle`, an eave `stair` whose `half=` is an identifier other than `top` or `bottom`), or
-arguments that put it outside its struct as written: a `window` past the end of its wall, a `door`
-or `window` whose rows no course of the walls holds, an eave `stair` above the struct or on one
-where no `roof` has an `overhang=` of at least 1, a `fill` or `raw_fill` with a corner outside the
-struct, or a `raw_block` whose `at=` is outside it
-([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member
-at the size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
+member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose `y=`
+is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=` is no
+block id, a `raw_repeat` with no `count=` or `step=` or with no raw member under it), a value
+outside the ones its key takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair`
+whose `half=` is an identifier other than `top` or `bottom`, a `raw_repeat` `count=` below 1 or a
+`step=0,0,0` over more than one copy, a raw member's `origin=` other than `imported`), or arguments
+that put it outside its struct as written: a `window` past the end of its wall, a `door` or `window`
+whose rows no course of the walls holds, an eave `stair` above the struct or on one where no `roof`
+has an `overhang=` of at least 1, a `fill` or `raw_fill` with a corner outside the struct, or a
+`raw_block` whose `at=` is outside it, by any copy a `raw_repeat` writes ([Syntax
+§5.1.1](/spec/syntax/#511-literals-and-separators)). The struct as written is every member at the
+size its line asks for, whether or not it builds: a `roof` that draws nothing still rises and
 overhangs as its line says, and an unreadable value counts as the default its `W_IGNORED_ARGUMENT`
 puts in its place. A `roof` whose `kind=` or `slope_to=` does not read may rise as far as any roof
 on its footprint, and `walls` under a `level` that is not placed may hold any row, so a member only
 they could hold is deferred to them. A `circuit` line that reserves no region and an actuator patch
-that binds no component are refused the same way. [Redstone §14.2](/spec/redstone/#142-signal-binding)
-lists the lines that put a `pressure_plate` nowhere, which put a `chest`, a `trapdoor` set by a wall
-and every other sensor or actuator but `door` nowhere too, and for a sensor or actuator the drop reaches past the block array
-as well: its binding is still read, so its signal stays in the netlist with no component behind it,
-and the finding says so in a note.
+that binds no component are refused the same way. [Redstone
+§14.2](/spec/redstone/#142-signal-binding) lists the lines that put a `pressure_plate` nowhere,
+which put a `chest`, a `trapdoor` set by a wall and every other sensor or actuator but `door`
+nowhere too, and for a sensor or actuator the drop reaches past the block array as well: its binding
+is still read, so its signal stays in the netlist with no component behind it, and the finding says
+so in a note.
 
 A member the struct would have held had another member built is `W_DEFERRED_MEMBER` instead, with a
 note saying which member has the repair: a `walls` that paints nothing, a `roof` that draws nothing,
@@ -724,6 +729,21 @@ wording the editions give it, and an edition's own by the rule for its guards
 | `E_SIM_ASSERTION_FAILED` | An `assert latency` the legalized circuit takes longer than, or one whose end does not depend on its start, or an `assert truth` or `assert always` a run of the circuit breaks ([Redstone §14.7](/spec/redstone/#147-verification)). |
 | `W_SIM_ASSERTION_UNCHECKED` | An `assert truth` or `assert always` no run of the circuit judges, so it is not checked: one in a scope that lays no circuit, one whose signals depend on more than 10 sensors, too many to run every combination of, or one a run is still changing at the end of; or a truth table with rows no run reaches ([Redstone §14.7](/spec/redstone/#147-verification)). |
 
+### Import
+
+`cairn import` raises the first ([Ecosystem Interop
+§12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls)) and `cairn diff-blocks` the second
+([§12.2.1](/spec/ecosystem-interop/#1221-diffing-a-lift)), and no other command raises either. Each
+is about a structure file rather than a line of a source, so it carries no span and prints on stderr:
+`warning[W_SEMANTIC_LOSS]: …` with the body it concerns first when it concerns one, and
+`error[E_DECOMPILE_DIFF]: …` with each metric that misses its threshold. Under `--format json`,
+`E_DECOMPILE_DIFF` is the report's `code` instead, and stderr does not carry it.
+
+| Code | Meaning |
+|---|---|
+| `W_SEMANTIC_LOSS` | What the raw members an import writes do not carry. Every import raises it once for the author's intent, which no transliteration recovers, and then once for each kind of thing a body holds that no raw member writes: block entity data, entities, structure voids, the palettes of a `.nbt` past its first, and on Bedrock a block with no canonical state and water or a second-layer block the written block does not hold. |
+| `E_DECOMPILE_DIFF` | A lift `cairn diff-blocks` compares with a structure file has not converged: its block IoU is below 0.985, its `state_accuracy` below 0.995, or its residual raw above 5%. The report names the regions that differ and the `edit` lines found to close them ([§12.2.2](/spec/ecosystem-interop/#1222-regions-and-their-causes), [§12.2.3](/spec/ecosystem-interop/#1223-the-suggested-patch)), and under `--format json` carries the code as its `code`. |
+
 ### Semantic categories
 
 Beyond the codes above, lint covers:
@@ -783,8 +803,8 @@ reference, a token and a block id print no such list.
 
 ## 11.2 Machine-readable payload
 
-Every command that takes `--format json` (`check`, `info`, `parse` and `lower`) writes exactly one
-JSON document to stdout under it, for every source it can read. `check`'s document is an array of
+Every command that takes `--format json` (`check`, `info`, `parse`, `lower` and `diff-blocks`)
+writes exactly one JSON document to stdout under it, for every source it can read. `check`'s document is an array of
 findings, so a source that does not parse is that array with one `E_PARSE` element. `info`'s is the
 report; where there is no report, after a parse failure or any error-severity finding, it writes
 `{"diagnostics": [ ... ]}` instead, told apart from a report by its keys and by the exit code. Which
@@ -832,6 +852,14 @@ failure is not the dump with a hole in it: each writes the same `{"diagnostics":
 `info` does, told apart from the dump by its keys and by the exit code. `lower` writes it for a
 source that does not parse and for one that fails a later pass, since neither leaves an IR worth
 dumping. Under every other `--format` the findings read as prose on stderr.
+
+`diff-blocks`'s product is the report of [Ecosystem
+Interop §12.2.4](/spec/ecosystem-interop/#1224-the-report). A source that does not build at the
+structure's stamp writes the `{"diagnostics": [ ... ]}` document `lower` does. A refusal at the run
+level (a dropped scope, a `@requires` floor the stamp falls short of, or a structure the target's
+backend refuses) and a structure file that cannot be read as its format write `{"diagnostics": []}`
+and say the rest on stderr. A lift that does not converge is not a failure of
+this kind: its report is written, and carries `E_DECOMPILE_DIFF` as its `code`.
 
 `--format json` renders one object per finding:
 
@@ -1095,11 +1123,11 @@ the key itself decides whether the member is built at all, the member is left ou
 reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
 *unreached* key is one this specification defines that no pass reads yet. `window shape=` is that
 key today. An *inapplicable* key is one every member accepts, on a keyword that puts down nothing it
-would be read for; `mat_slot=` on a `level`, `circuit`, `place`, `connect`, `raw_block` or
-`raw_fill` is that key today. A `mat_slot=` of either kind is not looked up in the theme, so a slot
-name the theme does not declare is this warning rather than `E_UNRESOLVED_SLOT`, and a misspelt one
-is not caught. And a key **routed past**: one the keyword reads only under some ways of writing a
-sibling argument, on a member that writes it another way. The boundary is the keyword: a
+would be read for; `mat_slot=` on a `level`, `circuit`, `place`, `connect`, `raw_block`, `raw_fill`
+or `raw_repeat` is that key today. A `mat_slot=` of either kind is not looked up in the theme, so a
+slot name the theme does not declare is this warning rather than `E_UNRESOLVED_SLOT`, and a misspelt
+one is not caught. And a key **routed past**: one the keyword reads only under some ways of writing
+a sibling argument, on a member that writes it another way. The boundary is the keyword: a
 spec-defined key on a keyword the compiler knows is reported this way, while a spec-defined
 *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three
 make the build differ from the source. The rule forbids *silent* substitution, and all three are

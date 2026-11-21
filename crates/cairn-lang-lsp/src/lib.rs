@@ -5,7 +5,7 @@
 //! Language Server Protocol implementation for Cairn editors: diagnostics from `cairn-lang-core`
 //! against the target the client pins, completion of its closed vocabularies, hover from the
 //! keyword reference, the IR and the registry packs, quick-fixes from each diagnostic's payload,
-//! and the `cairn info` report as a command.
+//! and the `cairn info` and `cairn diff-blocks` reports as commands.
 
 pub mod code_action;
 pub mod commands;

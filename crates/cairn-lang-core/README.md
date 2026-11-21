@@ -16,6 +16,8 @@ This crate is the dependency root of every crate above the byte layer; [`cairn-l
 | `check` | The diagnostic-collecting pipeline: arguments, arity, duplicates, edits, nesting, positional form, `@requires`, `@cairn`, `@intended_targets`, materials, member scope, type mismatches | [lint](https://cairn.kage1020.com/spec/lint/) |
 | `resolve` | Theme binding, per-edition theme variants, `@requires` parsing, and the three version axes | [materials-themes](https://cairn.kage1020.com/spec/materials-themes/), [versioning-editions "The `edition portability` row" and "The `buildable targets` row"](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `block_array` | The universal pivot: walls, openings, the corner posts and frames theme selector rows bind, roofs, walkways, and material lowering into a palette + index array, with the block entities its blocks keep (a sign's text and a bed's colour in no edition's shape, and a circuit comparator's strength under Java's names), and the comparison of a body built with its edits and as written | [architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/) |
+| `transliterate` | L1 transliteration: the blocks of an imported structure written back as raw members, folded into `raw_repeat`, with every connection state the compile derives left out, and checked by compiling the result against the stamped target | [ecosystem-interop "Three tiers of transliteration"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
+| `voxel_diff` | The voxel diff of a structure's blocks with a build's: `block_iou`, `state_accuracy` and `residual_ratio`, the cells that differ clustered into regions with their likely causes, and the `edit` lines found, by building with each, to bring the build nearer | [ecosystem-interop "Diffing a lift", "Regions and their causes" and "The suggested patch"](https://cairn.kage1020.com/spec/ecosystem-interop/) |
 | `lock` | Lockfile schema, the hashes that make a build reproducible, and the reading `cairn info` reports of a lock | [versioning-editions "Provenance and lock"](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `calver`, `edition`, `ids` | The `@cairn` version value, the edition axis, and the identifier newtypes shared across passes | [versioning-editions](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `suggest`, `error`, `lines` | "Did you mean …?" lookup over closed vocabularies, spans and positions, line boundaries | [lint](https://cairn.kage1020.com/spec/lint/) |
@@ -28,7 +30,7 @@ Everything past the block-array IR — the NBT codec, the format backends, redst
 
 ## Not yet here
 
-Entity placement and the reverse direction — lifting an imported structure back into idiomatic Cairn — are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
+Entity placement and L2, the semantic lift of a transliterated structure into named, themed Cairn, are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
 
 ## Versioning
 

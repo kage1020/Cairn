@@ -14,7 +14,12 @@ import { pathToFileURL } from "node:url";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { runTests } from "@vscode/test-electron";
-import type { Pin, ServerEvent, ShowInfo } from "./server-event";
+import type {
+  DiffBlocks,
+  Pin,
+  ServerEvent,
+  ShowInfo,
+} from "./server-event";
 
 const EXTENSION_ROOT = resolve(__dirname, "..", "..");
 const FAKE_SERVER = join(__dirname, "fake-cairn-lsp.js");
@@ -98,6 +103,8 @@ interface Run {
   readonly setTarget?: readonly [string, string];
   /** How `Cairn: Show Info` runs once the extension is active. */
   readonly showInfo?: ShowInfo;
+  /** How `Cairn: Diff Blocks` runs once the extension is active. */
+  readonly diffBlocks?: DiffBlocks;
   /** The JSON-RPC `result` or `error` member a stand-in answers a command with. */
   readonly commandAnswer?: object;
 }
@@ -193,7 +200,8 @@ class Fixture {
         CAIRN_TEST_RECORD: this.record,
         CAIRN_TEST_SET_TARGET: run.setTarget && JSON.stringify(run.setTarget),
         CAIRN_TEST_SHOW_INFO: run.showInfo && JSON.stringify(run.showInfo),
-        CAIRN_TEST_INFO_ANSWER:
+        CAIRN_TEST_DIFF_BLOCKS: run.diffBlocks && JSON.stringify(run.diffBlocks),
+        CAIRN_TEST_COMMAND_ANSWER:
           run.commandAnswer && JSON.stringify(run.commandAnswer),
       },
     });
@@ -317,7 +325,7 @@ function settingsAt(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-/** What `Cairn: Show Info` did, as the test host wrote it to `path`. */
+/** What a report command did, as the test host wrote it to `path`. */
 function shownAt(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -495,7 +503,7 @@ test(
     const fixture = new Fixture(t);
     const server = fixture.pathServer;
     const to = join(fixture.root, "shown.json");
-    const refused = { diagnostics: [] };
+    const refused = { diagnostics: [{ code: "E_UNKNOWN_MATERIAL" }] };
     await fixture.expectLaunches(
       { user: {}, showInfo: { to }, commandAnswer: { result: refused } },
       [probe(server), probe(server), commandSession(server)],
@@ -569,6 +577,61 @@ test(
       message:
         "Cairn: Show Info needs cairn-lsp, which is not running. " +
         "See the Output panel (Cairn Language Server) for why.",
+    });
+  },
+);
+
+test(
+  "Cairn: Diff Blocks opens what cairn.diffBlocks answers for the document and a structure file",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const to = join(fixture.root, "shown.json");
+    const structure = join(fixture.root, "main.nbt");
+    writeFileSync(structure, "");
+    await fixture.expectLaunches(
+      { user: {}, diffBlocks: { to, structure } },
+      [probe(server), probe(server), commandSession(server)],
+    );
+    const request = {
+      command: "cairn.diffBlocks",
+      arguments: [
+        {
+          uri: pathToFileURL(fixture.document).href,
+          structure: pathToFileURL(structure).href,
+        },
+      ],
+    };
+    assert.deepEqual(shownAt(to), {
+      opened: `${JSON.stringify(request, null, 2)}\n`,
+    });
+  },
+);
+
+test(
+  "Cairn: Diff Blocks says a run refused as a whole has no report",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const to = join(fixture.root, "shown.json");
+    const structure = join(fixture.root, "main.nbt");
+    writeFileSync(structure, "");
+    const refused = { diagnostics: [] };
+    await fixture.expectLaunches(
+      {
+        user: {},
+        diffBlocks: { to, structure },
+        commandAnswer: { result: refused },
+      },
+      [probe(server), probe(server), commandSession(server)],
+    );
+    assert.deepEqual(shownAt(to), {
+      opened: `${JSON.stringify(refused, null, 2)}\n`,
+      message:
+        "cairn diff-blocks refused the run as a whole, so there is no report. " +
+        "Run cairn diff-blocks in a terminal to see why.",
     });
   },
 );

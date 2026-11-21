@@ -60,8 +60,8 @@ pub enum DiagnosticCode {
     /// A known statement keyword whose enclosing body has no reader for it, or a `circuit` line
     /// under a `level`.
     MisplacedMember,
-    /// A known member other than a raw member or a Tier 0 part, or a `logic` or `assert` line,
-    /// under an `@edition` guard.
+    /// A known member other than a raw member, a `raw_repeat` or a Tier 0 part, or a `logic` or
+    /// `assert` line, under an `@edition` guard.
     SemanticInEditionGuard,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,

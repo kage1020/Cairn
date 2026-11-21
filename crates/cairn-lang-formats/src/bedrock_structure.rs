@@ -3,6 +3,9 @@
 //! waterlogged entry stands and `-1` everywhere else. A block entity is written under
 //! `block_position_data`, keyed by its voxel's place in that order: each of the IR's, and one for
 //! each block whose Java states Bedrock keeps in its block entity, as a chest's pairing.
+//! [`read_mcstructure`] reads such a file back, whichever tool saved it.
+
+mod read;
 
 use std::collections::HashMap;
 
@@ -24,6 +27,10 @@ use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, list_volume};
 use crate::java_structure::{java_entity_id, sign_text_fix};
 use crate::registry::VersionStates;
+
+pub use read::{
+    BedrockBlock, BedrockVolume, McStructureReadError, StoredMcStructure, read_mcstructure,
+};
 
 /// One intent a palette entry dropped to fit Bedrock, reported as `W_INTENT_DEGRADED`.
 #[derive(Debug, Clone, PartialEq, Eq)]

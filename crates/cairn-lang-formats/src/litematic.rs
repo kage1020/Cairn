@@ -39,6 +39,3 @@ fn long_count(volume: usize, bits: u32) -> usize {
         .saturating_mul(usize::try_from(bits).expect("at most 32 bits"))
         .div_ceil(64)
 }
-
-/// The block ids Litematica's `TotalBlocks` does not count.
-const AIR_IDS: [&str; 3] = ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];

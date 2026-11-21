@@ -4,7 +4,10 @@ use std::str::FromStr;
 use cairn_lang_core::lock::{
     HashHex, LOCK_SCHEMA_VERSION, LockInputs, LockTarget, Lockfile, hash_source,
 };
-use cairn_lang_core::{CAIRN_VERSION, Edition};
+use cairn_lang_core::{CAIRN_VERSION, Edition, parse};
+use cairn_lang_formats::build::artifact::prepare_artifact;
+use cairn_lang_formats::build::lowering::lower_for_target;
+use cairn_lang_formats::data_version::resolve_target;
 use cairn_lang_formats::info::{InfoDocument, default_lock_path};
 use serde_json::json;
 
@@ -248,8 +251,8 @@ fn each_refusal_says_what_the_command_takes() {
     let store = holding(SHOP, CLEAN);
     let usage = "`cairn.info` takes one argument, `{ \"uri\": <document>, \"editions\"?: [...] }`";
     assert_eq!(
-        run(&store, "cairn.diffBlocks", &json!([])),
-        invalid("unknown command `cairn.diffBlocks`; this server runs `cairn.info`"),
+        run(&store, "cairn.lower", &json!([])),
+        invalid("unknown command `cairn.lower`; this server runs `cairn.info`, `cairn.diffBlocks`"),
     );
     assert_eq!(
         run(&store, INFO, &json!([])),
@@ -361,4 +364,229 @@ fn a_file_uri_decodes_to_the_path_it_names() {
     assert_eq!(file_path(&uri("https://example.com/shop.crn")), None);
     assert_eq!(file_path(&uri("file:shop.crn")), None);
     assert_eq!(file_path(&uri("file:///site/%FF.crn")), None);
+}
+
+/// `CLEAN` with its walls a row short.
+const SHORT_WALLS: &str = "\
+theme t:
+  slot wall -> @stone
+
+struct s size=2x2
+  floor mat_slot=wall
+  walls height=3 mat_slot=wall
+";
+
+/// A directory holding `name`, the `.nbt` that `source` compiles to at Java 1.21.4.
+fn structure_file(source: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
+    let module = parse(source).expect("the source parses");
+    let target = resolve_target(Edition::Java, "1.21.4").expect("a shipped target");
+    let lowered = lower_for_target(&module, Edition::Java, Ok(target.clone()));
+    let (scope, array) = lowered.block_ir.structures.first().expect("one struct");
+    let prepared =
+        prepare_artifact(&lowered.block_ir, scope, array, &target).expect("the array prepares");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = dir.path().join(name);
+    let mut file = std::fs::File::create(&path).expect("the structure file is created");
+    prepared
+        .structure
+        .write(&mut file)
+        .expect("the structure file is written");
+    (dir, path)
+}
+
+/// What `cairn diff-blocks --format json` prints for `source` against the structure at `path`.
+fn printed_diff(source: &str, path: &Path) -> serde_json::Value {
+    let decoded = read_structure(path).expect("the structure decodes");
+    let run = diff_blocks(source, &decoded);
+    match &run.outcome {
+        Ok(document) => serde_json::to_value(document),
+        Err(_) => serde_json::to_value(run.failure_document(source)),
+    }
+    .expect("the document serialises")
+}
+
+#[test]
+fn diff_blocks_answers_with_the_report_cairn_diff_blocks_prints() {
+    let (_dir, path) = structure_file(CLEAN, "s.nbt");
+    let store = holding(SHOP, CLEAN);
+    let answer = run(
+        &store,
+        DIFF_BLOCKS,
+        &json!([{ "uri": SHOP, "structure": file_uri(&path) }]),
+    )
+    .expect("a lift is compared");
+    assert_eq!(answer, printed_diff(CLEAN, &path));
+    assert_eq!(
+        [
+            &answer["structure"],
+            &answer["target"],
+            &answer["converged"],
+            &answer["block_iou"],
+            &answer["regions"],
+        ],
+        [
+            &json!("s.nbt"),
+            &json!({ "edition": "java", "version": "1.21.4" }),
+            &json!(true),
+            &json!(1.0),
+            &json!([]),
+        ],
+    );
+}
+
+#[test]
+fn diff_blocks_compares_the_text_the_editor_holds() {
+    let (_dir, path) = structure_file(CLEAN, "s.nbt");
+    let store = holding("untitled:Untitled-1", SHORT_WALLS);
+    let answer = run(
+        &store,
+        DIFF_BLOCKS,
+        &json!([{ "uri": "untitled:Untitled-1", "structure": file_uri(&path) }]),
+    )
+    .expect("a lift is compared");
+    assert_eq!(answer, printed_diff(SHORT_WALLS, &path));
+    assert_eq!(
+        [
+            &answer["converged"],
+            &answer["code"],
+            &answer["patch"]["edits"]
+        ],
+        [
+            &json!(false),
+            &json!("E_DECOMPILE_DIFF"),
+            &json!(["edit walls[0] set height=4"]),
+        ],
+    );
+}
+
+#[test]
+fn diff_blocks_answers_a_refused_source_with_the_failure_document() {
+    let (_dir, path) = structure_file(CLEAN, "s.nbt");
+    let store = holding(SHOP, DUPLICATE);
+    let answer = run(
+        &store,
+        DIFF_BLOCKS,
+        &json!([{ "uri": SHOP, "structure": file_uri(&path) }]),
+    )
+    .expect("a refusal is still an answer");
+    assert_eq!(answer, printed_diff(DUPLICATE, &path));
+    let codes: Vec<&str> = answer["diagnostics"]
+        .as_array()
+        .expect("a diagnostics array")
+        .iter()
+        .filter_map(|d| d["code"].as_str())
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            "E_DUPLICATE_SIZE",
+            "E_MISSING_MATERIAL",
+            "E_DUPLICATE_ARG",
+            "E_DUPLICATE_ID",
+            "E_INVALID_MEMBER",
+            "E_INVALID_MEMBER",
+        ],
+    );
+}
+
+#[test]
+fn diff_blocks_refuses_a_run_the_cli_refuses_whole_with_an_empty_document() {
+    let (_dir, path) = structure_file(CLEAN, "s.nbt");
+    let source = format!("@requires version>=26.3\n{CLEAN}");
+    let store = holding(SHOP, &source);
+    let answer = run(
+        &store,
+        DIFF_BLOCKS,
+        &json!([{ "uri": SHOP, "structure": file_uri(&path) }]),
+    )
+    .expect("a refusal is still an answer");
+    assert_eq!(answer, json!({ "diagnostics": [] }));
+}
+
+#[test]
+fn each_diff_blocks_refusal_says_what_the_command_takes() {
+    let (dir, path) = structure_file(CLEAN, "s.nbt");
+    let structure = file_uri(&path);
+    let store = holding(SHOP, CLEAN);
+    let usage = "`cairn.diffBlocks` takes one argument, `{ \"uri\": <document>, \"structure\": \
+                 <file> }`";
+    assert_eq!(
+        run(&store, DIFF_BLOCKS, &json!([])),
+        invalid(&format!("{usage}, and got 0")),
+    );
+    assert_eq!(
+        run(&store, DIFF_BLOCKS, &json!([{ "uri": SHOP }])),
+        invalid(&format!("{usage}: missing field `structure`")),
+    );
+    assert_eq!(
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": SHOP, "structure": structure, "format": "text" }]),
+        ),
+        invalid(&format!(
+            "{usage}: unknown field `format`, expected `uri` or `structure`"
+        )),
+    );
+    assert_eq!(
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": "file:///no/such/dir/other.crn", "structure": structure }]),
+        ),
+        invalid(
+            "`cairn.diffBlocks` reports on a document the editor has open, and \
+             file:///no/such/dir/other.crn is not open; send `textDocument/didOpen` for it first"
+        ),
+    );
+    assert_eq!(
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": SHOP, "structure": "https://example.com/s.nbt" }]),
+        ),
+        invalid(
+            "`cairn.diffBlocks` reads the structure file from disk, so `structure` needs a local \
+             `file:` URI, and got https://example.com/s.nbt"
+        ),
+    );
+    let refused = |path: &Path| {
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": SHOP, "structure": file_uri(path) }]),
+        )
+    };
+    let schematic = dir.path().join("s.schematic");
+    assert_eq!(
+        refused(&schematic),
+        invalid(&format!(
+            "`cairn.diffBlocks` `structure`: `{}` is not a structure file `cairn diff-blocks` \
+             reads; name a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file",
+            schematic.display()
+        )),
+    );
+    let missing = dir.path().join("missing.nbt");
+    let Err(CommandRefused { code, message }) = refused(&missing) else {
+        panic!("a missing structure file is refused");
+    };
+    let prefix = format!(
+        "`cairn.diffBlocks` `structure`: cannot read `{}`: ",
+        missing.display()
+    );
+    assert_eq!(
+        (code, message.starts_with(&prefix)),
+        (ErrorCode::InvalidParams as i32, true),
+        "{message}"
+    );
+    let truncated = dir.path().join("truncated.nbt");
+    let bytes = std::fs::read(&path).expect("the structure file reads");
+    std::fs::write(&truncated, &bytes[..bytes.len() / 2]).expect("the cut file is written");
+    assert_eq!(
+        refused(&truncated),
+        invalid(&format!(
+            "`cairn.diffBlocks` `structure`: cannot compare `{}`: nbt I/O: incomplete deflate stream",
+            truncated.display()
+        )),
+    );
 }
