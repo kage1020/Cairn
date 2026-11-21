@@ -18,11 +18,11 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.9",
+    "@astrojs/starlight": "^0.43.1",
     "@shikijs/core": "4.6.0",
     "@shikijs/engine-javascript": "4.6.0",
     "@shikijs/themes": "4.6.0",
-    "astro": "^7.4.7",
+    "astro": "^7.4.12",
     "sharp": "^0.35.5",
     "starlight-links-validator": "^0.27.0"
   },
