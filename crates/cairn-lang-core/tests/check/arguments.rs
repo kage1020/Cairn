@@ -209,20 +209,37 @@ fn a_member_inside_a_def_is_checked_like_any_other() {
 
 #[test]
 fn a_struct_header_key_outside_its_vocabulary_is_refused_with_the_closed_set() {
-    // `height` is a member's key, not the header's, so nothing is suggested.
-    let src = "struct s size=5x5 hieght=3\n  floor mat_slot=m\n";
-    let d = exactly_one(diagnose(src));
-    assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
-    assert_eq!(&src[d.span.clone()], "3");
-    assert!(
-        d.primary
-            .contains("`hieght=` is not an argument a `struct` header reads"),
-        "got: {}",
-        d.primary,
-    );
-    let notes = notes(&d);
-    assert!(!notes.contains("did you mean"), "got: {notes}");
-    assert!(notes.contains("expected one of: size"), "got: {notes}");
+    // None of these is near `size`, and none is a key every member takes, so the closed set is
+    // the only note; `use=1` is a label key and still draws no `E_TYPE_MISMATCH_LABEL`.
+    for (src, key, value) in [
+        (
+            "struct s size=5x5 hieght=3\n  floor mat_slot=m\n",
+            "hieght",
+            "3",
+        ),
+        (
+            "struct s size=5x5 clas=house\n  floor mat_slot=m\n",
+            "clas",
+            "house",
+        ),
+        ("struct s size=5x5 use=1\n  floor mat_slot=m\n", "use", "1"),
+    ] {
+        let d = exactly_one(diagnose(src));
+        assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT", "source:\n{src}");
+        assert_eq!(&src[d.span.clone()], value, "source:\n{src}");
+        assert_eq!(
+            d.primary,
+            format!("`{key}=` is not an argument a `struct` header reads"),
+        );
+        assert_eq!(
+            d.notes
+                .iter()
+                .map(|note| note.message.as_str())
+                .collect::<Vec<_>>(),
+            ["expected one of: size"],
+            "source:\n{src}",
+        );
+    }
 }
 
 #[test]
@@ -234,17 +251,17 @@ fn a_misspelled_size_on_a_header_is_told_it_is_misspelled() {
     ] {
         let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", total);
         assert_eq!(&src[d.span.clone()], "7x7", "source:\n{src}");
-        assert!(
-            d.primary.contains(&format!(
-                "`siz=` is not an argument a `{keyword}` header reads"
-            )),
-            "got: {}",
+        assert_eq!(
             d.primary,
+            format!("`siz=` is not an argument a `{keyword}` header reads"),
         );
-        assert!(
-            notes(&d).contains("did you mean `size`?"),
-            "got: {}",
-            notes(&d),
+        assert_eq!(
+            d.notes
+                .iter()
+                .map(|note| note.message.as_str())
+                .collect::<Vec<_>>(),
+            ["did you mean `size`?", "expected one of: size"],
+            "source:\n{src}",
         );
     }
 }
@@ -279,6 +296,20 @@ fn a_member_key_on_a_header_is_refused_and_sent_to_the_body() {
             "struct",
             "class",
             "1",
+            1,
+        ),
+        (
+            "def cottage size=9x7 id=1:\n  floor mat_slot=m\n",
+            "def",
+            "id",
+            "1",
+            2,
+        ),
+        (
+            "struct cottage size=9x7 mat_slot=m\n  floor mat_slot=m\n",
+            "struct",
+            "mat_slot",
+            "m",
             1,
         ),
     ] {

@@ -67,7 +67,7 @@ fn check_selector_bindings(module: &Module, sink: &mut DiagnosticSink) {
 }
 
 /// Keys a `struct` / `def` header may carry, in the closed-set note's order.
-const HEADER_ARGUMENTS: &[&str] = &["size"];
+pub(super) const HEADER_ARGUMENTS: &[&str] = &["size"];
 
 /// A `size=` left in `args` is not `WxH`, which `check::type_mismatch` reports instead.
 fn check_header(keyword: &str, args: &IndexMap<String, ValueWithSpan>, sink: &mut DiagnosticSink) {

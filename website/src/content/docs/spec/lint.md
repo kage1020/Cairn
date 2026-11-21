@@ -1009,13 +1009,12 @@ answer turns out to be. Note that a key in a member's own bracket does not make 
 the attribute, so a `theme` row selecting on it matches nothing.
 
 A `struct` / `def` header line answers to a closed vocabulary of its own, the one [Components,
-Editing, and Multi-building](/spec/components-editing-sites/) states: `size=`, which lowering
-reads. No `theme` selector widens it, since a selector names a member keyword. Any other key is
-the same defect one line up from a member's, and is refused with the suggestion: `struct s siz=7x7`
-is offered `size`. A key every member takes, such as `class=`, is told it goes on a line in the
-body. The missing-size warning the
-same typo causes cannot name it, since it says only that the struct has no size. The error is
-printed before the warning.
+Editing, and Multi-building](/spec/components-editing-sites/) states: `size=`, which lowering reads.
+No `theme` selector widens it, since a selector names a member keyword. Any other key is the same
+defect one line up from a member's, and is refused with the suggestion: `struct s siz=7x7` is
+offered `size`. A key every member takes, such as `class=`, is told it goes on a line in the body.
+The missing-size warning the same typo causes cannot name it, since it says only that the struct has
+no size. The error is printed before the warning.
 
 `W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=` in
 the vocabulary whose value the pass cannot read is dropped and a default put in its place, or, where
@@ -1024,18 +1023,17 @@ the key itself decides whether the member is built at all, the member is left ou
 [§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
 reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
 *unreached* key is one this specification defines that no pass reads yet. `window shape=` is that
-key today. Every
-`key=value` on the right of a `theme` selector row whose keyword the compiler knows is one too,
-reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
-([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
-accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
-`circuit`, `place`, `connect`, `raw_block` or `raw_fill` is that key today. A `mat_slot=` of either kind is not looked up in
-the theme, so a slot name the theme does not declare is this warning rather than
-`E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword
-reads only under some ways of writing a sibling argument, on a member that writes it another way.
-The boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this
-way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are
-not judged at all. All three make the build differ from the source. The rule forbids *silent*
+key today. Every `key=value` on the right of a `theme` selector row whose keyword the compiler knows
+is one too, reported on the binding whatever its key or value, since no pass lowers a selector's
+bindings yet ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every
+member accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
+`circuit`, `place`, `connect`, `raw_block` or `raw_fill` is that key today. A `mat_slot=` of either
+kind is not looked up in the theme, so a slot name the theme does not declare is this warning rather
+than `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the
+keyword reads only under some ways of writing a sibling argument, on a member that writes it another
+way. The boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported
+this way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments
+are not judged at all. All three make the build differ from the source. The rule forbids *silent*
 substitution, and all three are announced. For an unreached key the gap is the compiler's rather
 than the source's, which is why it is not a refusal. An inapplicable key is no gap at all: the key
 is one every member accepts and its value changes nothing in the build, so the warning asks for its
