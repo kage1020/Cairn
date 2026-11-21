@@ -13,9 +13,12 @@ website/
 ├── package.json
 ├── Cargo.toml              # the cairn-lang-docs crate, which embeds the pages in `cairn`
 ├── rust/                   # its build script, library and README
+├── functions/
+│   └── _middleware.ts      # Cloudflare Pages middleware, answering Accept: text/markdown
 ├── scripts/
 │   └── build-wasm.sh       # builds the playground's compiler module, within its size budget
 ├── public/
+│   ├── _routes.json        # the paths that skip the middleware
 │   └── favicon.svg
 ├── src/
 │   ├── components/
@@ -23,9 +26,12 @@ website/
 │   ├── playground/          # its editor, worker and view; `pkg/` is the built module
 │   ├── content.config.ts   # Starlight docs collection
 │   ├── llms.ts             # the Markdown pages, as llms.txt and index.md serve them
+│   ├── negotiation.ts      # what the middleware serves, and its tests beside it
+│   ├── routeData.ts        # the home pages' JSON-LD
 │   ├── pages/
 │   │   ├── llms.txt.ts          # /llms.txt
 │   │   ├── llms-full.txt.ts     # /llms-full.txt
+│   │   ├── og.png.ts            # /og.png, the link-preview image
 │   │   └── [...slug]/index.md.ts  # /<path>/index.md for every Markdown page
 │   ├── content/
 │   │   └── docs/
@@ -64,8 +70,10 @@ pnpm install        # once
 pnpm dev            # astro dev at http://localhost:4321/
 pnpm check          # astro check — types in astro.config.mjs and src/
 pnpm build          # astro build → ./dist, and resolves every internal link
-pnpm preview        # serves ./dist
+pnpm preview        # serves ./dist, without the middleware
 pnpm build:wasm     # the playground's compiler module, into src/playground/pkg
+pnpm test           # vitest, for the middleware
+pnpm dlx wrangler pages dev ./dist   # serves ./dist through the middleware, after pnpm build
 ```
 
 The playground compiles with `cairn-lang-wasm`, which `pnpm build:wasm` builds with Rust and `wasm-pack`. Without the module the site still builds, and the playground says it was built without one. The [developer guide](https://cairn.kage1020.com/development/#the-playgrounds-module) has the details. The playground also reads the VS Code extension's TextMate grammar and the `.crn` files in `../examples/`, so a change to either changes the page.
@@ -83,7 +91,7 @@ The playground compiles with `cairn-lang-wasm`, which `pnpm build:wasm` builds w
 
 Every `.md` page under `src/content/docs/` that is not a draft reaches readers by three more routes, and none of them is a copy to keep in step: each reads the page sources as they are.
 
-- **As Markdown on the site.** `/<path>/index.md` serves a page's title and body, `/llms.txt` indexes the English ones the sidebar lists, in its order, for language models, and `/llms-full.txt` is every English page in one file. The endpoints are in `src/pages/`; an `.mdx` page is left out, since its components do not read as Markdown.
+- **As Markdown on the site.** `/<path>/index.md` serves a page's title and body, `/llms.txt` indexes the English ones the sidebar lists, in its order, for language models, and `/llms-full.txt` is every English page in one file. The endpoints are in `src/pages/`; an `.mdx` page is left out, since its components do not read as Markdown. A request for a page's own URL whose `Accept` ranks `text/markdown` at least as high as `text/html` gets that `index.md` too, from `functions/_middleware.ts`: the home pages answer with `/llms.txt`, a page without Markdown with its HTML, and a missing path with a Markdown 404 that links `/llms.txt`.
 - **Inside `cairn`.** `Cargo.toml` here makes this directory the `cairn-lang-docs` crate, whose build script embeds every page, so `cairn docs spec/syntax` prints the page the installed release was built with. Its package carries the pages themselves, which is why the manifest sits next to them rather than under `crates/`.
 - **As citations.** A heading's title without its number, a term a list item defines in bold (`- **Term.**`), and a page's own title are what `spec/<chapter> "<title>"` citations quote. `cargo xtask lint spec-citations` resolves them through the same crate, so retitling a heading fails the lint at every citation of it, and `cargo test -p cairn-lang-docs` fails if a page links to a fragment the crate gives no heading. After `pnpm run build`, `cargo xtask lint --site website/dist site-parity`, run from the repository root, checks that the site serves each embedded page and no other, with the same Markdown and the same heading anchors; CI runs it after every build of the site.
 
@@ -103,9 +111,9 @@ Cloudflare Pages project settings:
 | Node.js version | `24` (also pinned via [`.nvmrc`](.nvmrc)) |
 | Compatibility date | `2026-06-14` (in [`wrangler.jsonc`](wrangler.jsonc)) |
 
-Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. Deployment is Cloudflare's Git integration, not a workflow. `pnpm build:wasm --install` installs rustup, the Rust toolchain [`rust-toolchain.toml`](../rust-toolchain.toml) pins and `wasm-pack` on the build image, which has none of them, before it builds the playground's module. A build command without it, such as `pnpm install --frozen-lockfile && pnpm build`, still deploys the site, and the playground then says it was built without the module.
+Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. Deployment is Cloudflare's Git integration, not a workflow, and it deploys `functions/` beside `dist`, as `wrangler pages deploy` below does when run from this directory. Every request outside the static paths `public/_routes.json` excludes runs the middleware, which counts against the project's Functions quota. `pnpm build:wasm --install` installs rustup, the Rust toolchain [`rust-toolchain.toml`](../rust-toolchain.toml) pins and `wasm-pack` on the build image, which has none of them, before it builds the playground's module. A build command without it, such as `pnpm install --frozen-lockfile && pnpm build`, still deploys the site, and the playground then says it was built without the module.
 
-The `Documentation site` job in [`editors-website.yml`](../.github/workflows/editors-website.yml) builds the module, then runs `pnpm check` and `pnpm build`, on changes to `website/**` and to what the module is built from, so a type error or a dead link fails a PR instead of reaching the deploy. Cloudflare runs the build too, so a dead link that got past review would fail the deploy rather than ship — but the type check is CI's alone.
+The `Documentation site` job in [`editors-website.yml`](../.github/workflows/editors-website.yml) builds the module, then runs `pnpm check`, `pnpm test` and `pnpm build`, on changes to `website/**` and to what the module is built from, so a type error or a dead link fails a PR instead of reaching the deploy. Cloudflare runs the build too, so a dead link that got past review would fail the deploy rather than ship — but the type check is CI's alone.
 
 To deploy a one-off preview from the CLI:
 

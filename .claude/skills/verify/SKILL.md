@@ -30,8 +30,9 @@ Add these when the change reaches them:
 - `crates/cairn-lang-tree-sitter/grammar.js` or its corpus: `pnpm install`, `pnpm run generate`
   (the generated files must come out unchanged after you commit them) and `pnpm test`, in that
   crate's directory.
-- `website/`: `pnpm install`, `pnpm run build:wasm`, `pnpm run check` and `pnpm run build` in
-  `website/`, then `cargo xtask lint --site website/dist site-parity` from the root.
+- `website/`: `pnpm install`, `pnpm run build:wasm`, `pnpm run check`, `pnpm test` and
+  `pnpm run build` in `website/`, then `cargo xtask lint --site website/dist site-parity` from the
+  root.
 - `cairn-lang-wasm`, or `cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats` or
   `cairn-lang-redstone`, which it is built from: CI's `WebAssembly` job. With the
   `wasm32-unknown-unknown` target and `wasm-pack` installed, run

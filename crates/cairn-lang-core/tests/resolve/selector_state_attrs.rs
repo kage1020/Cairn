@@ -20,8 +20,8 @@ fn eave(selected: &str) -> String {
 #[test]
 fn a_selector_on_a_state_key_selects_the_member_that_writes_it() {
     let source = eave("top");
-    // Only the row's own binding, which nothing lowers.
-    assert_eq!(codes(&source), [DiagnosticCode::IgnoredArgument.as_str()]);
+    // Only the row's own binding, a key a theme binds on no `stair`.
+    assert_eq!(codes(&source), [DiagnosticCode::UnknownArgument.as_str()]);
     assert_eq!(
         selector_extras(&source),
         [(
@@ -38,7 +38,7 @@ fn a_selector_on_a_state_key_another_value_does_not_select() {
         codes(&source),
         [
             DiagnosticCode::ThemeSelectorUnmatched.as_str(),
-            DiagnosticCode::IgnoredArgument.as_str(),
+            DiagnosticCode::UnknownArgument.as_str(),
         ],
     );
     assert_eq!(selector_extras(&source), []);

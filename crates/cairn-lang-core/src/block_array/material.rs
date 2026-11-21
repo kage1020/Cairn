@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use crate::Edition;
 use crate::ast::ValueKind;
 use crate::error::Span;
-use crate::intent::ValueWithSpan;
+use crate::intent::{BindingKey, ValueWithSpan};
 use crate::resolve::{Resolution, TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
@@ -522,17 +522,25 @@ pub fn resolve_block_state(
     }
 }
 
-/// Each canonical token `resolution` binds to a member's `mat_slot=` or a walkway's `path=`, once
-/// per place it is written, in source order, as the block state it spells.
+/// Each canonical token `resolution` binds to a member's `mat_slot=`, to a part a theme selector
+/// row lays, or to a walkway's `path=`, once per place it is written, in source order, as the
+/// block state it spells.
 #[must_use]
 pub fn bound_canonical_tokens(resolution: &Resolution) -> Vec<(Span, BlockState)> {
-    let slots = resolution
-        .scopes
-        .values()
-        .flat_map(|scope| scope.members.values())
-        .filter_map(|binding| binding.slot_value.as_ref());
+    let bindings = || {
+        resolution
+            .scopes
+            .values()
+            .flat_map(|scope| scope.members.values())
+    };
+    let slots = bindings().filter_map(|binding| binding.slot_value.as_ref());
+    let parts = bindings()
+        .flat_map(|binding| &binding.selector_extras)
+        .filter(|(key, _)| BindingKey::from_key(key).is_some())
+        .map(|(_, value)| value);
     let paths = resolution.connects.iter().map(|connect| &connect.path);
     let mut tokens: Vec<(Span, BlockState)> = slots
+        .chain(parts)
         .chain(paths)
         .filter_map(
             |value| match (&value.value.kind, classify_token(&value.value)) {

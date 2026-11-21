@@ -527,3 +527,26 @@ fn the_bound_canonical_tokens_are_each_slot_and_path_once_in_source_order() {
         "`roof` binds no member, and the abstract `wall` is the catalog's",
     );
 }
+
+#[test]
+fn a_part_a_selector_row_lays_is_a_bound_canonical_token_once_per_row() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n  walls[class=outer] -> trim=@chain\n  \
+                  door[class=main] -> frame=@spruce_wood\n\nstruct a size=5x4\n  walls class=outer \
+                  mat_slot=wall height=3\n  door class=main side=front at=center\n\nstruct b \
+                  size=5x4\n  walls class=outer mat_slot=wall height=3\n";
+    let module = crate::parse(source).expect("the source parses");
+    let ir = crate::lower(&module);
+    let resolution = crate::resolve(&ir, None);
+    let tokens: Vec<(&str, BlockState)> = bound_canonical_tokens(&resolution)
+        .into_iter()
+        .map(|(span, state)| (&source[span], state))
+        .collect();
+    assert_eq!(
+        tokens,
+        [
+            ("@cobblestone", BlockState::bare("minecraft:cobblestone")),
+            ("@chain", BlockState::bare("minecraft:chain")),
+            ("@spruce_wood", BlockState::bare("minecraft:spruce_wood")),
+        ],
+    );
+}

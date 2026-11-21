@@ -4,6 +4,8 @@ dist/
 .astro/
 # the playground's compiler module, which `pnpm run build:wasm` writes
 src/playground/pkg/
+# wrangler pages dev state
+.wrangler/
 
 # dependencies
 node_modules/

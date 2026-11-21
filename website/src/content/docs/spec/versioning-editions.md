@@ -982,8 +982,8 @@ theme binds `@chain`, `@oak_sign` and `@cauldron[fluid=water]` reads:
 respelled:               Java: minecraft:chain, minecraft:cauldron   Bedrock: minecraft:chain, minecraft:oak_sign
 ```
 
-Each token is named on stderr where a theme slot or a `path=` binds it, once per ID written and
-table, with the versions that write that ID:
+Each token is named on stderr where a theme slot, a selector row or a `path=` binds it, once per ID
+written and table, with the versions that write that ID:
 
 ```text
 note: shop.crn:2:17: `minecraft:chain` is written `minecraft:iron_chain` at java 26.3, per the registry pack's alias table
@@ -1314,15 +1314,17 @@ component, each row with the sentence a diagnostic prints for it:
 The loader refuses an `absent` ID that the pack's own `blocks` declare at some version, under that
 spelling or another of its `aliases` group, since the edition then has the block.
 
-A semantic member whose `mat_slot=` resolves to such a block, and a `connect … path=` that does, is
-`E_PARITY_UNSUPPORTED` ([Lint](/spec/lint/)) at the token, at a pinned target of the edition that
-lacks it. The block is no typo, so no nearest ID is offered. The notes give the pack's reason and
-what to write instead. For a member, that is a step down the hierarchy
-[below](#writing-an-alternative): a per-edition theme that binds the slot to a block each edition
-has, or a `raw_block` under the other edition's `@edition` guard. Neither is open to a walkway,
-since `path=` names its block with no slot to bind and nothing a guard holds builds in a `site`
-body ([§10.7](#an-edition-guard-holds-the-escape-hatch)). So for a `path=`, the note asks for a
-block both editions have, or an abstract token each edition's materials catalog maps.
+A semantic member whose `mat_slot=` resolves to such a block, a key a `theme` selector row binds to
+one, and a `connect … path=` that does, is `E_PARITY_UNSUPPORTED` ([Lint](/spec/lint/)) at the
+token, at a pinned target of the edition that lacks it. The block is no typo, so no nearest ID is
+offered. The notes give the pack's reason and what to write instead. For a member, that is a step
+down the hierarchy [below](#writing-an-alternative): a per-edition theme that binds the slot to a
+block each edition has, or a `raw_block` under the other edition's `@edition` guard. Neither is open
+to a walkway, since `path=` names its block with no slot to bind and nothing a guard holds builds in
+a `site` body ([§10.7](#an-edition-guard-holds-the-escape-hatch)). So for a `path=`, the note asks
+for a block both editions have, or an abstract token each edition's materials catalog maps. For a
+selector row, it asks for the row in a per-edition theme that binds the key to a block each edition
+has, or for a block both editions have.
 
 A `raw_block` or `raw_fill` that names such a block is `E_UNKNOWN_ID`, since a raw ID is
 edition-specific by nature, with a note giving the pack's reason and naming the guard that would
