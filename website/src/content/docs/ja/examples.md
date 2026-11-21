@@ -37,7 +37,7 @@ description: 実際の .crn ファイル集。言語の書き方だけに集中�
 | ファイル | 内容 |
 |---|---|
 | [`storeroom.crn`](https://github.com/kage1020/Cairn/blob/main/examples/storeroom.crn) | 壁を背にした `chest`。どのチェストも背にした壁から離れる向きを向き、並んだ 2 つは連結し、`size=single` で 2 つを別々に保つ。 |
-| [`workshop.crn`](https://github.com/kage1020/Cairn/blob/main/examples/workshop.crn) | `beam`、`trapdoor`、`note_block`。ドアと窓の上と左右の壁の上端に渡した原木、壁に沿って開いたトラップドアと座標の 3 つ組の位置で上半分に置いたトラップドア、行に書いた音と楽器を持つ音符ブロック。 |
+| [`workshop.crn`](https://github.com/kage1020/Cairn/blob/main/examples/workshop.crn) | `beam`、`trapdoor`、`note_block`、`bed`、`sign`。ドアと窓の上と左右の壁の上端に渡した原木、壁に沿って開いたトラップドアと座標の 3 つ組の位置で上半分に置いたトラップドア、行に書いた音と楽器を持つ音符ブロック、頭を奥の壁に付けた茶色のベッド、ドアの横に掛けた、行に書いた文字を持つ看板。 |
 | [`control-room.crn`](https://github.com/kage1020/Cairn/blob/main/examples/control-room.crn) | 壁のそばに置いたすべてのセンサーとアクチュエーター。壁から離れる向きに掛けたレバーとボタン、日照センサー、上を向けたオブザーバーと粘着ピストン、ランプ、外を向いたディスペンサー、パッチで結び付けたピストン。 |
 | [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`。マテリアルで砂の床を塗り、水槽に置いたものの周りに水を注ぐ。仕切りの板ガラスと 1 つのチェストは水を含み、`waterlogged=false` のもう 1 つは乾いたまま残る。 |
 

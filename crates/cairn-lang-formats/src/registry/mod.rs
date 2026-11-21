@@ -34,7 +34,7 @@ pub use load::{
 };
 pub use manifest::{PackFiles, PackManifest};
 pub use states::{
-    BedrockForm, CanonicalSpelling, DroppedState, SUPPORTED_SENSITIVITY_SCHEMA,
+    BedrockForm, CanonicalSpelling, DroppedState, EntityStates, SUPPORTED_SENSITIVITY_SCHEMA,
     SUPPORTED_STATES_SCHEMA, SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal,
     StatesCatalog, StatesError, VersionStates,
 };

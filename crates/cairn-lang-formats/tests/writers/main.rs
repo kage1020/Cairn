@@ -5,6 +5,7 @@
 pub mod common;
 
 mod bedrock_structure;
+mod block_entities;
 mod java_structure;
 mod litematic;
 mod schem;

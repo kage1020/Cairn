@@ -7,6 +7,7 @@
 
 mod anchor;
 mod beam;
+mod bed;
 mod body;
 mod canvas;
 mod cell_box;
@@ -33,6 +34,7 @@ mod repeat;
 mod ripple;
 mod roof_fill;
 mod roof_kind;
+mod sign;
 mod site_floor;
 mod sizing;
 mod stair;
