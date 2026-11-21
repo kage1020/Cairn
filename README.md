@@ -99,8 +99,9 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - `edit` patches that change the members a selector or an address selects, without rewriting their lines.
 - A per-source lockfile, and registry packs carrying per-version block IDs, rename aliases and meaning tokens, so a canonical token is written the way each target spells it.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
-- `cairn-lsp` with diagnostics against the target the editor pins, completion, hover and quick-fixes, plus a [VS Code extension](editors/vscode/).
+- `cairn-lsp` with diagnostics against the target the editor pins, completion, hover, quick-fixes and the `cairn info` report, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
+- A [playground](https://cairn.kage1020.com/playground/) on the documentation site, where `cairn-lang-wasm` compiles a source in the browser as it is typed and offers its structure files to download.
 
 **Experimental.** `cairn synth --experimental-logic-synth` prints each stage of the redstone pipeline as JSON: synthesis, netlist construction, edition selection, placement, routing, delay insertion, and legalization. The output shape is free to change.
 
@@ -108,7 +109,6 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
 - Lifting an import into walls, windows and themes, which the reverse direction leaves to an LLM and `cairn diff-blocks` checks.
-- The browser playground. The `cairn-lang-wasm` crate is still a placeholder with no exports.
 
 ## Key ideas
 

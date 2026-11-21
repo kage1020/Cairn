@@ -3,8 +3,11 @@ import { promisify } from "node:util";
 import {
   ConfigurationTarget,
   ExtensionContext,
+  LogOutputChannel,
   OutputChannel,
+  TextDocument,
   Uri,
+  ViewColumn,
   WorkspaceConfiguration,
   commands,
   env,
@@ -13,6 +16,7 @@ import {
 } from "vscode";
 import {
   ClientCapabilities,
+  ExecuteCommandRequest,
   FeatureState,
   LanguageClient,
   LanguageClientOptions,
@@ -23,6 +27,9 @@ import {
 const execFileAsync = promisify(execFile);
 const RELEASE_URL = "https://github.com/kage1020/Cairn/releases";
 const PROBE_TIMEOUT_MS = 5_000;
+// Not `cairn.info`: the client registers that one itself, from the server's capabilities.
+const SHOW_INFO = "cairn.showInfo";
+const INFO = "cairn.info";
 /**
  * The command a quick-fix runs to pin another target; its arguments are the
  * edition and the version.
@@ -30,11 +37,28 @@ const PROBE_TIMEOUT_MS = 5_000;
 const SET_TARGET = "cairn.setTarget";
 
 let client: LanguageClient | undefined;
+/** Settles once the server has started, or is known not to start. */
+let ready: Promise<void> = Promise.resolve();
+
+/** What `Cairn: Show Info` did: the report it opened, and the message it showed. */
+export interface InfoShown {
+  readonly opened?: TextDocument;
+  readonly message?: string;
+}
 
 export async function activate(context: ExtensionContext): Promise<void> {
   const output = window.createOutputChannel("Cairn Language Server", { log: true });
   context.subscriptions.push(output);
+  // Before the server is found, so the command can say it is missing.
+  context.subscriptions.push(commands.registerCommand(SHOW_INFO, showInfo));
+  ready = startServer(context, output);
+  await ready;
+}
 
+async function startServer(
+  context: ExtensionContext,
+  output: LogOutputChannel,
+): Promise<void> {
   const serverPath = await resolveServerPath(output);
   if (!serverPath) {
     return;
@@ -90,6 +114,84 @@ export async function deactivate(): Promise<void> {
     // VS Code is tearing the extension host down; nothing user-facing is left.
     console.error("cairn-lsp: stop() failed during deactivate:", err);
   }
+}
+
+/**
+ * Opens what `cairn.info` answers for the active `.crn` editor beside it,
+ * waiting out a server that is still starting.
+ */
+async function showInfo(): Promise<InfoShown> {
+  const editor = window.activeTextEditor;
+  if (editor?.document.languageId !== "cairn") {
+    return refuse(
+      "Cairn: Show Info reports on the active editor, which is not a .crn file. Open one first.",
+    );
+  }
+  if (editor.document.uri.scheme !== "file") {
+    return refuse(
+      "Cairn: Show Info reads the lockfile beside the source. Save the document to a file first.",
+    );
+  }
+  await ready.catch(() => undefined);
+  const current = client;
+  if (!current?.isRunning()) {
+    return refuse(
+      "Cairn: Show Info needs cairn-lsp, which is not running. " +
+        "See the Output panel (Cairn Language Server) for why.",
+    );
+  }
+  let report: unknown;
+  try {
+    report = await current.sendRequest(ExecuteCommandRequest.type, {
+      command: INFO,
+      arguments: [
+        { uri: current.code2ProtocolConverter.asUri(editor.document.uri) },
+      ],
+    });
+  } catch (err) {
+    return refuse(
+      `cairn-lsp answered ${INFO} with an error: ${describeError(err)}`,
+    );
+  }
+  let opened: TextDocument;
+  try {
+    opened = await workspace.openTextDocument({
+      language: "json",
+      content: `${JSON.stringify(report, null, 2)}\n`,
+    });
+    await window.showTextDocument(opened, {
+      viewColumn: ViewColumn.Beside,
+      preserveFocus: true,
+    });
+  } catch (err) {
+    return refuse(
+      `Cairn: Show Info could not open the report: ${describeError(err)}`,
+    );
+  }
+  if (!isFailureDocument(report)) {
+    return { opened };
+  }
+  const message =
+    "cairn info refused the source, so there is no report. " +
+    "The document beside it lists the findings that refused it.";
+  void window.showWarningMessage(message);
+  return { opened, message };
+}
+
+/** Shows `message` as an error and returns it as what Show Info did. */
+function refuse(message: string): InfoShown {
+  void window.showErrorMessage(message);
+  return { message };
+}
+
+/** Whether `report` is the `{"diagnostics": [...]}` document of a refused run. */
+function isFailureDocument(report: unknown): boolean {
+  return (
+    typeof report === "object" &&
+    report !== null &&
+    Object.keys(report).length === 1 &&
+    Array.isArray((report as { diagnostics?: unknown }).diagnostics)
+  );
 }
 
 /**
@@ -200,7 +302,8 @@ async function resolveServerPath(
   );
 
   if (probe.category === "not-found") {
-    await promptForInstall();
+    // Not awaited: Show Info waits on the start, not on the reader's answer.
+    void promptForInstall();
     return undefined;
   }
 

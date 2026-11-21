@@ -3,15 +3,18 @@
 //! promise: any release may change it.
 //!
 //! Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers for the block-array
-//! IR, a reader of each, the import that writes what a reader read as raw members, and the
-//! registry packs and portability reports they rely on.
+//! IR, a reader of each, the import that writes what a reader read as raw members, the registry
+//! packs and portability reports they rely on, the build a front end runs over a source, and the
+//! `cairn info` report built on it.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
 mod block_id;
+pub mod build;
 pub mod data_version;
 mod dims;
 pub mod import;
+pub mod info;
 pub mod java_structure;
 pub mod litematic;
 pub mod portability;
@@ -19,6 +22,7 @@ mod read_stream;
 pub mod registry;
 pub mod schem;
 mod site_frame;
+pub mod target;
 pub mod volume;
 
 pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};

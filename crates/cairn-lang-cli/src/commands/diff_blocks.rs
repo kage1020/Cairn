@@ -10,17 +10,19 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::voxel_diff::{
     CONVERGENCE, DiffInput, DiffReport, Metrics, diff, floor3, percent,
 };
-use cairn_lang_core::{Edition, Severity, parse};
+use cairn_lang_core::{Edition, parse};
+use cairn_lang_formats::build::finding::Found;
+use cairn_lang_formats::build::lowering::{BuildRefusal, Lowered, lower_for_target};
+use cairn_lang_formats::build::run_level::{floor_refusal_message, partial_build};
+use cairn_lang_formats::build::scopes::built_scopes;
+use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
 use cairn_lang_formats::import::{DecodedStructure, ImportFormat, decode_structure};
 use serde::Serialize;
 
 use crate::cli::DiffFormat;
 use crate::commands::import::{file_name, open_structure, refuse_extension};
-use crate::floors::report_floor_refusal;
-use crate::inferred::report_conflicts;
-use crate::pipeline::{Lowered, built_scopes, load_module, lower_parsed, report_partial_build};
-use crate::report::{Finding, Found, print_json, report_diagnostics, report_failure_document};
-use crate::target::{ResolvedTarget, resolve_target};
+use crate::pipeline::load_module;
+use crate::report::{print_json, report_diagnostics, report_failure_document, report_run_level};
 
 /// How many regions the text report lists before it counts the rest.
 const LISTED_REGIONS: usize = 10;
@@ -47,22 +49,20 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
         }
     };
     let edition = decoded.stamp.edition();
-    let target = match resolve_target(edition, decoded.stamp.mc_version()) {
+    let lowered = lower_for_target(
+        &module,
+        edition,
+        resolve_target(edition, decoded.stamp.mc_version()),
+    );
+    let target = match compared_target(structure, file, format, &source, &lowered) {
         Ok(target) => target,
-        Err(err) => {
-            eprintln!("error: {err}");
-            return ExitCode::from(1);
-        }
+        Err(code) => return code,
     };
-    let (ir, lowered) = lower_parsed(source, &module, edition, Some(&target));
-    if let Some(code) = refuse_build(structure, file, format, &lowered, edition, &target) {
-        return code;
-    }
-    let build = |text: &str| build_candidate(text, edition, &target);
+    let build = |text: &str| build_candidate(text, edition, target);
     let verdict = diff(&DiffInput {
         units: &decoded.units,
-        source: &lowered.source,
-        module: &ir,
+        source: &source,
+        module: &lowered.ir,
         built: &lowered.block_ir,
         build: &build,
     });
@@ -92,82 +92,83 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
     ExitCode::from(1)
 }
 
-/// Report what `lowered` found, and the exit code when it refuses the comparison: an error, a
-/// floor no target can meet, a scope it dropped, or a `@requires` floor the stamped `target` falls
-/// short of.
-fn refuse_build(
+/// The target `lowered` is compared at, after reporting what it found, or the exit code when it
+/// refuses the comparison: an error, a conflicting floor, a scope it dropped, or a `@requires`
+/// floor the stamped target falls short of.
+fn compared_target<'a>(
     structure: &Path,
     file: &Path,
     format: DiffFormat,
-    lowered: &Lowered,
-    edition: Edition,
-    target: &ResolvedTarget,
-) -> Option<ExitCode> {
-    let Lowered {
-        source,
-        block_ir,
-        circuits,
-        dropped_scopes,
-        floor_refusal,
-        conflicts,
-    } = lowered;
-    let findings: Vec<Found> = block_ir
+    source: &str,
+    lowered: &'a Lowered,
+) -> Result<&'a ResolvedTarget, ExitCode> {
+    let findings: Vec<Found> = lowered
+        .block_ir
         .diagnostics
         .iter()
         .cloned()
         .map(Found::Core)
-        .chain(circuits.iter().cloned().map(Found::Circuit))
+        .chain(lowered.circuits.iter().cloned().map(Found::Circuit))
         .collect();
     let report = format.failure_report();
-    if findings.iter().any(|d| d.severity() == Severity::Error) {
-        return Some(report_failure_document(file, source, report, &findings));
-    }
     let lines = LineStarts::new(source);
+    // As in `compile`, every conflict is reported, beside the error findings too.
+    let report_conflicts = || {
+        for conflict in &lowered.conflicts {
+            report_run_level(file, source, &lines, conflict);
+        }
+    };
+    let refusal = match lowered.verdict() {
+        Ok(target) => {
+            report_diagnostics(file, source, &lines, &findings);
+            return Ok(target);
+        }
+        Err(BuildRefusal::Findings) => {
+            let code = report_failure_document(file, source, report, &findings);
+            report_conflicts();
+            return Err(code);
+        }
+        Err(refusal) => refusal,
+    };
     report_diagnostics(file, source, &lines, &findings);
-    // As in `compile`, a conflict holds at every target, so it refuses ahead of the stamp's floor.
-    if !report_conflicts(file, source, &lines, edition, conflicts) {
-        if !dropped_scopes.is_empty() {
-            report_partial_build(
-                file,
-                dropped_scopes,
-                built_scopes(block_ir),
+    report_conflicts();
+    match refusal {
+        BuildRefusal::Findings | BuildRefusal::Conflicts => {}
+        BuildRefusal::RunLevel(_) if !lowered.dropped_scopes.is_empty() => {
+            let message = partial_build(
+                &lowered.dropped_scopes,
+                built_scopes(&lowered.block_ir),
                 "refusing to compare a partial build",
             );
-        } else if let Some(refusal) = floor_refusal {
-            report_floor_refusal(file, source, refusal);
-            eprintln!(
-                "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {edition} \
-                 {}, so its `@requires` must admit that target",
-                structure.display(),
-                target.mc_version(),
-            );
-        } else {
-            return None;
+            report_run_level(file, source, &lines, &message);
+        }
+        BuildRefusal::RunLevel(message) => report_run_level(file, source, &lines, &message),
+        BuildRefusal::Floor(refusal) => {
+            report_run_level(file, source, &lines, &floor_refusal_message(refusal));
+            if let Ok(target) = &lowered.target {
+                eprintln!(
+                    "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {} {}, \
+                     so its `@requires` must admit that target",
+                    structure.display(),
+                    target.edition(),
+                    target.mc_version(),
+                );
+            }
         }
     }
     // One document per input under `--format json`: the refusal is stderr's, the warnings too.
     let none: [Found; 0] = [];
-    Some(match format {
+    Err(match format {
         DiffFormat::Json => report_failure_document(file, source, report, &none),
         DiffFormat::Text => ExitCode::from(1),
     })
 }
 
-/// What `text` builds at `target`, `None` when it does not parse, a pass raises an error or a
-/// scope is dropped.
+/// What `text` builds at `target`, `None` when the build is refused.
 fn build_candidate(text: &str, edition: Edition, target: &ResolvedTarget) -> Option<BlockArrayIr> {
     let module = parse(text).ok()?;
-    let (_, lowered) = lower_parsed(text.to_owned(), &module, edition, Some(target));
-    let refused = lowered
-        .block_ir
-        .diagnostics
-        .iter()
-        .any(|d| d.severity() == Severity::Error)
-        || lowered
-            .circuits
-            .iter()
-            .any(|d| d.severity() == Severity::Error)
-        || !lowered.dropped_scopes.is_empty();
+    let lowered = lower_for_target(&module, edition, Ok(target.clone()));
+    let refused = lowered.verdict().is_err();
     (!refused).then_some(lowered.block_ir)
 }
 
