@@ -217,8 +217,10 @@ script), run the extraction, and rerun the load check above. A Java property a s
 needs a row in Bedrock's hand-written `sensitivity.json`, saying what dropping it costs, and the
 run refuses until it has one. The edition's hand-written `absent.json` lists the other edition's
 blocks it lacks, so a new version that adds one of them makes the pack refuse to load until that
-row goes. The pack hash moves with every table, so the `builtin_*_pack_hash`
-snapshots in `cairn-lang-formats` move too.
+row goes. The pack refuses to load too when no version writes a token or a block a row of the
+hand-written `meanings.json` names, or a version gives the token's block a state named as the row's
+meaning token. The pack hash moves with every table, so the `builtin_*_pack_hash` snapshots in
+`cairn-lang-formats` move too.
 
 ## Conventions for Rust code
 

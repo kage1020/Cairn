@@ -25,6 +25,8 @@ pub struct VersionAxes {
     pub inferred_range: Vec<InferredRange>,
     /// Per-edition portability counts, in the caller's order (the CLI's `--editions`).
     pub edition_portability: Vec<EditionPortability>,
+    /// Per edition, in `edition_portability` order, the canonical tokens written under another id.
+    pub respelled: Vec<EditionRespellings>,
     /// Axis 2: members whose meaning shifts at a boundary version. Always empty: no catalog exists.
     pub semantic_sensitive: Vec<SemanticSensitiveFinding>,
     /// Per edition, in `edition_portability` order, the supported versions that build the source.
@@ -53,6 +55,8 @@ pub struct EditionReport {
     /// The interval from the latest version first declaring an id the build paints to the earliest
     /// last declaring one.
     pub inferred_range: InferredRange,
+    /// The canonical tokens a version the floors admit writes under another id, in source order.
+    pub respelled: Vec<RespelledToken>,
 }
 
 /// Which supported versions of one edition can build the source.
@@ -213,6 +217,53 @@ pub struct LastDeclaredId {
     pub position: Position,
 }
 
+/// One edition's canonical tokens written under another id, per `spec/versioning-editions` "The
+/// `respelled` row".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EditionRespellings {
+    /// Target edition this row describes.
+    pub edition: Edition,
+    /// The tokens, in source order.
+    pub tokens: Vec<RespelledToken>,
+}
+
+/// A canonical token some version of an edition writes under another id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RespelledToken {
+    /// The id the token spells.
+    pub id: String,
+    /// Where a theme slot or `path=` binds it.
+    #[serde(flatten)]
+    pub position: Position,
+    /// Each version that writes another id, in ascending release order.
+    pub written: Vec<WrittenSpelling>,
+}
+
+/// The id one version's structure file names for a canonical token, and the table that maps it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WrittenSpelling {
+    /// The version, as the registry pack spells it.
+    pub version: String,
+    /// The fully namespaced id written.
+    pub id: String,
+    /// The registry pack table that maps the token onto [`Self::id`].
+    pub through: SpellingTable,
+}
+
+/// The registry pack table that writes a canonical token under another id
+/// (`spec/materials-themes` "Mappings across version and edition").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpellingTable {
+    /// `aliases`: the version declares the one other spelling of the block's group, a rename
+    /// across the edition's versions.
+    Aliases,
+    /// The Bedrock state map, which writes the canonical block as one of the version's own.
+    StateMap,
+    /// `meanings`: the token's meaning value picks one of the blocks a split made.
+    Meanings,
+}
+
 /// Per-edition portability counts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EditionPortability {
@@ -306,10 +357,15 @@ pub struct SemanticSensitiveFinding {
 pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxes {
     let mut inferred_range = Vec::with_capacity(editions.len());
     let mut edition_portability = Vec::with_capacity(editions.len());
+    let mut respelled = Vec::with_capacity(editions.len());
     let mut buildable_targets = Vec::with_capacity(editions.len());
     for report in editions {
         debug_assert_eq!(report.inferred_range.edition, report.edition);
         inferred_range.push(report.inferred_range);
+        respelled.push(EditionRespellings {
+            edition: report.edition,
+            tokens: report.respelled,
+        });
         edition_portability.push(EditionPortability {
             edition: report.edition,
             portable: report.portable,
@@ -332,6 +388,7 @@ pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxe
         },
         inferred_range,
         edition_portability,
+        respelled,
         semantic_sensitive: Vec::new(),
         buildable_targets,
         intended_targets: declared_intended_targets(module),
