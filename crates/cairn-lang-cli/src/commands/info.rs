@@ -1,5 +1,5 @@
-//! `cairn info`: a source's version axes, with one portability and buildable-targets row per
-//! requested edition.
+//! `cairn info`: a source's version axes, with one portability, respelled and buildable-targets
+//! row per requested edition.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -35,6 +35,7 @@ use crate::report::{
     FailureReport, Finding, Found, Reporting, palette_entry_name, print_json, report_diagnostic,
     report_failure_document,
 };
+use crate::respelled::{report_respelled_notes, respelled_tokens};
 
 pub(crate) fn run_info(
     file: &Path,
@@ -388,6 +389,8 @@ fn edition_rows(
             &floors,
             |version| verdicts.pinned_errors(version),
         );
+        let respelled = respelled_tokens(&resolution, pack, &floors, &considered, source, lines);
+        report_respelled_notes(file, edition, &respelled);
 
         if let Some(portability) = portability {
             let refusal = buildable_refusal(
@@ -409,6 +412,7 @@ fn edition_rows(
                 considered,
                 refusal,
                 inferred_range,
+                respelled,
                 semantic_sensitive: semantic_sensitive(edition, &block_ir),
             });
         }
@@ -713,6 +717,26 @@ fn print_axes_report(axes: &VersionAxes) {
         }),
     );
     outln!("edition portability:     {portability_line}");
+
+    let respelled_line = joined_or(
+        "(no editions requested)",
+        "   ",
+        axes.respelled.iter().map(|row| {
+            let mut ids: Vec<&str> = Vec::new();
+            for token in &row.tokens {
+                if !ids.contains(&token.id.as_str()) {
+                    ids.push(&token.id);
+                }
+            }
+            let ids = if ids.is_empty() {
+                "none".to_owned()
+            } else {
+                ids.join(", ")
+            };
+            format!("{}: {ids}", capitalise(row.edition.as_str()))
+        }),
+    );
+    outln!("respelled:               {respelled_line}");
 
     let buildable_line = joined_or(
         "(no editions requested)",

@@ -466,6 +466,7 @@ fn a_lock_value_that_would_break_its_row_adds_no_row_to_the_report() {
         "registry compatibility:  0.0 .. latest\n\
          inferred range:          Java: 0.0 .. latest\n\
          edition portability:     Java: portable: 1  degraded: 0  unsupported: 0\n\
+         respelled:               Java: none\n\
          buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3\n\
          intended targets:        (none declared)\n\
          semantic-sensitive:      Java: (none)\n\

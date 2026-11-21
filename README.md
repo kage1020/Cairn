@@ -79,6 +79,7 @@ $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
 edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
+respelled:               Java: none   Bedrock: none
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
 semantic-sensitive:      Java: (none)   Bedrock: (none)
@@ -93,7 +94,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - Entities: paintings, item frames, armor stands, villagers with the trades they sell, the displays (`text_display`, `block_display`, `item_display`), any other entity by its id (`spawn`), and a `hologram` a theme builds per edition, a text display on Java and a glowing sign on Bedrock.
 - Themes with slots and per-edition variants.
 - `edit` patches that change the members a selector or an address selects, without rewriting their lines.
-- A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
+- A per-source lockfile, and registry packs carrying per-version block IDs, rename aliases and meaning tokens, so a canonical token is written the way each target spells it.
 - A constraint catalog beside the packs: a build pinned to a target warns on a lever or torch with nothing to hold it, sand over air, water that runs out of the structure, and an entity a block, a door or another entity clips, and `cairn info` and the lockfile name the members whose meaning changes at a Java version.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
 - `cairn-lsp` with diagnostics against the target the editor pins, completion, hover and quick-fixes, plus a [VS Code extension](editors/vscode/).
