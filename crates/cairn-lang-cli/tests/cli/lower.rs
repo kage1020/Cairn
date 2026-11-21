@@ -263,18 +263,19 @@ fn deferred_member_warnings_print_to_stderr() {
     );
 }
 
+/// An abstract token no target has, on line 2, which `check` passes and only lowering looks up.
+const TOKEN_TYPO: &str = concat!(
+    "theme t:\n",
+    "  slot floor -> @floor.wood.broadlef\n",
+    "\n",
+    "struct s size=2x2\n",
+    "  floor mat_slot=floor\n",
+);
+
 #[test]
 fn a_lowering_stage_error_exits_one() {
-    // `check` passes this source: only lowering looks the token up.
-    let source = concat!(
-        "theme t:\n",
-        "  slot floor -> @floor.wood.broadlef\n",
-        "\n",
-        "struct s size=2x2\n",
-        "  floor mat_slot=floor\n",
-    );
     let tmp = TempDir::new().expect("tempdir");
-    let src_path = write_source(tmp.path(), "token-typo.crn", source);
+    let src_path = write_source(tmp.path(), "token-typo.crn", TOKEN_TYPO);
     let run = Run::from(cairn("lower", &[src_path.to_str().unwrap()]));
     assert_eq!(run.code, Some(1), "stderr={}", run.stderr);
     assert_stream(&run.stderr, &[(2, 17, "error", "E_UNKNOWN_ABSTRACT_TOKEN")]);
@@ -322,21 +323,77 @@ fn a_target_checks_block_ids_against_its_version() {
     );
 }
 
+/// Asserts `stderr` ends in the one line refusing Java `9.9.9`.
+fn assert_ends_in_the_unshipped_refusal(stderr: &str) {
+    let last = stderr.lines().last().unwrap_or_default();
+    assert!(
+        last.starts_with("error: unsupported java target `9.9.9`. supported targets: "),
+        "stderr={stderr}",
+    );
+}
+
 #[test]
-fn a_target_the_edition_does_not_ship_is_refused_before_the_file_is_read() {
+fn a_target_the_edition_does_not_ship_is_refused_after_the_source_is_lowered() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write_source(tmp.path(), "token-typo.crn", TOKEN_TYPO);
     let run = Run::from(cairn(
         "lower",
-        &["missing.crn", "--edition", "java", "--target", "9.9.9"],
+        &[
+            path.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "9.9.9",
+        ],
     ));
-    assert_eq!(run.code, Some(1));
-    assert!(
-        run.stderr
-            .starts_with("error: unsupported java target `9.9.9`. supported targets: "),
-        "stderr={}",
-        run.stderr,
-    );
-    assert_eq!(run.stderr.lines().count(), 1, "stderr={}", run.stderr);
+    assert_eq!(run.code, Some(1), "stderr={}", run.stderr);
+    assert_stream(&run.stderr, &[(2, 17, "error", "E_UNKNOWN_ABSTRACT_TOKEN")]);
+    assert_ends_in_the_unshipped_refusal(&run.stderr);
     assert_eq!(run.stdout, "");
+}
+
+#[test]
+fn the_json_report_of_an_unshipped_target_is_the_source_findings() {
+    let tmp = TempDir::new().expect("tempdir");
+    for (name, source, codes) in [
+        (
+            "token-typo.crn",
+            TOKEN_TYPO,
+            &["E_UNKNOWN_ABSTRACT_TOKEN"][..],
+        ),
+        ("shed.crn", PALE_OAK_SHED, &[]),
+    ] {
+        let path = write_source(tmp.path(), name, source);
+        let run = Run::from(cairn(
+            "lower",
+            &[
+                path.to_str().unwrap(),
+                "--edition",
+                "java",
+                "--target",
+                "9.9.9",
+                "--format",
+                "json",
+            ],
+        ));
+        assert_eq!(run.code, Some(1), "{name}: stderr={}", run.stderr);
+        let document: serde_json::Value =
+            serde_json::from_str(&run.stdout).expect("one JSON document");
+        let reported: Vec<&str> = document["diagnostics"]
+            .as_array()
+            .expect("the failure document")
+            .iter()
+            .map(|d| d["code"].as_str().expect("a code"))
+            .collect();
+        assert_eq!(reported, codes, "{name}");
+        assert_eq!(
+            run.stderr.lines().count(),
+            1,
+            "{name}: stderr={}",
+            run.stderr
+        );
+        assert_ends_in_the_unshipped_refusal(&run.stderr);
+    }
 }
 
 #[test]

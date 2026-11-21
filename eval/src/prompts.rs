@@ -169,7 +169,8 @@ impl PromptSet {
     ///
     /// # Errors
     ///
-    /// [`PromptError`] when a file cannot be read or is not a prompt, or the set is inconsistent.
+    /// [`PromptError`] when a file cannot be read or is not a prompt, the directory holds none, or
+    /// the set is inconsistent.
     pub fn load(dir: &Path) -> Result<Self, PromptError> {
         let io = |path: &Path| {
             let path = path.to_path_buf();

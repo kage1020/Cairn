@@ -8,12 +8,14 @@ use cairn_lang_core::lock::HashHex;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::compiler::{Cells, Compiler, CompilerError, Outcome as Checked};
-use crate::conversation::{self, Failure, INSTRUCTIONS};
+use crate::compiler::{Cells, Checked, Compiler, CompilerError, Evaluation};
+use crate::conversation::{self, EMPTY, INSTRUCTIONS, NO_PROGRAM};
 use crate::metrics;
-use crate::model::{Conversation, Message, Model, ModelError};
+use crate::model::{Conversation, Message, Model, Reply};
 use crate::prompts::{Prompt, PromptSet};
-use crate::record::{Attempt, Build, EditDiff, FORMAT, Outcome, PromptRecord, RunRecord, Verdict};
+use crate::record::{
+    Attempt, Backend, Build, EditDiff, FORMAT, Outcome, PromptRecord, RunRecord, Stopped, Verdict,
+};
 use crate::spec::SpecPages;
 
 /// The corrections a conversation gets after its first attempt.
@@ -24,21 +26,15 @@ pub const CORRECTIONS: usize = 3;
 pub struct Settings {
     /// The model id the record names.
     pub model: String,
+    /// What answers the requests.
+    pub backend: Backend,
     /// The `max_tokens` every request carries.
     pub max_tokens: u32,
 }
 
-/// Why a run stopped before its record was written.
+/// Why a run could not start.
 #[derive(Debug, Error)]
 pub enum RunError {
-    /// The model gave no reply.
-    #[error("prompt `{id}`: {error}")]
-    Model {
-        /// The prompt being asked.
-        id: String,
-        /// Why no reply came.
-        error: ModelError,
-    },
     /// The compiler could not be used.
     #[error("{0}")]
     Compiler(#[from] CompilerError),
@@ -69,7 +65,39 @@ pub fn prompt_set_hash(prompts: &PromptSet) -> HashHex {
 /// A converged program and what it builds.
 struct Converged {
     program: String,
+    tokens: u64,
     cells: Cells,
+}
+
+impl Converged {
+    fn build(&self) -> Build {
+        Build {
+            program: self.program.clone(),
+            tokens: self.tokens,
+            blocks: self.cells.len() as u64,
+        }
+    }
+}
+
+/// How a conversation ended.
+enum Ended {
+    Converged(Converged),
+    Failed,
+    CutShort,
+}
+
+/// An attempt recording `reply` and what it came to.
+fn attempt(reply: &Reply, verdict: Verdict, evaluation: Option<&Evaluation>) -> Attempt {
+    Attempt {
+        reply: reply.text.clone(),
+        stop_reason: reply.stop_reason.clone(),
+        usage: reply.usage,
+        verdict,
+        diagnostics: evaluation
+            .map(|evaluation| evaluation.diagnostics.clone())
+            .unwrap_or_default(),
+        feedback: None,
+    }
 }
 
 /// The conversations of one run, asked of one model and checked with one compiler.
@@ -81,16 +109,18 @@ struct Runner<'a> {
 }
 
 impl Runner<'_> {
-    /// The attempts of the conversation `first` opens, and the program that passed, if one did.
-    fn converse(
-        &mut self,
-        id: &str,
-        first: String,
-    ) -> Result<(Vec<Attempt>, Option<Converged>), RunError> {
+    /// The attempts of the conversation `first` opens and how it ended, or where the run stopped.
+    fn converse(&mut self, id: &str, first: String) -> Result<(Vec<Attempt>, Ended), Stopped> {
         let target = self.compiler.target().clone();
         let mut messages = vec![Message::User(first)];
         let mut attempts = Vec::new();
         for turn in 0..=CORRECTIONS {
+            let stopped = |reason: String, program: Option<&String>| Stopped {
+                prompt: id.to_owned(),
+                attempt: turn as u64 + 1,
+                reason,
+                program: program.cloned(),
+            };
             let reply = self
                 .model
                 .reply(&Conversation {
@@ -98,83 +128,161 @@ impl Runner<'_> {
                     system: &self.system,
                     messages: &messages,
                 })
-                .map_err(|error| RunError::Model {
-                    id: id.to_owned(),
-                    error,
-                })?;
-            let program = conversation::extract_program(&reply.text);
-            let evaluation = match &program {
-                Some(program) => Some(
-                    self.compiler
-                        .evaluate(program, &self.scratch.join(id).join(turn.to_string()))?,
-                ),
-                None => None,
+                .map_err(|error| stopped(error.to_string(), None))?;
+            let cut = match reply.stop_reason.as_str() {
+                "max_tokens" => Some(Verdict::Truncated),
+                "refusal" => Some(Verdict::Refused),
+                _ => None,
             };
-            let (verdict, failure) = match evaluation.as_ref().map(|e| &e.outcome) {
-                None => (Verdict::NoProgram, Some(Failure::NoProgram)),
-                Some(Checked::Check(report)) => (Verdict::Check, Some(Failure::Check(report))),
-                Some(Checked::Compile(report)) => {
-                    (Verdict::Compile, Some(Failure::Compile(report)))
-                }
-                Some(Checked::Empty) => (Verdict::Empty, Some(Failure::Empty)),
-                Some(Checked::Pass(_)) => (Verdict::Pass, None),
-            };
-            let feedback = failure.map(|failure| conversation::feedback(failure, &target));
-            attempts.push(Attempt {
-                reply: reply.text.clone(),
-                stop_reason: reply.stop_reason.clone(),
-                usage: reply.usage,
-                verdict,
-                diagnostics: evaluation
-                    .as_ref()
-                    .map(|e| e.diagnostics.clone())
-                    .unwrap_or_default(),
-                feedback: feedback.clone(),
-            });
-            if let (Some(program), Some(Checked::Pass(cells))) =
-                (program, evaluation.map(|e| e.outcome))
-            {
-                return Ok((attempts, Some(Converged { program, cells })));
+            if let Some(verdict) = cut {
+                attempts.push(attempt(&reply, verdict, None));
+                return Ok((attempts, Ended::CutShort));
             }
+            let Some(program) = conversation::extract_program(&reply.text) else {
+                attempts.push(Attempt {
+                    feedback: Some(NO_PROGRAM.to_owned()),
+                    ..attempt(&reply, Verdict::NoProgram, None)
+                });
+                messages.push(Message::Assistant(reply));
+                messages.push(Message::User(NO_PROGRAM.to_owned()));
+                continue;
+            };
+            let dir = self.scratch.join(id).join(turn.to_string());
+            let evaluation = self
+                .compiler
+                .evaluate(&program, &dir)
+                .map_err(|error| stopped(error.to_string(), Some(&program)))?;
+            let (verdict, feedback) = match &evaluation.checked {
+                Checked::Pass(cells) => {
+                    let tokens = metrics::tokens(&program).map_err(|error| {
+                        stopped(
+                            format!(
+                                "`cairn check` passed a program the harness's own lexer refuses: \
+                                 {error}; check with the `cairn` of the harness's checkout"
+                            ),
+                            Some(&program),
+                        )
+                    })?;
+                    attempts.push(attempt(&reply, Verdict::Pass, Some(&evaluation)));
+                    let cells = cells.clone();
+                    return Ok((
+                        attempts,
+                        Ended::Converged(Converged {
+                            program,
+                            tokens,
+                            cells,
+                        }),
+                    ));
+                }
+                Checked::Check(printed) => (
+                    Verdict::Check,
+                    conversation::report("check", printed, &target),
+                ),
+                Checked::Compile(printed) => (
+                    Verdict::Compile,
+                    conversation::report("compile", printed, &target),
+                ),
+                Checked::Empty => (Verdict::Empty, EMPTY.to_owned()),
+            };
+            attempts.push(Attempt {
+                feedback: Some(feedback.clone()),
+                ..attempt(&reply, verdict, Some(&evaluation))
+            });
             messages.push(Message::Assistant(reply));
-            messages.push(Message::User(
-                feedback.expect("an attempt that fails has feedback"),
-            ));
+            messages.push(Message::User(feedback));
         }
-        Ok((attempts, None))
+        Ok((attempts, Ended::Failed))
     }
 }
 
-/// A record of what the prompt's conversation came to.
-fn record(prompt: &Prompt, attempts: Vec<Attempt>, converged: Option<&Converged>) -> PromptRecord {
+/// A record of `prompt`'s conversation.
+fn record(prompt: &Prompt, outcome: Outcome, attempts: Vec<Attempt>) -> PromptRecord {
     PromptRecord {
         id: prompt.id.clone(),
         topic: prompt.topic,
         base: prompt.base.clone(),
-        outcome: if converged.is_some() {
-            Outcome::Passed
-        } else {
-            Outcome::Failed
-        },
+        outcome,
         attempts,
-        build: converged.map(|converged| Build {
-            program: converged.program.clone(),
-            tokens: metrics::tokens(&converged.program).expect("a program that passed lexes"),
-            blocks: converged.cells.len() as u64,
-        }),
-        edit: None,
     }
 }
 
-/// Runs `prompts` against `model` and `compiler`, calling `progress` as each prompt ends.
+/// Asks every prompt of `prompts` in turn, generation before edits, adding each record to
+/// `records` as it ends.
+fn ask(
+    runner: &mut Runner<'_>,
+    prompts: &PromptSet,
+    records: &mut BTreeMap<String, PromptRecord>,
+    progress: &mut dyn FnMut(&PromptRecord),
+) -> Result<(), Stopped> {
+    let target = runner.compiler.target().clone();
+    let mut converged = BTreeMap::new();
+    for prompt in prompts.prompts().iter().filter(|p| p.base.is_none()) {
+        let first = conversation::task(&prompt.prompt, &target);
+        let (attempts, ended) = runner.converse(&prompt.id, first)?;
+        let outcome = match ended {
+            Ended::Converged(passed) => {
+                let build = passed.build();
+                converged.insert(prompt.id.clone(), passed);
+                Outcome::Converged { build, edit: None }
+            }
+            Ended::Failed => Outcome::Failed,
+            Ended::CutShort => Outcome::CutShort,
+        };
+        let record = record(prompt, outcome, attempts);
+        progress(&record);
+        records.insert(prompt.id.clone(), record);
+    }
+    let edits = prompts
+        .prompts()
+        .iter()
+        .filter_map(|prompt| Some((prompt, prompt.base.as_deref()?)));
+    for (prompt, base) in edits {
+        let record = match converged.get(base) {
+            None => record(prompt, Outcome::Skipped, Vec::new()),
+            Some(before) => {
+                let first = conversation::edit_task(&before.program, &prompt.prompt, &target);
+                let (attempts, ended) = runner.converse(&prompt.id, first)?;
+                let outcome = match ended {
+                    Ended::Converged(after) => {
+                        let ast = metrics::ast_diff(&before.program, &after.program).map_err(
+                            |error| Stopped {
+                                prompt: prompt.id.clone(),
+                                attempt: attempts.len() as u64,
+                                reason: format!(
+                                    "`cairn check` passed a program the harness's own parser \
+                                     refuses: {error}; check with the `cairn` of the harness's \
+                                     checkout"
+                                ),
+                                program: Some(after.program.clone()),
+                            },
+                        )?;
+                        Outcome::Converged {
+                            build: after.build(),
+                            edit: Some(EditDiff {
+                                ast,
+                                nbt: metrics::nbt_diff(&before.cells, &after.cells),
+                            }),
+                        }
+                    }
+                    Ended::Failed => Outcome::Failed,
+                    Ended::CutShort => Outcome::CutShort,
+                };
+                record(prompt, outcome, attempts)
+            }
+        };
+        progress(&record);
+        records.insert(prompt.id.clone(), record);
+    }
+    Ok(())
+}
+
+/// Runs `prompts` against `model` and `compiler`, calling `progress` as each prompt ends; a run
+/// stopped partway still returns its record, with `stopped` saying where and why.
 ///
 /// # Errors
 ///
-/// [`RunError`] when the model gives no reply or the compiler cannot be used.
-///
-/// # Panics
-///
-/// When a program this checkout's `cairn check` passed does not lex or parse in-process.
+/// [`RunError`] when the compiler refuses the target or cannot be used, or no scratch directory
+/// can be made, before any request is sent.
 pub fn run(
     settings: &Settings,
     prompts: &PromptSet,
@@ -185,61 +293,22 @@ pub fn run(
     let pages = SpecPages::embedded();
     let scratch = tempfile::tempdir().map_err(RunError::Scratch)?;
     compiler.validate(scratch.path())?;
-    let target = compiler.target().clone();
+    let compiler_version = compiler.version()?;
     let mut runner = Runner {
         model,
         compiler,
         system: conversation::system(&pages),
         scratch: scratch.path(),
     };
-
     let mut records = BTreeMap::new();
-    let mut converged = BTreeMap::new();
-    for prompt in prompts.prompts().iter().filter(|p| p.base.is_none()) {
-        let first = conversation::task(&prompt.prompt, &target);
-        let (attempts, passed) = runner.converse(&prompt.id, first)?;
-        let record = record(prompt, attempts, passed.as_ref());
-        progress(&record);
-        records.insert(prompt.id.clone(), record);
-        if let Some(passed) = passed {
-            converged.insert(prompt.id.clone(), passed);
-        }
-    }
-    let edits = prompts
-        .prompts()
-        .iter()
-        .filter_map(|prompt| Some((prompt, prompt.base.as_deref()?)));
-    for (prompt, base) in edits {
-        let record = match converged.get(base) {
-            None => PromptRecord {
-                id: prompt.id.clone(),
-                topic: prompt.topic,
-                base: prompt.base.clone(),
-                outcome: Outcome::Skipped,
-                attempts: Vec::new(),
-                build: None,
-                edit: None,
-            },
-            Some(before) => {
-                let first = conversation::edit_task(&before.program, &prompt.prompt, &target);
-                let (attempts, after) = runner.converse(&prompt.id, first)?;
-                let mut record = record(prompt, attempts, after.as_ref());
-                record.edit = after.map(|after| EditDiff {
-                    ast: metrics::ast_diff(&before.program, &after.program)
-                        .expect("programs that passed parse"),
-                    blocks: metrics::block_diff(&before.cells, &after.cells),
-                });
-                record
-            }
-        };
-        progress(&record);
-        records.insert(prompt.id.clone(), record);
-    }
-
+    let stopped = ask(&mut runner, prompts, &mut records, progress).err();
     let prompts_run: Vec<PromptRecord> = records.into_values().collect();
+    let target = compiler.target().clone();
     Ok(RunRecord {
         format: FORMAT,
-        compiler_version: cairn_lang_core::CAIRN_VERSION.to_owned(),
+        compiler_version,
+        compiler_commit: compiler.commit().map(str::to_owned),
+        backend: settings.backend,
         model: settings.model.clone(),
         edition: target.edition,
         target: target.version,
@@ -248,5 +317,6 @@ pub fn run(
         spec_pages: pages.hash(),
         metrics: metrics::summarize(&prompts_run),
         prompts: prompts_run,
+        stopped,
     })
 }

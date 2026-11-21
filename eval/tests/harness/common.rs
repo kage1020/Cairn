@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+use cairn_lang_core::Edition;
 use eval::compiler::Compiler;
 use eval::conversation::{SOURCE, Target};
 use eval::model::replay::Replay;
 use eval::prompts::PromptSet;
-use eval::record::RunRecord;
+use eval::record::{Backend, RunRecord};
 use eval::run::{Settings, run};
 
 /// The model id the tests' runs name.
@@ -149,7 +150,7 @@ pub fn prompts() -> PromptSet {
 #[must_use]
 pub fn target() -> Target {
     Target {
-        edition: "java".to_owned(),
+        edition: Edition::Java,
         version: "1.21.4".to_owned(),
     }
 }
@@ -167,16 +168,28 @@ pub fn compiler() -> Compiler {
     Compiler::new(cairn().to_path_buf(), target())
 }
 
+/// The settings of the tests' runs.
+#[must_use]
+pub fn settings() -> Settings {
+    Settings {
+        model: MODEL.to_owned(),
+        backend: Backend::Replay,
+        max_tokens: 16000,
+    }
+}
+
 /// The fixture set's run, answered by [`replay_file`].
 #[must_use]
 pub fn replayed_run() -> RunRecord {
     let mut model = Replay::parse(&replay_file()).expect("the replay parses");
-    let settings = Settings {
-        model: MODEL.to_owned(),
-        max_tokens: 16000,
-    };
-    run(&settings, &prompts(), &mut model, &compiler(), &mut |_| {})
-        .expect("the replayed run completes")
+    run(
+        &settings(),
+        &prompts(),
+        &mut model,
+        &compiler(),
+        &mut |_| {},
+    )
+    .expect("the replayed run completes")
 }
 
 /// What `cairn check` prints on stderr for `program`, at [`target`].
@@ -189,7 +202,7 @@ pub fn check_report(program: &str) -> String {
         .args([
             "check",
             "--edition",
-            &target.edition,
+            target.edition.as_str(),
             "--target",
             &target.version,
             SOURCE,

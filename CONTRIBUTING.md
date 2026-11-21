@@ -201,7 +201,7 @@ Some decisions are deliberately closed: `key=value` over positional arguments, p
 - the decision, and where it lives in the spec;
 - a concrete case it fails;
 - an alternative, with syntax, IR, and message examples;
-- the effect on the [evaluation metrics](https://cairn.kage1020.com/spec/evaluation/), measured with `cargo eval` on a baseline run and a proposal run as the [Operating rule](https://cairn.kage1020.com/spec/evaluation/#133-operating-rule) asks.
+- the effect on the [evaluation metrics](https://cairn.kage1020.com/spec/evaluation/), measured with `cargo eval` on a baseline run and a proposal run as the page's "Operating rule" asks.
 
 ## Bumping the toolchain
 

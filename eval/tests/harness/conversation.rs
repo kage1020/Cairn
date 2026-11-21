@@ -1,8 +1,6 @@
 //! What the model is told, and how a program is read out of its reply.
 
-use eval::conversation::{
-    EMPTY, Failure, NO_PROGRAM, PREAMBLE, edit_task, extract_program, feedback, system, task,
-};
+use eval::conversation::{PREAMBLE, edit_task, extract_program, report, system, task};
 use eval::spec::SpecPages;
 
 use crate::common::target;
@@ -29,22 +27,20 @@ fn an_edit_task_quotes_the_program_it_changes() {
 }
 
 #[test]
-fn feedback_frames_a_report_with_the_command_that_printed_it() {
-    let report = "main.crn:2:3: error[E_X]: wrong\n  note: fix it\n";
+fn a_report_quotes_what_cairn_printed_under_the_command_that_printed_it() {
+    let printed = "main.crn:2:3: error[E_X]: wrong\n  note: fix it {command}\n";
     assert_eq!(
-        feedback(Failure::Check(report), &target()),
+        report("check", printed, &target()),
         "`cairn check --edition java --target 1.21.4 main.crn` reports:\n\nmain.crn:2:3: \
-         error[E_X]: wrong\n  note: fix it\n\nFix the program and reply with the whole corrected \
-         program in one fenced code block marked `cairn`."
+         error[E_X]: wrong\n  note: fix it {command}\n\nFix the program and reply with the whole \
+         corrected program in one fenced code block marked `cairn`."
     );
     assert_eq!(
-        feedback(Failure::Compile(report), &target()),
+        report("compile", printed, &target()),
         "`cairn compile --edition java --target 1.21.4 main.crn` reports:\n\nmain.crn:2:3: \
-         error[E_X]: wrong\n  note: fix it\n\nFix the program and reply with the whole corrected \
-         program in one fenced code block marked `cairn`."
+         error[E_X]: wrong\n  note: fix it {command}\n\nFix the program and reply with the whole \
+         corrected program in one fenced code block marked `cairn`."
     );
-    assert_eq!(feedback(Failure::NoProgram, &target()), NO_PROGRAM);
-    assert_eq!(feedback(Failure::Empty, &target()), EMPTY);
 }
 
 #[test]

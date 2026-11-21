@@ -1,8 +1,10 @@
 //! The Messages API backend, against a local stand-in for the API that answers what it is told.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::rc::Rc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -216,6 +218,115 @@ fn an_overloaded_api_is_asked_again_with_the_same_request() {
         );
         assert_eq!(request.body, expected_body());
     }
+}
+
+#[test]
+fn a_response_with_no_usage_or_stop_reason_is_not_a_reply() {
+    let answer: Value = serde_json::from_str(ANSWER).expect("the answer is JSON");
+    let without = |key: &str| {
+        let mut body = answer.clone();
+        body.as_object_mut().expect("an object").remove(key);
+        body.to_string()
+    };
+    let refusal = |body: String| parse_reply(&body).map_err(|error| error.to_string());
+    let no_usage = without("usage");
+    assert_eq!(
+        refusal(no_usage.clone()),
+        Err(format!(
+            "the API's response has no `usage.input_tokens`: {no_usage}"
+        ))
+    );
+    let no_stop = without("stop_reason");
+    assert_eq!(
+        refusal(no_stop.clone()),
+        Err(format!(
+            "the API's response has no `stop_reason`: {no_stop}"
+        ))
+    );
+}
+
+/// A backend asking the stand-in at `url` with no wait of its own, and the lines it logs.
+fn logged(url: String) -> (Anthropic, Rc<RefCell<Vec<String>>>) {
+    let lines = Rc::new(RefCell::new(Vec::new()));
+    let log = Rc::clone(&lines);
+    let model = Anthropic::new("test-key".to_owned(), "test-model".to_owned(), 1024)
+        .with_endpoint(url)
+        .with_backoff(Duration::ZERO)
+        .with_log(move |line| log.borrow_mut().push(line.to_owned()));
+    (model, lines)
+}
+
+fn ask(model: &mut Anthropic) -> Result<Reply, String> {
+    let messages = vec![Message::User("task".to_owned())];
+    model
+        .reply(&Conversation {
+            id: "a",
+            system: "spec",
+            messages: &messages,
+        })
+        .map_err(|error| error.to_string())
+}
+
+const RATE_LIMITED: &str =
+    r#"{"type":"error","error":{"type":"rate_limit_error","message":"Slow down"}}"#;
+
+#[test]
+fn a_rate_limit_and_a_server_error_are_waited_out_as_the_api_says() {
+    let (url, server) = serve(vec![
+        (429, "retry-after: 1\r\n", RATE_LIMITED.to_owned()),
+        (503, "", "Service Unavailable".to_owned()),
+        (200, "", ANSWER.to_owned()),
+    ]);
+    let (mut model, log) = logged(url);
+    assert_eq!(ask(&mut model), Ok(answered()));
+    assert_eq!(server.join().expect("the stand-in ends").len(), 3);
+    assert_eq!(
+        *log.borrow(),
+        [
+            "the API answered 429: Slow down; asking again in 1s, retry 1 of 6",
+            "the API answered 503: Service Unavailable; asking again in 0s, retry 2 of 6",
+        ]
+    );
+}
+
+#[test]
+fn a_retry_after_that_is_a_date_is_waited_out_as_a_missing_one() {
+    let (url, server) = serve(vec![
+        (
+            529,
+            "retry-after: Wed, 21 Oct 2026 07:28:00 GMT\r\n",
+            RATE_LIMITED.to_owned(),
+        ),
+        (200, "", ANSWER.to_owned()),
+    ]);
+    let (mut model, log) = logged(url);
+    assert_eq!(ask(&mut model), Ok(answered()));
+    assert_eq!(server.join().expect("the stand-in ends").len(), 2);
+    assert_eq!(
+        *log.borrow(),
+        [
+            "the API's retry-after `Wed, 21 Oct 2026 07:28:00 GMT` is not a number of seconds, so \
+             the harness waits as it does without one",
+            "the API answered 529: Slow down; asking again in 0s, retry 1 of 6",
+        ]
+    );
+}
+
+#[test]
+fn a_request_still_refused_after_the_last_retry_is_reported() {
+    let (url, server) = serve(vec![(429, "", RATE_LIMITED.to_owned()); 7]);
+    let (mut model, log) = logged(url);
+    assert_eq!(
+        ask(&mut model),
+        Err(format!("the API answered 429: {RATE_LIMITED}"))
+    );
+    assert_eq!(server.join().expect("the stand-in ends").len(), 7);
+    let expected: Vec<String> = (1..=6)
+        .map(|retry| {
+            format!("the API answered 429: Slow down; asking again in 0s, retry {retry} of 6")
+        })
+        .collect();
+    assert_eq!(*log.borrow(), expected);
 }
 
 #[test]

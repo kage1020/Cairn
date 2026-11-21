@@ -1,5 +1,6 @@
-//! The compiler every program is checked with: this checkout's `cairn` binary, run as an author
-//! runs it, so the harness sees exactly the diagnostics and blocks an author would.
+//! The compiler every program is checked with: a `cairn` binary, this checkout's unless the run
+//! names another, run as an author runs it, so the harness sees exactly the diagnostics and blocks
+//! an author would.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -12,7 +13,11 @@ use thiserror::Error;
 
 use crate::conversation::{SOURCE, Target};
 use crate::json::canonical;
+use crate::model::anthropic::KEY_VARIABLE;
 use crate::record::DiagnosticRecord;
+
+/// The workspace the `cairn` binary is built from.
+const WORKSPACE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
 
 /// The workspace manifest the `cairn` binary is built from.
 const WORKSPACE_MANIFEST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../Cargo.toml");
@@ -42,24 +47,24 @@ pub struct Cells(pub BTreeMap<CellKey, String>);
 
 /// What `cairn check`, `cairn compile` and `cairn lower` made of a program.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Outcome {
-    /// Checked and compiled clean, building these blocks.
+pub enum Checked {
+    /// `cairn check` reported no error and `cairn compile` built it, holding these blocks.
     Pass(Cells),
     /// `cairn check` refused it, printing this.
     Check(String),
     /// `cairn compile` refused it, printing this.
     Compile(String),
-    /// Checked and compiled clean, building no block.
+    /// `cairn check` reported no error and `cairn compile` built it, holding no block.
     Empty,
 }
 
-/// A program's outcome, with the diagnostics `cairn check --format json` reported on it.
+/// What came of a program, with the diagnostics `cairn check --format json` reported on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Evaluation {
     /// What `cairn check` reported, warnings included.
     pub diagnostics: Vec<DiagnosticRecord>,
     /// What came of the program.
-    pub outcome: Outcome,
+    pub checked: Checked,
 }
 
 /// A `cairn` binary pinned to one `(edition, version)` target.
@@ -67,6 +72,7 @@ pub struct Evaluation {
 pub struct Compiler {
     binary: PathBuf,
     target: Target,
+    commit: Option<String>,
 }
 
 fn io(what: impl Into<String>) -> impl FnOnce(std::io::Error) -> CompilerError {
@@ -92,6 +98,7 @@ struct Ir {
 #[derive(Deserialize)]
 struct Dims {
     x: usize,
+    y: usize,
     z: usize,
 }
 
@@ -105,9 +112,8 @@ struct PaletteEntry {
 #[derive(Deserialize)]
 struct StructureBlockEntity {
     pos: [usize; 3],
-    id: String,
-    #[serde(default)]
-    fields: Value,
+    #[serde(flatten)]
+    data: serde_json::Map<String, Value>,
 }
 
 #[derive(Deserialize)]
@@ -124,24 +130,38 @@ impl Cells {
     ///
     /// # Errors
     ///
-    /// [`CompilerError::Refused`] when `json` is not that IR.
+    /// [`CompilerError::Refused`] when `json` is not that IR, or a structure's voxels do not fill
+    /// its dims with entries of its palette.
     pub fn from_ir(json: &str) -> Result<Self, CompilerError> {
-        let ir: Ir = serde_json::from_str(json).map_err(|error| {
+        let unreadable = |what: String| {
             CompilerError::Refused(format!(
-                "`cairn lower` printed an IR the harness cannot read: {error}"
+                "`cairn lower` printed an IR the harness cannot read: {what}"
             ))
-        })?;
+        };
+        let ir: Ir = serde_json::from_str(json).map_err(|error| unreadable(error.to_string()))?;
         let mut cells = BTreeMap::new();
         for (key, structure) in ir.structures {
+            let Dims { x, y, z } = structure.dims;
+            if structure.voxels.len() != x * y * z {
+                return Err(unreadable(format!(
+                    "`{key}` holds {} voxels for dims {x}x{y}x{z}",
+                    structure.voxels.len()
+                )));
+            }
+            if let Some(index) = structure
+                .voxels
+                .iter()
+                .find(|index| **index >= structure.palette.len())
+            {
+                return Err(unreadable(format!(
+                    "`{key}` names palette entry {index} of {}",
+                    structure.palette.len()
+                )));
+            }
             let entities: BTreeMap<[usize; 3], String> = structure
                 .block_entities
-                .iter()
-                .map(|entity| {
-                    (
-                        entity.pos,
-                        format!("{{{}:{}}}", entity.id, canonical(&entity.fields)),
-                    )
-                })
+                .into_iter()
+                .map(|entity| (entity.pos, canonical(Value::Object(entity.data))))
                 .collect();
             let blocks: Vec<Option<String>> = structure
                 .palette
@@ -164,24 +184,16 @@ impl Cells {
                     })
                 })
                 .collect();
-            let (width, depth) = (structure.dims.x, structure.dims.z);
-            if width == 0 || depth == 0 {
-                continue;
-            }
             for (index, palette) in structure.voxels.iter().enumerate() {
-                let Some(Some(block)) = blocks.get(*palette) else {
+                let Some(block) = &blocks[*palette] else {
                     continue;
                 };
-                let (x, z, y) = (
-                    index % width,
-                    index / width % depth,
-                    index / (width * depth),
-                );
+                let at = [index % x, index / (x * z), index / x % z];
                 let mut cell = block.clone();
-                if let Some(entity) = entities.get(&[x, y, z]) {
+                if let Some(entity) = entities.get(&at) {
                     cell.push_str(entity);
                 }
-                cells.insert((key.clone(), x, y, z), cell);
+                cells.insert((key.clone(), at[0], at[1], at[2]), cell);
             }
         }
         Ok(Self(cells))
@@ -206,13 +218,62 @@ impl Compiler {
     pub fn new(binary: PathBuf, target: Target) -> Self {
         // Each command runs in its program's directory, where a relative path would not resolve.
         let binary = std::path::absolute(&binary).unwrap_or(binary);
-        Self { binary, target }
+        Self {
+            binary,
+            target,
+            commit: None,
+        }
+    }
+
+    /// This checkout's `cairn` binary, built by [`Self::build`], knowing the commit it was built at.
+    ///
+    /// # Errors
+    ///
+    /// [`CompilerError`] when the binary cannot be built.
+    pub fn from_checkout(target: Target) -> Result<Self, CompilerError> {
+        let commit = checkout_commit();
+        Ok(Self {
+            commit,
+            ..Self::new(Self::build()?, target)
+        })
     }
 
     /// The target every program is checked and compiled for.
     #[must_use]
     pub fn target(&self) -> &Target {
         &self.target
+    }
+
+    /// The commit the binary was built at, when [`Self::from_checkout`] built it and git names it.
+    #[must_use]
+    pub fn commit(&self) -> Option<&str> {
+        self.commit.as_deref()
+    }
+
+    /// The release the binary reports with `--version`.
+    ///
+    /// # Errors
+    ///
+    /// [`CompilerError`] when the binary cannot be run or prints no `cairn` version.
+    pub fn version(&self) -> Result<String, CompilerError> {
+        let output = self
+            .command()
+            .arg("--version")
+            .output()
+            .map_err(io(format!("cannot run {}", self.binary.display())))?;
+        let printed = String::from_utf8_lossy(&output.stdout);
+        printed
+            .trim()
+            .strip_prefix("cairn ")
+            .filter(|_| output.status.success())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                CompilerError::Refused(format!(
+                    "`{} --version` printed no `cairn` version: {}",
+                    self.binary.display(),
+                    printed.trim_end()
+                ))
+            })
     }
 
     /// Builds this checkout's `cairn` binary and returns its path.
@@ -251,12 +312,20 @@ impl Compiler {
             })
     }
 
+    /// The binary as a command, without the key a model is asked with.
+    fn command(&self) -> Command {
+        let mut command = Command::new(&self.binary);
+        command.env_remove(KEY_VARIABLE);
+        command
+    }
+
     fn run(&self, dir: &Path, args: &[&str]) -> Result<Output, CompilerError> {
-        let output = Command::new(&self.binary)
+        let output = self
+            .command()
             .args(args)
             .args([
                 "--edition",
-                &self.target.edition,
+                self.target.edition.as_str(),
                 "--target",
                 &self.target.version,
             ])
@@ -279,7 +348,8 @@ impl Compiler {
     ///
     /// # Errors
     ///
-    /// [`CompilerError::Refused`] with what `cairn check` printed, when it refuses the target.
+    /// [`CompilerError::Refused`] with what `cairn check` printed, when it refuses the target, and
+    /// [`CompilerError::Io`] when the program cannot be written or `cairn` run.
     pub fn validate(&self, dir: &Path) -> Result<(), CompilerError> {
         fs::write(dir.join(SOURCE), "").map_err(io("cannot write an empty program"))?;
         let output = self.run(dir, &["check"])?;
@@ -303,9 +373,9 @@ impl Compiler {
         fs::create_dir_all(dir).map_err(io(format!("cannot create {}", dir.display())))?;
         fs::write(dir.join(SOURCE), program)
             .map_err(io(format!("cannot write {}", dir.join(SOURCE).display())))?;
-        let checked = self.run(dir, &["check", "--format", "json"])?;
+        let reported = self.run(dir, &["check", "--format", "json"])?;
         let diagnostics: Vec<CheckDiagnostic> =
-            serde_json::from_slice(&checked.stdout).map_err(|error| {
+            serde_json::from_slice(&reported.stdout).map_err(|error| {
                 CompilerError::Refused(format!(
                     "`cairn check` printed JSON the harness cannot read: {error}"
                 ))
@@ -320,7 +390,7 @@ impl Compiler {
             })
             .collect();
         let printed = |output: &Output| String::from_utf8_lossy(&output.stderr).into_owned();
-        let outcome = if checked.status.success() {
+        let checked = if reported.status.success() {
             let compiled = self.run(
                 dir,
                 &["compile", "--out", "out", "--lock", "out/main.crn.lock"],
@@ -335,20 +405,42 @@ impl Compiler {
                 }
                 let cells = Cells::from_ir(&String::from_utf8_lossy(&lowered.stdout))?;
                 if cells.is_empty() {
-                    Outcome::Empty
+                    Checked::Empty
                 } else {
-                    Outcome::Pass(cells)
+                    Checked::Pass(cells)
                 }
             } else {
-                Outcome::Compile(printed(&compiled))
+                Checked::Compile(printed(&compiled))
             }
         } else {
             let text = self.run(dir, &["check"])?;
-            Outcome::Check(printed(&text))
+            Checked::Check(printed(&text))
         };
         Ok(Evaluation {
             diagnostics,
-            outcome,
+            checked,
         })
     }
+}
+
+/// The commit this checkout is at, marked `-dirty` when a tracked file differs from it; `None`
+/// when git cannot say.
+fn checkout_commit() -> Option<String> {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(WORKSPACE)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    };
+    let commit = git(&["rev-parse", "HEAD"]).filter(|commit| !commit.is_empty())?;
+    let changed = git(&["status", "--porcelain", "--untracked-files=no"])?;
+    Some(if changed.is_empty() {
+        commit
+    } else {
+        format!("{commit}-dirty")
+    })
 }

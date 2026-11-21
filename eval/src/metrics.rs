@@ -4,13 +4,14 @@
 use std::collections::BTreeMap;
 
 use cairn_lang_core::{LexError, Module, ParseError, TokenKind};
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::compiler::Cells;
 use crate::json::canonical;
 use crate::record::{
-    AstDiff, BlockDiff, EditStability, Metrics, Outcome, PromptRecord, Rate, TokenEfficiency,
-    TopicCounts,
+    AstDiff, EditStability, Metrics, NbtDiff, Outcome, PromptRecord, Rate, TokenEfficiency,
+    TopicRates, Verdict,
 };
 
 /// The DSL tokens of `program`: the tokens Cairn's lexer reads, with no end of line, indent or
@@ -32,11 +33,30 @@ pub fn tokens(program: &str) -> Result<u64, LexError> {
         .count() as u64)
 }
 
-/// The objects of a node's own that hold its children, which become nodes of their own.
-const NESTED: [&str; 2] = ["body", "children"];
+/// The arrays of a node's own that hold the lines nested under it, which become nodes of their
+/// own: a body's `requires` lines, its other lines, a member's children and a truth table's rows.
+const NESTED: [&str; 4] = ["requires", "body", "children", "rows"];
 
 /// The arrays of `key=value` arguments, whose order a node does not keep.
-const ARGUMENTS: [&str; 2] = ["args", "selector"];
+const ARGUMENTS: [&str; 5] = ["args", "selector", "attrs", "bindings", "set"];
+
+/// `value` with every array of [`ARGUMENTS`] in it sorted by key.
+fn sort_arguments(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, nested) in map.iter_mut() {
+                if let Value::Array(arguments) = nested
+                    && ARGUMENTS.contains(&key.as_str())
+                {
+                    arguments.sort_by(|a, b| a["key"].as_str().cmp(&b["key"].as_str()));
+                }
+                sort_arguments(nested);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(sort_arguments),
+        _ => {}
+    }
+}
 
 fn flatten(mut value: Value, depth: usize, nodes: &mut Vec<String>) {
     let mut children = Vec::new();
@@ -46,32 +66,45 @@ fn flatten(mut value: Value, depth: usize, nodes: &mut Vec<String>) {
                 children.extend(nested);
             }
         }
-        for key in ARGUMENTS {
-            if let Some(Value::Array(arguments)) = map.get_mut(key) {
-                arguments.sort_by_key(|argument| argument["key"].as_str().map(str::to_owned));
-            }
-        }
+        // A member's address counts its siblings, so it is not what its line writes.
+        map.remove("address");
     }
-    nodes.push(format!("{depth} {}", canonical(&value)));
+    sort_arguments(&mut value);
+    nodes.push(format!("{depth} {}", canonical(value)));
     for child in children {
         flatten(child, depth + 1, nodes);
     }
 }
 
-/// The AST nodes of `module` in source order: each header, each item with its arguments, and
-/// each statement of a body, at its depth, with its arguments sorted by key.
+/// The AST nodes of `module`: each header, then each item and top-level `edit` line in source
+/// order, and under each the lines nested in it, at its depth, with its arguments sorted by key.
 ///
 /// # Panics
 ///
 /// Never: an AST always serializes to JSON.
 #[must_use]
 pub fn ast_nodes(module: &Module) -> Vec<String> {
-    let value = serde_json::to_value(module).expect("an AST serializes to JSON");
+    fn value(node: &impl Serialize) -> Value {
+        serde_json::to_value(node).expect("an AST serializes to JSON")
+    }
+    let mut lines: Vec<(usize, Value)> = module
+        .items
+        .iter()
+        .map(|item| (item.span().start, value(item)))
+        .chain(
+            module
+                .edits
+                .iter()
+                .map(|edit| (edit.span.start, value(edit))),
+        )
+        .collect();
+    lines.sort_by_key(|(start, _)| *start);
     let mut nodes = Vec::new();
-    for key in ["headers", "items"] {
-        for node in value[key].as_array().into_iter().flatten() {
-            flatten(node.clone(), 0, &mut nodes);
-        }
+    for header in &module.headers {
+        flatten(value(header), 0, &mut nodes);
+    }
+    for (_, line) in lines {
+        flatten(line, 0, &mut nodes);
     }
     nodes
 }
@@ -94,11 +127,12 @@ fn common(a: &[String], b: &[String]) -> usize {
     row[b.len()]
 }
 
+/// `part / whole`, with no value when `whole` is 0.
 #[expect(
     clippy::cast_precision_loss,
-    reason = "a count of nodes, cells or prompts is far below 2^52"
+    reason = "a count of nodes, cells, blocks, tokens or prompts is far below 2^52"
 )]
-fn ratio(part: u64, whole: u64) -> Option<f64> {
+pub(crate) fn ratio(part: u64, whole: u64) -> Option<f64> {
     (whole > 0).then(|| part as f64 / whole as f64)
 }
 
@@ -122,39 +156,75 @@ pub fn ast_diff(before: &str, after: &str) -> Result<AstDiff, ParseError> {
     })
 }
 
-/// The block diff from `before` to `after`.
+/// The NBT diff from `before` to `after`.
 #[must_use]
-pub fn block_diff(before: &Cells, after: &Cells) -> BlockDiff {
-    let cells = before.0.len()
-        + after
-            .0
-            .keys()
-            .filter(|key| !before.0.contains_key(*key))
-            .count();
+pub fn nbt_diff(before: &Cells, after: &Cells) -> NbtDiff {
+    let added = after
+        .0
+        .keys()
+        .filter(|key| !before.0.contains_key(*key))
+        .count();
+    let cells = before.0.len() + added;
     let changed = before
         .0
         .iter()
         .filter(|(key, block)| after.0.get(*key) != Some(*block))
         .count()
-        + after
-            .0
-            .keys()
-            .filter(|key| !before.0.contains_key(*key))
-            .count();
+        + added;
     let (cells, changed) = (cells as u64, changed as u64);
-    BlockDiff {
+    NbtDiff {
         cells,
         changed,
         ratio: ratio(changed, cells).unwrap_or_default(),
     }
 }
 
+/// The mean of `values`, with no value when there are none.
 #[expect(
     clippy::cast_precision_loss,
     reason = "a count of edits is far below 2^52"
 )]
-fn mean(values: &[f64]) -> Option<f64> {
-    (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
+pub(crate) fn mean(values: impl IntoIterator<Item = f64>) -> Option<f64> {
+    let (sum, count) = values
+        .into_iter()
+        .fold((0.0, 0_u64), |(sum, count), value| (sum + value, count + 1));
+    (count > 0).then(|| sum / count as f64)
+}
+
+/// The prompts of `prompts` that `counted` counts, over the ones `cut` does not leave out.
+fn rate(
+    prompts: &[&PromptRecord],
+    counted: impl Fn(&PromptRecord) -> bool,
+    cut: impl Fn(&PromptRecord) -> bool,
+) -> Rate {
+    let cut_short = prompts.iter().filter(|prompt| cut(prompt)).count() as u64;
+    let of = prompts.len() as u64 - cut_short;
+    let count = prompts.iter().filter(|prompt| counted(prompt)).count() as u64;
+    Rate {
+        count,
+        of,
+        cut_short,
+        rate: ratio(count, of),
+    }
+}
+
+/// The zero-shot compile rate of `prompts`.
+fn zero_shot(prompts: &[&PromptRecord]) -> Rate {
+    let first = |prompt: &PromptRecord| prompt.attempts.first().map(|attempt| attempt.verdict);
+    rate(
+        prompts,
+        |prompt| first(prompt) == Some(Verdict::Pass),
+        |prompt| first(prompt).is_some_and(Verdict::cuts_short),
+    )
+}
+
+/// The fix convergence rate of `prompts`.
+fn convergence(prompts: &[&PromptRecord]) -> Rate {
+    rate(
+        prompts,
+        |prompt| prompt.outcome.build().is_some(),
+        |prompt| prompt.outcome == Outcome::CutShort,
+    )
 }
 
 /// The run's metrics over its prompts' conversations.
@@ -162,38 +232,32 @@ fn mean(values: &[f64]) -> Option<f64> {
 pub fn summarize(prompts: &[PromptRecord]) -> Metrics {
     let generation: Vec<&PromptRecord> = prompts.iter().filter(|p| p.base.is_none()).collect();
     let edits: Vec<&PromptRecord> = prompts.iter().filter(|p| p.base.is_some()).collect();
-    let zero_shot =
-        |prompt: &&PromptRecord| prompt.outcome == Outcome::Passed && prompt.attempts.len() == 1;
-    let converged = |prompt: &&PromptRecord| prompt.outcome == Outcome::Passed;
-    let count = |filter: &dyn Fn(&&PromptRecord) -> bool| {
-        generation.iter().filter(|prompt| filter(prompt)).count() as u64
-    };
-    let of = generation.len() as u64;
-    let rate = |passed: u64| Rate {
-        passed,
-        of,
-        rate: ratio(passed, of),
-    };
 
-    let builds: Vec<_> = generation.iter().filter_map(|p| p.build.as_ref()).collect();
+    let builds: Vec<_> = generation
+        .iter()
+        .filter_map(|p| p.outcome.build())
+        .collect();
     let blocks: u64 = builds.iter().map(|build| build.blocks).sum();
     let tokens: u64 = builds.iter().map(|build| build.tokens).sum();
 
-    let diffs: Vec<_> = edits.iter().filter_map(|p| p.edit.as_ref()).collect();
-    let ast: Vec<f64> = diffs.iter().map(|diff| diff.ast.ratio).collect();
-    let changed: Vec<f64> = diffs.iter().map(|diff| diff.blocks.ratio).collect();
+    let diffs: Vec<_> = edits.iter().filter_map(|p| p.outcome.edit()).collect();
 
-    let mut topics: BTreeMap<_, TopicCounts> = BTreeMap::new();
+    let mut by_topic: BTreeMap<_, Vec<&PromptRecord>> = BTreeMap::new();
     for prompt in &generation {
-        let counts = topics.entry(prompt.topic).or_insert(TopicCounts {
-            prompts: 0,
-            zero_shot: 0,
-            converged: 0,
-        });
-        counts.prompts += 1;
-        counts.zero_shot += u64::from(zero_shot(prompt));
-        counts.converged += u64::from(converged(prompt));
+        by_topic.entry(prompt.topic).or_default().push(prompt);
     }
+    let topics = by_topic
+        .into_iter()
+        .map(|(topic, prompts)| {
+            (
+                topic,
+                TopicRates {
+                    zero_shot_compile_rate: zero_shot(&prompts),
+                    fix_convergence_rate: convergence(&prompts),
+                },
+            )
+        })
+        .collect();
 
     let mut usage = crate::model::Usage::default();
     let mut requests = 0;
@@ -203,8 +267,8 @@ pub fn summarize(prompts: &[PromptRecord]) -> Metrics {
     }
 
     Metrics {
-        zero_shot_compile_rate: rate(count(&zero_shot)),
-        fix_convergence_rate: rate(count(&converged)),
+        zero_shot_compile_rate: zero_shot(&generation),
+        fix_convergence_rate: convergence(&generation),
         token_efficiency: TokenEfficiency {
             programs: builds.len() as u64,
             blocks,
@@ -214,8 +278,8 @@ pub fn summarize(prompts: &[PromptRecord]) -> Metrics {
         edit_stability: EditStability {
             measured: diffs.len() as u64,
             of: edits.len() as u64,
-            ast: mean(&ast),
-            blocks: mean(&changed),
+            ast: mean(diffs.iter().map(|diff| diff.ast.ratio)),
+            nbt: mean(diffs.iter().map(|diff| diff.nbt.ratio)),
         },
         topics,
         requests,

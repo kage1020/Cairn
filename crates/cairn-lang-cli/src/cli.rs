@@ -208,8 +208,9 @@ pub(crate) enum Command {
                 data table exactly as `cairn compile --target` is, and requiring `--edition` as \
                 `cairn check --target` does. Setting it lowers against that version's id table, \
                 as `cairn check --edition E --target V` does, so the IR printed is the one \
-                `cairn compile` writes at that target. A version the edition does not ship is \
-                refused before the file is read"
+                `cairn compile` writes at that target. A version the edition does not ship \
+                still lowers, against the unpinned view, so every finding that needs no id table \
+                is reported before the target is refused, as `cairn check --target` reports them"
         )]
         target: Option<String>,
         /// Output format for the lowered block-array IR.

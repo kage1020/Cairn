@@ -3,8 +3,10 @@
 
 use std::collections::BTreeMap;
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::lock::HashHex;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::model::Usage;
 use crate::prompts::Topic;
@@ -14,15 +16,21 @@ pub const FORMAT: u32 = 1;
 
 /// One run of the prompt set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunRecord {
     /// [`FORMAT`] when the record was written.
     pub format: u32,
-    /// The Cairn release the checkout is.
+    /// The release the `cairn` binary reports with `--version`.
     pub compiler_version: String,
+    /// The commit the harness built the `cairn` binary at, when it built it from its checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_commit: Option<String>,
+    /// What answered the run.
+    pub backend: Backend,
     /// The model id the run asked, as `--model` named it.
     pub model: String,
     /// The edition every program was checked and compiled for.
-    pub edition: String,
+    pub edition: Edition,
     /// The version every program was checked and compiled for, as `--target` named it.
     pub target: String,
     /// The `max_tokens` of every request.
@@ -33,20 +41,78 @@ pub struct RunRecord {
     pub spec_pages: HashHex,
     /// The primary metrics over the prompts below.
     pub metrics: Metrics,
-    /// Each prompt's conversation, in id order.
+    /// Each prompt's conversation that ended, in id order.
     pub prompts: Vec<PromptRecord>,
+    /// Where and why the run stopped before every prompt ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<Stopped>,
 }
 
-/// How a prompt's conversation ended.
+/// Why a record cannot be read.
+#[derive(Debug, Error)]
+pub enum RecordError {
+    /// The text is not a run record of any format.
+    #[error("not a run record: {0}")]
+    Invalid(serde_json::Error),
+    /// The record is of a format this harness does not read.
+    #[error(
+        "the record is of format {found}, and this harness reads format {FORMAT}; compare it with \
+         the harness that wrote it, or run it again with this one"
+    )]
+    Format {
+        /// The record's `format`.
+        found: u64,
+    },
+}
+
+impl RunRecord {
+    /// The record `text` holds.
+    ///
+    /// # Errors
+    ///
+    /// [`RecordError::Format`] when its `format` is not [`FORMAT`], and [`RecordError::Invalid`]
+    /// when it is not a record.
+    pub fn from_json(text: &str) -> Result<Self, RecordError> {
+        let value: serde_json::Value = serde_json::from_str(text).map_err(RecordError::Invalid)?;
+        match value.get("format").and_then(serde_json::Value::as_u64) {
+            Some(found) if found != u64::from(FORMAT) => Err(RecordError::Format { found }),
+            _ => serde_json::from_value(value).map_err(RecordError::Invalid),
+        }
+    }
+}
+
+/// What answered a run's requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Outcome {
-    /// An attempt passed.
-    Passed,
-    /// No attempt passed.
-    Failed,
-    /// An edit whose base did not converge, so it was not asked.
-    Skipped,
+pub enum Backend {
+    /// The Anthropic Messages API.
+    Api,
+    /// Replies written down before, so the record's `model` is only the name it was given.
+    Replay,
+}
+
+impl std::fmt::Display for Backend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Api => "api",
+            Self::Replay => "replay",
+        })
+    }
+}
+
+/// Where a run stopped, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Stopped {
+    /// The prompt whose conversation was going on.
+    pub prompt: String,
+    /// The attempt it stopped at, from 1.
+    pub attempt: u64,
+    /// Why the harness could not go on.
+    pub reason: String,
+    /// The program the harness could not check, when the reply held one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
 }
 
 /// One prompt's conversation.
@@ -60,22 +126,57 @@ pub struct PromptRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
     /// How the conversation ended.
+    #[serde(flatten)]
     pub outcome: Outcome,
     /// Each attempt, in turn order.
     pub attempts: Vec<Attempt>,
-    /// What the passing attempt built.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub build: Option<Build>,
-    /// For an edit that passed, how far it moved from its base.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edit: Option<EditDiff>,
+}
+
+/// How a prompt's conversation ended.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum Outcome {
+    /// An attempt passed.
+    Converged {
+        /// What the passing attempt built.
+        build: Build,
+        /// For an edit, how far it moved from its base.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        edit: Option<EditDiff>,
+    },
+    /// No attempt passed.
+    Failed,
+    /// An attempt was truncated or refused, which ended the conversation.
+    CutShort,
+    /// An edit whose base did not converge, so it was not asked.
+    Skipped,
+}
+
+impl Outcome {
+    /// What the conversation built, when it converged.
+    #[must_use]
+    pub fn build(&self) -> Option<&Build> {
+        match self {
+            Self::Converged { build, .. } => Some(build),
+            _ => None,
+        }
+    }
+
+    /// How far an edit moved from its base, when it converged.
+    #[must_use]
+    pub fn edit(&self) -> Option<&EditDiff> {
+        match self {
+            Self::Converged { edit, .. } => edit.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 /// Why an attempt passed or did not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
-    /// Checked and compiled clean, and builds at least one block.
+    /// `cairn check` reported no error, `cairn compile` built it, and it builds a block.
     Pass,
     /// The reply holds no program.
     NoProgram,
@@ -85,10 +186,23 @@ pub enum Verdict {
     Compile,
     /// The program builds no block.
     Empty,
+    /// The reply stopped at `max_tokens`.
+    Truncated,
+    /// The model declined to reply.
+    Refused,
+}
+
+impl Verdict {
+    /// Whether the attempt cut its conversation short.
+    #[must_use]
+    pub fn cuts_short(self) -> bool {
+        matches!(self, Self::Truncated | Self::Refused)
+    }
 }
 
 /// One reply and what the harness made of it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Attempt {
     /// The reply's text.
     pub reply: String,
@@ -108,6 +222,7 @@ pub struct Attempt {
 
 /// One diagnostic `cairn check` reported.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DiagnosticRecord {
     /// The diagnostic code.
     pub code: String,
@@ -121,6 +236,7 @@ pub struct DiagnosticRecord {
 
 /// What a passing program is and builds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Build {
     /// The program.
     pub program: String,
@@ -132,15 +248,17 @@ pub struct Build {
 
 /// How far an edit's program and build moved from its base's.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EditDiff {
     /// The AST diff.
     pub ast: AstDiff,
-    /// The block diff.
-    pub blocks: BlockDiff,
+    /// The NBT diff.
+    pub nbt: NbtDiff,
 }
 
 /// The AST nodes an edit removed and added, against the nodes of both programs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AstDiff {
     /// The base program's nodes.
     pub before: u64,
@@ -156,7 +274,8 @@ pub struct AstDiff {
 
 /// The cells an edit changed, against the cells either build fills.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BlockDiff {
+#[serde(deny_unknown_fields)]
+pub struct NbtDiff {
     /// Cells that hold a block in either build.
     pub cells: u64,
     /// Of those, cells whose block differs between the builds.
@@ -167,6 +286,7 @@ pub struct BlockDiff {
 
 /// The primary metrics of a run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Metrics {
     /// Generation prompts whose first attempt passed.
     pub zero_shot_compile_rate: Rate,
@@ -176,27 +296,31 @@ pub struct Metrics {
     pub token_efficiency: TokenEfficiency,
     /// The mean diffs of the edits measured.
     pub edit_stability: EditStability,
-    /// The generation prompts of each topic.
-    pub topics: BTreeMap<Topic, TopicCounts>,
+    /// The two rates over the generation prompts of each topic.
+    pub topics: BTreeMap<Topic, TopicRates>,
     /// Requests sent, one per attempt.
     pub requests: u64,
     /// What the requests spent.
     pub usage: Usage,
 }
 
-/// A count of prompts out of a total.
+/// A count of generation prompts out of the ones a rate is taken over.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rate {
     /// Prompts counted.
-    pub passed: u64,
-    /// Prompts there were.
+    pub count: u64,
+    /// Prompts the rate is taken over.
     pub of: u64,
-    /// `passed / of`, with no value when there were none.
+    /// Prompts left out, cut short before the rate could judge them.
+    pub cut_short: u64,
+    /// `count / of`, with no value when there were none.
     pub rate: Option<f64>,
 }
 
 /// Expanded blocks over DSL tokens, summed over programs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TokenEfficiency {
     /// Programs summed.
     pub programs: u64,
@@ -208,8 +332,9 @@ pub struct TokenEfficiency {
     pub ratio: Option<f64>,
 }
 
-/// The mean AST and block diffs over the edits measured.
+/// The mean AST and NBT diffs over the edits measured.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EditStability {
     /// Edits whose base and own conversation both converged.
     pub measured: u64,
@@ -217,17 +342,16 @@ pub struct EditStability {
     pub of: u64,
     /// The mean AST diff ratio, with no value when no edit was measured.
     pub ast: Option<f64>,
-    /// The mean block diff ratio, with no value when no edit was measured.
-    pub blocks: Option<f64>,
+    /// The mean NBT diff ratio, with no value when no edit was measured.
+    pub nbt: Option<f64>,
 }
 
 /// How the generation prompts of one topic did.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TopicCounts {
-    /// Generation prompts of the topic.
-    pub prompts: u64,
-    /// Of those, the ones whose first attempt passed.
-    pub zero_shot: u64,
-    /// Of those, the ones whose conversation converged.
-    pub converged: u64,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TopicRates {
+    /// The topic's zero-shot compile rate.
+    pub zero_shot_compile_rate: Rate,
+    /// The topic's fix convergence rate.
+    pub fix_convergence_rate: Rate,
 }

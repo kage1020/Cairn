@@ -266,25 +266,30 @@ cargo eval compare baseline.json proposal.json
 ```
 
 `run` builds this checkout's `cairn` and checks every reply with it, so run it at the commit you
-measure. It reports each prompt on stderr as it ends and writes the
-[run record](/spec/evaluation/#135-run-record) to `--out`, or to stdout without it. Other flags:
+measure; the record names that commit. It reports each prompt on stderr as it ends, and each wait
+before it asks the API again, and writes the [run record](/spec/evaluation/#135-run-record) to
+`--out`, or to stdout without it. It checks that `--out` can be written before it sends a request. A
+run the API or `cairn` stops partway still writes the prompts that ended, names where it stopped,
+and exits 1. Other flags:
 
 - `--only <id>` runs that prompt, and an edit prompt's base with it; repeat it for several. A run of
   one prompt is a cheap first check of a key and a model.
 - `--max-tokens <n>` caps each reply, 16000 by default.
 - `--prompts <dir>` reads another prompt set, as a baseline does for a proposal that changes the
-  set, and `--cairn <path>` checks with a `cairn` already built.
+  set, and `--cairn <path>` checks with a `cairn` already built, whose `--version` the record names.
 - `--replay <file>` answers from recorded replies instead of the API: `[[conversation]]` tables,
-  each with an `id` and its `replies` in order.
+  each with an `id` and its `replies` in order. The record's `backend` is then `replay`.
 
 Each conversation makes one to four requests, and an edit prompt whose base did not converge makes
 none, so the 50 prompts cost between 50 and 200 requests. Every request carries the English spec
-pages, about 370 KB, as a system prompt marked for caching, and the record's `usage` counts the
-input tokens written to the cache, read from it and sent uncached.
+pages as a system prompt marked for caching, and the record's `usage` counts the input tokens
+written to the cache, read from it and sent uncached. A reply cut off at `--max-tokens` or declined
+ends its conversation, and the rates leave that prompt out.
 
-`compare` takes a baseline record, then a proposal record, and refuses two that did not ask the same
-model, prompt set, edition, target and `max_tokens`. It prints each metric for both runs and the
-change, taking token efficiency and edit stability over the prompts both runs converged on.
+`compare` takes a baseline record, then a proposal record, and refuses a record that stopped, one
+another harness format wrote, and two that did not ask the same model through the same backend
+with the same prompt set, edition, target and `max_tokens`. It prints each metric for both runs and
+the change, taking token efficiency and edit stability over the prompts both runs converged on.
 
 A prompt is a file `eval/prompts/<id>.toml` holding its `topic` and `prompt`, and for an edit prompt
 the `base` it edits, which must be a generation prompt. A change to a prompt, or to the messages the

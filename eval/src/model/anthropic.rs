@@ -33,6 +33,7 @@ pub struct Anthropic {
     model: String,
     max_tokens: u32,
     backoff: Duration,
+    log: Box<dyn FnMut(&str)>,
 }
 
 fn agent(proxy: Option<ureq::Proxy>) -> ureq::Agent {
@@ -55,6 +56,7 @@ impl Anthropic {
             model,
             max_tokens,
             backoff: Duration::from_secs(2),
+            log: Box::new(|line| eprintln!("{line}")),
         }
     }
 
@@ -90,6 +92,16 @@ impl Anthropic {
     pub fn with_backoff(self, backoff: Duration) -> Self {
         Self { backoff, ..self }
     }
+
+    /// The same backend telling `log` each time it waits to send a request again, in place of
+    /// standard error.
+    #[must_use]
+    pub fn with_log(self, log: impl FnMut(&str) + 'static) -> Self {
+        Self {
+            log: Box::new(log),
+            ..self
+        }
+    }
 }
 
 /// The body of the request that asks `model` to continue `conversation`.
@@ -119,7 +131,8 @@ pub fn request_body(model: &str, max_tokens: u32, conversation: &Conversation<'_
 ///
 /// # Errors
 ///
-/// [`ModelError`] when the body is not a Messages API response.
+/// [`ModelError`] when the body is not a Messages API response, or lacks its `stop_reason` or
+/// its input and output token counts.
 pub fn parse_reply(body: &str) -> Result<Reply, ModelError> {
     let invalid = |what: &str| ModelError(format!("the API's response {what}: {body}"));
     let response: Value = serde_json::from_str(body).map_err(|_| invalid("is not JSON"))?;
@@ -136,19 +149,21 @@ pub fn parse_reply(body: &str) -> Result<Reply, ModelError> {
         .filter_map(|block| block["text"].as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let count = |key: &str| response["usage"][key].as_u64().unwrap_or_default();
+    let stop_reason = response["stop_reason"]
+        .as_str()
+        .ok_or_else(|| invalid("has no `stop_reason`"))?
+        .to_owned();
+    let count = |key: &str| response["usage"][key].as_u64();
+    let spent = |key: &str| count(key).ok_or_else(|| invalid(&format!("has no `usage.{key}`")));
     Ok(Reply {
         text,
         content,
-        stop_reason: response["stop_reason"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned(),
+        stop_reason,
         usage: Usage {
-            input_tokens: count("input_tokens"),
-            output_tokens: count("output_tokens"),
-            cache_creation_input_tokens: count("cache_creation_input_tokens"),
-            cache_read_input_tokens: count("cache_read_input_tokens"),
+            input_tokens: spent("input_tokens")?,
+            output_tokens: spent("output_tokens")?,
+            cache_creation_input_tokens: count("cache_creation_input_tokens").unwrap_or_default(),
+            cache_read_input_tokens: count("cache_read_input_tokens").unwrap_or_default(),
         },
     })
 }
@@ -158,9 +173,30 @@ fn retryable(status: u16) -> bool {
     matches!(status, 429 | 500 | 502 | 503 | 504 | 529)
 }
 
+/// Whether a request that got no response may get one if sent again: a dropped or refused
+/// connection or a timeout, never a TLS, proxy or request error.
+fn transient(error: &ureq::Error) -> bool {
+    matches!(
+        error,
+        ureq::Error::Io(_)
+            | ureq::Error::Timeout(_)
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::HostNotFound
+            | ureq::Error::BodyStalled
+    )
+}
+
+/// The `error.message` of an error response's `body`, or the body when it holds none.
+fn error_message(body: &str) -> String {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|error| error["error"]["message"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| body.to_owned())
+}
+
 impl Anthropic {
-    /// One round trip: the status, the `retry-after` wait if any, and the body.
-    fn send(&self, body: &str) -> Result<(u16, Option<Duration>, String), ureq::Error> {
+    /// One round trip: the status, the `retry-after` header if any, and the body.
+    fn send(&self, body: &str) -> Result<(u16, Option<String>, String), ureq::Error> {
         let mut response = self
             .agent
             .post(&self.endpoint)
@@ -172,8 +208,7 @@ impl Anthropic {
             .headers()
             .get("retry-after")
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.trim().parse().ok())
-            .map(Duration::from_secs);
+            .map(|value| value.trim().to_owned());
         let text = response.body_mut().read_to_string()?;
         Ok((response.status().as_u16(), retry_after, text))
     }
@@ -182,25 +217,47 @@ impl Anthropic {
 impl Model for Anthropic {
     fn reply(&mut self, conversation: &Conversation<'_>) -> Result<Reply, ModelError> {
         let body = request_body(&self.model, self.max_tokens, conversation).to_string();
-        let mut wait = self.backoff;
-        let mut retries = 0;
+        let mut backoff = self.backoff;
+        let mut retry = 0;
         loop {
-            let more = retries < RETRIES;
-            match self.send(&body) {
+            let more = retry < RETRIES;
+            let (wait, why) = match self.send(&body) {
                 Ok((200, _, text)) => return parse_reply(&text),
-                Ok((status, retry_after, _)) if retryable(status) && more => {
-                    thread::sleep(retry_after.unwrap_or(wait).min(LONGEST_WAIT));
+                Ok((status, retry_after, text)) if retryable(status) && more => {
+                    let wait = match retry_after.map(|value| (value.parse(), value)) {
+                        None => backoff,
+                        Some((Ok(seconds), _)) => Duration::from_secs(seconds),
+                        Some((Err(_), value)) => {
+                            (self.log)(&format!(
+                                "the API's retry-after `{value}` is not a number of seconds, so \
+                                 the harness waits as it does without one"
+                            ));
+                            backoff
+                        }
+                    };
+                    (
+                        wait,
+                        format!("the API answered {status}: {}", error_message(&text)),
+                    )
                 }
                 Ok((status, _, text)) => {
                     return Err(ModelError(format!("the API answered {status}: {text}")));
                 }
-                Err(_) if more => thread::sleep(wait.min(LONGEST_WAIT)),
+                Err(error) if transient(&error) && more => {
+                    (backoff, format!("no response from the API: {error}"))
+                }
                 Err(error) => {
                     return Err(ModelError(format!("no response from the API: {error}")));
                 }
-            }
-            retries += 1;
-            wait *= 2;
+            };
+            retry += 1;
+            let wait = wait.min(LONGEST_WAIT);
+            (self.log)(&format!(
+                "{why}; asking again in {}s, retry {retry} of {RETRIES}",
+                wait.as_secs()
+            ));
+            thread::sleep(wait);
+            backoff *= 2;
         }
     }
 }

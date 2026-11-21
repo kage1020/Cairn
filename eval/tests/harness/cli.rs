@@ -51,18 +51,105 @@ fn run_writes_the_record_and_reports_each_prompt_as_it_ends() {
     assert_eq!(
         text(&output.stderr),
         "hut: failed after 4 attempts\n\
-         pavilion: passed on attempt 1\n\
-         shed: passed on attempt 2\n\
+         pavilion: converged on attempt 1\n\
+         shed: converged on attempt 2\n\
          hut-roof: skipped: `hut` did not converge\n\
-         shed-window: passed on attempt 1\n\
+         shed-window: converged on attempt 1\n\
          zero-shot 1/3, converged 2/3, edits measured 1/2, 8 requests\n"
     );
     assert_eq!(text(&output.stdout), "");
-    let written: RunRecord = serde_json::from_str(
+    let written = RunRecord::from_json(
         &fs::read_to_string(dir.path().join("record.json")).expect("the record is written"),
     )
     .expect("the record reads back");
     assert_eq!(written, common::replayed_run());
+}
+
+#[test]
+fn run_refuses_an_out_it_cannot_write_before_it_asks_anything() {
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let out = dir.path().join("missing").join("record.json");
+    let output = harness()
+        .args([
+            "run",
+            "--model",
+            MODEL,
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--replay",
+            "no-such-replay.toml",
+        ])
+        .arg("--out")
+        .arg(&out)
+        .output()
+        .expect("the harness runs");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    let expected = format!("error: cannot write the record to {}: ", out.display());
+    assert!(
+        stderr.starts_with(&expected)
+            && stderr.ends_with("; name a file in a directory that exists and can be written\n"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_run_that_stops_writes_what_ended_before_it_and_fails() {
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let file = common::replay_file();
+    let start = file
+        .find("[[conversation]]\nid = \"pavilion\"")
+        .expect("pavilion is replayed");
+    let end = start + file[start..].find("]\n\n").expect("its table ends") + 3;
+    let replay = dir.path().join("replay.toml");
+    fs::write(&replay, format!("{}{}", &file[..start], &file[end..]))
+        .expect("the replay is written");
+    let output = harness()
+        .args([
+            "run",
+            "--model",
+            MODEL,
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ])
+        .arg("--replay")
+        .arg(&replay)
+        .arg("--prompts")
+        .arg(common::fixture("prompts"))
+        .arg("--cairn")
+        .arg(common::cairn())
+        .arg("--out")
+        .arg(dir.path().join("record.json"))
+        .output()
+        .expect("the harness runs");
+    assert_eq!(
+        (output.status.code(), text(&output.stderr)),
+        (
+            Some(1),
+            "hut: failed after 4 attempts\n\
+             zero-shot 0/1, converged 0/1, edits measured 0/0, 4 requests\n\
+             error: the run stopped at prompt `pavilion`, attempt 1: the replay has no reply 1 for \
+             conversation `pavilion`; the record holds the prompts that ended before it\n"
+                .to_owned()
+        )
+    );
+    let written = RunRecord::from_json(
+        &fs::read_to_string(dir.path().join("record.json")).expect("the record is written"),
+    )
+    .expect("the record reads back");
+    let kept: Vec<&str> = written
+        .prompts
+        .iter()
+        .map(|prompt| prompt.id.as_str())
+        .collect();
+    assert_eq!(
+        (kept, written.stopped.map(|stopped| stopped.prompt)),
+        (vec!["hut"], Some("pavilion".to_owned()))
+    );
 }
 
 #[test]
@@ -110,7 +197,7 @@ fn compare_prints_what_the_library_compares() {
     let dir = tempfile::tempdir().expect("a scratch directory");
     let baseline = common::replayed_run();
     let mut proposal = baseline.clone();
-    proposal.compiler_version = "proposal".to_owned();
+    proposal.compiler_commit = Some("proposal".to_owned());
     for (name, record) in [("baseline.json", &baseline), ("proposal.json", &proposal)] {
         fs::write(
             dir.path().join(name),
@@ -156,7 +243,8 @@ fn compare_refuses_runs_of_different_models() {
     assert_eq!(
         text(&output.stderr),
         "error: the records differ in model, so the runs did not ask the same thing; run both \
-         with the same prompt set, model, edition, target and max_tokens\n"
+         through the same backend, with the same prompt set, model, edition, target and \
+         max_tokens\n"
     );
     assert_eq!(text(&output.stdout), "");
 }

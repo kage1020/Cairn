@@ -6,18 +6,35 @@ use std::fmt;
 
 use thiserror::Error;
 
-use crate::record::{Outcome, PromptRecord, RunRecord};
+use crate::metrics::{mean, ratio};
+use crate::record::{PromptRecord, Rate, RunRecord};
 
 /// Why two records cannot be compared.
 #[derive(Debug, Error, PartialEq, Eq)]
-#[error(
-    "the records differ in {}, so the runs did not ask the same thing; run both with the same \
-     prompt set, model, edition, target and max_tokens",
-    fields.join(", ")
-)]
-pub struct Mismatch {
-    /// The fields that differ.
-    pub fields: Vec<&'static str>,
+pub enum Refusal {
+    /// A run stopped before every prompt ended, so its metrics cover only some of them.
+    #[error(
+        "the {run} run stopped at prompt `{prompt}`, attempt {attempt}, so its metrics cover only \
+         the prompts before it; run it again to the end"
+    )]
+    Stopped {
+        /// `baseline` or `proposal`.
+        run: &'static str,
+        /// The prompt it stopped at.
+        prompt: String,
+        /// The attempt it stopped at.
+        attempt: u64,
+    },
+    /// The runs did not ask the same thing.
+    #[error(
+        "the records differ in {}, so the runs did not ask the same thing; run both through the \
+         same backend, with the same prompt set, model, edition, target and max_tokens",
+        fields.join(", ")
+    )]
+    Mismatch {
+        /// The fields that differ.
+        fields: Vec<&'static str>,
+    },
 }
 
 /// Two runs side by side.
@@ -26,37 +43,31 @@ pub struct Comparison {
     baseline: Side,
     proposal: Side,
     shared: String,
-    prompts: u64,
-    zero_shot: (u64, u64),
-    converged: (u64, u64),
+    zero_shot: (Rate, Rate),
+    converged: (Rate, Rate),
     programs: u64,
     efficiency: (Option<f64>, Option<f64>),
     edits: u64,
     ast: (Option<f64>, Option<f64>),
-    blocks: (Option<f64>, Option<f64>),
+    nbt: (Option<f64>, Option<f64>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct Side {
     spec_pages: String,
-    compiler_version: String,
+    compiler: String,
 }
 
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "a count of blocks, tokens or edits is far below 2^52"
-)]
-fn quotient(part: u64, whole: u64) -> Option<f64> {
-    (whole > 0).then(|| part as f64 / whole as f64)
-}
-
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "a count of edits is far below 2^52"
-)]
-fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {
-    let values: Vec<f64> = values.collect();
-    (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
+impl Side {
+    fn of(record: &RunRecord) -> Self {
+        Self {
+            spec_pages: record.spec_pages.to_string(),
+            compiler: match &record.compiler_commit {
+                Some(commit) => format!("{} at {commit}", record.compiler_version),
+                None => record.compiler_version.clone(),
+            },
+        }
+    }
 }
 
 fn by_id(record: &RunRecord) -> BTreeMap<&str, &PromptRecord> {
@@ -72,42 +83,44 @@ fn by_id(record: &RunRecord) -> BTreeMap<&str, &PromptRecord> {
 ///
 /// # Errors
 ///
-/// [`Mismatch`] when the runs asked different prompts, of a different model, or for a different
-/// target.
-pub fn compare(baseline: &RunRecord, proposal: &RunRecord) -> Result<Comparison, Mismatch> {
-    let mut fields = Vec::new();
-    if baseline.format != proposal.format {
-        fields.push("format");
+/// [`Refusal::Stopped`] when either run stopped before it ended, and [`Refusal::Mismatch`] when
+/// they differ in format, backend, prompt set, model, edition, target or `max_tokens`.
+pub fn compare(baseline: &RunRecord, proposal: &RunRecord) -> Result<Comparison, Refusal> {
+    for (run, record) in [("baseline", baseline), ("proposal", proposal)] {
+        if let Some(stopped) = &record.stopped {
+            return Err(Refusal::Stopped {
+                run,
+                prompt: stopped.prompt.clone(),
+                attempt: stopped.attempt,
+            });
+        }
     }
-    if baseline.prompt_set != proposal.prompt_set {
-        fields.push("prompt_set");
-    }
-    if baseline.model != proposal.model {
-        fields.push("model");
-    }
-    if baseline.edition != proposal.edition {
-        fields.push("edition");
-    }
-    if baseline.target != proposal.target {
-        fields.push("target");
-    }
-    if baseline.max_tokens != proposal.max_tokens {
-        fields.push("max_tokens");
-    }
+    let differs = [
+        ("format", baseline.format != proposal.format),
+        ("backend", baseline.backend != proposal.backend),
+        ("prompt_set", baseline.prompt_set != proposal.prompt_set),
+        ("model", baseline.model != proposal.model),
+        ("edition", baseline.edition != proposal.edition),
+        ("target", baseline.target != proposal.target),
+        ("max_tokens", baseline.max_tokens != proposal.max_tokens),
+    ];
+    let fields: Vec<&'static str> = differs
+        .into_iter()
+        .filter_map(|(field, differs)| differs.then_some(field))
+        .collect();
     if !fields.is_empty() {
-        return Err(Mismatch { fields });
+        return Err(Refusal::Mismatch { fields });
     }
 
     let (before, after) = (by_id(baseline), by_id(proposal));
     let both: Vec<(&PromptRecord, &PromptRecord)> = before
         .iter()
         .filter_map(|(id, base)| after.get(id).map(|other| (*base, *other)))
-        .filter(|(base, other)| base.outcome == Outcome::Passed && other.outcome == Outcome::Passed)
         .collect();
     let generation: Vec<_> = both
         .iter()
         .filter(|(a, _)| a.base.is_none())
-        .filter_map(|(a, b)| a.build.as_ref().zip(b.build.as_ref()))
+        .filter_map(|(a, b)| a.outcome.build().zip(b.outcome.build()))
         .collect();
     let [blocks_before, tokens_before, blocks_after, tokens_after] =
         generation.iter().fold([0; 4], |[b0, t0, b1, t1], (a, b)| {
@@ -115,50 +128,65 @@ pub fn compare(baseline: &RunRecord, proposal: &RunRecord) -> Result<Comparison,
         });
     let edits: Vec<_> = both
         .iter()
-        .filter_map(|(a, b)| a.edit.as_ref().zip(b.edit.as_ref()))
+        .filter_map(|(a, b)| a.outcome.edit().zip(b.outcome.edit()))
         .collect();
     let metrics = (&baseline.metrics, &proposal.metrics);
     Ok(Comparison {
-        baseline: Side {
-            spec_pages: baseline.spec_pages.to_string(),
-            compiler_version: baseline.compiler_version.clone(),
-        },
-        proposal: Side {
-            spec_pages: proposal.spec_pages.to_string(),
-            compiler_version: proposal.compiler_version.clone(),
-        },
+        baseline: Side::of(baseline),
+        proposal: Side::of(proposal),
         shared: format!(
-            "model {}, prompt set {}, {} {}, max_tokens {}",
+            "model {}, backend {}, prompt set {}, {} {}, max_tokens {}",
             baseline.model,
+            baseline.backend,
             baseline.prompt_set,
             baseline.edition,
             baseline.target,
             baseline.max_tokens
         ),
-        prompts: metrics.0.zero_shot_compile_rate.of,
         zero_shot: (
-            metrics.0.zero_shot_compile_rate.passed,
-            metrics.1.zero_shot_compile_rate.passed,
+            metrics.0.zero_shot_compile_rate.clone(),
+            metrics.1.zero_shot_compile_rate.clone(),
         ),
         converged: (
-            metrics.0.fix_convergence_rate.passed,
-            metrics.1.fix_convergence_rate.passed,
+            metrics.0.fix_convergence_rate.clone(),
+            metrics.1.fix_convergence_rate.clone(),
         ),
         programs: generation.len() as u64,
         efficiency: (
-            quotient(blocks_before, tokens_before),
-            quotient(blocks_after, tokens_after),
+            ratio(blocks_before, tokens_before),
+            ratio(blocks_after, tokens_after),
         ),
         edits: edits.len() as u64,
         ast: (
             mean(edits.iter().map(|(a, _)| a.ast.ratio)),
             mean(edits.iter().map(|(_, b)| b.ast.ratio)),
         ),
-        blocks: (
-            mean(edits.iter().map(|(a, _)| a.blocks.ratio)),
-            mean(edits.iter().map(|(_, b)| b.blocks.ratio)),
+        nbt: (
+            mean(edits.iter().map(|(a, _)| a.nbt.ratio)),
+            mean(edits.iter().map(|(_, b)| b.nbt.ratio)),
         ),
     })
+}
+
+/// A rate's row: each run's count out of its prompts, the change, and how many each left out.
+fn rate_row(name: &'static str, (a, b): &(Rate, Rate)) -> [String; 5] {
+    let delta = if a.of == b.of {
+        format!("{:+}", i128::from(b.count) - i128::from(a.count))
+    } else {
+        change((a.rate, b.rate))
+    };
+    let note = if a.cut_short == 0 && b.cut_short == 0 {
+        String::new()
+    } else {
+        format!("{} and {} cut short", a.cut_short, b.cut_short)
+    };
+    [
+        name.to_owned(),
+        format!("{}/{}", a.count, a.of),
+        format!("{}/{}", b.count, b.of),
+        delta,
+        note,
+    ]
 }
 
 fn over(count: u64, one: &str, many: &str, rest: &str) -> String {
@@ -182,57 +210,39 @@ fn change(pair: (Option<f64>, Option<f64>)) -> String {
 impl fmt::Display for Comparison {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rows = [
-            (
-                "zero-shot compile rate",
-                format!("{}/{}", self.zero_shot.0, self.prompts),
-                format!("{}/{}", self.zero_shot.1, self.prompts),
-                format!(
-                    "{:+}",
-                    i128::from(self.zero_shot.1) - i128::from(self.zero_shot.0)
-                ),
-                String::new(),
-            ),
-            (
-                "fix convergence rate",
-                format!("{}/{}", self.converged.0, self.prompts),
-                format!("{}/{}", self.converged.1, self.prompts),
-                format!(
-                    "{:+}",
-                    i128::from(self.converged.1) - i128::from(self.converged.0)
-                ),
-                String::new(),
-            ),
-            (
-                "token efficiency",
+            rate_row("zero-shot compile rate", &self.zero_shot),
+            rate_row("fix convergence rate", &self.converged),
+            [
+                "token efficiency".to_owned(),
                 value(self.efficiency.0),
                 value(self.efficiency.1),
                 change(self.efficiency),
                 over(self.programs, "program", "programs", "both runs built"),
-            ),
-            (
-                "edit stability, AST",
+            ],
+            [
+                "edit stability, AST".to_owned(),
                 value(self.ast.0),
                 value(self.ast.1),
                 change(self.ast),
                 over(self.edits, "edit", "edits", "both runs measured"),
-            ),
-            (
-                "edit stability, blocks",
-                value(self.blocks.0),
-                value(self.blocks.1),
-                change(self.blocks),
+            ],
+            [
+                "edit stability, NBT".to_owned(),
+                value(self.nbt.0),
+                value(self.nbt.1),
+                change(self.nbt),
                 String::new(),
-            ),
+            ],
         ];
         writeln!(
             f,
             "baseline: spec pages {}, compiler {}",
-            self.baseline.spec_pages, self.baseline.compiler_version
+            self.baseline.spec_pages, self.baseline.compiler
         )?;
         writeln!(
             f,
             "proposal: spec pages {}, compiler {}",
-            self.proposal.spec_pages, self.proposal.compiler_version
+            self.proposal.spec_pages, self.proposal.compiler
         )?;
         writeln!(f, "both: {}", self.shared)?;
         writeln!(f)?;
@@ -241,7 +251,7 @@ impl fmt::Display for Comparison {
             "{:<24}{:<10}{:<10}change",
             "metric", "baseline", "proposal"
         )?;
-        for (metric, before, after, delta, note) in rows {
+        for [metric, before, after, delta, note] in rows {
             let line = format!("{metric:<24}{before:<10}{after:<10}{delta:<8}{note}");
             writeln!(f, "{}", line.trim_end())?;
         }

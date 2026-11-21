@@ -3,6 +3,8 @@
 //! Every word the model is told besides the specification and the prompts is one of the templates
 //! here, and [`INSTRUCTIONS`] lists them so that a run record's `prompt_set` hash covers them.
 
+use cairn_lang_core::Edition;
+
 use crate::spec::SpecPages;
 
 /// The file each program is checked and compiled as.
@@ -33,7 +35,11 @@ program in one fenced code block marked `cairn`.
 
 {prompt}";
 
-/// The reply to an attempt whose program `cairn check` or `cairn compile` refused.
+/// The command line a [`REPORT`] names.
+pub const COMMAND: &str = "cairn {command} --edition {edition} --target {target} main.crn";
+
+/// The reply to an attempt whose program `cairn check` or `cairn compile` refused, quoting what
+/// it printed.
 pub const REPORT: &str = "`{command}` reports:
 
 {report}
@@ -46,32 +52,22 @@ pub const NO_PROGRAM: &str = "Your reply has no fenced code block marked `cairn`
 whole program in one fenced code block marked `cairn`.";
 
 /// The reply to an attempt whose program builds nothing.
-pub const EMPTY: &str = "`main.crn` checks and compiles clean, but it builds no block. Reply with \
-the whole program, building what was asked, in one fenced code block marked `cairn`.";
+pub const EMPTY: &str = "`cairn check` reports no error on `main.crn` and `cairn compile` builds \
+it, but it builds no block. Reply with the whole program, building what was asked, in one fenced \
+code block marked `cairn`.";
 
 /// Every template, in the order a run record's `prompt_set` hash takes them.
-pub const INSTRUCTIONS: [&str; 6] = [PREAMBLE, TASK, EDIT_TASK, REPORT, NO_PROGRAM, EMPTY];
+pub const INSTRUCTIONS: [&str; 7] = [
+    PREAMBLE, TASK, EDIT_TASK, COMMAND, REPORT, NO_PROGRAM, EMPTY,
+];
 
 /// The `(edition, version)` pair a run checks and compiles every program at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
-    /// `java` or `bedrock`.
-    pub edition: String,
+    /// The edition.
+    pub edition: Edition,
     /// The version label, as `--target` takes it.
     pub version: String,
-}
-
-/// Why an attempt did not pass, as the next message tells the model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Failure<'a> {
-    /// The reply holds no program.
-    NoProgram,
-    /// `cairn check` refused the program, printing this.
-    Check(&'a str),
-    /// `cairn compile` refused the program `cairn check` passed, printing this.
-    Compile(&'a str),
-    /// The program builds no block.
-    Empty,
 }
 
 /// `template` with each `{name}` of `values` replaced in one pass, so a value is never rescanned.
@@ -111,7 +107,7 @@ pub fn task(prompt: &str, target: &Target) -> String {
     fill(
         TASK,
         &[
-            ("edition", &target.edition),
+            ("edition", target.edition.as_str()),
             ("target", &target.version),
             ("prompt", prompt),
         ],
@@ -124,7 +120,7 @@ pub fn edit_task(program: &str, prompt: &str, target: &Target) -> String {
     fill(
         EDIT_TASK,
         &[
-            ("edition", &target.edition),
+            ("edition", target.edition.as_str()),
             ("target", &target.version),
             ("program", program.trim_end()),
             ("prompt", prompt),
@@ -132,25 +128,22 @@ pub fn edit_task(program: &str, prompt: &str, target: &Target) -> String {
     )
 }
 
-/// The message that tells the model why its attempt did not pass.
+/// The message that answers an attempt whose program `cairn {command}` refused, printing
+/// `printed`.
 #[must_use]
-pub fn feedback(failure: Failure<'_>, target: &Target) -> String {
-    let report = |command: &str, report: &str| {
-        let command = format!(
-            "cairn {command} --edition {} --target {} {SOURCE}",
-            target.edition, target.version
-        );
-        fill(
-            REPORT,
-            &[("command", &command), ("report", report.trim_end())],
-        )
-    };
-    match failure {
-        Failure::NoProgram => NO_PROGRAM.to_owned(),
-        Failure::Check(printed) => report("check", printed),
-        Failure::Compile(printed) => report("compile", printed),
-        Failure::Empty => EMPTY.to_owned(),
-    }
+pub fn report(command: &str, printed: &str, target: &Target) -> String {
+    let command = fill(
+        COMMAND,
+        &[
+            ("command", command),
+            ("edition", target.edition.as_str()),
+            ("target", &target.version),
+        ],
+    );
+    fill(
+        REPORT,
+        &[("command", &command), ("report", printed.trim_end())],
+    )
 }
 
 /// A fenced code block not closed yet.

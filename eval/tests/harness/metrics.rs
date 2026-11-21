@@ -1,10 +1,14 @@
-//! Tokens, the AST diff, the block diff, and the cells a block-array IR holds.
+//! Tokens, the AST diff, the NBT diff, the cells a block-array IR holds, and a run's metrics.
 
 use std::collections::BTreeMap;
 
 use eval::compiler::Cells;
-use eval::metrics::{ast_diff, block_diff, tokens};
-use eval::record::{AstDiff, BlockDiff};
+use eval::metrics::{ast_diff, nbt_diff, summarize, tokens};
+use eval::model::Usage;
+use eval::prompts::Topic;
+use eval::record::{
+    AstDiff, Attempt, Build, EditDiff, EditStability, NbtDiff, Outcome, PromptRecord, Verdict,
+};
 
 #[test]
 fn tokens_leave_out_layout_and_comments() {
@@ -89,6 +93,92 @@ struct a size=5x5
     );
 }
 
+/// The AST diff from `before` to `after`, as `(before, after, removed, added)`.
+fn diffed(before: &str, after: &str) -> (u64, u64, u64, u64) {
+    let diff = ast_diff(before, after).expect("both parse");
+    (diff.before, diff.after, diff.removed, diff.added)
+}
+
+#[test]
+fn a_header_is_a_node() {
+    assert_eq!(
+        diffed(BASE, &format!("@cairn 2026.06\n{BASE}")),
+        (5, 6, 0, 1)
+    );
+}
+
+#[test]
+fn an_added_edit_line_is_one_node_added() {
+    let edited = format!("{BASE}\nedit walls[0] set height=4\n");
+    assert_eq!(diffed(BASE, &edited), (5, 6, 0, 1));
+}
+
+#[test]
+fn edit_lines_count_in_source_order_among_the_items() {
+    let edit = "edit walls[0] set height=4\n\n";
+    let before = format!("{edit}{BASE}");
+    let after = format!("{BASE}\n{edit}");
+    assert_eq!(diffed(&before, &after), (6, 6, 1, 1));
+}
+
+#[test]
+fn the_order_of_selector_attributes_bindings_and_set_pairs_is_not_a_change() {
+    let before = "\
+theme t:
+  slot wall -> @cobblestone
+  window[class=vent][level=a] -> mat_slot=wall shape=arch
+
+struct a size=5x5
+  walls mat_slot=wall height=3
+
+edit window[class=vent][level=a] set y=2 offset=1
+";
+    let after = "\
+theme t:
+  slot wall -> @cobblestone
+  window[level=a][class=vent] -> shape=arch mat_slot=wall
+
+struct a size=5x5
+  walls mat_slot=wall height=3
+
+edit window[level=a][class=vent] set offset=1 y=2
+";
+    assert_eq!(diffed(before, after), (6, 6, 0, 0));
+}
+
+#[test]
+fn a_member_added_before_another_of_its_keyword_is_one_node_added() {
+    let before = format!("{BASE}  window side=front offset=1 y=1 size=1x1 mat_slot=wall\n");
+    let after = BASE.replace(
+        "  door side=front at=center\n",
+        "  window side=back offset=1 y=1 size=1x1 mat_slot=wall\n  door side=front at=center\n",
+    ) + "  window side=front offset=1 y=1 size=1x1 mat_slot=wall\n";
+    assert_eq!(diffed(&before, &after), (6, 7, 0, 1));
+}
+
+#[test]
+fn a_truth_table_row_and_a_requires_line_are_nodes() {
+    let before = "\
+def gate:
+  requires version>=1.20
+  floor mat_slot=wall
+
+struct d size=5x5
+  floor mat_slot=wall
+  pressure_plate id=plate at=inside.front offset=2 y=1 -> sig.step
+  logic sig.open = sig.step
+  assert truth(sig.step -> sig.open) {
+    0->0
+    1->1
+  }
+";
+    let after = before
+        .replace("  requires version>=1.20\n", "  requires version>=1.21\n")
+        .replace("    1->1\n", "    1->0\n");
+    // def, requires, floor; struct, floor, plate, logic, assert and its two rows.
+    assert_eq!(diffed(before, &after), (10, 10, 2, 2));
+}
+
 fn cells(blocks: &[(usize, &str)]) -> Cells {
     Cells(
         blocks
@@ -99,7 +189,7 @@ fn cells(blocks: &[(usize, &str)]) -> Cells {
 }
 
 #[test]
-fn the_block_diff_counts_every_cell_either_build_fills() {
+fn the_nbt_diff_counts_every_cell_either_build_fills() {
     let before = cells(&[
         (0, "minecraft:stone"),
         (1, "minecraft:stone"),
@@ -111,16 +201,16 @@ fn the_block_diff_counts_every_cell_either_build_fills() {
         (3, "minecraft:stone"),
     ]);
     assert_eq!(
-        block_diff(&before, &after),
-        BlockDiff {
+        nbt_diff(&before, &after),
+        NbtDiff {
             cells: 4,
             changed: 3,
             ratio: 0.75,
         }
     );
     assert_eq!(
-        block_diff(&before, &before),
-        BlockDiff {
+        nbt_diff(&before, &before),
+        NbtDiff {
             cells: 3,
             changed: 0,
             ratio: 0.0,
@@ -141,7 +231,7 @@ fn cells_leave_out_air_and_carry_properties_and_block_entities() {
                 ],
                 "voxels": [1, 0, 0, 2],
                 "block_entities": [
-                    {"pos": [1, 1, 0], "id": "minecraft:chest", "fields": {"b": 1, "a": [2]}}
+                    {"pos": [1, 1, 0], "kind": "fields", "id": "minecraft:chest", "fields": {"b": 1, "a": 2}}
                 ]
             },
             "walkway::s::a.e__b.e": {
@@ -158,7 +248,8 @@ fn cells_leave_out_air_and_carry_properties_and_block_entities() {
         ),
         (
             ("struct::a".to_owned(), 1, 1, 0),
-            "minecraft:chest{minecraft:chest:{\"a\":[2],\"b\":1}}".to_owned(),
+            "minecraft:chest{\"fields\":{\"a\":2,\"b\":1},\"id\":\"minecraft:chest\",\"kind\":\"fields\"}"
+                .to_owned(),
         ),
         (
             ("walkway::s::a.e__b.e".to_owned(), 0, 0, 1),
@@ -168,4 +259,84 @@ fn cells_leave_out_air_and_carry_properties_and_block_entities() {
     .into_iter()
     .collect();
     assert_eq!(Cells::from_ir(ir).expect("the IR reads").0, expected);
+}
+
+#[test]
+fn an_ir_whose_voxels_do_not_fill_its_dims_or_palette_is_refused() {
+    let ir = |voxels: &str| {
+        format!(
+            r#"{{"structures": {{"struct::a": {{"dims": {{"x": 2, "y": 1, "z": 1}},
+            "palette": [{{"id": "minecraft:air"}}], "voxels": {voxels}}}}}}}"#
+        )
+    };
+    let refusal = |voxels: &str| {
+        Cells::from_ir(&ir(voxels))
+            .expect_err("the IR is refused")
+            .to_string()
+    };
+    assert_eq!(
+        refusal("[0]"),
+        "`cairn lower` printed an IR the harness cannot read: `struct::a` holds 1 voxels for dims \
+         2x1x1"
+    );
+    assert_eq!(
+        refusal("[0, 1]"),
+        "`cairn lower` printed an IR the harness cannot read: `struct::a` names palette entry 1 \
+         of 1"
+    );
+}
+
+/// An edit prompt that converged with these diff ratios.
+fn edit(id: &str, ast: f64, nbt: f64) -> PromptRecord {
+    PromptRecord {
+        id: id.to_owned(),
+        topic: Topic::Openings,
+        base: Some("shed".to_owned()),
+        outcome: Outcome::Converged {
+            build: Build {
+                program: String::new(),
+                tokens: 1,
+                blocks: 1,
+            },
+            edit: Some(EditDiff {
+                ast: AstDiff {
+                    before: 1,
+                    after: 1,
+                    removed: 0,
+                    added: 0,
+                    ratio: ast,
+                },
+                nbt: NbtDiff {
+                    cells: 1,
+                    changed: 0,
+                    ratio: nbt,
+                },
+            }),
+        },
+        attempts: vec![Attempt {
+            reply: String::new(),
+            stop_reason: "end_turn".to_owned(),
+            usage: Usage::default(),
+            verdict: Verdict::Pass,
+            diagnostics: Vec::new(),
+            feedback: None,
+        }],
+    }
+}
+
+#[test]
+fn edit_stability_is_the_mean_over_the_edits_measured() {
+    let mut skipped = edit("c", 0.0, 0.0);
+    skipped.outcome = Outcome::Skipped;
+    skipped.attempts.clear();
+    let prompts = [edit("a", 0.1, 0.5), edit("b", 0.3, 0.0), skipped];
+    assert_eq!(
+        summarize(&prompts).edit_stability,
+        EditStability {
+            measured: 2,
+            of: 3,
+            ast: Some(0.2),
+            nbt: Some(0.25),
+        }
+    );
 }

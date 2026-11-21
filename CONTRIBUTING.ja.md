@@ -201,7 +201,7 @@ PR では [CHANGELOG.md](CHANGELOG.md) を直接編集しません。代わり�
 - 見直したい決定と、仕様のどこに書かれているか
 - その決定ではうまく扱えない具体的なケース
 - 構文・IR・メッセージの例を添えた代案
-- [評価指標](https://cairn.kage1020.com/ja/spec/evaluation/)への影響。[運用のルール](https://cairn.kage1020.com/ja/spec/evaluation/#133-運用のルール) に従い、`cargo eval` でベースラインの実行と提案の実行を測ります
+- [評価指標](https://cairn.kage1020.com/ja/spec/evaluation/)への影響。そのページの「運用のルール」に従い、`cargo eval` でベースラインの実行と提案の実行を測ります
 
 ## ツールチェーンの更新
 

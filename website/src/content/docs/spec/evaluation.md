@@ -47,8 +47,12 @@ The metrics rest on these terms:
 - **Attempt.** One reply. Its program is the last fenced code block marked `cairn` or `crn`. An
   attempt **passes** when it holds a program, `cairn check` reports no error on it, `cairn compile`
   builds it, and the build holds at least one block. A warning does not fail an attempt. A failed
-  attempt is answered with what `cairn check` or `cairn compile` printed, unchanged, or with a line
-  saying the reply held no program or built no block.
+  attempt is answered with a fixed message that names the command and quotes what `cairn check` or
+  `cairn compile` printed, or with a line saying the reply held no program or built no block.
+- **Cut short.** An attempt whose reply stopped at `max_tokens` is **truncated**, and one the model
+  declined to give, with a `stop_reason` of `refusal`, is **refused**. Either cuts its conversation
+  short: the conversation ends there with no correction, since what stopped the reply is not in its
+  program.
 - **Convergence.** A conversation **converges** when one of its first four attempts passes: the
   first, and up to 3 corrections. It ends at the attempt that passes.
 - **Block.** A cell other than air in a structure `cairn compile` writes at the target, as
@@ -57,14 +61,16 @@ The metrics rest on these terms:
 - **DSL token.** A token of [Lexical](/spec/syntax/#51-lexical), save the end of a line and the
   indents and dedents that nesting makes. A comment is not a token. `slot wall -> @cobblestone` is
   five tokens.
-- **AST node.** A leading `@` directive, a top-level item's own line, or a line of a body, at its
-  depth, with its arguments in key order and without the lines nested under it.
+- **AST node.** A leading `@` directive, a top-level item's own line, a top-level `edit` line, a
+  line of a body, or a row of an `assert truth` table: what it writes, at its depth, with its
+  `key=value` arguments in key order and without the lines nested under it.
 
 Over those terms, the metrics are:
 
 - **Zero-shot compile rate** is the generation prompts whose first attempt passes ÷ the generation
-  prompts.
-- **Fix convergence rate** is the generation prompts that converge ÷ the generation prompts.
+  prompts whose first attempt was not cut short.
+- **Fix convergence rate** is the generation prompts that converge ÷ the generation prompts whose
+  conversation was not cut short.
 - **Token efficiency** is the blocks ÷ the DSL tokens of the converged programs, each summed over
   the generation prompts, so a large build weighs more than a small one.
 - **Edit stability** is two ratios for each edit prompt that converged, each averaged over those
@@ -78,7 +84,9 @@ Over those terms, the metrics are:
     ([Editing model](/spec/components-editing-sites/#92-editing-model)).
 
 An edit prompt's outcome depends on its base's program, so the two rates count generation prompts
-only, and the run record also breaks them down by topic.
+only, and the run record also breaks them down by topic. A rate leaves out a prompt cut short before
+the rate could judge it, so a token budget or a declined reply does not read as the specification
+failing, and the record counts those prompts apart.
 
 ## 13.2 Reverse-conversion auxiliary metrics
 
@@ -101,14 +109,14 @@ A vocabulary addition or syntax change is adopted only if it improves these metr
 convergence rate and edit stability. One experiment settles most syntax and vocabulary questions on
 real data: give the model only the spec, have it generate, and see where the errors are.
 
-A proposal cites two runs: a **baseline run** at the commit it branches from, and a **proposal
-run** at its head. Both ask the same model, prompt set, edition, target and `max_tokens`; a
-proposal that changes the prompt set runs its baseline with the proposal's set. The proposal names
-both records by their `spec_pages` and `prompt_set` hashes and their compiler versions, and quotes
-what `cargo eval compare` prints for them. The comparison refuses two records that did not ask the
-same thing, and takes token efficiency and edit stability over the prompts both runs converged on.
-A model does not answer the same way twice, so one pair of runs settles only a wide margin; a
-proposal whose margin is a few prompts cites more pairs.
+A proposal cites two runs: a **baseline run** at the commit it branches from, and a **proposal run**
+at its head. Both ask the same model through the same backend, with the same prompt set, edition,
+target and `max_tokens`; a proposal that changes the prompt set runs its baseline with the
+proposal's set. The proposal names both records by their `spec_pages` and `prompt_set` hashes and
+their compilers, and quotes what `cargo eval compare` prints for them. The comparison refuses two
+records that did not ask the same thing, and takes token efficiency and edit stability over the
+prompts both runs converged on. A model does not answer the same way twice, so one pair of runs
+settles only a wide margin; a proposal whose margin is a few prompts cites more pairs.
 
 The reverse-conversion harness doubles as an engine that grows the `def` and `theme` standard
 library from a community schematic corpus:
@@ -130,14 +138,24 @@ See [Redstone](/spec/redstone/#147-verification).
 
 ## 13.5 Run record
 
-A run writes one JSON record. It names what the run asked: the record's `format`, the
-`compiler_version` of the checkout, the `model` id, the `edition` and `target`, the `max_tokens`
-each request carries, and two hashes. `prompt_set` is the sha256 of the prompts and the fixed
-messages the harness sends, and `spec_pages` the sha256 of the spec pages the system prompt carries.
-The record then holds the metrics of [§13.1](#131-primary-metrics), the requests the run made and
-the tokens they used, and each prompt's outcome: every attempt's reply, verdict, diagnostics and
-the answer it drew, and the program it converged on with that program's DSL tokens, blocks and, for
-an edit prompt, its diffs.
+A run writes one JSON record. It names what the run asked: the record's `format`, the compiler, the
+`backend` that answered, the `model` id, the `edition` and `target`, the `max_tokens` each request
+carries, and two hashes. The compiler is the `compiler_version` the `cairn` binary reports and, when
+the harness built that binary from its checkout, the `compiler_commit` it was built at, marked
+`-dirty` when tracked files had uncommitted changes, so two runs of one release still tell their
+compilers apart. The `backend` is `api` for the Messages API, or `replay` for replies written down
+before, whose `model` is only the name the run was given. `prompt_set` is the sha256 of the prompts
+and the fixed messages the harness sends, and `spec_pages` the sha256 of the spec pages the system
+prompt carries. The record then holds the metrics of [§13.1](#131-primary-metrics), the requests the
+run made and the tokens they used, and each prompt's outcome: every attempt's reply, verdict,
+diagnostics and the answer it drew, and the program it converged on with that program's DSL tokens,
+blocks and, for an edit prompt, its diffs.
+
+A run the harness cannot finish, because the model gave no reply or `cairn` failed in a way no
+program explains, stops at that attempt and still writes its record. Its `stopped` names the prompt
+and the attempt, why the run stopped, and the program it could not check, and its metrics cover the
+prompts that ended before it. `cargo eval compare` refuses a stopped record, a record of another
+`format`, and two records whose backends differ.
 
 The record names the model it asked. The harness has no default model, so `--model` is required
 and every run names one.

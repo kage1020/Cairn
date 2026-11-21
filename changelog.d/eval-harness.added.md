@@ -10,5 +10,5 @@
   proposal record, as the Operating rule asks a proposal to cite them.
 - *(cli)* `cairn lower --edition <edition> --target <version>` lowers against that version's id
   table, as `cairn check` does with the same pair, and prints the IR `cairn compile` writes at that
-  target. An unshipped version is refused before the file is read, and `--target` without
-  `--edition` is a usage error.
+  target. An unshipped version is refused after the source's findings are reported, as `cairn
+  check` refuses it, and `--target` without `--edition` is a usage error.
