@@ -12,7 +12,7 @@ The structure never writes a concrete block name. It carries `mat_slot` injectio
 separates structure (where the walls are) from style (which blocks, what detailing).
 
 ```
-def cottage class=house size=9x7:
+def cottage size=9x7:
   floor  id=floor  mat_slot=floor
   walls  id=walls  class=outer mat_slot=wall height=4
   roof   id=roof   kind=gable  mat_slot=roof
