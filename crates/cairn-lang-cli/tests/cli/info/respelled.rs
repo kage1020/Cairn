@@ -175,6 +175,24 @@ fn a_walkway_path_is_named_where_it_is_written() {
 }
 
 #[test]
+fn a_part_a_selector_row_lays_is_named_where_the_row_binds_it() {
+    let fixture = Fixture::new(
+        "theme t:\n  slot wall -> @cobblestone\n  walls[class=outer] -> trim=@chain\n\n\
+         struct s size=5x4\n  walls class=outer mat_slot=wall height=2\n",
+    );
+    let run = info(&fixture, "java", &[]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(respelled_row(&run), "Java: minecraft:chain");
+    assert_eq!(
+        respelled_notes(&fixture, &run),
+        [
+            "note: s.crn:3:30: `minecraft:chain` is written `minecraft:iron_chain` at java 26.3, \
+             per the registry pack's alias table"
+        ],
+    );
+}
+
+#[test]
 fn a_theme_floor_leaves_the_versions_below_it_unweighed() {
     let fixture = Fixture::new(&painting("stone_bricks", "oak_sign", "stone").replacen(
         "theme t:\n",

@@ -1,6 +1,6 @@
 //! The `arguments` pass: each `key=value` and member selector judged against the vocabulary of
 //! the member's role or the header's, and each binding on a known keyword's theme-selector row
-//! reported as ignored whatever its key. A theme selector's attribute (`window[tags=...]`) widens
+//! against the keys that keyword binds. A theme selector's attribute (`window[tags=...]`) widens
 //! a role's vocabulary for its keyword only.
 
 use indexmap::IndexMap;
@@ -8,8 +8,8 @@ use indexmap::IndexMap;
 use crate::ast::{Item, Module, ThemeRule, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::intent::{
-    Actuator, IntentModule, Member, MemberRole, SelectorKeys, SelectorValue, UNIVERSAL_ARGUMENTS,
-    Unread, ValueWithSpan, role_of, selector_keys,
+    Actuator, BindingKey, IntentModule, Member, MemberRole, SelectorKeys, SelectorValue,
+    UNIVERSAL_ARGUMENTS, Unread, ValueWithSpan, role_of, selector_keys,
 };
 use crate::prose::or_list;
 use crate::suggest::{did_you_mean_note, nearest_match, one_edit_match};
@@ -32,8 +32,8 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
     }
 }
 
-/// One `W_IGNORED_ARGUMENT` per selector binding as written; the IR keeps only the last value of a
-/// key a row repeats.
+/// One `E_UNKNOWN_ARGUMENT` per selector binding as written whose key its keyword does not bind;
+/// the IR keeps only the last value of a key a row repeats.
 fn check_selector_bindings(module: &Module, sink: &mut DiagnosticSink) {
     for item in &module.items {
         let Item::Theme { body, .. } = item else {
@@ -46,16 +46,15 @@ fn check_selector_bindings(module: &Module, sink: &mut DiagnosticSink) {
             else {
                 continue;
             };
+            let role = role_of(keyword);
             // An unknown keyword's own finding carries the repair.
-            if matches!(role_of(keyword), MemberRole::Other(_)) {
+            if matches!(role, MemberRole::Other(_)) {
                 continue;
             }
             for binding in bindings {
-                sink.push(unlowered_binding(
-                    keyword,
-                    &binding.key,
-                    &binding.value.span,
-                ));
+                if role.binding_key(&binding.key).is_none() {
+                    sink.push(unbindable_key(&role, &binding.key, &binding.value.span));
+                }
             }
         }
     }
@@ -174,24 +173,57 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
     }
 }
 
-/// A `key=value` on the right of a theme selector's arrow, which no pass lowers yet
-/// (`spec/materials-themes` "Slots as dependency injection").
-fn unlowered_binding(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
-    Diagnostic {
-        code: DiagnosticCode::IgnoredArgument,
-        span: span.clone(),
-        primary: format!(
-            "`{key}=` is bound by a theme selector on `{keyword}`, and no pass lowers a \
-             selector's bindings yet; the value was ignored",
-        ),
-        notes: vec![DiagnosticNote {
+/// A key on the right of a theme selector's arrow that `role`'s keyword lays no part for
+/// (`spec/materials-themes` "Selector bindings").
+fn unbindable_key(role: &MemberRole, key: &str, span: &crate::error::Span) -> Diagnostic {
+    let keyword = role.keyword();
+    let bound: Vec<&str> = role.binding_keys().iter().map(|b| b.key()).collect();
+    let suggestion = nearest_match(key, bound.iter().copied());
+    let mut notes = Vec::with_capacity(3);
+    notes.extend(suggestion.map(did_you_mean_note));
+    notes.push(DiagnosticNote {
+        span: None,
+        message: if bound.is_empty() {
+            format!(
+                "a theme binds no key on a `{keyword}`, so no row on it builds anything; delete \
+                 the row"
+            )
+        } else {
+            format!("expected one of: {}", bound.join(", "))
+        },
+    });
+    if let Some(binding) = BindingKey::from_key(key) {
+        let hosts: Vec<String> = binding
+            .keywords()
+            .iter()
+            .map(|host| format!("`{host}`"))
+            .collect();
+        let hosts = or_list(&hosts).expect("every binding key has a keyword that binds it");
+        notes.push(DiagnosticNote {
             span: None,
-            message: "the build is the same with this binding or without it; delete it, or \
-                      the whole row if it binds nothing else, or keep it and expect no effect \
-                      until selector bindings are lowered"
-                .into(),
-        }],
-        data: None,
+            message: format!(
+                "`{key}=` lays {} of a {hosts}, so it belongs on a {hosts} row",
+                binding.part(),
+            ),
+        });
+    } else if role
+        .accepted_arguments()
+        .is_some_and(|accepted| accepted.contains(&key))
+    {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!(
+                "`{key}=` is an argument of the `{keyword}` line itself, and a theme binds only \
+                 the block of a part; write it on the member"
+            ),
+        });
+    }
+    Diagnostic {
+        code: DiagnosticCode::UnknownArgument,
+        span: span.clone(),
+        primary: Field::Binding.nothing_reads(keyword, key),
+        notes,
+        data: Some(unknown_argument_data(key, suggestion)),
     }
 }
 
@@ -296,6 +328,8 @@ enum Field {
     /// The member's own `[key=value]`.
     Selector,
     Header,
+    /// A key right of a theme selector row's arrow.
+    Binding,
 }
 
 impl Field {
@@ -304,6 +338,7 @@ impl Field {
             Self::Argument => format!("`{key}=` is not an argument `{keyword}` reads"),
             Self::Selector => format!("`{key}=` is not an attribute a `{keyword}` carries"),
             Self::Header => format!("`{key}=` is not an argument a `{keyword}` header reads"),
+            Self::Binding => format!("`{key}=` is not a key a theme binds on `{keyword}`"),
         }
     }
 }
