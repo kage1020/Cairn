@@ -4,15 +4,35 @@ use std::path::Path;
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::lock::{
-    HashHex, LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement, LockTarget, LockWalkway,
-    Lockfile, LockfileRead, MemberSensitivity, hash_resolved_ir, hash_source,
+    LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
+    LockfileRead, MemberSensitivity, hash_resolved_ir, hash_source,
 };
+use cairn_lang_core::resolve::{FloorVerdict, SemanticSensitiveFinding};
 use cairn_lang_core::{CAIRN_VERSION, Edition};
 use cairn_lang_formats::data_version::ResolvedTarget;
+use cairn_lang_formats::registry::{builtin_constraints, builtin_pack};
 
-/// Warn where the lockfile at `lock_path` records another target, as `spec/versioning-editions`
-/// "Provenance and lock" does, or cannot be read; an absent one is silent.
-pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target: &ResolvedTarget) {
+/// The findings of each member of `block_ir` the constraint catalog lists as meaning something
+/// else across a boundary version of `edition`, the edition `target` is a version of.
+pub(crate) fn sensitive_members(
+    block_ir: &BlockArrayIr,
+    edition: Edition,
+    target: &ResolvedTarget,
+) -> Vec<Vec<SemanticSensitiveFinding>> {
+    builtin_pack(edition)
+        .view(Some(target.mc_version()))
+        .semantic_sensitive(builtin_constraints(), block_ir)
+}
+
+/// Warn where the lockfile at `lock_path` records another target than this build's, whose
+/// [`sensitive_members`] are `sensitive`, or cannot be read, as `spec/versioning-editions`
+/// "Provenance and lock" does.
+pub(crate) fn report_previous_target(
+    lock_path: &Path,
+    edition: Edition,
+    target: &ResolvedTarget,
+    sensitive: &[Vec<SemanticSensitiveFinding>],
+) {
     let path = lock_path.display();
     let previous = match LockfileRead::from_path(lock_path) {
         Ok(Some(previous)) => previous,
@@ -27,12 +47,9 @@ pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target:
         }
     };
     match previous {
-        LockfileRead::Valid(previous) => report_target_change(
-            &previous.target,
-            &previous.member_version_sensitivity,
-            edition,
-            target,
-        ),
+        LockfileRead::Valid(previous) => {
+            report_target_change(&previous.target, sensitive, edition, target);
+        }
         LockfileRead::RefusedIdentifier(refused) => {
             eprintln!(
                 "warning: {path}: the existing lockfile records an identifier this build refuses \
@@ -40,12 +57,7 @@ pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target:
                  replaced",
                 refused.error,
             );
-            report_target_change(
-                &refused.target,
-                &refused.member_version_sensitivity,
-                edition,
-                target,
-            );
+            report_target_change(&refused.target, sensitive, edition, target);
         }
         LockfileRead::NewerSchema { found, supported } => eprintln!(
             "warning: {path}: the existing lockfile is schema version {found} and this build reads \
@@ -57,10 +69,11 @@ pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target:
     }
 }
 
-/// Warn where `verified`, the previous lockfile's target, differs from this build's.
+/// Warn where `verified`, the previous lockfile's target, differs from this build's, naming the
+/// members of `sensitive` whose boundary lies between the two.
 fn report_target_change(
     verified: &LockTarget,
-    sensitive: &[MemberSensitivity],
+    sensitive: &[Vec<SemanticSensitiveFinding>],
     edition: Edition,
     target: &ResolvedTarget,
 ) {
@@ -78,16 +91,57 @@ fn report_target_change(
         describe_verified(verified, show_edition),
         describe_now(&now, show_edition),
     );
-    if sensitive.is_empty() {
+    let listed: Vec<String> = sensitive
+        .iter()
+        .filter_map(|findings| {
+            let crossed = crossed(findings, verified, edition, target);
+            let first = crossed.first()?;
+            let changes: Vec<String> = crossed.iter().map(|finding| change(finding)).collect();
+            Some(format!("{} ({})", first.member, changes.join(", ")))
+        })
+        .collect();
+    if listed.is_empty() {
         return;
     }
-    let ids: Vec<&str> = sensitive.iter().map(|m| m.id.as_str()).collect();
     eprintln!(
         "W_SEMANTIC_SENSITIVITY: {} member{} may resolve differently: {}",
-        ids.len(),
-        if ids.len() == 1 { "" } else { "s" },
-        ids.join(", "),
+        listed.len(),
+        if listed.len() == 1 { "" } else { "s" },
+        listed.join(", "),
     );
+}
+
+/// What `finding` says changes, and where: `item format at 1.20.5`.
+fn change(finding: &SemanticSensitiveFinding) -> String {
+    format!("{} at {}", finding.reason, finding.boundary_version)
+}
+
+/// The findings of `sensitive`, all of `edition`, whose boundary `target` and `verified` lie on
+/// different sides of; every one when `verified` is no version of the edition's table, and none
+/// when it is of the other edition.
+fn crossed<'s>(
+    sensitive: &'s [SemanticSensitiveFinding],
+    verified: &LockTarget,
+    edition: Edition,
+    target: &ResolvedTarget,
+) -> Vec<&'s SemanticSensitiveFinding> {
+    if verified.edition != edition {
+        return Vec::new();
+    }
+    let order = builtin_pack(edition).version_order();
+    let before = order.key_of(&verified.mc_version);
+    let after = order
+        .key_of(target.mc_version())
+        .expect("a resolved target is a row of its edition's version order");
+    let below = |boundary: &str, key| order.verdict(boundary, key) == FloorVerdict::Below;
+    sensitive
+        .iter()
+        .filter(|finding| {
+            before.is_none_or(|before| {
+                below(&finding.boundary_version, before) != below(&finding.boundary_version, after)
+            })
+        })
+        .collect()
 }
 
 /// A lock's target in its verified spelling, `1.20.4/DataVersion 3700`, led by the edition when
@@ -140,13 +194,19 @@ pub(crate) fn build_lockfile(
             data_version: target.version_int(),
         },
         inputs: LockInputs {
-            // No constraint catalog ships, so its hash is zero.
             registry_pack_hash: target.registry_pack().bytes_hash().clone(),
-            constraint_catalog_hash: HashHex::zero(),
+            constraint_catalog_hash: builtin_constraints().hash().clone(),
         },
         resolved_ir_hash: hash_resolved_ir(block_ir)?,
         verified: true,
-        member_version_sensitivity: vec![],
+        member_version_sensitivity: sensitive_members(block_ir, edition, target)
+            .iter()
+            .flatten()
+            .map(|finding| MemberSensitivity {
+                id: finding.member.clone(),
+                reason: change(finding),
+            })
+            .collect(),
         placements: block_ir
             .placements
             .values()

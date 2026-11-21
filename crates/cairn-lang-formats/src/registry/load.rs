@@ -1,4 +1,5 @@
-//! Loads a [`RegistryPack`] from the packs embedded at compile time, or from a directory.
+//! Loads a [`RegistryPack`] from the packs embedded at compile time, or from a directory, and the
+//! constraint catalog checked against a pair of them.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -6,12 +7,15 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    AbsentConcept, BlockIdSet, BlockState, DeclaredElsewhere, DomainFault, IdStanding, Joins,
-    OutOfDomain, StateDomain, TargetRegistry, UnmappedState,
+    AbsentConcept, BlockArrayIr, BlockIdSet, BlockState, Constraint, Contents, DeclaredElsewhere,
+    DomainFault, Face, Faces, IdStanding, JoinKind, Joins, OutOfDomain, StateDomain, Support,
+    TargetRegistry, UnmappedState,
 };
 use cairn_lang_core::check::VersionTables;
 use cairn_lang_core::lock::HashHex;
-use cairn_lang_core::resolve::{SpellingTable, VersionOrder, compare_versions};
+use cairn_lang_core::resolve::{
+    SemanticSensitiveFinding, SpellingTable, VersionOrder, compare_versions,
+};
 use cairn_lang_core::suggest::nearest_match;
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
@@ -21,6 +25,7 @@ use super::absent::{AbsentError, AbsentIndex};
 use super::aliases::{AliasError, AliasIndex};
 use super::blocks::{BlocksError, BlocksIndex};
 use super::connections::{ConnectionIndex, ConnectionsError};
+use super::constraints::{ConstraintIndex, ConstraintsCatalog, ConstraintsError};
 use super::data_versions::{
     BedrockTarget, DataVersionEntry, DataVersionTable, JavaTarget, UnsupportedTarget,
 };
@@ -144,6 +149,8 @@ pub struct PackView<'a> {
     /// The targetable versions, which alone a note may offer as a `--target`.
     targetable: Vec<&'a str>,
     connections: &'a ConnectionIndex,
+    /// The constraint catalog the view's checks read; `None` runs none.
+    constraints: Option<&'a ConstraintIndex>,
     /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
     label: String,
 }
@@ -319,12 +326,104 @@ impl TargetRegistry for PackView<'_> {
             .cloned()
             .collect()
     }
+
+    fn constraint(&self, state: &BlockState) -> Option<Constraint> {
+        // What holds a block is one version's answer, so an unpinned view judges none.
+        self.mc_version?;
+        let catalog = self.constraints?;
+        self.agreed_of(state, |id| catalog.constraint(id, &state.properties))?
+    }
+
+    fn holds(&self, state: &BlockState, host: &BlockState) -> Option<bool> {
+        let catalog = self.constraints?;
+        let (toward, needs) = match self.constraint(state)? {
+            Constraint::Hangs { host } => (host, Support::Sturdy),
+            Constraint::Rests { host, needs } => (host.face(), needs),
+            Constraint::Falls => return None,
+        };
+        let face = toward.opposite();
+        if self.sturdy(host)?.contains(face) {
+            return Some(true);
+        }
+        let on_any_face = self.agreed_of(host, |host_id| {
+            self.agreed_of(state, |id| {
+                catalog.rests_on_any_face(id, &state.properties, host_id)
+            })
+        })??;
+        if on_any_face || needs == Support::Sturdy {
+            return Some(on_any_face);
+        }
+        let post = matches!(face, Face::Down | Face::Up)
+            && matches!(
+                self.joins(host)?.kind,
+                Some(JoinKind::Pane | JoinKind::Wall | JoinKind::Fence { .. })
+            );
+        let centre = self.agreed_of(host, |id| catalog.gives_centre(id, &host.properties, face))?;
+        Some(post || centre)
+    }
+
+    fn keeps_water(&self, state: &BlockState, face: Face) -> Option<bool> {
+        self.mc_version?;
+        self.constraints?;
+        Some(self.sturdy(state)?.contains(face))
+    }
+
+    fn contents(&self, state: &BlockState) -> Option<Contents> {
+        self.agreed_of(state, Contents::of_id)
+    }
 }
 
 /// A block's canonical states at one version: each property with the values it takes.
 type Domain = IndexMap<String, Vec<String>>;
 
 impl<'a> PackView<'a> {
+    /// This view, with `catalog`'s checks run on what it lowers (`spec/lint` "Constraint checks").
+    #[must_use]
+    pub fn with_constraints(self, catalog: &'a ConstraintIndex) -> Self {
+        Self {
+            constraints: Some(catalog),
+            ..self
+        }
+    }
+
+    /// The findings of each member of `block_ir` whose blocks `catalog` lists as meaning something
+    /// else across a boundary version of this view's edition, one per boundary, member by member.
+    #[must_use]
+    pub fn semantic_sensitive(
+        &self,
+        catalog: &ConstraintIndex,
+        block_ir: &BlockArrayIr,
+    ) -> Vec<Vec<SemanticSensitiveFinding>> {
+        let mut members = Vec::new();
+        for member in block_ir.members.values().flatten() {
+            let name = member
+                .id
+                .clone()
+                .or_else(|| member.address.as_ref().map(ToString::to_string))
+                .unwrap_or_else(|| member.role.clone());
+            let mut found: Vec<SemanticSensitiveFinding> = Vec::new();
+            for block in &member.resolved_state {
+                for id in self.canonical_ids(&block.state) {
+                    for boundary in catalog.boundaries_of(self.edition, &id) {
+                        let finding = SemanticSensitiveFinding {
+                            edition: self.edition,
+                            member: name.clone(),
+                            reason: boundary.reason.to_owned(),
+                            boundary_version: boundary.version.to_owned(),
+                        };
+                        if !found.contains(&finding) {
+                            found.push(finding);
+                        }
+                    }
+                }
+            }
+            if !found.is_empty() {
+                members.push(found);
+            }
+        }
+        members
+    }
+
     /// The id the pinned version writes for the canonical token `token` when it is not the
     /// token's own, with the table that maps it there (`spec/materials-themes` "Mappings across
     /// version and edition"); `None` when the version writes the token's own id, refuses its id or
@@ -409,6 +508,51 @@ impl<'a> PackView<'a> {
             })
         });
         StateDomain::Checked(outside.collect())
+    }
+
+    /// The canonical blocks `state` names at the pinned version, or at any version unpinned.
+    fn canonical_ids(&self, state: &BlockState) -> Vec<String> {
+        let Edition::Bedrock = self.edition else {
+            return vec![state.id.clone()];
+        };
+        let Some(maps) = self.state_maps else {
+            return Vec::new();
+        };
+        let versions: Vec<&str> = self
+            .mc_version
+            .map_or_else(|| maps.versions().collect(), |version| vec![version]);
+        let mut ids: Vec<String> = Vec::new();
+        for states in versions.into_iter().filter_map(|version| maps.at(version)) {
+            for id in states.java_ids(&state.id, &state.properties) {
+                if !ids.iter().any(|held| held == id) {
+                    ids.push(id.to_owned());
+                }
+            }
+        }
+        ids
+    }
+
+    /// What `ask` answers of each canonical block `state` names, or `None` when they disagree or
+    /// it names none.
+    fn agreed_of<T: PartialEq>(&self, state: &BlockState, ask: impl Fn(&str) -> T) -> Option<T> {
+        let mut answers = self.canonical_ids(state).into_iter().map(|id| ask(&id));
+        let first = answers.next()?;
+        answers.all(|other| other == first).then_some(first)
+    }
+
+    /// The faces of `state` its model covers whole, at the pinned version or at every version
+    /// alike unpinned; `None` when the tables cannot say or the versions disagree.
+    fn sturdy(&self, state: &BlockState) -> Option<Faces> {
+        if let Some(version) = self.mc_version {
+            return Some(self.joins_at(version, state)?.sturdy);
+        }
+        let mut said = self
+            .connections
+            .versions()
+            .filter_map(|version| self.joins_at(version, state))
+            .map(|joins| joins.sturdy);
+        let first = said.next()?;
+        said.all(|other| other == first).then_some(first)
     }
 
     /// What `state` is to the connection rules at `version`, read as the canonical blocks its id
@@ -1074,6 +1218,7 @@ impl RegistryPack {
                 .map(|e| e.mc_version.as_str())
                 .collect(),
             connections: &self.connections,
+            constraints: None,
             label: match mc_version {
                 Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
                 None => self.manifest.edition.as_str().to_owned(),
@@ -1140,6 +1285,67 @@ pub fn load_builtin_pack(edition: Edition) -> Result<RegistryPack, RegistryError
         Edition::Bedrock => BUILTIN_BEDROCK,
     };
     load_pack(&files, edition)
+}
+
+/// The built-in constraint catalog's text.
+const BUILTIN_CONSTRAINTS: &str = include_str!("../../registry-data/constraints.json");
+
+/// Parse and validate `text` as a constraint catalog against the registry packs.
+///
+/// # Errors
+///
+/// [`ConstraintsError`] when `text` does not parse or validate.
+pub fn parse_constraints(
+    text: &str,
+    java: &RegistryPack,
+    bedrock: &RegistryPack,
+) -> Result<ConstraintIndex, ConstraintsError> {
+    let catalog: ConstraintsCatalog =
+        serde_json::from_str(text).map_err(|err| ConstraintsError::Parse {
+            message: err.to_string(),
+        })?;
+    ConstraintIndex::from_catalog(
+        catalog,
+        HashHex::from_bytes(text.as_bytes()),
+        java.blocks(),
+        [&java.version_order(), &bedrock.version_order()],
+    )
+}
+
+/// Parse the built-in catalog against the built-in packs, returning the error
+/// [`builtin_constraints`] panics on.
+///
+/// # Errors
+///
+/// [`ConstraintsError`] when the embedded catalog is corrupt.
+pub fn load_builtin_constraints() -> Result<ConstraintIndex, ConstraintsError> {
+    parse_constraints(
+        BUILTIN_CONSTRAINTS,
+        builtin_pack(Edition::Java),
+        builtin_pack(Edition::Bedrock),
+    )
+}
+
+/// The built-in constraint catalog, parsed once per process.
+///
+/// # Panics
+///
+/// When the embedded catalog fails to load, which means the build itself is broken.
+pub fn builtin_constraints() -> &'static ConstraintIndex {
+    static CATALOG: OnceLock<ConstraintIndex> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        load_builtin_constraints()
+            .expect("built-in constraint catalog failed to load — this is a build invariant")
+    })
+}
+
+/// The built-in pack of `edition` seen through `pinned`, running the built-in catalog's checks
+/// (`spec/lint` "Constraint checks").
+#[must_use]
+pub fn builtin_view(edition: Edition, pinned: Option<&str>) -> PackView<'_> {
+    builtin_pack(edition)
+        .view(pinned)
+        .with_constraints(builtin_constraints())
 }
 
 /// Loads a Java pack from a directory holding `pack.json` and the files it names.

@@ -83,6 +83,7 @@ fn every_code_renders_its_documented_string() {
             "W_INTENDED_TARGET_UNSUPPORTED",
             "W_INVALID_CAIRN_VERSION",
             "W_INVALID_WALKWAY_IDENT",
+            "W_NO_ATTACHMENT_FACE",
             "W_NO_THEME_BOUND",
             "W_PALETTE_TOO_LARGE",
             "W_PHASE_CONFLICT",
@@ -92,8 +93,10 @@ fn every_code_renders_its_documented_string() {
             "W_THEME_VARIANT_REBOUND",
             "W_TRUTH_TABLE_DUPLICATE_ROW",
             "W_TRUTH_TABLE_PARTIAL",
+            "W_UNSUPPORTED_BLOCK",
             "W_UNUSED_DEF",
             "W_WALKWAY_BLOCKED",
+            "W_WATER_SPILL",
         ],
     );
 }
@@ -174,6 +177,7 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "W_INTENDED_TARGET_UNSUPPORTED",
             "W_INVALID_CAIRN_VERSION",
             "W_INVALID_WALKWAY_IDENT",
+            "W_NO_ATTACHMENT_FACE",
             "W_NO_THEME_BOUND",
             "W_PALETTE_TOO_LARGE",
             "W_PHASE_CONFLICT",
@@ -183,8 +187,10 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
             "W_THEME_VARIANT_REBOUND",
             "W_TRUTH_TABLE_DUPLICATE_ROW",
             "W_TRUTH_TABLE_PARTIAL",
+            "W_UNSUPPORTED_BLOCK",
             "W_UNUSED_DEF",
             "W_WALKWAY_BLOCKED",
+            "W_WATER_SPILL",
         ],
         "the prefix is not the severity: `E_THEME_SELECTOR_UNMATCHED` is a \
          warning and most `W_` codes are partial-build degradations without \
