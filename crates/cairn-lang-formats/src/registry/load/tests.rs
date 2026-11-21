@@ -1032,6 +1032,7 @@ fn bedrock_pack(data_versions: &'static str) -> Result<RegistryPack, RegistryErr
         blocks: "",
         aliases: "",
         absent: "",
+        meanings: "",
         connections: "",
         states: None,
         sensitivity: None,
@@ -1530,6 +1531,7 @@ fn a_state_map_the_binary_does_not_embed_is_refused() {
         blocks: "",
         aliases: "",
         absent: "",
+        meanings: "",
         connections: "",
         states: None,
         sensitivity: Some(NO_SENSITIVITY),
@@ -1888,6 +1890,187 @@ fn two_reads_agree_on_what_they_share_and_on_nothing_else() {
         ..Joins::default()
     };
     assert_eq!(agreed(pane, Joins::default()), None);
+}
+
+/// Writes a pack whose `meanings` component is `meanings_json`, over `blocks_json`.
+fn write_pack_with_meanings(tmp: &Path, blocks_json: &str, meanings_json: &str) {
+    write_full_pack(
+        tmp,
+        r#"{
+            "schema_version": 1,
+            "edition": "java",
+            "name": "test",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "materials": "materials.json",
+                "blocks": "blocks.json",
+                "meanings": "meanings.json"
+            }
+        }"#,
+        good_data_versions(),
+        &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+        blocks_json,
+    );
+    std::fs::write(tmp.join("meanings.json"), meanings_json).expect("write meanings");
+}
+
+/// `stone` split by `kind` into `oak_planks` and `second`.
+fn meanings_naming(second: &str) -> String {
+    format!(
+        r#"{{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "tokens": [{{
+                "token": "stone",
+                "meaning": "kind",
+                "blocks": {{ "plank": "oak_planks", "pale": "{second}" }}
+            }}]
+        }}"#
+    )
+}
+
+#[test]
+fn a_meaning_token_picks_its_block_and_drops_itself() {
+    let pack = load_from_dir_or_die("meanings", |dir| {
+        write_pack_with_meanings(dir, good_blocks(), &meanings_naming("pale_oak_planks"));
+    });
+    let mut asked = BlockState::bare("minecraft:stone");
+    asked
+        .properties
+        .insert("kind".to_owned(), "pale".to_owned());
+    assert_eq!(
+        pack.view(None).meant(&asked),
+        Some(BlockState::bare("minecraft:pale_oak_planks"))
+    );
+}
+
+#[test]
+fn a_meaning_row_naming_a_block_no_version_writes_is_refused() {
+    let err = load_from_dir_err("meanings-unwritten", |dir| {
+        write_pack_with_meanings(dir, good_blocks(), &meanings_naming("paleoak_planks"));
+    });
+    let RegistryError::MeaningUnwritten { token, block } = err else {
+        panic!("expected MeaningUnwritten, got {err:?}");
+    };
+    assert_eq!(
+        (token.as_str(), block.as_str()),
+        ("minecraft:stone", "minecraft:paleoak_planks")
+    );
+}
+
+#[test]
+fn a_meaning_token_its_block_has_as_a_state_is_refused() {
+    let err = load_from_dir_err("meanings-state", |dir| {
+        write_pack_with_meanings(
+            dir,
+            r#"{
+                "schema_version": 2,
+                "namespace": "minecraft",
+                "base": { "mc_version": "1.20.4", "blocks": { "oak_planks": {}, "stone": {} } },
+                "diffs": [{
+                    "mc_version": "1.21.4", "inherits": "1.20.4",
+                    "added": { "pale_oak_planks": {} },
+                    "changed": { "stone": { "kind": ["plank", "pale"] } }
+                }]
+            }"#,
+            &meanings_naming("pale_oak_planks"),
+        );
+    });
+    let RegistryError::MeaningIsAState {
+        token,
+        meaning,
+        mc_version,
+    } = err
+    else {
+        panic!("expected MeaningIsAState, got {err:?}");
+    };
+    assert_eq!(
+        (token.as_str(), meaning.as_str(), mc_version.as_str()),
+        ("minecraft:stone", "kind", "1.21.4")
+    );
+}
+
+#[test]
+fn the_meanings_bytes_reach_the_pack_hash() {
+    let one = load_from_dir_or_die("meanings-hash-one", |dir| {
+        write_pack_with_meanings(dir, good_blocks(), &meanings_naming("pale_oak_planks"));
+    });
+    let other = load_from_dir_or_die("meanings-hash-other", |dir| {
+        write_pack_with_meanings(dir, good_blocks(), &meanings_naming("stone"));
+    });
+    assert_ne!(one.bytes_hash(), other.bytes_hash());
+}
+
+#[test]
+fn a_meaning_row_whose_token_no_version_writes_is_refused() {
+    let typo =
+        meanings_naming("pale_oak_planks").replace(r#""token": "stone""#, r#""token": "stoen""#);
+    let err = load_from_dir_err("meanings-token", |dir| {
+        write_pack_with_meanings(dir, good_blocks(), &typo);
+    });
+    let RegistryError::MeaningTokenUnwritten { token } = err else {
+        panic!("expected MeaningTokenUnwritten, got {err:?}");
+    };
+    assert_eq!(token, "minecraft:stoen");
+}
+
+#[test]
+fn a_pack_without_block_tables_takes_its_meaning_rows_unchecked() {
+    let pack = load_from_dir_or_die("meanings-no-blocks", |dir| {
+        write_pack_with_materials(
+            dir,
+            r#"{
+                "schema_version": 1,
+                "edition": "java",
+                "name": "test",
+                "description": "test",
+                "files": {
+                    "data_versions": "data_versions.json",
+                    "materials": "materials.json",
+                    "meanings": "meanings.json"
+                }
+            }"#,
+            good_data_versions(),
+            &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
+        );
+        std::fs::write(dir.join("meanings.json"), meanings_naming("paleoak_planks"))
+            .expect("write meanings");
+    });
+    let mut asked = BlockState::bare("minecraft:stone");
+    asked
+        .properties
+        .insert("kind".to_owned(), "pale".to_owned());
+    assert_eq!(
+        pack.view(None).meant(&asked),
+        Some(BlockState::bare("minecraft:paleoak_planks"))
+    );
+}
+
+/// Bedrock's stairs take `facing` through its state map, which holds Bedrock's canonical states.
+#[test]
+fn a_meaning_token_the_state_map_gives_its_block_is_refused() {
+    let files = BuiltinFiles {
+        meanings: r#"{
+            "schema_version": 1,
+            "namespace": "minecraft",
+            "tokens": [{ "token": "oak_stairs", "meaning": "facing", "blocks": { "north": "oak_planks" } }]
+        }"#,
+        ..BUILTIN_BEDROCK
+    };
+    let err = load_pack(&files, Edition::Bedrock).expect_err("the row hides a state");
+    let RegistryError::MeaningIsAState {
+        token,
+        meaning,
+        mc_version,
+    } = err
+    else {
+        panic!("expected MeaningIsAState, got {err:?}");
+    };
+    assert_eq!(
+        (token.as_str(), meaning.as_str(), mc_version.as_str()),
+        ("minecraft:oak_stairs", "facing", "1.21.0")
+    );
 }
 
 /// A Bedrock pack whose state map holds `oak_log` and whose one material is `material`.
