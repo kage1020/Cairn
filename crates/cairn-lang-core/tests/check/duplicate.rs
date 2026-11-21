@@ -1059,6 +1059,16 @@ mod selector {
         }
     }
 
+    #[test]
+    fn a_level_attribute_compares_as_label_text_and_chained_brackets_as_one() {
+        let src = "theme medieval:\n  slot glass -> @glass_pane\n  \
+                   window[level=upper][side=front] -> frame=@spruce_wood\n  \
+                   window[side=front,level=\"upper\"] -> frame=@dark_oak_wood\n\n\
+                   struct cottage size=9x7\n  level id=upper y=3\n    \
+                   window side=front offset=2 y=1 size=2x2 mat_slot=glass\n";
+        assert_eq!(row_codes(src), vec!["E_DUPLICATE_SELECTOR"]);
+    }
+
     /// Two rows binding one key, filtering on `attr` bare and quoted.
     fn rows_quoting(attr: &str) -> String {
         let (key, value) = attr.split_once('=').expect("`key=value`");
