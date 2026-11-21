@@ -99,7 +99,7 @@ title: "11. Lint と制約検証"
 | `W_STATE_LITERAL_UNCHECKED` | 正規トークンのステートリテラル (`@oak_log[axis=x]`) を書かれたまま使った。固定したターゲットのパックがそのブロックのステートを記録しておらず、照らし合わせる先がない ([バージョンとエディション](/ja/spec/versioning-editions/#ステートはターゲットでのブロックのステートと照らし合わせる))。 |
 | `W_NO_THEME_BOUND` | `mat_slot=` を読むスコープにテーマが割り当てられていないので、そこで読む `mat_slot=` はどれもブロックに解決されない。 |
 | `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定したエディションでは別のバリアントを割り当てた ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
-| `W_INTENT_DEGRADED` | パレットのエントリが、固定したバージョンでは表せない意図を失った。1.26.60 より前の Bedrock での階段の `shape` や、そのバージョンが自分で導くのにメンバーが書いたステート (そこでのダストの `connect=` など) がその例で、パックの `sensitivity` の文言で、失った意図ごとに 1 行出る ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
+| `W_INTENT_DEGRADED` | パレットのエントリが、固定したバージョンでは表せない意図を失った。1.26.60 より前の Bedrock での階段の `shape` や、そのバージョンが自分で導くのにメンバーが書いたステート (そこでのダストの `connect=` など) がその例で、パックの `sensitivity` の文言で、または隣にもう一方の半分がない Bedrock のチェストの半分の `type` ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階)) で、失った意図ごとに 1 行出る ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | 置き換えるロックが、別の `(edition, version)` を検証していた。行には両方が示される ([バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。 |
 | `W_SEMANTIC_SENSITIVITY` | `W_PREVIOUSLY_VERIFIED_TARGET` に続けて、前のロックの `member_version_sensitivity` が挙げるメンバーを、新しいターゲットでは解決が変わりうるものとして示す ([§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。制約カタログをまだ同梱していないので、コンパイラが書くロックはメンバーを 1 つも挙げておらず、そうしたロックの上でビルドしても、現時点ではこの警告は出ない。 |
 
@@ -211,7 +211,7 @@ title: "11. Lint と制約検証"
 | `W_DEF_NO_SIZE` | `def` で同じことが起きた。その def を使う `place use=` はすべて飛ばされる。 |
 | `W_STRUCTURE_TOO_LARGE` | スコープから導いた範囲が、block-array パスが確保する体積を超えている。 |
 | `W_PALETTE_TOO_LARGE` | スコープが空気以外に 65,535 を超える種類のブロックステートを塗っており、1 つのパレットで添字を振れる数を超えている。 |
-| `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバーが、1 つのボクセルに異なるブロックを書いた ([§4.8](/ja/spec/compilation/#48-同一フェーズ内の衝突とパレット))。 |
+| `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバーが、1 つのボクセルに異なるブロックを、または異なるブロックエンティティを持つ同じブロックを書いた ([§4.8](/ja/spec/compilation/#48-同一フェーズ内の衝突とパレット))。 |
 | `E_PARTIAL_BUILD` | 要求されたスコープ、または `connect` 行が求めた通路のうち、少なくとも 1 つが lowering されず、求められたより少ないものしか作られなかった。 |
 
 `W_STRUCT_NO_SIZE` と `W_DEF_NO_SIZE` は、1 つの規則を、それが当てはまる対象によって分けたものです。`code` で絞り込むフィルタが、建たない struct と、インスタンス化されないテンプレートを区別できます。

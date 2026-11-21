@@ -349,12 +349,32 @@ impl MemberCanvas<'_> {
         }
     }
 
-    /// Set `data` as the block entity of the block this member painted at `pos`, kept only while
-    /// the member holds that cell.
-    pub(super) fn set_block_entity(&mut self, pos: (u32, u32, u32), data: BlockEntityData) {
-        self.canvas
-            .block_entities
-            .push((self.member, BlockEntity { pos, data }));
+    /// [`Self::paint`] for a block that keeps `data` beside it, as its block entity, while this
+    /// member holds the cell.
+    pub(super) fn paint_with_entity(
+        &mut self,
+        pos: (u32, u32, u32),
+        claim: impl FnOnce() -> PaletteIndex,
+        data: BlockEntityData,
+    ) {
+        if !self.write(pos, claim, Some(data)) {
+            debug_assert!(
+                false,
+                "voxel {pos:?} lies outside {:?}; the dim math and the generator disagree",
+                self.canvas.dims,
+            );
+        }
+    }
+
+    /// [`Self::paint_with_entity`] without the assertion, for a cell the author placed; whether it
+    /// existed.
+    pub(super) fn try_paint_with_entity(
+        &mut self,
+        pos: (u32, u32, u32),
+        claim: impl FnOnce() -> PaletteIndex,
+        data: BlockEntityData,
+    ) -> bool {
+        self.write(pos, claim, Some(data))
     }
 
     /// [`Self::paint`] without the assertion, for a cell the author placed; whether it existed.
@@ -362,6 +382,16 @@ impl MemberCanvas<'_> {
         &mut self,
         pos: (u32, u32, u32),
         claim: impl FnOnce() -> PaletteIndex,
+    ) -> bool {
+        self.write(pos, claim, None)
+    }
+
+    /// Paint one voxel with the block entity its block keeps, if any; whether the cell existed.
+    fn write(
+        &mut self,
+        pos: (u32, u32, u32),
+        claim: impl FnOnce() -> PaletteIndex,
+        entity: Option<BlockEntityData>,
     ) -> bool {
         let member = self.member;
         let canvas = &mut *self.canvas;
@@ -376,15 +406,31 @@ impl MemberCanvas<'_> {
         let before = canvas.voxels[i];
         canvas.voxels[i] = after;
         let previous = std::mem::replace(&mut canvas.owners[i], member + 1);
+        let overridden = previous.checked_sub(1);
+        let entity_changes = overridden.is_some_and(|overridden| {
+            canvas
+                .block_entities
+                .iter()
+                .rev()
+                .find(|(owner, kept)| *owner == overridden && kept.pos == pos)
+                .map(|(_, kept)| &kept.data)
+                != entity.as_ref()
+        });
+        if let Some(data) = entity {
+            canvas
+                .block_entities
+                .push((member, BlockEntity { pos, data }));
+        }
         // A first write is not a contest, and a same-member overwrite is a generator fault no
         // author can move, so never a finding.
-        let Some(overridden) = previous.checked_sub(1) else {
+        let Some(overridden) = overridden else {
             return true;
         };
         if overridden == member || !canvas.same_phase(overridden, member) {
             return true;
         }
-        // A held slot may settle on another state, so even an unchanged one is judged later.
+        // A held slot may settle on another state, so even an unchanged one is judged later; a
+        // held member is a door, which keeps no block entity.
         if canvas.holds(overridden) || canvas.holds(member) {
             canvas.deferred.push(Contest {
                 overridden,
@@ -392,7 +438,7 @@ impl MemberCanvas<'_> {
                 before,
                 after,
             });
-        } else if before != after {
+        } else if before != after || entity_changes {
             canvas.count(overridden, member, before, after);
         }
         true

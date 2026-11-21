@@ -135,6 +135,14 @@ impl MaterialsIndex {
         self.by_token.get(token)?.canonical.as_deref()
     }
 
+    /// Every `(token, canonical)` pair, for each token that names the canonical block it stands
+    /// for, in declared order.
+    pub fn canonicals(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.by_token
+            .iter()
+            .filter_map(|(token, mapping)| Some((token.as_str(), mapping.canonical.as_deref()?)))
+    }
+
     /// Every `(token, mc_version)` pair that carries an override, in declared order.
     pub fn overrides(&self) -> impl Iterator<Item = (&str, &str)> {
         self.by_token.iter().flat_map(|(token, mapping)| {

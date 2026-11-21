@@ -41,7 +41,7 @@ pub enum StateEntity {
     ChestHalf {
         /// The other half's `(x, z)` offset from this one, as the half's `facing` turns it.
         toward: (i32, i32),
-        /// Whether this is the half that leads the pair, the left one.
+        /// Whether this is the half that leads the pair, the right one.
         lead: bool,
     },
     /// A note block's `note`.
@@ -183,16 +183,16 @@ fn state_entity(
             .and_then(|facing| HORIZONTAL.iter().position(|(name, _)| name == facing))
             .filter(|_| value == "left" || value == "right")
             .map(|at| {
-                let lead = value == "left";
+                let right = value == "right";
                 // The left half's other half is clockwise of its facing, the right half's counter.
-                let turned = if lead {
-                    at + 1
-                } else {
+                let turned = if right {
                     at + HORIZONTAL.len() - 1
+                } else {
+                    at + 1
                 };
                 StateEntity::ChestHalf {
                     toward: HORIZONTAL[turned % HORIZONTAL.len()].1,
-                    lead,
+                    lead: right,
                 }
             }),
         [(key, value)] if key == "note" => value.parse().ok().map(StateEntity::Note),

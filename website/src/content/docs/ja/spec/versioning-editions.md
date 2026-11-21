@@ -68,7 +68,7 @@ ID の `since` と `until`、つまりその ID を宣言している最初と�
   "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }] }
 ```
 
-エディションが複数の Java ブロックを同じブロックで綴るエントリは、そのトークンが表す Java ブロックも `canonical` として示します。Bedrock の 1 つの `bed` はどの色のベッドでもあり、書き出しは `canonical` が示すベッドの色を、ベッドのブロックエンティティに保存します ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階))。
+エディションが複数の Java ブロックを同じブロックで綴るエントリは、そのトークンが表す Java ブロックも `canonical` として示します。Bedrock の 1 つの `bed` はどの色のベッドでもあり、書き出しは `canonical` が示すベッドの色を、ベッドのブロックエンティティに保存します ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階))。ローダーは、あるバージョンのステートマップがエントリのブロックに対応づけない `canonical` と、ブロックがそのまま正準のブロックである Java のパックにある `canonical` を、すべて拒否します。
 
 ```json
 { "token": "bed.blue", "block": "bed", "canonical": "blue_bed" }

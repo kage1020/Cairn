@@ -5,12 +5,13 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockState, Covers, Face, Faces, JoinKind, Joins, TargetRegistry,
 };
+use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag};
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_nbt::tag::Compound;
 
-use crate::common::{lower_source, position_data, states_for, written_palette};
+use crate::common::{lower_source, note_fields, position_data, states_for, written_palette};
 
 /// `minecraft:{id}` with `properties`.
 fn state(id: &str, properties: &[(&str, &str)]) -> BlockState {
@@ -363,22 +364,130 @@ fn a_bedrock_target_pairs_the_halves_of_a_chest_pair_through_their_block_entitie
             "minecraft:cobblestone[]",
         ],
     );
-    // The left half, facing south, has its other half to the west, and leads the pair.
+    // The left half, facing south, has its other half to the west; the right half leads the pair.
     assert_eq!(
         position_data(&root),
         [
             (
                 "28".to_owned(),
-                "{block_entity_data:{id:\"Chest\",pairlead:0b,pairx:3,pairz:1,x:2,y:1,z:1}}"
+                "{block_entity_data:{id:\"Chest\",pairlead:1b,pairx:3,pairz:1,x:2,y:1,z:1}}"
                     .to_owned()
             ),
             (
                 "40".to_owned(),
-                "{block_entity_data:{id:\"Chest\",pairlead:1b,pairx:2,pairz:1,x:3,y:1,z:1}}"
+                "{block_entity_data:{id:\"Chest\",pairlead:0b,pairx:2,pairz:1,x:3,y:1,z:1}}"
                     .to_owned()
             ),
         ],
     );
+}
+
+/// Why a Bedrock chest half without its other half beside it loses its `type`.
+const STANDS_SINGLE: &str = "Bedrock pairs a chest half only with its other half beside it, the \
+                             same block facing the same way, and none stands there, so this half \
+                             stands single";
+
+/// The `type=value` a chest half standing single on Bedrock 1.21.0 loses.
+fn single(value: &str) -> DroppedIntent {
+    DroppedIntent {
+        key: "type".to_owned(),
+        value: value.to_owned(),
+        mc_versions: vec!["1.21.0".to_owned()],
+        reason: STANDS_SINGLE.to_owned(),
+    }
+}
+
+/// One `block_position_data` entry of a chest half at `(x, y, z)` paired with the one at
+/// `(pairx, pairz)`.
+fn chest_half(
+    key: u32,
+    (x, y, z): (u32, u32, u32),
+    pair: (u32, u32),
+    lead: bool,
+) -> (String, String) {
+    (
+        key.to_string(),
+        format!(
+            "{{block_entity_data:{{id:\"Chest\",pairlead:{}b,pairx:{},pairz:{},x:{x},y:{y},z:{z}}}}}",
+            i8::from(lead),
+            pair.0,
+            pair.1
+        ),
+    )
+}
+
+#[test]
+fn a_chest_pair_facing_north_or_west_pairs_its_halves_on_bedrock() {
+    // In a 5x3 struct a voxel's key is `(x * 4 + y) * 3 + z`, and in a 3x5 one `(x * 4 + y) * 5 + z`.
+    for (size, halves, expected) in [
+        (
+            "5x3",
+            "raw_block mat=minecraft:chest[facing=north,type=left] at=1,1,1\n  \
+             raw_block mat=minecraft:chest[facing=north,type=right] at=2,1,1",
+            [
+                chest_half(16, (1, 1, 1), (2, 1), false),
+                chest_half(28, (2, 1, 1), (1, 1), true),
+            ],
+        ),
+        (
+            "3x5",
+            "raw_block mat=minecraft:chest[facing=west,type=right] at=1,1,1\n  \
+             raw_block mat=minecraft:chest[facing=west,type=left] at=1,1,2",
+            [
+                chest_half(26, (1, 1, 1), (1, 2), true),
+                chest_half(27, (1, 1, 2), (1, 1), false),
+            ],
+        ),
+    ] {
+        let source = format!(
+            "theme t:\n  slot wall -> @cobblestone\n\nstruct s size={size}\n  \
+             walls mat_slot=wall height=3\n  {halves}\n"
+        );
+        let (root, notes) = bedrock_root(&source, "1.21.0");
+        assert_eq!(
+            (position_data(&root), notes),
+            (expected.to_vec(), vec![]),
+            "{halves}"
+        );
+    }
+}
+
+#[test]
+fn chest_halves_that_do_not_make_a_pair_each_stand_single_on_bedrock() {
+    for (halves, lost) in [
+        (
+            "raw_block mat=minecraft:chest[facing=south,type=left] at=2,1,1\n  \
+             raw_block mat=minecraft:chest[facing=south,type=left] at=3,1,1",
+            vec![("minecraft:chest", "facing=south,type=left", single("left"))],
+        ),
+        (
+            "raw_block mat=minecraft:chest[facing=north,type=right] at=2,1,1\n  \
+             raw_block mat=minecraft:chest[facing=south,type=left] at=3,1,1",
+            vec![
+                (
+                    "minecraft:chest",
+                    "facing=north,type=right",
+                    single("right"),
+                ),
+                ("minecraft:chest", "facing=south,type=left", single("left")),
+            ],
+        ),
+    ] {
+        let source = format!(
+            "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x3\n  \
+             walls mat_slot=wall height=3\n  {halves}\n"
+        );
+        let (root, notes) = bedrock_root(&source, "1.21.0");
+        let lost: Vec<(&str, &str, &DroppedIntent)> = lost
+            .iter()
+            .map(|(id, states, dropped)| (*id, *states, dropped))
+            .collect();
+        assert_eq!(
+            (position_data(&root), note_fields(&notes)),
+            (vec![], lost),
+            "{halves}"
+        );
+    }
 }
 
 #[test]
@@ -389,7 +498,17 @@ fn a_chest_half_without_its_other_half_beside_it_stands_single_on_bedrock() {
                   raw_block mat=minecraft:trapped_chest[facing=south,type=right] at=2,1,1\n  \
                   raw_block mat=minecraft:chest[facing=south,type=left] at=1,2,1\n";
     let (root, notes) = bedrock_root(source, "1.21.0");
-    assert_eq!(notes, []);
+    assert_eq!(
+        note_fields(&notes),
+        [
+            ("minecraft:chest", "facing=south,type=left", &single("left")),
+            (
+                "minecraft:trapped_chest",
+                "facing=south,type=right",
+                &single("right")
+            ),
+        ],
+    );
     assert_eq!(position_data(&root), []);
 }
 
@@ -408,18 +527,18 @@ fn a_chest_pair_facing_east_pairs_along_z_on_bedrock() {
             "minecraft:cobblestone[]",
         ],
     );
-    // The left half, facing east, has its other half to the south.
+    // The left half, facing east, has its other half to the south; the right half leads.
     assert_eq!(
         position_data(&root),
         [
             (
                 "26".to_owned(),
-                "{block_entity_data:{id:\"Chest\",pairlead:1b,pairx:1,pairz:2,x:1,y:1,z:1}}"
+                "{block_entity_data:{id:\"Chest\",pairlead:0b,pairx:1,pairz:2,x:1,y:1,z:1}}"
                     .to_owned()
             ),
             (
                 "27".to_owned(),
-                "{block_entity_data:{id:\"Chest\",pairlead:0b,pairx:1,pairz:1,x:1,y:1,z:2}}"
+                "{block_entity_data:{id:\"Chest\",pairlead:1b,pairx:1,pairz:1,x:1,y:1,z:2}}"
                     .to_owned()
             ),
         ],

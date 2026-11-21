@@ -116,7 +116,9 @@ one block ID, and its `overrides` name the versions that spell it differently, a
 An entry whose block the edition spells for several Java blocks also names, as `canonical`, the
 Java block the token stands for. Bedrock's one `bed` is every dyed bed, and its writer saves the
 colour of the bed `canonical` names in the bed's block entity ([Entities
-§8.1](/spec/entities/#81-two-tiers)):
+§8.1](/spec/entities/#81-two-tiers)). The loader refuses a `canonical` that a version's state map
+does not map onto the entry's block, and any `canonical` in a Java pack, whose blocks are the
+canonical ones:
 
 ```json
 { "token": "bed.blue", "block": "bed", "canonical": "blue_bed" }
