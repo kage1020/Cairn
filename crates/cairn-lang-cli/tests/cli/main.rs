@@ -6,6 +6,7 @@ mod check;
 mod compile;
 mod contract;
 mod docs;
+mod edit;
 mod info;
 mod install;
 mod limits;

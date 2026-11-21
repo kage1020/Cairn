@@ -4,7 +4,9 @@
 
 use indexmap::IndexMap;
 
-use crate::ast::{Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind};
+use crate::ast::{
+    Arg, EditTarget, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind,
+};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
@@ -30,6 +32,12 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
     }
     for theme in &ir.themes {
         check_theme_selectors(theme, sink);
+    }
+    for edit in &module.edits {
+        if let EditTarget::Selector { attrs, .. } = &edit.target {
+            check_arg_keys(attrs, ArgScope::List, sink);
+        }
+        check_arg_keys(&edit.set, ArgScope::List, sink);
     }
 }
 
