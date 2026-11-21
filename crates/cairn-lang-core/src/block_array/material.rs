@@ -5,8 +5,9 @@ use indexmap::IndexMap;
 
 use crate::Edition;
 use crate::ast::ValueKind;
+use crate::error::Span;
 use crate::intent::ValueWithSpan;
-use crate::resolve::{TokenKind, classify_token};
+use crate::resolve::{Resolution, TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
@@ -42,6 +43,23 @@ pub trait TargetRegistry {
     fn aliases_for(&self, id: &str) -> Vec<String> {
         let _ = id;
         Vec::new()
+    }
+
+    /// The block the canonical token `state` names through a meaning token, a property its block
+    /// lacks whose value picks one of the blocks it split into (`@cauldron[fluid=water]` is
+    /// `water_cauldron`), with that property dropped; `None` when it carries none, or a value that
+    /// names no block.
+    fn meant(&self, state: &BlockState) -> Option<BlockState> {
+        let _ = state;
+        None
+    }
+
+    /// The state the palette holds for the canonical token `state` when the pinned target does
+    /// not declare its id but writes the block under another spelling (`spec/materials-themes`
+    /// "Mappings across version and edition"); `None` otherwise, and with no version pinned.
+    fn respelled(&self, state: &BlockState) -> Option<BlockState> {
+        let _ = state;
+        None
     }
 
     /// Why the pinned target's state map has no form for `state`, or `None` when it has one, the
@@ -80,6 +98,13 @@ pub trait TargetRegistry {
     fn state_domain(&self, state: &BlockState) -> StateDomain {
         let _ = state;
         StateDomain::Unrecorded
+    }
+
+    /// [`Self::state_domain`] for the state a canonical token names, whose block also takes the
+    /// meaning token [`Self::meant`] reads (`spec/materials-themes` "Mappings across version and
+    /// edition").
+    fn token_state_domain(&self, state: &BlockState) -> StateDomain {
+        self.state_domain(state)
     }
 
     /// What `state` is to the rules joining panes, fences, walls and chests to their neighbours
@@ -127,6 +152,13 @@ pub trait TargetRegistry {
         true
     }
 
+    /// Whether a version this registry covers may write the canonical token naming `id`, under
+    /// that id or another, asked only when [`Self::block_ids`] is `None`; a token this denies is
+    /// a stand-in, as for [`Self::may_declare`], which it answers unless the registry overrides it.
+    fn may_write_token(&self, id: &str) -> bool {
+        self.may_declare(id)
+    }
+
     /// The canonical block `token` stands for where the target spells several canonical blocks
     /// as the one it resolves to, as Bedrock's `bed` is every dyed bed; `None` otherwise.
     fn canonical_block(&self, token: &str) -> Option<String> {
@@ -135,12 +167,26 @@ pub trait TargetRegistry {
     }
 }
 
-/// The registry of a lowering with no target. It lifts every abstract token, and every id no
-/// version of the edition declares, to a stand-in rather than a canonical state; that is safe
-/// because nothing it lowers leaves [`findings_without_target`](super::findings_without_target).
+/// What the versions of an edition make of a block id, as a lowering with no target weighs it,
+/// in ascending order of standing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IdStanding {
+    /// No version declares it, nor writes the canonical token naming it.
+    Unknown,
+    /// No version declares it, but some version writes the canonical token naming it under
+    /// another id (`spec/materials-themes` "Mappings across version and edition").
+    Respelled,
+    /// Some version declares it.
+    Declared,
+}
+
+/// The registry of a lowering with no target. It lifts every abstract token, block id no version
+/// of the edition declares, and canonical token none writes to a stand-in rather than a canonical
+/// state, which is safe because nothing it lowers leaves
+/// [`findings_without_target`](super::findings_without_target).
 pub(crate) struct NoTarget<'a> {
-    /// Whether some version of the edition being lowered declares a block id.
-    pub(crate) declared: &'a dyn Fn(&str) -> bool,
+    /// What the versions of the editions being lowered make of a block id.
+    pub(crate) standing: &'a dyn Fn(&str) -> IdStanding,
 }
 
 impl TargetRegistry for NoTarget<'_> {
@@ -157,7 +203,11 @@ impl TargetRegistry for NoTarget<'_> {
     }
 
     fn may_declare(&self, id: &str) -> bool {
-        id.starts_with(STAND_IN_MARK) || (self.declared)(id)
+        id.starts_with(STAND_IN_MARK) || (self.standing)(id) == IdStanding::Declared
+    }
+
+    fn may_write_token(&self, id: &str) -> bool {
+        (self.standing)(id) > IdStanding::Unknown
     }
 
     fn state_domain(&self, _state: &BlockState) -> StateDomain {
@@ -463,8 +513,8 @@ pub fn resolve_block_state(
             let ValueKind::Token(inner) = &slot.value.kind else {
                 unreachable!("classify_token reports Canonical only for ValueKind::Token");
             };
-            let state = canonical_to_block_state(inner);
-            validated_id(state, registry, &IdOrigin::Authored).map_err(MaterialDeferred::UnknownId)
+            validated_token(canonical_to_block_state(inner), registry)
+                .map_err(MaterialDeferred::UnknownId)
         }
         TokenKind::Abstract => {
             let ValueKind::Token(inner) = &slot.value.kind else {
@@ -493,6 +543,55 @@ pub fn resolve_block_state(
         }
         TokenKind::NotAToken => Err(MaterialDeferred::AlreadyDiagnosed),
     }
+}
+
+/// Each canonical token `resolution` binds to a member's `mat_slot=` or a walkway's `path=`, once
+/// per place it is written, in source order, as the block state it spells.
+#[must_use]
+pub fn bound_canonical_tokens(resolution: &Resolution) -> Vec<(Span, BlockState)> {
+    let slots = resolution
+        .scopes
+        .values()
+        .flat_map(|scope| scope.members.values())
+        .filter_map(|binding| binding.slot_value.as_ref());
+    let paths = resolution.connects.iter().map(|connect| &connect.path);
+    let mut tokens: Vec<(Span, BlockState)> = slots
+        .chain(paths)
+        .filter_map(
+            |value| match (&value.value.kind, classify_token(&value.value)) {
+                (ValueKind::Token(inner), TokenKind::Canonical) => {
+                    Some((value.span.clone(), canonical_to_block_state(inner)))
+                }
+                _ => None,
+            },
+        )
+        .collect();
+    tokens.sort_by_key(|(span, _)| span.start);
+    tokens.dedup_by_key(|(span, _)| span.start);
+    tokens
+}
+
+/// [`validated_id`] for a canonical token, which the target may spell another way.
+fn validated_token(
+    state: BlockState,
+    registry: Option<&dyn TargetRegistry>,
+) -> Result<BlockState, Box<UnknownId>> {
+    let Some(registry) = registry else {
+        return Ok(state);
+    };
+    let state = registry.meant(&state).unwrap_or(state);
+    let Some(ids) = registry.block_ids() else {
+        if registry.may_write_token(&state.id) {
+            return Ok(state);
+        }
+        return Ok(stand_in(&state.id));
+    };
+    if !ids.contains(&state.id)
+        && let Some(respelled) = registry.respelled(&state)
+    {
+        return Ok(respelled);
+    }
+    validated_id(state, Some(registry), &IdOrigin::Authored)
 }
 
 /// Refuse `state` when the pinned target does not declare its id; pass it when none is pinned,

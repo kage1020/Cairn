@@ -1,6 +1,6 @@
-//! Registry packs: the JSON files of `DataVersion`s, materials, block ids, aliases, absences, state
-//! maps and connection tables a compile depends on, and the constraint catalog beside them, each
-//! hashed into the lockfile so a build is reproducible.
+//! Registry packs: the JSON files of `DataVersion`s, materials, block ids, aliases, absences,
+//! meanings, state maps and connection tables a compile depends on, and the constraint catalog
+//! beside them, each hashed into the lockfile so a build is reproducible.
 
 pub mod absent;
 pub mod aliases;
@@ -12,6 +12,8 @@ pub mod hash;
 pub mod load;
 pub mod manifest;
 pub mod materials;
+pub mod meanings;
+mod respelled;
 pub mod states;
 
 pub use absent::{AbsentCatalog, AbsentEntry, AbsentError, AbsentIndex, SUPPORTED_ABSENT_SCHEMA};
@@ -32,7 +34,7 @@ pub use constraints::{
 pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
 pub use load::{
-    PackSource, PackView, RegistryError, RegistryPack, SUPPORTED_DATA_VERSIONS_SCHEMA,
+    PackSource, PackView, RegistryError, RegistryPack, Respelling, SUPPORTED_DATA_VERSIONS_SCHEMA,
     SUPPORTED_MANIFEST_SCHEMA, builtin_constraints, builtin_pack, builtin_version_tables,
     load_builtin_constraints, load_builtin_pack, load_from_dir, parse_constraints,
 };
@@ -42,6 +44,8 @@ pub use states::{
     SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal, StatesCatalog, StatesError,
     VersionStates,
 };
+
+pub(crate) use respelled::{Respelled, respelled_at};
 
 /// Prepends `namespace` to a component entry that does not carry one.
 pub(crate) fn namespaced(namespace: &str, block: &str) -> String {
@@ -53,4 +57,7 @@ pub(crate) fn namespaced(namespace: &str, block: &str) -> String {
 }
 pub use materials::{
     MaterialEntry, MaterialsCatalog, MaterialsError, MaterialsIndex, SUPPORTED_MATERIALS_SCHEMA,
+};
+pub use meanings::{
+    MeaningIndex, MeaningRow, MeaningsCatalog, MeaningsError, SUPPORTED_MEANINGS_SCHEMA,
 };

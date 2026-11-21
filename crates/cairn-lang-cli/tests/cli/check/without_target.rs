@@ -1,6 +1,6 @@
 //! `cairn check` without `--target`: the lowering findings every target that reads their line
-//! raises, weighed as if every id some shipped version declares were declared, and none whose
-//! verdict is a target's pack's to give.
+//! raises, weighed as if every id some shipped version declares, and every canonical token one
+//! writes, were declared, and none whose verdict is a target's pack's to give.
 
 use std::path::Path;
 
@@ -64,6 +64,32 @@ fn a_bare_check_reports_the_lowering_findings_a_pinned_check_reports() {
         &["--edition", "bedrock"],
         &["--edition", "java", "--target", "1.21.4"],
         &["--edition", "bedrock", "--target", "1.21.60"],
+    ] {
+        let run = check(&src, flags);
+        assert_eq!(run.code, Some(1), "{flags:?}: {}", run.stderr);
+        assert_eq!(run.stderr, bare.stderr, "{flags:?}");
+    }
+}
+
+/// Bedrock declares no `oak_sign`, and writes the token as `standing_sign` at every version.
+#[test]
+fn a_token_some_version_writes_under_another_id_is_weighed_without_a_target() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "hut.crn",
+        "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @oak_sign\n\n\
+         struct hut size=5x5\n  walls mat_slot=wall height=3\n  \
+         roof kind=shed slope_to=front mat_slot=roof\n",
+    );
+    let bare = check(&src, &[]);
+    assert_eq!(bare.code, Some(1), "{}", bare.stderr);
+    assert_stream(&bare.stderr, &[(3, 16, "error", "E_INCOMPATIBLE_MATERIAL")]);
+    for flags in [
+        &["--edition", "bedrock"][..],
+        &["--edition", "bedrock", "--target", "1.21.0"],
+        &["--edition", "bedrock", "--target", "1.26.60"],
+        &["--edition", "java", "--target", "1.21.4"],
     ] {
         let run = check(&src, flags);
         assert_eq!(run.code, Some(1), "{flags:?}: {}", run.stderr);

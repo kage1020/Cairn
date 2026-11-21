@@ -5,3 +5,4 @@ pub mod common;
 
 mod counters;
 mod shipped_examples;
+mod written_apart;
